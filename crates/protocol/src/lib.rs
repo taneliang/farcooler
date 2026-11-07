@@ -1032,6 +1032,7 @@ pub mod method {
         WorkflowApprove = "workflow.approve" => WORKFLOW_COMMANDS,
         WorkflowReview = "workflow.review" => WORKFLOW_COMMANDS,
         WorkflowCancel = "workflow.cancel" => WORKFLOW_COMMANDS,
+        WorkflowRetry = "workflow.retry" => WORKFLOW_COMMANDS,
         WorkflowCutover = "workflow.cutover" => WORKFLOW_COMMANDS,
         LayoutViewport = "layout.viewport" => LAYOUT,
         LayoutPreset = "layout.preset" => LAYOUT,

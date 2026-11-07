@@ -25,7 +25,7 @@ impl Runtime {
         }
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
-            | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } => mutation,
+            | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. } => mutation,
             Action::Get => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -82,6 +82,14 @@ impl Runtime {
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::Cancel { item:item.clone() },Grant::Controller);
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                    }
+                }
+                Action::Retry { item, run, pin, .. } => {
+                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                    } else {
+                        let input = input(Command::Retry { item:item.clone() },Grant::Controller);
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                     }
                 }
@@ -144,6 +152,22 @@ mod tests {
         ok(&runtime.wire_command("ws","owner",approve(m("approve",state.revision,2),item.run.clone(),pin.clone())).unwrap());
         runtime.pump(20).await.unwrap();
         assert_eq!(runtime.state("ws").unwrap().unwrap().items["a"].phase,Phase::Done);
+    }
+    #[tokio::test]
+    async fn workflow_wire_retry_needs_the_exact_run_and_a_failed_item() {
+        let dir = tempfile::tempdir().unwrap(); let mut runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();
+        let definition = Definition::tracker("owner"); let pin = definition.pin();
+        ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
+        ok(&runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap());
+        runtime.pump(10).await.unwrap();
+        let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
+        let retry = |id,run:String| Action::Retry { mutation:m(id,state.revision,2),item:"a".into(),run,pin:pin.clone() };
+        // An old run id is stale; the current run is refused because the item has not failed.
+        let stale = runtime.wire_command("ws","owner",retry("old","old".into())).unwrap();
+        assert!(stale.to_string().contains("Stale"),"{stale}");
+        let waiting = runtime.wire_command("ws","owner",retry("now",item.run.clone())).unwrap();
+        assert!(waiting.to_string().contains("Phase"),"{waiting}");
+        assert_eq!(runtime.state("ws").unwrap().unwrap().items["a"].retries,0);
     }
     #[tokio::test]
     async fn workflow_wire_auto_and_every_stage_approval_preserve_policy() {

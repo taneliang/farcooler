@@ -61,6 +61,8 @@ pub enum WorkflowCmd {
         #[arg(long)] evidence:std::path::PathBuf,#[arg(long)] reason:String,#[command(flatten)] identity:Identity },
     /// Request cancellation of the inspected run.
     Cancel { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    /// Run a failed item's step again. At most three retries per item.
+    Retry { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -80,6 +82,7 @@ impl WorkflowCmd {
                 (workspace,Action::Review { mutation:identity.mutation(),item,run,pin,evidence:serde_json::from_slice(&bytes)?,passed:false,reason:Some(reason) })
             }
             Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
+            Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
         })
     }
 }

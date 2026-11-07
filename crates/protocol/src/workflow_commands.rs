@@ -21,6 +21,8 @@ pub enum Action {
     Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
     Cancel { mutation: Mutation, item: String, run: String, pin: String },
+    /// Run a failed item's step again. A controller's command, like cancel.
+    Retry { mutation: Mutation, item: String, run: String, pin: String },
 }
 impl Action {
     pub fn method(&self) -> &'static str {
@@ -31,6 +33,7 @@ impl Action {
             Self::Approve { .. } => "workflow.approve",
             Self::Review { .. } => "workflow.review",
             Self::Cancel { .. } => "workflow.cancel",
+            Self::Retry { .. } => "workflow.retry",
         }
     }
 }
@@ -58,6 +61,19 @@ mod tests {
         value["reason"]=serde_json::json!({"grant":"Controller"});assert!(parse(&value.to_string()).is_err());
         value["reason"]=serde_json::Value::Null;assert!(parse(&value.to_string()).is_err());
         value.as_object_mut().unwrap().remove("reason");value["authority"]=serde_json::json!("owner");assert!(parse(&value.to_string()).is_err());
+    }
+    #[test]
+    fn workflow_wire_carries_retry_and_routed_definitions_exactly() {
+        let retry = Action::Retry { mutation:Mutation { id:"r".into(),revision:3,epoch:1,sequence:2 },item:"a".into(),run:"run".into(),pin:"pin".into() };
+        let raw = serde_json::to_string(&retry).unwrap();
+        assert_eq!(parse(&raw).unwrap(),retry);
+        assert_eq!(retry.method(),"workflow.retry");
+        let mut definition = Definition::coding();
+        definition.schema = 2; definition.max_reworks = 0; definition.rework_target = None;
+        definition.stages[2].routes.insert("rejected".into(), farcooler_workflow::Target::Step("stage-1".into()));
+        definition.stages[2].limit = 2;
+        let publish = Action::Publish { notifications:None, adapter:None, mutation:Mutation { id:"p".into(),revision:0,epoch:1,sequence:1 },expected_pin:None,definition };
+        assert_eq!(parse(&serde_json::to_string(&publish).unwrap()).unwrap(),publish);
     }
     #[test]
     fn workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields() {

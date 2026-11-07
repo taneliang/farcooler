@@ -97,7 +97,8 @@ impl CodingConfigExt for CodingConfig {
     }
     fn stage(&self, id: &str, kind: StageKind, version: &str, argument: &str) -> Stage {
         Stage { id: id.into(), kind, operation: self.operation(version, argument),
-            progression: Progression::Automatic, max_attempts: 1 }
+            progression: Progression::Automatic, max_attempts: 1,
+            routes: Default::default(), limit: 0 }
     }
     fn validate_definition(&self, definition: &Definition) -> Result<()> {
         self.validate()?;

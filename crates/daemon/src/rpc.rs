@@ -360,7 +360,7 @@ pub(crate) fn required_scope(method: &str) -> Option<Scope> {
 fn scope_of(method: Method) -> Scope {
     match method {
         Method::WorkflowCutover => Scope::HostAdmin,
-        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowReview => Scope::Control,
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowReview => Scope::Control,
         // Themes are what a client paints with. Read, not Control: naming a
         // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
@@ -768,7 +768,7 @@ impl Rpc {
         let scope = self.peer.scope;
 
         match req.method.as_str() {
-            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.review" => {
+            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.retry" | "workflow.review" => {
                 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
                 let workspace = Self::target(&req)?;
                 svc.store.get_workspace(workspace)?;

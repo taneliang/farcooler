@@ -141,7 +141,7 @@ fn engine_cutover_f11_restored_pending_cannot_replay_a_postbackup_push() {
     let mut command=input(ws.id.to_string(),"push-item".into(),"branch-resource");
     if let Command::Enqueue {definition,policy_pin,..}=&mut command.command {
         definition.source="private-fake-push".into();definition.max_reworks=0;definition.rework_target=None;
-        definition.stages=vec![farcooler_workflow::Stage {id:"fake-push".into(),kind:farcooler_workflow::StageKind::Action("fake-git-push".into()),progression:farcooler_workflow::Progression::Automatic,max_attempts:1,operation:farcooler_workflow::OperationSpec {adapter_version:"fake-git/v1".into(),arguments:vec!["push".into(),"exact-operation".into()],environment:BTreeMap::new()}}];
+        definition.stages=vec![farcooler_workflow::Stage {id:"fake-push".into(),kind:farcooler_workflow::StageKind::Action("fake-git-push".into()),progression:farcooler_workflow::Progression::Automatic,max_attempts:1,routes:BTreeMap::new(),limit:0,operation:farcooler_workflow::OperationSpec {adapter_version:"fake-git/v1".into(),arguments:vec!["push".into(),"exact-operation".into()],environment:BTreeMap::new()}}];
         *policy_pin=definition.pin();
     }
     let receipt=old.workflow_apply(&command).unwrap();drop(old);
