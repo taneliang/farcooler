@@ -14,7 +14,7 @@ use crate::workflow_runtime::CodingConfigExt;
 
 /// The environment a gate runs in. The old landing job passed the whole of the runner's; a definition pins
 /// its own: `PATH` and `HOME` unless the draft says otherwise, plus whatever `--gate-env` adds.
-pub const GATE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+pub const GATE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin";
 /// How long a gate may run: the landing job's own allowance.
 pub const GATE_TIMEOUT_MS: u64 = 3 * 3_600_000;
 /// The command `Gate: none` becomes: a gate that always passes, written into the definition so the
@@ -100,7 +100,11 @@ pub const MAX_BATCH: u8 = 8;
 /// The environment gates run in: `PATH` and the draft host's `HOME`, then each `NAME=value` given, which wins.
 pub fn gate_environment(given: &[String]) -> Result<std::collections::BTreeMap<String, String>, Error> {
     let mut environment = std::collections::BTreeMap::from([("PATH".to_string(), GATE_PATH.to_string())]);
-    if let Some(home) = std::env::var_os("HOME").and_then(|h| h.into_string().ok()).filter(|h| h.starts_with('/')) { environment.insert("HOME".into(), home); }
+    // `cargo` and `rustup` live under the home directory, so a Rust gate finds them there.
+    if let Some(home) = std::env::var_os("HOME").and_then(|h| h.into_string().ok()).filter(|h| h.starts_with('/')) {
+        environment.insert("PATH".into(), format!("{GATE_PATH}:{home}/.cargo/bin"));
+        environment.insert("HOME".into(), home);
+    }
     for text in given {
         let (name, value) = text.split_once('=').filter(|(n, _)| !n.is_empty() && !n.contains(char::is_whitespace)).ok_or_else(|| Error::BadEnvironment(text.clone()))?;
         environment.insert(name.into(), value.into());
@@ -196,7 +200,8 @@ impl Options {
         let default = self.route_default.clone().unwrap_or_else(|| "push".into());
         let mut rules = Vec::new();
         for text in &self.routes {
-            let (glob, route) = text.rsplit_once('=').filter(|(g, r)| !g.is_empty() && matches!(*r, "push" | "ask")).ok_or_else(|| Error::BadRoute(text.clone()))?;
+            // Paths are matched relative to the repository root, so a leading `/` could never match and would fail open.
+            let (glob, route) = text.rsplit_once('=').filter(|(g, r)| !g.is_empty() && !g.starts_with('/') && matches!(*r, "push" | "ask")).ok_or_else(|| Error::BadRoute(text.clone()))?;
             rules.push((glob.to_string(), route.to_string()));
         }
         if !matches!(default.as_str(), "push" | "ask") { return Err(Error::BadRoute(default)); }

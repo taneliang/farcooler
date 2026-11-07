@@ -149,7 +149,7 @@ async fn a_template_draft_takes_path_routes_from_flags() {
     let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(adapted) = &bundle.adapter;
     adapted.validate_definition(&bundle.definition).unwrap();
     assert!(bundle.definition.stages.iter().any(|s| s.kind == StageKind::Route));
-    for bad in ["site/**", "=ask", "site/**=maybe", "site/**=pull_request"] {
+    for bad in ["site/**", "=ask", "site/**=maybe", "site/**=pull_request", "/site/**=ask"] {
         let options = lt::Options { routes: vec![bad.into()], ..Default::default() };
         assert!(matches!(lt::template("ticket-push", &config, &["x".into()], &[], &options).unwrap_err(), lt::Error::BadRoute(_)), "{bad}");
     }
@@ -380,4 +380,12 @@ async fn a_route_that_cannot_read_its_diff_fails_the_ticket_where_a_person_can_s
     let mut runtime = Runtime::open(&root).unwrap();
     let state = until(&mut runtime, |s| matches!(phase_of(s, "r"), Some(Phase::WaitingJoin | Phase::Failed | Phase::Uncertain))).await;
     assert_eq!(phase_of(&state, "r"), Some(Phase::Failed), "failed with attempts spent, not stuck uncertain");
+}
+
+#[tokio::test]
+async fn the_default_gate_path_reaches_cargo_under_the_home_directory() {
+    let env = lt::gate_environment(&[]).unwrap();
+    let home = env.get("HOME").expect("HOME is set in tests");
+    assert!(env["PATH"].split(':').any(|p| p == format!("{home}/.cargo/bin")), "{}", env["PATH"]);
+    assert!(env["PATH"].split(':').any(|p| p == "/opt/homebrew/bin"));
 }
