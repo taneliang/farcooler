@@ -1,0 +1,51 @@
+  waiting for the machine-wide heavy-job lock (/usr/bin/python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/reports/ov-938/entry.py' '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon --lib workflow_notice_native_unproved_group_ -- --nocapture); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root, PID 39927, started 2026-11-07 10:31:42, running /usr/bin/python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-937-explicit-runtime-root/reports/ov-937/entry.py' '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target' /Users/e-liang/.cargo/bin/cargo test --offline -p farcooler-daemon --lib runtime_selection_normal_explicit_start_keeps_private_paths -- --nocapture (2 in line ahead of you)
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/daemon)
+warning: associated items `new` and `kill` are never used
+  --> crates/daemon/src/effect_runner.rs:10:19
+   |
+ 9 | impl Group {
+   | ---------- associated items in this implementation
+10 |     pub(crate) fn new(pid: u32) -> Self { Self(Some(pid)) }
+   |                   ^^^
+...
+15 |     pub(crate) fn kill(&mut self) -> std::io::Result<()> {
+   |                   ^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `farcooler-daemon` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 31.50s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 1 test
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_unproved_group_cleanup_keeps_original_unknown ... owned cleanup receipt: leader=54964 pgid=54964 descendant=55072 descendant_pgid=54964: all ESRCH
+private retained-zombie receipt [54964, 54964, 55072, 54964] outside_reaper=55071 alive=true pgid=55071 group_unproved=true settlement=handed_off evidence="codex_queue_exit0_local_handoff_only" elapsed=597.417875ms
+
+thread 'watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_unproved_group_cleanup_keeps_original_unknown' (829090365) panicked at crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:286:9:
+assertion `left == right` failed: exit0 cannot settle without owned-group disappearance
+  left: "handed_off"
+ right: "unknown"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_unproved_group_cleanup_keeps_original_unknown
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2719 filtered out; finished in 1.53s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

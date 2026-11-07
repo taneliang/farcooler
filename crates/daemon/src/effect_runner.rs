@@ -5,7 +5,28 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
-struct Group(Option<u32>);
+pub(crate) struct Group(Option<u32>);
+impl Group {
+    pub(crate) fn new(pid: u32) -> Self { Self(Some(pid)) }
+
+    /// Caller retains its unreaped leader until this signal, pinning the PGID.
+    /// Disarm after one attempt, even on error, before the caller may reap.
+    /// An error requires independent disappearance proof, never a late retry.
+    pub(crate) fn kill(&mut self) -> std::io::Result<()> {
+        let Some(pid) = self.0.take() else { return Ok(()); };
+        if unsafe { libc::killpg(pid as i32, libc::SIGKILL) } != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) { return Err(error); }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn gone(pid: u32) -> std::io::Result<bool> {
+        if unsafe { libc::killpg(pid as i32, 0) } == 0 { return Ok(false); }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) { Ok(true) } else { Err(error) }
+    }
+}
 impl Drop for Group {
     fn drop(&mut self) {
         // SAFETY: this is the group created for our child, never a discovered PID.

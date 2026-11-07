@@ -147,28 +147,151 @@ async fn workflow_notice_native_owned_reconnect_wake_and_shutdown() {
     assert_eq!(std::fs::read_to_string(log).unwrap().lines().count(),2);
 }
 
+// Each invocation publishes a live descendant BEFORE its leader may exit.
+// The backend sentinel is separately owned and deliberately outside this group.
+fn descendant_queue(b:&Board,normal:bool)->(PathBuf,PathBuf,PathBuf) {
+    let (program,log)=queue(b,0);let receipt=b.dir.path().join("queue-group.json");
+    let source=std::fs::read_to_string(&program).unwrap().replace("sys.exit(0)",&format!(
+        "import time\nchild=os.fork()\nif child==0:\n    time.sleep(30)\n    os._exit(0)\nwith open({:?},'w') as f: json.dump([os.getpid(),os.getpgrp(),child,os.getpgid(child)],f)\n{}",
+        receipt.to_string_lossy(),if normal {"sys.exit(0)"} else {"time.sleep(30)"}));
+    std::fs::write(&program,source).unwrap();(program,log,receipt)
+}
+async fn group_receipt(path:&std::path::Path)->[i32;4] {
+    tokio::time::timeout(Duration::from_secs(5),async {
+        loop {
+            if let Ok(bytes)=std::fs::read(path) && let Ok(ids)=serde_json::from_slice::<[i32;4]>(&bytes) {return ids}
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.unwrap()
+}
+async fn assert_group_gone(ids:[i32;4]) {
+    assert_eq!(ids[0],ids[1]);assert_eq!(ids[1],ids[3]);assert_ne!(ids[0],ids[2]);
+    tokio::time::timeout(Duration::from_secs(3),async {
+        loop {
+            if unsafe{libc::killpg(ids[1],0)}!=0
+                && std::io::Error::last_os_error().raw_os_error()==Some(libc::ESRCH) {break}
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("owned descendant group disappeared within bound");
+    for pid in [ids[0],ids[2]] {
+        assert_eq!(unsafe{libc::kill(pid,0)},-1,"leader AND descendant gone");
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(),Some(libc::ESRCH));
+    }
+    println!("owned cleanup receipt: leader={} pgid={} descendant={} descendant_pgid={}: all ESRCH",ids[0],ids[1],ids[2],ids[3]);
+}
 #[tokio::test]
-async fn workflow_notice_native_cancel_and_timeout_reap_owned_child_and_keep_unknown() {
-    for cancel in [false,true] {
+async fn workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop() {
+    for mode in ["normal","cancel","timeout","drop","unwind"] {
         let b=board().await;enqueue(&b,1);target(&b).await;
-        let (program,log)=queue(&b,0);let pidfile=b.dir.path().join("queue.pid");
-        let source=std::fs::read_to_string(&program).unwrap().replace("sys.exit(0)",&format!("import time\nwith open({:?},'w') as f: f.write(str(os.getpid()))\ntime.sleep(30)",pidfile.to_string_lossy()));
-        std::fs::write(&program,source).unwrap();
+        let (program,log,receipt)=descendant_queue(&b,mode=="normal");
+        let mut backend=tokio::process::Command::new("/bin/sleep").arg("30").process_group(0).kill_on_drop(true).spawn().unwrap();
+        let backend_pid=backend.id().unwrap() as i32;
         let (stop,mut signal)=tokio::sync::watch::channel(false);
         let notice=b.svc.store.workflow_pending_notices(0).unwrap()[0].1.notice.clone();
         let store=b.svc.store.clone();let inventory=b.svc.inventory.clone();
         let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
         let id=notice.id.clone();
-        let owner=tokio::spawn(async move{notices::invoke(&store,&inventory,&notice,proof,&mut signal).await});
-        tokio::time::timeout(Duration::from_secs(5),async{while !pidfile.exists(){tokio::time::sleep(Duration::from_millis(10)).await;}}).await.unwrap();
-        let pid:i32=std::fs::read_to_string(&pidfile).unwrap().parse().unwrap();
-        if cancel{stop.send_replace(true);}
-        tokio::time::timeout(Duration::from_secs(8),owner).await.unwrap().unwrap().unwrap();
-        assert_eq!(unsafe{libc::kill(pid,0)},-1,"native child was killed AND reaped before settlement");
-        assert_eq!(b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap().state,"unknown");
-        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1);
-        println!("owned native child pid={pid} cancel={cancel}: reaped, exact delivery Unknown");
+        let (panic_send,panic_recv)=tokio::sync::oneshot::channel::<()>();
+        let owner=tokio::spawn(async move {
+            let invocation=notices::invoke(&store,&inventory,&notice,proof,&mut signal);
+            tokio::pin!(invocation);
+            tokio::select! {
+                result=&mut invocation=>result,
+                _=panic_recv=>panic!("private queue supervision unwind"),
+            }
+        });
+        let ids=group_receipt(&receipt).await;
+        println!("live private receipt mode={mode}: {ids:?} external_pid={backend_pid}");
+        assert_ne!(backend_pid,ids[1]);
+        if mode!="normal" {
+            assert_eq!(unsafe{libc::kill(ids[2],0)},0,"actual live owned descendant before cleanup");
+            assert_eq!(unsafe{libc::getpgid(ids[2])},ids[1]);
+        }
+        let prepared=b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap();
+        if mode=="cancel" {stop.send_replace(true);}
+        if mode=="drop" {owner.abort();}
+        if mode=="unwind" {panic_send.send(()).unwrap();}
+        let joined=tokio::time::timeout(Duration::from_secs(8),owner).await.unwrap();
+        match mode {
+            "drop"=>assert!(joined.unwrap_err().is_cancelled()),
+            "unwind"=>assert!(joined.unwrap_err().is_panic()),
+            _=>joined.unwrap().unwrap(),
+        }
+        assert_group_gone(ids).await;
+        assert_eq!(unsafe{libc::kill(backend_pid,0)},0,"external backend survives owned cleanup");
+        backend.kill().await.unwrap();backend.wait().await.unwrap();
+        b.svc.store.workflow_recover_notice_attempts().unwrap();
+        let settled=b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap();
+        assert_eq!(settled.state,if mode=="normal" {"handed_off"} else {"unknown"});
+        assert_eq!(settled.attempt_id,prepared.attempt_id);assert_eq!(settled.target,prepared.target);
+        assert!(settled.attempt_id.is_some());assert!(settled.target.is_some());
+        let proof=TEST_PROGRAM.scope(b.dir.path().join("native-queue-0"),endpoint(&b,&settled.notice)).await;
+        let (_retry_owner,mut retry_stop)=tokio::sync::watch::channel(false);
+        notices::invoke(&b.svc.store,&b.svc.inventory,&settled.notice,proof,&mut retry_stop).await.unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1,"settled original identity never resends");
+        println!("private native mode={mode} state={} original_attempt={:?} target={:?} external_pid={backend_pid} survived",settled.state,settled.attempt_id,settled.target);
     }
+}
+
+#[tokio::test]
+async fn workflow_notice_native_unproved_group_cleanup_keeps_original_unknown() {
+    let b=board().await;enqueue(&b,1);target(&b).await;
+    let (program,log)=queue(&b,0);
+    let receipt=b.dir.path().join("zombie-group.json");let backend=b.dir.path().join("backend.pid");
+    let release=b.dir.path().join("release-reaper");
+    // The separate private reaper keeps its dead child's group visible until
+    // release. It must survive: it models an external backend outside our PGID.
+    let fixture=format!(r#"import time
+leader=os.getpid(); group=os.getpgrp()
+reaper=os.fork()
+if reaper==0:
+    os.setpgid(0,0)
+    with open({backend:?},'w') as f: f.write(str(os.getpid()))
+    child=os.fork()
+    if child==0:
+        os.setpgid(0,group)
+        with open({receipt:?},'w') as f: json.dump([leader,group,os.getpid(),os.getpgrp()],f)
+        time.sleep(30)
+        os._exit(0)
+    deadline=time.monotonic()+30
+    while not os.path.exists({release:?}) and time.monotonic()<deadline: time.sleep(.01)
+    os.waitpid(child,0)
+    os._exit(0)
+while not os.path.exists({receipt:?}): time.sleep(.01)
+sys.exit(0)"#,backend=backend.to_string_lossy(),receipt=receipt.to_string_lossy(),release=release.to_string_lossy());
+    let source=std::fs::read_to_string(&program).unwrap().replace("sys.exit(0)",&fixture);
+    std::fs::write(&program,source).unwrap();
+    TEST_PROGRAM.scope(program,async {
+        let notice=b.svc.store.workflow_pending_notices(0).unwrap()[0].1.notice.clone();
+        let proof=endpoint(&b,&notice).await;
+        let (_owner,mut stop)=tokio::sync::watch::channel(false);
+        let start=std::time::Instant::now();
+        notices::invoke(&b.svc.store,&b.svc.inventory,&notice,proof,&mut stop).await.unwrap();
+        let elapsed=start.elapsed();
+        let settled=b.svc.store.workflow_notice_delivery(&notice.id).unwrap().unwrap();
+        let ids=group_receipt(&receipt).await;
+        let backend_pid:i32=std::fs::read_to_string(&backend).unwrap().parse().unwrap();
+        let backend_alive=unsafe{libc::kill(backend_pid,0)}==0;
+        let backend_group=unsafe{libc::getpgid(backend_pid)};
+        let group_unproved=!crate::effect_runner::Group::gone(ids[1] as u32).unwrap_or(false);
+        // Release even against old source, before checking its false settlement.
+        std::fs::write(&release,"reap").unwrap();
+        assert_group_gone(ids).await;
+        tokio::time::timeout(Duration::from_secs(3),async {
+            while unsafe{libc::kill(backend_pid,0)}==0 {tokio::time::sleep(Duration::from_millis(10)).await;}
+        }).await.unwrap();
+        println!("private retained-zombie receipt {ids:?} outside_reaper={backend_pid} alive={backend_alive} pgid={backend_group} group_unproved={group_unproved} settlement={} evidence={:?} elapsed={elapsed:?}",settled.state,settled.evidence);
+        assert!(backend_alive);assert_ne!(backend_group,ids[1]);assert!(group_unproved);
+        assert!(elapsed<Duration::from_secs(3),"cleanup refusal is bounded");
+        assert_eq!(settled.state,"unknown","exit0 cannot settle without owned-group disappearance");
+        assert_eq!(settled.evidence,"native_owned_group_cleanup_unproved");
+        let proof=endpoint(&b,&notice).await;
+        notices::invoke(&b.svc.store,&b.svc.inventory,&notice,proof,&mut stop).await.unwrap();
+        let unchanged=b.svc.store.workflow_notice_delivery(&notice.id).unwrap().unwrap();
+        assert_eq!(unchanged.attempt_id,settled.attempt_id);assert_eq!(unchanged.target,settled.target);
+        assert!(settled.attempt_id.is_some());assert!(settled.target.is_some());
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1);
+    }).await;
 }
 
 #[tokio::test]

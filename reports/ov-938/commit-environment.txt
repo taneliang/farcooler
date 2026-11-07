@@ -1,0 +1,11 @@
+Initial command: git commit -S -m 'workflow: join owned native notice queue groups'
+Exit: 1; no commit created; HEAD remains exactfae3.
+Output: env: python3: Bad CPU type in executable
+Inspected commit-msg hook delegates to scripts/git-hooks/commit-msg, which invokes
+scripts/doc-comment-check.py via its /usr/bin/env python3 shebang.
+command -v python3: /usr/local/bin/python3
+file /usr/local/bin/python3: Mach-O 64-bit executable x86_64
+/usr/bin/python3: universal native executable, Python 3.9.6
+Corrected per-command PATH: /usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/Users/e-liang/.cargo/bin
+GPG program remains gpg (/opt/homebrew/bin/gpg). No hooks/config/security files changed.
+Product bytes and final checks remain unchanged; evidence freeze updated only.

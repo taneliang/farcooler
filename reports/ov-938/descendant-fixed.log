@@ -1,0 +1,44 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 32.98s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06)
+
+running 1 test
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop ... live private receipt mode=normal: [78907, 78907, 78998, 78907] external_pid=78873
+owned cleanup receipt: leader=78907 pgid=78907 descendant=78998 descendant_pgid=78907: all ESRCH
+private native mode=normal state=handed_off original_attempt=Some("01a1b3d2-48ab-75d1-915d-67ac4b6342ee") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b3d2-451c-7c23-8519-4768c5bc79e6\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b3d2-44fe-7a11-bdba-0c1fcd78c5f9\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpVnpdKa/.codex\",\"incarnation\":1794018264418397,\"pane\":\"%0\",\"pid\":78756,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpVnpdKa/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys048\",\"tty_device\":268435504}") external_pid=78873 survived
+live private receipt mode=cancel: [79246, 79246, 79348, 79246] external_pid=79210
+owned cleanup receipt: leader=79246 pgid=79246 descendant=79348 descendant_pgid=79246: all ESRCH
+private native mode=cancel state=unknown original_attempt=Some("01a1b3d2-4f0f-7c50-acf9-3d4d163b684c") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b3d2-4c79-75d3-9ff7-b529d736b525\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b3d2-4c60-75d1-85c8-903fc40184cb\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpqg65QM/.codex\",\"incarnation\":1794018266282372,\"pane\":\"%0\",\"pid\":79096,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpqg65QM/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys048\",\"tty_device\":268435504}") external_pid=79210 survived
+live private receipt mode=timeout: [79588, 79588, 79645, 79588] external_pid=79537
+owned cleanup receipt: leader=79588 pgid=79588 descendant=79645 descendant_pgid=79588: all ESRCH
+private native mode=timeout state=unknown original_attempt=Some("01a1b3d2-5587-7ad2-8b2c-c4be24d9cc57") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b3d2-52b0-79d2-a8b9-3ca0c6c6aed1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b3d2-528f-7462-96c8-d644c2e70a5e\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpafN0S8/.codex\",\"incarnation\":1794018267872260,\"pane\":\"%0\",\"pid\":79457,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpafN0S8/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys048\",\"tty_device\":268435504}") external_pid=79537 survived
+live private receipt mode=drop: [80485, 80485, 80547, 80485] external_pid=80434
+
+thread 'watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop' (828969858) panicked at crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:172:5:
+assertion `left == right` failed
+  left: Some(1)
+ right: Some(3)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2718 filtered out; finished in 11.01s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

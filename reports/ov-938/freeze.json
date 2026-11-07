@@ -1,0 +1,84 @@
+{
+  "task": "ov-938",
+  "base": "fae3f30d0c3d1c475f9dc4463243f293fd88b007",
+  "head_before_commit": "fae3f30d0c3d1c475f9dc4463243f293fd88b007",
+  "branch": "ov-938-notice-group-ownership",
+  "product_files": {
+    "crates/daemon/src/effect_runner.rs": "c90dab8b28fdeafc7797815b7c98cfe683b0cae9574329f1cebac49788192f29",
+    "crates/daemon/src/workflow_notices.rs": "9cdabb886b2a0af2294e3fe805d4d51382fe5e8d91073cdabeb1ad8840b99e0f",
+    "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs": "79db4c41879d3925461dd90e1c9fa914edd5a871e3cead452261b6d8c0b1ca38"
+  },
+  "evidence_files": {
+    "reports/ov-938/affected.py": "bb1bff75741af8066752c1aa8c6533b98473f68d7b7aee1ebe5d86e5868d67b7",
+    "reports/ov-938/cache-holders.jsonl": "bff33a48fdfc315fb6f72fc599f23fe61c693ef7401e3ee56027902345c269c7",
+    "reports/ov-938/check.py": "952a1279412ebdc0b92adbafd03b7d810cc124116d80eb546f3b8fdd9a0fb476",
+    "reports/ov-938/commit-environment.txt": "6572ca9f3027cce402f3b87bedd2fdc0f380ca432905129a6b4811be4fb7c74a",
+    "reports/ov-938/descendant-corrected.json": "2ef86c64f9fb23e15368169015cdee7cde100a1a31e6888675bfecbb9a62c44e",
+    "reports/ov-938/descendant-corrected.log": "adb0edc8cbb6fe87cf8ecde5f17983b86dd7a92cf50b5c22ee0bd8aed7358ad6",
+    "reports/ov-938/descendant-fixed.json": "740ebd7673cc2e0d98d4d3f57b887236bc0c463bbac59d63a2bda03b6b5ca921",
+    "reports/ov-938/descendant-fixed.log": "cf2683e0ca3f14ae3ab60c680c372e1a50be2838ee22afc2908225199336ac26",
+    "reports/ov-938/descendant-initial.json": "9d709860c1d2e8e79697a2eae35844a517207eb545562ff5d1a6d90743abb333",
+    "reports/ov-938/descendant-initial.log": "b14ed299227477ae42c8893e38046492ba67a7570b87f301f01cd6bcbf107ca3",
+    "reports/ov-938/diff-check.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reports/ov-938/doc-comments.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "reports/ov-938/entry.py": "43cde849371d6fda8b5778fa8562761fe75bc6e507232cea44504828bbbb4000",
+    "reports/ov-938/final-restored.json": "da9f25c938d9949bb810697cd6f9298cd5d5c5e5a8c5a2fdb21ae93bbd20f77a",
+    "reports/ov-938/final-restored.log": "64eed5068d10fff552d7bb7fc452fb535b0e0e67525fad9945fcf065426ec9a1",
+    "reports/ov-938/final.py": "ee8e4ad5998254058e31ac222838dd300a47d64d0a1866b8688ad58b38d020c8",
+    "reports/ov-938/implementation.md": "2a82ba1e000726e97526128f9b4ef486553e8cb31d9629764f89d38fd915f036",
+    "reports/ov-938/kernel-probe-leader.json": "57af0bb64b371c1bb09f26a2043ab52fe16ff63470963273d7533f52f734f4f1",
+    "reports/ov-938/kernel-probe.json": "5eab5621a129bd4e209b9f4aea904b5c8158385ff3f1d4a3e6aba2c57c6aa949",
+    "reports/ov-938/native-checked-reap.json": "048f0c159126ff1ef864279b110edeaace7f03ad47a792cf03e16e386c78d722",
+    "reports/ov-938/native-checked-reap.log": "555f8bebf929a501c931c96ca52d126c7e169d587e7e376a564722a760fa0567",
+    "reports/ov-938/native-zombie-aware.json": "9e17f354043d96b33ad376da0effcaea551daab34d3c39de09ac958909867a01",
+    "reports/ov-938/native-zombie-aware.log": "04a631aa5e244e32887b56af084280f895bfb26c493abb924f08e84872c1054f",
+    "reports/ov-938/negative-sources/queue.fixed.txt": "9cdabb886b2a0af2294e3fe805d4d51382fe5e8d91073cdabeb1ad8840b99e0f",
+    "reports/ov-938/negative-sources/queue.old.txt": "1b29051a3e80f3c19db8328334cc27de593121fc779fcffedf15894b872f3cba",
+    "reports/ov-938/negative.json": "4f9114a19e70342b7837bcd4d2edabeeedcdeeabd0054af247c354b6f22a14e5",
+    "reports/ov-938/negative.py": "d093e9972ea46c53142c09011a54622266d3aa8c440edb9dd182f24dfd38c989",
+    "reports/ov-938/old-drop.json": "dd6e74f91bec49c2d6ca43ecd563abeb572a50a9769b17f0d46f2814f862bf8d",
+    "reports/ov-938/old-drop.log": "9fd78dc9d55b12c3531c763626b35cbd510376a498c31a8f71352f795dbba5f9",
+    "reports/ov-938/old-unproved.json": "00f1d492860771cbbf9e3cb7bd5749042cd487b6805c5e5af02870cf4dbb8244",
+    "reports/ov-938/old-unproved.log": "7ed40577930f3033e86e2c2b99d3c256949e2fc27623004e9ab10186edf58229",
+    "reports/ov-938/probe.py": "c03656c8d8828184b83057966ec89a5a191dd75639eb3c215554cc01a2985762",
+    "reports/ov-938/result.md": "b12c30eedfc46424b69540bdad27bd4ba0a4a6bd7ff3ba2c826c63fdf48fa97b",
+    "reports/ov-938/reuse.json": "550265889df6ddb70a6adf692ebe865490c50bf537b6e44498186a788f0b6c90"
+  },
+  "final_gate": {
+    "record": "reports/ov-938/final-restored.json",
+    "exit": 0,
+    "input_count": 1231,
+    "passed": 12,
+    "ignored": 0,
+    "clippy": "daemon all-target -D warnings exit0",
+    "size": "exit0",
+    "source_unchanged": true,
+    "minimum_free_bytes": 23541370880,
+    "stopped": null
+  },
+  "old_source_negatives": [
+    {
+      "mode": "unproved",
+      "label": "old-unproved",
+      "exit": 101,
+      "assertion": "exit0 cannot settle without owned-group disappearance",
+      "meaningful": true
+    },
+    {
+      "mode": "descendant",
+      "label": "old-drop",
+      "exit": 101,
+      "assertion": "owned descendant group disappeared within bound",
+      "meaningful": true
+    }
+  ],
+  "reused": {
+    "record": "reports/ov-938/reuse.json",
+    "passes": 140,
+    "ignores": 3,
+    "negative_controls": 9,
+    "fresh_rerun": false
+  },
+  "review": "SAME933 sole-blocker/final-delta review pending; stop at signed pin",
+  "limits": "Private local owned groups/stand-ins only; no real provider consumption/exactly-once/main/app/data/cutover claim."
+}

@@ -1,0 +1,195 @@
+//! One owned finite workflow-notice drain, independent of the engine's inbox.
+//! Codex queue exit0 is LOCAL HANDOFF only. Unknown is never retried.
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use farcooler_store::{Store, workflow_notices::{Notice, NativeTarget}};
+use farcooler_tmux::LiveInventory;
+use farcooler_core::inventory::RuntimeInventory;
+use tokio::sync::{watch, Notify};
+use uuid::Uuid;
+use crate::{workflow_runtime::{Result, Error}, watch::answer_wake::{self, codex_turn}, claude_registry::{Kernel, Processes}};
+
+const DISCOVERY_MS:u64=15_000;
+const QUEUE_MS:u64=5_000;
+const MAX_BYTES:usize=16*1024;
+// Dropping the last owner closes the channel without changing its last bool.
+// Closure is shutdown too; it must never authorize another native attempt.
+fn stopping(stop:&watch::Receiver<bool>)->bool { *stop.borrow() || stop.has_changed().is_err() }
+pub(crate) struct Endpoint { proof:NativeTarget, identity:String, terminal:Uuid, pane:String, tty:String,
+    pid:i32, incarnation:i64, tty_device:u64, thread:String, home:PathBuf, program:PathBuf }
+
+fn pane(inventory:&LiveInventory, terminal:Uuid)->Option<(String,String)> {
+    let snapshot=inventory.snapshot();
+    if !snapshot.inventory_healthy {return None}
+    let claimants=snapshot.claimants(terminal);
+    let [one]=claimants.as_slice() else {return None};
+    one.proves_life().then(||(one.pane_id.clone(),one.tty.clone()))
+}
+async fn foreground(tty:&str)->Option<i32> {
+    let listing=codex_turn::discovery_output("ps", &["-t",tty.strip_prefix("/dev/").unwrap_or(tty),"-o","pid=,ppid=,stat=,comm="]).await?;
+    let (pid,comm)=answer_wake::in_front(&listing)?;
+    let args=codex_turn::discovery_output("ps", &["-o","args=","-p",&pid.to_string()]).await?;
+    (answer_wake::agent_of_process(&comm,args.trim())==Some("codex")).then_some(pid)
+}
+pub(crate) async fn discover(store:&Store,inventory:&LiveInventory, notice:&Notice)->Option<Endpoint> {
+    use std::os::unix::fs::MetadataExt;
+    let workspace=Uuid::parse_str(&notice.workspace).ok()?;
+    let rows=store.unended_orchestrators(workspace).ok()?;
+    let [terminal]=rows.as_slice() else {return None};
+    let (pane_id,tty)=pane(inventory,terminal.id)?;
+    let pid=foreground(&tty).await?;
+    let incarnation=crate::claude_registry::process_incarnation(pid)?;
+    let tty_device=std::fs::metadata(&tty).ok()?.rdev();
+    if Kernel.tty(pid)!=Some(tty_device) {return None}
+    let rollout=codex_turn::unique_rollout_now(pid).await?;
+    let (thread,home)=crate::log_join::codex_thread_of(&rollout)?;
+    #[cfg(not(test))]
+    let program=farcooler_core::programs::find("codex")?;
+    #[cfg(test)]
+    let program=TEST_PROGRAM.try_with(Clone::clone).ok()?;
+    // Repeat structured endpoint discovery after every earlier await; never
+    // reuse the text/mtime cache or infer a thread from prose.
+    if foreground(&tty).await!=Some(pid) || codex_turn::unique_rollout_now(pid).await?!=rollout {return None}
+    if crate::claude_registry::process_incarnation(pid)!=Some(incarnation)
+        || pane(inventory,terminal.id)!=Some((pane_id.clone(),tty.clone())) {return None}
+    let proof=store.workflow_native_target(workspace,terminal.id,&thread).ok()??;
+    let identity=serde_json::json!({"schema":"workflow-native-queue-target/v1","authority":store.workflow_native_target_identity(&proof),
+        "pane":&pane_id,"tty":&tty,"tty_device":tty_device,"pid":pid,"incarnation":incarnation,"thread":&thread,"home":&home,"program":&program}).to_string();
+    Some(Endpoint {proof,identity,terminal:terminal.id,pane:pane_id,tty,pid,incarnation,tty_device,thread,home,program})
+}
+
+pub(crate) async fn invoke(store:&Store,inventory:&LiveInventory, notice:&Notice, endpoint:Endpoint, stop:&mut watch::Receiver<bool>)->Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    if stopping(stop) {return Ok(())}
+    let message=serde_json::to_string(&serde_json::json!({"schema":"workflow-notice/v1","notice":notice,
+        "meaning":"Informational workflow event. No approval or execution authority is granted."}))?;
+    if message.len()>MAX_BYTES {return Err(Error::Refused("workflow notice exceeds native byte bound"))}
+    let attempt=Uuid::now_v7().to_string();
+    if !store.workflow_prepare_notice(notice,&attempt,&endpoint.identity)? {return Ok(())}
+    // The attempt is durably prepared BEFORE process creation. Final durable
+    // authority is checked under SQLite's writer lock through synchronous spawn.
+    let spawned=store.workflow_with_native_notice_admission(notice,&attempt,&endpoint.identity,&endpoint.proof,|| {
+        if stopping(stop) || crate::claude_registry::process_incarnation(endpoint.pid)!=Some(endpoint.incarnation)
+            || pane(inventory,endpoint.terminal)!=Some((endpoint.pane.clone(),endpoint.tty.clone()))
+            || Kernel.tty(endpoint.pid)!=Some(endpoint.tty_device)
+            || std::fs::metadata(&endpoint.tty).ok().map(|m|m.rdev())!=Some(endpoint.tty_device) {
+            return None;
+        }
+        Some(queue_command(&endpoint.program,&endpoint.thread,&endpoint.home,&message).spawn().map(OwnedQueue::new))
+    })?;
+    let child=match spawned {
+        Some(Some(Ok(child)))=>child,
+        // No child was created; native side effects conclusively did not start.
+        _=>{store.workflow_finish_notice(&notice.id,&attempt,&endpoint.identity,"pending","refused_before_native_spawn")?;return Ok(())}
+    };
+    let (state,evidence)=own_queue(child,stop).await;
+    #[cfg(test)]
+    if TEST_LOST_REPLY.try_with(|lost|*lost).unwrap_or(false) { return Ok(()); }
+    store.workflow_finish_notice(&notice.id,&attempt,&endpoint.identity,state,evidence)?;
+    Ok(())
+}
+fn queue_command(program:&std::path::Path,thread:&str,home:&std::path::Path,message:&str)->tokio::process::Command {
+    let mut command=tokio::process::Command::new(program);
+    command.args(["queue","--thread",thread,&format!("--message={message}")]).env("CODEX_HOME",home)
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+        .process_group(0).kill_on_drop(true);
+    command
+}
+// Field order signals the pinned group before Child drop/reaping, including
+// unwind in the synchronous Store admission return path immediately after spawn.
+struct OwnedQueue { group:crate::effect_runner::Group, child:tokio::process::Child, pid:u32 }
+impl OwnedQueue {
+    fn new(child:tokio::process::Child)->Self {
+        let pid=child.id().expect("newly spawned queue child has a pid");
+        Self {group:crate::effect_runner::Group::new(pid),child,pid}
+    }
+}
+// Observe exit without releasing the leader's PID/PGID before the group signal.
+// Tokio's Child remains the sole reaper; WNOWAIT only peeks at our direct child.
+fn queue_has_exited(pid:u32)->std::io::Result<bool> {
+    let mut info=unsafe{std::mem::zeroed::<libc::siginfo_t>()};
+    if unsafe{libc::waitid(libc::P_PID,pid,&mut info,libc::WEXITED|libc::WNOHANG|libc::WNOWAIT)}!=0 {
+        let error=std::io::Error::last_os_error();
+        if error.kind()!=std::io::ErrorKind::Interrupted {return Err(error)}
+        return Ok(false);
+    }
+    Ok(unsafe{info.si_pid()}==pid as i32)
+}
+async fn queue_exited(pid:u32)->std::io::Result<()> {
+    while !queue_has_exited(pid)? {tokio::time::sleep(Duration::from_millis(10)).await;}
+    Ok(())
+}
+async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str) {
+    let pid=queue.pid;
+    let exited=tokio::select! {
+        result=queue_exited(pid)=>result.is_ok(),
+        _=tokio::time::sleep(Duration::from_millis(QUEUE_MS))=>false,
+        _=async {if !stopping(stop){let _=stop.changed().await;}}=>false,
+    };
+    // Signal while the unreaped leader still pins this owned group, then never
+    // signal the numeric identity again. EPERM/other errors are not disappearance.
+    // A zombie-only group returns EPERM on macOS. Reap and independently prove
+    // disappearance even after a signal error; the error itself proves nothing.
+    let signal_error=queue.group.kill().err();
+    let reaped=tokio::time::timeout(Duration::from_secs(1),queue.child.wait()).await;
+    let Ok(Ok(status))=reaped else {return ("unknown","native_owned_leader_reap_unproved")};
+    for _ in 0..100 {
+        match crate::effect_runner::Group::gone(pid) {
+            Ok(true)=>return if exited && status.success() {
+                ("handed_off","codex_queue_exit0_local_handoff_only")
+            } else {("unknown","native_spawn_possible_acceptance_without_conclusive_receipt")},
+            // macOS can report EPERM for a group containing only zombies.
+            // It is not disappearance; allow reaping within the same bound.
+            Ok(false)|Err(_)=>tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+    if let Some(error)=signal_error {
+        tracing::warn!(pid,%error,"native queue group signal failed and cleanup remains unproved");
+        ("unknown","native_owned_group_signal_and_cleanup_unproved")
+    } else {("unknown","native_owned_group_cleanup_unproved")}
+}
+
+pub(crate) async fn run(store:Arc<Store>,inventory:LiveInventory,wake:Arc<Notify>,mut stop:watch::Receiver<bool>)->Result<()> {
+    // Subscribe BEFORE the initial drain: recovery/availability during a pass
+    // remains a retained wake, without adding an idle timer or refresh loop.
+    if stopping(&stop) {return Ok(())}
+    let mut targets=inventory.subscribe_targets();
+    store.workflow_recover_notice_attempts()?;
+    loop {
+        let mut after=0;
+        loop {
+            if stopping(&stop){return Ok(())}
+            let page=store.workflow_pending_notices(after)?;
+            if page.is_empty(){break}
+            for (sequence,delivery) in page {
+                after=sequence;
+                if stopping(&stop){return Ok(())}
+                let discovery=Arc::new(codex_turn::DiscoveryOwner::default());
+                let endpoint=tokio::select! {
+                    result=tokio::time::timeout(Duration::from_millis(DISCOVERY_MS),discovery.clone().scope(discover(&store,&inventory,&delivery.notice)))=>result.ok().flatten(),
+                    _=async{if !stopping(&stop){let _=stop.changed().await;}}=>None,
+                };
+                if !discovery.stop_and_reap().await {return Err(Error::Refused("workflow notice discovery child not reaped"))}
+                if let Some(endpoint)=endpoint {invoke(&store,&inventory,&delivery.notice,endpoint,&mut stop).await?;}
+            }
+            tokio::task::yield_now().await;
+        }
+        #[cfg(test)]
+        if let Ok(idle)=TEST_IDLE.try_with(Clone::clone) { idle.notify_one(); }
+        tokio::select! {
+            _=wake.notified()=>{},
+            changed=targets.changed()=>{
+                if changed.is_err(){return Err(Error::Refused("native inventory subscription closed"))}
+            },
+            _=async{if !stopping(&stop){let _=stop.changed().await;}}=>return Ok(()),
+        }
+    }
+}
+
+#[cfg(test)]
+tokio::task_local! { pub(crate) static TEST_PROGRAM: PathBuf; }
+
+#[cfg(test)]
+tokio::task_local! { pub(crate) static TEST_LOST_REPLY: bool; }
+
+#[cfg(test)]
+tokio::task_local! { pub(crate) static TEST_IDLE: Arc<Notify>; }

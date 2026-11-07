@@ -74,7 +74,7 @@ pub(crate) async fn invoke(store:&Store,inventory:&LiveInventory, notice:&Notice
             || std::fs::metadata(&endpoint.tty).ok().map(|m|m.rdev())!=Some(endpoint.tty_device) {
             return None;
         }
-        Some(queue_command(&endpoint.program,&endpoint.thread,&endpoint.home,&message).spawn())
+        Some(queue_command(&endpoint.program,&endpoint.thread,&endpoint.home,&message).spawn().map(OwnedQueue::new))
     })?;
     let child=match spawned {
         Some(Some(Ok(child)))=>child,
@@ -94,20 +94,58 @@ fn queue_command(program:&std::path::Path,thread:&str,home:&std::path::Path,mess
         .process_group(0).kill_on_drop(true);
     command
 }
-async fn own_queue(mut child:tokio::process::Child,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str) {
-    let pid=child.id();
-    let result=tokio::select! {
-        result=child.wait()=>Some(result),
-        _=tokio::time::sleep(Duration::from_millis(QUEUE_MS))=>None,
-        _=async {if !stopping(stop){let _=stop.changed().await;}}=>None,
+// Field order signals the pinned group before Child drop/reaping, including
+// unwind in the synchronous Store admission return path immediately after spawn.
+struct OwnedQueue { group:crate::effect_runner::Group, child:tokio::process::Child, pid:u32 }
+impl OwnedQueue {
+    fn new(child:tokio::process::Child)->Self {
+        let pid=child.id().expect("newly spawned queue child has a pid");
+        Self {group:crate::effect_runner::Group::new(pid),child,pid}
+    }
+}
+// Observe exit without releasing the leader's PID/PGID before the group signal.
+// Tokio's Child remains the sole reaper; WNOWAIT only peeks at our direct child.
+fn queue_has_exited(pid:u32)->std::io::Result<bool> {
+    let mut info=unsafe{std::mem::zeroed::<libc::siginfo_t>()};
+    if unsafe{libc::waitid(libc::P_PID,pid,&mut info,libc::WEXITED|libc::WNOHANG|libc::WNOWAIT)}!=0 {
+        let error=std::io::Error::last_os_error();
+        if error.kind()!=std::io::ErrorKind::Interrupted {return Err(error)}
+        return Ok(false);
+    }
+    Ok(unsafe{info.si_pid()}==pid as i32)
+}
+async fn queue_exited(pid:u32)->std::io::Result<()> {
+    while !queue_has_exited(pid)? {tokio::time::sleep(Duration::from_millis(10)).await;}
+    Ok(())
+}
+async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str) {
+    let pid=queue.pid;
+    let exited=tokio::select! {
+        result=queue_exited(pid)=>result.is_ok(),
+        _=tokio::time::sleep(Duration::from_millis(QUEUE_MS))=>false,
+        _=async {if !stopping(stop){let _=stop.changed().await;}}=>false,
     };
-    // Own the entire process group even when its leader exited. No detached
-    // native watcher, transcript poll, fallback typing or automatic resend.
-    if let Some(pid)=pid {unsafe{libc::kill(-(pid as i32),libc::SIGKILL);}}
-    let reaped=child.wait().await;
-    if matches!(result,Some(Ok(status)) if status.success()) && reaped.is_ok() {
-        ("handed_off","codex_queue_exit0_local_handoff_only")
-    } else {("unknown","native_spawn_possible_acceptance_without_conclusive_receipt")}
+    // Signal while the unreaped leader still pins this owned group, then never
+    // signal the numeric identity again. EPERM/other errors are not disappearance.
+    // A zombie-only group returns EPERM on macOS. Reap and independently prove
+    // disappearance even after a signal error; the error itself proves nothing.
+    let signal_error=queue.group.kill().err();
+    let reaped=tokio::time::timeout(Duration::from_secs(1),queue.child.wait()).await;
+    let Ok(Ok(status))=reaped else {return ("unknown","native_owned_leader_reap_unproved")};
+    for _ in 0..100 {
+        match crate::effect_runner::Group::gone(pid) {
+            Ok(true)=>return if exited && status.success() {
+                ("handed_off","codex_queue_exit0_local_handoff_only")
+            } else {("unknown","native_spawn_possible_acceptance_without_conclusive_receipt")},
+            // macOS can report EPERM for a group containing only zombies.
+            // It is not disappearance; allow reaping within the same bound.
+            Ok(false)|Err(_)=>tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+    if let Some(error)=signal_error {
+        tracing::warn!(pid,%error,"native queue group signal failed and cleanup remains unproved");
+        ("unknown","native_owned_group_signal_and_cleanup_unproved")
+    } else {("unknown","native_owned_group_cleanup_unproved")}
 }
 
 pub(crate) async fn run(store:Arc<Store>,inventory:LiveInventory,wake:Arc<Notify>,mut stop:watch::Receiver<bool>)->Result<()> {

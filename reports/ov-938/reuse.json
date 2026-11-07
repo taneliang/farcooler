@@ -1,0 +1,155 @@
+{
+  "base": "fae3f30d0c3d1c475f9dc4463243f293fd88b007",
+  "prior_freeze_sha256": "bfecc23092c791a7ce441663d2ebfbff6611cbf246b856d68f19e6e2aedfe60c",
+  "same_reviewer_report": "/Users/e-liang/Dev/overnight/.claude/agent/reports/ov-933/independent-review.md",
+  "same_reviewer_report_sha256": "12d5697c58feecc7f1ebb64be9fb4f7b34d05320b3308a22ed769878804eca63",
+  "unchanged_prior_product_inputs": 29,
+  "unchanged_prior_evidence_inputs": 127,
+  "new_product_helper": "crates/daemon/src/effect_runner.rs",
+  "replaced_prior_inputs": [
+    "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs",
+    "crates/daemon/src/workflow_notices.rs"
+  ],
+  "reused_main_pass_count": 140,
+  "reused_main_ignored_count": 3,
+  "reused_negative_guard_count": 9,
+  "prior_main_suites": [
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-tmux",
+        "--lib",
+        "inventory::",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 3,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-store",
+        "--lib",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 25,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-protocol",
+        "--lib",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 1,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-cli",
+        "--bin",
+        "farcooler",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 2,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "workflow_",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 69,
+      "ignored": 0,
+      "nested_summary_count": 1
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "log_join::tests::",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 25,
+      "ignored": 2,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--lib",
+        "watch::answer_wake::codex_turn::",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 3,
+      "ignored": 0,
+      "nested_summary_count": 0
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_service_over_socket",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 10,
+      "ignored": 1,
+      "nested_summary_count": 12
+    },
+    {
+      "command": [
+        "test",
+        "--offline",
+        "-p",
+        "farcooler-daemon",
+        "--test",
+        "workflow_commands_over_socket",
+        "--",
+        "--nocapture"
+      ],
+      "passed": 2,
+      "ignored": 0,
+      "nested_summary_count": 0
+    }
+  ],
+  "limits": "Saved private local evidence only, not rerun. Nested summaries excluded. Six early guard graphs predate inventory/closed-owner extension; final sealed affected/lint includes that extension. No provider execution/consumption, installed app/owner data, publication/cutover or combined main CI claim."
+}

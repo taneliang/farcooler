@@ -1,0 +1,121 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-938-notice-group-ownership/crates/daemon)
+error: future cannot be sent between threads safely
+   --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:134:28
+    |
+134 |     let owner=tokio::spawn(TEST_PROGRAM.scope(program,notices::run(store,inventory,wake,signal)));
+    |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ future returned by `run` is not `Send`
+    |
+    = help: within `TaskLocalFuture<PathBuf, impl Future<Output = Result<(), Error>>>`, the trait `Send` is not implemented for `*mut c_void`
+note: future is not `Send` as this value is used across an await
+   --> crates/daemon/src/workflow_notices.rs:106:55
+    |
+101 |         let mut info=unsafe{std::mem::zeroed::<libc::siginfo_t>()};
+    |             -------- has type `siginfo_t` which is not `Send`
+...
+106 |         tokio::time::sleep(Duration::from_millis(10)).await;
+    |                                                       ^^^^^ await occurs here, with `mut info` maybe used later
+note: required by a bound in `tokio::spawn`
+   --> /Users/e-liang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.1/src/task/spawn.rs:176:21
+    |
+174 |     pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+    |            ----- required by a bound in this function
+175 |     where
+176 |         F: Future + Send + 'static,
+    |                     ^^^^ required by this bound in `spawn`
+    = note: the full name for the type has been written to '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06.long-type-7721883025312601120.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error: future cannot be sent between threads safely
+   --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:244:28
+    |
+244 |     let owner=tokio::spawn(TEST_PROGRAM.scope(program,notices::TEST_IDLE.scope(idle.clone(),notices::run(store,live,wake,signal))));
+    |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ future returned by `run` is not `Send`
+    |
+    = help: within `TaskLocalFuture<PathBuf, TaskLocalFuture<Arc<Notify>, ...>>`, the trait `Send` is not implemented for `*mut c_void`
+note: future is not `Send` as this value is used across an await
+   --> crates/daemon/src/workflow_notices.rs:106:55
+    |
+101 |         let mut info=unsafe{std::mem::zeroed::<libc::siginfo_t>()};
+    |             -------- has type `siginfo_t` which is not `Send`
+...
+106 |         tokio::time::sleep(Duration::from_millis(10)).await;
+    |                                                       ^^^^^ await occurs here, with `mut info` maybe used later
+note: required by a bound in `tokio::spawn`
+   --> /Users/e-liang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.1/src/task/spawn.rs:176:21
+    |
+174 |     pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+    |            ----- required by a bound in this function
+175 |     where
+176 |         F: Future + Send + 'static,
+    |                     ^^^^ required by this bound in `spawn`
+    = note: the full name for the type has been written to '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-539bb50545370e06.long-type-7677098630067871834.txt'
+    = note: consider using `--verbose` to print the full type name to the console
+
+error: future cannot be sent between threads safely
+   --> crates/daemon/src/workflow_service.rs:25:36
+    |
+ 25 | ...wn(crate::workflow_notices::run(self.store.clone(),self.inventory.clone(),self.workflow_notice_wake.clone(),signal.clone()));
+    |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ future returned by `run` is not `Send`
+    |
+    = help: within `impl std::future::Future<Output = std::result::Result<(), workflow_runtime::Error>>`, the trait `Send` is not implemented for `*mut c_void`
+note: future is not `Send` as this value is used across an await
+   --> crates/daemon/src/workflow_notices.rs:106:55
+    |
+101 |         let mut info=unsafe{std::mem::zeroed::<libc::siginfo_t>()};
+    |             -------- has type `siginfo_t` which is not `Send`
+...
+106 |         tokio::time::sleep(Duration::from_millis(10)).await;
+    |                                                       ^^^^^ await occurs here, with `mut info` maybe used later
+note: required by a bound in `tokio::spawn`
+   --> /Users/e-liang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.1/src/task/spawn.rs:176:21
+    |
+174 |     pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+    |            ----- required by a bound in this function
+175 |     where
+176 |         F: Future + Send + 'static,
+    |                     ^^^^ required by this bound in `spawn`
+
+error: future cannot be sent between threads safely
+   --> crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:192:19
+    |
+192 |           let owner=tokio::spawn(async move {
+    |  ___________________^
+193 | |             let invocation=notices::invoke(&store,&inventory,&notice,proof,&mut signal);
+194 | |             tokio::pin!(invocation);
+195 | |             tokio::select! {
+...   |
+199 | |         });
+    | |__________^ future created by async block is not `Send`
+    |
+    = help: within `{async block@crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:192:32: 192:42}`, the trait `Send` is not implemented for `*mut c_void`
+note: future is not `Send` as this value is used across an await
+   --> crates/daemon/src/workflow_notices.rs:106:55
+    |
+101 |         let mut info=unsafe{std::mem::zeroed::<libc::siginfo_t>()};
+    |             -------- has type `siginfo_t` which is not `Send`
+...
+106 |         tokio::time::sleep(Duration::from_millis(10)).await;
+    |                                                       ^^^^^ await occurs here, with `mut info` maybe used later
+note: required by a bound in `tokio::spawn`
+   --> /Users/e-liang/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.53.1/src/task/spawn.rs:176:21
+    |
+174 |     pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+    |            ----- required by a bound in this function
+175 |     where
+176 |         F: Future + Send + 'static,
+    |                     ^^^^ required by this bound in `spawn`
+
+error: could not compile `farcooler-daemon` (lib test) due to 4 previous errors
+
+exit=101, stopped=None
