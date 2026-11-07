@@ -150,8 +150,10 @@ impl Pinned for CodingConfig {
                 StageKind::Provision if !provisioned && !built => { provisioned = true; self.operation("coding-worktree/v1", "") },
                 StageKind::Build if provisioned && !landed => { built = true; self.operation("coding-harness/v1", "") },
                 StageKind::Check if built => self.operation("coding-check/v1", &gate_index(stage.operation.arguments.get(1))?.to_string()),
-                // A person decides; nothing runs, so no reviewer needs configuring.
-                StageKind::Review(Reviewer::Person(person)) if built && !landed => self.operation("coding-review/v1", &format!("person:{person}")),
+                // A person decides and nothing runs, so this form needs no reviewer configured. A person
+                // review that pins the configured reviewer's identity (the older form) falls to the next arm.
+                StageKind::Review(Reviewer::Person(person)) if built && !landed
+                    && stage.operation == self.operation("coding-review/v1", &format!("person:{person}")) => stage.operation.clone(),
                 StageKind::Review(_) if built && (!landed || definition.max_reworks == 0) =>
                     self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity),
                 StageKind::Land if built && !landed => { landed = true; self.operation("coding-land/v1", &self.landing_ref) },
