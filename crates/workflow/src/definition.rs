@@ -27,6 +27,14 @@ pub enum StageKind {
     /// Read the paths the ticket changed and answer with the label its pinned rules give them. It only
     /// reads: the definition routes each label, and a label it doesn't route ends the run.
     Route,
+    /// Pull request steps (ov-957). Push the candidate to the head branch the engine names for this item.
+    PushBranch,
+    /// Open the one pull request for the head branch, or find the one already open.
+    OpenPr,
+    /// Take a draft pull request out of draft.
+    PrReady,
+    /// Wait for the pull request to be merged. The merge commit becomes the item's candidate.
+    AwaitPr,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSpec {
