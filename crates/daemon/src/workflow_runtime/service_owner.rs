@@ -3,6 +3,25 @@ use super::*;
 use super::coding::PinnedDefinition;
 use farcooler_protocol::workflow_config::AdapterConfiguration;
 
+/// The base a publication names is where its tickets start, so it has to be a commit the landing refs
+/// still contain: the same commit or an older one. A landing since the base was set moves the refs on,
+/// and the group's fold re-bases onto the target's head, so a moved target must not refuse a publication.
+pub(super) async fn publication_base_current(config: &CodingConfig) -> Result<()> {
+    adapters::git(&config.repository, &["cat-file", "-e", &format!("{}^{{commit}}", config.base)]).await?;
+    adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?;
+    if crate::git::git(&config.repository, &["merge-base", "--is-ancestor", &config.base, &config.landing_ref]).await
+        .map_err(|_| Error::Refused("git invocation failed"))?.ok == false {
+        return Err(Error::Refused("publication landing ref differs from selected base"));
+    }
+    if let Some(landing) = &config.landing {
+        adapters::git(&landing.repository, &["rev-parse", &landing.target]).await?;
+        let ancestor = crate::git::git(&landing.repository, &["merge-base", "--is-ancestor", &config.base, &landing.target]).await
+            .map_err(|_| Error::Refused("git invocation failed"))?;
+        if !ancestor.ok { return Err(Error::Refused("publication remote ref differs from selected base")); }
+    }
+    Ok(())
+}
+
 impl Runtime {
     pub(super) async fn validate_wire_publication(&self, workspace: &str, principal: &str,
         action: &farcooler_protocol::workflow_commands::Action) -> Result<()> {
@@ -17,18 +36,7 @@ impl Runtime {
         self.validate_workspace_repository(workspace, config)?;
         config.validate_definition(definition)?;
         self.validate_native_configuration(config)?;
-        let check = async {
-            adapters::git(&config.repository, &["cat-file", "-e", &format!("{}^{{commit}}", config.base)]).await?;
-            if adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await? != config.base {
-                return Err(Error::Refused("publication landing ref differs from selected base"));
-            }
-            if let Some(landing) = &config.landing {
-                if adapters::git(&landing.repository, &["rev-parse", &landing.target]).await? != config.base {
-                    return Err(Error::Refused("publication remote ref differs from selected base"));
-                }
-            }
-            Ok(())
-        };
+        let check = publication_base_current(config);
         tokio::time::timeout(Duration::from_secs(5), check).await
             .map_err(|_| Error::Refused("publication identity check timed out"))?
     }

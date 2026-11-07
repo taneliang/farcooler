@@ -12,9 +12,13 @@ pub struct Gates {
     /// Add a gate an agent decides, using the runner's configured reviewer.
     #[arg(long)]
     pub agent_gate: bool,
-    /// Add a gate this person decides. The ticket waits for their word. Repeat for several.
+    /// Add a gate a person decides: the ticket waits for their word. Only `owner` can decide. Repeat for several.
     #[arg(long, value_name = "PERSON")]
     pub person_gate: Vec<String>,
+    /// A setting every command gate runs with, as NAME=value. Repeat for several. A gate gets PATH and HOME
+    /// unless you set them here; nothing else from the runner reaches it.
+    #[arg(long, value_name = "NAME=VALUE")]
+    pub gate_env: Vec<String>,
 }
 impl Gates {
     fn extras(&self) -> Vec<Extra> {
@@ -48,12 +52,12 @@ pub fn list() -> String {
 
 pub fn import(charter: &str, held: &Held, gates: &Gates) -> Result<(Bundle, Vec<String>), lt::Error> {
     let config = held.adapter.as_ref().ok_or(lt::Error::NoAdapter)?;
-    lt::import_charter(charter, config, held.source.as_deref(), &gates.extras())
+    lt::import_charter(charter, config, held.source.as_deref(), &gates.extras(), &gates.gate_env)
 }
 
 pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, batch: Option<u8>) -> Result<Bundle, lt::Error> {
     let config = held.adapter.as_ref().ok_or(lt::Error::NoAdapter)?;
-    lt::template(name, config, commands, &gates.extras(), batch)
+    lt::template(name, config, commands, &gates.extras(), batch, &gates.gate_env)
 }
 
 /// Print or write a draft, and say how to publish it. The words go to standard error so `--json`
@@ -121,12 +125,12 @@ mod tests {
     #[test]
     fn a_template_takes_gates_of_all_three_kinds_from_flags() {
         let held = held(&get(None)).unwrap();
-        let gates = Gates { agent_gate: false, person_gate: vec!["owner".into()] };
+        let gates = Gates { agent_gate: false, person_gate: vec!["owner".into()], gate_env: vec![] };
         let bundle = template("batched-push", &held, &["make check".into()], &gates, Some(4)).unwrap();
         assert_eq!(bundle.definition.groups["landing"].limit, 4);
         assert!(bundle.definition.stages.iter().any(|s| matches!(&s.kind, lt::StageKind::Review(lt::Reviewer::Person(p)) if p == "owner")));
         // An agent gate needs the reviewer this runner doesn't have.
-        let agent = Gates { agent_gate: true, person_gate: vec![] };
-        assert_eq!(template("batched-push", &held, &["make check".into()], &agent, None).unwrap_err(), lt::Error::Unsound);
+        let agent = Gates { agent_gate: true, person_gate: vec![], gate_env: vec![] };
+        assert_eq!(template("batched-push", &held, &["make check".into()], &agent, None).unwrap_err(), lt::Error::NoReviewer);
     }
 }
