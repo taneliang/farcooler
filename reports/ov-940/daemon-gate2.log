@@ -1,0 +1,113 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/tmux)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/review)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 31.31s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-2ab3a43642087497)
+
+running 40 tests
+test hook_ingress::tests::a_refusal_that_persists_is_reported_once_and_then_rarely ... ok
+test hook_ingress::tests::recovery_reports_every_refusal_the_quiet_covered ... ok
+test landing_read::tests::a_changed_base_does_not_keep_the_old_bases_refusal ... ok
+test paths::tests::runtime_selection_explicit_default_and_pre_effect_refusal ... ok
+test paths::tests::runtime_selection_refuses_before_socket_directory_effects ... ok
+test refusal::tests::a_held_daemon_says_why_to_every_client_and_leaves_when_told ... ok
+test refusal::tests::a_newer_database_stops_the_service_with_the_reason ... ok
+test service::refusal_tests::a_real_name_after_a_separator_is_refused ... ok
+test service::refusal_tests::a_stand_in_vouches_like_the_stub ... ok
+test service::refusal_tests::an_unstubbed_launch_is_refused ... ok
+test service::refusal_tests::the_stub_and_a_named_stand_in_are_accepted ... ok
+test service::runtime_selection_tests::runtime_selection_default_binding_keeps_installed_precedence_without_opening_it ... ok
+test service::runtime_selection_tests::runtime_selection_normal_explicit_start_keeps_private_paths ... ok
+test service::runtime_selection_tests::runtime_selection_private_fence_migration_caps_allowlist_and_revoke ... ok
+test task_ops::tests::a_new_acceptance_item_gets_an_id_and_an_existing_one_keeps_its_own ... ok
+test task_ops::tests::a_notes_structure_has_to_be_an_object ... ok
+test task_ops::tests::a_second_question_before_an_answer_is_the_one_answered ... ok
+test task_ops::tests::a_title_is_one_line_and_has_to_be_one ... ok
+test task_ops::tests::a_word_that_does_not_parse_is_refused_rather_than_read_as_a_person ... ok
+test task_ops::tests::an_answer_records_only_its_own_questions_other_options ... ok
+test task_ops::tests::an_old_key_resolves_through_get_by_key ... 
+thread 'task_ops::tests::an_old_key_resolves_through_get_by_key' (832970572) panicked at crates/daemon/src/task_ops.rs:785:68:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test task_ops::tests::an_unnamed_actor_is_the_person_at_the_client ... ok
+test task_ops::tests::an_unreadable_optional_id_is_refused_rather_than_dropped ... ok
+test task_ops::tests::an_unspecified_enum_is_a_filter_and_never_a_value ... ok
+test task_ops::tests::every_status_and_kind_survives_the_round_trip ... ok
+test task_ops::tests::filing_a_task_with_an_intent_is_not_an_edit ... 
+thread 'task_ops::tests::filing_a_task_with_an_intent_is_not_an_edit' (832970578) panicked at crates/daemon/src/task_ops.rs:817:88:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_ops::tests::only_a_decision_can_carry_rejected_options ... ok
+test task_starts::tests::a_blocker_finishing_announces_what_it_blocked ... 
+thread 'task_starts::tests::a_blocker_finishing_announces_what_it_blocked' (832970651) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_starts::tests::a_hold_is_let_go_when_its_time_comes_and_boards_hear ... 
+thread 'task_starts::tests::a_hold_is_let_go_when_its_time_comes_and_boards_hear' (832970652) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_starts::tests::a_line_reaches_the_wire_with_its_positions ... 
+thread 'task_starts::tests::a_line_reaches_the_wire_with_its_positions' (832970653) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_starts::tests::a_moved_task_comes_back_whole ... 
+thread 'task_starts::tests::a_moved_task_comes_back_whole' (832970654) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_starts::tests::a_note_from_a_newer_build_breaks_no_read ... 
+thread 'task_starts::tests::a_note_from_a_newer_build_breaks_no_read' (832970655) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_starts::tests::a_subagent_recorded_on_the_wire ... 
+thread 'task_starts::tests::a_subagent_recorded_on_the_wire' (832970656) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_starts::tests::ending_with_no_id_on_the_wire_ends_every_open_one ... 
+thread 'task_starts::tests::ending_with_no_id_on_the_wire_ends_every_open_one' (832970657) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test task_starts::tests::set_wait_reads_the_wire ... 
+thread 'task_starts::tests::set_wait_reads_the_wire' (832970658) panicked at crates/daemon/src/task_starts_tests.rs:15:73:
+called `Result::unwrap()` on an `Err` value: OperationFailed
+FAILED
+test watch::answer_wake::tests::messages_tests::refusals_file_nothing ... ok
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpbiMyxQ/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpgdgEYk/private-remote.git
+ * [new branch]      HEAD -> main
+To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpgdgEYk/private-remote.git
+   35b9314..16c4384  16c43844398147320317c061f71165be84d51683 -> main
+ok
+test workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner ... ok
+test workflow_runtime::wire_commands::reasoned_tests::workflow_reasoned_wire_durable_replay_and_refusals ... ok
+test workflow_service::tests::workflow_service_availability_tracks_failed_owner_and_join_before_restart ... ok
+
+failures:
+
+failures:
+    task_ops::tests::an_old_key_resolves_through_get_by_key
+    task_ops::tests::filing_a_task_with_an_intent_is_not_an_edit
+    task_starts::tests::a_blocker_finishing_announces_what_it_blocked
+    task_starts::tests::a_hold_is_let_go_when_its_time_comes_and_boards_hear
+    task_starts::tests::a_line_reaches_the_wire_with_its_positions
+    task_starts::tests::a_moved_task_comes_back_whole
+    task_starts::tests::a_note_from_a_newer_build_breaks_no_read
+    task_starts::tests::a_subagent_recorded_on_the_wire
+    task_starts::tests::ending_with_no_id_on_the_wire_ends_every_open_one
+    task_starts::tests::set_wait_reads_the_wire
+
+test result: FAILED. 30 passed; 10 failed; 0 ignored; 0 measured; 2688 filtered out; finished in 6.41s
+
+error: test failed, to rerun pass `-p farcooler-daemon --lib`
+
+exit=101, stopped=None

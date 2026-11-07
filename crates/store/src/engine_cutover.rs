@@ -14,7 +14,7 @@ mod verify;
 use manifest::{Cell, Manifest};
 use rehearsal::CommitPermit;
 pub use owners::{JoinedOwners, OwnedWriter, OwnerJoin};
-pub(crate) const REQUIRED_OWNERS: [&str; 7] = ["legacy-scheduler","line-jobs","landing-jobs","legacy-hooks","delivery","workflow-owner","native-notices"];
+pub const REQUIRED_OWNERS: [&str; 7] = ["legacy-scheduler","line-jobs","landing-jobs","legacy-hooks","delivery","workflow-owner","native-notices"];
 
 pub const SOURCE_PIN: &str = "fae3f30d0c3d1c475f9dc4463243f293fd88b007";
 pub const CUTOVER_SCHEMA_HASH: &str = "wf1:7871168a56707659c4aec1ed4e548970a69f4193f5f92726d37b7286a52a5e2d";
@@ -342,6 +342,8 @@ pub fn preflight(conn: &Connection) -> Result<Preflight> {
 
 impl Store {
     pub fn engine_authority(&self) -> Result<Authority> { authority(&self.conn()) }
+    /// Resources a join proof must protect (workflow, terminal, worktree identities).
+    pub fn engine_protected_resources(&self) -> Result<BTreeSet<String>> { required_resources(&self.conn()) }
     pub fn engine_quiesce(&self, owners: &JoinedOwners) -> Result<()> {
         let proof=owners.evidence();
         proof.validate()?;

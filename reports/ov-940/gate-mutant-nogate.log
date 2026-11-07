@@ -1,0 +1,39 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+    Finished `test` profile [unoptimized] target(s) in 8.71s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_store-90d0db3b672e6574)
+
+running 7 tests
+test engine_cutover::tests::startup_gate::owner_join_issues_nothing_for_a_stuck_or_missing_owner ... ok
+test engine_cutover::tests::startup_gate::startup_gate_fresh_requires_proven_absence_and_empty_files_are_not_fresh ... ok
+test engine_cutover::tests::startup_gate::startup_gate_refuses_missing_floor_and_frozen_authority_but_recovery_reaches_them ... 
+thread 'engine_cutover::tests::startup_gate::startup_gate_refuses_missing_floor_and_frozen_authority_but_recovery_reaches_them' (832880668) panicked at crates/store/src/engine_cutover/tests/startup_gate.rs:44:5:
+a missing floor is inconsistent state, not permission to stamp
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+test engine_cutover::tests::startup_gate::startup_gate_refuses_pre_cutover_schema_without_writing_a_byte ... 
+thread 'engine_cutover::tests::startup_gate::startup_gate_refuses_pre_cutover_schema_without_writing_a_byte' (832880669) panicked at crates/store/src/engine_cutover/tests/startup_gate.rs:19:5:
+assertion failed: Store::open(&path).is_err()
+FAILED
+test engine_cutover::tests::startup_gate::transfer_baseline_tamper_and_foreign_proof_are_refused ... ok
+test engine_cutover::tests::startup_gate::transfer_publishes_raw_baseline_and_intent_then_upgrades_floor_and_freeze_atomically ... 
+thread 'engine_cutover::tests::startup_gate::transfer_publishes_raw_baseline_and_intent_then_upgrades_floor_and_freeze_atomically' (832880775) panicked at crates/store/src/engine_cutover/tests/startup_gate.rs:68:5:
+intent and frozen authority both refuse ordinary startup
+FAILED
+test engine_cutover::tests::startup_gate::transfer_upgrade_failure_rolls_back_whole_and_keeps_the_intent ... ok
+
+failures:
+
+failures:
+    engine_cutover::tests::startup_gate::startup_gate_refuses_missing_floor_and_frozen_authority_but_recovery_reaches_them
+    engine_cutover::tests::startup_gate::startup_gate_refuses_pre_cutover_schema_without_writing_a_byte
+    engine_cutover::tests::startup_gate::transfer_publishes_raw_baseline_and_intent_then_upgrades_floor_and_freeze_atomically
+
+test result: FAILED. 4 passed; 3 failed; 0 ignored; 0 measured; 537 filtered out; finished in 1.65s
+
+error: test failed, to rerun pass `-p farcooler-store --lib`
+
+exit=101, stopped=None

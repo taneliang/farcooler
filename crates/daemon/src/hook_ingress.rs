@@ -140,6 +140,8 @@ pub struct HookIngress {
     followups: Arc<Mutex<Option<followup::Followups>>>,
     /// Subagents asked to stop (`stopping`, ov-872).
     stopping: Arc<stopping::Stopping>,
+    /// Admission for connection tasks and transcript tails (cutover join).
+    gate: Option<Arc<crate::writer_gate::WriterGate>>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -182,7 +184,19 @@ impl HookIngress {
             registry: Arc::new(std::sync::RwLock::new(crate::claude_registry::global())),
             followups: Arc::default(),
             stopping: Arc::default(),
+            gate: None,
         }
+    }
+
+    pub(crate) fn with_writer_gate(mut self, gate: Arc<crate::writer_gate::WriterGate>) -> Self { self.gate = Some(gate); self }
+
+    fn admit(&self) -> Result<Option<crate::writer_gate::Ticket>, ()> {
+        match &self.gate { Some(g) => g.admit("legacy-hooks").map(Some).map_err(|_| ()), None => Ok(None) }
+    }
+
+    /// Ask every transcript tail to stop; the join then waits for them.
+    pub(crate) fn stop_tails(&self) {
+        for alive in self.tails.lock().unwrap_or_else(|e| e.into_inner()).values() { alive.store(false, Ordering::Relaxed); }
     }
 
     /// The same ingress, reading `registry` rather than this machine's.
@@ -606,6 +620,7 @@ impl HookIngress {
             "tailing this session's own transcript for its prose"
         );
 
+        let Ok(ticket) = self.admit() else { release_tail_slot(&self.tails, terminal, &alive); return };
         let this = self.clone();
         let loop_alive = alive.clone();
         // Kept back so a start that fails below can also stop whatever it
@@ -627,6 +642,7 @@ impl HookIngress {
                 )
             })
             .await;
+            let clean = started.is_ok();
 
             match started {
                 Ok(true) => {}
@@ -647,6 +663,7 @@ impl HookIngress {
                     release_tail_slot(&this.tails, terminal, &stop);
                 }
             }
+            if let (true, Some(t)) = (clean, ticket) { t.finish(); }
         });
     }
 
@@ -718,6 +735,7 @@ impl HookIngress {
                     return Err(e);
                 }
             };
+            let Ok(ticket) = self.admit() else { continue };
             let this = self.clone();
             let on_events = on_events.clone();
             // One task per connection: a hook that is waiting on a decision
@@ -726,6 +744,7 @@ impl HookIngress {
                 if let Err(e) = this.serve(stream, on_events.as_ref()).await {
                     tracing::debug!(error = %e, "a hook connection ended");
                 }
+                if let Some(t) = ticket { t.finish(); }
             });
         }
     }

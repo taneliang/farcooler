@@ -74,7 +74,7 @@ impl Store {
     #[cfg(test)]
     pub(crate) fn open_fixture(path: impl AsRef<Path>) -> Result<Store> { Self::open_normalizing(path.as_ref()) }
 
-    fn open_normalizing(path: &Path) -> Result<Store> {
+    pub(crate) fn open_normalizing(path: &Path) -> Result<Store> {
         let existed = path.exists();
         let mut conn = Connection::open(path).map_err(map_err)?;
         Self::init(&mut conn, existed.then_some(path))?;

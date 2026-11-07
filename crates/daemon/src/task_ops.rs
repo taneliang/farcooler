@@ -782,7 +782,7 @@ mod tests {
             repository,
             task,
         );
-        let svc = Service::open_in(dir.path().to_path_buf()).await.unwrap();
+        let svc = Service::open_in_legacy_fixture(dir.path().to_path_buf()).await.unwrap();
         let ask = |key: &str, repository_id: Vec<u8>| pb::TaskGetByKeyRequest {
             repository_id: repository_id.into(),
             key: key.to_string(),
@@ -814,7 +814,7 @@ mod tests {
             repository,
             existing,
         );
-        let svc = std::sync::Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
+        let svc = std::sync::Arc::new(Service::open_in_legacy_fixture(dir.path().to_path_buf()).await.unwrap());
         let watcher = Watcher::new(svc.clone());
 
         let filed = create(

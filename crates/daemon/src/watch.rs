@@ -4494,9 +4494,12 @@ impl Watcher {
                     // A held task whose time came (ov-212): an indexed probe.
                     // Before the pump, so its orchestrator is told on this
                     // tick and not the next.
-                    self.release_due_holds(now_millis());
-                    // The subagents recorded on tasks (ov-213).
-                    self.follow_workers(now_millis()).await;
+                    if let Ok(ticket) = self.service.writers.admit("line-jobs") {
+                        self.release_due_holds(now_millis());
+                        // The subagents recorded on tasks (ov-213).
+                        self.follow_workers(now_millis()).await;
+                        ticket.finish();
+                    }
                     // The answers, after the sample, so an agent that just
                     // went idle is told on the tick that saw it; then, in the
                     // same task, the drafts held behind a dialog (ov-385).
@@ -4512,8 +4515,10 @@ impl Watcher {
                     self.service.backstop_reconcile().await;
                     // Lanes that are ready and on no train join the open one
                     // (ov-520). Off the watch task: it writes the store.
-                    let me = self.clone();
-                    tokio::task::spawn_blocking(move || me.collect_ready_tickets());
+                    if let Ok(ticket) = self.service.writers.admit("line-jobs") {
+                        let me = self.clone();
+                        tokio::task::spawn_blocking(move || { me.collect_ready_tickets(); ticket.finish(); });
+                    }
                 }
                 // Its first tick is immediate and that is wanted: every worktree
                 // is unprobed at startup, so this pass is what puts a number

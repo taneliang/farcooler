@@ -1,0 +1,551 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 31.80s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-2ab3a43642087497)
+
+running 488 tests
+test hook_ingress::fence::tests::a_prompt_for_a_running_turn_is_queued_and_bounds_nothing ... ok
+test hook_ingress::fence::tests::a_turns_prompt_is_kept_for_its_session ... ok
+test hook_ingress::held_tests::a_frame_cannot_carry_a_held_asks_id_onto_a_row_of_its_own ... ok
+test hook_ingress::hook_fence_tests::a_pre_tool_use_is_marked_and_answered_after_the_fence ... ok
+test hook_ingress::hook_fence_tests::the_subagent_and_failure_hooks_move_the_fence ... ok
+test hook_ingress::tests::a_descriptor_shortage_is_a_refused_connection_and_not_a_broken_socket ... ok
+test hook_ingress::tests::a_preset_names_its_agent_with_or_without_a_model ... ok
+test hook_ingress::tests::a_refusal_that_persists_is_reported_once_and_then_rarely ... ok
+test hook_ingress::tests::a_second_payload_for_the_same_terminal_does_not_start_a_second_tail ... ok
+test hook_ingress::tests::a_socket_that_is_actually_broken_is_not_treated_as_transient ... ok
+test hook_ingress::tests::a_start_that_could_not_start_after_forget_leaves_the_next_starts_slot_alone ... ok
+test hook_ingress::tests::a_start_that_panics_after_forget_leaves_the_next_starts_slot_alone ... 
+thread 'tokio-rt-worker' (833022636) panicked at crates/daemon/src/hook_ingress.rs:1600:17:
+the first start's catch-up read fails here, on purpose
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+ok
+test hook_ingress::tests::a_start_that_panics_releases_the_terminal_for_the_next_payload ... 
+thread 'tokio-rt-worker' (833022852) panicked at crates/daemon/src/hook_ingress.rs:1704:17:
+the start's catch-up read fails here, on purpose
+ok
+test hook_ingress::tests::a_tail_that_could_not_start_releases_the_terminal_for_the_next_payload ... ok
+test hook_ingress::tests::claude_never_gets_a_transcript_tail ... ok
+test hook_ingress::tests::codexs_own_final_answer_line_and_its_stop_payload_do_not_both_land ... ok
+test hook_ingress::tests::forget_silences_a_running_tail ... ok
+test hook_ingress::tests::forgetting_a_terminal_releases_its_held_ask ... ok
+test hook_ingress::tests::no_sink_installed_starts_no_tail ... ok
+test hook_ingress::tests::no_transcript_path_starts_no_tail ... ok
+test hook_ingress::tests::recovery_reports_every_refusal_the_quiet_covered ... ok
+test hook_ingress::tests::releasing_a_tail_slot_removes_only_the_releasers_own_entry ... ok
+test hook_ingress::tests::the_hook_socket_fits_in_a_unix_socket_path ... ok
+test hook_ingress::tests::the_reply_does_not_wait_for_the_claim_check ... ok
+test landing_run::tests::a_run_id_is_read_from_a_run_or_job_page ... ok
+test landing_run::tests::one_job_runs_per_board ... ok
+test log_join::workflow_notice_metadata_tests::workflow_notice_native_metadata_refuses_fifo_symlink_and_hardlink_without_blocking ... ok
+test skill_install::practice_tests::a_check_in_re_evaluates_and_shows_initiative ... ok
+test watch::answer_wake::check_in::ownership_tests::destination_binding_changes_for_each_incarnation_pane_tty_and_thread ... ok
+test watch::answer_wake::check_in::ownership_tests::scheduler_arms_only_after_cleanup_gate_and_joins_on_shutdown ... ok
+test watch::answer_wake::check_in::ownership_tests::scheduler_rejects_duplicate_dead_or_unhealthy_pane_claims ... ok
+test watch::answer_wake::codex_turn::check_in_discovery_tests::cancelled_discovery_stays_owned_until_reaped ... ok
+test watch::answer_wake::codex_turn::check_in_discovery_tests::timed_out_discovery_is_killed_and_reaped ... ok
+test watch::answer_wake::codex_turn::check_in_discovery_tests::unique_main_requires_foreground_holder_and_rejects_competing_or_unknown_files ... ok
+test watch::answer_wake::compose::codex::tests::an_earlier_message_with_the_same_words_does_not_confirm ... ok
+test watch::answer_wake::registry_turn::tests::a_file_that_will_not_parse_is_torn_not_nothing ... ok
+test watch::answer_wake::registry_turn::tests::only_an_explicit_busy_is_busy ... ok
+test watch::answer_wake::registry_turn::tests::only_an_explicit_idle_is_idle ... ok
+test watch::answer_wake::route::pin_tests::only_a_typed_send_confirms_a_typed_send ... ok
+test watch::answer_wake::route::pin_tests::the_socket_is_a_peers_never_the_users ... ok
+test watch::answer_wake::route::pin_tests::the_wake_is_a_notification_never_user_input ... ok
+test watch::answer_wake::route::pin_tests::typed_is_a_human_turn ... ok
+test watch::answer_wake::tests::a_broken_stream_proves_nothing_until_it_is_followed_again ... ok
+test watch::answer_wake::tests::a_claim_left_by_a_crash_is_never_typed_again ... ok
+test watch::answer_wake::tests::a_created_agent_is_followed ... ok
+test watch::answer_wake::tests::a_demoted_orchestrator_is_no_longer_followed ... ok
+test watch::answer_wake::tests::a_draft_is_never_touched ... ok
+test watch::answer_wake::tests::a_draft_is_pasted_into_an_idle_orchestrator_and_never_submitted ... ok
+test watch::answer_wake::tests::a_draft_is_refused_for_a_process_that_is_not_an_agent ... ok
+test watch::answer_wake::tests::a_draft_is_refused_where_an_answer_would_wait ... ok
+test watch::answer_wake::tests::a_draft_never_carries_a_line_break_or_ends_in_one ... ok
+test watch::answer_wake::tests::a_draft_whose_send_fails_is_an_error ... ok
+test watch::answer_wake::tests::a_hand_started_orchestrator_is_told ... ok
+test watch::answer_wake::tests::a_newer_answer_replaces_one_not_yet_told ... ok
+test watch::answer_wake::tests::a_node_claude_is_told ... ok
+test watch::answer_wake::tests::a_node_install_is_known_by_its_script ... ok
+test watch::answer_wake::tests::a_node_running_something_else_is_never_typed_into ... ok
+test watch::answer_wake::tests::a_pane_launched_as_codex_running_claude_is_never_told ... ok
+test watch::answer_wake::tests::a_pane_moved_from_a_chat_is_followed ... ok
+test watch::answer_wake::tests::a_pane_started_before_the_daemon_is_followed_on_a_sample ... ok
+test watch::answer_wake::tests::a_pane_without_bracketed_paste_is_never_typed_into ... ok
+test watch::answer_wake::tests::a_paste_the_box_doesnt_hold_exactly_is_not_sent ... ok
+test watch::answer_wake::tests::a_permission_menu_is_never_typed_into ... ok
+test watch::answer_wake::tests::a_record_from_before_a_respawn_is_never_used ... ok
+test watch::answer_wake::tests::a_restarted_agent_is_followed ... ok
+test watch::answer_wake::tests::a_send_failing_after_the_claim_is_not_retried ... ok
+test watch::answer_wake::tests::a_shell_in_the_foreground_is_never_typed_into ... ok
+test watch::answer_wake::tests::a_shell_pane_running_claude_by_hand_is_never_told ... ok
+test watch::answer_wake::tests::a_split_agent_is_followed ... ok
+test watch::answer_wake::tests::a_tmux_that_reports_bracketing_starts_no_fanout ... ok
+test watch::answer_wake::tests::a_tmux_version_is_read_for_bracketing ... ok
+test watch::answer_wake::tests::agent_start_tests::a_builder_on_the_trust_prompt_is_told_and_answered_from_needs_you ... ok
+test watch::answer_wake::tests::agent_start_tests::a_new_pane_first_seen_on_a_prompt_is_announced ... ok
+test watch::answer_wake::tests::agent_start_tests::a_not_started_notice_folds_into_one_still_waiting ... ok
+test watch::answer_wake::tests::agent_start_tests::a_start_is_reported_once_per_reason ... ok
+test watch::answer_wake::tests::agent_start_tests::an_agent_cant_answer_the_trust_prompt ... ok
+test watch::answer_wake::tests::agent_start_tests::an_agent_that_never_starts_is_reported_after_the_window ... ok
+test watch::answer_wake::tests::agent_start_tests::an_older_app_with_no_actor_answers_the_trust_prompt ... ok
+test watch::answer_wake::tests::agent_start_tests::only_a_new_pane_is_watched ... ok
+test watch::answer_wake::tests::agent_start_tests::the_trust_answer_is_terminal_agent_answer ... ok
+test watch::answer_wake::tests::agent_start_tests::trust_folder_never_answers_a_permission_dialog ... ok
+test watch::answer_wake::tests::an_adopted_orchestrator_at_its_shell_waits_and_says_so ... ok
+test watch::answer_wake::tests::an_agent_in_another_workspace_is_never_told ... ok
+test watch::answer_wake::tests::an_agent_is_known_by_its_executable ... ok
+test watch::answer_wake::tests::an_answer_is_pasted_into_an_idle_claude_and_submitted ... ok
+test watch::answer_wake::tests::an_answer_is_pasted_into_an_idle_codex ... ok
+test watch::answer_wake::tests::an_answer_is_told_exactly_once_across_a_restart ... ok
+test watch::answer_wake::tests::an_answer_waits_while_the_agent_is_unknown ... ok
+test watch::answer_wake::tests::an_undelivered_answer_says_to_restart_the_agent ... ok
+test watch::answer_wake::tests::an_unknown_process_is_never_typed_into ... ok
+test watch::answer_wake::tests::an_unreadable_mark_is_typing_now ... ok
+test watch::answer_wake::tests::an_unrecognized_screen_is_never_typed_into ... ok
+test watch::answer_wake::tests::bring_tests::a_box_at_claudes_height_is_refused ... ok
+test watch::answer_wake::tests::bring_tests::a_changed_box_is_left_alone ... ok
+test watch::answer_wake::tests::bring_tests::a_clear_empties_the_box_it_read ... ok
+test watch::answer_wake::tests::bring_tests::a_dialog_and_codex_are_refused ... ok
+test watch::answer_wake::tests::bring_tests::a_dialog_mid_clear_is_not_pasted_into ... ok
+test watch::answer_wake::tests::bring_tests::a_draft_mid_turn_is_cleared_without_stopping_the_turn ... ok
+test watch::answer_wake::tests::bring_tests::a_key_just_now_holds_the_clear ... ok
+test watch::answer_wake::tests::bring_tests::a_key_mid_clear_puts_it_back ... ok
+test watch::answer_wake::tests::bring_tests::a_moved_cursor_is_refused ... ok
+test watch::answer_wake::tests::bring_tests::a_placeholder_is_refused ... ok
+test watch::answer_wake::tests::bring_tests::a_read_answers_the_draft_and_types_nothing ... ok
+test watch::answer_wake::tests::bring_tests::an_empty_box_brings_nothing ... ok
+test watch::answer_wake::tests::bring_tests::hidden_rows_scrolling_in_put_it_back ... ok
+test watch::answer_wake::tests::bring_tests::hidden_rows_that_look_alike_scrolling_in_put_it_back ... ok
+test watch::answer_wake::tests::bring_tests::keys_before_a_clear_no_longer_hold_a_send ... ok
+test watch::answer_wake::tests::bring_tests::keys_typed_between_a_read_and_the_next_key_are_not_deleted ... ok
+test watch::answer_wake::tests::bring_tests::vim_insert_mode_is_refused ... ok
+test watch::answer_wake::tests::codex_turn_tests::a_dead_process_s_open_turn_is_over ... ok
+test watch::answer_wake::tests::codex_turn_tests::a_pasted_answer_is_entered_only_once_codex_s_turn_ends ... ok
+test watch::answer_wake::tests::codex_turn_tests::a_pasted_answer_waits_while_codex_s_rollout_is_lost ... ok
+test watch::answer_wake::tests::codex_turn_tests::a_resumed_codex_is_told_over_its_dead_turn ... ok
+test watch::answer_wake::tests::codex_turn_tests::a_tell_gets_no_enter_into_a_turn_begun_during_the_read_back ... ok
+test watch::answer_wake::tests::codex_turn_tests::a_tell_gets_no_enter_when_the_rollout_is_lost_during_the_read_back ... ok
+test watch::answer_wake::tests::codex_turn_tests::a_turn_begun_during_the_read_back_holds_the_enter ... ok
+test watch::answer_wake::tests::codex_turn_tests::an_idle_codex_screen_waits_while_its_rollout_says_a_turn_runs ... ok
+test watch::answer_wake::tests::codex_turn_tests::live_codex_gate ... ignored
+test watch::answer_wake::tests::codex_turn_tests::only_a_closed_turn_is_idle ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_backslash_at_the_end_is_sent ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_codex_mid_turn_is_busy ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_fresh_codex_is_confirmed_by_the_rollout_it_opens ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_long_paste_is_read_back_as_its_placeholder ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_rollout_lost_before_the_enter_leaves_the_paste ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_send_the_rollout_never_records_is_unconfirmed ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_turn_begun_before_the_enter_leaves_the_paste ... ok
+test watch::answer_wake::tests::compose_codex_tests::a_watcher_that_lost_codex_defers_to_the_screen_and_rollout ... ok
+test watch::answer_wake::tests::compose_codex_tests::an_image_goes_in_first_as_its_placeholder ... ok
+test watch::answer_wake::tests::compose_codex_tests::multi_line_text_is_sent_once_the_rollout_records_it ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_admission_vetoes_stop_before_kill ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_busy_codex_waits_without_paste_or_duplicate ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_cleanup_gate_blocks_claim_paste_and_enter ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_discovery_panic_reaps_owned_child_before_gate_release ... 
+thread 'watch::answer_wake::tests::compose_codex_tests::scheduled_discovery_panic_reaps_owned_child_before_gate_release' (833050610) panicked at crates/daemon/src/watch/answer_wake/codex_turn.rs:171:9:
+injected scheduler discovery panic after spawn
+ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_final_discovery_rechecks_input_before_enter ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_final_discovery_rechecks_visible_dialog_before_enter ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_idle_codex_submits_once_and_records_a_correlated_receipt ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_rollout_replacement_before_claim_or_enter_never_sends ... ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_sender_panic_disarms_and_retains_uncertain_attempt ... 
+thread 'watch::answer_wake::tests::compose_codex_tests::scheduled_sender_panic_disarms_and_retains_uncertain_attempt' (833052978) panicked at crates/daemon/src/watch/answer_wake/compose/codex.rs:350:13:
+injected scheduled sender panic after spawn
+ok
+test watch::answer_wake::tests::compose_codex_tests::scheduled_stalled_discovery_reaps_child_and_shutdown_releases_gate ... ok
+test watch::answer_wake::tests::compose_codex_tests::the_gate_holds_when_a_known_rollout_is_lost ... ok
+test watch::answer_wake::tests::compose_codex_tests::the_gate_reads_the_screen_after_the_rollout ... ok
+test watch::answer_wake::tests::compose_codex_tests::the_screen_is_read_after_the_rollout_check ... ok
+test watch::answer_wake::tests::compose_codex_tests::what_codex_wouldn_t_send_is_refused_untyped ... ok
+test watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_a_sends_first_paste_refuses_it_untyped ... ok
+test watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_a_tells_paste_refuses_it_untyped ... ok
+test watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_an_answers_paste_makes_it_wait ... ok
+test watch::answer_wake::tests::compose_empty_box_tests::a_draft_drawn_just_before_the_first_paste_keeps_a_held_message_held ... ok
+test watch::answer_wake::tests::compose_empty_box_tests::a_send_if_empty_with_text_in_the_box_types_nothing ... ok
+test watch::answer_wake::tests::compose_held_tests::a_box_holding_more_than_the_message_beside_background_shells_still_refuses ... ok
+test watch::answer_wake::tests::compose_held_tests::a_busy_registry_beside_background_shells_holds_the_message ... ok
+test watch::answer_wake::tests::compose_held_tests::a_claude_beside_background_shells_takes_a_message_as_its_next_turn ... ok
+test watch::answer_wake::tests::compose_held_tests::a_claude_waiting_on_background_agents_takes_a_message_as_its_next_turn ... ok
+test watch::answer_wake::tests::compose_held_tests::a_command_is_held_through_a_registry_being_written ... ok
+test watch::answer_wake::tests::compose_held_tests::a_command_is_held_through_a_registry_written_in_place ... ok
+test watch::answer_wake::tests::compose_held_tests::a_command_mid_turn_is_held_until_the_turn_ends ... ok
+test watch::answer_wake::tests::compose_held_tests::a_given_up_run_does_not_shorten_the_next ... ok
+test watch::answer_wake::tests::compose_held_tests::a_held_message_waits_out_a_draft ... ok
+test watch::answer_wake::tests::compose_held_tests::a_message_held_too_long_says_it_wasnt_sent ... ok
+test watch::answer_wake::tests::compose_held_tests::a_registry_that_stays_torn_is_given_up_after_its_cap ... ok
+test watch::answer_wake::tests::compose_held_tests::a_registry_torn_at_the_last_check_gets_no_enter ... ok
+test watch::answer_wake::tests::compose_held_tests::a_send_racing_one_being_held_goes_after_it ... ok
+test watch::answer_wake::tests::compose_held_tests::a_torn_registry_that_heals_is_typed_and_a_missing_one_is_refused ... ok
+test watch::answer_wake::tests::compose_held_tests::a_turn_running_beside_background_agents_is_mid_turn ... ok
+test watch::answer_wake::tests::compose_held_tests::a_whole_read_between_tears_restarts_the_cap ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_box_cleared_mid_turn_is_said_at_once ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_answered_esc_gives_the_wait_up ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_answered_no_gives_the_wait_up ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_drawn_before_the_enter_is_waited_out ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_during_the_wait_is_waited_out_and_its_answer_is_no_typing ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_dialog_up_past_the_wait_is_said_so ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_key_that_leaves_the_box_holds_the_enter_until_nobody_types ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_long_wait_reads_claudes_process_once_and_slows ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_beside_agents_its_box_hides_is_sent ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_sent_during_a_five_minute_turn_with_a_dialog_is_sent_when_it_ends ... ignored, five minutes long: the card's acceptance at production timing
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_sent_during_a_long_turn_with_a_dialog_is_sent_when_it_ends ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_sent_while_the_runner_was_down_is_not_entered_again ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_submitted_from_the_mac_during_the_wait_is_not_said_unsent ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_message_submitted_straight_in_tmux_during_the_wait_is_not_said_unsent ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_resumed_wait_keeps_the_deadline_it_was_queued_with ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_second_send_during_the_wait_is_held_behind_it ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_begun_beside_background_shells_takes_the_message_under_the_fence ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_drawn_before_the_enter_queues_the_message_under_the_fence ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_drawn_with_no_fence_gets_no_enter_and_is_left ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_still_running_past_the_wait_leaves_the_paste ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_turn_that_ends_within_the_wait_takes_the_message_between_turns ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_wait_cut_short_by_a_restart_is_picked_up_again ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_wait_resumed_against_another_claude_is_given_up ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::a_wait_whose_time_ran_out_while_the_runner_was_down_is_given_up ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::an_agent_glyph_in_the_message_is_no_background_agent ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_hook_heard_before_the_enter_returns_still_confirms_it ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_registry_that_stays_torn_ends_the_wait_after_the_cap ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_screen_read_that_fails_once_does_not_end_the_wait ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_shell_in_the_pane_is_claude_gone ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_torn_registry_read_does_not_end_the_wait ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::a_wait_resumed_against_another_session_is_given_up ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_bad_read_tests::screen_reads_that_keep_failing_end_the_wait_after_the_cap ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_box_cleared_while_parked_gets_no_enter_and_says_so ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_box_edited_while_parked_gets_no_enter_and_says_so ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_dialog_up_at_the_turns_end_gets_no_enter_until_it_goes ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_parked_past_its_limit_is_given_up ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_parked_past_its_limit_is_taken_back_out ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_whose_conversation_changed_is_not_sent ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_message_whose_turn_outlasts_the_wait_is_sent_when_it_ends ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_parked_message_is_sent_after_a_runner_restart ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::a_parked_message_is_woken_by_the_watcher_seeing_the_turn_end ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::compose_parked_tests::two_bad_reads_while_parked_do_not_end_the_wait ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::one_stray_idle_frame_mid_turn_gets_no_enter ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::send_now_during_the_wait_is_refused_and_the_wait_goes_on ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::stop_during_the_wait_acts_at_once_and_the_wait_gives_up_unentered ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::the_box_changing_during_the_wait_gives_it_up_as_changed ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::the_gates_agents_are_not_trusted_past_their_time ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::the_gates_agents_are_trusted_while_fresh ... ok
+test watch::answer_wake::tests::compose_held_tests::compose_pending_tests::typing_in_the_box_during_the_wait_gives_it_up_as_typed ... ok
+test watch::answer_wake::tests::compose_held_tests::held_messages_survive_a_restart ... ok
+test watch::answer_wake::tests::compose_held_tests::sends_claude_cant_take_yet_are_held_shown_and_queued_in_order ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_box_short_of_claudes_tallest_is_left ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_draft_drawn_before_a_tall_answer_holds_it ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_draft_drawn_before_a_tall_compose_is_refused ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_draft_drawn_before_a_tall_tell_is_refused ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_message_taller_than_the_box_is_queued_mid_turn ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_message_taller_than_the_box_is_sent ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_tall_answer_a_dialog_stopped_is_finished ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::a_tell_taller_than_the_box_is_submitted ... ok
+test watch::answer_wake::tests::compose_scrolled_tests::an_answer_taller_than_the_box_is_told ... ok
+test watch::answer_wake::tests::compose_tests::a_backslash_at_the_end_is_refused_for_claude ... ok
+test watch::answer_wake::tests::compose_tests::a_command_the_popup_reads_as_another_is_not_entered ... ok
+test watch::answer_wake::tests::compose_tests::a_composes_file_paths_go_before_its_checked_text ... ok
+test watch::answer_wake::tests::compose_tests::a_composition_is_checked_before_anything_is_typed ... ok
+test watch::answer_wake::tests::compose_tests::a_draft_or_a_dialog_is_refused_untyped ... ok
+test watch::answer_wake::tests::compose_tests::a_key_typed_after_the_read_back_gets_no_enter ... ok
+test watch::answer_wake::tests::compose_tests::a_long_paste_is_read_back_as_its_placeholder ... ok
+test watch::answer_wake::tests::compose_tests::a_panel_command_is_handed_off_untyped ... ok
+test watch::answer_wake::tests::compose_tests::a_persons_send_holds_three_seconds_after_a_key ... ok
+test watch::answer_wake::tests::compose_tests::a_prompt_command_goes_in_when_the_popup_highlights_it ... ok
+test watch::answer_wake::tests::compose_tests::a_prompt_with_an_image_is_read_from_its_text_block ... ok
+test watch::answer_wake::tests::compose_tests::a_send_no_hook_confirms_is_unconfirmed ... ok
+test watch::answer_wake::tests::compose_tests::a_turn_begun_during_the_paste_is_queued_under_the_fence ... ok
+test watch::answer_wake::tests::compose_tests::a_turn_the_screen_misses_is_read_from_claudes_registry ... ok
+test watch::answer_wake::tests::compose_tests::a_watcher_that_lost_the_agent_defers_to_claudes_registry ... ok
+test watch::answer_wake::tests::compose_tests::an_image_goes_in_first_as_its_placeholder ... ok
+test watch::answer_wake::tests::compose_tests::bracketed_paste_off_before_the_paste_gets_nothing ... ok
+test watch::answer_wake::tests::compose_tests::busy_is_queued_once_the_enqueue_record_holds_it ... ok
+test watch::answer_wake::tests::compose_tests::busy_with_only_the_hook_is_queued_and_with_nothing_unconfirmed ... ok
+test watch::answer_wake::tests::compose_tests::multi_line_text_is_sent_once_the_hook_names_it ... ok
+test watch::answer_wake::tests::compose_upload_tests::a_file_composes_over_the_socket_and_its_path_goes_first ... ok
+test watch::answer_wake::tests::compose_upload_tests::a_refused_compose_leaves_no_image_behind ... ok
+test watch::answer_wake::tests::compose_upload_tests::a_stage_into_no_terminal_is_not_found_and_keeps_nothing ... ok
+test watch::answer_wake::tests::compose_upload_tests::a_ten_megabyte_screenshot_composes_over_the_socket ... ok
+test watch::answer_wake::tests::control_characters_in_an_answer_arrive_as_text ... ok
+test watch::answer_wake::tests::cursor_tests::a_box_emptied_after_someone_typed_is_not_taken ... ok
+test watch::answer_wake::tests::cursor_tests::a_pasted_message_in_a_scrolled_cursor_box_is_read_as_a_draft ... ok
+test watch::answer_wake::tests::cursor_tests::a_prompt_hook_after_the_paste_is_cursor_taking_it ... ok
+test watch::answer_wake::tests::cursor_tests::an_earlier_or_another_prompt_is_not_it ... ok
+test watch::answer_wake::tests::cursor_tests::only_cursors_preset_differs_from_its_registry_name ... ok
+test watch::answer_wake::tests::cursor_tests::text_left_in_the_box_is_not_taken ... ok
+test watch::answer_wake::tests::cursor_tests::the_text_leaving_the_box_is_taken ... ok
+test watch::answer_wake::tests::deliver_tests::a_failed_queue_falls_back_to_typing ... ok
+test watch::answer_wake::tests::deliver_tests::a_failed_queue_is_not_retried_on_every_pass ... ok
+test watch::answer_wake::tests::deliver_tests::a_message_to_a_working_codex_is_queued_and_settled ... ok
+test watch::answer_wake::tests::deliver_tests::a_stuck_queue_is_given_up_on ... ok
+test watch::answer_wake::tests::deliver_tests::an_agents_message_to_codex_goes_by_the_queue_by_default ... ok
+test watch::answer_wake::tests::deliver_tests::an_unknown_thread_is_typed ... ok
+test watch::answer_wake::tests::deliver_tests::only_a_main_thread_with_a_plain_id_is_a_target ... ok
+test watch::answer_wake::tests::deliver_tests::the_codex_queue_can_be_turned_off ... ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_delivery ... actual private native argv bytes: ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpR1Ua0U/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:2352ec8b232f731228338a14f8e9d65bd4dbc3282915dd97e092cfaeb242b878\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:f93957d2072fc6890aa81b62c4caaacdc1e17ea42c2a015dff3821bd9af4a603\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:b7ec59853a564e8103d15f463b5dbbfef199c5e5ba182d18494b383a44babb7c\",\"stage\":0,\"workspace\":\"01a1b548-292e-79f1-9428-d011da71e010\"},\"schema\":\"workflow-notice/v1\"}"]]
+["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpR1Ua0U/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:2352ec8b232f731228338a14f8e9d65bd4dbc3282915dd97e092cfaeb242b878\",\"epoch\":1,\"event\":\"second-phase-entry\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:f56d44c6a8d912f337f49f5818790906bf07dedcacd996ad1bccf6daf92df197\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":3,\"run\":\"wf1:2007643ec50b2c3ebb8acf631946ec8484ee4e538e3d38d7aa30614cdda4e466\",\"stage\":1,\"workspace\":\"01a1b548-292e-79f1-9428-d011da71e010\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_closed_owner_cannot_prepare_or_spawn ... ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_inventory_recovery_without_store_write_and_unchanged_refresh_silence ... actual recovery-only native bytes, unchanged Store row: ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpWuSAA6/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:c17352a2c2b9ba2504538f108165bd26f20940085af91fd360b6d8f769111ddb\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:81d619e26639f49f72916200f3a67676e6066f0e1dc2bf7969bf61712e8570bc\",\"stage\":0,\"workspace\":\"01a1b548-3427-7b40-9197-a6166a927ea1\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop ... live private receipt mode=normal: [15450, 15450, 15522, 15450] external_pid=15426
+owned cleanup receipt: leader=15450 pgid=15450 descendant=15522 descendant_pgid=15450: all ESRCH
+private native mode=normal state=handed_off original_attempt=Some("01a1b548-3d6d-70e2-b3be-71e5489f3ea8") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b548-3aec-7b92-8882-318895c0b04d\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b548-3ad2-7dc0-8612-2babc29a1cec\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpSOTcIL/.codex\",\"incarnation\":1794042772247718,\"pane\":\"%0\",\"pid\":15336,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpSOTcIL/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys031\",\"tty_device\":268435487}") external_pid=15426 survived
+live private receipt mode=cancel: [15738, 15738, 15805, 15738] external_pid=15702
+owned cleanup receipt: leader=15738 pgid=15738 descendant=15805 descendant_pgid=15738: all ESRCH
+private native mode=cancel state=unknown original_attempt=Some("01a1b548-4398-7fc1-be6b-ad1aeda3f813") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b548-4107-73b1-b91f-f65b914cffc3\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b548-40ee-7051-ba3e-470494b54d25\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpEmWzcC/.codex\",\"incarnation\":1794042773811306,\"pane\":\"%0\",\"pid\":15619,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpEmWzcC/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys031\",\"tty_device\":268435487}") external_pid=15702 survived
+live private receipt mode=timeout: [16029, 16029, 16092, 16029] external_pid=15984
+owned cleanup receipt: leader=16029 pgid=16029 descendant=16092 descendant_pgid=16029: all ESRCH
+private native mode=timeout state=unknown original_attempt=Some("01a1b548-49cb-74f0-8dba-98fc6f4134fc") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b548-473a-70d1-8af5-b1be08b2719c\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b548-471e-7c90-a898-396d346fd581\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpweWHEp/.codex\",\"incarnation\":1794042775401719,\"pane\":\"%0\",\"pid\":15904,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpweWHEp/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys031\",\"tty_device\":268435487}") external_pid=15984 survived
+live private receipt mode=drop: [16836, 16836, 16903, 16836] external_pid=16777
+owned cleanup receipt: leader=16836 pgid=16836 descendant=16903 descendant_pgid=16836: all ESRCH
+private native mode=drop state=unknown original_attempt=Some("01a1b548-6125-7873-8640-3fb71fe4bf16") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b548-5e74-7b41-8b58-e600cb48f1bb\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b548-5e5b-7813-a985-3cd2491a81ad\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpft65d1/.codex\",\"incarnation\":1794042781344316,\"pane\":\"%0\",\"pid\":16683,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpft65d1/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys031\",\"tty_device\":268435487}") external_pid=16777 survived
+live private receipt mode=unwind: [17142, 17142, 17207, 17142] external_pid=17091
+
+thread 'watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop' (833150124) panicked at crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs:200:31:
+private queue supervision unwind
+owned cleanup receipt: leader=17142 pgid=17142 descendant=17207 descendant_pgid=17142: all ESRCH
+private native mode=unwind state=unknown original_attempt=Some("01a1b548-676e-7d90-8111-5ee491535d36") target=Some("{\"authority\":{\"row_facts\":\"{\\\"resource_version\\\":5,\\\"epoch\\\":0,\\\"lease_generation\\\":0,\\\"session\\\":\\\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\\\",\\\"preset\\\":\\\"codex\\\",\\\"target_generation\\\":9}\",\"schema\":\"workflow-native-target/v1\",\"terminal\":\"01a1b548-649c-73b1-b8ee-1d76337b090d\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"workspace\":\"01a1b548-6482-73c1-b303-97aa7db0624e\"},\"home\":\"/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpZYMtal/.codex\",\"incarnation\":1794042782920470,\"pane\":\"%0\",\"pid\":16990,\"program\":\"/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpZYMtal/native-queue-0\",\"schema\":\"workflow-native-queue-target/v1\",\"thread\":\"01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d\",\"tty\":\"/dev/ttys031\",\"tty_device\":268435487}") external_pid=17091 survived
+ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_owned_reconnect_wake_and_shutdown ... ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_reply_loss_and_nonzero_are_unknown_without_resend ... actual private native possibly-accepted bytes (lost_reply=false): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpgtUOb2/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:27c7a39b33c3d83d12e2285ceb1695d2a95977cfe4d6285b6b8f85a31098d379\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:78bd7b9f5bd2ec9483c5dffc2dfc01e32a2d3e89eb0687852969824c1f7c2c4a\",\"stage\":0,\"workspace\":\"01a1b548-712c-79a0-8240-9990ba0bb190\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+actual private native possibly-accepted bytes (lost_reply=true): ["/private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmp4EiroV/.codex", ["queue", "--thread", "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d", "--message={\"meaning\":\"Informational workflow event. No approval or execution authority is granted.\",\"notice\":{\"attempt\":1,\"candidate\":\"candidate\",\"definition_pin\":\"wf1:f7f82c994c57cce3debf1ef0bece92319157275d25ab9c8fdac1a3ac95a8c381\",\"epoch\":1,\"event\":\"notice-event-1\",\"execution_policy_pin\":\"policy\",\"id\":\"wf1:dc3f3dc6cedbdbdf6e43c4ffb70285023a5ff93f87b7c0da9976bf86f4dc9e55\",\"item\":\"notice-item-1\",\"iteration\":0,\"notification_policy_pin\":\"wf1:99d78bf9cc8c08b663adffe3bab087cc7fe29e6df07804c602ca6c3f68785b23\",\"point\":\"waiting_approval\",\"revision\":1,\"run\":\"wf1:f24bdc924bb8bd683820457322c82e50b979c03d7677a43bf57088d537f00d41\",\"stage\":0,\"workspace\":\"01a1b548-7772-7822-b160-5f74c655484c\"},\"schema\":\"workflow-notice/v1\"}"]]
+
+ok
+test watch::answer_wake::tests::deliver_tests::workflow_notice_tests::workflow_notice_native_unproved_group_cleanup_keeps_original_unknown ... owned cleanup receipt: leader=18373 pgid=18373 descendant=18461 descendant_pgid=18373: all ESRCH
+private retained-zombie receipt [18373, 18373, 18461, 18373] outside_reaper=18460 alive=true pgid=18460 group_unproved=true settlement=unknown evidence="native_owned_group_cleanup_unproved" elapsed=1.908783958s
+ok
+test watch::answer_wake::tests::departure_tests::a_departure_caused_by_an_rpc_is_told_in_that_call ... ok
+test watch::answer_wake::tests::departure_tests::a_landing_started_by_hand_is_not_announced ... ok
+test watch::answer_wake::tests::departure_tests::a_landing_that_left_by_itself_is_told_to_the_orchestrator_exactly_once ... ok
+test watch::answer_wake::tests::departure_tests::nothing_is_sent_or_recorded_without_a_running_orchestrator ... ok
+test watch::answer_wake::tests::departure_tests::notice_wait_tests::a_notice_whose_dialog_was_answered_esc_is_taken_back ... ok
+test watch::answer_wake::tests::departure_tests::notice_wait_tests::a_notice_whose_dialog_was_answered_no_is_taken_back ... ok
+test watch::answer_wake::tests::departure_tests::notice_wait_tests::a_notice_whose_turn_is_stopped_mid_pass_gets_no_enter ... ok
+test watch::answer_wake::tests::departure_tests::notice_wait_tests::a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends ... ok
+test watch::answer_wake::tests::departure_tests::notice_wait_tests::one_stray_idle_frame_gets_a_waiting_notice_no_enter ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_draft_expires_once_someone_types_after_the_dialog_closes ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_draft_held_behind_a_dialog_is_pasted_once_it_closes ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_draft_held_too_long_expires ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_draft_prompt_answers_promptly_while_an_answer_pass_runs ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_held_draft_lands_after_an_answer_pass_in_progress ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_held_draft_lands_while_an_answer_waits_on_another_pane ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_newer_draft_replaces_a_waiting_one ... ok
+test watch::answer_wake::tests::draft_hold_tests::a_withdrawn_draft_is_never_pasted ... ok
+test watch::answer_wake::tests::draft_hold_tests::answering_a_second_dialog_keeps_the_draft_waiting ... ok
+test watch::answer_wake::tests::draft_hold_tests::only_a_dialog_holds_a_draft_and_only_when_asked ... ok
+test watch::answer_wake::tests::follow_race_tests::a_follow_overtaken_by_a_respawn_leaves_the_pane_to_the_next_sample ... ok
+test watch::answer_wake::tests::followup_tests::a_cursor_turn_s_end_takes_the_message_waiting_for_it ... ok
+test watch::answer_wake::tests::followup_tests::a_hook_that_cannot_print_one_takes_none ... ok
+test watch::answer_wake::tests::followup_tests::a_hook_that_hung_up_leaves_the_message_claimed ... ok
+test watch::answer_wake::tests::followup_tests::a_message_for_another_pane_stays_put ... ok
+test watch::answer_wake::tests::followup_tests::a_message_held_for_a_working_cursor_is_typed_once_it_idles_without_a_hook ... ok
+test watch::answer_wake::tests::followup_tests::a_persons_message_to_a_working_cursor_goes_by_the_followup ... ok
+test watch::answer_wake::tests::followup_tests::a_persons_message_to_an_idle_cursor_is_typed ... ok
+test watch::answer_wake::tests::followup_tests::a_working_cursor_waits_for_its_turn_to_end ... ok
+test watch::answer_wake::tests::followup_tests::an_answer_to_a_cursor_is_typed_never_held_for_the_followup ... ok
+test watch::answer_wake::tests::followup_tests::an_idle_cursor_is_typed_to ... ok
+test watch::answer_wake::tests::followup_tests::past_the_followup_limit_a_persons_message_says_why_it_waits ... ok
+test watch::answer_wake::tests::hidden_turn_tests::a_tell_after_a_queued_long_paste_waits_for_the_call ... ok
+test watch::answer_wake::tests::hidden_turn_tests::an_answer_after_a_queued_long_paste_waits_for_the_call ... ok
+test watch::answer_wake::tests::hidden_turn_tests::an_answer_waits_while_the_registry_is_torn ... ok
+test watch::answer_wake::tests::hidden_turn_tests::the_registry_alone_makes_it_mid_turn ... ok
+test watch::answer_wake::tests::hidden_turn_tests::the_spinner_alone_makes_it_mid_turn ... ok
+test watch::answer_wake::tests::input_mark_tests::a_click_is_not_typing_and_a_key_is ... ok
+test watch::answer_wake::tests::interrupt_tests::a_call_begun_after_the_first_checks_is_waited_out_under_the_fence ... ok
+test watch::answer_wake::tests::interrupt_tests::a_confirmed_stop_ends_the_calls_it_killed ... ok
+test watch::answer_wake::tests::interrupt_tests::a_dialog_a_gate_announced_is_waited_for ... ok
+test watch::answer_wake::tests::interrupt_tests::a_dialog_a_new_call_may_raise_is_waited_for ... ok
+test watch::answer_wake::tests::interrupt_tests::a_dialog_drawn_as_the_fence_is_taken_stops_the_key ... ok
+test watch::answer_wake::tests::interrupt_tests::a_dialog_that_keeps_maybe_coming_is_settling ... ok
+test watch::answer_wake::tests::interrupt_tests::a_gate_heard_after_the_first_checks_is_waited_out_under_the_fence ... ok
+test watch::answer_wake::tests::interrupt_tests::a_session_never_heard_from_is_unconfirmable ... ok
+test watch::answer_wake::tests::interrupt_tests::checks_under_the_fence_that_overrun_are_settling ... ok
+test watch::answer_wake::tests::interrupt_tests::codex_is_unsupported ... ok
+test watch::answer_wake::tests::interrupt_tests::never_twice_inside_the_lockout ... ok
+test watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_between_turns ... ok
+test watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_just_after_someone_typed ... ok
+test watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_on_a_dialog ... ok
+test watch::answer_wake::tests::interrupt_tests::nothing_is_pressed_while_an_ask_is_held ... ok
+test watch::answer_wake::tests::interrupt_tests::one_esc_stops_a_working_claude_and_is_confirmed ... ok
+test watch::answer_wake::tests::interrupt_tests::send_now_never_goes_over_a_draft ... ok
+test watch::answer_wake::tests::interrupt_tests::send_now_sends_what_waits_in_the_queue ... ok
+test watch::answer_wake::tests::interrupt_tests::stop_lands_while_calls_keep_coming ... ok
+test watch::answer_wake::tests::interrupt_tests::the_transcript_says_what_waits_and_what_was_taken ... ok
+test watch::answer_wake::tests::lane_tests::a_lane_terminal_is_still_woken_outside_the_main_checkout ... ok
+test watch::answer_wake::tests::lane_tests::a_pane_bound_to_the_task_is_woken_in_the_main_checkout ... ok
+test watch::answer_wake::tests::lane_tests::an_answer_never_wakes_a_main_checkout_agent_as_the_tasks ... ok
+test watch::answer_wake::tests::mailbox_tests::a_builders_message_names_its_role_and_ticket_in_the_mailbox ... ok
+test watch::answer_wake::tests::mailbox_tests::a_message_is_taken_back_when_its_wake_ends_undelivered ... ok
+test watch::answer_wake::tests::mailbox_tests::a_message_nobody_takes_is_taken_back_and_typed ... ok
+test watch::answer_wake::tests::mailbox_tests::a_message_waits_in_the_mailbox_until_the_waiter_takes_it ... ok
+test watch::answer_wake::tests::mailbox_tests::a_rep_to_the_orchestrator_has_no_sender ... ok
+test watch::answer_wake::tests::mailbox_tests::a_route_is_private ... ok
+test watch::answer_wake::tests::mailbox_tests::a_session_that_moves_on_gets_no_second_copy ... ok
+test watch::answer_wake::tests::mailbox_tests::no_waiter_means_typing ... ok
+test watch::answer_wake::tests::mailbox_tests::the_switch_turns_the_sender_off ... ok
+test watch::answer_wake::tests::messages_tests::a_builder_is_addressed_by_its_ticket_and_tags_its_own ... ok
+test watch::answer_wake::tests::messages_tests::a_cursor_pane_is_told_between_turns_and_not_during_one ... ok
+test watch::answer_wake::tests::messages_tests::a_done_transition_queues_the_notice ... ok
+test watch::answer_wake::tests::messages_tests::a_long_message_wraps_in_cursors_box_and_is_sent ... ok
+test watch::answer_wake::tests::messages_tests::a_message_survives_a_restart ... ok
+test watch::answer_wake::tests::messages_tests::a_silent_stop_tells_the_orchestrator_once ... ok
+test watch::answer_wake::tests::messages_tests::a_waiting_message_holds_back_later_ones_for_its_pane ... ok
+test watch::answer_wake::tests::messages_tests::an_agents_message_reaches_its_orchestrator ... ok
+test watch::answer_wake::tests::messages_tests::no_message_is_tagged_as_the_owners ... ok
+test watch::answer_wake::tests::messages_tests::refusals_file_nothing ... ok
+test watch::answer_wake::tests::messages_tests::the_orchestrator_cant_message_itself_through_a_ticket ... ok
+test watch::answer_wake::tests::messages_tests::the_orchestrator_reaches_a_cards_agent ... ok
+test watch::answer_wake::tests::messages_tests::with_no_orchestrator_no_notice_is_queued ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_dialog_announced_during_the_paste_gets_no_enter ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_draft_is_pasted_into_a_working_orchestrator ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_dropped_caller_keeps_the_fence_held_until_the_key_is_in ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_message_reaches_a_working_claude_through_its_queue ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_message_while_a_tool_runs_waits_with_nothing_typed ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_queue_that_never_shows_the_message_is_unconfirmed ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_slow_enter_keeps_the_fence_until_its_key_is_in ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_working_claude_no_hook_was_heard_from_is_left_to_finish ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_working_claude_with_no_session_registry_is_left_to_finish ... ok
+test watch::answer_wake::tests::mid_turn_tests::a_working_codex_is_left_to_finish ... ok
+test watch::answer_wake::tests::mid_turn_tests::an_answer_reaches_a_working_claude_through_its_queue ... ok
+test watch::answer_wake::tests::mid_turn_tests::an_answer_with_a_dialog_announced_during_the_paste_gets_no_enter ... ok
+test watch::answer_wake::tests::mid_turn_tests::claudes_transcript_is_found_from_its_process ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hooked_orchestrator_with_no_witness_still_waits ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_keyed_beside_the_notice_still_gets_it ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_typed_into_during_the_wait_gets_no_enter ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_whose_registry_lags_or_works_gets_no_enter ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_hookless_orchestrator_with_a_menu_up_gets_no_enter ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_menu_and_a_key_during_the_read_back_leave_the_paste ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_menu_during_the_read_back_marks_the_answer_pasted ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_notice_given_up_on_is_taken_back_out_of_the_box ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_notice_given_up_on_leaves_an_edited_or_partial_box_alone ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_notice_held_for_a_hookless_orchestrator_is_sent_once_it_goes_idle ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_a_key_left_unchanged_is_entered_in_claude ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_codex_no_longer_holds_is_never_entered ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_is_finished_after_a_restart ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_is_finished_once_the_dialog_goes ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_someone_typed_beside_is_never_entered_in_codex ... ok
+test watch::answer_wake::tests::mid_turn_tests::finish_tests::a_pasted_answer_the_box_no_longer_holds_is_never_retyped ... ok
+test watch::answer_wake::tests::mid_turn_tests::only_a_new_record_of_the_text_says_it_was_queued ... ok
+test watch::answer_wake::tests::mid_turn_tests::the_enter_holds_the_fence_and_waits_on_a_tool_call ... ok
+test watch::answer_wake::tests::mid_turn_tests::the_enter_waits_on_the_screen_and_the_hooks ... ok
+test watch::answer_wake::tests::mid_turn_tests::the_screen_not_the_watcher_says_whether_a_turn_runs ... ok
+test watch::answer_wake::tests::mid_turn_tests::typing_while_the_enter_waits_on_the_fence_stops_it ... ok
+test watch::answer_wake::tests::nothing_is_typed_while_someone_is_typing ... ok
+test watch::answer_wake::tests::queued_tests::a_live_plain_message_to_a_busy_codex_is_queued_and_nothing_else_is ... ok
+test watch::answer_wake::tests::queued_tests::a_persons_message_to_a_busy_codex_goes_by_the_queue ... ok
+test watch::answer_wake::tests::queued_tests::a_persons_message_to_an_idle_codex_is_typed ... ok
+test watch::answer_wake::tests::queued_tests::a_persons_message_to_codex_behind_a_draft_goes_by_the_queue ... ok
+test watch::answer_wake::tests::queued_tests::a_queued_message_never_seen_run_is_withdrawn_on_its_card_too ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_message_to_a_stopped_rep_wakes_it_then_arrives ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_rep_messages_nobody_but_its_orchestrator ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_rep_messages_only_on_its_own_board ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_rep_never_wakes_a_rep ... ok
+test watch::answer_wake::tests::rep_messages_tests::a_reps_message_reaches_the_orchestrator_with_its_person ... ok
+test watch::answer_wake::tests::rep_messages_tests::only_the_lead_messages_as_a_person ... ok
+test watch::answer_wake::tests::rep_messages_tests::only_who_may_start_a_rep_wakes_it ... ok
+test watch::answer_wake::tests::rep_messages_tests::the_orchestrator_asks_a_person_through_their_rep ... ok
+test watch::answer_wake::tests::route_tests::a_callers_seat_is_read_from_its_process ... ok
+test watch::answer_wake::tests::route_tests::a_claude_in_a_shell_pane_messaging_a_lane_goes_by_the_mailbox ... ok
+test watch::answer_wake::tests::route_tests::a_command_an_agent_left_behind_is_refused_as_a_person ... ok
+test watch::answer_wake::tests::route_tests::a_draft_is_pasted_never_entered ... ok
+test watch::answer_wake::tests::route_tests::a_held_persons_message_never_stalls_the_agents_behind_it ... ok
+test watch::answer_wake::tests::route_tests::a_key_is_gated ... ok
+test watch::answer_wake::tests::route_tests::a_members_message_is_typed_never_mailboxed ... ok
+test watch::answer_wake::tests::route_tests::a_person_in_a_plain_shell_pane_is_typed_as_their_own_turn ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_behind_a_draft_is_held_never_mailboxed ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_is_typed_never_mailboxed ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_taken_before_the_upgrade_is_not_typed_again ... ok
+test watch::answer_wake::tests::route_tests::a_persons_message_waiting_from_before_the_upgrade_is_taken_back_and_typed ... ok
+test watch::answer_wake::tests::route_tests::a_persons_tell_keeps_composes_rules ... ok
+test watch::answer_wake::tests::route_tests::a_prompt_behind_a_draft_is_refused ... ok
+test watch::answer_wake::tests::route_tests::a_prompt_is_composed ... ok
+test watch::answer_wake::tests::route_tests::a_trust_enter_from_a_pane_is_not_a_persons ... ok
+test watch::answer_wake::tests::route_tests::a_wake_routes_by_its_author ... ok
+test watch::answer_wake::tests::route_tests::agent_and_runner_messages_keep_the_mailbox ... ok
+test watch::answer_wake::tests::route_tests::an_agents_live_deliveries_are_held_to_its_rules ... ok
+test watch::answer_wake::tests::route_tests::an_agents_tell_goes_by_the_mailbox_and_runs_no_command ... ok
+test watch::answer_wake::tests::route_tests::an_agents_tell_with_no_card_goes_unfiled_to_the_mailbox ... ok
+test watch::answer_wake::tests::route_tests::an_answer_gets_composes_check_before_an_unfenced_enter ... ok
+test watch::answer_wake::tests::route_tests::an_unknown_caller_is_refused_in_pane ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::a_forged_message_record_queues_nothing_and_names_nobody ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::a_person_answering_from_their_own_shell_pane_is_typed ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::a_persons_answer_is_still_typed_as_their_own_turn ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_agent_outside_every_pane_is_unknown_not_the_person ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_agents_answer_does_not_supersede_a_persons ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_agents_answer_is_taken_back_when_its_wake_ends_undelivered ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_an_agent_left_behind_is_refused ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_from_a_claude_in_a_shell_pane_is_an_agent_message ... ok
+test watch::answer_wake::tests::route_tests::answer_seat_tests::an_answer_from_an_unreadable_seat_is_refused ... ok
+test watch::answer_wake::tests::route_tests::the_process_that_runs_a_program_is_found_not_the_shell_that_names_it ... ok
+test watch::answer_wake::tests::seat_tests::a_command_an_agent_left_behind_is_never_a_person ... ok
+test watch::answer_wake::tests::seat_tests::a_pane_the_inventory_hasnt_seen_is_never_a_person ... ok
+test watch::answer_wake::tests::seat_tests::a_persons_command_in_their_own_shell_pane_is_a_person ... ok
+test watch::answer_wake::tests::seat_tests::a_persons_terminal_or_the_mac_app_is_a_person ... ok
+test watch::answer_wake::tests::seat_tests::a_users_own_sshd_isnt_a_person ... ok
+test watch::answer_wake::tests::seat_tests::an_agents_child_in_a_shell_pane_is_an_agent ... ok
+test watch::answer_wake::tests::seat_tests::outside_the_runner_an_agent_is_still_an_agent ... ok
+test watch::answer_wake::tests::stand_in_set_bracketing_before_anyone_followed ... ok
+test watch::answer_wake::tests::stand_in_show::show_waits_on_the_respawned_stand_in_not_the_log_of_both ... ok
+test watch::answer_wake::tests::tell_tests::a_composed_message_and_a_draft_wait_for_the_box ... ok
+test watch::answer_wake::tests::tell_tests::a_composed_message_is_submitted_into_a_worker_claude_pane ... ok
+test watch::answer_wake::tests::tell_tests::a_held_answer_names_a_word_the_cli_knows ... ok
+test watch::answer_wake::tests::tell_tests::a_message_is_refused_for_a_process_that_is_not_an_agent ... ok
+test watch::answer_wake::tests::tell_tests::a_message_is_refused_where_an_answer_would_wait ... ok
+test watch::answer_wake::tests::tell_tests::a_message_is_typed_into_an_idle_orchestrator_and_submitted ... ok
+test watch::answer_wake::tests::tell_tests::a_message_the_box_doesnt_hold_is_left_and_not_sent ... ok
+test watch::answer_wake::tests::tell_tests::a_message_too_long_empty_a_command_or_to_the_wrong_pane_is_refused ... ok
+test watch::answer_wake::tests::tell_tests::a_second_message_right_after_the_first_is_typed_too ... ok
+test watch::answer_wake::tests::the_message_is_one_line_with_the_answer_and_nothing_that_acts ... ok
+test watch::answer_wake::tests::the_process_in_front_is_the_one_under_the_shell ... ok
+test watch::answer_wake::tests::two_answers_for_one_terminal_go_one_at_a_time ... ok
+test watch::answer_wake::tests::typing_during_the_read_back_stops_the_enter ... ok
+test watch::answer_wake::tests::typing_marks_the_pane_and_telling_does_not ... ok
+test watch::answer_wake::tests::typing_tests::a_draft_waiting_for_a_box_stalls_no_other_pane ... ok
+test watch::answer_wake::tests::typing_tests::a_held_box_stalls_no_other_panes_answer_or_draft ... ok
+test watch::answer_wake::tests::typing_tests::a_held_draft_is_skipped_while_its_own_box_is_taken ... ok
+test watch::answer_wake::tests::typing_tests::an_answer_waits_for_a_box_someone_else_holds ... ok
+test watch::answer_wake::tests::viewer_resize_tests::a_viewers_smaller_size_is_handed_back_to_the_size_before_it ... ok
+test watch::answer_wake::tests::waiting_is_said_once_across_a_restart ... ok
+test watch::answer_wake::tests::waiting_on_an_unproven_paste_names_tmux ... ok
+test watch::answer_wake::tests::web_tests::nothing_is_typed_into_a_web_pane_whatever_it_runs ... ok
+test watch::answer_wake::tests::with_no_agent_the_orchestrator_is_told ... ok
+test watch::answer_wake::tests::with_nobody_there_the_task_says_nobody_was_told ... ok
+test watch::answer_wake::tests::with_the_switch_off_nobody_is_told ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_goes_by_the_mailbox ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_dropped_once_the_task_has_started ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_given_up_on_after_half_an_hour ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_pasted_beside_a_draft ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_pasted_without_bracketed_paste ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_typed_over_someone_typing ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_not_typed_to_a_process_that_isnt_an_agent ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_is_told_to_the_idle_orchestrator ... ok
+test watch::answer_wake::tests::worker_tests::a_hold_that_ended_waits_for_an_orchestrator_in_an_unknown_state ... ok
+test watch::answer_wake::tests::worker_tests::a_subagent_that_ended_is_not_named ... ok
+test watch::answer_wake::tests::worker_tests::a_subagents_label_is_typed_as_text ... ok
+test watch::answer_wake::tests::worker_tests::an_answer_does_not_replace_a_hold_that_ended ... ok
+test watch::answer_wake::tests::worker_tests::an_answer_on_a_subagents_task_names_the_subagent_to_the_orchestrator ... ok
+test watch::answer_wake::tests::worker_tests::the_hold_message_says_when_and_that_it_is_the_orchestrators_call ... ok
+test watch::answer_wake::tests::worker_tests::the_message_names_the_subagent ... ok
+test watch::answer_wake::tests::worker_tests::with_the_switch_off_a_hold_that_ended_is_only_a_note ... ok
+test workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner ... ok
+test workflow_service::tests::workflow_service_availability_tracks_failed_owner_and_join_before_restart ... ok
+test workspace_ops::tests::check_in_enable_requires_owner_and_person_seat ... ok
+test workspace_ops::tests::check_in_owner_enable_refuses_unreadable_and_read_only_callers ... ok
+
+test result: ok. 486 passed; 0 failed; 2 ignored; 0 measured; 2244 filtered out; finished in 881.35s
+
+
+exit=0, stopped=None

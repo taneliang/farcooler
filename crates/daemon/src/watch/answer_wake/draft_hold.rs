@@ -163,12 +163,14 @@ impl Watcher {
             return;
         }
         let Some(me) = self.me.upgrade() else { return };
+        let Ok(ticket) = self.service.writers.admit("delivery") else { return };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
                 if wakes {
                     me.pump_wakes().await;
                 }
                 me.pump_draft_holds().await;
+                ticket.finish();
             });
         }
     }

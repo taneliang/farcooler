@@ -215,6 +215,12 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
         }
     };
 
+    // Re-checked under the exclusive lock, before any helper or owner starts.
+    if let Err(e) = farcooler_daemon::cutover_gate::admit(selected.root()) {
+        eprintln!("engine cutover gate refused ordinary startup: {e}");
+        return Err(1);
+    }
+
     // Whether a browser's passkey can log in here (ov-765): `passkey_keys`
     // is withheld until this has read the sshd's version, before any hello.
     farcooler_daemon::sshd_version::offer_passkey_keys().await;

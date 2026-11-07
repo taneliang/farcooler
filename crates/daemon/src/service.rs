@@ -1906,6 +1906,8 @@ const SKIP_DIRS: &[&str] = &[
 pub struct Service {
     pub(crate) workflow_notice_wake: Arc<tokio::sync::Notify>,
     pub(crate) workflow_owner: std::sync::Mutex<Option<crate::workflow_service::Owner>>,
+    /// Admission and join for every legacy-era writer (see `writer_gate`).
+    pub(crate) writers: Arc<crate::writer_gate::WriterGate>,
     /// Behind an `Arc` so `hooks` can read the same database through the same
     /// connection. `Store` is not `Clone` — it owns a `Connection` behind a
     /// mutex — so the alternative is a second connection to the same file:
@@ -2115,8 +2117,22 @@ impl Service {
     /// The environment is read once, at the edge, so nothing below this point
     /// depends on a process-global that another thread can change.
     pub async fn open_in(root: PathBuf) -> Result<Self> {
+        // Before the install ID, Store, inventory or any helper: read-only.
+        crate::cutover_gate::admit(&root)?;
+        Self::open_in_admitted(root, false).await
+    }
+
+    /// Test-only: a service over a deliberately old-schema fixture.
+    #[cfg(test)]
+    pub(crate) async fn open_in_legacy_fixture(root: PathBuf) -> Result<Self> { Self::open_in_admitted(root, true).await }
+
+    async fn open_in_admitted(root: PathBuf, legacy_fixture: bool) -> Result<Self> {
         let install_id = paths::load_or_create_install_id_in(&root)?;
-        let store = Arc::new(Store::open(root.join("farcooler.db"))?);
+        let database = root.join("farcooler.db");
+        #[cfg(test)]
+        let store = Arc::new(if legacy_fixture { farcooler_store::testing::open_legacy_fixture(&database)? } else { Store::open(database)? });
+        #[cfg(not(test))]
+        let store = { let _ = legacy_fixture; Arc::new(Store::open(database)?) };
 
         // The daemon identity is stable per install, so tags written by a prior
         // run of this same daemon remain provable after a restart.
@@ -2127,9 +2143,11 @@ impl Service {
 
         let registry = std::sync::RwLock::new(Arc::new(farcooler_core::config::load_registry()));
         let claims = Arc::new(crate::claims::Ledger::default());
+        let writers = crate::writer_gate::WriterGate::new();
 
         let service = Self {
             workflow_owner: Default::default(),
+            writers: writers.clone(),
             workflow_notice_wake: Default::default(),
             store: store.clone(),
             tmux,
@@ -2151,7 +2169,7 @@ impl Service {
             registry,
             read_only_folders: Vec::new(),
             agents: agent_supervisor::AgentSupervisor::new(),
-            hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone()), claims.clone()),
+            hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone()), claims.clone()).with_writer_gate(writers),
             claims,
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),

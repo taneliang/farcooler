@@ -77,6 +77,7 @@ pub(crate) async fn start(svc: &Arc<Service>, watcher: &Arc<Watcher>, p: pb::Lan
         return Err(DomainError::InvalidArgument { what: "no_tickets" });
     }
     let lander = p.lander_id.as_deref().map(required_id).transpose()?;
+    let ticket = svc.writers.admit("landing-jobs").map_err(|_| DomainError::OperationFailed)?;
     let guard = Running::take(workspace).ok_or(DomainError::InvalidArgument { what: "landing_job_running" })?;
     let base = format!("{}/{}", rules.remote, rules.base);
     let landing = landing_job::prepare(&svc.store, workspace, &tickets, &base, &p.title, lander, p.land, actor)?;
@@ -86,6 +87,7 @@ pub(crate) async fn start(svc: &Arc<Service>, watcher: &Arc<Watcher>, p: pb::Lan
     let (svc, watcher, id, land) = (svc.clone(), watcher.clone(), landing.id, p.land);
     tokio::spawn(async move {
         let _guard = guard;
+        let ticket = ticket;
         let announce = |ws: Uuid| watcher.announce_plan_changed(ws, Actor::Runner);
         let setup = Setup {
             store: &svc.store,
@@ -107,6 +109,7 @@ pub(crate) async fn start(svc: &Arc<Service>, watcher: &Arc<Watcher>, p: pb::Lan
             }
         }
         watcher.tell_departures();
+        ticket.finish();
     });
     Ok(landing)
 }

@@ -87,6 +87,7 @@ impl Watcher {
                 }
                 _ = ticker.tick() => {}
             }
+            let Ok(ticket) = self.service.writers.admit("legacy-scheduler") else { break };
             let now = super::now_millis();
             match self.service.store.submitted_check_ins() {
                 Ok(submitted) => for (occurrence, attempt) in submitted {
@@ -116,6 +117,7 @@ impl Watcher {
                 },
                 Err(error) => tracing::warn!(error = %error, "could not read pending check-ins"),
             }
+            ticket.finish();
         }
         let _gate = self.check_in_cleanup_gate.lock().await;
         if self.check_in_arm.swap(2, std::sync::atomic::Ordering::SeqCst) == 1

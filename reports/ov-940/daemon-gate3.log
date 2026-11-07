@@ -1,0 +1,67 @@
+FIFO granted; original warm-target provenance/empty holder verified; local root mtimes bound
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/workflow)
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/tmux)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/client)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/review)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-940-engine-cutover-implementation/crates/daemon)
+    Finished `test` profile [unoptimized] target(s) in 30.27s
+     Running unittests src/lib.rs (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-923-workflow-runtime/target/debug/deps/farcooler_daemon-2ab3a43642087497)
+
+running 40 tests
+test hook_ingress::tests::a_refusal_that_persists_is_reported_once_and_then_rarely ... ok
+test hook_ingress::tests::recovery_reports_every_refusal_the_quiet_covered ... ok
+test landing_read::tests::a_changed_base_does_not_keep_the_old_bases_refusal ... ok
+test paths::tests::runtime_selection_explicit_default_and_pre_effect_refusal ... ok
+test paths::tests::runtime_selection_refuses_before_socket_directory_effects ... ok
+test refusal::tests::a_held_daemon_says_why_to_every_client_and_leaves_when_told ... ok
+test refusal::tests::a_newer_database_stops_the_service_with_the_reason ... ok
+test service::refusal_tests::a_real_name_after_a_separator_is_refused ... ok
+test service::refusal_tests::a_stand_in_vouches_like_the_stub ... ok
+test service::refusal_tests::an_unstubbed_launch_is_refused ... ok
+test service::refusal_tests::the_stub_and_a_named_stand_in_are_accepted ... ok
+test service::runtime_selection_tests::runtime_selection_default_binding_keeps_installed_precedence_without_opening_it ... ok
+test service::runtime_selection_tests::runtime_selection_normal_explicit_start_keeps_private_paths ... ok
+test service::runtime_selection_tests::runtime_selection_private_fence_migration_caps_allowlist_and_revoke ... ok
+test task_ops::tests::a_new_acceptance_item_gets_an_id_and_an_existing_one_keeps_its_own ... ok
+test task_ops::tests::a_notes_structure_has_to_be_an_object ... ok
+test task_ops::tests::a_second_question_before_an_answer_is_the_one_answered ... ok
+test task_ops::tests::a_title_is_one_line_and_has_to_be_one ... ok
+test task_ops::tests::a_word_that_does_not_parse_is_refused_rather_than_read_as_a_person ... ok
+test task_ops::tests::an_answer_records_only_its_own_questions_other_options ... ok
+test task_ops::tests::an_old_key_resolves_through_get_by_key ... ok
+test task_ops::tests::an_unnamed_actor_is_the_person_at_the_client ... ok
+test task_ops::tests::an_unreadable_optional_id_is_refused_rather_than_dropped ... ok
+test task_ops::tests::an_unspecified_enum_is_a_filter_and_never_a_value ... ok
+test task_ops::tests::every_status_and_kind_survives_the_round_trip ... ok
+test task_ops::tests::filing_a_task_with_an_intent_is_not_an_edit ... ok
+test task_ops::tests::only_a_decision_can_carry_rejected_options ... ok
+test task_starts::tests::a_blocker_finishing_announces_what_it_blocked ... ok
+test task_starts::tests::a_hold_is_let_go_when_its_time_comes_and_boards_hear ... ok
+test task_starts::tests::a_line_reaches_the_wire_with_its_positions ... ok
+test task_starts::tests::a_moved_task_comes_back_whole ... ok
+test task_starts::tests::a_note_from_a_newer_build_breaks_no_read ... ok
+test task_starts::tests::a_subagent_recorded_on_the_wire ... ok
+test task_starts::tests::ending_with_no_id_on_the_wire_ends_every_open_one ... ok
+test task_starts::tests::set_wait_reads_the_wire ... ok
+test watch::answer_wake::tests::messages_tests::refusals_file_nothing ... ok
+test workflow_runtime::coding_landing::tests::workflow_coding_retained_remote_crash_receipt_and_changed_base_refusal ... To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpCoV8jy/private-remote.git
+ * [new branch]      HEAD -> main
+To /var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpOnafT1/private-remote.git
+ * [new branch]      HEAD -> main
+To /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/.tmpOnafT1/private-remote.git
+   2d7459b..b958726  b958726e6a415ca6872ba11a3faac58df3158653 -> main
+ok
+test workflow_runtime::coding_native::recovery_tests::workflow_service_native_stop_ignores_launch_drift_with_original_owner ... ok
+test workflow_runtime::wire_commands::reasoned_tests::workflow_reasoned_wire_durable_replay_and_refusals ... ok
+test workflow_service::tests::workflow_service_availability_tracks_failed_owner_and_join_before_restart ... ok
+
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 2688 filtered out; finished in 6.66s
+
+
+exit=0, stopped=None

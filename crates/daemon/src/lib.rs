@@ -1,5 +1,8 @@
 //! Daemon composition: git worktree transactions, domain services, lifecycle.
 pub(crate) mod activity_source;
+pub mod cutover_gate;
+pub mod writer_gate;
+pub mod writer_join;
 pub mod answered_for;
 pub mod agent_supervisor;
 pub mod chat_migration;

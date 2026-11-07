@@ -4,6 +4,7 @@ use super::*;
 impl Service {
     /// Normal startup with the selection already validated before logging/socket effects.
     pub async fn open_selected(selected: &paths::RuntimeSelection) -> Result<Self> {
+        crate::cutover_gate::admit(selected.root())?;
         let mut service = Self::open_in(selected.ensure_dir()?).await?;
         // Here and not in `open_in`, so a test's service reads no folders
         // from the config of whoever runs the suite, and never reads, creates
