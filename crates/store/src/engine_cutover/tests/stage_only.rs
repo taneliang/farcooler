@@ -397,3 +397,28 @@ fn the_guards_pass_a_ticket_at_rest_and_hold_a_run() {
         }
     }
 }
+
+/// The real Prepare and Commit on a file at registry 67: `transfer::begin` lifts it to 68 inside the freeze, and
+/// the closed commit maps and verifies it through the named delta.
+#[test]
+fn a_legacy_67_file_prepares_and_commits_through_the_real_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("db.sqlite");
+    {
+        let store = Store::open(&path).unwrap();
+        let repo = store.register_repository_for_test("Sixty-seven");
+        let ws = store.ensure_main_workspace(repo).unwrap().id;
+        store.create_task(ws, "history", Actor::User).unwrap();
+    }
+    roll_back_to_67(&path);
+    let (store, plan) = transfer::begin(&path, join_db(&path, "a")).unwrap();
+    assert_eq!(plan.registry, 67);
+    assert_eq!(store.schema().unwrap().version, 68, "the freeze took registry 68");
+    drop(store);
+    closing::commit(&path, join_db(&path, "a")).expect("the commit conserves the source through the named delta");
+    let owners = join_db(&path, "a");
+    let store = startup::open_recovery(&path, &owners).unwrap();
+    assert_eq!(store.engine_authority().unwrap().phase, "committed");
+    let (_, plan) = transfer::bound_plan(&path, &store).unwrap();
+    store.engine_verify(&plan).unwrap();
+}
