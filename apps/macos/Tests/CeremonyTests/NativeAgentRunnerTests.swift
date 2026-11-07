@@ -107,7 +107,7 @@ struct NativeAgentRunnerTests {
             let session = try #require((mine["terminals"] as? [[String: Any]])?.first { $0["id"] as? String == terminal }?["agentSessionId"] as? String)
             let path = try #require(mine["worktree"] as? String)
             let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-            let project = home + "/claude/projects/" + String(real.map { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") ? $0 : "-" })
+            let project = home + "/h/home/.claude/projects/" + String(real.map { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") ? $0 : "-" })
             try FileManager.default.createDirectory(atPath: project, withIntermediateDirectories: true)
             let transcript = project + "/\(session).jsonl"
             try Self.append(

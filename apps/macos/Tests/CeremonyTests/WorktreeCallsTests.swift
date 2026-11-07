@@ -582,7 +582,8 @@ struct WorktreeCallsTests {
         arguments.insert("--help", at: line.firstIndex(of: "--") ?? line.endIndex)
         process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
-        guard let home = (try? ScratchDirectory.make("fc-worktree-calls"))?.path else { return (-1, "no scratch directory") }
+        // Short: a runtime root over 103 characters with its socket is refused (ov-937), and `--help` makes nothing.
+        let home = "/tmp/fc-t/ui-2/p-\(UUID().uuidString.prefix(8))"
         ScratchDaemon.isolate(&environment, home: home)
         process.environment = environment
         let err = Pipe()

@@ -199,6 +199,7 @@ struct MenuWiringTests {
         "Show Runner Log in Finder": "DaemonLog.exists",
         "New Terminal": "hasWorktree",
         "New Worktree…": "MainWindowFocus.isKey(",
+        "Resume Branch…": "MainWindowFocus.isKey(",
         "New Workspace…": "makesWorkspaces",
         "Add Repository…": "MainWindowFocus.isKey(",
         "Show Board": "MainWindowFocus.isKey(",

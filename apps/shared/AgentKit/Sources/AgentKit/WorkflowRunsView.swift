@@ -84,7 +84,7 @@ public struct WorkflowRunsView: View {
         Group {
             if let value {
                 VStack(alignment: .leading) {
-                    Text(title).font(.caption).foregroundStyle(.secondary)
+                    Text(title).font(.caption).foregroundStyle(.quietInk)
                     Text(value).textSelection(.enabled)
                 }
             }
