@@ -155,8 +155,12 @@ fn the_layer_s_migrations_are_marked() {
 /// writes has the columns it had before.
 #[test]
 fn no_existing_table_gained_a_column() {
-    let store = Store::open_in_memory().unwrap();
-    let conn = store.conn();
+    // This invariant belongs to the removable plan/line layer through entry58.
+    // Later ownership and cutover migrations deliberately fence those tables;
+    // testing them here would prohibit the production single-authority guards.
+    let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)").unwrap();
+    crate::migrate::migrate_only_to(&mut conn,58);
     let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").unwrap();
     let tables: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
     let ours = [

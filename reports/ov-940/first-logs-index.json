@@ -1,0 +1,62 @@
+{
+  "first-controls.log": {
+    "raw_sha256": "d96147d54732aa2818497b3d55d1d9fc551bdfca6cffa0e32f6ed8c47f1b98eb",
+    "raw_bytes": 1577,
+    "gzip_sha256": "222210a0e0f8ac29c27b83f898393a1594857a115ed633ab92ae523297439a14",
+    "gzip_bytes": 686
+  },
+  "first-lint.log": {
+    "raw_sha256": "19c0943f378be873733909e038547a7c7d8351d516d8b74d452b380bb6d22a23",
+    "raw_bytes": 3128,
+    "gzip_sha256": "4e08816ba05e86e27a6f9e8f521a038c68cc9cd27ad2e16f3f321b080eea5e3e",
+    "gzip_bytes": 450
+  },
+  "group-reaped.log": {
+    "raw_sha256": "75d6aa721ff68043be62988206b241322ea11506d160037bb82ce0ebf0095878",
+    "raw_bytes": 2984,
+    "gzip_sha256": "5ec20d665306fa627bf86a1a6b59e15c60f12f01c2381f6b8790f4768c241ef6",
+    "gzip_bytes": 681
+  },
+  "groups-first.log": {
+    "raw_sha256": "cc299fe7f2b9555f992a4752b54054d26d53a3231c905ad41b279d3f05fa7fb9",
+    "raw_bytes": 19370,
+    "gzip_sha256": "4af3713feb8d2fb8e64235da98c6823a40b941bdb578160de135ad9ce18bebd1",
+    "gzip_bytes": 2077
+  },
+  "groups-notices-private-envelope.log": {
+    "raw_sha256": "f0d7c44f5d8e446518ad5d0e31c91770ba12398ba701acd1c1278c0e7344b96b",
+    "raw_bytes": 19026,
+    "gzip_sha256": "a5ec6329852415b3ba99e34bf24f501b53d4751174efa629450da1190aa46694",
+    "gzip_bytes": 3801
+  },
+  "groups-send-fix.log": {
+    "raw_sha256": "bf2c91d39d7241c6c9182f5dd587155b4e46ef470fd9f041e8fbb93e46156eb2",
+    "raw_bytes": 4398,
+    "gzip_sha256": "26acd78b7c137435a069be3b6802eee65615478d3daaa25c901ccb5dbe117022",
+    "gzip_bytes": 1059
+  },
+  "notice-original.log": {
+    "raw_sha256": "bf0642ca1eb0e0f487d612000f70c2bc4aff8a17ac2076b174935c4343056d86",
+    "raw_bytes": 3931,
+    "gzip_sha256": "348aac6a7b0d4ef34e2f682d7e119951ba5875f10fdfa881f719f35eace2b9b0",
+    "gzip_bytes": 1226
+  },
+  "notices-after-helper.log": {
+    "raw_sha256": "e04d799529b06e6f40d4da47d5412a0ed827cac134cb125002d865fd4d8a6522",
+    "raw_bytes": 14932,
+    "gzip_sha256": "e474c14ea1166f94719f3c31d018073af093cd261d814b1b41030b0ea16d6a89",
+    "gzip_bytes": 3268
+  },
+  "plan-original.log": {
+    "raw_sha256": "db1ea91f40b92a157835afdaaabb8177a31ab163696f411ed119eca1112de933",
+    "raw_bytes": 1820,
+    "gzip_sha256": "4228ebb8fb89ae860ebd54d594a8d75a28bd813851170daa3366fe9b0bdd5766",
+    "gzip_bytes": 740
+  },
+  "store-invariants-first.log": {
+    "raw_sha256": "393d0653f62cce4e36761d02b09899cc26b9b26d559dd7e8d7918f80fa810097",
+    "raw_bytes": 162412,
+    "gzip_sha256": "bf9c1dabb0098aff9e90da3815ff54a10a14a9be376f1672e9430fdbf1ccab51",
+    "gzip_bytes": 19246
+  }
+}

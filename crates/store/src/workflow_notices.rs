@@ -284,12 +284,16 @@ mod migration_tests {
     fn workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes() {
         let mut conn=rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA recursive_triggers=ON; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
-        crate::migrate::migrate_only_to(&mut conn,crate::migrate::CURRENT_SCHEMA_VERSION-1);
+        // Notice DDL is registry entry65, independent of later authority entries.
+        crate::migrate::migrate_only_to(&mut conn,64);
+        assert!(!conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='workflow_notice_outbox')",[],|r|r.get::<_,bool>(0)).unwrap());
         conn.execute("INSERT INTO workflow_states(workspace,revision,epoch,state) VALUES('old',1,1,'untouched-state')",[]).unwrap();
         conn.execute("INSERT INTO workflow_events(workspace,revision,id,payload,payload_hash,notices) VALUES('old',1,'old-event','untouched-input','old-hash','[\"same text\"]')",[]).unwrap();
         let before:String=conn.query_row("SELECT notices FROM workflow_events",[],|r|r.get(0)).unwrap();
         let tx=conn.transaction().unwrap();migration(&tx).unwrap();tx.commit().unwrap();
         let count:u64=conn.query_row("SELECT count(*) FROM workflow_notice_outbox",[],|r|r.get(0)).unwrap();assert_eq!(count,0);
+        let after:String=conn.query_row("SELECT notices FROM workflow_events",[],|r|r.get(0)).unwrap();assert_eq!(before,after);
+        crate::migrate::migrate(&mut conn,64+1).unwrap();
         let after:String=conn.query_row("SELECT notices FROM workflow_events",[],|r|r.get(0)).unwrap();assert_eq!(before,after);
     }
 }

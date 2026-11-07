@@ -1,0 +1,59 @@
+[
+  {
+    "label": "plan-original",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "plan::tests::no_existing_table_gained_a_column",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "semantic": true,
+    "before": "370fe8edb271fa3ec2aa57876bd2239bc2121ce8c00dfb097b4e74fd8132a9dd",
+    "mutant": "11fe06f1f24e7a70d1aa428a7c50455d9f55f7983e20df8643efc9f39b132fc4",
+    "restored": "370fe8edb271fa3ec2aa57876bd2239bc2121ce8c00dfb097b4e74fd8132a9dd"
+  },
+  {
+    "label": "notice-original",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-store",
+      "--lib",
+      "workflow_notice_migration_never_backfills_historical_events_or_rewrites_bytes",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "semantic": true,
+    "before": "61341f5c9b7c85ad0371512cf9b7782f3215d9a1b3c9e7cdda7f7cd2434b7f60",
+    "mutant": "e63657773a9cb5c2c262d2fa908fca86502cc97386ad449a69d6f2958d880c35",
+    "restored": "61341f5c9b7c85ad0371512cf9b7782f3215d9a1b3c9e7cdda7f7cd2434b7f60"
+  },
+  {
+    "label": "group-reaped",
+    "command": [
+      "/Users/e-liang/.cargo/bin/cargo",
+      "test",
+      "--offline",
+      "-p",
+      "farcooler-daemon",
+      "--lib",
+      "workflow_runtime_exited_leader_keeps_group_owned_until_descendant_stops",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 101,
+    "semantic": true,
+    "before": "6d6c820f3ab24301cea981464c3945e18233fe6333dc99c453bce7528cfd6181",
+    "mutant": "cfe85a467e2cc9dfab3defd55e0785156e46441413ebd4e0ca045fdb543936a0",
+    "restored": "6d6c820f3ab24301cea981464c3945e18233fe6333dc99c453bce7528cfd6181"
+  }
+]

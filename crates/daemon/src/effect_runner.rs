@@ -34,6 +34,25 @@ impl Drop for Group {
     }
 }
 
+/// Peek only: the retained Child remains the sole reaper and pins the owned
+/// group identity until its one signal, even when the leader already exited.
+pub(crate) async fn exited(pid: u32) -> std::io::Result<()> {
+    loop {
+        if has_exited(pid)? { return Ok(()); }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+fn has_exited(pid: u32) -> std::io::Result<bool> {
+    let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+    if unsafe { libc::waitid(libc::P_PID, pid, &mut info,
+        libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) } != 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted { return Err(error); }
+        return Ok(false);
+    }
+    Ok(unsafe { info.si_pid() } == pid as i32)
+}
+
 pub(crate) async fn run(tree: &Path, script: &str, log: &Path, limit: Duration)
     -> std::io::Result<bool>
 {
@@ -78,7 +97,7 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     let pid = child.id().expect("newly spawned child has a pid");
     let mut group = Group(Some(pid));
     let result = tokio::select! {
-        result = tokio::time::timeout(limit, child.wait()) => Some(result),
+        result = tokio::time::timeout(limit, exited(pid)) => Some(result),
         _ = async {
             if let Some(cancel) = cancel.as_mut() {
                 while !*cancel.borrow_and_update() {
@@ -87,30 +106,55 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
             } else { std::future::pending::<()>().await; }
         } => None,
     };
-    // Always stop descendants, including on success and timeout. Keep the group
-    // guard across every await so cancellation also kills the group.
-    unsafe { libc::killpg(pid as i32, libc::SIGKILL); }
+    // Signal before releasing the leader identity. Disarm even on signal error:
+    // no retry may target a recycled PGID after the child has been reaped.
+    #[cfg(test)]
+    let _ = TEST_SIGNAL_PINNED.try_with(|pinned| {
+        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        pinned.set(unsafe { libc::waitid(libc::P_PID, pid, &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) } == 0);
+    });
+    let signal_error = group.kill().err();
     let timed_out = matches!(result, Some(Err(_)));
-    let status = match result {
-        Some(Ok(status)) => status?.code(),
-        Some(Err(_)) | None => { child.wait().await?; None }
-    };
+    let observed = matches!(result, Some(Ok(Ok(()))));
+    let status = tokio::time::timeout(Duration::from_secs(1), child.wait()).await
+        .map_err(|_| std::io::Error::other("owned process leader reap unproved"))??;
     // A surviving group (including unreaped grandchildren) is not quiescence.
     for _ in 0..100 {
-        let alive = unsafe { libc::killpg(pid as i32, 0) } == 0;
-        if !alive {
-            group.0 = None;
+        if matches!(Group::gone(pid), Ok(true)) {
+            if let Some(Ok(Err(error))) = result { return Err(error); }
             return if timed_out { Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "process deadline exceeded")) }
-                else { Ok(status) };
+                else { Ok(if observed { status.code() } else { None }) };
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    if let Some(error) = signal_error {
+        tracing::warn!(pid, %error, "owned process signal failed and disappearance remains unproved");
     }
     Err(std::io::Error::other("process group did not become quiescent"))
 }
 
 #[cfg(test)]
+tokio::task_local! { static TEST_SIGNAL_PINNED: std::cell::Cell<bool>; }
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn workflow_runtime_exited_leader_keeps_group_owned_until_descendant_stops() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = TEST_SIGNAL_PINNED.scope(std::cell::Cell::new(false), async {
+            let result = run(dir.path(), "sleep 30 & echo $! > descendant.pid; exit 0",
+                &dir.path().join("leader.log"), Duration::from_secs(2)).await.unwrap();
+            TEST_SIGNAL_PINNED.with(|pinned| assert!(pinned.get(), "leader was reaped before group signal"));
+            result
+        }).await;
+        assert!(result);
+        let descendant: i32 = std::fs::read_to_string(dir.path().join("descendant.pid"))
+            .unwrap().trim().parse().unwrap();
+        assert_eq!(unsafe { libc::kill(descendant, 0) }, -1);
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::ESRCH));
+    }
     #[tokio::test]
     async fn workflow_runtime_process_timeout_and_cancel_kill_owned_group() {
         let dir = tempfile::tempdir().unwrap();

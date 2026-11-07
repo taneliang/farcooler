@@ -105,18 +105,8 @@ impl OwnedQueue {
 }
 // Observe exit without releasing the leader's PID/PGID before the group signal.
 // Tokio's Child remains the sole reaper; WNOWAIT only peeks at our direct child.
-fn queue_has_exited(pid:u32)->std::io::Result<bool> {
-    let mut info=unsafe{std::mem::zeroed::<libc::siginfo_t>()};
-    if unsafe{libc::waitid(libc::P_PID,pid,&mut info,libc::WEXITED|libc::WNOHANG|libc::WNOWAIT)}!=0 {
-        let error=std::io::Error::last_os_error();
-        if error.kind()!=std::io::ErrorKind::Interrupted {return Err(error)}
-        return Ok(false);
-    }
-    Ok(unsafe{info.si_pid()}==pid as i32)
-}
 async fn queue_exited(pid:u32)->std::io::Result<()> {
-    while !queue_has_exited(pid)? {tokio::time::sleep(Duration::from_millis(10)).await;}
-    Ok(())
+    crate::effect_runner::exited(pid).await
 }
 async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str) {
     let pid=queue.pid;
