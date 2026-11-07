@@ -101,10 +101,13 @@ impl Exec {
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome>
     {
         match kind {
-            StageKind::AwaitBase => self.await_base(binding, cancel).await,
+            // A wait that errs has failed for a reason and spends an attempt; only a cut-short wait is `Interrupted`.
+            StageKind::AwaitBase => Ok(self.await_base(binding, cancel).await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "await-base failed"); Outcome::SafeFailure })),
             StageKind::Fold => self.fold(binding, cancel).await,
             StageKind::Push => self.push(binding, cancel).await,
-            StageKind::AwaitCi => self.await_ci(binding, cancel).await,
+            StageKind::AwaitCi => Ok(self.await_ci(binding, cancel).await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "await-ci failed"); Outcome::SafeFailure })),
             _ => Err(Error::Refused("not a landing verb")),
         }
     }
@@ -117,6 +120,8 @@ impl Exec {
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 return match kind {
                     StageKind::Push => Err(Error::Refused("push has no settlement; whether it landed is unknown")),
+                    // A wait cut short only looks again; a fold made half is made anew and spends an attempt.
+                    StageKind::AwaitBase | StageKind::AwaitCi => Ok(Outcome::Interrupted),
                     _ => Ok(Outcome::SafeFailure),
                 };
             }
@@ -149,7 +154,7 @@ impl Exec {
         let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
         let mut last = binding.base.clone();
         for poll in 0u32.. {
-            if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
+            if *cancel.borrow() { return Ok(Outcome::Interrupted); }
             if let Some(head) = self.fetch_base(binding, poll, &cancel).await? {
                 last = head.clone();
                 if !green || self.ci_poll(binding, &head, poll, &cancel).await? == CiStatus::Passed {
@@ -161,7 +166,7 @@ impl Exec {
                 self.write_fact(binding, "timeout", &last, serde_json::json!({ "polls": poll + 1 }))?;
                 return self.reconcile_verb(binding, &StageKind::AwaitBase).await;
             }
-            if pause(every, &cancel).await { return Ok(Outcome::SafeFailure); }
+            if pause(every, &cancel).await { return Ok(Outcome::Interrupted); }
         }
         unreachable!("the poll count is unbounded")
     }
@@ -190,14 +195,14 @@ impl Exec {
         let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing CI candidate"))?;
         let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
         for poll in 0u32.. {
-            if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
+            if *cancel.borrow() { return Ok(Outcome::Interrupted); }
             let label = match self.ci_poll(binding, &candidate, poll, &cancel).await? {
                 CiStatus::Passed => "passed",
                 CiStatus::Failed => "rejected",
                 CiStatus::Superseded => "cancelled",
                 _ if self.clock_ms() >= deadline => "timeout",
                 _ => {
-                    if pause(every, &cancel).await { return Ok(Outcome::SafeFailure); }
+                    if pause(every, &cancel).await { return Ok(Outcome::Interrupted); }
                     continue;
                 }
             };

@@ -51,6 +51,10 @@ pub struct Item {
     /// A joined ticket only: the group item it is queued into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_in: Option<String>,
+    /// A wait step only: when its first effect was made. A restart looks again with the same deadline, so
+    /// patience survives it and a wait that never answers still ends in `timeout`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_since: Option<i64>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member { pub item: String, pub candidate: String }
@@ -137,7 +141,7 @@ pub struct Evidence {
     pub policy_pin: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Outcome { Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure, Uncertain, Stopped { operation: String, receipt: String } }
+pub enum Outcome { Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure, Interrupted, Uncertain, Stopped { operation: String, receipt: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind { Execute(StageKind), Stop { operation: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

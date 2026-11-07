@@ -2,14 +2,14 @@
 use farcooler_workflow::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-struct Log { state: State, inputs: Vec<Input> }
+struct Log { state: State, inputs: Vec<Input>, now: i64 }
 impl Log {
-    fn new() -> Self { Self { state: State::empty("workspace".into(), 1), inputs: vec![] } }
+    fn new() -> Self { Self { state: State::empty("workspace".into(), 1), inputs: vec![], now: 1000 } }
     fn input(&self, command: Command, grant: Grant) -> Input {
         let s = &self.state;
         Input { busy_resources: BTreeSet::new(), schema: 1, id: format!("command-{}", s.revision + 1),
             workspace: s.workspace.clone(), expected_revision: s.revision, epoch: s.epoch,
-            source: "fixture".into(), source_sequence: s.revision + 1, now_ms: 1000, grant, command }
+            source: "fixture".into(), source_sequence: s.revision + 1, now_ms: self.now, grant, command }
     }
     fn try_run(&mut self, command: Command, grant: Grant) -> Result<Transition, Refusal> {
         let input = self.input(command, grant);
@@ -28,10 +28,11 @@ impl Log {
         Evidence { candidate: i.candidate.clone().unwrap_or(format!("cand-{item}")), manifest: "m".into(),
             receipt: "r".into(), policy_pin: i.policy_pin.clone() }
     }
-    fn outcome(&mut self, item: &str, outcome: Outcome) -> Transition {
+    fn outcome(&mut self, item: &str, outcome: Outcome) -> Transition { self.try_outcome(item, outcome).unwrap() }
+    fn try_outcome(&mut self, item: &str, outcome: Outcome) -> Result<Transition, Refusal> {
         let i = &self.state.items[item];
         let (effect, run, fence) = (i.pending.clone().unwrap(), i.run.clone(), i.fence);
-        self.run(Command::Observe { item: item.into(), effect: effect.clone(), run: run.clone(), fence, outcome },
+        self.try_run(Command::Observe { item: item.into(), effect: effect.clone(), run: run.clone(), fence, outcome },
             Grant::Operation { effect, run, fence })
     }
     fn pass(&mut self, item: &str) -> Transition { let e = self.evidence(item); self.outcome(item, Outcome::Passed(e)) }
@@ -606,22 +607,48 @@ fn a_group_cannot_be_cancelled_while_it_pushes_or_after_it_has() {
     early.run(Command::Cancel { item: group }, Grant::Controller);
 }
 #[test]
-fn a_wait_that_a_restart_interrupted_looks_again_and_spends_no_attempt() {
+fn a_wait_that_a_restart_interrupted_looks_again_spends_no_attempt_and_keeps_its_patience() {
     for step in ["base", "ci"] {
         let mut log = Log::new();
         let group = verb_group(&mut log, verb_ticket());
         walk_to(&mut log, &group, step);
         let before = log.state.items[&group].clone();
-        let t = log.outcome(&group, Outcome::SafeFailure);
+        let first = log.outcome(&group, Outcome::Interrupted);
         let after = &log.state.items[&group];
         assert_eq!((after.phase.clone(), log.stage(&group), after.attempt), (Phase::Running, step.to_string(), before.attempt), "{step}");
         assert!(after.fence > before.fence);
-        assert_eq!(t.effects.iter().filter(|e| e.item == group).count(), 1, "{step}: read again");
+        let again: Vec<_> = first.effects.iter().filter(|e| e.item == group).collect();
+        assert_eq!(again.len(), 1, "{step}: read again");
+        // The clock moves on; a second interruption must still carry the first deadline.
+        log.now = 5000;
+        let second = log.outcome(&group, Outcome::Interrupted);
+        let later: Vec<_> = second.effects.iter().filter(|e| e.item == group).collect();
+        assert_eq!(later[0].created_ms, again[0].created_ms, "{step}: patience survives a restart");
     }
-    // A fold is made again and that does spend one: a step that keeps failing ends.
+    // Only a wait can be interrupted; a fold is made again and a restart there is a failure.
     let mut log = Log::new();
     let group = verb_group(&mut log, verb_ticket());
     walk_to(&mut log, &group, "fold");
-    log.outcome(&group, Outcome::SafeFailure);
-    assert_eq!(log.state.items[&group].phase, Phase::Failed);
+    assert_eq!(log.try_outcome(&group, Outcome::Interrupted).unwrap_err(), Refusal::Phase);
+}
+#[test]
+fn a_wait_that_fails_for_a_real_reason_spends_attempts_and_ends() {
+    for step in ["base", "ci"] {
+        let mut log = Log::new();
+        let group = verb_group(&mut log, verb_ticket());
+        walk_to(&mut log, &group, step);
+        let budget = log.state.items[&group].definition.stages[log.state.items[&group].stage].max_attempts;
+        for round in 0..budget {
+            assert_eq!(log.state.items[&group].phase, Phase::Running, "{step} round {round}");
+            log.outcome(&group, Outcome::SafeFailure);
+        }
+        assert_eq!(log.state.items[&group].phase, Phase::Failed, "{step}: a wait that keeps failing ends");
+    }
+    // A group that already pushed ends as landed, with the pushed commit, not stuck.
+    let mut log = Log::new();
+    let group = verb_group(&mut log, verb_ticket());
+    walk_to(&mut log, &group, "ci");
+    assert!(log.state.items[&group].pushed.is_some());
+    for _ in 0..8 { if log.state.items.get(&group).is_some_and(|g| g.phase == Phase::Running) { log.outcome(&group, Outcome::SafeFailure); } }
+    assert!(log.state.items.get(&group).map_or(true, |g| g.phase == Phase::Failed), "the pushed group has an exit");
 }

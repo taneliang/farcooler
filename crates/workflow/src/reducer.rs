@@ -46,7 +46,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
                 candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new(),
-                back_edges: BTreeMap::new(), retries: 0, pushed: None,
+                back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), group_of: None, grouped_in: None };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
@@ -91,7 +91,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             iteration: item.iteration, reason: reason.clone(),
                         });
                     }
-                    finish(&mut item, id, input, *passed, evidence, room(&next, &spawn), &mut effects, &mut spawn)?;
+                    finish(&mut item, id, input, *passed, evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                 }
                 Command::Observe { effect, run, fence, outcome, .. }
                 | Command::Resolve { effect, run, fence, outcome, .. } => {
@@ -110,6 +110,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             return Err(Refusal::Phase);
                         }
                     }
+                    // Whatever the answer, the wait's first deadline is spent unless a restart cut it short.
+                    let wait_since = item.wait_since.take();
                     match outcome {
                         Outcome::Uncertain => { item.phase = Phase::Uncertain; }
                         Outcome::Stopped { operation, receipt } => {
@@ -132,25 +134,35 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 return Err(Refusal::Evidence);
                             }
                             evidence_matches(&item, evidence)?;
-                            route(&mut item, id, input, label, Some(evidence), room(&next, &spawn), &mut effects, &mut spawn)?;
+                            route(&mut item, id, input, label, Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
                         Outcome::Passed(evidence) | Outcome::Rejected(evidence) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
-                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, room(&next, &spawn), &mut effects, &mut spawn)?;
+                            finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
                         Outcome::SafeFailure => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             item.pending = None;
-                            // A wait that was interrupted (a restart, a crash) only looks again: reading spends no attempt.
-                            let reads = matches!(item.definition.stages[item.stage].kind, StageKind::AwaitBase | StageKind::AwaitCi);
-                            if !reads && item.attempt >= item.definition.stages[item.stage].max_attempts {
+                            if item.attempt >= item.definition.stages[item.stage].max_attempts {
                                 item.phase = Phase::Failed;
                             } else {
-                                if !reads { item.attempt += 1; }
+                                item.attempt += 1;
                                 item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                                 enter(&mut item, id, input, &mut effects)?;
                             }
+                        }
+                        Outcome::Interrupted => {
+                            // Only a wait is read again for free, and only because a restart cut it short, not
+                            // because it failed. Its patience is kept, so a loop still ends in `timeout`.
+                            if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
+                            if !matches!(item.definition.stages[item.stage].kind, StageKind::AwaitBase | StageKind::AwaitCi) {
+                                return Err(Refusal::Phase);
+                            }
+                            item.pending = None;
+                            item.wait_since = wait_since;
+                            item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                            enter(&mut item, id, input, &mut effects)?;
                         }
                     }
                 }
@@ -202,7 +214,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None,
+                                stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(),
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
                                 grouped_in: None });
@@ -278,7 +290,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             if let StageKind::Join { adopt: true, .. } = ticket.definition.stages[ticket.stage].kind {
                 if matches!(label, "passed" | "landed") && result.is_some() { ticket.candidate = result.clone(); }
             }
-            route(&mut ticket, &member.item, input, label, None, room(&next, &spawn), &mut effects, &mut spawn)?;
+            route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
             next.items.insert(member.item, ticket);
         }
     }
@@ -370,11 +382,15 @@ fn launch(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -
 fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mut Vec<Effect>) {
     let effect_id = digest(&("effect/v1", &input.workspace, &input.id, effects.len()));
     item.pending = Some(effect_id.clone());
+    // A wait looked at again after a restart keeps its first deadline.
+    let created_ms = if matches!(item.definition.stages[item.stage].kind, StageKind::AwaitBase | StageKind::AwaitCi) {
+        *item.wait_since.get_or_insert(input.now_ms)
+    } else { input.now_ms };
     effects.push(Effect { id: effect_id, item: id.into(), run: item.run.clone(),
         epoch: input.epoch, fence: item.fence, resource: item.resource.clone(),
         definition_pin: item.pin.clone(), policy_pin: item.policy_pin.clone(),
         candidate: item.candidate.clone(), members: item.members.clone(), kind,
-        operation: item.definition.stages[item.stage].operation.clone(), created_ms: input.now_ms });
+        operation: item.definition.stages[item.stage].operation.clone(), created_ms });
 }
 fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     if !valid_id(&e.candidate) || !valid_id(&e.manifest) || !valid_id(&e.receipt)
@@ -387,11 +403,12 @@ fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     { return Err(Refusal::Evidence); }
     Ok(())
 }
-fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence, room: bool,
-    effects: &mut Vec<Effect>, spawn: &mut Vec<(String, Vec<Member>)>) -> Result<(), Refusal>
+/// What a step may leave behind besides the item itself: new effects, and groups to open on a split.
+struct Out<'a> { room: bool, effects: &'a mut Vec<Effect>, spawn: &'a mut Vec<(String, Vec<Member>)> }
+fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence, out: Out) -> Result<(), Refusal>
 {
     if item.definition.schema == 2 {
-        return route(item, id, input, if passed { "passed" } else { "rejected" }, Some(evidence), room, effects, spawn);
+        return route(item, id, input, if passed { "passed" } else { "rejected" }, Some(evidence), out);
     }
     item.pending = None;
     item.last_evidence = Some(evidence.clone());
@@ -405,7 +422,7 @@ fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evi
             item.attempt = 1;
             item.candidate = None;
             item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
-            return enter(item, id, input, effects);
+            return enter(item, id, input, out.effects);
         }
         item.phase = Phase::Failed;
         return Ok(());
@@ -417,7 +434,7 @@ fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evi
     item.attempt = 1;
     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
     if item.stage == item.definition.stages.len() { item.phase = Phase::Done; Ok(()) }
-    else { enter(item, id, input, effects) }
+    else { enter(item, id, input, out.effects) }
 }
 
 /// Where a label goes from the current step: its route, else forward on `passed` and to `Fail`.
@@ -446,8 +463,7 @@ fn rework_room(item: &Item, label: &str) -> Result<(), Refusal> {
 fn room(next: &State, spawn: &[(String, Vec<Member>)]) -> bool { next.items.len() + 1 + spawn.len() < MAX_ITEMS }
 /// Schema 2: take the route a label names. A back edge past its limit fails the run instead.
 /// A split keeps the first half of a group here and hands the rest to `spawn`.
-fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>, room: bool,
-    effects: &mut Vec<Effect>, spawn: &mut Vec<(String, Vec<Member>)>) -> Result<(), Refusal>
+fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>, out: Out) -> Result<(), Refusal>
 {
     item.pending = None;
     let stage = &item.definition.stages[item.stage];
@@ -464,9 +480,9 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
     let taken = item.back_edges.get(&key).copied().unwrap_or(0);
     if let Target::Split { step, otherwise } = target {
         // Two or more members and room to go back: split. Otherwise the fallback decides.
-        target = if item.members.len() >= 2 && taken < limit && room {
+        target = if item.members.len() >= 2 && taken < limit && out.room {
             let rest = item.members.split_off(item.members.len().div_ceil(2));
-            spawn.push((id.to_string(), rest));
+            out.spawn.push((id.to_string(), rest));
             Target::Step(step)
         } else { *otherwise };
     }
@@ -493,7 +509,7 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
         item.phase = Phase::Blocked;
         return Ok(());
     }
-    enter(item, id, input, effects)
+    enter(item, id, input, out.effects)
 }
 
 /// Groups and the tickets queued into them agree with each other, in both directions.

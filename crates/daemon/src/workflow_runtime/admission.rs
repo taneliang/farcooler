@@ -23,6 +23,10 @@ pub(crate) struct Admission {
     terminal: Option<(Terminal, Login, Option<String>)>,
 }
 
+/// The actions an orchestrator may never take on a person's behalf: publishing a definition, and saying
+/// whether a lost push landed.
+pub(super) fn person_only(action: &Action) -> bool { matches!(action, Action::Publish { .. } | Action::Settle { .. }) }
+
 impl Admission {
     /// The workspace of a command about the whole host, such as a cutover. No
     /// orchestrator matches it, so only a person can be admitted to one.
@@ -85,7 +89,7 @@ impl Admission {
     }
     pub(crate) fn recheck_now(&self) -> Result<()> { self.recheck() }
     pub(crate) fn permits(&self, action: &Action) -> Result<()> {
-        if matches!(action, Action::Publish { .. } | Action::Settle { .. }) && self.seat != Seat::Person {
+        if person_only(action) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });
         }
         Ok(())
