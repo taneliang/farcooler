@@ -1,0 +1,193 @@
+{
+  "B1-orphan": {
+    "test": "source60_unknown_catalog_refuses",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::source60::source60_unknown_catalog_refuses_before_any_artifact"
+    ],
+    "passed": 0
+  },
+  "B1-no-recovery-prepare": {
+    "test": "recovery_prepares_then_recovers",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "rpc::recovery::tests::recovery_prepares_then_recovers_a_real_database_back_to_ordinary_service"
+    ],
+    "passed": 0
+  },
+  "B1-no-restore": {
+    "test": "recover_returns_a_frozen_attempt",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::recover_returns_a_frozen_attempt_to_the_original_bytes_and_a_new_attempt_can_start"
+    ],
+    "passed": 0
+  },
+  "B2-capture-gap": {
+    "test": "transfer_no_writer_lands",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::transfer_no_writer_lands_between_capture_and_upgrade"
+    ],
+    "passed": 0
+  },
+  "B2-store-holds-nothing": {
+    "test": "owner_lock_any_open_store",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::owner_lock_any_open_store_blocks_the_proof_and_the_proof_blocks_ordinary_opens"
+    ],
+    "passed": 0
+  },
+  "B2-lost-write": {
+    "test": "recover_refuses_committed_truth",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::recover_refuses_committed_truth_and_a_database_written_since_the_upgrade"
+    ],
+    "passed": 0
+  },
+  "B3-proof-without-lock": {
+    "test": "owner_lock_any_open_store",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::owner_lock_any_open_store_blocks_the_proof_and_the_proof_blocks_ordinary_opens"
+    ],
+    "passed": 0
+  },
+  "B3-any-attempt": {
+    "test": "owner_lock_proof_refuses",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::owner_lock_proof_refuses_a_replaced_file_and_a_stage_of_another_attempt"
+    ],
+    "passed": 0
+  },
+  "B3-any-file": {
+    "test": "owner_lock_proof_refuses",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::owner_lock_proof_refuses_a_replaced_file_and_a_stage_of_another_attempt"
+    ],
+    "passed": 0
+  },
+  "B4-recovery-ignores-seat": {
+    "test": "recovery_refuses_every_caller",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "rpc::recovery::tests::recovery_refuses_every_caller_but_a_person_outside_every_pane"
+    ],
+    "passed": 0
+  },
+  "B4-pid-reuse": {
+    "test": "recovery_a_reused_pid",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "rpc::recovery::tests::recovery_a_reused_pid_is_not_the_process_that_connected"
+    ],
+    "passed": 0
+  },
+  "B4-no-recheck": {
+    "test": "live_hold_drains",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "rpc::recovery::tests::live_hold_drains_marks_the_attempt_and_a_caller_lost_during_the_drain_marks_nothing"
+    ],
+    "passed": 0
+  },
+  "B4-agent-prepares": {
+    "test": "live_prepare_refuses_an_agent",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "rpc::recovery::tests::live_prepare_refuses_an_agent_pane_and_holds_and_stops_for_a_person"
+    ],
+    "passed": 0
+  },
+  "B5-no-schema60": {
+    "test": "source60_",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::source60::source60_conserves_every_field_through_commit_and_release_and_invents_no_row",
+      "engine_cutover::tests::source60::source60_transfer_freezes_atomically_and_recover_returns_the_exact_bytes",
+      "engine_cutover::tests::source60::source60_verify_catches_field_rowid_allocator_and_relationship_damage"
+    ],
+    "passed": 1
+  },
+  "B5-catalog-unchecked": {
+    "test": "source60_verify_catches",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::source60::source60_verify_catches_field_rowid_allocator_and_relationship_damage"
+    ],
+    "passed": 0
+  },
+  "B5-any-catalog": {
+    "test": "source60_unknown_catalog_refuses",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::source60::source60_unknown_catalog_refuses_before_any_artifact"
+    ],
+    "passed": 0
+  },
+  "B6-no-identity": {
+    "test": "baseline_binds_root",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::baseline_binds_root_file_attempt_floor_catalog_and_resources"
+    ],
+    "passed": 0
+  },
+  "B6-no-frozen-attempt": {
+    "test": "baseline_of_another_attempt",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::baseline_of_another_attempt_is_not_this_databases"
+    ],
+    "passed": 0
+  },
+  "B6-no-attempt-row": {
+    "test": "baseline_binds_root",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::baseline_binds_root_file_attempt_floor_catalog_and_resources"
+    ],
+    "passed": 0
+  },
+  "M1-no-settle": {
+    "test": "hot_journal_is_rolled_back",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::hot_journal_is_rolled_back_by_ordinary_admission_and_only_reported_by_inspection"
+    ],
+    "passed": 0
+  },
+  "M1-journal-by-restore": {
+    "test": "hot_journal_never_lands",
+    "exit": 101,
+    "compiled": true,
+    "failed": [
+      "engine_cutover::tests::recovery::hot_journal_never_lands_on_restored_bytes"
+    ],
+    "passed": 0
+  }
+}
