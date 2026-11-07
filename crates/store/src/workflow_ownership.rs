@@ -17,15 +17,25 @@ fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8
 pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
     let Command::Enqueue { item,.. } = &input.command else { return Ok(true) };
     let Some(task) = task(tx,input,item)? else { return Ok(true) };
-    // A migrated card must be retained-intent; every card then passes the occupancy
-    // check, because after release a hand agent may have taken it (ov-946).
+    // A migrated card must be retained-intent. Its history stays inert (a landed line, a settled
+    // landing, a dead pane), but anything live after release is a hand worker the engine must
+    // not run beside: the same facts `preflight` quarantines at cutover, plus live panes and
+    // open work, which only a post-release hand agent can have (ov-946).
     let migrated: Option<String> = tx.query_row("SELECT disposition FROM engine_cutover_items WHERE task=?1", [&task], |r|r.get(0)).optional()?;
-    if migrated.is_some_and(|d| d != "retained-intent") { return Ok(false); }
-    Ok(!tx.query_row("SELECT EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=?1)
-        OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1)
-        OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1)
-        OR EXISTS(SELECT 1 FROM ticket_work WHERE task_id=?1 AND ended_at IS NULL)
-        OR EXISTS(SELECT 1 FROM landing_tickets WHERE task_id=?1)", [task], |r| r.get::<_,bool>(0))?)
+    let live = match migrated {
+        Some(d) if d != "retained-intent" => return Ok(false),
+        Some(_) => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1 AND exit_code IS NULL AND exit_signal IS NULL)
+            OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1 AND stage NOT IN ('landed','dropped'))
+            OR EXISTS(SELECT 1 FROM landing_tickets lt JOIN landings l ON l.id=lt.landing_id WHERE lt.task_id=?1 AND l.state NOT IN ('landed','dropped'))
+            OR EXISTS(SELECT 1 FROM task_blocks WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND wait_kind IS NOT NULL)
+            OR EXISTS(SELECT 1 FROM check_in_schedules WHERE task_id=?1 AND state='enabled')",
+        None => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM landing_tickets WHERE task_id=?1)",
+    };
+    Ok(!tx.query_row(&format!("SELECT EXISTS(SELECT 1 FROM workflow_owned_items WHERE task_id=?1)
+        OR EXISTS(SELECT 1 FROM ticket_work WHERE task_id=?1 AND ended_at IS NULL) {live}"), [task], |r| r.get::<_,bool>(0))?)
 }
 pub(crate) fn reserve(tx: &Transaction<'_>, input: &Input) -> Result<()> {
     if let Command::Enqueue { item,.. } = &input.command {

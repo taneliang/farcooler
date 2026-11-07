@@ -152,3 +152,71 @@ fn a_stage_move_into_or_out_of_landing_works_after_release() {
     s.conn().execute("INSERT INTO landing_tickets(landing_id,task_id,added_at) SELECT x'03030303030303030303030303030303',?1,1", [r.free.as_bytes().as_slice()]).unwrap();
     assert!(s.update_line(r.free, &up(Stage::Building), user).is_ok(), "out of landing");
 }
+
+#[test]
+fn a_main_ci_read_after_release_does_not_send_the_collecting_landing_off() {
+    use crate::board_ci::{CiRead, CiStatus, MAIN_SUBJECT};
+    let r = released();
+    let s = &r.store;
+    // Lift the landing fences so only the legacy gate, not the fence, can keep depart out.
+    for table in ["landings", "landing_tickets"] {
+        for suffix in ["i", "u", "d"] { s.conn().execute_batch(&format!("DROP TRIGGER engine_fence_{table}_{suffix}")).unwrap(); }
+    }
+    s.conn().execute("INSERT INTO landings(id,workspace_id,number,route,base,state,state_since,title,collecting,actor,created_at,resource_version) VALUES(x'04040404040404040404040404040404',?1,4,'push','main','open',2,'',1,'user',1,1)", [r.ws.as_bytes().as_slice()]).unwrap();
+    s.conn().execute("INSERT INTO landing_tickets(landing_id,task_id,added_at) VALUES(x'04040404040404040404040404040404',?1,1)", [r.other.as_bytes().as_slice()]).unwrap();
+    // Make depart eligible: no landing ahead, and a ready ticket on the collecting one.
+    s.conn().execute("UPDATE landings SET state='landed' WHERE number=2", []).unwrap();
+    s.put_on_line(r.other, &NewTicketLine { reason: "p".into(), branch: "o".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None }, Actor::User).unwrap();
+    s.conn().execute("UPDATE ticket_lines SET stage='landing' WHERE task_id=?1", [r.other.as_bytes().as_slice()]).unwrap();
+    let read = CiRead { subject: MAIN_SUBJECT.into(), sha: "abc".into(), status: CiStatus::Passed, url: String::new(),
+        jobs: Vec::new(), fetched_at: 5, changed_at: 5, asked_at: 5 };
+    let write = s.record_ci(r.ws, &read).unwrap();
+    assert!(write.landings_moved.is_empty());
+    assert_eq!(s.conn().query_row("SELECT state||collecting FROM landings WHERE number=4", [], |x| x.get::<_, String>(0)).unwrap(), "open1", "the collecting landing stays");
+}
+
+#[test]
+fn hourly_check_ins_still_fire_after_release() {
+    use rusqlite::params;
+    let r = released();
+    let s = &r.store;
+    let ws = uuid::Uuid::from(r.ws);
+    s.recover_check_ins_after_exclusive_start().unwrap();
+    // The cutover left a settled schedule; make one that is due now on a card the engine does not own.
+    s.conn().execute("DELETE FROM check_in_occurrences", []).unwrap();
+    let repo = s.get_workspace(ws).unwrap().repository_id;
+    let tree = s.create_worktree(repo, "test/check-in", "/check-in", false).unwrap();
+    let pane = s.create_terminal(tree.id, "manager", "codex", farcooler_protocol::v1::TerminalIntent::Running, 80, 24).unwrap();
+    s.conn().execute("UPDATE terminals SET workspace_id=?2, role=2, runtime_confirmed=1, agent_session_id='thread' WHERE id=?1",
+        params![pane.id.as_bytes().as_slice(), ws.as_bytes().as_slice()]).unwrap();
+    let generation: Vec<u8> = s.conn().query_row("SELECT generation FROM check_in_schedules", [], |x| x.get(0)).unwrap();
+    s.enable_check_in(crate::check_ins::EnableCheckIn { workspace: r.ws, task: r.free, device: None,
+        expected_generation: Some(uuid::Uuid::from_slice(&generation).unwrap()), expected_occurrence: None, acknowledge_uncertain: true, now: 1 }).unwrap();
+    s.conn().execute("UPDATE workspaces SET wake_on_answer=1 WHERE id=?1", [ws.as_bytes().as_slice()]).unwrap();
+    let sched: Vec<(String, i64)> = s.conn().prepare("SELECT state, next_due FROM check_in_schedules").unwrap().query_map([], |x| Ok((x.get(0)?, x.get(1)?))).unwrap().map(|x| x.unwrap()).collect();
+    assert!(s.tick_check_in(ws, 3_600_001).unwrap(), "an occurrence became due: {sched:?}");
+    let occ = s.pending_check_ins().unwrap()[0].id;
+    let (attempt, daemon) = (uuid::Uuid::now_v7(), uuid::Uuid::now_v7());
+    assert!(s.claim_check_in(occ, attempt, daemon, pane.id, "thread", "%1", 123, 1, 3_600_002).unwrap(), "claimed");
+    assert!(s.pin_check_in_rollout(crate::PinCheckInRollout { occurrence: occ, attempt, path: "/rollout", tty: "/dev/test", incarnation: 7, device: 1, inode: 2, offset: 0 }).unwrap());
+    assert!(s.admit_check_in_enter(occ, attempt, daemon, pane.id, "thread", "%1", 123, 1, 7, 3_600_003).unwrap(), "submitted");
+    assert!(s.settle_check_in_enter(occ, attempt, 3_600_004).unwrap());
+}
+
+#[test]
+fn released_agents_work_panes_and_moves_on_an_unowned_card_all_work() {
+    use crate::agents::{AgentPlace, AgentRole, NewAgent};
+    use crate::ticket_work::{LinkedBy, Verdict, WorkRole};
+    let r = released();
+    let s = &r.store;
+    let user = Actor::User;
+    let agent = s.record_agent(r.ws, &NewAgent { role: AgentRole::Builder, place: AgentPlace::Subagent { id: "sub-1".into(), parent: None },
+        harness: "claude".into(), session_id: None, session_cwd: None, model: None, title: Some("ov-1: build".into()) }).expect("agent dispatch");
+    s.start_work(agent.id, r.free, WorkRole::Build, LinkedBy::Orchestrator, user).expect("agent work");
+    let pane = s.create_terminal_for_task(r.tree, "w", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(r.free)).expect("agent-pane task start");
+    s.reserve_check_in_target_change(pane.id, uuid::Uuid::from_bytes([8; 16]), "stop", None).expect("task-bound pane stop");
+    s.end_work(agent.id, r.free, WorkRole::Build, Verdict::Finished, user).expect("agent work ends");
+    s.end_agent(agent.id, Verdict::Finished).expect("agent end");
+    let other = s.create_workspace(s.get_workspace(r.ws).unwrap().repository_id, "Second", "sc").expect("a second board");
+    s.move_tasks(&[r.free], other.id, user).expect("task move");
+}

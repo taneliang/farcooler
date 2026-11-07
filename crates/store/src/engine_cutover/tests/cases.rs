@@ -444,6 +444,7 @@ fn engine_cutover_completed_legacy_line_landing_and_pane_allow_fresh_validated_i
     let tree=store.create_worktree(repo,"old","resources/old",false).unwrap();
     store.create_terminal_for_task(tree.id,"history","fake",farcooler_protocol::v1::TerminalIntent::Running,80,24,Some(task.id)).unwrap();
     store.conn().execute("UPDATE tasks SET status='done' WHERE id=?1",[task.id.as_bytes().as_slice()]).unwrap();
+    store.conn().execute("UPDATE terminals SET exit_code=0 WHERE task_id=?1",[task.id.as_bytes().as_slice()]).unwrap();
     store.conn().execute("INSERT INTO ticket_lines(task_id,stage,stage_since,created_at,resource_version) VALUES(?1,'landed',1,1,1)",[task.id.as_bytes().as_slice()]).unwrap();
     let landing=uuid::Uuid::now_v7();store.conn().execute("INSERT INTO landings(id,workspace_id,number,route,state,state_since,actor,created_at,resource_version) VALUES(?1,?2,1,'ask','landed',1,'user',1,1)",params![landing.as_bytes().as_slice(),ws.id.as_bytes().as_slice()]).unwrap();
     store.conn().execute("INSERT INTO landing_tickets VALUES(?1,?2,1)",params![landing.as_bytes().as_slice(),task.id.as_bytes().as_slice()]).unwrap();

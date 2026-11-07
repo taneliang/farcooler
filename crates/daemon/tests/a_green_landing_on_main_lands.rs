@@ -244,3 +244,20 @@ async fn green_landing_membership_cannot_absorb_unrouted_tickets() {
     assert!(matches!(result, Err(farcooler_core::DomainError::InvalidArgument { what: "landing_moving" })), "{result:?}");
     assert_eq!(store.landing_of(behind).unwrap().unwrap().id, collecting.id);
 }
+
+/// After release landing is the engine's: a green landing on main is left alone
+/// (ov-947). The landing fences are lifted so only the gate can keep it out.
+#[tokio::test]
+async fn a_released_board_lands_nothing_by_hand() {
+    let w = a_world().await;
+    let (landing, tickets) = w.landing(&w.tree.on_main, LandingState::Green, &["a"]);
+    farcooler_store::testing::exec_for_tests(&w.h.service.store, "UPDATE engine_cutover_authority SET phase='released'");
+    for table in ["landings", "landing_tickets"] {
+        for suffix in ["i", "u", "d"] {
+            farcooler_store::testing::exec_for_tests(&w.h.service.store, &format!("DROP TRIGGER engine_fence_{table}_{suffix}"));
+        }
+    }
+    assert_eq!(w.land().await, Vec::<Uuid>::new());
+    assert_eq!(w.state(landing), LandingState::Green);
+    assert_eq!(w.stage(tickets[0]), Stage::Landing);
+}
