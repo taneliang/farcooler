@@ -30,6 +30,7 @@
 //! | `task_prefix_taken` | another workspace holds it, in any case |
 //! | `name` | an empty name |
 //! | `main_workspace` | deleting Main |
+//! | `landing_history` | deleting a workspace whose landings the engine keeps as history |
 //! | `workspace_not_empty` | deleting a workspace a task, worktree or terminal still names |
 //! | `other_repository` | moving a task, or giving a worktree or terminal, to a workspace in another repository |
 //! | `main_checkout` | assigning a repository's main checkout to a workspace other than Main |
@@ -418,6 +419,13 @@ impl Store {
             .map_err(map_err)?;
         if holds > 0 {
             return Err(DomainError::InvalidArgument { what: "workspace_not_empty" });
+        }
+        // After release landing history is kept, and the delete would cascade into it.
+        if !crate::engine_cutover::legacy_authority(&tx) {
+            let kept: bool = tx
+                .query_row("SELECT EXISTS(SELECT 1 FROM landings WHERE workspace_id = ?1)", params![uuid_blob(id)], |r| r.get(0))
+                .map_err(map_err)?;
+            if kept { return Err(DomainError::InvalidArgument { what: "landing_history" }); }
         }
         tx.execute("DELETE FROM workspaces WHERE id = ?1", params![uuid_blob(id)]).map_err(|e| {
             match map_err(e) {

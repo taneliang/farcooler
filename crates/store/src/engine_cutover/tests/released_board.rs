@@ -247,3 +247,17 @@ fn released_engine_moves_the_card_it_owns_and_leaves_the_catalog_as_it_was() {
     assert_eq!(catalog(), before, "the fences the projection stepped past are back, word for word");
     assert!(s.set_task_status(r.owned, TaskStatus::Todo, Actor::User).is_err(), "and still fence a hand");
 }
+
+#[test]
+fn released_empty_workspace_with_landing_history_says_why_it_stays() {
+    let r = released();
+    let s = &r.store;
+    let repo: uuid::Uuid = s.conn().query_row("SELECT repository_id FROM workspaces WHERE id=?1", [r.ws.as_bytes().as_slice()], |x| Ok(uuid::Uuid::from_slice(&x.get::<_, Vec<u8>>(0)?).unwrap())).unwrap();
+    let empty = s.create_workspace(repo, "Empty", "EM").unwrap();
+    assert!(s.delete_workspace(empty.id).is_ok(), "no landing history: it goes");
+    let kept = s.create_workspace(repo, "Kept", "KP").unwrap();
+    s.conn().execute_batch("DROP TRIGGER engine_fence_landings_i").unwrap();
+    s.conn().execute("INSERT INTO landings(id,workspace_id,number,route,base,pushed_sha,state,state_since,title,collecting,actor,created_at,resource_version) VALUES(x'03030303030303030303030303030303',?1,1,'push','main','sha','landed',2,'t',0,'user',1,1)", [kept.id.as_bytes().as_slice()]).unwrap();
+    let err = s.delete_workspace(kept.id).unwrap_err();
+    assert!(matches!(err, farcooler_core::DomainError::InvalidArgument { what: "landing_history" }), "not the not-empty copy: {err:?}");
+}

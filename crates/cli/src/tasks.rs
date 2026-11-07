@@ -1860,6 +1860,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "role" => "choose a role: shell, agent or orchestrator",
         "task_ids" => "name at least one task to move",
         "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was recorded. run it from outside Far Cooler's panes, or answer in the app",
+        "landing_history" => "this workspace has landing history that is kept, so it can't be deleted",
         "engine_owned" => "this ticket is running in a workflow, so its column follows the run. cancel the run to take it off the workflow",
         // `terminal.agent_answer`'s conflicts (no command here sends `pr.thread_reply`, ov-647).
         "not_held" => "someone already answered this",

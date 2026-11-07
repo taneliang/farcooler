@@ -373,6 +373,7 @@ const SENTENCES: &[(&str, &str)] = &[
         "engine_owned",
         "This ticket is running in a workflow, so its column follows the run. Cancel the run to take it off the workflow.",
     ),
+    ("landing_history", "This workspace has landing history that is kept, so it can't be deleted."),
     ("not_lost", "That terminal isn't lost anymore."),
     // A rep's pane, refused anything but reading the board, messaging and
     // commenting, and an answer or a decision (ov-494, ov-527).
