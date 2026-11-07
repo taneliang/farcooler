@@ -134,6 +134,13 @@ impl Definition {
                 edges.push((i, label, to));
             }
         }
+        // A landing moves the base, so no edge may go back to or across one.
+        for &(from, _, to) in &edges {
+            let Some(to) = to else { continue };
+            if to <= from && (to..=from).any(|l| matches!(self.stages[l].kind, StageKind::Land) && to <= l && l <= from) {
+                return Err(Refusal::Definition);
+            }
+        }
         // Reachability from the first step, and a way to Done.
         let mut seen = vec![false; n];
         let mut todo = vec![0usize];

@@ -174,6 +174,19 @@ fn the_validator_rejects_bad_routes() {
     for (name, edit) in cases { assert_eq!(bad(edit), Err(Refusal::Definition), "{name}"); }
 }
 #[test]
+fn no_route_goes_back_across_a_landing() {
+    // A landing moves the base; going back through it would land on a stale base.
+    for (name, from, to) in [("ci back to the build", 5, "stage-1"), ("ci back to the landing", 5, "stage-4"),
+                             ("landing to itself", 4, "stage-4"), ("landing back to the check", 4, "stage-2")] {
+        let result = bad(|d| { d.stages[from].routes.insert("rejected".into(), Target::Step(to.into())); d.stages[from].limit = 1; });
+        assert_eq!(result, Err(Refusal::Definition), "{name}");
+    }
+    // A back edge that stays after the landing is fine.
+    let mut d = routed();
+    d.stages[5].routes.insert("rejected".into(), Target::Step("stage-5".into())); d.stages[5].limit = 1;
+    assert_eq!(d.validate(), Ok(()));
+}
+#[test]
 fn a_route_cannot_reach_a_step_that_needs_a_candidate_before_one_exists() {
     // The provision step jumps straight to the check: no build has made a candidate.
     // The build stays reachable through the check's own back edge, so only the candidate rule objects.
