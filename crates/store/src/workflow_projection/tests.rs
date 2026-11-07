@@ -168,14 +168,13 @@ fn command(b: &Board, n: &str, command: Command) -> Result<u64, Refusal> {
 fn a_tracked_ticket_sits_in_the_column_the_orchestrator_put_it_in() {
     let b = board();
     enqueue(&b, Definition::ticket());
-    assert_eq!(seen(&b), ("backlog".into(), Some("waiting".into())), "nothing is asked of anyone");
-    for (to, status, stage) in [("todo", "todo", "waiting"), ("doing", "in_progress", "building"),
-        ("review", "in_review", "reviewing"), ("decision", "needs_decision", "needs_you"), ("backlog", "backlog", "waiting")] {
+    assert_eq!(seen(&b), ("backlog".into(), None), "nothing is asked of anyone, and no line is made for it");
+    for (to, status) in [("todo", "todo"), ("doing", "in_progress"), ("review", "in_review"), ("decision", "needs_decision"), ("backlog", "backlog")] {
         command(&b, &format!("move-{to}"), Command::Move { item: b.task.key.clone(), to: to.into() }).unwrap();
-        assert_eq!(seen(&b), (status.into(), Some(stage.into())), "{to}");
+        assert_eq!(seen(&b), (status.into(), None), "{to}: only the column moves");
     }
     command(&b, "close", Command::Move { item: b.task.key.clone(), to: "done".into() }).unwrap();
-    assert_eq!(seen(&b), ("done".into(), Some("landed".into())));
+    assert_eq!(seen(&b).0, "done");
     assert!(b.store.set_task_status(b.task.id, TaskStatus::Todo, Actor::User).is_err(), "the column is final");
 }
 
@@ -219,4 +218,19 @@ fn a_reps_desk_card_is_never_tracked() {
         rusqlite::params![b.ws.as_bytes().as_slice(), handle, b.task.id.as_bytes().as_slice()]).unwrap();
     let tracked: Vec<String> = b.store.untracked_tickets(None).unwrap().into_iter().map(|(_, k, _)| k).collect();
     assert_eq!(tracked, vec![b.other.key.clone()], "only the real card is tracked");
+}
+
+/// Tracking a card must not rewrite the line it is already on: its stage, rank and hold are the board's own
+/// history (ov-962). Only the run that Start makes projects the line.
+#[test]
+fn tracking_a_card_leaves_its_line_rank_and_hold_alone() {
+    let b = board();
+    let line = NewTicketLine { reason: "x".into(), branch: "b".into(), worktree_id: None, worktree_path: "/p".into(), stack_parent: None };
+    b.store.put_on_line(b.task.id, &line, Actor::User).unwrap();
+    b.store.conn().execute("UPDATE ticket_lines SET stage='landing', plan_rank=3, held_off=1 WHERE task_id=?1", [b.task.id.as_bytes().as_slice()]).unwrap();
+    let read = |b: &Board| -> (String, Option<i64>, i64) { b.store.conn().query_row(
+        "SELECT stage, plan_rank, held_off FROM ticket_lines WHERE task_id=?1", [b.task.id.as_bytes().as_slice()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap() };
+    let before = read(&b);
+    enqueue(&b, Definition::ticket());
+    assert_eq!(read(&b), before, "tracking rewrote the line");
 }

@@ -107,10 +107,14 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
         let (status, stage) = place(item);
         let have: Option<String> = tx.query_row("SELECT status FROM tasks WHERE id=?1", [&task], |r| r.get(0)).optional()?;
         let line: Option<String> = tx.query_row("SELECT stage FROM ticket_lines WHERE task_id=?1", [&task], |r| r.get(0)).optional()?;
-        if have.as_deref() != Some(status.as_str()) || line.as_deref() != Some(stage.as_str()) { moves.push((task, status, stage, have, line)); }
+        // A ticket with no run holds only its column. Its line, rank and hold are the board's own history, and
+        // tracking a card must not rewrite them (ov-962); the run that Start makes projects the line.
+        let ticket = item.definition.is_ticket();
+        let differs = have.as_deref() != Some(status.as_str()) || (!ticket && line.as_deref() != Some(stage.as_str()));
+        if differs { moves.push((task, status, stage, have, line, ticket)); }
     }
     if moves.is_empty() { return Ok(Vec::new()); }
-    let moved = moves.iter().filter_map(|(task, to, _, from, _)| Some(BoardMove {
+    let moved = moves.iter().filter_map(|(task, to, _, from, _, _)| Some(BoardMove {
         task: uuid::Uuid::from_slice(task).ok()?, from: from.as_deref().and_then(TaskStatus::parse), to: *to })).collect();
     let saved: Vec<String> = {
         let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (?1,?2,?3) ORDER BY name")?;
@@ -128,16 +132,16 @@ pub type BoardListener = std::sync::Arc<dyn Fn(&[BoardMove]) + Send + Sync>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoardMove { pub task: uuid::Uuid, pub from: Option<TaskStatus>, pub to: TaskStatus }
 /// A card to move: its id, where the run puts it, and what the board has now.
-type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>);
+type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>, bool);
 fn write(tx: &Transaction<'_>, moves: Vec<Move>) -> Result<()> {
     let now = crate::tasks::now_millis();
     let board = |e: DomainError| WorkflowError::Board(e.to_string());
-    for (task, status, stage, have, line) in moves {
+    for (task, status, stage, have, line, ticket) in moves {
         let id = uuid::Uuid::from_slice(&task).map_err(|e| WorkflowError::Board(e.to_string()))?;
         if let Some(from) = have.as_deref().and_then(TaskStatus::parse).filter(|from| *from != status) {
             crate::tasks::move_in(tx, id, from, status, Actor::Runner, now).map_err(board)?;
         }
-        if line.as_deref() == Some(stage.as_str()) { continue; }
+        if ticket || line.as_deref() == Some(stage.as_str()) { continue; }
         if line.is_none() {
             tx.execute("INSERT INTO ticket_lines (task_id, stage, stage_since, created_at, resource_version) VALUES (?1, ?2, ?3, ?3, 1)",
                 params![task, stage.as_str(), now])?;
