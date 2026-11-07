@@ -363,7 +363,8 @@ fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
         || e.policy_pin != item.policy_pin
     { return Err(Refusal::Evidence); }
     if matches!(item.definition.stages[item.stage].kind,
-        StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci | StageKind::Tracker | StageKind::Evaluate(_))
+        StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci | StageKind::Tracker | StageKind::Evaluate(_)
+        | StageKind::Run | StageKind::Push | StageKind::AwaitCi)
         && item.candidate.as_ref() != Some(&e.candidate)
     { return Err(Refusal::Evidence); }
     Ok(())

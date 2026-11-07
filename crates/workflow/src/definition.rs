@@ -14,6 +14,16 @@ pub enum StageKind {
     /// result as a label: `passed`, `rejected`, or `dropped`. `adopt` takes the group's result as
     /// the ticket's candidate.
     Join { group: String, adopt: bool },
+    /// Group steps. Wait for the target's head (green, if the step says so) and take it as the base.
+    AwaitBase,
+    /// Group steps. Apply each member's commits, in order, onto the base in a fresh tree.
+    Fold,
+    /// Run one pinned command on the candidate and judge it by its exit.
+    Run,
+    /// Group steps. Push the candidate to the target once, only while the base it was gated on is current.
+    Push,
+    /// Wait for CI on the candidate: one effect, polled inside.
+    AwaitCi,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSpec {
@@ -92,6 +102,11 @@ impl Definition {
                 || stage.operation.environment.len() > 32
                 || stage.operation.environment.iter().any(|(k, v)| !valid_id(k) || v.len() > 4096 || v.contains('\0'))
             { return Err(Refusal::Definition); }
+            // Landing verbs are routed (schema 2); the ones that act on a group's members are for groups.
+            if !routed && is_verb(&stage.kind) { return Err(Refusal::Definition); }
+            if !in_group && matches!(stage.kind, StageKind::Fold | StageKind::AwaitBase | StageKind::Push) {
+                return Err(Refusal::Definition);
+            }
             match stage.kind {
                 // Routed definitions check candidate availability along their edges instead.
                 _ if routed => {}
@@ -172,6 +187,11 @@ impl Definition {
             if matches!(stage.kind, StageKind::Join { .. }) { labels.push("dropped"); }
             for (label, target) in &stage.routes {
                 if !valid_id(label) || !can_emit(&stage.kind, label) { return Err(Refusal::Definition); }
+                // A rejected gate must stop, retry or split: falling forward or finishing would push or adopt what failed.
+                if label == "rejected" && matches!(stage.kind, StageKind::Run | StageKind::Check)
+                    && self.stages.iter().any(|s| matches!(s.kind, StageKind::Push))
+                    && (matches!(target, Target::Done) || matches!(target, Target::Step(id) if index.get(id.as_str()).is_some_and(|&to| to > i)))
+                { return Err(Refusal::Definition); }
                 if !labels.contains(&label.as_str()) { labels.push(label); }
                 match target {
                     Target::Step(id) => {
@@ -186,7 +206,7 @@ impl Definition {
                         // Both halves start over, so the step must discard the candidate the group had.
                         if !makes_candidate_anew(&self.stages[to].kind) { return Err(Refusal::Definition); }
                         // The second half would run again what the first already landed.
-                        if self.stages[..=i].iter().any(|s| matches!(s.kind, StageKind::Land)) { return Err(Refusal::Definition); }
+                        if self.stages[..=i].iter().any(|s| lands(&s.kind)) { return Err(Refusal::Definition); }
                         match &**otherwise {
                             Target::Step(id) if !index.contains_key(id.as_str()) => return Err(Refusal::Definition),
                             Target::Split { .. } => return Err(Refusal::Definition),
@@ -220,10 +240,20 @@ impl Definition {
                 }
             }
         }
-        // A landing moves the base, so no edge may go back to or across one.
-        for &(from, _, to) in &edges {
+        // A landing moves the base, so no edge may go back to or across one. The one exception is a
+        // push the remote refused (`base_moved`): nothing landed, so it goes back to start from the new base.
+        for &(from, label, to) in &edges {
             let Some(to) = to else { continue };
-            if to <= from && (to..=from).any(|l| matches!(self.stages[l].kind, StageKind::Land) && to <= l && l <= from) {
+            let refused_push = label == "base_moved" && matches!(self.stages[from].kind, StageKind::Push);
+            if to <= from && (to..=from).any(|l| lands(&self.stages[l].kind) && !(refused_push && l == from)) {
+                return Err(Refusal::Definition);
+            }
+        }
+        // A push needs a check after the last step that changed what it pushes.
+        for (p, stage) in self.stages.iter().enumerate().filter(|(_, s)| matches!(s.kind, StageKind::Push)) {
+            let changed = self.stages[..p].iter().rposition(|s| makes_candidate(&s.kind)).ok_or(Refusal::Definition)?;
+            let _ = stage;
+            if !self.stages[changed + 1..p].iter().any(|s| matches!(s.kind, StageKind::Run | StageKind::Check | StageKind::Evaluate(_))) {
                 return Err(Refusal::Definition);
             }
         }
@@ -284,17 +314,30 @@ pub const MAX_GROUP_MEMBERS: u8 = 32;
 pub fn can_emit(kind: &StageKind, label: &str) -> bool {
     matches!(label, "passed" | "rejected")
         || (label == "dropped" && matches!(kind, StageKind::Join { .. }))
+        || (label == "conflict" && matches!(kind, StageKind::Fold))
+        || (label == "base_moved" && matches!(kind, StageKind::Push))
+        || (label == "timeout" && matches!(kind, StageKind::AwaitBase | StageKind::AwaitCi))
+        || (label == "cancelled" && matches!(kind, StageKind::AwaitCi))
         || matches!(kind, StageKind::Check | StageKind::Action(_) | StageKind::Evaluate(_))
 }
+/// The landing verbs: all of them need routes, so they are for schema 2.
+fn is_verb(kind: &StageKind) -> bool {
+    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi)
+}
+/// Steps that move the base. Nothing after one may run its group over again.
+pub fn lands(kind: &StageKind) -> bool { matches!(kind, StageKind::Land | StageKind::Push) }
 fn needs_candidate(kind: &StageKind) -> bool {
     matches!(kind, StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci
-        | StageKind::Tracker | StageKind::Evaluate(_) | StageKind::Join { .. })
+        | StageKind::Tracker | StageKind::Evaluate(_) | StageKind::Join { .. }
+        | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi)
 }
+/// What a step's result becomes the item's candidate. Waiting for the base takes the base as the
+/// candidate, which the fold then builds on and replaces.
 pub fn makes_candidate(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::Tracker)
+    matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::Tracker | StageKind::AwaitBase | StageKind::Fold)
 }
 /// Entering these discards the old candidate, because they are about to make a new one.
-pub fn makes_candidate_anew(kind: &StageKind) -> bool { matches!(kind, StageKind::Build | StageKind::Action(_)) }
+pub fn makes_candidate_anew(kind: &StageKind) -> bool { matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::AwaitBase) }
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_:./".contains(&b))
