@@ -79,7 +79,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     if let Some(reason) = reason {
                         if *passed || !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
                         if item.last_evidence.as_ref() != Some(evidence) { return Err(Refusal::Evidence); }
-                        if item.iteration >= item.definition.max_reworks { return Err(Refusal::Limit); }
+                        if item.definition.schema == 2 { rework_room(&item, "rejected")?; }
+                        else if item.iteration >= item.definition.max_reworks { return Err(Refusal::Limit); }
                         item.rework_history.push(ReworkDecision {
                             id: input.id.clone(), principal: p.clone(), revision: input.expected_revision,
                             run: item.run.clone(), definition_pin: item.pin.clone(), evidence: evidence.clone(),
@@ -117,7 +118,16 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             item.phase = Phase::Cancelled;
                             item.pending = None;
                         }
-                        Outcome::Labeled(..) => { return Err(Refusal::Invalid); }
+                        Outcome::Labeled(label, evidence) => {
+                            if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
+                            let stage = &item.definition.stages[item.stage];
+                            if item.definition.schema != 2 { return Err(Refusal::Invalid); }
+                            if !(matches!(label.as_str(), "passed" | "rejected") || stage.routes.contains_key(label)) {
+                                return Err(Refusal::Evidence);
+                            }
+                            evidence_matches(&item, evidence)?;
+                            route(&mut item, id, input, label, evidence, &mut effects)?;
+                        }
                         Outcome::Passed(evidence) | Outcome::Rejected(evidence) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
@@ -151,7 +161,16 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         emit(&mut item, id, input, EffectKind::Stop { operation }, &mut effects);
                     } else { item.phase = Phase::Cancelled; }
                 }
-                Command::Retry { .. } => { return Err(Refusal::Phase); }
+                Command::Retry { .. } => {
+                    controller(input)?;
+                    // A failed run does not own its resource, so a retry queues like new work.
+                    if item.phase != Phase::Failed { return Err(Refusal::Phase); }
+                    if item.retries >= MAX_RETRIES { return Err(Refusal::Limit); }
+                    item.retries += 1;
+                    item.attempt = 1;
+                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    item.phase = Phase::Blocked;
+                }
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             }
             next.items.insert(id.clone(), item);
@@ -250,6 +269,9 @@ fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
 fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evidence,
     effects: &mut Vec<Effect>) -> Result<(), Refusal>
 {
+    if item.definition.schema == 2 {
+        return route(item, id, input, if passed { "passed" } else { "rejected" }, evidence, effects);
+    }
     item.pending = None;
     item.last_evidence = Some(evidence.clone());
     if !passed {
@@ -277,6 +299,59 @@ fn finish(item: &mut Item, id: &str, input: &Input, passed: bool, evidence: &Evi
     else { enter(item, id, input, effects) }
 }
 
+/// Where a label goes from the current step: its route, else forward on `passed` and to `Fail`.
+fn target_of(item: &Item, label: &str) -> Target {
+    let stage = &item.definition.stages[item.stage];
+    stage.routes.get(label).cloned().unwrap_or_else(|| match label {
+        "passed" if item.stage + 1 < item.definition.stages.len() =>
+            Target::Step(item.definition.stages[item.stage + 1].id.clone()),
+        "passed" => Target::Done,
+        _ => Target::Fail,
+    })
+}
+fn is_back_edge(item: &Item, target: &Target) -> bool {
+    matches!(target, Target::Step(to) if item.definition.stages.iter().position(|s| &s.id == to)
+        .is_some_and(|t| t <= item.stage))
+}
+/// Whether the step's route for `label` is a back edge with room left to take it.
+fn rework_room(item: &Item, label: &str) -> Result<(), Refusal> {
+    if !is_back_edge(item, &target_of(item, label)) { return Err(Refusal::Invalid); }
+    let stage = &item.definition.stages[item.stage];
+    if item.back_edges.get(&stage.id).copied().unwrap_or(0) >= stage.limit { return Err(Refusal::Limit); }
+    Ok(())
+}
+/// Schema 2: take the route a label names. A back edge past its limit fails the run instead.
+fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: &Evidence,
+    effects: &mut Vec<Effect>) -> Result<(), Refusal>
+{
+    item.pending = None;
+    item.last_evidence = Some(evidence.clone());
+    let stage = &item.definition.stages[item.stage];
+    if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }
+    let target = target_of(item, label);
+    let to = match &target {
+        Target::Fail => { item.phase = Phase::Failed; return Ok(()); }
+        Target::Done => {
+            item.stage = item.definition.stages.len();
+            item.phase = Phase::Done;
+            return Ok(());
+        }
+        Target::Step(to) => item.definition.stages.iter().position(|s| &s.id == to).ok_or(Refusal::Definition)?,
+    };
+    if is_back_edge(item, &target) {
+        let (key, limit) = (stage.id.clone(), stage.limit);
+        let taken = item.back_edges.get(&key).copied().unwrap_or(0);
+        if taken >= limit { item.phase = Phase::Failed; return Ok(()); }
+        item.back_edges.insert(key, taken + 1);
+        item.iteration = item.iteration.checked_add(1).ok_or(Refusal::Limit)?;
+    }
+    if makes_candidate_anew(&item.definition.stages[to].kind) { item.candidate = None; }
+    item.stage = to;
+    item.attempt = 1;
+    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+    enter(item, id, input, effects)
+}
+
 fn valid_state(state: &State) -> bool {
     valid_id(&state.workspace) && state.epoch > 0 && state.items.len() <= 1024
         && state.archive.iter().all(|(id, a)| valid_id(id) && !state.items.contains_key(id)
@@ -285,7 +360,12 @@ fn valid_state(state: &State) -> bool {
         && state.items.iter().all(|(id, item)| {
             valid_id(id) && item.definition.validate().is_ok() && item.pin == item.definition.pin()
                 && valid_id(&item.policy_pin) && valid_id(&item.resource)
-                && item.iteration <= item.definition.max_reworks
+                && if item.definition.schema == 2 {
+                    usize::from(item.iteration) == item.back_edges.values().map(|n| usize::from(*n)).sum::<usize>()
+                        && item.back_edges.iter().all(|(stage, taken)| item.definition.stages.iter()
+                            .any(|s| &s.id == stage && s.limit >= *taken))
+                    } else { item.iteration <= item.definition.max_reworks && item.back_edges.is_empty() }
+                && item.retries <= MAX_RETRIES
                 && item.rework_history.len() <= usize::from(item.iteration)
                 && item.rework_history.iter().enumerate().all(|(index, r)|
                     valid_id(&r.id) && valid_id(&r.principal) && valid_id(&r.run)
