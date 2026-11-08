@@ -338,6 +338,8 @@ AGENTKIT_SOURCES = [
     "StepUpSigner.swift",
     "PhoneApproval.swift",
     "AppLock.swift",
+    # The model a phone says at pairing (ov-989), sent in its offer by Ceremony/CeremonyStore.swift.
+    "PhoneModel.swift",
     # The corner steps, `Radius.small`, `.medium` and `.large`, and the shapes
     # drawn from them (ov-226). The phone's views name a step by its job
     # instead of spelling a number, as the Mac's do. It reads `GlancePalette`,

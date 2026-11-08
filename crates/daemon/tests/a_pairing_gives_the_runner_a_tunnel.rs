@@ -175,6 +175,7 @@ fn pairing(public_key: &str, client_id: &str, node_key: &str) -> ClientEnroll {
         for_teammate: false,
         step_up_key: None,
         teammate: None,
+        model: String::new(),
     }
 }
 
