@@ -25,12 +25,12 @@ enum Hold {
     AtRest { run: String, pin: String },
     /// An item with a run of its own, or one that has closed.
     Taken(&'static str),
+    /// A ticket that goes where another ticket's run goes (ov-970): the lead's key.
+    Follows(String),
 }
 
 /// Why a closed ticket can't be dispatched.
 const CLOSED: &str = "has closed under the engine";
-/// Why a ticket that follows another's run can't be dispatched (ov-970).
-const FOLLOWS: &str = "follows another ticket's run";
 
 /// The state and published pin one `workflow get` answered.
 struct Snapshot {
@@ -87,7 +87,7 @@ impl Snapshot {
         };
         let ticket = item.pointer("/definition/source").and_then(Value::as_str) == Some("ticket/v1");
         // It goes where another ticket's run goes (ov-970), so it isn't free to start.
-        if item.get("follows").is_some_and(|f| !f.is_null()) { return Hold::Taken(FOLLOWS); }
+        if let Some(lead) = item.get("follows").and_then(Value::as_str) { return Hold::Follows(lead.into()); }
         match (ticket, item.get("phase").and_then(Value::as_str)) {
             (true, Some("WaitingApproval")) => Hold::AtRest {
                 run: item.get("run").and_then(Value::as_str).unwrap_or_default().into(),
@@ -96,6 +96,15 @@ impl Snapshot {
             (true, _) => Hold::Taken(CLOSED),
             (false, _) => Hold::Taken("already has a run under the engine"),
         }
+    }
+}
+
+/// "a, b and c".
+fn listed(items: &[impl AsRef<str>]) -> String {
+    let items: Vec<&str> = items.iter().map(AsRef::as_ref).collect();
+    match items.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        _ => items.join(""),
     }
 }
 
@@ -113,18 +122,26 @@ pub(super) enum Engine {
 }
 
 /// How the engine's refusal reads to the person who asked. `key` is the ticket, for a command to run.
-fn refusal_words(refusal: &str, key: &str) -> String {
+fn refusal_words(refusal: &str, keys: &[&str]) -> String {
+    // A Start on several tickets is refused for whichever of them caused it, and the engine doesn't say which.
+    let several = keys.len() > 1;
     String::from(match refusal {
         "Stale" => "the board moved while it was starting",
+        "Phase" if several => "one of them isn't waiting to be started any more",
         "Phase" => "it isn't waiting to be started any more",
         // The store refuses a Start this way while the card has open subagent records or blocks, which a run would
         // fence and so never settle (ov-965). The orchestrator settles those, so say how.
+        "Resource" if several => return format!("something else holds what they need, or a subagent still works one of them or one \
+            has a block. End their subagents with `farcooler agent end <agent> --verdict stopped`, clear their blocks with {}, \
+            and dispatch again", listed(&keys.iter().map(|k| format!("`farcooler task block {k} --on <key> --clear`")).collect::<Vec<_>>())),
         "Resource" => return format!("something else holds what it needs, or a subagent still works it or it has a block. \
             End its subagents with `farcooler agent end <agent> --verdict stopped`, clear its blocks with \
-            `farcooler task block {key} --on <key> --clear`, and dispatch again"),
+            `farcooler task block {} --on <key> --clear`, and dispatch again", keys[0]),
+        "Blocked" if several => "one of them is waiting on another ticket",
         "Blocked" => "it's waiting on another ticket",
         "Limit" => "the board's limit on runs is reached",
         "Unauthorized" => "this seat can't start it",
+        "Missing" if several => "the engine doesn't have one of them",
         "Missing" => "the engine doesn't have it",
         "Duplicate" => "it was already started",
         "Definition" | "Invalid" => "the published workflow doesn't fit it",
@@ -191,11 +208,16 @@ pub(super) async fn through_engine<L: DispatchLink>(
     };
     let held: Vec<Hold> = tickets.iter().map(|t| seen.hold(&t.key)).collect();
     if held.iter().all(|h| *h == Hold::None) { return pane(false); }
+    if let Some((t, Hold::Follows(lead))) = tickets.iter().zip(&held).find(|(_, h)| matches!(h, Hold::Follows(_))) {
+        return Err(format!("{t} follows {lead}'s run, so it can't be dispatched. Its card goes where that run goes. If it needs more \
+            work, send {lead} back with `farcooler workflow send-back {workspace} {lead} --run <run> --pin <pin> --reason <why>`. To work on \
+            {t} alone, cancel {lead}'s run with `farcooler workflow cancel {workspace} {lead} --run <run> --pin <pin>`, which hands {t} back.",
+            t = t.key).into());
+    }
     if let Some((t, Hold::Taken(why))) = tickets.iter().zip(&held).find(|(_, h)| matches!(h, Hold::Taken(_))) {
         // A closed ticket comes back through the engine (ov-968); one with a run is sent back, not dispatched again.
         let next = match *why {
             CLOSED => format!("Reopen it with `farcooler workflow reopen {workspace} {}`, then dispatch again", t.key),
-            FOLLOWS => "Its card goes where that run goes; send the run back with `farcooler workflow send-back` if it needs more work".into(),
             _ => "Send it back to its build step with `farcooler workflow send-back`".into(),
         };
         return Err(format!("{} {why}, so it can't be dispatched. {next}.", t.key).into());
@@ -238,13 +260,11 @@ pub(super) async fn through_engine<L: DispatchLink>(
         let Some(refusal) = value.pointer("/receipt/result/Err") else { break };
         let said = refusal.as_str().map_or_else(|| refusal.to_string(), String::from);
         if said == "Stale" && !retried { retried = true; continue; }
-        return Err(format!("The engine didn't start {}: {}.", lead.key, refusal_words(&said, &lead.key)).into());
+        let keys: Vec<&str> = tickets.iter().map(|t| t.key.as_str()).collect();
+        return Err(format!("The engine didn't start {}: {}.", listed(&keys), refusal_words(&said, &keys)).into());
     }
     let started: Vec<String> = tickets.iter().map(|t| t.key.clone()).collect();
-    let list = match started.split_last() {
-        Some((last, rest)) if !rest.is_empty() => format!("{} and {last} together, as one run", rest.join(", ")),
-        _ => started.join(""),
-    };
+    let list = if started.len() > 1 { format!("{} together, as one run", listed(&started)) } else { listed(&started) };
     if let (Some(tree), false) = (worktree, json) {
         return Ok(Engine::Started(format!(
             "The engine is starting {list} in the worktree {}, on the branch {}. The run makes the worktree, which the app lists, from main as it is now, and starts its own agent under the board's published workflow, so no pane was opened here.\nWatch it with `farcooler workflow get {workspace}`.",

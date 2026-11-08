@@ -194,7 +194,9 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
                 |Command::SendBack {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::Advance => None,
         };
-        let quarantined=target.is_some_and(|resource|blocked.contains(resource));
+        // A Start takes its followers with it (ov-970), so their quarantine holds it back as the lead's does.
+        let followers:Vec<&str>=match &input.command { Command::Start {with,..} => with.iter().filter_map(|f|state.items.get(f)).map(|i|i.resource.as_str()).collect(), _ => Vec::new() };
+        let quarantined=target.into_iter().chain(followers).any(|resource|blocked.contains(resource));
         admitted.busy_resources.extend(blocked.iter().filter(|resource|relevant.contains(*resource)).cloned());
         let mut result = if quarantined { Err(Refusal::Resource) } else if raw.is_none() && input.grant != Grant::Controller {
             Err(Refusal::Unauthorized)

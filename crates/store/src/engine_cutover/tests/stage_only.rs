@@ -524,3 +524,23 @@ fn a_followers_line_ends_where_its_run_ends() {
         }
     }
 }
+
+/// ov-970: a quarantined resource holds a Start back whether it's the lead's or a follower's, since the run takes both.
+#[test]
+fn a_start_is_held_back_by_a_followers_quarantine() {
+    let b = board(Phase::Legacy);
+    let s = &b.store;
+    let follower = s.create_task(b.ws, "follower", Actor::User).unwrap();
+    let definition = Definition::ticket();
+    let policy_pin = s.workflow_ticket_bundle(&definition).unwrap();
+    assert!(b.apply("follower", Command::Enqueue { item: follower.key.clone(), policy_pin, resource: "own-follower".into(),
+        dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition }).result.is_ok());
+    s.conn().execute("INSERT INTO engine_cutover_quarantine VALUES('own-follower','held for the test')", []).unwrap();
+    let tracker = Definition::tracker("owner");
+    let start = |id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+        dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None,
+        with: vec![follower.key.clone()] }).result;
+    assert_eq!(start("start-1"), Err(farcooler_workflow::Refusal::Resource), "the follower's quarantine holds the run back");
+    s.conn().execute("DELETE FROM engine_cutover_quarantine WHERE resource='own-follower'", []).unwrap();
+    assert!(start("start-2").is_ok(), "lifted, it starts");
+}

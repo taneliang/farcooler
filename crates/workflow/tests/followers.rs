@@ -107,3 +107,13 @@ fn followers_must_be_distinct_tickets_at_rest() {
     assert_eq!(log.start("ov-3", &["ov-1"]), Err(Refusal::Phase), "a run, not a ticket at rest");
     assert!(log.state.items["ov-3"].follows.is_none() && log.phase("ov-3") == Phase::WaitingApproval, "a refusal changes nothing");
 }
+
+#[test]
+fn a_ticket_is_never_claimed_by_two_leads() {
+    let mut log = three();
+    log.start("ov-1", &["ov-2"]).unwrap();
+    // A state where a second lead names a ticket that follows the first is refused before any command reads it.
+    log.state.items.get_mut("ov-3").unwrap().followers = vec!["ov-2".into()];
+    assert_eq!(log.try_run(Command::Cancel { item: "ov-1".into() }, Grant::Controller), Err(Refusal::Invalid));
+    // (A closed lead's list is history, and its tickets have let go: `one_run_carries_three_tickets…` goes on past one.)
+}

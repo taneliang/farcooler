@@ -307,7 +307,15 @@ async fn a_builder_on_tracked_tickets_goes_through_one_start() {
     let mut link = with_engine(&held);
     link.engine.as_mut().unwrap()["state"]["items"]["ov-3"]["follows"] = json!("ov-9");
     let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3").await.unwrap_err().to_string();
-    assert!(said.starts_with("ov-3 follows another ticket's run, so it can't be dispatched."), "{said}");
+    // It names the run it follows and what to do about it there (ov-970 review).
+    assert!(said.starts_with("ov-3 follows ov-9's run, so it can't be dispatched."), "{said}");
+    assert!(said.contains("farcooler workflow send-back ") && said.contains(" ov-9 ") && said.contains("farcooler workflow cancel "), "{said}");
+    // A refusal that one of several tickets caused is said of all of them, so the orchestrator looks at each.
+    let mut link = with_engine(&held);
+    link.refuse_start = Some("Resource");
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3").await.unwrap_err().to_string();
+    assert!(said.starts_with("The engine didn't start ov-2 and ov-3: "), "{said}");
+    assert!(said.contains("`farcooler task block ov-2 --on <key> --clear`") && said.contains("`farcooler task block ov-3 --on <key> --clear`"), "{said}");
     let mut link = with_engine(&[("ov-2", "ticket/v1", "Done")]);
     let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
     assert!(said.contains("Reopen it with `farcooler workflow reopen "), "{said}");

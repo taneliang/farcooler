@@ -691,6 +691,9 @@ fn valid_state(state: &State) -> bool {
                 && item.sent_back.iter().all(|b| valid_id(&b.id) && valid_rework_reason(&b.reason))
                 && item.brief.as_deref().is_none_or(valid_rework_reason)
                 && item.followers.len() <= usize::from(MAX_GROUP_MEMBERS)
+                // A live lead's tickets follow it and no other; a closed one's list is history, as they've let go.
+                && (matches!(item.phase, Phase::Done | Phase::Cancelled)
+                    || item.followers.iter().all(|f| state.items.get(f).is_some_and(|t| t.follows.as_deref() == Some(id.as_str()))))
                 && item.follows.as_ref().is_none_or(|lead| item.definition.is_ticket() && item.phase == Phase::WaitingApproval
                     && item.followers.is_empty() && state.items.get(lead).is_some_and(|l| l.followers.iter().any(|f| f == id)))
                 && if item.phase == Phase::Done { item.stage == item.definition.stages.len() }
