@@ -118,6 +118,38 @@ impl Store {
         tx.commit().map_err(map_err)
     }
 
+    /// Record that `by` vouched for `device`'s trusted key with the owner
+    /// present (ov-974, B1): the Mac app with Touch ID, or a device the owner
+    /// already vouched for, with its own step-up. Bound to the key's bytes, so
+    /// a new key under the id is vouched by nobody. Refused `key_untrusted`
+    /// for a device whose key isn't trusted.
+    pub fn vouch_step_up_key(&self, device: &str, by: &str) -> Result<()> {
+        let key = self.step_up_key(device)?.filter(|k| k.trusted).ok_or(DomainError::Conflict { what: "key_untrusted" })?;
+        self.conn()
+            .execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![vouch_key(device), format!("{} {by}", fingerprint(&key))],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Who vouched for `device`'s key as it is now, if anyone did and it is
+    /// still trusted. Kept in `meta` rather than a column, so no migration
+    /// lands this close to the engine cutover.
+    pub fn step_up_vouched_by(&self, device: &str) -> Result<Option<String>> {
+        let Some(key) = self.step_up_key(device)?.filter(|k| k.trusted) else { return Ok(None) };
+        let said: Option<String> =
+            self.conn().query_row("SELECT value FROM meta WHERE key = ?1", [vouch_key(device)], |r| r.get(0)).optional().map_err(map_err)?;
+        Ok(said.and_then(|said| said.strip_prefix(&format!("{} ", fingerprint(&key))).map(str::to_string)))
+    }
+
+    /// Forget who vouched for `device`'s key: its rows are going (a revoke).
+    pub(crate) fn forget_vouch_in(tx: &rusqlite::Transaction, device: &str) -> Result<()> {
+        tx.execute("DELETE FROM meta WHERE key = ?1", [vouch_key(device)]).map_err(map_err)?;
+        Ok(())
+    }
+
     /// Accept a WebAuthn signature counter of `count` for `device`: refused
     /// `step_up_replayed` when it didn't move forward (a cloned authenticator
     /// or a replay). A counter that is 0 before and after is an authenticator
@@ -135,6 +167,16 @@ impl Store {
         conn.execute("UPDATE step_up_keys SET sign_count = ?2 WHERE client_id = ?1", params![device, count]).map_err(map_err)?;
         Ok(())
     }
+}
+
+fn vouch_key(device: &str) -> String {
+    format!("step_up_vouch:{device}")
+}
+
+/// A key as a vouch names it: its algorithm and its bytes, in hex.
+fn fingerprint(key: &StepUpKeyRow) -> String {
+    let hex: String = key.public_key.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{}:{hex}", key.alg)
 }
 
 #[cfg(test)]
@@ -177,6 +219,28 @@ mod tests {
             assert!(matches!(s.put_step_up_key("pad-b", "p256-sha256", &[6; 65], trusted, 3_000), Err(DomainError::Conflict { what: "key_exists" })));
         }
         assert_eq!(s.step_up_key("pad-b").unwrap().unwrap().public_key, vec![5; 65]);
+    }
+
+    /// A vouch names the key it was given for: a proposal can't be vouched,
+    /// a new key under the id (after a revoke) is vouched by nobody, and a
+    /// revoke forgets it.
+    #[test]
+    fn a_vouch_holds_for_its_key_alone() {
+        let s = store();
+        s.put_step_up_key("pad-b", "p256-sha256", &[4; 65], false, 1_000).unwrap();
+        assert!(matches!(s.vouch_step_up_key("pad-b", "local:app"), Err(DomainError::Conflict { what: "key_untrusted" })));
+        assert_eq!(s.step_up_vouched_by("pad-b").unwrap(), None);
+        s.trust_step_up_key("pad-b", 1_000).unwrap();
+        assert_eq!(s.step_up_vouched_by("pad-b").unwrap(), None, "trusted is not vouched");
+        s.vouch_step_up_key("pad-b", "local:app").unwrap();
+        assert_eq!(s.step_up_vouched_by("pad-b").unwrap().as_deref(), Some("local:app"));
+        // Another key under the id, its vouch written behind the store's back.
+        s.conn().execute("UPDATE step_up_keys SET pubkey = ?1 WHERE client_id = 'pad-b'", [vec![5u8; 65]]).unwrap();
+        assert_eq!(s.step_up_vouched_by("pad-b").unwrap(), None, "a vouch for another key");
+        s.conn().execute("UPDATE step_up_keys SET pubkey = ?1 WHERE client_id = 'pad-b'", [vec![4u8; 65]]).unwrap();
+        s.clear_device_rows("pad-b").unwrap();
+        s.put_step_up_key("pad-b", "p256-sha256", &[4; 65], true, 2_000).unwrap();
+        assert_eq!(s.step_up_vouched_by("pad-b").unwrap(), None, "a revoke forgets the vouch, even for the same key again");
     }
 
     /// A counter that stands still or goes back is refused; one that never

@@ -103,6 +103,14 @@ pub(crate) async fn dispatch(
             } else {
                 (crate::caller_seat::Seat::Person, "cli")
             };
+            // A grant signed with a key that can't say the owner was there (a
+            // phone trusted on the walk alone, or the app's key from something
+            // that isn't the app) is refused outright, so the phone says what
+            // to do rather than sending an answer that grants nothing (B1).
+            if stepped.is_some() && said_from == "cli" && crate::cutover_grant::is_grant(&p.body) {
+                tracing::warn!("refused: a signed cutover grant from a key nobody vouched for");
+                return Err(DomainError::Conflict { what: "key_unvouched" });
+            }
             Ok(result::Value::TaskNote(crate::task_ops::note_from(svc, watcher, &p, seat, said_from)?))
         }
 

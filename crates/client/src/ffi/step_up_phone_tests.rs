@@ -198,6 +198,14 @@ async fn the_owners_signed_cutover_answer_goes_through_the_bridge() {
     dispatch(&session, "task.note", &args).await.expect("a plain answer is still an answer");
     assert_eq!(find(store, workspace, now()).unwrap(), None, "unsigned, it grants nothing");
 
+    // Trusted on the walk alone, the key signs and the grant is refused,
+    // until the owner vouches for it with presence (B1 of the second review).
+    let prepared = begin(&session, "task.note", args.clone(), &pin).await;
+    let signature = key.sign(&base64::decode(prepared["statement"].as_str().unwrap()).unwrap());
+    let unvouched = dispatch(&session, "step_up.finish", &json!({ "token": prepared["token"], "signature": signature })).await;
+    { let said = refusal(unvouched); assert!(said.contains("key_unvouched"), "{said}"); }
+    store.vouch_step_up_key("phone-o", "local:app").unwrap();
+
     let prepared = begin(&session, "task.note", args.clone(), &pin).await;
     let signature = key.sign(&base64::decode(prepared["statement"].as_str().unwrap()).unwrap());
     let said = dispatch(&session, "step_up.finish", &json!({ "token": prepared["token"], "signature": signature })).await.expect("a signed answer");

@@ -26,7 +26,13 @@
 //!   it;
 //! - `device`: the answer carries a step-up (ov-856) signed by the owner's
 //!   phone's trusted key over this very request (`step_up::OPTIONAL`), the key
-//!   that asks for Face ID or the passcode; a browser's passkey doesn't count;
+//!   that asks for Face ID or the passcode; a browser's passkey doesn't count.
+//!   The device must be bound to the owner (`owner_devices`, confirmed), and
+//!   its key vouched for with the owner present: approved by the Mac app with
+//!   Touch ID, or by a device of theirs already vouched for, with its own
+//!   step-up (`step_up_rpc::vouch_of`). A key trusted on the walk alone (the
+//!   CLI's `people approve`, the socket's `set_step_up_key` or enroll) signs
+//!   admin actions as before, and never a grant;
 //! - `cli`: anything else, the CLI in any terminal included.
 //!
 //! Only `app` and `device` grant.
@@ -51,9 +57,16 @@ const SPENDS: &str = "cutover_grant";
 /// `device` or `cli`. `stepped` is the request's verified step-up, if any.
 /// See this module's docs.
 pub fn said_from(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, stepped: Option<&crate::step_up::Stepped>) -> &'static str {
-    said_from_with(peer, caller_pid, stepped,
-        || crate::people::person_of(&svc.store, peer).is_ok_and(|p| p == crate::people::Person::Owner),
-        &crate::caller_seat::is_own_app)
+    said_from_with(peer, caller_pid, stepped, || peer.client_id.as_deref().is_some_and(|device| owners_vouched_device(&svc.store, device)), &crate::caller_seat::is_own_app)
+}
+
+/// Whether `device` is the owner's by the positive binding, and its key is
+/// one the owner vouched for with presence (B1 of the second review): a key
+/// trusted from the socket on the process walk alone never grants, and nor
+/// does a device nobody bound ("unknown, so the owner's").
+pub(crate) fn owners_vouched_device(store: &Store, device: &str) -> bool {
+    let owners = crate::people::person_of_device(store, Some(device)).is_ok_and(|p| p == crate::people::Person::Owner);
+    owners && store.is_confirmed_owner_device(device).unwrap_or(false) && store.step_up_vouched_by(device).ok().flatten().is_some()
 }
 
 /// `said_from` with its reads given. A device says it with its own step-up
@@ -115,6 +128,9 @@ pub fn find(store: &Store, workspace: Uuid, now_ms: i64) -> Result<Option<Grant>
 }
 
 fn same(a: &str, b: &str) -> bool { a.trim().to_lowercase() == b.trim().to_lowercase() }
+
+/// Whether `body` is the owner's [`ALLOW`], as the apps send it.
+pub fn is_grant(body: &str) -> bool { same(body, ALLOW) }
 
 /// The owner's own `ALLOW`, said from the app or a device, young enough.
 fn grants(note: &TaskNote, now_ms: i64) -> bool {

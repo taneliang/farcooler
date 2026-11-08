@@ -13,6 +13,10 @@
 //!   their hand, not a label the proposer chose. It comes from the socket
 //!   outside a pane, or from another trusted device of the same person, with
 //!   its own step-up. A proposal older than ten minutes is refused.
+//! - **A vouch says the owner was there** (ov-974): an approval by the Mac
+//!   app with Touch ID, or by a device of the owner's already vouched for,
+//!   also vouches for the key ([`vouch_of`]). Only a vouched key signs a
+//!   cutover grant.
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, request, result};
@@ -114,9 +118,36 @@ pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, steppe
         return Err(DomainError::Conflict { what: "wrong_code" });
     }
     svc.store.trust_step_up_key(target, now_ms())?;
+    if let Some(by) = vouch_of(&svc.store, peer, caller_pid, stepped, &crate::caller_seat::is_own_app)? {
+        svc.store.vouch_step_up_key(target, &by)?;
+        tracing::info!(device = target, by = %by, "a step-up key was vouched for with its owner present");
+    }
     let row = svc.store.step_up_key(target)?.ok_or(DomainError::OperationFailed)?;
     tracing::info!(device = target, "a step-up key was approved");
     Ok(state(target, &row))
+}
+
+/// Who vouches, with the owner present, for the key an approval trusts
+/// (ov-974, B1): only such a key signs a cutover grant (`cutover_grant`).
+///
+/// - On the socket, the Mac app, by its code signature and its own key's
+///   step-up over this approval, which asks for Touch ID or the login
+///   password. The CLI's `people approve` passes the walk and trusts a key,
+///   and vouches for none.
+/// - On a device's line, a device bound to the owner whose own key is
+///   vouched for, stepped up for this approval.
+///
+/// Approving a key that is trusted already, with its code, vouches for it.
+pub(crate) fn vouch_of(
+    store: &farcooler_store::Store, peer: &Peer, caller_pid: Option<i32>, stepped: Option<&Stepped>, is_app: &dyn Fn(i32) -> bool,
+) -> Result<Option<String>> {
+    let Some(stepped) = stepped.filter(|s| s.method == "client.approve_step_up" && !s.browser) else { return Ok(None) };
+    Ok(match peer.client_id.as_deref() {
+        None => (stepped.device == step_up::LOCAL_APP && caller_pid.is_some_and(is_app)).then(|| step_up::LOCAL_APP.to_string()),
+        Some(approver) => {
+            (stepped.device == approver && crate::cutover_grant::owners_vouched_device(store, approver)).then(|| approver.to_string())
+        }
+    })
 }
 
 /// The three calls, and phone approval's five (ov-858), as the dispatcher runs them.

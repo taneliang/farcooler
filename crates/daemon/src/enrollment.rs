@@ -260,6 +260,12 @@ async fn enroll_held(
         (key, trusted)
     });
     let owner_binds = by_member.is_none() && !request.for_teammate;
+    // And vouched for (ov-974, B1) when the owner's own vouched device stepped
+    // up for this enroll: the owner was there, so the new key may sign a
+    // cutover grant. The socket's enroll trusts a key and vouches for none.
+    let vouched_by = caller.as_ref().and_then(|c| c.stepped_up.as_ref())
+        .filter(|s| owner_binds && s.method == "client.enroll" && !s.browser && crate::cutover_grant::owners_vouched_device(&store, &s.device))
+        .map(|s| s.device.clone());
     let (mut result, admitted) = blocking(move || {
         held();
         let bind = std::cell::Cell::new(None);
@@ -401,7 +407,11 @@ async fn enroll_held(
             // with any row left, a key's included).
             match (&step_key, done.already_enrolled) {
                 (Some((key, trusted)), false) => {
-                    store.put_step_up_key(&mine.client_id, &key.alg, &key.public_key, *trusted, now).map_err(Refusal)
+                    store.put_step_up_key(&mine.client_id, &key.alg, &key.public_key, *trusted, now).map_err(Refusal)?;
+                    match &vouched_by {
+                        Some(by) if *trusted => store.vouch_step_up_key(&mine.client_id, by).map_err(Refusal),
+                        _ => Ok(()),
+                    }
                 }
                 _ => Ok(()),
             }

@@ -128,6 +128,14 @@ impl Store {
         Ok(false)
     }
 
+    /// Whether `device` is bound to the runner's owner and confirmed: the
+    /// positive binding, never "nobody's, so the owner's" (ov-974, B1).
+    pub fn is_confirmed_owner_device(&self, device: &str) -> Result<bool> {
+        self.conn()
+            .query_row("SELECT EXISTS(SELECT 1 FROM owner_devices WHERE client_id = ?1 AND state = 'confirmed')", [device], |r| r.get(0))
+            .map_err(map_err)
+    }
+
     /// Bind a new line's `device` to the runner's owner, insert-only: refused
     /// `device_taken`, writing nothing, when anything about the id is left.
     /// `cap` is the line's, when it is below the owner's ceiling, so the
@@ -174,6 +182,7 @@ impl Store {
             let gone = tx.execute(&format!("DELETE FROM {table} WHERE client_id = ?1"), [device]).map_err(map_err)?;
             authority |= gone > 0 && (table == "device_caps" || table == "step_up_keys");
         }
+        Store::forget_vouch_in(&tx, device)?;
         if let (Some(person), true) = (holder, authority) {
             bump_in(&tx, &person)?;
         }

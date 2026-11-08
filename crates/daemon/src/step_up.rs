@@ -75,10 +75,13 @@ pub const OPTIONAL: [&str; 1] = ["task.note"];
 
 /// The Mac app's own key on the runner's socket (ov-974): a Secure Enclave
 /// key that asks for Touch ID or the login password each time it signs. It
-/// signs only an [`OPTIONAL`] method, and only the app puts it here
+/// signs only a [`LOCAL_SIGNED`] method, and only the app puts it here
 /// (`step_up_rpc::set_key`, by the app's code signature). Not a client id: a
 /// device's never holds a `:` (`farcooler_fence`), so no line can be it.
 pub const LOCAL_APP: &str = "local:app";
+/// What the Mac app's key signs on the socket: the owner's grant, and an
+/// approval of a device's key, which then vouches for it (ov-974, B1).
+pub const LOCAL_SIGNED: [&str; 2] = ["task.note", "client.approve_step_up"];
 /// The host pin a [`LOCAL_APP`] statement names: the socket has no host key
 /// to pin, and the key is this runner's alone.
 pub const LOCAL_PIN: &str = "local";
@@ -368,7 +371,7 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
     // The runner's own socket needs none, save the Mac app's signed answer;
     // and a device that is named in a preamble is that device (S4).
     let Some(device) = peer.client_id.as_deref() else {
-        if OPTIONAL.contains(&req.method.as_str()) && step_up.alg == ALG_DEVICE {
+        if LOCAL_SIGNED.contains(&req.method.as_str()) && step_up.alg == ALG_DEVICE {
             return admit_local(svc, session, req, now_ms);
         }
         return Err(DomainError::Conflict { what: "step_up_unneeded" });
