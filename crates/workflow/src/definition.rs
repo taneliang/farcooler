@@ -4,8 +4,19 @@ use crate::{digest, Refusal};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Progression { Automatic, AwaitApproval { principal: String } }
+/// Who decides a review gate (ov-969). Each one blocks the run until that decider gives a verdict.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Reviewer { Dispatch, Orchestrator(String), Person(String) }
+pub enum Reviewer {
+    /// The configured review command, which writes the verdict.
+    Dispatch,
+    /// The named principal, through a `Review` it sends: the orchestrator reviews however it chooses.
+    Orchestrator(String),
+    /// The named person, through a `Review` they send.
+    Person(String),
+    /// An agent the engine starts in the run's tree, with a model from `models` like a build step's. Its
+    /// verdict is the receipt it writes, never its prose; a turn that ends without one is no verdict.
+    Agent,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StageKind {
     Provision, Build, Check, Review(Reviewer), Land, Ci, Tracker,
@@ -86,9 +97,9 @@ pub struct Definition {
     /// Schema 2 only: batches that tickets reaching a `Join` step are queued into.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub groups: BTreeMap<String, GroupDef>,
-    /// The models a build step may run with, by step id (ov-966): `claude:opus`, `codex:gpt-5.5`. The first is
-    /// the step's default, and the orchestrator picks among them at Start. A step not listed runs the harness
-    /// the runtime is configured with, as before; an empty map leaves the pin as it was.
+    /// The models a build step or an agent's review gate may run with, by step id (ov-966, ov-969): `claude:opus`,
+    /// `codex:gpt-5.5`. The first is the step's default, and the orchestrator picks among them at Start. A step not
+    /// listed runs the harness the runtime is configured with, as before; an empty map leaves the pin as it was.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, Vec<String>>,
 }
@@ -177,12 +188,13 @@ impl Definition {
         }
         Ok(())
     }
-    /// Each list names a build step, holds 1 to 8 distinct models, and each is a plain `harness[:model]`.
+    /// Each list names a step that starts an agent (a build, or an agent's review gate), holds 1 to 8 distinct
+    /// models, and each is a plain `harness[:model]`.
     fn validate_models(&self) -> Result<(), Refusal> {
         for (step, models) in &self.models {
-            let build = self.stages.iter().any(|s| &s.id == step && s.kind == StageKind::Build);
+            let agent = self.stages.iter().any(|s| &s.id == step && starts_agent(&s.kind));
             let distinct = models.iter().collect::<BTreeSet<_>>().len() == models.len();
-            if !build || models.is_empty() || models.len() > MAX_MODELS || !distinct || !models.iter().all(|m| valid_model(m)) {
+            if !agent || models.is_empty() || models.len() > MAX_MODELS || !distinct || !models.iter().all(|m| valid_model(m)) {
                 return Err(Refusal::Definition);
             }
         }
@@ -448,6 +460,8 @@ pub fn makes_candidate(kind: &StageKind) -> bool {
 }
 /// Entering these discards the old candidate, because they are about to make a new one.
 pub fn makes_candidate_anew(kind: &StageKind) -> bool { matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::AwaitBase) }
+/// The steps the engine starts an agent for, which may list the models it runs with.
+pub fn starts_agent(kind: &StageKind) -> bool { matches!(kind, StageKind::Build | StageKind::Review(Reviewer::Agent)) }
 /// Most models one step may list.
 pub const MAX_MODELS: usize = 8;
 /// `harness` or `harness:model`, each part plain: it ends up as `--model` in a shell command.
