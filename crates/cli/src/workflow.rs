@@ -176,6 +176,7 @@ pub fn watch_request(workspace:Uuid, item:&str) -> pb::Request {
     r.required_capabilities.push(capability::WORKFLOW_COMMANDS.into());
     r
 }
+pub(crate) fn size_marker(columns:u32, rows:u32) -> Vec<u8> { format!("\x1bP>farcooler-size;{columns};{rows}\x1b\\").into_bytes() }
 /// Print the agent's terminal bytes as they arrive. Writes only to stdout; the link is never written to
 /// again after the one request.
 async fn watch(runner:Option<&str>, workspace:Uuid, item:String) -> Fallible {
@@ -183,8 +184,11 @@ async fn watch(runner:Option<&str>, workspace:Uuid, item:String) -> Fallible {
     let mut link = crate::connect_to(runner).await?;
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
     let reply = link.call(watch_request(workspace,&item)).await?;
-    let result::Value::TerminalAttach(_) = expect_value(reply.value)? else { return Err("unexpected watch reply".into()) };
+    let result::Value::TerminalAttach(attached) = expect_value(reply.value)? else { return Err("unexpected watch reply".into()) };
     let mut out = std::io::stdout().lock();
+    // The agent's pane size, first, as the runner's own streams announce it (`farcooler_vt::size_marker`),
+    // so a viewer sizes its screen to the pane before the picture arrives and does not ask for a resize.
+    if out.write_all(&size_marker(attached.columns, attached.rows)).is_err() || out.flush().is_err() { return Ok(()); }
     loop {
         let event = link.next_event().await?;
         let Some(pb::event::Payload::TerminalFrame(frame)) = event.payload else { continue };
@@ -203,6 +207,14 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
 mod tests {
     use super::*;
     use clap::Parser;
+    #[test]
+    fn watch_asks_for_the_item_only_and_announces_the_panes_size() {
+        let r = watch_request(Uuid::nil(), "ov-9");
+        assert_eq!(r.method, "workflow.watch");
+        let Some(request::Payload::WorkflowCommand(p)) = r.payload else { panic!() };
+        assert_eq!(p.json, r#"{"item":"ov-9"}"#);
+        assert_eq!(size_marker(120, 40), b"\x1bP>farcooler-size;120;40\x1b\\".to_vec(), "the viewer reads this as the runner's own marker");
+    }
     #[test]
     fn workflow_removed_artifact_syntax_fails_at_parser() {
         assert!(crate::Cli::try_parse_from(["farcooler","workflow","retry","--prepared-file","absent"]).is_err());
