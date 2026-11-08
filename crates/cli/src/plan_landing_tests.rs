@@ -224,6 +224,13 @@ async fn refusals_read_as_landing_sentences() {
     link.refuse = Some("sha");
     let err = landing_say(&mut link, "set 9 --sha zz").await.unwrap_err();
     assert!(err.to_string().starts_with("Give the SHA it pushed with --sha"), "{err}");
+    // After the cutover (ov-987): what a stale read can't explain, said plainly, with what to run instead.
+    link.refuse = Some("engine_lands");
+    for args in ["set 9 --sha abc1234", "set 9 --state green", "start --record-only --ticket ov-1"] {
+        let err = landing_say(&mut link, args).await.unwrap_err();
+        assert!(err.to_string().starts_with("This board lands through the workflow engine now"), "{args}: {err}");
+        assert!(err.to_string().contains("`farcooler workflow get <board>`"), "{args}: {err}");
+    }
 
     let mut old = runner();
     old.capabilities.retain(|c| c != capability::BOARD_LINE);

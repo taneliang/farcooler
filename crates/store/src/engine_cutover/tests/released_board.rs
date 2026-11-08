@@ -323,3 +323,36 @@ fn a_tracked_ticket_keeps_its_wait_and_blocks_after_release() {
     assert!(s.set_wait(r.owned, Some(Wait::Parked), Actor::User).is_err());
     assert!(s.set_block(r.owned, r.other, None).is_err());
 }
+
+/// ov-987: Landing 373 pushed, its tickets were closed, and then the board was
+/// cut over. Every `landing set` and `landing start --record-only` after that
+/// came back "this task changed while you were reading it", which no rereading
+/// fixes: the cutover freezes the landing tables. Each write says so instead,
+/// and leaves the landing as it was.
+#[test]
+fn released_landing_writes_say_the_engine_lands_now_not_that_the_task_changed() {
+    use crate::landings::{LandingState, LandingUpdate, NewLanding, Route};
+    let r = released();
+    let s = &r.store;
+    let pushed = uuid::Uuid::from_bytes([2; 16]);
+    // Its tickets were done before anyone moved the landing (the fence is lifted only to seed the ticket).
+    s.conn().execute_batch("DROP TRIGGER engine_fence_landing_tickets_i").unwrap();
+    s.conn().execute("INSERT INTO landing_tickets(landing_id,task_id,added_at) VALUES(?1,?2,1)",
+        [pushed.as_bytes().as_slice(), r.free.as_bytes().as_slice()]).unwrap();
+    s.set_task_status(r.free, TaskStatus::Done, Actor::User).unwrap();
+    let says = |e: farcooler_core::DomainError| matches!(e, farcooler_core::DomainError::InvalidArgument { what: "engine_lands" });
+    let sha = LandingUpdate { sha: Some("abcdef1".into()), ..Default::default() };
+    let green = LandingUpdate { state: Some(LandingState::Green), ..Default::default() };
+    let landed = LandingUpdate { state: Some(LandingState::Landed), ..Default::default() };
+    for (what, update) in [("--sha", sha), ("--state green", green), ("--state landed", landed)] {
+        let err = s.update_landing(pushed, &update, Actor::User).unwrap_err();
+        assert!(says(err.clone()), "landing set {what}: {err:?}");
+    }
+    let new = NewLanding { route: Route::Push, base: "main".into(), title: String::new(), lander: None, collecting: false };
+    let err = s.start_landing(r.ws, &new, &[r.other], Actor::User).unwrap_err();
+    assert!(says(err.clone()), "landing start --record-only: {err:?}");
+    assert!(says(s.land_asked(pushed, Actor::User).unwrap_err()), "the Land button");
+    assert!(says(s.hold_for_you(pushed, "asks first", Actor::Runner).unwrap_err()), "the ask route");
+    let after = s.landing(pushed).unwrap();
+    assert_eq!((after.state, after.pushed_sha.as_deref()), (LandingState::Pushed, Some("exact-sha")), "and the landing is kept as it was");
+}

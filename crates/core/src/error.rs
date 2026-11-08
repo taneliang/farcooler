@@ -401,6 +401,11 @@ const SENTENCES: &[(&str, &str)] = &[
     ("adopt_unlisted", "The app doesn't list that branch's worktree. Add the worktree to the app, then adopt the branch."),
     ("adopt_other_board", "That branch's worktree belongs to another board. Move it to this board, then adopt the branch."),
     ("adopt_busy", "A terminal is still running in that branch's worktree. Close it, then adopt the branch."),
+    // A landing write after the board moved to the workflow engine (ov-987): the old landings are frozen history.
+    (
+        "engine_lands",
+        "This board lands through the workflow engine now. Landings from before the move are kept as history and can't be changed.",
+    ),
     ("not_lost", "That terminal isn't lost anymore."),
     // A rep's pane, refused anything but reading the board, messaging and
     // commenting, and an answer or a decision (ov-494, ov-527).

@@ -37,6 +37,11 @@ pub(crate) async fn start_from(svc: &Arc<Service>, watcher: &Arc<Watcher>, calle
 pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, req: Request) -> Result<result::Value> {
     let missing = || DomainError::InvalidArgument { what: "payload" };
     let ids = |raw: &[bytes::Bytes]| raw.iter().map(|id| required_id(id)).collect::<Result<Vec<_>>>();
+    // After the cutover the engine lands, and the old landings are frozen history (ov-987). Said
+    // before a landing job is admitted, which the store's own refusal would come too late for.
+    if !svc.store.legacy_authority() {
+        return Err(DomainError::InvalidArgument { what: "engine_lands" });
+    }
     match (req.method.as_str(), req.payload) {
         ("landing.start", Some(request::Payload::LandingStart(p))) if p.run => {
             let landing = crate::landing_run::start(svc, watcher, p).await?;
@@ -230,5 +235,30 @@ pub(crate) fn pb_ci(r: &CiRead) -> pb::BoardCiRead {
         fetched_at: r.fetched_at,
         changed_at: r.changed_at,
         asked_at: r.asked_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ov-987: once the board has moved to the workflow engine, both landing
+    /// routes say so before anything else is read: before a landing job is
+    /// admitted, and before an unknown landing is looked up.
+    #[tokio::test]
+    async fn a_released_board_says_the_engine_lands_before_anything_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
+        let watcher = Watcher::new(svc.clone());
+        let db = rusqlite::Connection::open(dir.path().join("farcooler.db")).unwrap();
+        db.execute("UPDATE engine_cutover_authority SET phase = 'released'", []).unwrap();
+        let some = id_bytes(uuid::Uuid::now_v7());
+        let run = pb::LandingStart { run: true, workspace_id: some.clone(), task_ids: vec![some.clone()], ..Default::default() };
+        let set = pb::LandingSet { landing_id: some, sha: Some("abcdef1".into()), ..Default::default() };
+        for (method, payload) in [("landing.start", request::Payload::LandingStart(run)), ("landing.set", request::Payload::LandingSet(set))] {
+            let req = Request { method: method.into(), payload: Some(payload), ..Default::default() };
+            let err = dispatch(&svc, &watcher, req).await.unwrap_err();
+            assert!(matches!(err, DomainError::InvalidArgument { what: "engine_lands" }), "{method}: {err:?}");
+        }
     }
 }

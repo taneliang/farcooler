@@ -771,7 +771,7 @@ async fn a_refusal_is_said_in_words_a_person_reads() {
     }
     for word in [
         "lander", "not_ready", "ticket_in_review", "landing_moving", "landing_settled", "landing_changed", "no_sha", "sha",
-        "route", "base",
+        "route", "base", "engine_lands",
     ] {
         assert!(landing::said_here(word).is_some(), "no landing sentence for {word}");
     }

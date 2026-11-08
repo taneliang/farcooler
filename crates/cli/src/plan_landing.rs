@@ -198,6 +198,7 @@ pub(super) fn said_here(what: &str) -> Option<&'static str> {
         "ticket_closed" => "That ticket has already landed or been dropped, so it can't go on a landing.",
         "landing_moving" => "That landing has already gone to gating or CI, so a ticket can't come off it. Wait for it to land, or drop it.",
         "landing_settled" => "That landing has landed or been dropped, so it takes no more moves, SHAs or tickets.",
+        "engine_lands" => "This board lands through the workflow engine now, so landings from before the move are kept as history and take no more moves, SHAs or tickets. Land tickets through a workflow: `farcooler workflow get <board>` shows its runs.",
         "landing_changed" => "That landing moved while it was being changed. Read it again.",
         "route" => "Use push, pull_request or ask.",
         "no_landing_rules" => "The charter has no ## Landing section, so the runner doesn't know how this board lands. Add one (`- Route: push`, `- Gate: <command>`), or land it yourself with --record-only.",

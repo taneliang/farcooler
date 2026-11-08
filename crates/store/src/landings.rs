@@ -179,6 +179,14 @@ pub struct LandingUpdate {
     pub expect: Option<(LandingState, String)>,
 }
 
+/// Refuse a landing write once the board has moved to the workflow engine
+/// (`engine_lands`). The cutover freezes the landing tables as history until
+/// the engine lands tickets itself (ov-947, ov-960), and the fence's own abort
+/// would come back as a stale read, which no rereading fixes (ov-987).
+fn check_legacy(conn: &Connection) -> Result<()> {
+    if crate::engine_cutover::legacy_authority(conn) { Ok(()) } else { Err(invalid("engine_lands")) }
+}
+
 fn invalid(what: &'static str) -> DomainError {
     DomainError::InvalidArgument { what }
 }
@@ -489,6 +497,7 @@ impl Store {
         let title = clean(&new.title, TITLE_MAX, false, "title")?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        check_legacy(&tx)?;
         board_exists(&tx, workspace)?;
         if let Some(lander) = new.lander {
             check_lander(&tx, workspace, lander)?;
@@ -591,6 +600,7 @@ impl Store {
         let sha = update.sha.as_deref().map(clean_sha).transpose()?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        check_legacy(&tx)?;
         let before = landing_in(&tx, id)?;
         if tickets.is_some_and(|tickets| tickets != before.tickets.as_slice()) {
             return Err(invalid("landing_changed"));
@@ -679,6 +689,7 @@ impl Store {
         let reason = clean(reason, crate::ticket_lines::LINE_MAX, false, "reason")?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        check_legacy(&tx)?;
         let landing = landing_in(&tx, id)?;
         if landing.state != LandingState::Open {
             return Err(invalid(if landing.state.is_settled() { "landing_settled" } else { "landing_moving" }));
@@ -711,6 +722,7 @@ impl Store {
     pub fn land_asked(&self, id: Uuid, actor: Actor) -> Result<Landing> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
+        check_legacy(&tx)?;
         let landing = landing_in(&tx, id)?;
         if landing.state.is_settled() {
             return Err(invalid("landing_settled"));
