@@ -412,6 +412,17 @@ async fn the_wire_path_reads_a_dead_pane_from_the_inventory() {
     assert_eq!(process.look(&t.runtime, &pane).await, Some(PaneLife::Gone));
 }
 
+/// A watcher is told an agent finished only when tmux says the pane is over; a running pane is not.
+#[tokio::test]
+async fn a_pane_is_over_only_when_tmux_says_so() {
+    let t = Pane::start().await;
+    let pane = t.runtime.live_pane(t.terminal).unwrap();
+    assert!(!super::pane_is_over(&t.runtime, &pane).await, "a running pane was called over");
+    t.die().await;
+    farcooler_tmux::reap_server(t.runtime.tmux.socket());
+    assert!(super::pane_is_over(&t.runtime, &pane).await, "a reaped pane was not called over");
+}
+
 /// Looks at a dead pane slow down: doubling to `LONGEST`, then `DEAD_PAUSE`
 /// once it has been dead for `LONG_DEAD`; and output flowing again starts
 /// them afresh. The clock is the caller's, so no test waits 30 s.
