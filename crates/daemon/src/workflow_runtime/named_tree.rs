@@ -99,27 +99,31 @@ impl Runtime {
     async fn refuse_unadoptable(&self, config: &CodingConfig, board: Uuid, repository: Uuid, branch: &str, found: Option<&Path>) -> Result<()> {
         let refuse = |what: &'static str| Err(Error::Domain(DomainError::InvalidArgument { what }));
         let repo = &config.repository;
-        let local = adapters::git(repo, &["for-each-ref", "--format=%(refname)", &format!("refs/heads/{branch}")]).await?;
-        if local.lines().all(|l| l != format!("refs/heads/{branch}")) { return refuse("not a local branch"); }
+        let local = adapters::git(repo, &["for-each-ref", "--format=%(refname) %(symref)", &format!("refs/heads/{branch}")]).await?;
+        let Some(found_ref) = local.lines().find(|l| l.split(' ').next() == Some(&format!("refs/heads/{branch}"))) else {
+            return refuse("adopt_not_local");
+        };
+        // A symbolic ref is a second name for another branch, which may be the landing branch itself.
+        if found_ref.split_once(' ').is_some_and(|(_, to)| !to.is_empty()) { return refuse("adopt_alias"); }
         let mut protected = vec!["main".to_string(), "master".into()];
         protected.extend([config.landing_ref.as_str()].into_iter().chain(config.landing.as_ref().map(|l| l.target.as_str()))
             .map(|r| r.strip_prefix("refs/heads/").unwrap_or(r).to_string()));
         // Each remote's default branch, as `refs/remotes/<remote>/HEAD` names it.
         let heads = adapters::git(repo, &["for-each-ref", "--format=%(symref)", "refs/remotes/*/HEAD"]).await.unwrap_or_default();
         protected.extend(heads.lines().filter_map(|h| h.strip_prefix("refs/remotes/")?.split_once('/').map(|(_, b)| b.to_string())));
-        if protected.iter().any(|p| p == branch) { return refuse("a landing or default branch"); }
+        if protected.iter().any(|p| p == branch) { return refuse("adopt_protected"); }
         let remotes = adapters::git(repo, &["remote"]).await.unwrap_or_default();
-        if remotes.lines().any(|r| !r.is_empty() && branch.starts_with(&format!("{r}/"))) { return refuse("a remote-tracking branch"); }
-        if branch.starts_with("wf-") { return refuse("another run's branch"); }
+        if remotes.lines().any(|r| !r.is_empty() && branch.starts_with(&format!("{r}/"))) { return refuse("adopt_remote_name"); }
+        if branch.starts_with("wf-") { return refuse("adopt_engine"); }
         let Some(path) = found else { return Ok(()) };
-        if canonical(path).starts_with(canonical(&self.root)) { return refuse("another run's branch"); }
+        if canonical(path).starts_with(canonical(&self.root)) { return refuse("adopt_engine"); }
         let row = self.store.list_worktrees_for_repository(repository).map_err(Error::Domain)?
             .into_iter().find(|w| same_path(Path::new(&w.worktree_path), path));
-        let Some(row) = row else { return refuse("a worktree the app doesn't list") };
-        if row.workspace_id.is_some_and(|w| w != board) { return refuse("a worktree on another board"); }
+        let Some(row) = row else { return refuse("adopt_unlisted") };
+        if row.workspace_id.is_some_and(|w| w != board) { return refuse("adopt_other_board"); }
         let live = self.store.list_terminals_for_worktree(row.id).map_err(Error::Domain)?
             .iter().any(|t| t.exit_code.is_none() && t.exit_signal.is_none());
-        if live { return refuse("a worktree with a pane running in it"); }
+        if live { return refuse("adopt_busy"); }
         Ok(())
     }
 }

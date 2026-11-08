@@ -152,7 +152,11 @@ fn refusal_words(refusal: &str, keys: &[&str]) -> String {
 
 /// A Start the runner refused because the worktree it names is taken (ov-967), said as that.
 fn taken(error: &ClientError, key: &str, worktree: Option<&NamedTree>) -> Option<Failed> {
-    let (ClientError::Daemon { code, .. }, Some(tree)) = (error, worktree) else { return None };
+    let (ClientError::Daemon { code, what, .. }, Some(tree)) = (error, worktree) else { return None };
+    // A branch the runner won't adopt (ov-968) says why and what to do instead.
+    if let Some(said) = what.starts_with("adopt_").then(|| farcooler_core::error::sentence(what)).flatten() {
+        return Some(format!("{key} wasn't started on {}. {said}", tree.branch).into());
+    }
     match pb::ErrorCode::try_from(*code).ok()? {
         pb::ErrorCode::BranchExists => Some(format!("{key} wasn't started: the branch {} already exists. Name a new one with --branch.", tree.branch).into()),
         pb::ErrorCode::WorktreeExists => Some(format!("{key} wasn't started: a worktree named {} already exists. Name another with --new.", tree.name).into()),

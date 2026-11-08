@@ -389,6 +389,18 @@ const SENTENCES: &[(&str, &str)] = &[
         "A workflow ran this ticket and its column is final, so it can't be moved by hand.",
     ),
     ("landing_history", "This workspace has landing history that is kept, so it can't be deleted."),
+    // A run told to adopt a branch with work on it (ov-968): only a plain local branch made for the work.
+    ("adopt_not_local", "That isn't a local branch. Make a local branch for the work, from a remote one if need be, then adopt it."),
+    ("adopt_alias", "That branch is a second name for another branch. Adopt the branch made for the work by its own name."),
+    (
+        "adopt_protected",
+        "That's the landing branch or a remote's default branch, which a run must never build on. Adopt a branch made for the work.",
+    ),
+    ("adopt_remote_name", "That names a remote's branch. Make a local branch from it, then adopt that."),
+    ("adopt_engine", "That branch or worktree belongs to another run. Send that run back instead, or adopt a branch made for the work."),
+    ("adopt_unlisted", "The app doesn't list that branch's worktree. Add the worktree to the app, then adopt the branch."),
+    ("adopt_other_board", "That branch's worktree belongs to another board. Move it to this board, then adopt the branch."),
+    ("adopt_busy", "A terminal is still running in that branch's worktree. Close it, then adopt the branch."),
     ("not_lost", "That terminal isn't lost anymore."),
     // A rep's pane, refused anything but reading the board, messaging and
     // commenting, and an answer or a decision (ov-494, ov-527).

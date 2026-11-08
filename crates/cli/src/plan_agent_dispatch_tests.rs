@@ -42,13 +42,15 @@ struct Runner {
     engine_unanswered: bool,
     /// `workflow.start` fails with this code, as the runner refuses a taken branch or name (ov-967).
     start_error: Option<pb::ErrorCode>,
+    /// The `what` a refused Start names.
+    start_what: &'static str,
     /// `terminal.create` fails, as it does on a card the engine holds.
     refuse_pane: bool,
 }
 
 fn runner() -> Runner {
     let caps = ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_LINE, capability::TERMINAL_TASK];
-    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None, engine: None, refuse_start: None, engine_unanswered: false, start_error: None, refuse_pane: false }
+    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None, engine: None, refuse_start: None, engine_unanswered: false, start_error: None, start_what: "", refuse_pane: false }
 }
 
 fn items() -> Vec<pb::Task> {
@@ -74,7 +76,7 @@ impl DispatchLink for Runner {
             return Err(ClientError::Closed);
         }
         if let Some(code) = self.start_error.filter(|_| method == "workflow.start") {
-            return Err(ClientError::Daemon { code: code as i32, retryable: false, message: String::new(), what: String::new() });
+            return Err(ClientError::Daemon { code: code as i32, retryable: false, message: String::new(), what: self.start_what.into() });
         }
         let value = match (method.as_str(), payload) {
             ("workflow.get", _) => result::Value::WorkflowReply(pb::WorkflowReply {
@@ -504,4 +506,9 @@ async fn a_named_worktree_covers_the_run_and_a_taken_one_is_said() {
         let said = say(&mut link, "--role builder --ticket ov-2 --new phones --branch b").await.unwrap_err().to_string();
         assert_eq!(said, words);
     }
+    // A branch the runner won't adopt says why, not that the name was bad (ov-968).
+    let mut link = with_engine(&held[..1]);
+    (link.start_error, link.start_what) = (Some(pb::ErrorCode::InvalidArgument), "adopt_protected");
+    let said = say(&mut link, "--role builder --ticket ov-2 --new main --branch main --adopt").await.unwrap_err().to_string();
+    assert!(said.starts_with("ov-2 wasn't started on main. That's the landing branch"), "{said}");
 }

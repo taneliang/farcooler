@@ -414,6 +414,14 @@ async fn try_call(link:&mut Link, workspace:Uuid, action:Action) -> Result<serde
         Err(error)=>Err(error.to_string()) }
 }
 
+/// The word a refused call names (`Error.what`), and the sentence it carries for a person.
+async fn refused_for(link:&mut Link, workspace:Uuid, action:Action) -> Option<(String,String)> {
+    let mut req=farcooler_transport::request(action.method());
+    req.target_resource_id=Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
+    req.payload=Some(request::Payload::WorkflowCommand(pb::WorkflowCommand {schema:1,json:serde_json::to_string(&action).unwrap()}));
+    match link.call(req).await { Err(farcooler_transport::ClientError::Daemon { what, message, .. })=>Some((what,message)), _=>None }
+}
+
 /// ov-967: a ticket started with a worktree and branch the orchestrator names runs in a worktree the app lists,
 /// claimed for the workspace, on that branch, from main as it is at Start (not as it was at publish). A branch
 /// that already exists is refused, and nothing is made.
@@ -699,12 +707,23 @@ async fn workflow_service_adopt_refuses_the_landing_branch_and_trees_that_are_no
     host.service.store.create_terminal_for_test(busy.id,workspace);
     let landing=config.landing_ref.strip_prefix("refs/heads/").unwrap().to_string();
     let before=git(&config.repository,&["rev-parse",&config.landing_ref]).await.unwrap();
-    for (id,branch) in [("landing",landing.as_str()),("private-tree",theirs.lines().next().unwrap()),("unlisted","e-liang/unlisted"),("busy","e-liang/busy")] {
+    // Each of the engine's two marks on its own: a wf- branch with no tree, and a listed tree under its root on a
+    // branch of any name.
+    git(&config.repository,&["branch","wf-mine",&config.base]).await.unwrap();
+    let root=std::path::Path::new(&private_tree).parent().unwrap().join("borrowed");
+    git(&config.repository,&["worktree","add","--quiet","-b","e-liang/borrowed",root.to_str().unwrap(),&config.base]).await.unwrap();
+    host.service.store.create_worktree(repository,"e-liang/borrowed",root.to_str().unwrap(),false).unwrap();
+    // A second name for the landing branch is the landing branch.
+    git(&config.repository,&["symbolic-ref","refs/heads/e-liang/alias",&config.landing_ref]).await.unwrap();
+    for (id,branch,word) in [("landing",landing.as_str(),"adopt_protected"),("alias","e-liang/alias","adopt_alias"),
+        ("nowhere","e-liang/nowhere","adopt_not_local"),("private-tree",theirs.lines().next().unwrap(),"adopt_engine"),
+        ("engine-branch","wf-mine","adopt_engine"),("engine-root","e-liang/borrowed","adopt_engine"),
+        ("unlisted","e-liang/unlisted","adopt_unlisted"),("busy","e-liang/busy","adopt_busy")] {
         let snapshot=get(&mut link,workspace).await;
-        let refused=try_call(&mut link,workspace,start(id,&ticket.key,&snapshot,adopt(branch))).await;
-        assert!(refused.is_err(),"{id}: adopting {branch} must be refused at Start: {refused:?}");
-        let Err(said)=refused else { unreachable!() };
-        assert!(said.contains("InvalidArgument") || said.to_lowercase().contains("invalid"),"{id}: refused for what it is, not by accident: {said}");
+        let refused=refused_for(&mut link,workspace,start(id,&ticket.key,&snapshot,adopt(branch))).await;
+        let Some((what,message))=refused else { panic!("{id}: adopting {branch} must be refused at Start") };
+        assert_eq!(what,word,"{id}: refused for what it is: {message}");
+        assert_eq!(Some(message.as_str()),farcooler_core::error::sentence(word),"{id}: said as a sentence with what to do");
     }
     let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
     assert!(state.items[&ticket.key].tree.is_none(),"nothing was started");
