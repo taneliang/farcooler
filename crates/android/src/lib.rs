@@ -482,8 +482,10 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
     key_a: JString,
     key_b: JString,
     node_key: JString,
+    model: JString,
 ) -> jstring {
     guarded(std::ptr::null_mut(), || {
+        let model = c_string(&mut env, &model);
         let name = c_string(&mut env, &name);
         let account = c_string(&mut env, &account);
         let key_a = c_string(&mut env, &key_a);
@@ -498,6 +500,7 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyOffer(
                 pointer(&key_a),
                 pointer(&key_b),
                 pointer(&node_key),
+                pointer(&model),
                 out,
                 capacity,
             )

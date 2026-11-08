@@ -187,6 +187,11 @@ pub struct Offer {
     /// The public X25519 key a camera-less device's reply is sealed to: [`seal_reply`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_key: Option<String>,
+    /// The device's model as it says it, such as `iPhone 17 Pro` (ov-989), for the approve list on the
+    /// side that pairs it. A claim, not a proof: the runner keeps it cleaned and shows it beside the name.
+    /// Absent from an older device, which says none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 /// One runner in a reply: everything a device needs to reach it and nothing it
@@ -365,6 +370,7 @@ pub fn offer(name: &str, account: &str, key_a: &str, key_b: Option<&str>) -> Off
         // here, so that no app has to pass an empty string to say "none".
         node_key: String::new(),
         reply_key: None,
+        model: String::new(),
     }
 }
 
@@ -1479,5 +1485,16 @@ mod tests {
                 "{code} is not a machine-readable word"
             );
         }
+    }
+
+    /// ov-989: a phone's model rides in its offer for the approve list, and an offer without one (an
+    /// older phone, a Mac) reads as none and writes no key.
+    #[test]
+    fn an_offer_carries_the_model_a_phone_says_and_none_from_an_older_one() {
+        let said = Offer { model: "iPhone 17 Pro".to_string(), ..offer("phone", "acct", KEY_A, None) };
+        let back = decode_offer(&encode_offer(&said)).expect("round trip");
+        assert_eq!(back.model, "iPhone 17 Pro");
+        assert!(!encode_offer(&offer("phone", "acct", KEY_A, None)).contains("model"), "none is not written");
+        assert_eq!(decode_offer(&v1_offer_json("phone", "acct", KEY_A)).expect("older").model, "");
     }
 }

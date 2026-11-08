@@ -2129,6 +2129,7 @@ fn enrollment_of(
 ) -> farcooler_protocol::v1::Request {
     let mut req = request("client.enroll");
     req.payload = Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+        model: String::new(),
         public_key: public_key.into(),
         label: label.into(),
         client_id: client_id.into(),
@@ -2195,6 +2196,7 @@ fn the_enrollment_request_cannot_ask_for_a_line_far_cooler_did_not_render() {
     let printed = format!(
         "{:?}",
         farcooler_protocol::v1::ClientEnroll {
+            model: String::new(),
             public_key: KEY.into(),
             label: "iPhone".into(),
             client_id: "c1".into(),

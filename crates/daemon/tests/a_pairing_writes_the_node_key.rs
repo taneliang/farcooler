@@ -56,6 +56,7 @@ async fn open_service(root: &Path) -> Service {
 
 fn pairing(public_key: &str, client_id: &str, node_key: &str, shell_access: bool) -> ClientEnroll {
     ClientEnroll {
+        model: String::new(),
         public_key: public_key.into(),
         label: "device".into(),
         client_id: client_id.into(),

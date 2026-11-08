@@ -647,6 +647,7 @@ struct AddDeviceView: View {
         // `store.confirm` moves to `.enrolling` before it calls back, so a
         // closure that went looking for the offer then would find none.
         let nodeKey = confirmation.offer.node_key ?? ""
+        let model = confirmation.offer.model ?? ""
         // ONE id for both keys, and it is what the forced command will carry —
         // so it is what closing this device's sessions later will name, and what
         // makes `client revoke` take both of a Mac's lines in one write.
@@ -717,7 +718,7 @@ struct AddDeviceView: View {
                     // passed from here, because a plain line cannot be held to a
                     // scope at all — `Enrollment` owns that, so no screen can
                     // accidentally ask for a shell at `read`.
-                    scope: "control", nodeKey: nodeKey, on: granted)
+                    scope: "control", nodeKey: nodeKey, model: model, on: granted)
             }
         }
     }

@@ -63,6 +63,7 @@ pub(super) fn build(method: &str, args: &serde_json::Value) -> Result<farcooler_
             &text("nodeKey"),
             flag("forTeammate"),
             teammate_bind(args),
+            &text("model"),
         )?,
         "member.set_access" => request::Payload::MemberSetAccess(farcooler_protocol::v1::MemberSetAccess {
             handle: need("handle")?,

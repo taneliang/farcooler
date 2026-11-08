@@ -62,6 +62,7 @@ fn an_offer(name: &str, account: &str, key_a: &str) -> String {
             key.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
+            std::ptr::null(),
             out,
             capacity,
         )
@@ -102,6 +103,7 @@ fn an_offer_carrying(name: &str, account: &str, key_a: &str, node_key: &str) -> 
             key.as_ptr(),
             std::ptr::null(),
             node_key.as_ptr(),
+            std::ptr::null(),
             out,
             capacity,
         )
@@ -350,6 +352,7 @@ fn a_short_buffer_reports_the_size_and_writes_nothing() {
             key.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
+            std::ptr::null(),
             tiny.as_mut_ptr(),
             tiny.len(),
         )
@@ -363,6 +366,7 @@ fn a_short_buffer_reports_the_size_and_writes_nothing() {
             name.as_ptr(),
             account.as_ptr(),
             key.as_ptr(),
+            std::ptr::null(),
             std::ptr::null(),
             std::ptr::null(),
             std::ptr::null_mut(),
@@ -385,6 +389,7 @@ fn a_mac_offers_its_shell_key_too() {
             account.as_ptr(),
             key_a.as_ptr(),
             key_b.as_ptr(),
+            std::ptr::null(),
             std::ptr::null(),
             out,
             capacity,
@@ -440,6 +445,7 @@ fn a_device_that_could_not_mint_offers_no_node_key_at_all() {
                 key.as_ptr(),
                 std::ptr::null(),
                 node_key,
+                std::ptr::null(),
                 out,
                 capacity,
             )
@@ -599,6 +605,7 @@ fn null_arguments_are_survivable() {
     unsafe {
         // No key: a refusal, not a crash and not an offer for nothing.
         let n = farcooler_client_ceremony_offer(
+            std::ptr::null(),
             std::ptr::null(),
             std::ptr::null(),
             std::ptr::null(),

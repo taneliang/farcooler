@@ -987,11 +987,13 @@ pub unsafe extern "C" fn farcooler_client_ceremony_offer(
     key_a: *const c_char,
     key_b: *const c_char,
     node_key: *const c_char,
+    model: *const c_char,
     out: *mut u8,
     capacity: usize,
 ) -> usize {
     guarded(0, || {
         let name = unsafe { read_str(name) }.unwrap_or_default();
+        let model = unsafe { read_str(model) }.unwrap_or_default();
         let account = unsafe { read_str(account) }.unwrap_or_default();
         let Some(key_a) = (unsafe { read_str(key_a) }) else {
             return spill(&refusal(&crate::ceremony::CeremonyError::Malformed("no key".into())), out, capacity);
@@ -1005,6 +1007,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_offer(
         // none to pass.
         let offer = crate::ceremony::Offer {
             node_key,
+            model,
             ..crate::ceremony::offer(&name, &account, &key_a, key_b.as_deref())
         };
         spill(&crate::ceremony::encode_offer(&offer), out, capacity)

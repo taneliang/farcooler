@@ -245,7 +245,7 @@ class PeopleAccessViewTest {
               "device_access":[
                 {"client_id":"phone-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"","step_up_at":5,"step_up_vouched":true,"paired_at":1762560000000,"paired_via":"app","paired_by":""},
                 {"client_id":"agent-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"507314","step_up_at":9,"paired_at":1762592100000,"paired_via":"terminal","paired_by":""},
-                {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"630482","step_up_at":9,"paired_at":1762590300000,"paired_via":"device","paired_by":"phone-o"}]}""",
+                {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"630482","step_up_at":9,"paired_at":1762590300000,"paired_via":"device","paired_by":"phone-o","model":"Google Pixel 9 Pro Fold Extra Long Edition"}]}""",
         ).jsonObject,
         Json.parseToJsonElement(
             """{"clients":[

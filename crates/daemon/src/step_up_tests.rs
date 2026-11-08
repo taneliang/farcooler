@@ -22,6 +22,7 @@ pub(crate) fn key(n: u8) -> String {
 
 pub(crate) fn asking(n: u8, id: &str, scope: Scope) -> pb::ClientEnroll {
     pb::ClientEnroll {
+        model: String::new(),
         public_key: key(n),
         label: id.into(),
         client_id: id.into(),
@@ -850,4 +851,28 @@ async fn each_device_says_how_and_when_it_was_paired() {
     assert_eq!(crate::enrollment::Caller::paired_via(Some(&local)), PairedVia::Terminal);
     assert_eq!(crate::enrollment::Caller::paired_via(Some(&local.clone().with_via_app(true))), PairedVia::App);
     assert_eq!(crate::enrollment::Caller::paired_via(None), PairedVia::Terminal, "in-process");
+}
+
+/// ov-989: the model a device said at pairing is kept beside it, cleaned to one short printable line, and
+/// the owner's list carries it. Key B's call, which says none, leaves what Key A's said; a device that
+/// never said has none.
+#[tokio::test]
+async fn the_model_a_device_said_at_pairing_reaches_the_owners_list() {
+    let r = runner().await;
+    let said = |n: u8, id: &str, model: &str| {
+        let mut req = enroll_req(n, id, Scope::Control, false, None);
+        if let Some(request::Payload::ClientEnroll(p)) = req.payload.as_mut() {
+            p.model = model.into();
+        }
+        req
+    };
+    call(&r.socket(), said(71, "pad-m", "iPhone 17 Pro")).await.expect("a phone that says its model");
+    call(&r.socket(), said(72, "odd-m", "Pixel\n  9\u{202e}Pro")).await.expect("one that says something odd");
+    call(&r.socket(), said(73, "mute-m", "")).await.expect("one that says none");
+
+    let rows = crate::access_migration::device_access(&r.svc.store, None, now_ms()).unwrap();
+    let model = |id: &str| rows.iter().find(|d| d.client_id == id).unwrap_or_else(|| panic!("{id}")).model.clone();
+    assert_eq!(model("pad-m"), "iPhone 17 Pro");
+    assert_eq!(model("odd-m"), "Pixel 9Pro", "no line break, no reordering");
+    assert_eq!(model("mute-m"), "");
 }

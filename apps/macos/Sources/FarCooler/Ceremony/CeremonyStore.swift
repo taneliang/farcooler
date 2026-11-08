@@ -35,6 +35,9 @@ struct CeremonyOffer: Codable, Equatable {
     /// grants it addresses only. `ceremony::can_be_granted_a_tunnel` reads the
     /// same field for the same reason on the other side of the exchange.
     var node_key: String?
+    /// What the device says it is, such as `iPhone 17 Pro` (ov-989), sent on to the runner for the approve
+    /// list. Optional: an older phone's offer has none.
+    var model: String?
 
     /// `SHA256:t7Xq…9Vd`, for the person holding both devices to compare.
     ///
@@ -329,16 +332,19 @@ enum CeremonyFFI {
     /// offer: direct runners granted, tunneled ones refused by the core rather
     /// than half-accepted here. See ``MacNodeIdentity``.
     static func offer(
-        name: String, account: String, keyA: String, keyB: String?, nodeKey: String? = nil
+        name: String, account: String, keyA: String, keyB: String?, nodeKey: String? = nil,
+        model: String = ""
     ) -> String? {
         name.withCString { name in
             account.withCString { account in
                 keyA.withCString { keyA in
                     withOptionalCString(keyB) { keyB in
                         withOptionalCString(nodeKey) { nodeKey in
-                            spill {
-                                farcooler_client_ceremony_offer(
-                                    name, account, keyA, keyB, nodeKey, $0, $1)
+                            model.withCString { model in
+                                spill {
+                                    farcooler_client_ceremony_offer(
+                                        name, account, keyA, keyB, nodeKey, model, $0, $1)
+                                }
                             }
                         }
                     }

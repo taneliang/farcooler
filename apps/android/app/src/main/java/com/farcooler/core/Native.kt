@@ -205,6 +205,7 @@ internal object NativeClient {
         keyA: String,
         keyB: String?,
         nodeKey: String?,
+        model: String?,
     ): String?
 
     /**

@@ -52,6 +52,7 @@ async fn open_service(root: &Path) -> Service {
 
 fn enrolling(seed: u8, name: &str, scope: Scope, node_key: &str) -> ClientEnroll {
     ClientEnroll {
+        model: String::new(),
         public_key: public(seed),
         label: name.into(),
         client_id: client_id(seed),

@@ -127,6 +127,7 @@ const LAPTOP_KEY: &str =
 async fn enroll(admin: &mut SocketClient, key: &str, label: &str, client_id: &str) {
     let mut req = request("client.enroll");
     req.payload = Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+        model: String::new(),
         public_key: key.into(),
         label: label.into(),
         client_id: client_id.into(),
@@ -332,6 +333,7 @@ async fn only_a_written_enrollment_of_that_device_lifts_its_revoke() {
 async fn assert_served_nothing(device: &mut SocketClient) {
     let mut enrolling = request("client.enroll");
     enrolling.payload = Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+        model: String::new(),
         public_key: LAPTOP_KEY.into(),
         label: "mine now".into(),
         client_id: "phone-2".into(),

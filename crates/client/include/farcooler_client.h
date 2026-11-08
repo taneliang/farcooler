@@ -540,8 +540,8 @@ size_t farcooler_client_client_id(const char *public_key, uint8_t *out, size_t c
  */
 size_t farcooler_client_ceremony_offer(const char *name, const char *account,
                                        const char *key_a, const char *key_b,
-                                       const char *node_key, uint8_t *out,
-                                       size_t capacity);
+                                       const char *node_key, const char *model,
+                                       uint8_t *out, size_t capacity);
 
 /*
  * Leg one, the scanning side: read a scanned offer.

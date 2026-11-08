@@ -165,7 +165,7 @@ enum Enrollment {
     /// is a transcript nobody can read. The list is short.
     static func enroll(
         keyA: String, keyB: String?, label: String, clientID: String, scope: String,
-        nodeKey: String, on runners: [CeremonyRunner],
+        nodeKey: String, model: String = "", on runners: [CeremonyRunner],
         using run: @escaping Writer = {
             let result = await CLI.run($0)
             // The reply a caller reads a token from is stdout alone; a failure
@@ -178,7 +178,7 @@ enum Enrollment {
         for runner in runners {
             let a = await write(
                 key: keyA, label: label, clientID: clientID, scope: scope, shell: false,
-                nodeKey: nodeKey, to: runner, using: run)
+                nodeKey: nodeKey, model: model, to: runner, using: run)
             if !a.ok {
                 // Key B is skipped when Key A did not land, and only then. Not a
                 // rollback — the two lines are independent and one without the
@@ -238,12 +238,12 @@ enum Enrollment {
     /// restricted line, which is what every existing caller means.
     private static func write(
         key: String, label: String, clientID: String, scope: String, shell: Bool, nodeKey: String,
-        to runner: CeremonyRunner, using run: Writer
+        model: String = "", to runner: CeremonyRunner, using run: Writer
     ) async -> (ok: Bool, output: String) {
         await run(
             arguments(
                 key: key, label: label, clientID: clientID, scope: scope, shell: shell,
-                nodeKey: nodeKey, runner: runner.id))
+                nodeKey: nodeKey, runner: runner.id, model: model))
     }
 
     /// The command line for one enrollment.
@@ -261,6 +261,8 @@ enum Enrollment {
     /// destination and failed with "Could not reach  over ssh." — the double
     /// space being the whole of the runner's name, and the phone's key never
     /// reaching the Mac it was being added to.
+    ///
+    /// `model` is the new device's own word for what it is, such as `iPhone 17 Pro`, off its offer (ov-989).
     ///
     /// ## `--node-key`, and why it is on one of a Mac's two calls
     ///
@@ -291,7 +293,7 @@ enum Enrollment {
     /// device nobody's until the `member add` that follows binds it (ov-828).
     static func arguments(
         key: String, label: String, clientID: String, scope: String, shell: Bool,
-        nodeKey: String, runner: String, forTeammate: Bool = false
+        nodeKey: String, runner: String, forTeammate: Bool = false, model: String = ""
     ) -> [String] {
         var arguments = ["--json"]
         if !runner.isEmpty { arguments += ["--runner", runner] }
@@ -302,6 +304,9 @@ enum Enrollment {
         if shell { arguments.append("--shell-access") }
         if !shell, !nodeKey.isEmpty { arguments += ["--node-key", nodeKey] }
         if forTeammate { arguments.append("--for-teammate") }
+        // What the device said it is, for the approve list (ov-989). Key A's call only: a Mac's shell key
+        // has no phone behind it, and the runner keeps what Key A said.
+        if !shell, !model.isEmpty { arguments += ["--model", model] }
         return arguments
     }
 

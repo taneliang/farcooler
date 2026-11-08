@@ -109,3 +109,17 @@ fn how_and_when_a_device_was_paired_is_kept() {
     }
     assert_eq!(PairedVia::parse("socket"), None);
 }
+
+/// ov-989: a device's model, as it said at pairing, is kept and cleaned to one short printable line.
+#[test]
+fn the_model_a_device_said_is_kept_clean() {
+    use crate::device_added_by::clean_model;
+    let store = Store::open_in_memory().unwrap();
+    assert_eq!(store.device_model("phone").unwrap(), "", "never said");
+    store.record_device_model("phone", "iPhone 17 Pro").unwrap();
+    assert_eq!(store.device_model("phone").unwrap(), "iPhone 17 Pro");
+    store.record_device_model("phone", "").unwrap();
+    assert_eq!(store.device_model("phone").unwrap(), "", "forgotten");
+    assert_eq!(clean_model("  Pixel\n\t9  Pro\u{202e} "), "Pixel 9 Pro");
+    assert_eq!(clean_model(&"x".repeat(100)).chars().count(), 40);
+}

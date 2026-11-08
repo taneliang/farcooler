@@ -97,6 +97,28 @@ impl Store {
         Ok(said.as_deref().and_then(PairedVia::parse))
     }
 
+    /// Record the model `client_id` said at pairing (ov-989), replacing an earlier
+    /// enrollment's. Empty forgets it. In `meta`, like how it was paired.
+    pub fn record_device_model(&self, client_id: &str, model: &str) -> Result<()> {
+        let conn = self.conn();
+        if model.is_empty() {
+            return conn.execute("DELETE FROM meta WHERE key = ?1", [device_model_key(client_id)]).map(drop).map_err(map_err);
+        }
+        conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![device_model_key(client_id), model],
+        )
+        .map(drop)
+        .map_err(map_err)
+    }
+
+    /// The model `client_id` said at pairing, or empty.
+    pub fn device_model(&self, client_id: &str) -> Result<String> {
+        let said: Option<String> =
+            self.conn().query_row("SELECT value FROM meta WHERE key = ?1", [device_model_key(client_id)], |r| r.get(0)).optional().map_err(map_err)?;
+        Ok(said.unwrap_or_default())
+    }
+
     /// Every device's enroller, as `(device, added_by)`, sorted by device.
     pub fn added_by_all(&self) -> Result<Vec<(String, String)>> {
         let conn = self.conn();
@@ -172,6 +194,23 @@ impl PairedVia {
             _ => return None,
         })
     }
+}
+
+fn device_model_key(client_id: &str) -> String {
+    format!("device_model:{client_id}")
+}
+
+/// A model a device said, as one short printable line (ov-989): control and
+/// format characters (a bidi override included) dropped, runs of space made
+/// one, at most 40 characters. It is shown to the owner deciding whether to
+/// vouch, so it can't carry a line break or reorder what's beside it.
+pub fn clean_model(said: &str) -> String {
+    let kept: String = said.chars().map(|c| if c.is_whitespace() { ' ' } else { c }).filter(|c| !c.is_control() && !is_format(*c)).collect();
+    kept.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect::<String>().trim().to_string()
+}
+
+fn is_format(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
 fn paired_via_key(client_id: &str) -> String {

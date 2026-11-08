@@ -11,6 +11,7 @@ import com.farcooler.core.NativeLibrary
 import com.farcooler.data.NodeIdentity
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
+import com.farcooler.model.DeviceModel
 import com.farcooler.model.DirectRoute
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -401,9 +402,11 @@ object CeremonyCore : CeremonyCalls {
      * not minted one, which is the `v=1` shape the core has always accepted: it
      * can be granted direct runners and no tunneled ones. **Null is also what a
      * failed mint sends**, and never a placeholder.
+     *
+     * [model] is what this phone says it is, for the approve list on the Mac (ov-989).
      */
-    fun offer(name: String, account: String, keyA: String, nodeKey: String?): Answer =
-        answer { NativeClient.nativeCeremonyOffer(name, account, keyA, null, nodeKey) }
+    fun offer(name: String, account: String, keyA: String, nodeKey: String?, model: String = ""): Answer =
+        answer { NativeClient.nativeCeremonyOffer(name, account, keyA, null, nodeKey, model) }
 
     /**
      * Leg one, the scanning side.
@@ -945,7 +948,7 @@ class CeremonyStore(
         alreadyTaken = false
         _someRunnersPending.value = false
         val answer = CeremonyCore.offer(
-            deviceName, account, publicKey, NodeIdentity.offeredPublicKey,
+            deviceName, account, publicKey, NodeIdentity.offeredPublicKey, DeviceModel.current(),
         )
         when (answer) {
             is CeremonyCore.Answer.Refused -> _phase.value = Phase.Refused(answer.refusal)

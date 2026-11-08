@@ -38,6 +38,7 @@ async fn a_runner(label: &str) -> Runner {
     crate::enrollment::enroll(
         &svc,
         &ClientEnroll {
+            model: String::new(),
             public_key: PHONE_KEY.into(),
             label: label.into(),
             client_id: "phone-1".into(),

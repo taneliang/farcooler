@@ -3288,6 +3288,11 @@ message ClientEnroll {
   // access and the device together, because all three are in the signed
   // bytes. Absent, the device waits for a `member.set` as before.
   optional TeammateBind teammate = 9;
+  // The device's model as it said at pairing, for example "iPhone 17 Pro"
+  // (ov-989). What the device claims, not something the runner checked: the
+  // owner's approve list shows it beside the name. Cut to one short line of
+  // printable characters; empty from a device that didn't say.
+  string model = 10;
 }
 
 // Whom `client.enroll` binds a teammate's new device to, and with what access
@@ -5550,6 +5555,8 @@ message DeviceAccess {
   string paired_via = 11;
   // The device that paired this one, when `paired_via` is `device`.
   string paired_by = 12;
+  // The model it said at pairing (ov-989); empty if it said none.
+  string model = 13;
 }
 
 // A member's own Claude login on this runner (ov-584): whether they're

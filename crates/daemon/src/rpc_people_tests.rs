@@ -51,6 +51,7 @@ pub(crate) async fn with_bobs_phone_enrolled() -> (tempfile::TempDir, Arc<Servic
     std::fs::set_permissions(&ssh, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
     let svc = Arc::new(Service::open_in(state).await.unwrap().enrolling_into(ssh.join("authorized_keys")));
     let enroll = pb::ClientEnroll {
+        model: String::new(),
         public_key: BOBS_PHONE.into(),
         label: "Bob’s iPhone".into(),
         client_id: "phone-b".into(),
@@ -125,6 +126,7 @@ async fn removing_a_teammate_revokes_their_phone() {
 /// Enroll `key` as `client_id`, at Control, with no tunnel.
 pub(crate) async fn enroll(svc: &Service, key: &str, client_id: &str) {
     let enroll = pb::ClientEnroll {
+        model: String::new(),
         public_key: key.into(),
         label: client_id.into(),
         client_id: client_id.into(),

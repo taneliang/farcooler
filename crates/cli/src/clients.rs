@@ -78,6 +78,10 @@ pub enum ClientCmd {
         /// call, and never the owner's (ov-828). The Mac's Add Teammate passes it.
         #[arg(long)]
         for_teammate: bool,
+        /// The device's model as it said at pairing, such as `iPhone 17 Pro`, shown beside its name
+        /// when the owner approves it (ov-989). What the device claims; the runner doesn't check it.
+        #[arg(long)]
+        model: Option<String>,
     },
     /// Remove a device's keys and close the sessions they were holding.
     ///
@@ -116,7 +120,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
     // whatever the far end says about an enum it was handed.
     let outbound = match &cmd {
         ClientCmd::List => req("client.list"),
-        ClientCmd::Enroll { key, label, client_id, scope, shell_access, node_key, for_teammate } => with(
+        ClientCmd::Enroll { key, label, client_id, scope, shell_access, node_key, for_teammate, model } => with(
             req("client.enroll"),
             request::Payload::ClientEnroll(pb::ClientEnroll {
                 public_key: key.clone(),
@@ -130,6 +134,7 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                 for_teammate: *for_teammate,
                 step_up_key: None,
                 teammate: None,
+                model: model.clone().unwrap_or_default(),
             }),
         ),
         ClientCmd::Revoke { client_id, with_added } => with(

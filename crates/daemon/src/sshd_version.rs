@@ -131,6 +131,7 @@ mod tests {
         let keys = ssh.join("authorized_keys");
         let svc = crate::service::Service::open_in(state).await.unwrap().enrolling_into(keys.clone());
         let enroll = ClientEnroll {
+            model: String::new(),
             // A passkey for this build's app host, whichever channel it is.
             public_key: match farcooler_fence::app_host() {
                 "app.farcooler.com" => "sk-ecdsa-sha2-nistp256@openssh.com AAAAInNrLWVjZHNhLXNoYTItbmlzdHAyNTZAb3BlbnNzaC5jb20AAAAIbmlzdHAyNTYAAABBBGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfUAAAARYXBwLmZhcmNvb2xlci5jb20=",

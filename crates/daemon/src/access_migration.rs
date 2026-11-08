@@ -421,6 +421,7 @@ fn paired(store: &Store, device: &str, row: farcooler_protocol::v1::DeviceAccess
     let added = store.added_by_of(device)?;
     Ok(farcooler_protocol::v1::DeviceAccess {
         paired_at: added.as_ref().map_or(0, |(_, at)| *at),
+        model: store.device_model(device)?,
         paired_via: via.map(|v| v.as_str().to_string()).unwrap_or_default(),
         paired_by: added.filter(|_| via == Some(farcooler_store::device_added_by::PairedVia::Device)).map(|(by, _)| by).unwrap_or_default(),
         ..row

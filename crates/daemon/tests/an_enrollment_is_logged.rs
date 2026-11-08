@@ -55,6 +55,7 @@ async fn call(factory: &RpcFactory, req: Request) -> Result<pb::result::Value, S
 
 fn enroll(key: &str, client_id: &str, scope: Scope, node_key: &str) -> Request {
     let p = pb::ClientEnroll {
+        model: String::new(),
         public_key: key.into(),
         label: "Chrome on Mac".into(),
         client_id: client_id.into(),

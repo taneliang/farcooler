@@ -196,6 +196,25 @@ struct PeopleAccessTests {
         #expect(PeopleAccess.pairedOutsideConfirmTitle(for: cli).hasSuffix("Anyway?"))
     }
 
+    /// ov-989: the model a device said at pairing is on its row, and leads the line under its name.
+    @Test("The approve list shows the model a device said")
+    func modelShown() throws {
+        let members = Data(
+            #"""
+            {"members":[],"claude_account":"","you":"",
+            "device_access":[
+              {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"221133","step_up_at":5,"paired_at":1731000000000,"paired_via":"app","paired_by":"","model":"iPhone 17 Pro"},
+              {"client_id":"old-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"990011","step_up_at":5,"paired_at":1731000000000,"paired_via":"app","paired_by":""}
+            ]}
+            """#.utf8)
+        let mac = try #require(PeopleAccess(members: members, isSocket: true))
+        let by = Dictionary(uniqueKeysWithValues: mac.people.flatMap(\.devices).map { ($0.id, $0) })
+        let said = try #require(by["pad-o"]), silent = try #require(by["old-o"])
+        #expect(said.model == "iPhone 17 Pro")
+        #expect(PeopleAccess.pairedLine(for: said, runner: "Mac").hasPrefix("iPhone 17 Pro. Paired in Far Cooler on Mac"))
+        #expect(silent.model == "" && PeopleAccess.pairedLine(for: silent, runner: "Mac").hasPrefix("Paired in Far Cooler"))
+    }
+
     /// The review's path (ov-982 B1): an agent pairs from a terminal, its key
     /// arrives as a proposal (ov-980), and the Mac lists it under Waiting for
     /// Approval, where one press of Allow trusted and vouched for it. Wherever

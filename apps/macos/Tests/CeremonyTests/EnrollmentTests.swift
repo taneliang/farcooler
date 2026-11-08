@@ -214,3 +214,23 @@ struct EnrollmentTests {
         return arguments[flag + 1]
     }
 }
+
+/// ov-989: a phone's model goes to the runner on Key A's call only, and not at all when it said none.
+@Suite("A phone's model reaches the runner")
+struct EnrollmentModelTests {
+    @Test func theModelIsSentOnKeyAAndNeverOnTheShellKey() throws {
+        let a = Enrollment.arguments(
+            key: "ssh-ed25519 AAAAC3Nz", label: "iPhone", clientID: "id-1", scope: "control",
+            shell: false, nodeKey: "", runner: "", model: "iPhone 17 Pro")
+        let flag = try #require(a.firstIndex(of: "--model"))
+        #expect(a[flag + 1] == "iPhone 17 Pro")
+        let b = Enrollment.arguments(
+            key: "ssh-ed25519 AAAAC3Nz", label: "iPhone", clientID: "id-1", scope: "host_admin",
+            shell: true, nodeKey: "", runner: "", model: "iPhone 17 Pro")
+        #expect(!b.contains("--model"))
+        let none = Enrollment.arguments(
+            key: "ssh-ed25519 AAAAC3Nz", label: "iPhone", clientID: "id-1", scope: "control",
+            shell: false, nodeKey: "", runner: "")
+        #expect(!none.contains("--model"))
+    }
+}

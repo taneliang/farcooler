@@ -15,6 +15,7 @@ const NODE: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 async fn enroll(svc: &Service, n: u8, id: &str, scope: Scope, shell: bool, node: &str) {
     let request = pb::ClientEnroll {
+        model: String::new(),
         public_key: key(n),
         label: id.into(),
         client_id: id.into(),

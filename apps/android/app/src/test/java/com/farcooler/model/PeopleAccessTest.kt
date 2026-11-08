@@ -161,4 +161,21 @@ class PeopleAccessTest {
         val said = StepUpWords.sentenceForRefusal("key_unvouched", runner = "box", device = "phone")
         assertTrue(said, said.contains("Mac") && !said.contains("_"))
     }
+
+    /** ov-989: the model a device said at pairing leads the line under its name; a silent one has none. */
+    @Test
+    fun theApproveListShowsTheModelADeviceSaid() {
+        val said = Json.parseToJsonElement(
+            """{"members":[],"claude_account":"","you":"",
+            "device_access":[
+              {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"221133","step_up_at":5,"paired_at":1731000000000,"paired_via":"app","paired_by":"","model":"iPhone 17 Pro"},
+              {"client_id":"old-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"990011","step_up_at":5,"paired_at":1731000000000,"paired_via":"app","paired_by":""}
+            ]}""",
+        ).jsonObject
+        val by = PeopleAccess.of(said, null, "")!!.people.flatMap { it.devices }.associateBy { it.id }
+        assertEquals("iPhone 17 Pro", by.getValue("pad-o").model)
+        assertTrue(PeopleAccess.pairedLine(by.getValue("pad-o"), "Mac").startsWith("iPhone 17 Pro. Paired in Far Cooler on Mac"))
+        assertEquals("", by.getValue("old-o").model)
+        assertTrue(PeopleAccess.pairedLine(by.getValue("old-o"), "Mac").startsWith("Paired in Far Cooler"))
+    }
 }

@@ -84,6 +84,7 @@ async fn open_service(root: &Path) -> Service {
 /// One device, through the daemon's own enrollment path.
 async fn enroll(service: &Service, public_key: &str, client_id: &str, shell_access: bool) {
     let request = farcooler_protocol::v1::ClientEnroll {
+        model: String::new(),
         public_key: public_key.into(),
         label: "device".into(),
         client_id: client_id.into(),
@@ -406,6 +407,7 @@ async fn the_dispatch_table_writes_onto_the_connections_own_line() {
         let mut req = request("client.enroll");
         req.payload =
             Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+                model: String::new(),
                 public_key: KEYS[index].into(),
                 label: "device".into(),
                 client_id: (*client_id).into(),
@@ -452,6 +454,7 @@ async fn a_local_caller_is_refused_over_the_socket_too() {
     let mut admin = connect(&h, None).await;
     let mut req = request("client.enroll");
     req.payload = Some(request::Payload::ClientEnroll(farcooler_protocol::v1::ClientEnroll {
+        model: String::new(),
         public_key: KEYS[0].into(),
         label: "device".into(),
         client_id: "c1".into(),

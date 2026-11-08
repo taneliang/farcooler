@@ -243,6 +243,7 @@ async fn enroll_held(
     // place that knows whether the write happened or the line was already
     // there.
     let admitting = request.node_key.clone();
+    let said_model = farcooler_store::device_added_by::clean_model(&request.model);
     let sessions = svc.sessions().clone();
     let asking = caller.clone();
     let device = mine.client_id.clone();
@@ -378,6 +379,10 @@ async fn enroll_held(
             // that can't be recorded is refused (ov-838).
             store.record_added_by(&mine.client_id, caller.as_ref().and_then(|c| c.session.client_id()).unwrap_or("")).map_err(Refusal)?;
             store.record_paired_via(&mine.client_id, Caller::paired_via(caller.as_ref())).map_err(Refusal)?;
+            // Key A's call says it; Key B's, with none, leaves what Key A said (ov-989).
+            if !said_model.is_empty() {
+                store.record_device_model(&mine.client_id, &said_model).map_err(Refusal)?;
+            }
             let (mut ours, foreign) = sorted(&entries);
             ours.push(line);
             Ok((

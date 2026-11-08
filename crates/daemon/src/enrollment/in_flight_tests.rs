@@ -43,6 +43,7 @@ fn admin(session: Arc<Session>) -> super::Caller {
 
 fn asking(key: &str, client_id: &str, shell_access: bool) -> ClientEnroll {
     ClientEnroll {
+        model: String::new(),
         public_key: key.into(),
         label: "A device".into(),
         client_id: client_id.into(),

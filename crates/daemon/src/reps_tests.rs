@@ -414,6 +414,7 @@ async fn a_member_is_bound_only_to_enrolled_devices() {
     crate::enrollment::enroll(
         &svc,
         &pb::ClientEnroll {
+            model: String::new(),
             public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER phone".into(),
             label: "Bob's phone".into(),
             client_id: "phone-b".into(),

@@ -65,6 +65,7 @@ fn bobs_offer() -> String {
             key.as_ptr(),
             std::ptr::null(),
             std::ptr::null(),
+            std::ptr::null(),
             out,
             capacity,
         )

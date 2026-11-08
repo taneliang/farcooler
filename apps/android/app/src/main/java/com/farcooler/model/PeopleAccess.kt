@@ -82,6 +82,8 @@ class PeopleAccess private constructor(
         val pairedVia: PairedVia? = null,
         /** The name of the device that added it, when [pairedVia] is [PairedVia.DEVICE]. */
         val pairedBy: String? = null,
+        /** The model it said at pairing, such as "Pixel 9 Pro" (ov-989); empty if it said none. Its own word. */
+        val model: String = "",
     ) {
         /** Paired from a terminal on the runner, not in the app: an agent can do that, naming any device (ov-982). */
         val pairedOutsideApp: Boolean get() = pairedVia == PairedVia.TERMINAL
@@ -151,6 +153,11 @@ class PeopleAccess private constructor(
 
         /** How and when [device] was paired, under its name where its approval is offered (ov-982). */
         fun pairedLine(device: Device, runner: String): String {
+            val model = device.model.trim()
+            return if (model.isEmpty()) pairedHow(device, runner) else "$model. " + pairedHow(device, runner)
+        }
+
+        private fun pairedHow(device: Device, runner: String): String {
             val how = when (device.pairedVia) {
                 PairedVia.APP -> "Paired in Far Cooler on $runner"
                 PairedVia.DEVICE -> "Added from ${device.pairedBy ?: "another device"}"
@@ -254,6 +261,7 @@ class PeopleAccess private constructor(
                     pairedAt = row?.text("paired_at")?.toLongOrNull()?.takeIf { it > 0 },
                     pairedVia = PairedVia.of(row?.text("paired_via")),
                     pairedBy = row?.text("paired_by")?.takeIf(String::isNotEmpty)?.let(::nameOf),
+                    model = row?.text("model").orEmpty(),
                 )
             }
 

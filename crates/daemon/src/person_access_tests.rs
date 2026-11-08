@@ -25,6 +25,7 @@ const NODE_E: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE";
 
 fn asking(n: u8, id: &str, scope: Scope, node: &str) -> pb::ClientEnroll {
     pb::ClientEnroll {
+        model: String::new(),
         public_key: key(n),
         label: id.into(),
         client_id: id.into(),

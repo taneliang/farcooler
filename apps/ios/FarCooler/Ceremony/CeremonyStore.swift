@@ -1,3 +1,4 @@
+import AgentKit
 import FarCoolerClient
 import Foundation
 import LocalAuthentication
@@ -237,16 +238,19 @@ enum CeremonyCore {
     /// silence, so the symptom would be a connection that times out saying
     /// nothing.
     static func offer(
-        name: String, account: String, keyA: String, keyB: String? = nil, nodeKey: String?
+        name: String, account: String, keyA: String, keyB: String? = nil, nodeKey: String?,
+        model: String = ""
     ) -> Answer {
         name.withCString { name in
             account.withCString { account in
                 keyA.withCString { keyA in
                     withOptionalCString(keyB) { keyB in
                         withOptionalCString(nodeKey) { nodeKey in
-                            answer {
-                                farcooler_client_ceremony_offer(
-                                    name, account, keyA, keyB, nodeKey, $0, $1)
+                            model.withCString { model in
+                                answer {
+                                    farcooler_client_ceremony_offer(
+                                        name, account, keyA, keyB, nodeKey, model, $0, $1)
+                                }
                             }
                         }
                     }
@@ -692,7 +696,7 @@ final class CeremonyStore: ObservableObject {
         alreadyTaken = false
         switch CeremonyCore.offer(
             name: deviceName, account: account, keyA: publicKey, keyB: nil,
-            nodeKey: offeredNodeKey())
+            nodeKey: offeredNodeKey(), model: PhoneModel.current())
         {
         case .refused(let refusal):
             phase = .refused(refusal)

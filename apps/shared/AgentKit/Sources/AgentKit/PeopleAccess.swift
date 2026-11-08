@@ -103,6 +103,9 @@ public struct PeopleAccess: Equatable, Sendable {
         public var pairedVia: PairedVia? = nil
         /// The device that paired it, by name, when ``pairedVia`` is `.device`.
         public var pairedBy: String? = nil
+        /// The model it said at pairing, such as "iPhone 17 Pro" (ov-989); empty if it said none. Its own
+        /// word, which the runner doesn't check.
+        public var model: String = ""
         /// Paired from a terminal on the runner, not by Far Cooler's own
         /// pairing: the Mac asks a second time before approving it (ov-982).
         public var pairedOutsideApp: Bool { pairedVia == .terminal }
@@ -185,7 +188,8 @@ public struct PeopleAccess: Equatable, Sendable {
                 vouched: row?.step_up_vouched ?? false,
                 pairedAt: (row?.paired_at ?? 0) > 0 ? Date(timeIntervalSince1970: Double(row?.paired_at ?? 0) / 1000) : nil,
                 pairedVia: PairedVia(rawValue: row?.paired_via ?? ""),
-                pairedBy: (row?.paired_by ?? "").isEmpty ? nil : name(of: row?.paired_by ?? ""))
+                pairedBy: (row?.paired_by ?? "").isEmpty ? nil : name(of: row?.paired_by ?? ""),
+                model: row?.model ?? "")
         }
 
         var people: [Person] = []
@@ -303,6 +307,10 @@ public struct PeopleAccess: Equatable, Sendable {
     /// How and when `device` was paired, under its name in the approve list
     /// (ov-982). `runner` names the runner's Mac: "this Mac" on its own.
     public static func pairedLine(for device: Device, runner: String = "this Mac") -> String {
+        let model = device.model.trimmingCharacters(in: .whitespaces)
+        return model.isEmpty ? pairedHow(device, runner: runner) : "\(model). " + pairedHow(device, runner: runner)
+    }
+    private static func pairedHow(_ device: Device, runner: String) -> String {
         let how: String
         switch device.pairedVia {
         case .app: how = "Paired in Far Cooler on \(runner)"
@@ -385,6 +393,7 @@ public struct PeopleAccess: Equatable, Sendable {
         let paired_at: Int64
         let paired_via: String
         let paired_by: String
+        let model: String
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -398,9 +407,10 @@ public struct PeopleAccess: Equatable, Sendable {
             paired_at = try c.decodeIfPresent(Int64.self, forKey: .paired_at) ?? 0
             paired_via = try c.decodeIfPresent(String.self, forKey: .paired_via) ?? ""
             paired_by = try c.decodeIfPresent(String.self, forKey: .paired_by) ?? ""
+            model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
         }
         enum Keys: String, CodingKey {
-            case client_id, person, cap, check, step_up, step_up_code, step_up_vouched, paired_at, paired_via, paired_by
+            case client_id, person, cap, check, step_up, step_up_code, step_up_vouched, paired_at, paired_via, paired_by, model
         }
     }
 

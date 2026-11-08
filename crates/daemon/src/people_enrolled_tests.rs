@@ -64,6 +64,7 @@ fn enroll(key: &str, client_id: &str, scope: Scope, shell_access: bool) -> Reque
     Request {
         method: "client.enroll".into(),
         payload: Some(request::Payload::ClientEnroll(pb::ClientEnroll {
+            model: String::new(),
             public_key: key.into(),
             label: "A device".into(),
             client_id: client_id.into(),
@@ -315,6 +316,7 @@ async fn removing_a_member_revokes_a_device_whose_line_lands_late() {
                 Ok(())
             });
             let request = pb::ClientEnroll {
+                model: String::new(),
                 public_key: KEY_TESS.into(),
                 label: "A device".into(),
                 client_id: "phone-late".into(),
