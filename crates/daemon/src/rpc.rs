@@ -814,9 +814,13 @@ impl Rpc {
                 let sink = crate::resync::TerminalSink::new(self.push.clone(), pane.terminal_id, 0);
                 let ending = crate::resync::TerminalSink::new(self.push.clone(), pane.terminal_id, 0);
                 let task = tokio::spawn(async move {
+                    let (tmux, pane_id, terminal) = (runtime.tmux.clone(), pane.pane_id.clone(), pane.terminal_id);
                     let _ = runtime.attach(pane, sink).await;
-                    // The engine reaped the pane: say so, so the viewer can show "finished".
-                    ending.pane_gone();
+                    // Say "finished" only when tmux confirms the pane is gone. An attach that failed
+                    // while the agent still runs must not tell the owner it ended.
+                    if matches!(tmux.pane_life(&pane_id, terminal).await, Ok(farcooler_tmux::PaneLife::Gone | farcooler_tmux::PaneLife::Dead)) {
+                        ending.pane_gone();
+                    }
                 });
                 if let Ok(mut held) = self.attachment.lock() {
                     held.replace(Attachment(task));
