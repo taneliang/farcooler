@@ -83,8 +83,9 @@ struct Written {
 /// Every plan-layer write, each refused to a released phone first: a theme
 /// with its story, Next line and ask of the owner; a ticket on the line with
 /// its branch and reason, ranked in the plan; an agent recorded on it, its
-/// work ended and the agent ended; a ruling kept and one kept with the rest; a
-/// landing started and moved on; a page set and removed. Bob makes most of
+/// work ended and the agent ended; a ruling kept and one kept with the rest;
+/// a landing's start and move refused from every seat, the engine landing now,
+/// with an old one left as history (ov-960); a page set and removed. Bob makes most of
 /// them; the owner's phone and the orchestrator make the rest, as before,
 /// and the orchestrator's record (an agent, a landing's state) is theirs
 /// alone (`a_member_writes_none_of_the_orchestrators_record`).
@@ -152,13 +153,20 @@ async fn write_the_plan(r: &Runner) -> Written {
     written(r, "ruling.keep_all", |actor| P::RulingKeepAll(pb::RulingKeepAll { workspace_id: ws(), actor: actor.into() }), BOB).await;
     written(r, "ruling.add", add("Keep the paper invoice for a release"), LOCAL).await;
 
-    let started = written(r, "landing.start", |actor| {
-        P::LandingStart(pb::LandingStart { workspace_id: ws(), route: pb::LandingRoute::Push as i32, base: "origin/main".into(), actor: actor.into(), ..Default::default() })
-    }, LOCAL).await;
-    let result::Value::Landing(landing) = started else { panic!("{started:?}") };
-    written(r, "landing.set", |actor| {
-        P::LandingSet(pb::LandingSet { landing_id: landing.id.clone(), state: pb::LandingState::Gating as i32, actor: actor.into(), ..Default::default() })
-    }, OWNERS_PHONE).await;
+    // The engine lands now (ov-960): landing.start and landing.set are refused
+    // from every seat, and the plan reads an old landing as history.
+    let landing = farcooler_store::testing::old_landing(&r.svc.store, r.workspace, 1, "gating", None, &[], farcooler_store::testing::now_millis());
+    for by in [RELEASED, BOB, OWNERS_PHONE, LOCAL] {
+        let actor = if by == LOCAL { "manager" } else { "user" };
+        let start = P::LandingStart(pb::LandingStart { workspace_id: ws(), route: pb::LandingRoute::Push as i32, base: "origin/main".into(), actor: actor.into(), ..Default::default() });
+        let set = P::LandingSet(pb::LandingSet { landing_id: id_bytes(landing), state: pb::LandingState::Gating as i32, actor: actor.into(), ..Default::default() });
+        for (method, payload) in [("landing.start", start), ("landing.set", set)] {
+            let refused = call(&factory(&r.svc, by, Scope::Control), method, payload).await;
+            // A released phone and a member are stopped at the seat, as before; the owner's are told the engine lands.
+            let want = if by == RELEASED || by == BOB { NOT_YOURS } else { "invalid-argument:engine_lands" };
+            assert_eq!(refused.err().as_deref(), Some(want), "{by:?} on {method}");
+        }
+    }
 
     // The orchestrator's pages are the plan's too.
     let page = |actor: &str| {

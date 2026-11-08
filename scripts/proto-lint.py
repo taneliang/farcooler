@@ -357,12 +357,23 @@ def timeout_problems(text):
     holding a runner (a macOS one bills at ten times Linux) and, in Canary and
     CI, the concurrency group behind it. A job that calls a reusable workflow
     through `uses:` cannot take one; the called workflow's jobs carry it.
+    A per-OS choice, `${{ matrix.os == 'macos-latest' && 60 || 35 }}`, counts
+    when both of its outcomes are numbers (ov-992); any other expression could
+    come out empty, which GitHub reads as no limit.
     """
     return [
         f"`{job}` has no timeout-minutes, so a hang runs for six hours"
         for job, keys in workflow_jobs(text).items()
-        if "uses" not in keys and not re.fullmatch(r"[1-9]\d*", keys.get("timeout-minutes", ""))
+        if "uses" not in keys and not bounded_minutes(keys.get("timeout-minutes", ""))
     ]
+
+
+def bounded_minutes(value):
+    """True when a `timeout-minutes` value is a number, or a `cond && N || M` with both N and M numbers."""
+    return bool(
+        re.fullmatch(r"[1-9]\d*", value)
+        or re.fullmatch(r"\$\{\{[^{}&|]+&&\s*[1-9]\d*\s*\|\|\s*[1-9]\d*\s*\}\}", value)
+    )
 
 
 def top_level(text):
@@ -937,6 +948,9 @@ def self_test():
     timeout_cases = [
         ("a job without timeout-minutes", planted, 1),
         ("an empty timeout-minutes", canary.replace("    timeout-minutes: 5\n", "    timeout-minutes:\n", 1), 1),
+        ("a per-OS choice of two numbers", canary.replace("    timeout-minutes: 5\n", "    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 35 }}\n", 1), 0),
+        ("a per-OS choice that can come out empty", canary.replace("    timeout-minutes: 5\n", "    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || '' }}\n", 1), 1),
+        ("an expression that is not a choice of numbers", canary.replace("    timeout-minutes: 5\n", "    timeout-minutes: ${{ matrix.timeout }}\n", 1), 1),
         ("a job calling a reusable workflow", canary.replace("\njobs:\n", "\njobs:\n  called:\n    uses: ./.github/workflows/linux-binaries.yml\n", 1), 0),
         ("the real canary.yml", canary, 0),
     ]
