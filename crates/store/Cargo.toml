@@ -29,3 +29,7 @@ tempfile = "3"
 [[example]]
 name = "engine_cutover_rehearsal"
 required-features = ["testing"]
+
+[[example]]
+name = "write_source60"
+required-features = ["testing"]

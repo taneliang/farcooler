@@ -43,6 +43,10 @@ struct FleetPlaceholder: View {
         /// The runner refuses this Mac's key, after letting it in before
         /// (ov-818): the runner. Its work is gone from this Mac too.
         case noAccess(String)
+        /// This Mac's runner is mid-upgrade: its data is older than this
+        /// build serves, and it answers nothing until the upgrade finishes
+        /// (ov-984). Its own screen, with the one button that finishes it.
+        case upgrade
     }
 
     /// How long a restore waits before it says it's connecting: a runner
@@ -81,6 +85,9 @@ struct FleetPlaceholder: View {
     ) -> Phase {
         if let removedFrom { return .removed(removedFrom) }
         if let noAccessTo { return .noAccess(noAccessTo) }
+        // Ahead of the rest: this Mac's runner shows nothing until it's
+        // finished, so a window going back to a place on it waits here too.
+        if runner?.isEmpty ?? true, isMidUpgrade(localError) { return .upgrade }
         if let runner {
             if trouble != nil || waited >= connectingLimit { return .unreachable(runner, reason: trouble) }
             return waited < connectingDelay ? .settling : .connecting(runner)
@@ -90,6 +97,12 @@ struct FleetPlaceholder: View {
         if localLoaded { return hasRepositories ? .noWorktrees : .noRepositories }
         if let localError { return .failed(localError) }
         return .loading
+    }
+
+    /// Whether this Mac's runner refused the fleet's read because its data is
+    /// mid-upgrade (`version-incompatible`, `what: cutover_held`).
+    nonisolated static func isMidUpgrade(_ error: String?) -> Bool {
+        RunnerRefusal.isCutoverHeld(word: TaskFailure.code(in: error), what: TaskFailure.what(in: error))
     }
 
     /// What a workspace is for, by its job: the purpose, then what its
@@ -201,6 +214,11 @@ struct FleetPlaceholder: View {
     let welcome: WelcomeSetup
     let onNewWorktree: () -> Void
     let onTryAgain: () -> Void
+    /// After the upgrade ends: this Mac's daemon started again where nothing
+    /// supervises it, and the fleet read again.
+    var onRefreshAfterUpgrade: @MainActor () async -> Void = {}
+    /// The upgrade the recovery screen runs: this Mac's runner's.
+    var upgrade: RunnerUpgrade = .local
 
     /// On a card like every destination (ov-297): loading, trouble and the
     /// empty states are the same surface as the pages they stand in for.
@@ -298,6 +316,8 @@ struct FleetPlaceholder: View {
                 }
             }
             .accessibilityIdentifier("runner-no-access")
+        case .upgrade:
+            RunnerUpgradeView(upgrade: upgrade, refresh: onRefreshAfterUpgrade)
         case .chooseWorkspace:
             ContentUnavailableView {
                 EmptyStateTitle("No Workspace Selected", symbol: "square.stack.3d.up")

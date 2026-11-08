@@ -252,6 +252,12 @@ extension ContentView {
             // The runner a restore waits for, dialed again; else this Mac's read.
             onTryAgain: {
                 if let runner, !runner.isEmpty { store.reconnect(runner) } else { Task { await local?.refresh() } }
+            },
+            // The upgrade ended its runner's recovery: start this Mac's
+            // daemon again if nothing supervises it, then read the fleet.
+            onRefreshAfterUpgrade: {
+                await LocalDaemon.shared.ensure()
+                await local?.refresh()
             }
         ).asking(rep: store.clients.values.contains { $0.talk.people?.isMember == true })
     }

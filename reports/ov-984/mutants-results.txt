@@ -1,0 +1,9 @@
+upgrade-phase-dropped RED
+no-recover-on-failure RED
+committed-rolled-back RED
+no-touch-id RED
+held-attempt-ignored RED
+failure-runs-on RED
+[('upgrade-phase-dropped', 'RED', 'aRunnerMidUpgradeDrawsTheRecoveryScreen'), ('no-recover-on-failure', 'RED', 'aFailureAtAnyStep'), ('committed-rolled-back', 'RED', 'recoverAfterCommitFinishesTheStepsLeft'), ('no-touch-id', 'RED', 'noTouchIDRunsNothing'), ('held-attempt-ignored', 'RED', 'aHeldRunnerIsPreparedUnderItsOwnAttempt'), ('failure-runs-on', 'RED', 'aFailureAtAnyStep')]
+
+[exited with code 0]
