@@ -200,6 +200,8 @@ public enum StepUpWords {
             "That request timed out. Ask again on the other device."
         case "key_unvouched":
             "To allow the cutover from this \(device), approve it once in People on your Mac, with Touch ID."
+        case "presence_needed":
+            "Approve it with Touch ID in Far Cooler on \(runner), or from a phone that already allows admin actions there."
         default:
             "Couldn’t do that. Try again."
         }

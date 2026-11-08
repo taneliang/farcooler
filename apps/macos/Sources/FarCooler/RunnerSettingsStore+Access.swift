@@ -54,8 +54,10 @@ extension RunnerSettingsStore {
     /// Allow a device's key on this Mac's own runner, after Touch ID or the
     /// login password, from this app's own process (ov-974): the approval
     /// then also vouches for the key, which is what lets a phone allow the
-    /// cutover. A runner over ssh, or a Mac that can't sign, approves through
-    /// the CLI as before: the key is trusted, and vouched for by nobody.
+    /// cutover. A runner over ssh, or a Mac that can't sign, asks through the
+    /// CLI: a runner from before ov-980 trusts the key on that, and a newer
+    /// one refuses it `presence_needed`, since the CLI is no proof anyone is
+    /// there, and the sentence points to Touch ID or a trusted phone.
     private func approveWithTouchID(_ device: PeopleAccess.Device) async {
         let plain = ["people", "approve", device.id, device.code]
         guard target.isEmpty else { return await change(plain) }
@@ -130,7 +132,7 @@ extension RunnerSettingsStore {
 
     /// The runner's word in a CLI refusal, or "".
     static func word(of said: String) -> String {
-        for word in ["no_approver", "approval_expired", "approval_denied", "step_up_needed", "key_untrusted", "key_unvouched", "socket_only", "person_only", "wrong_code", "proposal_expired", "not_yours", "not_admin", "step_up_failed", "challenge_expired", "defensive_only"] where said.contains(word) {
+        for word in ["no_approver", "approval_expired", "approval_denied", "step_up_needed", "key_untrusted", "key_unvouched", "presence_needed", "socket_only", "person_only", "wrong_code", "proposal_expired", "not_yours", "not_admin", "step_up_failed", "challenge_expired", "defensive_only"] where said.contains(word) {
             return word
         }
         return ""
