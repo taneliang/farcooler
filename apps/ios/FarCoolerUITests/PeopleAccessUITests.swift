@@ -177,6 +177,32 @@ final class PeopleAccessUITests: XCTestCase {
         XCTAssertFalse(back.isHittable, "the terminal's Back is reachable under the lock")
     }
 
+    /// **One face unlocks once** (ov-986). The Face ID sheet takes the
+    /// scene to inactive and back to active without the app ever going to
+    /// the background, and the gate read that return as a resume with no
+    /// record of leaving and locked again: another face, another lock,
+    /// forever. The simulator has no passcode, so no sheet. Control Center
+    /// makes the same inactive and active return. `-appLockHoldResume` opens
+    /// the launch and holds every lock after it, so a re-lock stays up to be
+    /// seen.
+    func testAnInactiveReturnDoesNotLockAgain() {
+        let app = XCUIApplication.phoneHarness(["-appLock", "YES", "-appLockHoldResume"])
+        let lock = element(app, "app-lock")
+        // The launch's lock opens two seconds in, often before the first look.
+        XCTAssertTrue(app.buttons["Settings"].firstMatch.waitForExistence(timeout: 30), "no app: \(app.debugDescription)")
+        XCTAssertTrue(lock.waitForNonExistence(timeout: 15), "the launch never unlocked: \(app.debugDescription)")
+        XCTAssertTrue(app.buttons["Settings"].firstMatch.isHittable, "the app is covered after the launch: \(app.debugDescription)")
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.005))
+            .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.6)))
+        Thread.sleep(forTimeInterval: 2)
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.97))
+            .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
+        XCTAssertEqual(app.state, .runningForeground, "the app went to the background, which isn't the case under test")
+        XCTAssertTrue(lock.waitForNonExistence(timeout: 5), "an inactive return locked again: \(app.debugDescription)")
+        XCTAssertFalse(lock.waitForExistence(timeout: 3), "the lock came back after the return: \(app.debugDescription)")
+    }
+
     /// **A kept terminal does not reopen under the lock** (ov-856, §3a). The
     /// last run was in a worktree; the lock is held at launch. The place is
     /// kept for the unlock, and no terminal is opened before it.

@@ -37,14 +37,13 @@ public struct AppLock: Equatable, Sendable {
         leftAt = now
     }
 
-    /// The app is back: locks when it was away long enough. A resume with
-    /// no record of leaving (a crash restore) locks too.
+    /// The app is back: locks when it was away long enough. A return with
+    /// no leave before it changes nothing: the scene only went inactive,
+    /// which is what the Face ID sheet itself does, so locking there would ask
+    /// again after every face, forever (ov-986). A fresh launch is already
+    /// locked by `atLaunch`.
     public mutating func didReturn(at now: Date) {
-        guard isOn else { return }
-        guard let leftAt else {
-            isLocked = true
-            return
-        }
+        guard isOn, let leftAt else { return }
         if now.timeIntervalSince(leftAt) >= Self.idleLimit { isLocked = true }
         self.leftAt = nil
     }

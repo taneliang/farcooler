@@ -237,10 +237,34 @@ struct AppLockTests {
         #expect(AppLock.setting(wanting: true, verified: false))
     }
 
-    @Test("A resume with no record of leaving is locked, never open")
-    func noRecord() {
-        var lock = AppLock()
-        lock.didReturn(at: t0)
-        #expect(lock.isLocked)
+    /// The gate's loop, as the phone runs it: each time the scene turns
+    /// active it reports a return, and while locked it asks for a face. The
+    /// Face ID sheet turns the scene inactive and back to active without
+    /// ever going to the background (ov-986).
+    @Test("One face unlocks once: the Face ID sheet's own return doesn't lock again")
+    func faceIDSheetDoesNotRelock() {
+        var lock = AppLock.atLaunch()
+        var asks = 0
+        lock.didReturn(at: t0) // the launch's first activation
+        while lock.isLocked, asks < 5 {
+            asks += 1
+            lock.unlock() // the face is good
+            lock.didReturn(at: t0) // the sheet goes, and the scene is active again
+        }
+        #expect(asks == 1, "asked \(asks) times for one face")
+        #expect(!lock.isLocked)
+    }
+
+    @Test("A return with no leave first changes nothing: a launch stays locked, an unlock stays open")
+    func noLeave() {
+        var launch = AppLock.atLaunch()
+        launch.didReturn(at: t0)
+        #expect(launch.isLocked)
+        var open = AppLock()
+        open.didReturn(at: t0)
+        #expect(!open.isLocked)
+        open.didLeave(at: t0)
+        open.didReturn(at: t0.addingTimeInterval(AppLock.idleLimit))
+        #expect(open.isLocked, "the background still locks after a blip")
     }
 }

@@ -66,9 +66,14 @@ struct AppLockGate: ViewModifier {
                 case .background:
                     center.lock.isOn = AppLockSetting.isOn
                     center.lock.didLeave(at: Self.leftAt())
+                    declined = false
                 case .active:
                     center.lock.didReturn(at: .now)
-                    if center.lock.isLocked { attempt() }
+                    // Not after a declined face: the Face ID sheet's own
+                    // inactive and active return would ask again at once,
+                    // and Cancel could never stay cancelled (ov-986). Unlock
+                    // asks, and so does the next return from the background.
+                    if center.lock.isLocked, !declined { attempt() }
                 default: break
                 }
                 refresh()
@@ -110,8 +115,7 @@ struct AppLockGate: ViewModifier {
         #if DEBUG
         // A UI test that must see the lock stay up: no face to give it.
         // `-appLockHoldResume` opens the launch with no face, two seconds in
-        // (after the scene's first activation, which locks a launch that has
-        // no record of leaving), and holds every lock after.
+        // (after the scene's first activation), and holds every lock after.
         let args = CommandLine.arguments
         if args.contains("-appLockHold") { return }
         if args.contains("-appLockHoldResume") {
