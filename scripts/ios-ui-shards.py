@@ -177,6 +177,7 @@ LOCAL = {
     "TerminalPasteTests": "needs the demo runner",
     "TerminalScrollTests": "needs the demo runner",
     "ScrollHitchUITests": "a measurement, not a gate: a simulator's frame times follow the machine's load (ov-788)",
+    "AgentWatchCaptureTests": "opt-in captures of the Review and watch screens, by hand with TEST_RUNNER_FARCOOLER_CAPTURE_DIR (ov-976, ov-978)",
 }
 
 # Capture tools, run by nightly.yml's `captures` job with
