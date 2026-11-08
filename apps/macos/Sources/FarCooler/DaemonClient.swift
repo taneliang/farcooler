@@ -1295,12 +1295,31 @@ final class DaemonClient: ObservableObject {
     /// `answerDecision` for a task known only by its key, as a notification
     /// knows it (ov-94): the runner finds the key on its boards.
     func answerTask(key: String, body: String, repository: String? = nil) async -> String? {
+        if CutoverGrant.isGrant(body) { return await answerCutoverGrant(key: key, repository: repository) }
         let board = repository.map { ["--repo", $0] } ?? []
         let (data, message) = await runRaw(
             ["task", "note", key, "--kind", "answer", "--body", body] + board + ["--json"],
             background: true)
         if data != nil { return nil }
         return message ?? "The answer wasn’t written."
+    }
+
+    /// "Allow cutover once" (ov-974): signed by this app after Touch ID or the
+    /// login password and sent from this app's own process, never the CLI,
+    /// which the runner would not take as the owner's word
+    /// (`MacCutoverGrant`). Only this Mac's own runner: one over ssh sees ssh.
+    private func answerCutoverGrant(key: String, repository: String?) async -> String? {
+        guard target.isEmpty else { return "Allow the cutover from your iPhone, or from Far Cooler on that runner’s Mac." }
+        let (data, message) = await taskByKey(key, repository: repository)
+        guard let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let task = (object["task"] as? [String: Any])?["id"] as? String
+        else { return message ?? "The answer wasn’t written." }
+        do {
+            try await MacCutoverGrant.answer(task: task)
+            return nil
+        } catch {
+            return MacCutoverGrant.sentence(for: error) ?? "The answer wasn’t sent."
+        }
     }
 
     // MARK: - Needs You

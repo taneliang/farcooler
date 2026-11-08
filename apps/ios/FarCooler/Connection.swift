@@ -1649,6 +1649,7 @@ final class Connection: ObservableObject {
     func answerDecision(task: String, with text: String) async -> String? {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return "Write an answer first." }
+        if CutoverGrant.isGrant(body) { return await answerCutoverGrant(task: task) }
         return await sending(
             PhoneTaskAnswer.method, PhoneTaskAnswer.request(task: task, body: body),
             agent: "the runner")

@@ -177,7 +177,11 @@ in here.
 - **No other way to make the app answer.** `AppControl`'s socket serves
   `about`, `version` and `update` only; its one URL scheme is AuthKit's sign-in
   callback (`Info.plist`), and it has no AppleScript dictionary. And whatever reaches `answerTask` (a button, a
-  notification action, accessibility) ends at the Touch ID prompt.
+  notification action, accessibility) ends at the Touch ID prompt. The app
+  reads no launch arguments; its environment overrides (`FARCOOLER_HOME`,
+  `FARCOOLER_BIN`, the capture probes) can point it at another daemon, but a
+  signature it makes there and an agent relays here fails the other half: the
+  answer must come from the app's own process.
 
 ### Phones (ov-977)
 

@@ -32,6 +32,11 @@ struct RunnerCoreStepUpCalls: StepUpCalling {
     }
 
     func refusalWord(_ error: Error) -> String? {
+        Self.word(error)
+    }
+
+    /// The runner's `what` for a refusal, else its word; nil for any other failure.
+    static func word(_ error: Error) -> String? {
         guard let failure = error as? RunnerCore.Failure else { return nil }
         return failure.what ?? failure.word
     }
