@@ -96,7 +96,9 @@ async fn a_runner_with_stale_lines(root: &Path) -> Service {
     let service = Service::open_in(root.to_path_buf())
         .await
         .expect("service")
-        .enrolling_into(home.join(".ssh").join("authorized_keys"));
+        // Under the runtime root, where a daemon with an explicit FARCOOLER_HOME
+        // keeps it (ov-937); `$HOME/.ssh` is no longer what it reads.
+        .enrolling_into(root.join("ssh").join("authorized_keys"));
     for (i, id) in BOBS.iter().chain([&OWNERS]).enumerate() {
         let pairing = ClientEnroll {
             public_key: KEYS[i].into(),

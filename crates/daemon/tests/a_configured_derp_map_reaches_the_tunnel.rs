@@ -141,10 +141,9 @@ impl Runner {
     async fn start(map: Option<&str>) -> Runner {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path().to_path_buf();
-        // The account home, whose `.ssh` the fence writer creates itself. The
-        // daemon reads `$HOME/.ssh/authorized_keys` with no override, so a
-        // daemon that inherited the real HOME would read — and could rewrite —
-        // the developer's own fence.
+        // The account home. The daemon keeps its fence under the runtime root
+        // when FARCOOLER_HOME is set, but HOME is still pinned here so a daemon
+        // that inherited the real one could never touch the developer's own.
         let home = root.join("home");
         std::fs::create_dir(&home).expect("the account home");
         let runtime = root.join("rt");
@@ -163,8 +162,10 @@ impl Runner {
             Some(NODE_KEY),
         )
         .expect("render a Key A line carrying a node key");
+        // Under the runtime root, where a daemon with an explicit FARCOOLER_HOME
+        // keeps it (ov-937); `$HOME/.ssh` is no longer what it reads.
         fence::write(
-            &home.join(".ssh").join("authorized_keys"),
+            &runtime.join("ssh").join("authorized_keys"),
             fence::AUTHORIZED_KEYS,
             std::slice::from_ref(&line),
             &[],
