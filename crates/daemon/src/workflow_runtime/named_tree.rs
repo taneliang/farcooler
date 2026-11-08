@@ -52,10 +52,12 @@ impl Runtime {
             .map_err(|_| Error::Refused("unknown repository"))?;
         let fresh = host.dir.join(farcooler_core::names::slug(&repository.display_name)).join(farcooler_core::names::slug(&named.name));
         // An adopted branch is worked on where it is already checked out, or in a new tree on it (ov-968).
-        let path = match named.adopt.then(|| adopted_at(&config.repository, &named.branch)) {
-            Some(found) => found.await?.unwrap_or(fresh),
-            None => fresh,
+        let found = match named.adopt.then(|| adopted_at(&config.repository, &named.branch)) {
+            Some(found) => found.await?,
+            None => None,
         };
+        if named.adopt { self.refuse_unadoptable(&config, board, repository.id, &named.branch, found.as_deref()).await?; }
+        let path = found.unwrap_or(fresh);
         let listed = named.adopt && path.try_exists()?;
         if path.try_exists()? && !listed { return Err(Error::Domain(DomainError::WorktreeExists)); }
         // What git itself accepts as a branch name, so a name it would refuse fails here and not at Provision.
@@ -80,12 +82,7 @@ impl Runtime {
             let name = line.strip_prefix("refs/heads/").or_else(|| line.strip_prefix("refs/remotes/").and_then(|r| r.split_once('/').map(|x| x.1)));
             name.is_some_and(|n| clashes(n, &named.branch))
         });
-        if named.adopt {
-            // The branch to adopt is there, here or on a remote, under exactly its name.
-            let exact = found.lines().any(|line| line == format!("refs/heads/{}", named.branch)
-                || line.strip_prefix("refs/remotes/").and_then(|r| r.split_once('/')).is_some_and(|(_, n)| n == named.branch));
-            if !exact { return Err(Error::Domain(DomainError::InvalidArgument { what: "no such branch" })); }
-        } else if clash { return Err(Error::Domain(DomainError::BranchExists)); }
+        if !named.adopt && clash { return Err(Error::Domain(DomainError::BranchExists)); }
         let base = adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?;
         let tree = RunTree { name: named.name.clone(), branch: named.branch.clone(), path: path.to_string_lossy().into_owned(), base,
             adopted: named.adopt };
@@ -93,6 +90,43 @@ impl Runtime {
         Ok(Some(tree))
     }
 }
+
+impl Runtime {
+    /// What may be adopted (ov-968 review): a plain local branch that is nobody's but the work's. Never the landing
+    /// branch or a remote's default, which a build would commit straight onto; never a remote-tracking name; never
+    /// the engine's own `wf-` branches or a tree under its root, which are another run's; and only a worktree the
+    /// app lists, on this board, with no pane running in it, so the run is the one writer.
+    async fn refuse_unadoptable(&self, config: &CodingConfig, board: Uuid, repository: Uuid, branch: &str, found: Option<&Path>) -> Result<()> {
+        let refuse = |what: &'static str| Err(Error::Domain(DomainError::InvalidArgument { what }));
+        let repo = &config.repository;
+        let local = adapters::git(repo, &["for-each-ref", "--format=%(refname)", &format!("refs/heads/{branch}")]).await?;
+        if local.lines().all(|l| l != format!("refs/heads/{branch}")) { return refuse("not a local branch"); }
+        let mut protected = vec!["main".to_string(), "master".into()];
+        protected.extend([config.landing_ref.as_str()].into_iter().chain(config.landing.as_ref().map(|l| l.target.as_str()))
+            .map(|r| r.strip_prefix("refs/heads/").unwrap_or(r).to_string()));
+        // Each remote's default branch, as `refs/remotes/<remote>/HEAD` names it.
+        let heads = adapters::git(repo, &["for-each-ref", "--format=%(symref)", "refs/remotes/*/HEAD"]).await.unwrap_or_default();
+        protected.extend(heads.lines().filter_map(|h| h.strip_prefix("refs/remotes/")?.split_once('/').map(|(_, b)| b.to_string())));
+        if protected.iter().any(|p| p == branch) { return refuse("a landing or default branch"); }
+        let remotes = adapters::git(repo, &["remote"]).await.unwrap_or_default();
+        if remotes.lines().any(|r| !r.is_empty() && branch.starts_with(&format!("{r}/"))) { return refuse("a remote-tracking branch"); }
+        if branch.starts_with("wf-") { return refuse("another run's branch"); }
+        let Some(path) = found else { return Ok(()) };
+        if canonical(path).starts_with(canonical(&self.root)) { return refuse("another run's branch"); }
+        let row = self.store.list_worktrees_for_repository(repository).map_err(Error::Domain)?
+            .into_iter().find(|w| same_path(Path::new(&w.worktree_path), path));
+        let Some(row) = row else { return refuse("a worktree the app doesn't list") };
+        if row.workspace_id.is_some_and(|w| w != board) { return refuse("a worktree on another board"); }
+        let live = self.store.list_terminals_for_worktree(row.id).map_err(Error::Domain)?
+            .iter().any(|t| t.exit_code.is_none() && t.exit_signal.is_none());
+        if live { return refuse("a worktree with a pane running in it"); }
+        Ok(())
+    }
+}
+
+/// A path with its links resolved, so `/tmp` and `/private/tmp` (as git reports it) are one place.
+fn canonical(p: &Path) -> PathBuf { p.canonicalize().unwrap_or_else(|_| p.to_path_buf()) }
+fn same_path(a: &Path, b: &Path) -> bool { canonical(a) == canonical(b) }
 
 /// The linked worktree that has `branch` checked out, if one does. The repository's own checkout is where a person
 /// works by hand, so a branch checked out there is refused rather than adopted.
@@ -150,12 +184,14 @@ impl Exec {
     async fn provision_adopted(&self, board: Uuid, repository: Uuid, install_id: &str, tree: &RunTree) -> Result<()> {
         let path = Path::new(&tree.path);
         let row = self.store.list_worktrees_for_repository(repository).map_err(Error::Domain)?
-            .into_iter().find(|w| Path::new(&w.worktree_path) == path);
+            .into_iter().find(|w| same_path(Path::new(&w.worktree_path), path));
         if path.try_exists()? {
             let head = adapters::git(path, &["symbolic-ref", "HEAD"]).await?;
             if head != format!("refs/heads/{}", tree.branch) { return Err(Error::Refused("the adopted worktree has moved to another branch")); }
             refuse_foreign_changes(path).await?;
-            if let Some(row) = &row {
+            // Start refused a tree the app doesn't list; one that lost its row since is refused here too.
+            let Some(row) = &row else { return Err(Error::Refused("the adopted worktree isn't one the app lists")) };
+            {
                 if row.workspace_id.is_some_and(|w| w != board) { return Err(Error::Refused("the adopted worktree belongs to another board")); }
                 let live = self.store.list_terminals_for_worktree(row.id).map_err(Error::Domain)?
                     .iter().any(|t| t.exit_code.is_none() && t.exit_signal.is_none());

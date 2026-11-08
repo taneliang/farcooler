@@ -566,6 +566,9 @@ async fn workflow_service_a_start_adopts_a_branch_with_work_and_a_closed_ticket_
     git(&earlier,&["add","earlier.txt"]).await.unwrap();
     git(&earlier,&["-c","user.name=Test","-c","user.email=test@localhost","-c","commit.gpgsign=false","commit","--quiet","-m","earlier work"]).await.unwrap();
     let work=git(&earlier,&["rev-parse","HEAD"]).await.unwrap();
+    // The app lists it (only a listed worktree is adopted, so it can't be another run's private one).
+    let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
+    host.service.store.create_worktree(repository,"e-liang/earlier",earlier.to_str().unwrap(),false).unwrap();
     let start=|id:&str,snapshot:&serde_json::Value,branch:&str| { let item=&snapshot["state"]["items"][&ticket.key];
         Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
@@ -642,5 +645,67 @@ async fn workflow_service_one_run_carries_three_tickets_on_one_branch() {
     let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
     let build=effects.iter().find(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Build))).unwrap();
     assert_eq!(build.effect.with,rest.iter().map(|t| t.key.clone()).collect::<Vec<_>>(),"one agent, told every ticket");
+    drop(link);host.close().await;
+}
+
+/// ov-968 review: adopt never takes the landing branch (a build would commit straight onto it), another run's
+/// private `wf-` tree, a worktree the app doesn't list, or a listed one with a pane running in it. Each is refused
+/// at Start, and nothing moves.
+#[tokio::test]
+async fn workflow_service_adopt_refuses_the_landing_branch_and_trees_that_are_not_the_works() {
+    if person_terminal("workflow_service_adopt_refuses_the_landing_branch_and_trees_that_are_not_the_works").await { return; }
+    use farcooler_protocol::workflow_commands::NamedTree;
+    let (dir,config)=configured(false,"check-fail").await;
+    let host=Host::open(dir.path()).await; let workspace=host.workspace; let mut link=host.connect().await;
+    let definition=config.definition().unwrap();
+    let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    let private=host.service.store.create_task(workspace,"private run",farcooler_store::models::Actor::User).unwrap();
+    let ticket=host.service.store.create_task(workspace,"adopter",farcooler_store::models::Actor::User).unwrap();
+    host.service.track_tickets(Some(private.id)).await;
+    host.service.track_tickets(Some(ticket.id)).await;
+    let sequence=std::cell::Cell::new(1);
+    let start=|id:&str,key:&str,snapshot:&serde_json::Value,worktree:Option<NamedTree>| { let item=&snapshot["state"]["items"][key];
+        sequence.set(sequence.get()+1);
+        Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),sequence.get()),item:key.into(),
+            run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+            worktree,with:vec![] } };
+    let adopt=|branch:&str| Some(NamedTree { name:"adopted".into(),branch:branch.into(),adopt:true });
+    // Another run in its private tree, left Failed with its work in it.
+    let snapshot=get(&mut link,workspace).await;
+    accepted(&call(&mut link,workspace,start("private",&private.key,&snapshot,None)).await);
+    tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
+        let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+        if state.items.get(&private.key).is_some_and(|i| i.phase==Phase::Failed) { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }}).await.unwrap();
+    let theirs=git(&config.repository,&["for-each-ref","--format=%(refname:short)","refs/heads/wf-*"]).await.unwrap();
+    assert!(!theirs.is_empty(),"the private run has its own branch");
+    // The app's reconciler may list a private tree too, so a row for it is no permission to take it.
+    let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
+    let porcelain=git(&config.repository,&["worktree","list","--porcelain"]).await.unwrap();
+    let private_tree=porcelain.split("\n\n").find(|r| r.contains(&format!("branch refs/heads/{}",theirs.lines().next().unwrap())))
+        .and_then(|r| r.lines().next()?.strip_prefix("worktree ").map(String::from)).expect("the private run's tree");
+    host.service.store.create_worktree(repository,theirs.lines().next().unwrap(),&private_tree,false).unwrap();
+    // A worktree git lists and the app doesn't, and one the app lists with a pane running in it.
+    let lanes=dir.path().join("lanes");
+    for name in ["unlisted","busy"] {
+        git(&config.repository,&["worktree","add","--quiet","-b",&format!("e-liang/{name}"),lanes.join(name).to_str().unwrap(),&config.base]).await.unwrap();
+    }
+    let busy=host.service.store.create_worktree(repository,"e-liang/busy",lanes.join("busy").to_str().unwrap(),false).unwrap();
+    host.service.store.create_terminal_for_test(busy.id,workspace);
+    let landing=config.landing_ref.strip_prefix("refs/heads/").unwrap().to_string();
+    let before=git(&config.repository,&["rev-parse",&config.landing_ref]).await.unwrap();
+    for (id,branch) in [("landing",landing.as_str()),("private-tree",theirs.lines().next().unwrap()),("unlisted","e-liang/unlisted"),("busy","e-liang/busy")] {
+        let snapshot=get(&mut link,workspace).await;
+        let refused=try_call(&mut link,workspace,start(id,&ticket.key,&snapshot,adopt(branch))).await;
+        assert!(refused.is_err(),"{id}: adopting {branch} must be refused at Start: {refused:?}");
+        let Err(said)=refused else { unreachable!() };
+        assert!(said.contains("InvalidArgument") || said.to_lowercase().contains("invalid"),"{id}: refused for what it is, not by accident: {said}");
+    }
+    let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+    assert!(state.items[&ticket.key].tree.is_none(),"nothing was started");
+    assert_eq!(git(&config.repository,&["rev-parse",&config.landing_ref]).await.unwrap(),before,"the landing branch didn't move");
     drop(link);host.close().await;
 }
