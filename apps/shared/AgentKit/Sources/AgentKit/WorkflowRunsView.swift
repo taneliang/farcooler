@@ -11,6 +11,18 @@ extension EnvironmentValues {
     }
 }
 
+/// Where a host that can show an agent's terminal, read-only, supplies it: workspace and item to a view.
+/// Absent means no Watch button (a host without the view).
+private struct WorkflowWatchKey: EnvironmentKey {
+    static let defaultValue: (@MainActor (String, String) -> AnyView)? = nil
+}
+extension EnvironmentValues {
+    public var workflowWatch: (@MainActor (String, String) -> AnyView)? {
+        get { self[WorkflowWatchKey.self] }
+        set { self[WorkflowWatchKey.self] = newValue }
+    }
+}
+
 // Attached to an existing workspace without replacing its terminal/navigation.
 public struct WorkflowRunsButton: View {
     let host: String
@@ -22,8 +34,11 @@ public struct WorkflowRunsButton: View {
             .sheet(isPresented: $showing) { WorkflowRunsView(host: host, workspace: workspace) }
     }
 }
+private struct WatchedItem: Identifiable { let id: String }
 public struct WorkflowRunsView: View {
     @Environment(\.workflowPort) private var port
+    @Environment(\.workflowWatch) private var watch
+    @State private var watching: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model: WorkflowRunsModel
@@ -72,6 +87,9 @@ public struct WorkflowRunsView: View {
             }
         }
         .frame(minWidth: 280, minHeight: 300)
+        .sheet(item: Binding(get: { watching.map(WatchedItem.init) }, set: { watching = $0?.id })) { watched in
+            watch?(model.workspace, watched.id)
+        }
         .task(id: port?.id) { model.disconnect(); await model.refresh(port) }
         .onDisappear { model.disconnect() }
         .onChange(of: selected) { _, _ in model.clearInspection() }
@@ -97,6 +115,9 @@ public struct WorkflowRunsView: View {
             field("Item", run.item); field("Run", run.run)
             field("Definition", run.definition_pin); field("Policy", run.policy_pin)
             field("Candidate", run.candidate); field("Pending Effect", run.pending_effect)
+            if run.pending_effect != nil, watch != nil {
+                Button("Watch Agent") { watching = run.item }
+            }
             field("Iteration", String(run.iteration)); field("Attempt", String(run.attempt))
             field("Fence", String(run.fence)); field("Reworks Remaining", String(run.reworks_remaining))
             if let evidence = run.latest_evidence {

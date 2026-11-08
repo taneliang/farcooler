@@ -101,6 +101,14 @@ extension ContentView {
             if let summary {
                 WorkflowRunsButton(host: host, workspace: summary.id)
                     .environment(\.workflowPort, nativeAgents.workflows.port(host: host))
+                    .environment(\.workflowWatch, { workspace, item in
+                        let client = store.clients[host]
+                        return AnyView(AgentTerminalWatch(
+                            workspace: workspace, item: item, binary: client?.cliPath,
+                            environment: client?.cliEnvironment ?? [:],
+                            hostArguments: client?.cliHostArguments ?? [],
+                            linkGeneration: client?.linkGeneration ?? 0))
+                    })
             }
         }
         // What the empty states offer: start this workspace's orchestrator, or

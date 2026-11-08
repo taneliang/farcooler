@@ -51,13 +51,15 @@ final class TerminalStream {
     /// `sizes` asks for the runner's size markers. See `StreamSizes`.
     func start(
         binary: String, terminal: String, environment: [String: String], host: [String] = [],
-        sizes: Bool = false
+        sizes: Bool = false,
+        command: [String]? = nil
     ) {
         stop()
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: binary)
-        p.arguments = host + ["terminal", "stream", terminal] + (sizes ? ["--sizes"] : [])
+        // `command` replaces the verb, for `workflow watch`, whose stream carries its own size marker.
+        p.arguments = host + (command ?? (["terminal", "stream", terminal] + (sizes ? ["--sizes"] : [])))
         p.environment = environment
 
         let out = Pipe()
