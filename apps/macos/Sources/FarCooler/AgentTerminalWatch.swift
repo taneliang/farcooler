@@ -17,15 +17,17 @@ struct AgentTerminalWatch: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var gotBytes = false
-    @State private var ended = false
-    @State private var exitStatus: Int32 = 0
+    /// Nil while the stream runs. The exit code is the one thing that ends the watch, so no frame can
+    /// say "Finished" before the code that says otherwise has arrived.
+    @State private var exitStatus: Int32?
 
     /// What to tell the owner when the stream stops: nothing while it runs, "finished" only when the
-    /// watch ended cleanly (the engine reaped the pane), a dropped link when it did not, and the reason
-    /// when there never was a picture (a review, a merge, or an agent that already ended).
-    static func status(gotBytes: Bool, ended: Bool, exitStatus: Int32 = 0) -> String? {
-        guard ended else { return nil }
-        guard gotBytes else { return "This agent isn’t running right now." }
+    /// watch ended cleanly (the engine reaped the pane), a dropped link when it did not, and with no
+    /// picture either the reason (a review, a merge, or an agent that already ended) or, after a
+    /// failed exit, that the agent could not be reached.
+    static func status(gotBytes: Bool, exitStatus: Int32?) -> String? {
+        guard let exitStatus else { return nil }
+        guard gotBytes else { return exitStatus == 0 ? "This agent isn’t running right now." : "Couldn’t reach this agent." }
         return exitStatus == 0 ? "Finished" : "Lost the connection to this agent."
     }
 
@@ -34,7 +36,7 @@ struct AgentTerminalWatch: View {
             HStack {
                 Text("Watching \(item)").font(.headline)
                 Text("Read-only").font(.caption).foregroundStyle(.secondary)
-                if gotBytes, let done = Self.status(gotBytes: gotBytes, ended: ended, exitStatus: exitStatus) {
+                if gotBytes, let done = Self.status(gotBytes: gotBytes, exitStatus: exitStatus) {
                     Text(done).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -49,9 +51,9 @@ struct AgentTerminalWatch: View {
                     item: item, command: AgentTerminalCanvas.command(workspace: workspace, item: item),
                     binary: binary, environment: environment, hostArguments: hostArguments,
                     linkGeneration: linkGeneration,
-                    onBytes: { gotBytes = true }, onEnd: { ended = true }, onExit: { exitStatus = $0 })
+                    onBytes: { gotBytes = true }, onExit: { exitStatus = $0 })
                     .overlay {
-                        if let why = Self.status(gotBytes: gotBytes, ended: ended), !gotBytes {
+                        if let why = Self.status(gotBytes: gotBytes, exitStatus: exitStatus), !gotBytes {
                             Text(why).foregroundStyle(.secondary)
                         }
                     }

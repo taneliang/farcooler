@@ -119,14 +119,14 @@ struct AgentTerminalWatchTests {
 
     @Test("A stream that stops says why: finished after a picture, not running when there never was one")
     func theEndIsExplained() {
-        #expect(AgentTerminalWatch.status(gotBytes: true, ended: false) == nil)
-        #expect(AgentTerminalWatch.status(gotBytes: true, ended: true) == "Finished")
-        #expect(AgentTerminalWatch.status(gotBytes: false, ended: true) == "This agent isn’t running right now.")
+        #expect(AgentTerminalWatch.status(gotBytes: true, exitStatus: nil) == nil)
+        #expect(AgentTerminalWatch.status(gotBytes: true, exitStatus: 0) == "Finished")
+        #expect(AgentTerminalWatch.status(gotBytes: false, exitStatus: 0) == "This agent isn’t running right now.")
     }
 
     @Test("A stream that dropped is not called finished")
     func aDroppedLinkIsNotFinished() {
-        #expect(AgentTerminalWatch.status(gotBytes: true, ended: true, exitStatus: 1) == "Lost the connection to this agent.")
+        #expect(AgentTerminalWatch.status(gotBytes: true, exitStatus: 1) == "Lost the connection to this agent.")
     }
 
     @MainActor
@@ -172,5 +172,16 @@ struct AgentTerminalWatchTests {
         #expect(scroller.backgroundColor == Palette.background, "the fill is not the terminal's background")
         #expect(scroller.hasHorizontalScroller && !scroller.autohidesScrollers, "nothing shows the picture continues sideways")
         #expect(scroller.scrollerStyle == .legacy, "an overlay scroller hides itself until the pointer moves")
+    }
+
+    @Test("A nonzero exit with no picture says the agent could not be reached, not that it is idle")
+    func noPictureAndAFailureIsUnreachable() {
+        #expect(AgentTerminalWatch.status(gotBytes: false, exitStatus: 1) == "Couldn’t reach this agent.")
+    }
+
+    @Test("A stream still running says nothing, and an exit code alone ends it, so no frame can show Finished before the code arrives")
+    func oneValueEndsTheWatch() {
+        #expect(AgentTerminalWatch.status(gotBytes: true, exitStatus: nil) == nil)
+        #expect(AgentTerminalWatch.status(gotBytes: false, exitStatus: nil) == nil)
     }
 }
