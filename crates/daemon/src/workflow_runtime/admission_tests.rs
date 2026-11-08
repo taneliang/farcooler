@@ -53,36 +53,50 @@ async fn held(
     response
 }
 
-#[tokio::test]
-async fn workflow_held_queue_device_authority_changes_refuse_without_writes() {
+/// One change to the device's authority while a command is held, published
+/// or enqueued. A test per change and kind (ov-993): fourteen fixtures in one
+/// test took 9 s; side by side they take one fixture's time.
+async fn device_authority_change(change: u8, publication: bool) {
     use farcooler_store::access::Cap;
-    for change in 0..7 {
-        for publication in [true, false] {
-            let (_dir, svc, repo) = crate::test_support::fixture().await;
-            let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
-            svc.store.bind_owner_device("phone", None).unwrap();
-            let dir = tempfile::tempdir().unwrap();
-            let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
-            let definition = coding_definition(false);
-            let pin = definition.pin();
-            let publish = Action::Publish { notifications:None, adapter:None, mutation: mutation("p", 0, 1), expected_pin: None, definition };
-            let action = if publication { publish } else {
-                runtime.wire_command(&workspace.to_string(), "owner", publish).unwrap();
-                Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin }
-            };
-            let rpc = factory(&svc, &runtime, Peer { client_id: Some("phone".into()), scope: Scope::Control }, None);
-            eprintln!("device change={change} publication={publication}");
-            held(&mut runtime, &rpc, workspace, action, change != 6, || match change {
-                0 => { svc.store.set_device_cap("phone", Some(Cap::Viewer)).unwrap(); },
-                1 => { svc.sessions().mark_revoked("phone"); },
-                2 => { svc.sessions().reconnect("phone"); },
-                3 => { svc.store.set_member("alice", "Alice", &["phone".into()]).unwrap(); },
-                4 => { svc.sessions().mark_revoked("phone"); svc.sessions().readmit("phone").unwrap(); },
-                5 => { svc.store.clear_device_rows("phone").unwrap(); },
-                _ => {}, // Unchanged authority must still be usable.
-            }).await;
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    svc.store.bind_owner_device("phone", None).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+    let definition = coding_definition(false);
+    let pin = definition.pin();
+    let publish = Action::Publish { notifications:None, adapter:None, mutation: mutation("p", 0, 1), expected_pin: None, definition };
+    let action = if publication { publish } else {
+        runtime.wire_command(&workspace.to_string(), "owner", publish).unwrap();
+        Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin }
+    };
+    let rpc = factory(&svc, &runtime, Peer { client_id: Some("phone".into()), scope: Scope::Control }, None);
+    eprintln!("device change={change} publication={publication}");
+    held(&mut runtime, &rpc, workspace, action, change != 6, || match change {
+        0 => { svc.store.set_device_cap("phone", Some(Cap::Viewer)).unwrap(); },
+        1 => { svc.sessions().mark_revoked("phone"); },
+        2 => { svc.sessions().reconnect("phone"); },
+        3 => { svc.store.set_member("alice", "Alice", &["phone".into()]).unwrap(); },
+        4 => { svc.sessions().mark_revoked("phone"); svc.sessions().readmit("phone").unwrap(); },
+        5 => { svc.store.clear_device_rows("phone").unwrap(); },
+        _ => {}, // Unchanged authority must still be usable.
+    }).await;
+}
+macro_rules! device_authority_changes {
+    ($($name:ident = $change:literal, $publication:literal;)*) => {
+        mod workflow_held_queue_device_authority_changes_refuse_without_writes {
+            $(#[tokio::test] async fn $name() { super::device_authority_change($change, $publication).await; })*
         }
-    }
+    };
+}
+device_authority_changes! {
+    viewer_cap_publish = 0, true; viewer_cap_enqueue = 0, false;
+    revoked_publish = 1, true; revoked_enqueue = 1, false;
+    reconnected_publish = 2, true; reconnected_enqueue = 2, false;
+    made_a_member_publish = 3, true; made_a_member_enqueue = 3, false;
+    revoked_and_readmitted_publish = 4, true; revoked_and_readmitted_enqueue = 4, false;
+    rows_cleared_publish = 5, true; rows_cleared_enqueue = 5, false;
+    unchanged_publish = 6, true; unchanged_enqueue = 6, false;
 }
 
 #[tokio::test]

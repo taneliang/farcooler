@@ -87,23 +87,31 @@ async fn workflow_coding_real_git_commands_rework_multiple_checks_and_repeated_b
     assert!(runtime.store.workflow_outbox("w").unwrap().iter().all(|s| s.effect.operation.arguments[0] == pin));
 }
 
-#[tokio::test]
-async fn workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success() {
-    for mode in ["prose", "mutate", "ci-wrong", "ci-missing"] {
-        let (_dir, mut runtime) = configured(false, mode).await;
-        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
-        for time in 2..15 { runtime.pump(time).await.unwrap(); }
-        let state = runtime.state("w").unwrap().unwrap();
-        assert_eq!(state.items["one"].phase, Phase::Uncertain, "{mode}: {state:?}");
-        let before = state.clone();
-        assert_eq!(runtime.pump(100).await.unwrap(), 0);
-        assert_eq!(runtime.state("w").unwrap().unwrap(), before);
-    }
-    for mode in ["check-fail", "ci-fail"] {
-        let (_dir, mut runtime) = configured(false, mode).await;
-        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
-        assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Failed, "{mode}");
-    }
+/// A mode whose stage exits 0 without a real result: Uncertain, and it stays so.
+async fn not_success_is_uncertain(mode: &str) {
+    let (_dir, mut runtime) = configured(false, mode).await;
+    let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+    for time in 2..15 { runtime.pump(time).await.unwrap(); }
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items["one"].phase, Phase::Uncertain, "{mode}: {state:?}");
+    let before = state.clone();
+    assert_eq!(runtime.pump(100).await.unwrap(), 0);
+    assert_eq!(runtime.state("w").unwrap().unwrap(), before);
+}
+/// A mode whose check or CI says it failed: Failed.
+async fn a_failure_fails(mode: &str) {
+    let (_dir, mut runtime) = configured(false, mode).await;
+    let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+    assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Failed, "{mode}");
+}
+/// A test per mode (ov-993): six runtimes in one test took 12 s.
+mod workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success {
+    #[tokio::test] async fn prose() { super::not_success_is_uncertain("prose").await; }
+    #[tokio::test] async fn mutate() { super::not_success_is_uncertain("mutate").await; }
+    #[tokio::test] async fn ci_wrong() { super::not_success_is_uncertain("ci-wrong").await; }
+    #[tokio::test] async fn ci_missing() { super::not_success_is_uncertain("ci-missing").await; }
+    #[tokio::test] async fn check_fail() { super::a_failure_fails("check-fail").await; }
+    #[tokio::test] async fn ci_fail() { super::a_failure_fails("ci-fail").await; }
 }
 
 pub(super) async fn admitted(runtime: &Runtime) -> Binding {
@@ -115,26 +123,35 @@ pub(super) async fn admitted(runtime: &Runtime) -> Binding {
     Binding::new("w", &stored.effect, claim.resource_generation, state.items[&stored.effect.item].iteration, &base)
 }
 
-#[tokio::test]
-async fn workflow_coding_crash_each_stage_reconciles_facts_without_reexecution() {
-    for (index, review) in (0..6).map(|i| (i, false)).chain([(4, true)]) {
-        let (_dir, mut runtime) = configured(review, "pass").await;
-        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
-        for time in 0..index { runtime.pump(time + 2).await.unwrap(); }
-        let binding = admitted(&runtime).await;
-        let (_cancel, cancelled) = tokio::sync::watch::channel(false);
-        let outcome = runtime.execute_coding("w", &binding, cancelled).await.unwrap();
-        let root = runtime.root.clone();
-        let log = runtime.root.join("receipts").join(format!("{}.output", digest(&binding.effect)));
-        let before = std::fs::read(&log).ok();
-        // Crash after external settlement, before durable journal/Observe.
-        drop(runtime);
-        let mut runtime = Runtime::open(&root).unwrap();
-        runtime.pump(200).await.unwrap();
-        assert_eq!(std::fs::read(&log).ok(), before);
-        let state = runtime.state("w").unwrap().unwrap();
-        assert_ne!(state.items["one"].phase, Phase::Uncertain, "{index}: {outcome:?}");
-    }
+/// A crash after stage `index` settled outside, before its journal: the
+/// restart reconciles the fact and never runs the stage again.
+async fn a_crash_after_stage(index: i64, review: bool) {
+    let (_dir, mut runtime) = configured(review, "pass").await;
+    let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+    for time in 0..index { runtime.pump(time + 2).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let outcome = runtime.execute_coding("w", &binding, cancelled).await.unwrap();
+    let root = runtime.root.clone();
+    let log = runtime.root.join("receipts").join(format!("{}.output", digest(&binding.effect)));
+    let before = std::fs::read(&log).ok();
+    // Crash after external settlement, before durable journal/Observe.
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(200).await.unwrap();
+    assert_eq!(std::fs::read(&log).ok(), before);
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_ne!(state.items["one"].phase, Phase::Uncertain, "{index}: {outcome:?}");
+}
+/// A test per stage (ov-993): seven runtimes in one test took 10 s.
+mod workflow_coding_crash_each_stage_reconciles_facts_without_reexecution {
+    #[tokio::test] async fn stage_0() { super::a_crash_after_stage(0, false).await; }
+    #[tokio::test] async fn stage_1() { super::a_crash_after_stage(1, false).await; }
+    #[tokio::test] async fn stage_2() { super::a_crash_after_stage(2, false).await; }
+    #[tokio::test] async fn stage_3() { super::a_crash_after_stage(3, false).await; }
+    #[tokio::test] async fn stage_4() { super::a_crash_after_stage(4, false).await; }
+    #[tokio::test] async fn stage_5() { super::a_crash_after_stage(5, false).await; }
+    #[tokio::test] async fn stage_4_with_review() { super::a_crash_after_stage(4, true).await; }
 }
 
 #[tokio::test]

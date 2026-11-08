@@ -796,14 +796,21 @@ async fn one_read_carries_the_panes_the_stamp_and_the_unfinished_opens() {
 /// from then on. The skip once believed the socket it found AFTER the error,
 /// which in a race is the new server's own, and then read nothing for as long as
 /// that server lived: every terminal derived Lost (review, 7 of 800).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_server_born_during_a_read_is_never_skipped() {
-    let Some(srv) = live_server("a_server_born_during_a_read_is_never_skipped").await else { return };
+///
+/// The 300 rounds are four tests of 75, each its own server, so they run side
+/// by side (ov-993). Interleaved, every fourth round from `first`: each test
+/// sweeps every delay, 0 to 10 ms, and together they run the same rounds one
+/// test did. Split in runs instead, the first quarter's delays stopped short
+/// of the 4 to 8 ms where the bug lived, and could not fail.
+async fn a_server_born_during_a_read(name: &str, first: u64) {
+    let Some(srv) = live_server(name).await else { return };
     // A round whose setup tmux refuses or is too slow for (a loaded machine
     // running the other live tests beside this one) is skipped and counted, not
     // unwrapped: that is the machine, not the race. Every round that ran asserts.
     let mut ran = 0;
-    for i in 0..300u64 {
+    let rounds: Vec<u64> = (first..300).step_by(4).collect();
+    let total = rounds.len();
+    for i in rounds {
         if srv.kill_server().await.is_err() {
             continue;
         }
@@ -837,7 +844,23 @@ async fn a_server_born_during_a_read_is_never_skipped() {
         }
         ran += 1;
     }
-    assert!(ran >= 200, "only {ran} of 300 rounds could be set up; the machine was too loaded to say");
+    assert!(ran * 3 >= total * 2, "only {ran} of {total} rounds could be set up; the machine was too loaded to say");
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_server_born_during_a_read_is_never_skipped_from_round_0() {
+    a_server_born_during_a_read("a_server_born_during_a_read_is_never_skipped_from_round_0", 0).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_server_born_during_a_read_is_never_skipped_from_round_1() {
+    a_server_born_during_a_read("a_server_born_during_a_read_is_never_skipped_from_round_1", 1).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_server_born_during_a_read_is_never_skipped_from_round_2() {
+    a_server_born_during_a_read("a_server_born_during_a_read_is_never_skipped_from_round_2", 2).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_server_born_during_a_read_is_never_skipped_from_round_3() {
+    a_server_born_during_a_read("a_server_born_during_a_read_is_never_skipped_from_round_3", 3).await;
 }
 
 /// `window_activity` alone moves when a program draws and puts the cursor back:

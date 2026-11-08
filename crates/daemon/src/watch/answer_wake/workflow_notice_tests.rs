@@ -179,58 +179,64 @@ async fn assert_group_gone(ids:[i32;4]) {
     }
     println!("owned cleanup receipt: leader={} pgid={} descendant={} descendant_pgid={}: all ESRCH",ids[0],ids[1],ids[2],ids[3]);
 }
-#[tokio::test]
-async fn workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop() {
-    for mode in ["normal","cancel","timeout","drop","unwind"] {
-        let b=board().await;enqueue(&b,1);target(&b).await;
-        let (program,log,receipt)=descendant_queue(&b,mode=="normal");
-        let mut backend=tokio::process::Command::new("/bin/sleep").arg("30").process_group(0).kill_on_drop(true).spawn().unwrap();
-        let backend_pid=backend.id().unwrap() as i32;
-        let (stop,mut signal)=tokio::sync::watch::channel(false);
-        let notice=b.svc.store.workflow_pending_notices(0).unwrap()[0].1.notice.clone();
-        let store=b.svc.store.clone();let inventory=b.svc.inventory.clone();
-        let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
-        let id=notice.id.clone();
-        let (panic_send,panic_recv)=tokio::sync::oneshot::channel::<()>();
-        let owner=tokio::spawn(async move {
-            let invocation=notices::invoke(&store,&inventory,&notice,proof,&mut signal);
-            tokio::pin!(invocation);
-            tokio::select! {
-                result=&mut invocation=>result,
-                _=panic_recv=>panic!("private queue supervision unwind"),
-            }
-        });
-        let ids=group_receipt(&receipt).await;
-        println!("live private receipt mode={mode}: {ids:?} external_pid={backend_pid}");
-        assert_ne!(backend_pid,ids[1]);
-        if mode!="normal" {
-            assert_eq!(unsafe{libc::kill(ids[2],0)},0,"actual live owned descendant before cleanup");
-            assert_eq!(unsafe{libc::getpgid(ids[2])},ids[1]);
+/// One way a native queue's owner ends, with an owned descendant alive.
+async fn owned_descendant(mode: &str) {
+    let b=board().await;enqueue(&b,1);target(&b).await;
+    let (program,log,receipt)=descendant_queue(&b,mode=="normal");
+    let mut backend=tokio::process::Command::new("/bin/sleep").arg("30").process_group(0).kill_on_drop(true).spawn().unwrap();
+    let backend_pid=backend.id().unwrap() as i32;
+    let (stop,mut signal)=tokio::sync::watch::channel(false);
+    let notice=b.svc.store.workflow_pending_notices(0).unwrap()[0].1.notice.clone();
+    let store=b.svc.store.clone();let inventory=b.svc.inventory.clone();
+    let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
+    let id=notice.id.clone();
+    let (panic_send,panic_recv)=tokio::sync::oneshot::channel::<()>();
+    let owner=tokio::spawn(async move {
+        let invocation=notices::invoke(&store,&inventory,&notice,proof,&mut signal);
+        tokio::pin!(invocation);
+        tokio::select! {
+            result=&mut invocation=>result,
+            _=panic_recv=>panic!("private queue supervision unwind"),
         }
-        let prepared=b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap();
-        if mode=="cancel" {stop.send_replace(true);}
-        if mode=="drop" {owner.abort();}
-        if mode=="unwind" {panic_send.send(()).unwrap();}
-        let joined=tokio::time::timeout(Duration::from_secs(8),owner).await.unwrap();
-        match mode {
-            "drop"=>assert!(joined.unwrap_err().is_cancelled()),
-            "unwind"=>assert!(joined.unwrap_err().is_panic()),
-            _=>joined.unwrap().unwrap(),
-        }
-        assert_group_gone(ids).await;
-        assert_eq!(unsafe{libc::kill(backend_pid,0)},0,"external backend survives owned cleanup");
-        backend.kill().await.unwrap();backend.wait().await.unwrap();
-        b.svc.store.workflow_recover_notice_attempts().unwrap();
-        let settled=b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap();
-        assert_eq!(settled.state,if mode=="normal" {"handed_off"} else {"unknown"});
-        assert_eq!(settled.attempt_id,prepared.attempt_id);assert_eq!(settled.target,prepared.target);
-        assert!(settled.attempt_id.is_some());assert!(settled.target.is_some());
-        let proof=TEST_PROGRAM.scope(b.dir.path().join("native-queue-0"),endpoint(&b,&settled.notice)).await;
-        let (_retry_owner,mut retry_stop)=tokio::sync::watch::channel(false);
-        notices::invoke(&b.svc.store,&b.svc.inventory,&settled.notice,proof,&mut retry_stop).await.unwrap();
-        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1,"settled original identity never resends");
-        println!("private native mode={mode} state={} original_attempt={:?} target={:?} external_pid={backend_pid} survived",settled.state,settled.attempt_id,settled.target);
+    });
+    let ids=group_receipt(&receipt).await;
+    println!("live private receipt mode={mode}: {ids:?} external_pid={backend_pid}");
+    assert_ne!(backend_pid,ids[1]);
+    if mode!="normal" {
+        assert_eq!(unsafe{libc::kill(ids[2],0)},0,"actual live owned descendant before cleanup");
+        assert_eq!(unsafe{libc::getpgid(ids[2])},ids[1]);
     }
+    let prepared=b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap();
+    if mode=="cancel" {stop.send_replace(true);}
+    if mode=="drop" {owner.abort();}
+    if mode=="unwind" {panic_send.send(()).unwrap();}
+    let joined=tokio::time::timeout(Duration::from_secs(8),owner).await.unwrap();
+    match mode {
+        "drop"=>assert!(joined.unwrap_err().is_cancelled()),
+        "unwind"=>assert!(joined.unwrap_err().is_panic()),
+        _=>joined.unwrap().unwrap(),
+    }
+    assert_group_gone(ids).await;
+    assert_eq!(unsafe{libc::kill(backend_pid,0)},0,"external backend survives owned cleanup");
+    backend.kill().await.unwrap();backend.wait().await.unwrap();
+    b.svc.store.workflow_recover_notice_attempts().unwrap();
+    let settled=b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap();
+    assert_eq!(settled.state,if mode=="normal" {"handed_off"} else {"unknown"});
+    assert_eq!(settled.attempt_id,prepared.attempt_id);assert_eq!(settled.target,prepared.target);
+    assert!(settled.attempt_id.is_some());assert!(settled.target.is_some());
+    let proof=TEST_PROGRAM.scope(b.dir.path().join("native-queue-0"),endpoint(&b,&settled.notice)).await;
+    let (_retry_owner,mut retry_stop)=tokio::sync::watch::channel(false);
+    notices::invoke(&b.svc.store,&b.svc.inventory,&settled.notice,proof,&mut retry_stop).await.unwrap();
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1,"settled original identity never resends");
+    println!("private native mode={mode} state={} original_attempt={:?} target={:?} external_pid={backend_pid} survived",settled.state,settled.attempt_id,settled.target);
+}
+/// A test per way it ends (ov-993): five boards in one test took 12 s.
+mod workflow_notice_native_owned_descendant_normal_cancel_timeout_and_drop {
+    #[tokio::test] async fn normal() { super::owned_descendant("normal").await; }
+    #[tokio::test] async fn cancel() { super::owned_descendant("cancel").await; }
+    #[tokio::test] async fn timeout() { super::owned_descendant("timeout").await; }
+    #[tokio::test] async fn drop() { super::owned_descendant("drop").await; }
+    #[tokio::test] async fn unwind() { super::owned_descendant("unwind").await; }
 }
 
 #[tokio::test]
