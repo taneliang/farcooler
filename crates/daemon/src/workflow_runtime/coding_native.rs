@@ -48,6 +48,15 @@ fn snapshot() -> Result<crate::foreground::Foreground> {
     Ok(crate::foreground::parse(&raw))
 }
 
+/// No such process, or one that has exited and is only waiting to be reaped.
+fn gone(pid: i32) -> bool {
+    if unsafe { libc::kill(pid, 0) } != 0 { return true; }
+    // `/proc/<pid>/stat` is `pid (comm) S ...`; comm may hold parentheses, so read after the last one.
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
+        .and_then(|stat| stat.rsplit_once(')').and_then(|(_, rest)| rest.trim_start().chars().next()))
+        .is_some_and(|state| state == 'Z' || state == 'X')
+}
+
 impl Exec {
     pub(super) fn is_native_build(&self, binding: &Binding) -> bool {
         matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
@@ -134,14 +143,18 @@ impl Exec {
         if !stable { return Err(Error::Refused("native process tree did not settle")); }
         for &pid in owned.iter().rev() { unsafe { libc::kill(pid, libc::SIGKILL); } }
         // tmux is the wait/reap owner of the PTY child, not the workflow daemon.
-        for _ in 0..100 {
-            if owned.iter().all(|pid| unsafe { libc::kill(*pid, 0) } != 0) {
+        // A killed process stays findable by `kill(pid, 0)` until its parent reaps it, and a
+        // pane's process is tmux's child: tmux 3.4 can miss the exit and leave it a zombie.
+        // A zombie is dead, and the nudge makes tmux reap it.
+        for round in 0..100 {
+            if owned.iter().all(|&pid| gone(pid)) {
                 if !tmux.kill_terminal_window(owner.terminal).await
                     .map_err(|_| Error::Refused("native terminal close failed"))? {
                     return Err(Error::Refused("native terminal close unproved"));
                 }
                 return Ok(());
             }
+            if round % 10 == 9 { tmux.nudge_reap().await; }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         Err(Error::Refused("native descendants not quiescent"))
@@ -415,6 +428,23 @@ else:
 mod recovery_tests {
     use super::*;
     use super::super::{coding_tests::{configured, admitted}, tests::{enqueue, finish}};
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_killed_process_nobody_has_reaped_yet_is_gone() {
+        let mut child = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = child.id() as i32;
+        assert!(!gone(pid), "a running process is not gone");
+        unsafe { libc::kill(pid, libc::SIGKILL); }
+        // Unreaped: `kill(pid, 0)` still succeeds, as it does for a pane tmux has not reaped.
+        for _ in 0..500 {
+            if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| s.contains(") Z")) { break; }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "the zombie is still findable");
+        assert!(gone(pid));
+        child.wait().unwrap();
+        assert!(gone(pid));
+    }
     #[tokio::test]
     async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch() {
         let (dir, mut runtime) = configured(false, "pass").await;

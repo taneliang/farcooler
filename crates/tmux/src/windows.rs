@@ -322,6 +322,17 @@ impl TmuxServer {
         }
     }
 
+    /// Make the server reap every child of its that has exited.
+    ///
+    /// tmux 3.4 can lose the wakeup for a pane process's exit and leave it a
+    /// zombie that `kill(pid, 0)` still finds (see `read_panes`). Any child of
+    /// the server exiting makes it reap them all, so a backgrounded
+    /// `run-shell true` is the nudge. For a caller that killed a pane's
+    /// process and now waits to see it gone.
+    pub async fn nudge_reap(&self) {
+        let _ = self.run(&["run-shell", "-b", "true"]).await;
+    }
+
     /// Kill exactly the window whose fresh tags match this terminal.
     ///
     /// Never `kill-session`, and never a name or index match.
