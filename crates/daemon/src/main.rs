@@ -547,9 +547,18 @@ async fn relay_stdio(stream: tokio::net::UnixStream) -> Result<(), i32> {
         let _ = stdout.flush().await;
     };
 
+    tokio::pin!(up, down);
     tokio::select! {
-        _ = up => {}
-        _ = down => {}
+        _ = &mut down => {}
+        _ = &mut up => {
+            // The daemon closing its end makes the next write to it fail, so
+            // `up` can finish while the daemon's last words (the
+            // `device_released` farewell, ov-820) are still on their way to
+            // stdout. Ending here would cut that frame in half. Let `down`
+            // drain to the daemon's close, but not for long: the daemon
+            // closes within `FAREWELL_DEADLINE` of saying it.
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), &mut down).await;
+        }
     }
     Ok(())
 }
