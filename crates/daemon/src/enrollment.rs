@@ -377,6 +377,7 @@ async fn enroll_held(
             // Before the write, so no line is ever without its enroller; one
             // that can't be recorded is refused (ov-838).
             store.record_added_by(&mine.client_id, caller.as_ref().and_then(|c| c.session.client_id()).unwrap_or("")).map_err(Refusal)?;
+            store.record_paired_via(&mine.client_id, Caller::paired_via(caller.as_ref())).map_err(Refusal)?;
             let (mut ours, foreign) = sorted(&entries);
             ours.push(line);
             Ok((

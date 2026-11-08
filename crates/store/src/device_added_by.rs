@@ -67,6 +67,36 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Who added `client_id` and when, in milliseconds: `("", at)` for this
+    /// runner's socket. `None` for a device enrolled before ov-838 recorded it.
+    pub fn added_by_of(&self, client_id: &str) -> Result<Option<(String, i64)>> {
+        self.conn()
+            .query_row("SELECT added_by, added_at FROM device_added_by WHERE client_id = ?1", [client_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()
+            .map_err(map_err)
+    }
+
+    /// Record how `client_id` was paired (ov-982), replacing what an earlier
+    /// enrollment of the id said. Kept in `meta` beside its enroller, so no
+    /// migration lands for one word per device.
+    pub fn record_paired_via(&self, client_id: &str, via: PairedVia) -> Result<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![paired_via_key(client_id), via.as_str()],
+            )
+            .map(drop)
+            .map_err(map_err)
+    }
+
+    /// How `client_id` was paired, or `None` for a device paired before
+    /// ov-982 recorded it.
+    pub fn paired_via(&self, client_id: &str) -> Result<Option<PairedVia>> {
+        let said: Option<String> =
+            self.conn().query_row("SELECT value FROM meta WHERE key = ?1", [paired_via_key(client_id)], |r| r.get(0)).optional().map_err(map_err)?;
+        Ok(said.as_deref().and_then(PairedVia::parse))
+    }
+
     /// Every device's enroller, as `(device, added_by)`, sorted by device.
     pub fn added_by_all(&self) -> Result<Vec<(String, String)>> {
         let conn = self.conn();
@@ -112,6 +142,40 @@ impl Store {
         tx.execute("DELETE FROM device_enrollers WHERE client_id = ?1", [client_id]).map_err(map_err)?;
         tx.commit().map_err(map_err)
     }
+}
+
+/// How a device was paired (ov-982), for the owner deciding whether to vouch
+/// for it: through the Far Cooler app's own pairing on this runner's Mac, by
+/// another device of theirs, or from a terminal on the runner (the CLI's
+/// `client enroll`, or anything else on the socket that isn't the app).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairedVia {
+    App,
+    Device,
+    Terminal,
+}
+
+impl PairedVia {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PairedVia::App => "app",
+            PairedVia::Device => "device",
+            PairedVia::Terminal => "terminal",
+        }
+    }
+
+    pub fn parse(word: &str) -> Option<PairedVia> {
+        Some(match word {
+            "app" => PairedVia::App,
+            "device" => PairedVia::Device,
+            "terminal" => PairedVia::Terminal,
+            _ => return None,
+        })
+    }
+}
+
+fn paired_via_key(client_id: &str) -> String {
+    format!("device_paired_via:{client_id}")
 }
 
 /// The devices `root` added, and those they added, without end: every id

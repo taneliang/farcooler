@@ -817,3 +817,37 @@ fn only_a_p256_point_in_a_known_algorithm_is_a_key() {
     assert_eq!(code_of(ALG_DEVICE, &good).len(), 6);
     assert_ne!(code_of(ALG_DEVICE, &good), code_of(ALG_WEBAUTHN, &good), "the algorithm is part of the key");
 }
+
+/// ov-982: each enrollment records how it was paired, and the owner's list
+/// says so with when. The socket's enroll that isn't the app is `terminal`;
+/// a device's own enroll is `device`, naming it; the app's own pairing is
+/// `app` (its code signature can't be had in a test, so its caller is built
+/// here); a device paired before any of this says nothing.
+#[tokio::test]
+async fn each_device_says_how_and_when_it_was_paired() {
+    use farcooler_store::device_added_by::PairedVia;
+    let r = runner().await;
+    call(&r.socket(), enroll_req(63, "cli-o", Scope::Control, false, None)).await.expect("from a terminal");
+    let phone = Device::new("phone-o", 64);
+    r.trust(&phone, ALG_DEVICE);
+    let conn = r.conn("phone-o");
+    let n = nonce(&conn).await;
+    call(&conn, phone.step(&r.pin, enroll_req(65, "pad-o", Scope::Control, false, None), &n)).await.expect("by the owner's phone");
+    // An owner device from before any enroller was recorded.
+    r.svc.store.bind_owner_device("old-o", None).unwrap();
+
+    let rows = crate::access_migration::device_access(&r.svc.store, None, now_ms()).unwrap();
+    let row = |id: &str| rows.iter().find(|d| d.client_id == id).unwrap_or_else(|| panic!("{id}")).clone();
+    let (cli, pad, old) = (row("cli-o"), row("pad-o"), row("old-o"));
+    assert_eq!((cli.paired_via.as_str(), cli.paired_by.as_str()), ("terminal", ""));
+    assert!(cli.paired_at > 0);
+    assert_eq!((pad.paired_via.as_str(), pad.paired_by.as_str()), ("device", "phone-o"));
+    assert!(pad.paired_at >= cli.paired_at);
+    assert_eq!((old.paired_via.as_str(), old.paired_at), ("", 0), "paired before it was recorded");
+
+    let session = r.svc.sessions().open(None);
+    let local = crate::enrollment::Caller::new(session, Scope::HostAdmin);
+    assert_eq!(crate::enrollment::Caller::paired_via(Some(&local)), PairedVia::Terminal);
+    assert_eq!(crate::enrollment::Caller::paired_via(Some(&local.clone().with_via_app(true))), PairedVia::App);
+    assert_eq!(crate::enrollment::Caller::paired_via(None), PairedVia::Terminal, "in-process");
+}

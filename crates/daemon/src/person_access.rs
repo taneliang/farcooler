@@ -262,7 +262,8 @@ pub async fn enroll(
         }
         _ => None,
     };
-    let caller = crate::enrollment::Caller::new(session.clone(), peer.scope).with_authority(authority).with_stepped_up(stepped.cloned());
+    let caller = crate::enrollment::Caller::new(session.clone(), peer.scope).with_authority(authority).with_stepped_up(stepped.cloned())
+        .with_via_app(peer.client_id.is_none() && caller_pid.is_some_and(crate::caller_seat::is_own_app_or_its_child));
     if let Some(binding) = binding {
         // Add Teammate marks the device pending first (the `for_teammate` arm
         // above), then binds it, both before the line is written.

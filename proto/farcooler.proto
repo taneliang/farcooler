@@ -5539,6 +5539,17 @@ message DeviceAccess {
   // key signs the owner's "Allow cutover once". While a trusted key isn't,
   // `step_up_code` carries its six digits, so the Mac can check them.
   bool step_up_vouched = 9;
+  // When this device was paired, in milliseconds since the epoch, or 0 for one
+  // paired before the runner recorded it (ov-982).
+  int64 paired_at = 10;
+  // How it was paired (ov-982): `app`, through the Far Cooler app's own
+  // pairing on the runner's Mac; `device`, by another device (`paired_by`);
+  // `terminal`, from anything else on the runner, the CLI's `client enroll`
+  // included. Empty for one paired before the runner recorded it. The Mac
+  // asks twice before vouching for a device paired from a terminal.
+  string paired_via = 11;
+  // The device that paired this one, when `paired_via` is `device`.
+  string paired_by = 12;
 }
 
 // A member's own Claude login on this runner (ov-584): whether they're

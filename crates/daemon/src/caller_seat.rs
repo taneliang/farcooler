@@ -241,6 +241,19 @@ pub fn is_own_app(pid: i32) -> bool {
     own_app().is_some_and(|app| crate::code_identity::satisfies(pid, &app))
 }
 
+/// Whether `pid` is the Mac app this daemon ships in, or a process the app
+/// started itself, its bundled CLI (ov-982): what the app's own pairing runs
+/// as. Both by the app's code signature, the parent's read from the process
+/// table now. A guardrail, as the module says: anything may run the app's
+/// binary, but not make the app the parent of a command it chose.
+pub fn is_own_app_or_its_child(pid: i32) -> bool {
+    if is_own_app(pid) {
+        return true;
+    }
+    let parent = crate::proc_table::snapshot().and_then(|table| procs(&table).get(&pid).map(|row| row.ppid));
+    parent.is_some_and(|ppid| ppid > 1 && is_own_app(ppid))
+}
+
 /// Whether `pid` runs as root (`proc_table::uid_of`). A test can't start a
 /// root process, so it names its stand-in for root's `sshd` here
 /// (`test_support::Outside::under_root`).

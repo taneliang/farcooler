@@ -90,3 +90,22 @@ fn a_members_own_device_is_bound_to_them_from_its_write() {
     store.remove_member("bob").unwrap();
     assert!(store.released_to_sweep().unwrap().contains(&"browser-b".to_string()), "bob's browser outlived him");
 }
+
+/// ov-982: how a device was paired, and when, for the owner to read before
+/// vouching. Enrolled again, the newer route wins; one paired before any of
+/// this was recorded says nothing rather than guessing.
+#[test]
+fn how_and_when_a_device_was_paired_is_kept() {
+    let store = Store::open_in_memory().unwrap();
+    assert_eq!((store.paired_via("phone").unwrap(), store.added_by_of("phone").unwrap()), (None, None), "never recorded");
+    store.record_added_by_at("phone", "", 7_000).unwrap();
+    store.record_paired_via("phone", PairedVia::Terminal).unwrap();
+    assert_eq!(store.added_by_of("phone").unwrap(), Some(("".into(), 7_000)));
+    assert_eq!(store.paired_via("phone").unwrap(), Some(PairedVia::Terminal));
+    store.record_paired_via("phone", PairedVia::App).unwrap();
+    assert_eq!(store.paired_via("phone").unwrap(), Some(PairedVia::App), "enrolled again");
+    for via in [PairedVia::App, PairedVia::Device, PairedVia::Terminal] {
+        assert_eq!(PairedVia::parse(via.as_str()), Some(via));
+    }
+    assert_eq!(PairedVia::parse("socket"), None);
+}

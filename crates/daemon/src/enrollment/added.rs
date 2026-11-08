@@ -44,11 +44,14 @@ pub struct Caller {
     /// what the line grants, so every `== HostAdmin` test below still means
     /// "this line is `host_admin`" (B2).
     pub stepped_up: Option<crate::step_up::Stepped>,
+    /// The runner's socket caller was the Mac app, or the CLI it started
+    /// (`caller_seat::is_own_app_or_its_child`): its own pairing (ov-982).
+    pub via_app: bool,
 }
 
 impl Caller {
     pub fn new(session: Arc<Session>, scope: Scope) -> Self {
-        Caller { session, scope, authority: None, stepped_up: None }
+        Caller { session, scope, authority: None, stepped_up: None, via_app: false }
     }
 
     /// This caller, with the authority its request was decided under.
@@ -61,6 +64,24 @@ impl Caller {
     pub fn with_stepped_up(mut self, stepped: Option<crate::step_up::Stepped>) -> Self {
         self.stepped_up = stepped;
         self
+    }
+
+    /// This caller, the app's own pairing or not.
+    pub fn with_via_app(mut self, via_app: bool) -> Self {
+        self.via_app = via_app;
+        self
+    }
+
+    /// How a device this caller enrolls was paired (ov-982): by a device when
+    /// one asked, by the app when the socket's caller is it, else from a
+    /// terminal, an in-process enroll included.
+    pub fn paired_via(caller: Option<&Caller>) -> farcooler_store::device_added_by::PairedVia {
+        use farcooler_store::device_added_by::PairedVia;
+        match caller {
+            Some(c) if c.session.client_id().is_some() => PairedVia::Device,
+            Some(c) if c.via_app => PairedVia::App,
+            _ => PairedVia::Terminal,
+        }
     }
 
     /// Whether this caller has stepped up for exactly `method`.

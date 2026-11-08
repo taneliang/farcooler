@@ -338,7 +338,8 @@ pub fn verify(entries: &[Entry], view: &View) -> std::result::Result<(), String>
 /// by device. Empty until the migration has run. `only` is whose rows to tell:
 /// `None` is everyone's (the owner's view), `Some(handle)` one member's own.
 ///
-/// Each row says what its device's step-up key is (`trusted`, `proposed`, or
+/// Each row says how and when its device was paired (ov-982), and what its
+/// device's step-up key is (`trusted`, `proposed`, or
 /// `expired` for a proposal past its ten minutes), whether the owner vouched
 /// for a trusted one (ov-974), and, for a proposal or a trusted key nobody
 /// vouched for yet, the six digits to check: what lets another device of the
@@ -351,6 +352,7 @@ pub fn device_access(store: &Store, only: Option<&str>, now_ms: i64) -> Result<V
     let cap_word = |device: &str| caps.get(device).map(|c| c.as_str().to_string()).unwrap_or_default();
     // The key's state, code and time, for a row.
     let key = |device: &str, row: DeviceAccess| -> Result<DeviceAccess> {
+        let row = paired(store, device, row)?;
         let Some(k) = store.step_up_key(device)? else { return Ok(row) };
         let expired = !k.trusted && now_ms - k.registered_at > farcooler_store::step_up::PROPOSAL_MS;
         let vouched = k.trusted && store.step_up_vouched_by(device)?.is_some();
@@ -410,6 +412,19 @@ impl From<FenceError> for Skipped {
     fn from(error: FenceError) -> Self {
         Skipped::Fence(error)
     }
+}
+
+/// `row` with how and when its device was paired (ov-982), when the runner
+/// recorded it.
+fn paired(store: &Store, device: &str, row: farcooler_protocol::v1::DeviceAccess) -> Result<farcooler_protocol::v1::DeviceAccess> {
+    let via = store.paired_via(device)?;
+    let added = store.added_by_of(device)?;
+    Ok(farcooler_protocol::v1::DeviceAccess {
+        paired_at: added.as_ref().map_or(0, |(_, at)| *at),
+        paired_via: via.map(|v| v.as_str().to_string()).unwrap_or_default(),
+        paired_by: added.filter(|_| via == Some(farcooler_store::device_added_by::PairedVia::Device)).map(|(by, _)| by).unwrap_or_default(),
+        ..row
+    })
 }
 
 /// Run the migration as the daemon starts: the first time it derives the
