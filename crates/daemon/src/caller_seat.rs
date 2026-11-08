@@ -151,12 +151,18 @@ pub fn recovery_seat(pid: i32) -> Seat {
     }
     let Some(table) = crate::proc_table::snapshot() else { return Seat::Unreadable };
     let procs = procs(&table);
-    let servers = procs.keys().copied().filter(|&p| crate::proc_table::name_of(p).is_some_and(|name| name.contains("tmux"))).collect();
+    let servers = tmux_servers(&procs);
     let agent = |pid: i32| crate::proc_table::command_of(pid).map(|(exe, args)| {
         crate::watch::answer_wake::agent_of_process(if exe.is_empty() { args.split_whitespace().next().unwrap_or_default() } else { &exe }, &args).is_some()
     });
     let app = own_app();
     recovery_seat_in(pid, &procs, &servers, &agent, &|pid| vouches_for_a_person(pid, app.as_deref()))
+}
+
+/// The tmux servers in `procs`, by their program's name: a recovery daemon
+/// has no inventory to know its own server by.
+pub(crate) fn tmux_servers(procs: &HashMap<i32, Proc>) -> HashSet<i32> {
+    procs.keys().copied().filter(|&p| crate::proc_table::name_of(p).is_some_and(|name| name.contains("tmux"))).collect()
 }
 
 /// `recovery_seat` on a table already read. A pane's terminal is the one its

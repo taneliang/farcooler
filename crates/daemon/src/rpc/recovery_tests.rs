@@ -166,11 +166,10 @@ async fn live_hold_drains_marks_the_attempt_and_a_caller_lost_during_the_drain_m
     assert!(crate::service::Service::open_in(root.clone()).await.is_err(), "the next start is not ordinary");
     assert_eq!(prepare(&person(&root)).await.unwrap()["phase"], "quiesced");
 }
-#[tokio::test]
-async fn live_prepare_refuses_an_agent_pane_and_holds_and_stops_for_a_person() {
-    use farcooler_store::models::{TerminalRole, TerminalUpdate};
-    use farcooler_transport::Handler;
-    let (_dir, svc, repo) = crate::test_support::fixture().await;
+/// A pane in `svc`'s main checkout, launched as `claude` with `role`, and the
+/// pid of its root process: the caller a live Prepare walks.
+async fn a_pane(svc: &std::sync::Arc<crate::service::Service>, repo: uuid::Uuid, role: farcooler_store::models::TerminalRole) -> (uuid::Uuid, i32) {
+    use farcooler_store::models::TerminalUpdate;
     let worktree = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
     let t = svc.create_terminal(worktree.id, "cutover caller", "shell").await.unwrap();
     svc.store.update_terminal(t.id, t.resource_version, TerminalUpdate {
@@ -178,19 +177,106 @@ async fn live_prepare_refuses_an_agent_pane_and_holds_and_stops_for_a_person() {
         runtime_confirmed: t.runtime_confirmed, exit_code: t.exit_code, exit_signal: t.exit_signal,
         lease_generation: t.lease_generation, epoch: t.epoch, columns: t.columns, rows: t.rows,
     }).unwrap();
-    svc.store.set_terminal_role(t.id, TerminalRole::Orchestrator).unwrap();
+    svc.store.set_terminal_role(t.id, role).unwrap();
     svc.inventory.refresh().await;
     let pid = svc.inventory_snapshot().panes.iter().find(|p| p.terminal_id == t.id).unwrap().stamp.pid as i32;
-    assert_ne!(crate::caller_seat::recovery_seat(pid), Seat::Person, "recovery takes no pane for a person");
-    let db = crate::cutover_admin::database(svc.root_dir());
+    (t.id, pid)
+}
+/// A live Prepare from `pid` (`None`: the in-process session, a person), its
+/// reply, and whether it stopped the daemon.
+async fn live_prepare(svc: &std::sync::Arc<crate::service::Service>, pid: Option<i32>) -> (std::result::Result<serde_json::Value, String>, bool) {
+    use farcooler_transport::Handler;
     let stop = std::sync::Arc::new(tokio::sync::Notify::new());
-    let factory = |pid| crate::rpc::RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()), stop.clone(), local()).with_caller_pid(pid);
-    let refused = reply(factory(Some(pid)).handle(ask("workflow.cutover", PREPARE)).await);
-    assert!(refused.is_err(), "an agent cannot strand the runner");
-    assert!(!startup::artifact_dir(&db).exists());
-    assert!(tokio::time::timeout(std::time::Duration::from_millis(400), stop.notified()).await.is_err(), "a refused caller stops nothing");
-    let held = reply(factory(None).handle(ask("workflow.cutover", PREPARE)).await).unwrap();
-    assert_eq!(held["held"], "a-1");
+    let factory = crate::rpc::RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()), stop.clone(), local()).with_caller_pid(pid);
+    let said = reply(factory.handle(ask("workflow.cutover", PREPARE)).await);
+    let wait = if said.is_ok() { 2000 } else { 400 };
+    (said, tokio::time::timeout(std::time::Duration::from_millis(wait), stop.notified()).await.is_ok())
+}
+/// Nothing held, nobody pinned, nothing stopped.
+fn untouched(svc: &crate::service::Service, (said, stopped): (std::result::Result<serde_json::Value, String>, bool), who: &str) {
+    assert!(said.is_err(), "{who} cannot strand the runner: {said:?}");
+    assert!(!stopped, "{who}: a refused caller stops nothing");
+    assert!(!startup::artifact_dir(&crate::cutover_admin::database(svc.root_dir())).exists(), "{who}: no hold");
+    assert!(!svc.root_dir().join(crate::cutover_delegate::FILE).exists(), "{who}: no pane pinned");
+}
+
+/// ov-974: a builder's pane is no orchestrator.
+#[tokio::test]
+async fn live_prepare_refuses_a_builder_pane() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let (_, pid) = a_pane(&svc, repo, farcooler_store::models::TerminalRole::Agent).await;
+    assert_ne!(crate::caller_seat::recovery_seat(pid), Seat::Person, "recovery takes no pane for a person");
+    untouched(&svc, live_prepare(&svc, Some(pid)).await, "a builder pane");
+}
+/// ov-974: the cutover is the owner's, so a member's orchestrator, on the
+/// login of the member who leads its workspace, is refused.
+#[tokio::test]
+async fn live_prepare_refuses_a_members_orchestrator() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let (pane, pid) = a_pane(&svc, repo, farcooler_store::models::TerminalRole::Orchestrator).await;
+    let workspace = svc.store.get_terminal(pane).unwrap().workspace_id.unwrap();
+    svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    svc.store.set_workspace_lead(workspace, Some("bob")).unwrap();
+    let login_id = svc.store.ensure_member_login("bob").unwrap();
+    svc.store.set_terminal_login(pane, &farcooler_store::claude_logins::TerminalLogin { handle: "bob".into(), login_id, config_dir: "/r/claude/bob".into(), shared: false }).unwrap();
+    untouched(&svc, live_prepare(&svc, Some(pid)).await, "Bob's orchestrator");
+}
+/// ov-974: an orchestrator on the runner's login while Bob leads its
+/// workspace is another lead's pane (`refuse_another_leads_login`).
+#[tokio::test]
+async fn live_prepare_refuses_an_orchestrator_on_another_leads_login() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let (pane, pid) = a_pane(&svc, repo, farcooler_store::models::TerminalRole::Orchestrator).await;
+    let workspace = svc.store.get_terminal(pane).unwrap().workspace_id.unwrap();
+    svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    svc.store.set_workspace_lead(workspace, Some("bob")).unwrap();
+    untouched(&svc, live_prepare(&svc, Some(pid)).await, "an orchestrator while Bob leads");
+}
+/// ov-974: the owner's orchestrator holds, stops, and is pinned by its pane's
+/// root process; a person's Prepare after it pins nobody.
+#[tokio::test]
+async fn live_prepare_holds_for_the_owners_orchestrator_and_pins_its_pane() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let (pane, pid) = a_pane(&svc, repo, farcooler_store::models::TerminalRole::Orchestrator).await;
+    let db = crate::cutover_admin::database(svc.root_dir());
+    let (said, stopped) = live_prepare(&svc, Some(pid)).await;
+    assert_eq!(said.unwrap()["held"], "a-1");
+    assert!(stopped, "the daemon stops into recovery");
+    let pinned: crate::cutover_delegate::Delegate = serde_json::from_slice(&std::fs::read(svc.root_dir().join(crate::cutover_delegate::FILE)).unwrap()).unwrap();
+    assert_eq!((pinned.attempt.as_str(), pinned.terminal, pinned.pane_pid), ("a-1", pane, pid));
+    assert_eq!(Some(pinned.pane_start), crate::claude_registry::process_incarnation(pid));
     assert!(startup::artifact_dir(&db).join("hold.json").exists());
-    tokio::time::timeout(std::time::Duration::from_secs(2), stop.notified()).await.expect("the daemon stops into recovery");
+}
+/// A person holds and stops as before, and a pane an earlier Prepare pinned
+/// is forgotten, so it never outlives the attempt it was pinned for.
+#[tokio::test]
+async fn live_prepare_holds_for_a_person_and_forgets_any_pinned_pane() {
+    let (_dir, svc, _) = crate::test_support::fixture().await;
+    std::fs::write(svc.root_dir().join(crate::cutover_delegate::FILE), "an earlier pane").unwrap();
+    let (said, stopped) = live_prepare(&svc, None).await;
+    assert_eq!(said.unwrap()["held"], "a-1");
+    assert!(stopped, "the daemon stops into recovery");
+    assert!(startup::artifact_dir(&crate::cutover_admin::database(svc.root_dir())).join("hold.json").exists());
+    assert!(!svc.root_dir().join(crate::cutover_delegate::FILE).exists(), "no pane is pinned for a person");
+}
+/// ov-974: in recovery, a caller inside the pinned pane runs every step, and
+/// Commit names it as the orchestrator acting for the owner; Finish forgets it.
+#[tokio::test]
+async fn recovery_runs_the_pinned_orchestrator_from_prepare_to_finish() {
+    let (_dir, root) = closed_root().await;
+    let db = crate::cutover_admin::database(&root);
+    transfer::hold(&db, "a-1").unwrap();
+    std::fs::write(root.join(crate::cutover_delegate::FILE), "pinned").unwrap();
+    fn pinned(_: &std::path::Path, _: i32) -> Option<crate::cutover_delegate::Delegate> {
+        Some(crate::cutover_delegate::Delegate { attempt: "a-1".into(), terminal: uuid::Uuid::nil(), workspace: uuid::Uuid::max(), pane_pid: 9, pane_start: 1 })
+    }
+    let unpinned = RecoveryHandler::with_walk(root.clone(), local(), Some(7), |_| Seat::Unreadable, |_| Some(1));
+    assert!(op(&unpinned, INSPECT).await.is_err(), "a pane nobody pinned");
+    let orchestrator = RecoveryHandler::with_walk(root.clone(), local(), Some(7), |_| Seat::Unreadable, |_| Some(1)).with_delegate(pinned);
+    prepare(&orchestrator).await.unwrap();
+    op(&orchestrator, r#"{"op":"Commit"}"#).await.unwrap();
+    let asked = std::fs::read_to_string(startup::artifact_dir(&db).join("journal/commit-requested-1.json")).unwrap();
+    assert!(asked.contains(&format!("the owner's orchestrator (terminal {}, workspace {}), acting for the owner: pid 7", uuid::Uuid::nil(), uuid::Uuid::max())), "{asked}");
+    for step in [r#"{"op":"Verify"}"#, r#"{"op":"Release"}"#, r#"{"op":"Finish"}"#] { op(&orchestrator, step).await.unwrap_or_else(|e| panic!("{step}: {e}")); }
+    assert!(!root.join(crate::cutover_delegate::FILE).exists(), "Finish forgets the pane");
 }

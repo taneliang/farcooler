@@ -88,6 +88,8 @@ impl Admission {
         Ok(())
     }
     pub(crate) fn recheck_now(&self) -> Result<()> { self.recheck() }
+    /// The orchestrator pane this admitted, if it admitted one rather than a person.
+    pub(crate) fn orchestrator(&self) -> Option<&Terminal> { self.terminal.as_ref().map(|(term, _, _)| term) }
     pub(crate) fn permits(&self, action: &Action) -> Result<()> {
         if person_only(action) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });

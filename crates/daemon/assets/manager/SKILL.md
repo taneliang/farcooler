@@ -259,8 +259,8 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
   backticks, under ~120 words, a report linked, not pasted; `--body "$(cat f)"`.
 - **Asks.** One sentence naming one decision; detail goes in the intent or a note.
   Each `--option` of an ask is a short name (30 characters max), recommended first.
-- **Cutover.** Agents never run `workflow-cutover` commands: stopping the runner,
-  Commit and Finish are the owner's, from their own terminal. Commit can't be undone.
+- **Cutover.** `workflow-cutover` is the owner's: only their own orchestrator runs it, when
+  they ask, from its pane; no other agent ever does. Commit can't be undone.
 - **Landings.** Ready work never waits for a ticket still building or in a
   fix: a ticket that would conflict rebases onto the landing and rides the next.
   Tickets already gated alone push folded without a combined gate when they can't

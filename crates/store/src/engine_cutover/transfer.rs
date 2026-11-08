@@ -184,6 +184,13 @@ pub fn hold(db: &Path, attempt: &str) -> Result<()> {
     reach("hold.after");
     Ok(())
 }
+/// The attempt a runner is in: its baseline's once Prepare has run, its hold
+/// mark's before then, and `None` when it is in neither.
+pub fn attempt_in_hand(db: &Path) -> Option<String> {
+    if let Ok((baseline, _)) = validate_artifacts(db) { return Some(baseline.attempt); }
+    let hold: Hold = serde_json::from_slice(&fs::read(artifact_dir(db).join(HOLD)).ok()?).ok()?;
+    Some(hold.attempt)
+}
 fn held(dir: &Path) -> Result<Option<Hold>> {
     if fs::symlink_metadata(dir).is_err() { return Ok(None); }
     match fs::read(dir.join(HOLD)) {

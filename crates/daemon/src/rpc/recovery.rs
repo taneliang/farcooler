@@ -4,8 +4,9 @@
 //! taken as authority. The ordinary daemon knows a member's or rep's pane from
 //! its Store and inventory; this one cannot, so it is stricter: the caller must
 //! be a local socket client with no device, host_admin, and a person outside
-//! every pane (`caller_seat::recovery_seat`), asked again on every request
-//! against the process that connected.
+//! every pane (`caller_seat::recovery_seat`) or the owner's orchestrator the
+//! live daemon admitted and pinned at Prepare (`cutover_delegate`, ov-974),
+//! asked again on every request against the process that connected.
 use super::*;
 use crate::caller_seat::{Seat, recovery_seat};
 use farcooler_protocol::workflow_cutover;
@@ -15,23 +16,34 @@ pub type SeatOf = fn(i32) -> Seat;
 /// The caller's process start, to tell the process that connected from a pid
 /// reused since.
 pub type StartOf = fn(i32) -> Option<i64>;
+/// The orchestrator pinned for the attempt in hand that a caller runs inside.
+pub type DelegateOf = fn(&std::path::Path, i32) -> Option<crate::cutover_delegate::Delegate>;
+
+/// Who a recovery daemon admitted.
+enum Caller { Person, Orchestrator(crate::cutover_delegate::Delegate) }
 
 /// The exit status that asks a supervisor for a restart: launchd and systemd
 /// restart a daemon only on failure, and the next start is ordinary service.
 pub const RESTART_EXIT: i32 = 75;
 
-pub struct RecoveryHandler { root: std::path::PathBuf, peer: Peer, caller: Option<(i32, Option<i64>)>, seat_of: SeatOf, start_of: StartOf, done: std::sync::Arc<tokio::sync::Notify> }
+pub struct RecoveryHandler { root: std::path::PathBuf, peer: Peer, caller: Option<(i32, Option<i64>)>, seat_of: SeatOf, start_of: StartOf, delegate_of: DelegateOf, done: std::sync::Arc<tokio::sync::Notify> }
 impl RecoveryHandler {
     pub fn new(root: std::path::PathBuf, peer: Peer, pid: Option<i32>) -> Self {
         Self::with_walk(root, peer, pid, recovery_seat, crate::claude_registry::process_incarnation)
     }
     pub(crate) fn with_walk(root: std::path::PathBuf, peer: Peer, pid: Option<i32>, seat_of: SeatOf, start_of: StartOf) -> Self {
-        Self { root, peer, caller: pid.map(|pid| (pid, start_of(pid))), seat_of, start_of, done: Default::default() }
+        Self { root, peer, caller: pid.map(|pid| (pid, start_of(pid))), seat_of, start_of, delegate_of: crate::cutover_delegate::admits, done: Default::default() }
     }
     fn ending(mut self, done: std::sync::Arc<tokio::sync::Notify>) -> Self { self.done = done; self }
-    fn caller_is_a_person(&self) -> bool {
-        let Some((pid, Some(start))) = self.caller else { return false };
-        (self.start_of)(pid) == Some(start) && (self.seat_of)(pid) == Seat::Person
+    #[cfg(test)]
+    pub(crate) fn with_delegate(mut self, delegate_of: DelegateOf) -> Self { self.delegate_of = delegate_of; self }
+    /// A person outside every pane, or a process inside the pane pinned for
+    /// the attempt in hand; either still the process that connected.
+    fn admitted(&self) -> Option<Caller> {
+        let Some((pid, Some(start))) = self.caller else { return None };
+        if (self.start_of)(pid) != Some(start) { return None; }
+        if (self.seat_of)(pid) == Seat::Person { return Some(Caller::Person); }
+        (self.delegate_of)(&self.root, pid).map(Caller::Orchestrator)
     }
 
     /// Pid, terminal and session leader of the caller, for the journal.
@@ -49,11 +61,17 @@ impl RecoveryHandler {
         if self.peer.client_id.is_some() || self.peer.scope != farcooler_protocol::v1::Scope::HostAdmin {
             return Err(DomainError::ScopeDenied { needed: "owner" });
         }
-        if !self.caller_is_a_person() { return Err(DomainError::ScopeDenied { needed: "person" }); }
+        let Some(caller) = self.admitted() else { return Err(DomainError::ScopeDenied { needed: "person" }) };
         let Some(request::Payload::WorkflowCommand(p)) = &req.payload else { return Err(DomainError::NotFound) };
         if p.schema != 1 { return Err(DomainError::NotFound); }
         let op = workflow_cutover::parse(&p.json).map_err(|_| DomainError::NotFound)?;
-        crate::cutover_admin::recovery(&self.root, &op, &self.caller_note()).map_err(|error| {
+        let note = match &caller { Caller::Person => self.caller_note(), Caller::Orchestrator(d) => d.note(&self.caller_note()) };
+        let done = crate::cutover_admin::recovery(&self.root, &op, &note);
+        // An attempt ended forgets the pane it admitted.
+        if done.is_ok() && matches!(op, workflow_cutover::Cutover::Recover | workflow_cutover::Cutover::Finish) {
+            let _ = crate::cutover_delegate::forget(&self.root);
+        }
+        done.map_err(|error| {
             tracing::warn!(%error, "workflow.cutover refused in recovery");
             // `refused` is the one error that carries a sentence over the
             // wire; the owner needs the holders named to act on a refusal.
