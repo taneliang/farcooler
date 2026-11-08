@@ -162,7 +162,7 @@ async fn main_serves_only_recovery(runner: &Runner) {
 }
 /// Real main, serving as usual.
 async fn main_serves_ordinarily(runner: &Runner) {
-    let _reaper = common::TmuxReaper::new(&runner.home);
+    let _reaper = common::TmuxReaper::in_tmux_dir(&runner.home, &runner.tmux);
     let mut main = runner.daemon().spawn().unwrap();
     answering(&runner.socket()).await;
     let mut client = Client::connect(&runner.socket(), "matrix", "0").await.expect("a hello");
@@ -420,7 +420,7 @@ async fn as_a_person(runner: &Runner, json: &str) -> Result<String, String> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_person_takes_a_real_runner_from_prepare_to_ordinary_service() {
     let runner = Runner::new(Source::Legacy);
-    let _reaper = common::TmuxReaper::new(&runner.home);
+    let _reaper = common::TmuxReaper::in_tmux_dir(&runner.home, &runner.tmux);
     let tasks = |runner: &Runner| rusqlite::Connection::open(runner.db()).unwrap().query_row("SELECT count(*) FROM tasks", [], |r| r.get::<_, i64>(0)).unwrap();
     let mut live = runner.daemon().spawn().unwrap();
     answering(&runner.socket()).await;

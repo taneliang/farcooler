@@ -42,26 +42,36 @@ fn run_bounded(mut cmd: Command, limit: Duration) -> Option<String> {
 
 /// Where tmux puts the socket for `-L <name>`: `$TMUX_TMPDIR` (or `/tmp`),
 /// then `tmux-<uid>`.
-fn socket_path(socket: &str) -> PathBuf {
-    let base = std::env::var_os("TMUX_TMPDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"));
+fn socket_path(socket: &str, tmpdir: Option<&std::path::Path>) -> PathBuf {
+    let base = tmpdir
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("TMUX_TMPDIR").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
     // SAFETY: getuid has no preconditions and cannot fail.
     base.join(format!("tmux-{}", unsafe { libc::getuid() })).join(socket)
 }
 
 /// The server's PID. Asked of the server first; a hung one does not answer,
 /// so the fallback is whoever has the socket open.
-fn server_pid(tmux: &std::path::Path, socket: &str) -> Option<i32> {
+fn server_pid(tmux: &std::path::Path, socket: &str, tmpdir: Option<&std::path::Path>) -> Option<i32> {
     let mut ask = Command::new(tmux);
+    with_tmpdir(&mut ask, tmpdir);
     ask.args(["-L", socket, "display-message", "-p", "#{pid}"]);
     if let Some(pid) = run_bounded(ask, ASK).and_then(|s| s.trim().parse().ok()) {
         return Some(pid);
     }
     // Canonical, because lsof matches the resolved name: `/tmp` is a link to
     // `/private/tmp` on macOS and a bare `/tmp/...` finds nothing.
-    let path = socket_path(socket).canonicalize().ok()?;
+    let path = socket_path(socket, tmpdir).canonicalize().ok()?;
     let mut lsof = Command::new("lsof");
     lsof.arg("-t").arg("--").arg(path);
     run_bounded(lsof, ASK)?.lines().next()?.trim().parse().ok()
+}
+
+fn with_tmpdir(cmd: &mut Command, tmpdir: Option<&std::path::Path>) {
+    if let Some(dir) = tmpdir {
+        cmd.env("TMUX_TMPDIR", dir);
+    }
 }
 
 fn alive(pid: i32) -> bool {
@@ -87,9 +97,19 @@ fn wait_dead(pid: i32, limit: Duration) -> bool {
 /// server that survives SIGKILL panics (unless the thread already is), so a
 /// leak fails the test that made it. No server on that socket is not an error.
 pub fn reap_server(socket: &str) {
+    reap_server_in(socket, None);
+}
+
+/// The same, for a server started with its own `TMUX_TMPDIR`.
+///
+/// A test that sets `TMUX_TMPDIR` on the daemon child only (not on itself)
+/// must say where the socket is, or the lookup falls to `/tmp`, finds no
+/// server, and the real one outlives the test (ov-985).
+pub fn reap_server_in(socket: &str, tmpdir: Option<&std::path::Path>) {
     let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
-    let pid = server_pid(&tmux, socket);
+    let pid = server_pid(&tmux, socket, tmpdir);
     let mut kill = Command::new(&tmux);
+    with_tmpdir(&mut kill, tmpdir);
     kill.args(["-L", socket, "kill-server"]);
     let _ = run_bounded(kill, ASK);
     let Some(pid) = pid else { return };

@@ -21,6 +21,6 @@ pub use control::{Notification, parse_line};
 pub use inventory::LiveInventory;
 pub use pane_life::PaneLife;
 pub use pane_read::PaneRead;
-pub use reap::reap_server;
+pub use reap::{reap_server, reap_server_in};
 pub use server::{SESSION_NAME, TmuxServer};
 pub use windows::{ManagedWindow, UnfinishedOpen};

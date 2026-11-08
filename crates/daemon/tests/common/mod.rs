@@ -34,7 +34,7 @@ pub struct DaemonChild {
 impl Drop for DaemonChild {
     fn drop(&mut self) {
         let _ = self.child.start_kill();
-        TmuxReaper::reap(&self.home);
+        TmuxReaper::reap(&self.home, None);
     }
 }
 
@@ -52,27 +52,51 @@ impl Drop for DaemonChild {
 /// wrong.
 pub struct TmuxReaper {
     home: std::path::PathBuf,
+    tmux_tmpdir: Option<std::path::PathBuf>,
 }
 
 impl TmuxReaper {
     pub fn new(home: &std::path::Path) -> Self {
-        Self { home: home.to_path_buf() }
+        Self { home: home.to_path_buf(), tmux_tmpdir: None }
     }
 
-    /// Kill the tmux server belonging to this runtime directory, if it has one.
-    fn reap(home: &std::path::Path) {
+    /// For a daemon started with its own `TMUX_TMPDIR` that this process does
+    /// not share: the server's socket is under `tmux_tmpdir`, not `/tmp`, and
+    /// `new` would look in the wrong place and reap nothing (ov-985).
+    pub fn in_tmux_dir(home: &std::path::Path, tmux_tmpdir: &std::path::Path) -> Self {
+        Self { home: home.to_path_buf(), tmux_tmpdir: Some(tmux_tmpdir.to_path_buf()) }
+    }
+
+    /// Kill the tmux server belonging to this runtime directory, if it has one,
+    /// and remove the pane fanout sockets it left in the temp directory.
+    fn reap(home: &std::path::Path, tmux_tmpdir: Option<&std::path::Path>) {
         // Read rather than recomputed: how an install id becomes a socket name
         // is the daemon's rule, and a second copy of it here would be one to
         // get quietly wrong.
         let Ok(install) = std::fs::read_to_string(home.join("install-id")) else { return };
         let socket = format!("farcooler-{}", install.trim());
-        farcooler_tmux::reap_server(&socket);
+        farcooler_tmux::reap_server_in(&socket, tmux_tmpdir);
+        // The fanout process a pane's pipe-pane starts holds `farcooler-pane-*.sock`
+        // in the temp directory and does not always unlink it when its server dies.
+        let prefix = farcooler_daemon::fanout::socket_path(&install, "")
+            .file_name()
+            .map(|n| n.to_string_lossy().trim_end_matches(".sock").to_string())
+            .unwrap_or_default();
+        if prefix.is_empty() { return; }
+        // leak-exempt: this removes the daemon's own fanout sockets, it makes nothing
+        if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
     }
 }
 
 impl Drop for TmuxReaper {
     fn drop(&mut self) {
-        Self::reap(&self.home);
+        Self::reap(&self.home, self.tmux_tmpdir.as_deref());
     }
 }
 

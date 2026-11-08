@@ -143,7 +143,7 @@ async fn answering(socket: &Path) {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_owners_orchestrator_takes_a_real_runner_from_prepare_to_finish() {
     let runner = Runner::new().await;
-    let _reaper = common::TmuxReaper::new(&runner.home);
+    let _reaper = common::TmuxReaper::in_tmux_dir(&runner.home, &runner.tmux);
     let mut live = runner.daemon().spawn().unwrap();
     answering(&runner.socket()).await;
 
