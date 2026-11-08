@@ -103,7 +103,7 @@ struct RunnerUpgradeTests {
         let upgrade = RunnerUpgrade(driver: runner.driver)
         await upgrade.finish()
         #expect(upgrade.phase == .failed(.step(.commit), detail: "refused"))
-        #expect(RunnerUpgrade.recoverCopy(for: .step(.commit)).contains("exactly as it was"))
+        #expect(!RunnerUpgrade.recoverCopy(for: .step(.commit)).contains("exactly as it was"), "Commit may have landed")
         let refreshed = Counter()
         await upgrade.recover { refreshed.bump() }
         #expect(runner.prompts == [RunnerUpgrade.finishReason, RunnerUpgrade.recoverReason])
@@ -181,6 +181,86 @@ struct RunnerUpgradeTests {
         await upgrade.finish()
         #expect(upgrade.phase == .failed(.step(.prepare), detail: "not json"))
         #expect(runner.ops == ["inspect"])
+    }
+
+    /// Recover's promise follows where the runner stands, which a failed Commit
+    /// can't tell (its reply may have been lost after it landed).
+    @Test func aFailedCommitDoesNotPromiseAnExactRestore() {
+        #expect(RunnerUpgrade.recoverCopy(for: .step(.prepare)).contains("exactly as it was"))
+        let commit = RunnerUpgrade.recoverCopy(for: .step(.commit))
+        #expect(!commit.contains("exactly as it was") && commit.contains("Recover"))
+    }
+
+    /// A refusal that will come again is not offered a retry, and the copy says
+    /// the upgrade needs help instead.
+    @Test func aRefusalThatWillComeAgainOffersNoRetry() async {
+        for words in [
+            "database changed since the upgrade; keeping it for review",
+            "the attempt’s closed backup is missing", "the attempt's closed backup is missing",
+        ] {
+            #expect(RunnerUpgrade.needsHelp(words), "\(words)")
+            let stuck = RunnerUpgrade.Phase.failed(.recover, detail: words)
+            #expect(RunnerUpgradeView.actions(for: stuck).isEmpty, "\(words)")
+            #expect(RunnerUpgrade.recoverCopy(for: .recover, detail: words).contains("needs help"))
+            #expect(!RunnerUpgrade.recoverCopy(for: .recover, detail: words).contains("again"))
+        }
+        #expect(!RunnerUpgrade.needsHelp("Another process (pid 9) has this runner's database open."))
+        let transient = RunnerUpgrade.Phase.failed(.recover, detail: "Another process (pid 9) has this runner's database open.")
+        #expect(RunnerUpgradeView.actions(for: transient) == [.recover])
+        #expect(RunnerUpgrade.recoverCopy(for: .recover, detail: "busy").contains("Try Recover again"))
+    }
+
+    /// The box holds the runner's sentences, not the CLI's labels or a pointer
+    /// to a terminal.
+    @Test func theRunnersWordsLoseTheTerminalPointerAndLabels() {
+        let said = "code: operation-failed\nwhat: x\n"
+            + "That upgrade step was refused. Run `farcooler workflow-cutover inspect` to see where the upgrade stands."
+        #expect(RunnerUpgrade.plainWords(said) == "That upgrade step was refused.")
+        #expect(RunnerUpgrade.plainWords("Another process has this runner's database open. Close it, then try again.")
+            == "Another process has this runner's database open. Close it, then try again.")
+        #expect(RunnerUpgrade.plainWords("code: operation-failed") == "")
+        // The CLI puts the message on the `error:` line itself: the label goes, the sentence stays.
+        #expect(
+            RunnerUpgrade.plainWords("error: scope denied: person required\ncode: scope-denied")
+                == "scope denied: person required")
+        #expect(
+            RunnerUpgrade.plainWords("Error: That upgrade step was refused. Run `farcooler workflow-cutover inspect` to see where.\ncode: operation-failed")
+                == "That upgrade step was refused.")
+    }
+
+    @Test func restartingSaysTheRunnerNotTheApp() {
+        #expect(RunnerUpgrade.Step.finish.title.contains("runner"))
+        #expect(!RunnerUpgrade.Step.finish.title.contains("Far Cooler"))
+    }
+
+    /// A second press while the first waits on Touch ID asks nothing more.
+    @Test func aDoublePressAsksOnce() async {
+        final class Gate: @unchecked Sendable {
+            let lock = NSLock()
+            var waiting: CheckedContinuation<RunnerUpgrade.Confirmed, Never>?
+            var asks = 0
+        }
+        let gate = Gate()
+        let runner = Runner()
+        let upgrade = RunnerUpgrade(
+            driver: .init(
+                run: { runner.run($0) },
+                confirm: { _ in
+                    // The first ask waits for the test; any other answers at once,
+                    // so a missing guard fails the count rather than hanging.
+                    let first = gate.lock.withLock { gate.asks += 1; return gate.asks == 1 }
+                    if !first { return .cancelled }
+                    return await withCheckedContinuation { c in gate.lock.withLock { gate.waiting = c } }
+                },
+                attempt: { "mac-test" }))
+        let first = Task { await upgrade.finish() }
+        while gate.lock.withLock({ gate.waiting }) == nil { await Task.yield() }
+        await upgrade.finish()
+        await upgrade.recover()
+        #expect(gate.lock.withLock { gate.asks } == 1)
+        gate.lock.withLock { gate.waiting }?.resume(returning: .cancelled)
+        await first.value
+        #expect(runner.asked.isEmpty)
     }
 
     @Test func aNewAttemptIsANameTheRunnerTakes() {

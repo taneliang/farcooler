@@ -20,7 +20,7 @@ struct RunnerUpgradeView: View {
     nonisolated static func actions(for phase: RunnerUpgrade.Phase) -> [Action] {
         switch phase {
         case .ready: [.finish]
-        case .failed: [.recover]
+        case .failed(_, let detail): RunnerUpgrade.needsHelp(detail) ? [] : [.recover]
         case .confirming, .running, .recovering, .done: []
         }
     }
@@ -76,11 +76,12 @@ struct RunnerUpgradeView: View {
         case .failed(let failed, let detail):
             VStack(spacing: 8) {
                 Text(Self.sentence(for: failed))
-                Text(RunnerUpgrade.recoverCopy(for: failed))
+                Text(RunnerUpgrade.recoverCopy(for: failed, detail: detail))
                 // The runner's own words in a box, never the app's voice:
                 // under the sentences, since the actions row lays out across.
-                if !detail.isEmpty {
-                    DetailBox(text: detail)
+                let words = RunnerUpgrade.plainWords(detail)
+                if !words.isEmpty {
+                    DetailBox(text: words)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: 420)
                         .padding(.top, 4)

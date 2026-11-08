@@ -49,7 +49,7 @@ final class RunnerUpgrade: ObservableObject {
             case .commit: "Making a backup and switching over"
             case .verify: "Checking everything came across"
             case .release: "Handing your data to this version"
-            case .finish: "Restarting Far Cooler"
+            case .finish: "Restarting this Mac’s runner"
             }
         }
 
@@ -60,7 +60,7 @@ final class RunnerUpgrade: ObservableObject {
             case .commit: "Far Cooler couldn’t make a backup and switch your data over."
             case .verify: "Far Cooler couldn’t confirm that everything came across."
             case .release: "Far Cooler couldn’t hand your data to this version."
-            case .finish: "Far Cooler couldn’t finish the upgrade and restart."
+            case .finish: "Far Cooler couldn’t finish the upgrade and restart this Mac’s runner."
             }
         }
 
@@ -137,16 +137,50 @@ final class RunnerUpgrade: ObservableObject {
     static let finishReason = "finish upgrading this Mac’s runner"
     static let recoverReason = "recover this Mac’s runner from an upgrade that didn’t finish"
 
-    /// Said under a failure: what Recover will do from here.
-    static func recoverCopy(for failed: Failed) -> String {
-        switch failed {
-        case .step(let step) where step.isCommitted:
-            "Your data is already upgraded and backed up. Recover finishes the steps that are left."
-        case .step:
-            "Your original data is kept. Recover puts it back exactly as it was."
-        case .recover:
-            "Your data hasn’t been changed by this. Try Recover again."
+    /// Said under a failure: what Recover will do from here. It follows where
+    /// the runner stands, which a failed Commit can't tell (it may have landed
+    /// with only its reply lost), so that one promises neither way.
+    static func recoverCopy(for failed: Failed, detail: String = "") -> String {
+        if needsHelp(detail) {
+            return "Your data is kept as it is, and nothing more was changed. This upgrade needs help to finish."
         }
+        switch failed {
+        case .step(.commit):
+            return "Your data is safe. Recover checks where the upgrade stands, then puts your original data back or finishes the steps that are left."
+        case .step(let step) where step.isCommitted:
+            return "Your data is already upgraded and backed up. Recover finishes the steps that are left."
+        case .step:
+            return "Your original data is kept. Recover puts it back exactly as it was."
+        case .recover:
+            return "Your data hasn’t been changed by this. Try Recover again."
+        }
+    }
+
+    /// Whether the runner refused for a reason that will come again, so
+    /// pressing Recover can't help: its data is kept for review, or the
+    /// backup it needs is gone.
+    nonisolated static func needsHelp(_ said: String) -> Bool {
+        let words = said.replacingOccurrences(of: "’", with: "'")
+        return ["keeping it for review", "closed backup is missing"].contains { words.contains($0) }
+    }
+
+    /// The runner's words for the box: its sentences, without the CLI's labels
+    /// (`error:` leads the message itself; `code:` and `what:` are lines of
+    /// their own) or a pointer to a terminal command.
+    nonisolated static func plainWords(_ said: String) -> String {
+        let kept = said.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .compactMap { line -> String? in
+                let lower = line.lowercased()
+                if lower.hasPrefix("code:") || lower.hasPrefix("what:") { return nil }
+                var words = line
+                if lower.hasPrefix("error:") { words = String(line.dropFirst("error:".count)) }
+                // "… Run `farcooler …` to …": the sentence that sends them to a terminal.
+                if let tick = words.range(of: "Run `farcooler") { words = String(words[..<tick.lowerBound]) }
+                words = words.trimmingCharacters(in: .whitespaces)
+                return words.isEmpty ? nil : words
+            }
+        return kept.joined(separator: "\n")
     }
 
     /// Said once the original data is back.

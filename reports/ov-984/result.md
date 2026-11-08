@@ -27,3 +27,12 @@ Design: `design.md`. Scratch runners only; this Mac's runner and app were never 
 - **A real Touch ID press on the real app.** No agent can press the sensor. The real `.app`, launched by `open` against a scratch schema-60 home, with the button pressed by a person, is untried. That's acceptance 1's last step, and it's the owner's.
 - **The seat as the app.** The end to end proves a person's seat through an orphan pty, not through the app bundle on the chain. `vouches_for_a_person` already has its own tests.
 - **The words in the box.** The runner's generic refusal still says "Run `farcooler workflow-cutover inspect`", a terminal pointer, and it shows in the box. The sentence above it is plain. Changing the daemon's `Refused::said` would change the CLI's words too, so it's left as a follow-up.
+
+## Fix round (independent review's five minors)
+
+- Recover's copy no longer promises an exact restore after a failed Commit (that reply may have been lost after Commit landed); it says it checks where the upgrade stands first.
+- A refusal that will come again (data kept for review, backup missing) shows "This upgrade needs help to finish" and no Recover button; transient failures keep "Try Recover again".
+- The box shows the runner's sentences without `error:`/`code:`/`what:` labels or the "Run `farcooler …`" pointer.
+- The last step reads "Restarting this Mac's runner", not the app.
+- A double press asks for Touch ID once (new test).
+- Each new test was seen red against its mutant, one at a time (title, guard, needs-help, plain words, commit copy). 20 of 20 green; captures retaken at 640 pt.
