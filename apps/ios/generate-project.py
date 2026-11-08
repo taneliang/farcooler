@@ -324,6 +324,9 @@ AGENTKIT_SOURCES = [
     "WorkflowRuns.swift",
     "WorkflowSession.swift",
     "WorkflowRunsView.swift",
+    # A workflow change read out of the daemon's question, and its Review view (ov-978).
+    "WorkflowChangeReview.swift",
+    "WorkflowChangeReviewView.swift",
     # A running engine agent's terminal, read-only (ov-976).
     "AgentWatch.swift",
     # The People screen (ov-856): Access, each person's devices, the step-up flow and its key, and the app lock.

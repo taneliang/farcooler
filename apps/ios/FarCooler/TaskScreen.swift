@@ -233,6 +233,19 @@ struct TaskScreen: View {
     /// list and Answer, else Answer… for words of your own.
     @ViewBuilder
     private func decision(_ question: TaskQuestion) -> some View {
+        if let review = WorkflowChangeReview.parse(question.body) {
+            // A workflow change: the whole change, then Approve at its end (ov-978).
+            WorkflowChangeReviewView(
+                review: review, mayAct: connection.daemon?.mayAct ?? true, sending: sending != nil, failure: failure,
+                approve: { answer($0) }, decline: { answer($0) })
+                .padding(.vertical, 2)
+        } else {
+            plainDecision(question)
+        }
+    }
+
+    @ViewBuilder
+    private func plainDecision(_ question: TaskQuestion) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             // Markdown, as the intent is: an ask's paragraphs and lists stay
             // apart, at a readable width on an iPad.

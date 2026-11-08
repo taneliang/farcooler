@@ -1349,11 +1349,17 @@ struct TaskCard: View {
         VStack(alignment: .leading, spacing: TaskTypography.sectionGap) {
             understanding
             if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
-                QuestionAnswers(
-                    offer: offer, onAnswer: onAnswer, draft: draft,
-                    whose: decision?.whose(teamRunners: teamRunners),
-                    answerForOthersPrompt: decision?.answerForOthersPrompt)
-                    .id(offer.question.id)
+                if let review = WorkflowChangeReview.parse(offer.question.body) {
+                    // A workflow change: the whole change, then Approve at its end (ov-978).
+                    WorkflowChangeReviewCard(review: review, canAnswer: canAnswer, onAnswer: onAnswer)
+                        .id(offer.question.id)
+                } else {
+                    QuestionAnswers(
+                        offer: offer, onAnswer: onAnswer, draft: draft,
+                        whose: decision?.whose(teamRunners: teamRunners),
+                        answerForOthersPrompt: decision?.answerForOthersPrompt)
+                        .id(offer.question.id)
+                }
             }
             if speaksOfAgents, !row.workers.isEmpty {
                 TaskWorkersSection(row: row, orchestrator: orchestrator, onGoTo: onGoTo)
