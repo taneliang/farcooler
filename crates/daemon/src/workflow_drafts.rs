@@ -115,7 +115,8 @@ pub fn wire(draft: &Draft) -> serde_json::Value {
 
 /// What the card asks, in the person's terms. The summary is the daemon's; the reason is labeled the orchestrator's.
 fn question(draft: &Draft) -> String {
-    format!("{}\n\nApprove to publish this workflow. Decline to leave things as they are. Nothing changes until you answer.", draft.summary)
+    let bundle = crate::landing_templates::Bundle { definition: draft.definition.clone(), adapter: draft.adapter.clone() };
+    format!("{}\n\n{}\n\nApprove to publish this workflow. Decline to leave things as they are. Nothing changes until you answer.", workflow_summary::headline(&bundle), draft.summary)
 }
 
 /// File a proposal and ask a person. Returns the draft, already pending on its card.

@@ -72,6 +72,18 @@ fn runs(config: &CodingConfig) -> Vec<String> {
 
 fn bullets(lines: &[String]) -> String { lines.iter().map(|l| format!("- {l}\n")).collect() }
 
+/// The one sentence a Needs You row shows (it keeps two lines): what the workflow would do, in the three
+/// things a person weighs. The full summary follows it on the card.
+pub fn headline(bundle: &Bundle) -> String {
+    let AdapterConfiguration::Coding(config) = &bundle.adapter;
+    let n = checks(&bundle.definition, config).len();
+    let checking = match n { 0 => "no checks".to_string(), 1 => "1 check must pass".into(), n => format!("{n} checks must pass") };
+    let landing = if bundle.definition.stages.iter().chain(bundle.definition.groups.values().flat_map(|g| g.steps.iter())).any(|s| matches!(s.kind, StageKind::OpenPr)) { "each ticket opens a pull request" } else { "tickets push to the branch" };
+    let approval = if approvers(&bundle.definition).iter().any(|l| l.starts_with("You ")) { "you approve each ticket" } else { "nobody approves tickets" };
+    format!("Publish this workflow? {}, {landing}, {approval}.", capitalized(&checking))
+}
+fn capitalized(text: &str) -> String { let mut c = text.chars(); c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect()) }
+
 /// The summary a person reads. `current` is the definition published now, if any.
 pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition>) -> String {
     let AdapterConfiguration::Coding(config) = &bundle.adapter;
@@ -116,6 +128,14 @@ mod tests {
             "How code lands:", "up to 4 at a time", "`main`", "waits for CI", "Who approves:", "You approve each ticket before it lands."] {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
+    }
+    #[test]
+    fn the_headline_is_one_sentence_of_the_three_things_a_person_weighs() {
+        let gated = headline(&bundle("batched-push", &["make check", "scripts/copy-lint"], &[Extra::Person("owner".into())], None));
+        assert_eq!(gated, "Publish this workflow? 2 checks must pass, tickets push to the branch, you approve each ticket.");
+        let loose = headline(&bundle("ticket-push", &["make check"], &[], None));
+        assert_eq!(loose, "Publish this workflow? 1 check must pass, tickets push to the branch, nobody approves tickets.");
+        assert!(!gated.contains('\n') && gated.chars().count() < 110, "it has to fit two lines of a narrow row");
     }
     #[test]
     fn a_summary_cannot_claim_a_gate_the_definition_lacks() {
