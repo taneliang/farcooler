@@ -84,6 +84,9 @@ pub enum WorkflowCmd {
         /// The new branch for --worktree. One that exists, here or on a remote, is refused.
         #[arg(long,requires="worktree")] branch:Option<String>,
         #[command(flatten)] identity:Identity },
+    /// Stream a running engine agent's terminal to stdout, read-only: its picture, then live bytes, until
+    /// the agent's turn ends. Nothing is ever sent to the agent. Owner only.
+    Watch { workspace:Uuid,item:String },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -111,6 +114,7 @@ impl WorkflowCmd {
             Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,
                 worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch }) }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
+            Self::Watch { .. } => return Err("watch is a stream, not a command".into()),
         })
     }
 }
@@ -165,7 +169,31 @@ pub async fn get(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Va
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
 }
+/// The `workflow.watch` request: the item, and nothing a viewer could type or size.
+pub fn watch_request(workspace:Uuid, item:&str) -> pb::Request {
+    let json = serde_json::json!({ "item": item }).to_string();
+    let mut r = with(req_for("workflow.watch",workspace),request::Payload::WorkflowCommand(pb::WorkflowCommand { schema:1,json }));
+    r.required_capabilities.push(capability::WORKFLOW_COMMANDS.into());
+    r
+}
+/// Print the agent's terminal bytes as they arrive. Writes only to stdout; the link is never written to
+/// again after the one request.
+async fn watch(runner:Option<&str>, workspace:Uuid, item:String) -> Fallible {
+    use std::io::Write;
+    let mut link = crate::connect_to(runner).await?;
+    if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
+    let reply = link.call(watch_request(workspace,&item)).await?;
+    let result::Value::TerminalAttach(_) = expect_value(reply.value)? else { return Err("unexpected watch reply".into()) };
+    let mut out = std::io::stdout().lock();
+    loop {
+        let event = link.next_event().await?;
+        let Some(pb::event::Payload::TerminalFrame(frame)) = event.payload else { continue };
+        let Some(pb::terminal_frame::Kind::Output(output)) = frame.kind else { continue };
+        if out.write_all(&output.payload).is_err() || out.flush().is_err() { return Ok(()); }
+    }
+}
 pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible {
+    if let WorkflowCmd::Watch { workspace,item } = cmd { return watch(runner,workspace,item).await; }
     let (workspace,action) = cmd.action()?;
     let mut link = crate::connect_to(runner).await?;
     send(&mut link,workspace,action,json).await

@@ -1042,6 +1042,7 @@ pub mod method {
         WorkflowPropose = "workflow.propose" => WORKFLOW_COMMANDS,
         WorkflowDrafts = "workflow.drafts" => WORKFLOW_COMMANDS,
         WorkflowCutover = "workflow.cutover" => WORKFLOW_COMMANDS,
+        WorkflowWatch = "workflow.watch" => WORKFLOW_COMMANDS,
         LayoutViewport = "layout.viewport" => LAYOUT,
         LayoutPreset = "layout.preset" => LAYOUT,
         LayoutCycle = "layout.cycle" => LAYOUT,

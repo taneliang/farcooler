@@ -367,7 +367,7 @@ pub(crate) fn required_scope(method: &str) -> Option<Scope> {
 fn scope_of(method: Method) -> Scope {
     match method {
         Method::WorkflowCutover => Scope::HostAdmin,
-        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowReview => Scope::Control,
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowReview | Method::WorkflowWatch => Scope::Control,
         // Themes are what a client paints with. Read, not Control: naming a
         // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
@@ -797,6 +797,30 @@ impl Rpc {
                 let value = handle.wire_command(admission, action).await
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:value.to_string() }))
+            }
+            // Watch a running engine agent's terminal, read-only (ov-972). Addressed by workspace and
+            // item, never by terminal id: the engine's pane is in a tmux server the daemon's inventory
+            // does not list, so `terminal.write` and the rest cannot name it. This only attaches.
+            "workflow.watch" => {
+                let workspace = Self::target(&req)?;
+                svc.store.get_workspace(workspace)?;
+                if self.caller()? != crate::people::Person::Owner {
+                    return Err(DomainError::ScopeDenied { needed: "owner" });
+                }
+                let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
+                let item = crate::watch_view::item_of(&p).ok_or(DomainError::NotFound)?;
+                let (runtime, pane) = crate::watch_view::lookup(&workspace.to_string(), &item).ok_or(DomainError::NotFound)?;
+                let (columns, rows) = (pane.columns, pane.rows);
+                let sink = crate::resync::TerminalSink::new(self.push.clone(), pane.terminal_id, 0);
+                let task = tokio::spawn(async move {
+                    let _ = runtime.attach(pane, sink).await;
+                });
+                if let Ok(mut held) = self.attachment.lock() {
+                    held.replace(Attachment(task));
+                }
+                Ok(result::Value::TerminalAttach(farcooler_protocol::v1::TerminalAttachResult {
+                    epoch: 0, next_sequence: 0, oldest_sequence: 0, columns, rows, resume_token: String::new(),
+                }))
             }
             "workflow.cutover" => {
                 use farcooler_protocol::workflow_cutover::{self, Cutover};

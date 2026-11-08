@@ -243,6 +243,8 @@ impl Exec {
             .ok_or(Error::Refused("native PTY tags missing"))?;
         let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
         durable(&self.native_path(binding, "owner"), &serde_json::to_vec(&owner)?)?;
+        // Listed for watching only (ov-972); declared after `host`, so it is unlisted before the server is reaped.
+        let _watchable = crate::watch_view::publish(&binding.workspace, &binding.effect.item, tmux.clone(), pane.clone());
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
         let result = tokio::select! {
             result = tokio::time::timeout(Duration::from_millis(command.timeout_ms), self.native_turn(&listener, binding)) => result.ok().and_then(|r| r.ok()),
