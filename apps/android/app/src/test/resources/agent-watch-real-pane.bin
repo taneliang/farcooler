@@ -1,0 +1,40 @@
+P>farcooler-size;120;40\[1m[32m● step 13[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_13 -- --exact --noc
+apture --test-threads=1
+[1m[33m● step 14[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_14 -- --exact --noc
+apture --test-threads=1
+[1m[34m● step 15[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_15 -- --exact --noc
+apture --test-threads=1
+[1m[35m● step 16[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_16 -- --exact --noc
+apture --test-threads=1
+[1m[36m● step 17[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_17 -- --exact --noc
+apture --test-threads=1
+[1m[31m● step 18[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_18 -- --exact --noc
+apture --test-threads=1
+[1m[32m● step 19[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_19 -- --exact --noc
+apture --test-threads=1
+[1m[33m● step 20[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_20 -- --exact --noc
+apture --test-threads=1
+[1m[34m● step 21[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_21 -- --exact --noc
+apture --test-threads=1
+[1m[35m● step 22[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_22 -- --exact --noc
+apture --test-threads=1
+[1m[36m● step 23[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_23 -- --exact --noc
+apture --test-threads=1
+[1m[31m● step 24[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_24 -- --exact --noc
+apture --test-threads=1
+[1m[32m● step 25[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_25 -- --exact --noc
+apture --test-threads=1
+[1m[33m● step 26[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_26 -- --exact --noc
+apture --test-threads=1
+[1m[34m● step 27[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_27 -- --exact --noc
+apture --test-threads=1
+[1m[35m● step 28[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_28 -- --exact --noc
+apture --test-threads=1
+[1m[36m● step 29[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_29 -- --exact --noc
+apture --test-threads=1
+[1m[31m● step 30[0m  [2mrunning[0m cargo test -p farcooler-daemon --lib workflow_runtime::coding_native::tests::case_30 -- --exact --noc
+apture --test-threads=1
+[32m    Finished[39m `test` profile [unoptimized + debuginfo] target(s) in 41.20s
+[1m> Applying the change to apps/shared/AgentKit/Sources/AgentKit/WorkflowRunsView.swift and apps/android/app/src/main/java
+/com/farcooler/ui/WorkflowRunsView.kt, then running every check[0m
+

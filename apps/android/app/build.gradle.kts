@@ -331,6 +331,11 @@ android {
                         "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
                         "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
                     )
+                    // The host build of the JNI core (`cargo build -p farcooler-jni`), so a capture can draw
+                    // real terminal bytes through the real emulator (ov-976).
+                    (project.findProperty("farcooler.nativeLibDir") as String?)?.let {
+                        test.jvmArgs("-Djava.library.path=$it")
+                    }
                     test.systemProperty("roborazzi.test.record", "true")
                     test.systemProperty(
                         "farcooler.captureDir",
