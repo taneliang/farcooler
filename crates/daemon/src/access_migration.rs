@@ -339,8 +339,10 @@ pub fn verify(entries: &[Entry], view: &View) -> std::result::Result<(), String>
 /// `None` is everyone's (the owner's view), `Some(handle)` one member's own.
 ///
 /// Each row says what its device's step-up key is (`trusted`, `proposed`, or
-/// `expired` for a proposal past its ten minutes) and, for a proposal, the six
-/// digits to check: what lets another device of the same person approve it.
+/// `expired` for a proposal past its ten minutes), whether the owner vouched
+/// for a trusted one (ov-974), and, for a proposal or a trusted key nobody
+/// vouched for yet, the six digits to check: what lets another device of the
+/// same person approve it, or the Mac vouch for it.
 pub fn device_access(store: &Store, only: Option<&str>, now_ms: i64) -> Result<Vec<farcooler_protocol::v1::DeviceAccess>> {
     use farcooler_protocol::v1::DeviceAccess;
     let stored = store.stored_access()?;
@@ -351,10 +353,12 @@ pub fn device_access(store: &Store, only: Option<&str>, now_ms: i64) -> Result<V
     let key = |device: &str, row: DeviceAccess| -> Result<DeviceAccess> {
         let Some(k) = store.step_up_key(device)? else { return Ok(row) };
         let expired = !k.trusted && now_ms - k.registered_at > farcooler_store::step_up::PROPOSAL_MS;
+        let vouched = k.trusted && store.step_up_vouched_by(device)?.is_some();
         Ok(DeviceAccess {
             step_up: if k.trusted { "trusted" } else if expired { "expired" } else { "proposed" }.to_string(),
-            step_up_code: if k.trusted || expired { String::new() } else { crate::step_up::code_of(&k.alg, &k.public_key) },
+            step_up_code: if vouched || expired { String::new() } else { crate::step_up::code_of(&k.alg, &k.public_key) },
             step_up_at: k.registered_at,
+            step_up_vouched: vouched,
             ..row
         })
     };

@@ -198,6 +198,8 @@ public enum StepUpWords {
             "Your iPhone didn’t approve it in time. Try again."
         case "proposal_expired":
             "That request timed out. Ask again on the other device."
+        case "key_unvouched":
+            "To allow the cutover from this \(device), approve it once in People on your Mac, with Touch ID."
         default:
             "Couldn’t do that. Try again."
         }

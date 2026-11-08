@@ -66,13 +66,13 @@ pub fn members_json(list: &pb::MemberList) -> Value {
 }
 
 /// One device's place in the people's access (ov-856): `{client_id, person,
-/// access, cap, check, step_up, step_up_code, step_up_at}`. `person` is the
+/// access, cap, check, step_up, step_up_code, step_up_at, step_up_vouched}`. `person` is the
 /// member's handle, "" for the owner; `cap` is `viewer`, `member` or "";
 /// `step_up` is `trusted`, `proposed`, `expired` or "" for none.
 pub fn device_access_json(d: &pb::DeviceAccess) -> Value {
     json!({
         "client_id": d.client_id, "person": d.person, "access": d.access, "cap": d.cap, "check": d.check,
-        "step_up": d.step_up, "step_up_code": d.step_up_code, "step_up_at": d.step_up_at,
+        "step_up": d.step_up, "step_up_code": d.step_up_code, "step_up_at": d.step_up_at, "step_up_vouched": d.step_up_vouched,
     })
 }
 
@@ -137,13 +137,14 @@ mod tests {
                 step_up: "proposed".into(),
                 step_up_code: "418207".into(),
                 step_up_at: 77,
+                step_up_vouched: false,
             }],
         };
         let v = members_json(&list);
         assert_eq!(v["members"][0]["access"], "member");
         assert_eq!(
             v["device_access"][0],
-            json!({ "client_id": "phone-a", "person": "alice", "access": "member", "cap": "viewer", "check": true, "step_up": "proposed", "step_up_code": "418207", "step_up_at": 77 })
+            json!({ "client_id": "phone-a", "person": "alice", "access": "member", "cap": "viewer", "check": true, "step_up": "proposed", "step_up_code": "418207", "step_up_at": 77, "step_up_vouched": false })
         );
         assert!(members_json(&pb::MemberList::default()).get("device_access").is_none(), "none from a runner before it");
         assert!(v.get("removed").is_none(), "only a removal's answer says what it removed");

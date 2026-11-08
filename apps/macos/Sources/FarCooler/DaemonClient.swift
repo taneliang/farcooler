@@ -1315,7 +1315,7 @@ final class DaemonClient: ObservableObject {
             let task = (object["task"] as? [String: Any])?["id"] as? String
         else { return message ?? "The answer wasn’t written." }
         do {
-            try await MacCutoverGrant.answer(task: task)
+            try await MacCutoverGrant.answer(task: task, card: key)
             return nil
         } catch {
             return MacCutoverGrant.sentence(for: error) ?? "The answer wasn’t sent."

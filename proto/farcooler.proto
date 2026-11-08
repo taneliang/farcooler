@@ -5534,6 +5534,11 @@ message DeviceAccess {
   // Milliseconds since the epoch when the key was proposed or trusted, or 0.
   // A proposal is good for ten minutes from this.
   int64 step_up_at = 8;
+  // A trusted key the owner vouched for with presence (ov-974): approved by
+  // the Mac app with Touch ID, or by a vouched device of theirs. Only such a
+  // key signs the owner's "Allow cutover once". While a trusted key isn't,
+  // `step_up_code` carries its six digits, so the Mac can check them.
+  bool step_up_vouched = 9;
 }
 
 // A member's own Claude login on this runner (ov-584): whether they're

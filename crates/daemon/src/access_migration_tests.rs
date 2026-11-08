@@ -285,8 +285,9 @@ async fn member_list_shows_the_owner_the_peoples_access_and_nobody_else() {
     assert!(!bob.device_access.is_empty() && bob.device_access.iter().all(|d| d.person == "bob"), "a member is told their own devices, never the owner's or another member's");
 }
 
-/// Each People row says what its device's step-up key is: trusted, proposed
-/// with the code to check, or expired once its ten minutes pass (slice 4).
+/// Each People row says what its device's step-up key is: trusted (vouched
+/// for, or with the code to check until it is), proposed with the code to
+/// check, or expired once its ten minutes pass (slice 4, ov-974).
 #[tokio::test]
 async fn people_rows_carry_each_devices_step_up_key() {
     use farcooler_store::step_up::PROPOSAL_MS;
@@ -299,7 +300,11 @@ async fn people_rows_carry_each_devices_step_up_key() {
     let row = |rows: &[pb::DeviceAccess], id: &str| rows.iter().find(|d| d.client_id == id).cloned().unwrap_or_else(|| panic!("no row for {id}"));
     let all = rows(None, t0 + 1);
     assert_eq!(row(&all, "ipad-o").step_up, "trusted");
-    assert_eq!(row(&all, "ipad-o").step_up_code, "", "a trusted key shows no code");
+    // Trusted, and vouched for by nobody yet (ov-974): its code, for the Mac to check.
+    assert_eq!((row(&all, "ipad-o").step_up_vouched, row(&all, "ipad-o").step_up_code), (false, crate::step_up::code_of("p256-sha256", &[4; 65])));
+    r.svc.store.vouch_step_up_key("ipad-o", crate::step_up::LOCAL_APP).unwrap();
+    let all = rows(None, t0 + 1);
+    assert_eq!((row(&all, "ipad-o").step_up_vouched, row(&all, "ipad-o").step_up_code.as_str()), (true, ""), "a vouched key shows no code");
     let waiting = row(&all, "pad-b");
     assert_eq!((waiting.step_up.as_str(), waiting.step_up_at), ("proposed", t0));
     assert_eq!(waiting.step_up_code, crate::step_up::code_of("p256-sha256", &[4; 65]));

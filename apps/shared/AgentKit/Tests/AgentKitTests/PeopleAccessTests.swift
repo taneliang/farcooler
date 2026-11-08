@@ -139,4 +139,30 @@ struct PeopleAccessTests {
         #expect(old.people.map(\.name) == ["A"])
         #expect(PeopleAccess(members: Data("not json".utf8)) == nil)
     }
+
+    /// ov-974: the owner's devices whose keys their Mac has yet to approve
+    /// with Touch ID, each with its code, listed on the Mac alone. A member's,
+    /// one vouched for, and one with no code (a runner from before) aren't.
+    @Test("The Mac lists the owner's devices to approve for the cutover")
+    func toVouch() throws {
+        let members = Data(
+            #"""
+            {"members":[{"handle":"cosmo","name":"Cosmo","devices":["phone-c"],"access":"member"}],"claude_account":"","you":"",
+            "device_access":[
+              {"client_id":"phone-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"418207","step_up_at":5},
+              {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"","step_up_at":5,"step_up_vouched":true},
+              {"client_id":"old-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"","step_up_at":5},
+              {"client_id":"phone-c","person":"cosmo","access":"member","cap":"","check":false,"step_up":"trusted","step_up_code":"123456","step_up_at":5}
+            ]}
+            """#.utf8)
+        let mac = try #require(PeopleAccess(members: members, isSocket: true))
+        #expect(mac.toVouch.map(\.id) == ["phone-o"])
+        #expect(mac.toVouch.first?.code == "418207")
+        let pad = try #require(mac.people.first?.devices.first { $0.id == "pad-o" })
+        #expect(pad.vouched && !pad.needsVouch)
+        let phone = try #require(PeopleAccess(members: members, thisDevice: "phone-o"))
+        #expect(phone.toVouch.isEmpty, "a phone lists none: only the Mac approves with Touch ID")
+        #expect(phone.thisDevice?.needsVouch == true, "the phone shows its own code until then")
+        #expect(PeopleAccess.vouchPrompt(for: try #require(mac.toVouch.first)).contains("418 207"))
+    }
 }

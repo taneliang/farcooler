@@ -37,7 +37,7 @@ fn json_keeps_the_owner_apart_from_the_members() {
     assert_eq!(v["people"][1]["access"], "member");
     assert_eq!(
         v["devices"][0],
-        json!({ "client_id": "ipad-o", "person": null, "access": "owner", "cap": "viewer", "check": false, "step_up": "", "step_up_code": "" })
+        json!({ "client_id": "ipad-o", "person": null, "access": "owner", "cap": "viewer", "check": false, "step_up": "", "step_up_code": "", "step_up_vouched": false })
     );
     assert_eq!(v["devices"][2]["cap"], Value::Null);
     assert_eq!(v["devices"][1]["check"], true);

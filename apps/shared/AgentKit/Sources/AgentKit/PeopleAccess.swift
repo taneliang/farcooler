@@ -76,15 +76,23 @@ public struct PeopleAccess: Equatable, Sendable {
         /// A legacy line the owner has yet to confirm.
         public let needsCheck: Bool
         public let stepUp: StepUpKeyStanding
-        /// The six digits the device shows, while its key waits.
+        /// The six digits the device shows, while its key waits or until the
+        /// owner vouches for it.
         public let code: String
         /// How many devices this one added, and those they added in turn.
         public let added: Int
         /// The person's handle, "" for the owner.
         public let person: String
         public let personName: String
+        /// A trusted key the owner approved with Touch ID on their Mac, or from
+        /// a device of theirs approved so (ov-974): it may allow a cutover.
+        public var vouched: Bool = false
         /// How many devices are in this device's removal: itself and what it added.
         public var removal: Int { 1 + added }
+        /// The owner's device whose trusted key nobody vouched for yet, with
+        /// its code to check: a runner from before ov-974 says no code, so
+        /// nothing is offered there.
+        public var needsVouch: Bool { person.isEmpty && stepUp == .trusted && !vouched && code.count == 6 }
     }
 
     public struct Person: Equatable, Identifiable, Sendable {
@@ -102,6 +110,10 @@ public struct PeopleAccess: Equatable, Sendable {
     public let toCheck: [Device]
     /// Keys waiting for an approval.
     public let waiting: [Device]
+    /// The owner's devices whose keys the owner has yet to approve with
+    /// Touch ID, listed on their Mac alone (ov-974): until then they can't
+    /// allow a cutover.
+    public let toVouch: [Device]
     /// This device's own row, when the runner lists it.
     public let thisDevice: Device?
     /// Whether this is the owner's Mac, which talks to its runner through the
@@ -150,7 +162,8 @@ public struct PeopleAccess: Equatable, Sendable {
                 stepUp: StepUpKeyStanding(rawValue: row?.step_up ?? "") ?? .none,
                 code: row?.step_up_code ?? "",
                 added: added[id] ?? 0,
-                person: person, personName: personName)
+                person: person, personName: personName,
+                vouched: row?.step_up_vouched ?? false)
         }
 
         var people: [Person] = []
@@ -177,6 +190,7 @@ public struct PeopleAccess: Equatable, Sendable {
         self.people = people
         self.toCheck = everyDevice.filter(\.needsCheck)
         self.waiting = everyDevice.filter { $0.stepUp == .proposed }
+        self.toVouch = isSocket ? everyDevice.filter(\.needsVouch) : []
         self.thisDevice = me.isEmpty ? nil : everyDevice.first { $0.id == me }
         self.yourAccess =
             youAreOwner ? .owner : (people.first { $0.handle == wire.you }?.access ?? .member)
@@ -257,6 +271,16 @@ public struct PeopleAccess: Equatable, Sendable {
             ? "Only allow a device you’re holding. Check that it shows the same code."
             : "These devices asked to approve changes to who has access. Allow one only from another device of your own, while you’re holding the one that asked."
     }
+    public static let vouchHeader = "Allow the Cutover From"
+    public static let vouchFooter =
+        "Approve one of your devices with Touch ID, and it can allow your orchestrator to run the cutover."
+    /// The sentence beside Approve: only a device in hand, by its code.
+    public static func vouchPrompt(for device: Device) -> String {
+        "Only approve this if you’re holding \(device.name) right now. Check that it shows \(spoken(device.code))."
+    }
+    /// On the owner's own device, until their Mac approves it (ov-974).
+    public static let vouchHere =
+        "To allow the cutover from this device, approve it once in People on your Mac. Check that it shows this code."
     public static let limitToViewer = "Limit to Viewer"
     public static let removeDevice = "Remove Device…"
 
@@ -302,6 +326,7 @@ public struct PeopleAccess: Equatable, Sendable {
         let check: Bool
         let step_up: String
         let step_up_code: String
+        let step_up_vouched: Bool
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -311,8 +336,9 @@ public struct PeopleAccess: Equatable, Sendable {
             check = try c.decodeIfPresent(Bool.self, forKey: .check) ?? false
             step_up = try c.decodeIfPresent(String.self, forKey: .step_up) ?? ""
             step_up_code = try c.decodeIfPresent(String.self, forKey: .step_up_code) ?? ""
+            step_up_vouched = try c.decodeIfPresent(Bool.self, forKey: .step_up_vouched) ?? false
         }
-        enum Keys: String, CodingKey { case client_id, person, cap, check, step_up, step_up_code }
+        enum Keys: String, CodingKey { case client_id, person, cap, check, step_up, step_up_code, step_up_vouched }
     }
 
     struct MembersWire: Decodable {

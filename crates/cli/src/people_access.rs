@@ -115,6 +115,7 @@ pub(crate) fn access_json(list: &pb::MemberList) -> Value {
                 "check": d.check,
                 "step_up": d.step_up,
                 "step_up_code": d.step_up_code,
+                "step_up_vouched": d.step_up_vouched,
             })
         })
         .collect();

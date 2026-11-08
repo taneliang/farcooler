@@ -278,8 +278,16 @@ private fun ThisDeviceAdmin(device: PeopleAccess.Device, shownCode: String?, act
     SectionTitle("This device")
     Column(Modifier.testTag("people-this-device"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         when (device.stepUp) {
-            StepUpKeyStanding.TRUSTED ->
+            StepUpKeyStanding.TRUSTED -> {
                 Text("Admin actions are on", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("admin-actions-on"))
+                if (device.needsVouch) {
+                    Text(
+                        "To allow the cutover from this device, approve it once in People on your Mac. Check that it shows this code.", // casing ok: People is the screen's name
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(PeopleAccess.spoken(device.code), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.testTag("vouch-code"))
+                }
+            }
             StepUpKeyStanding.PROPOSED -> Waiting(shownCode ?: device.code)
             StepUpKeyStanding.NONE, StepUpKeyStanding.EXPIRED -> {
                 val allow = actions.allowAdminActions

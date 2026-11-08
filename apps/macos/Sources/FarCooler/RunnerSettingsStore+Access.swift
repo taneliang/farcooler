@@ -4,8 +4,9 @@ import Foundation
 /// The People screen's Access, devices and keys on this Mac (ov-856, §8).
 ///
 /// The runner's own socket makes the changes (`farcooler people access`,
-/// `people limit`, `people approve`, `client revoke`), so none of them asks
-/// for a face: this Mac is where the runner's owner is. A runner reached over
+/// `people limit`, `client revoke`), so none of them asks for a face: this
+/// Mac is where the runner's owner is. Allowing a device's key is the one
+/// that does, with Touch ID, so the key may also allow a cutover (ov-974). A runner reached over
 /// ssh as the owner needs none either. A Mac that is not the runner and has no
 /// shell on it (a teammate's, paired at `control`) asks the person's iPhone to
 /// approve each action, with Face ID there (`MacRemoteStepUp`, ov-858).
@@ -47,7 +48,28 @@ extension RunnerSettingsStore {
             },
             limitToViewer: { [weak self] device in await self?.change(["people", "limit", device.id, "viewer"]) },
             setAccess: { [weak self] person, access in await self?.change(["people", "access", person.handle, access.rawValue]) },
-            approve: { [weak self] device in await self?.change(["people", "approve", device.id, device.code]) })
+            approve: { [weak self] device in await self?.approveWithTouchID(device) })
+    }
+
+    /// Allow a device's key on this Mac's own runner, after Touch ID or the
+    /// login password, from this app's own process (ov-974): the approval
+    /// then also vouches for the key, which is what lets a phone allow the
+    /// cutover. A runner over ssh, or a Mac that can't sign, approves through
+    /// the CLI as before: the key is trusted, and vouched for by nobody.
+    private func approveWithTouchID(_ device: PeopleAccess.Device) async {
+        let plain = ["people", "approve", device.id, device.code]
+        guard target.isEmpty else { return await change(plain) }
+        do {
+            try await MacOwnerStepUp.perform(
+                "client.approve_step_up", ["clientId": device.id, "code": device.code],
+                reason: "approve \(device.name), which shows \(PeopleAccess.spoken(device.code))")
+            failure = nil
+            await loadPeople()
+        } catch let error as StepUpError where (error == .keyUnavailable || error == .noPasscode) && device.stepUp == .proposed {
+            await change(plain)
+        } catch {
+            failure = MacOwnerStepUp.sentence(for: error, doing: "approve \(device.name)")
+        }
     }
 
     /// The actions a paired Mac asks its person's iPhone to approve, each for
@@ -108,7 +130,7 @@ extension RunnerSettingsStore {
 
     /// The runner's word in a CLI refusal, or "".
     static func word(of said: String) -> String {
-        for word in ["no_approver", "approval_expired", "approval_denied", "step_up_needed", "key_untrusted", "socket_only", "person_only", "wrong_code", "proposal_expired", "not_yours", "not_admin", "step_up_failed", "challenge_expired", "defensive_only"] where said.contains(word) {
+        for word in ["no_approver", "approval_expired", "approval_denied", "step_up_needed", "key_untrusted", "key_unvouched", "socket_only", "person_only", "wrong_code", "proposal_expired", "not_yours", "not_admin", "step_up_failed", "challenge_expired", "defensive_only"] where said.contains(word) {
             return word
         }
         return ""

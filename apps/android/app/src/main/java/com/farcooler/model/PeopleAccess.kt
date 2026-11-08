@@ -67,16 +67,21 @@ class PeopleAccess private constructor(
         val hasShell: Boolean,
         val needsCheck: Boolean,
         val stepUp: StepUpKeyStanding,
-        /** The six digits the device shows, while its key waits. */
+        /** The six digits the device shows, while its key waits or until the owner's Mac approves it (ov-974). */
         val code: String,
         /** How many devices this one added, and those they added in turn. */
         val added: Int,
         /** The person's handle, "" for the owner. */
         val person: String,
         val personName: String,
+        /** A trusted key the owner approved with Touch ID on their Mac, or from a device approved so (ov-974): it may allow a cutover. */
+        val vouched: Boolean = false,
     ) {
         /** How many devices are in this device's removal: itself and what it added. */
         val removal: Int get() = 1 + added
+
+        /** The owner's device whose trusted key their Mac has yet to approve, with its code to show. */
+        val needsVouch: Boolean get() = person.isEmpty() && stepUp == StepUpKeyStanding.TRUSTED && !vouched && code.length == 6
     }
 
     data class Person(val handle: String, val name: String, val access: PersonAccess, val isYou: Boolean, val devices: List<Device>) {
@@ -209,6 +214,7 @@ class PeopleAccess private constructor(
                     added = added[id] ?: 0,
                     person = person,
                     personName = personName,
+                    vouched = row?.flag("step_up_vouched") ?: false,
                 )
             }
 

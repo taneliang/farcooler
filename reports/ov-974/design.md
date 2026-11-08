@@ -233,3 +233,46 @@ neither attempt in recovery.
   (client core to daemon): unsigned grants nothing, signed is `device`, a spent
   token is refused, a signed note that isn't an answer is refused.
 - AgentKit `StepUpTests.cutoverGrant`; Android `CutoverGrantTest`.
+
+## Third fix round: only a key the owner vouched for grants (review 2: B1, B2, M1 to M5)
+
+Review: `.claude/agent/reports/ov-974/independent-review-2.md`. Ruling: decision `0b66353c`. B3 (the person path skips the grant; a direct SQLite insert forges one) is with the owner and not built here.
+
+### B1: a key trusted on the walk never grants
+
+- **Vouched.** `said_from: device` now needs the device bound to the owner (`owner_devices`, `confirmed`, never "nobody's, so the owner's") *and* its key vouched for with the owner present (`cutover_grant::owners_vouched_device`).
+- **Who vouches** (`step_up_rpc::vouch_of`): the Mac app approving the key with its Touch ID key (`local:app` step-up on `client.approve_step_up`, plus the code signature), or a vouched owner device approving it with its own step-up, or enrolling it stepped up (`enrollment.rs`). The socket's `set_step_up_key`, the CLI's `people approve` and the socket's enroll still trust a key, and vouch for none.
+- **Kept** in `meta` as `step_up_vouch:<id>` = the key's algorithm and bytes, then who. A new key under the id is vouched by nobody; a revoke deletes it (`clear_device_rows`). No migration this close to the cutover.
+- **Refused loudly.** A signed grant that stamps `cli` is refused `key_unvouched`, so a phone says: approve it once in People on your Mac. The Mac lists the owner's unvouched devices with their codes ("Allow the Cutover From"); a phone shows its own code until then.
+- **Today's phones** were all trusted on the walk: each needs one Touch ID approve on the Mac before it can grant.
+
+### B2: a fresh key per signature, never from disk
+
+`MacStepUpSigner` makes a new `.userPresence` enclave key in the app for each signature and holds its wrapped form in memory only. `MacOwnerStepUp.perform` proposes it as `local:app` and signs. Nothing is read from or written to disk.
+
+### Minors
+
+- **M1.** The hold is a file mark, not a transaction, so the spend can't share one. Admission checks the grant (`required`); `pin_and_hold` spends it after the drain and recheck, just before the mark, and a hold that fails gives it back (`cutover_grant_returned`, discounted by both readers). Past 24 hours mid-recovery, the pinned orchestrator is refused with `cutover_delegate::LAPSED`: only the owner finishes, by Recover or Finish.
+- **M2.** A grant must be the person's only answer to the card's latest question, and that question must offer the option.
+- **M3.** The Mac prompt: "allow your orchestrator on this Mac to run the cutover once, as <card> asks".
+- **M4.** `admits_at`, with a case a minute past 24 hours.
+- **M5.** `find` reads `Store::owner_answers_since`, a plain query, not full-text search.
+
+### Tests, each red with its check removed
+
+| Check removed | Test |
+|---|---|
+| `owners_vouched_device` back to `person_of == Owner` | `a_key_trusted_on_the_walk_alone_never_grants`, `the_owners_phone_grants_by_signing_its_answer`, `a_vouched_device_vouches_for_the_owners_next` |
+| the vouch check alone | the same three |
+| the `owner_devices` check alone | `a_key_trusted_on_the_walk_alone_never_grants` |
+| the approver needn't be vouched | `a_vouched_device_vouches_for_the_owners_next` |
+| the socket vouches without the app | `only_the_app_vouches_on_the_socket` |
+| enroll vouches from an unvouched phone | `an_enroll_by_a_vouched_phone_vouches_for_the_new_key` |
+| a revoke keeps the vouch | store `a_vouch_holds_for_its_key_alone` |
+| any earlier question, any number of answers | `a_grant_answers_the_latest_question_alone` |
+| a give-back ignored (daemon or recovery read) | `a_failed_hold_gives_the_grant_back` |
+| `admits_at` without the grant check | `a_delegate_is_read_only_for_the_attempt_in_hand_and_only_for_its_pane` |
+| no lapsed sentence | `a_lapsed_grant_says_the_owner_finishes_it` |
+| `makeKey` reuses a key | Mac `MacStepUpSignerTests.freshKeys` |
+
+Not run: a real Touch ID, Face ID or fingerprint prompt; the give-back after a real failed hold (only the ledger is tested).

@@ -141,4 +141,24 @@ class PeopleAccessTest {
         assertEquals("Mac", PeopleAccess.tidy("farcooler-shell-Mac-zzzz9999"))
         assertEquals("laptop", PeopleAccess.tidy("laptop"))
     }
+
+    /** ov-974: the owner's phone shows its code until their Mac approves it with Touch ID; a vouched one doesn't. */
+    @Test
+    fun theOwnersPhoneShowsItsCodeUntilTheMacApprovesIt() {
+        val members = Json.parseToJsonElement(
+            """{"members":[],"claude_account":"","you":"",
+            "device_access":[
+              {"client_id":"phone-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"418207","step_up_at":5},
+              {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"","step_up_at":5,"step_up_vouched":true}
+            ]}""",
+        ).jsonObject
+        val phone = PeopleAccess.of(members, null, "phone-o")!!.thisDevice!!
+        assertTrue(phone.needsVouch)
+        assertEquals("418207", phone.code)
+        val pad = PeopleAccess.of(members, null, "pad-o")!!.thisDevice!!
+        assertTrue(pad.vouched)
+        assertFalse(pad.needsVouch)
+        val said = StepUpWords.sentenceForRefusal("key_unvouched", runner = "box", device = "phone")
+        assertTrue(said, said.contains("Mac") && !said.contains("_"))
+    }
 }

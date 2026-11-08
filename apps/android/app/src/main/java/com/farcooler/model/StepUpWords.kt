@@ -62,6 +62,7 @@ object StepUpWords {
         "scope_access" -> "That access doesn’t fit the device’s line. Try again."
         "wrong_code" -> "That code doesn’t match. Check the other device and try again."
         "proposal_expired" -> "That request timed out. Ask again on the other device."
+        "key_unvouched" -> "To allow the cutover from this $device, approve it once in People on your Mac, with Touch ID." // casing ok: People is the screen's name
         else -> "Couldn’t do that. Try again."
     }
 }
