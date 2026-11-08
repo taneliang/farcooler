@@ -232,8 +232,13 @@ impl Exec {
                 // A gate that was ended mid-run (a restart, a crash) may have left files in the tree. They are
                 // ours and the candidate is a commit, so start the run from exactly the commit.
                 if matches!(kind, StageKind::Run) && tree.try_exists()? {
-                    self.git_recorded(binding, &tree, &["reset", "--hard", "--quiet"]).await?;
-                    self.git_recorded(binding, &tree, &["clean", "-fdq"]).await?;
+                    if binding.effect.tree.is_some() {
+                        // A tree the app lists is one people edit in: never wipe what the run didn't make (ov-967).
+                        named_tree::refuse_foreign_changes(&tree).await?;
+                    } else {
+                        self.git_recorded(binding, &tree, &["reset", "--hard", "--quiet"]).await?;
+                        self.git_recorded(binding, &tree, &["clean", "-fdq"]).await?;
+                    }
                 }
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }

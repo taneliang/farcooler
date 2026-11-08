@@ -82,6 +82,34 @@ impl Runtime {
     }
 }
 
+/// A named tree is visible, so people may have changes in it. A gate restarting there stops and asks instead of
+/// running `reset --hard` and `clean` over them.
+pub(super) async fn refuse_foreign_changes(tree: &Path) -> Result<()> {
+    if crate::git::is_dirty(tree).await.unwrap_or(true) {
+        return Err(Error::Refused("the run's worktree has changes the run didn't make; commit or remove them to continue"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_dirty_named_tree_is_refused_and_left_alone_and_a_clean_one_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| { let ok = std::process::Command::new("/usr/bin/git").current_dir(dir.path())
+            .args(["-c", "user.name=T", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false"]).args(args)
+            .status().unwrap().success(); assert!(ok, "{args:?}"); };
+        git(&["init", "-q"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "base"]);
+        refuse_foreign_changes(dir.path()).await.unwrap();
+        std::fs::write(dir.path().join("mine.txt"), "someone's work").unwrap();
+        assert!(refuse_foreign_changes(dir.path()).await.is_err());
+        assert_eq!(std::fs::read_to_string(dir.path().join("mine.txt")).unwrap(), "someone's work");
+    }
+}
+
 impl Exec {
     /// Make the run's named worktree, record it, and claim it for the board, under the repository's lock.
     pub(super) async fn provision_named(&self, workspace: &str, binding: &Binding, tree: &RunTree) -> Result<()> {
