@@ -259,6 +259,21 @@ mod tests {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
     }
+    /// The question a person is asked, from the real producer, pinned for the apps' Review screens to parse
+    /// (ov-978). Set FARCOOLER_REGEN_FIXTURES=1 to rewrite it after a deliberate change to the summary.
+    #[test]
+    fn the_question_the_apps_parse_is_the_one_the_producer_writes() {
+        let mut cfg = config();
+        cfg.pull_request = Some(farcooler_protocol::workflow_config::CodingPullRequest { repository: "far-cooler/overnight".into(), base: "main".into(), remote: Some("ssh://git@example.com/far-cooler/overnight.git".into()), gh: cmd("gh pr create --fill") });
+        cfg.landing = Some(farcooler_protocol::workflow_config::CodingLanding { job: "landing-1".into(), repository: "/srv/landing.git".into(), target: "refs/heads/main".into(), config_digest: "wf1:0123456789abcdef".into() });
+        let commands: Vec<String> = ["make check", "scripts/copy-lint.py --all", "cargo test -p farcooler-daemon --lib -- --test-threads=1", "swift test --package-path apps/shared/AgentKit"].iter().map(|c| c.to_string()).collect();
+        let b = lt::template("ticket-pr", &cfg, &commands, &[Extra::Person("owner".into())],
+            &Options { environment: vec!["HOME=/home/tester".into(), "PATH=/usr/bin:/bin:/home/tester/.cargo/bin".into()], ..Options::default() }).unwrap();
+        let text = crate::workflow_drafts::compose(&headline(&b), &summarize("Gate every push on the copy lint and the AgentKit tests.", &b, None), "a1b2c3");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../client/src/testdata/workflow-change-question.txt");
+        if std::env::var_os("FARCOOLER_REGEN_FIXTURES").is_some() { std::fs::write(&path, &text).unwrap(); }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "the fixture the apps parse is stale; rerun with FARCOOLER_REGEN_FIXTURES=1");
+    }
     #[test]
     fn the_headline_is_one_sentence_of_the_three_things_a_person_weighs() {
         let gated = headline(&bundle("batched-push", &["make check", "scripts/copy-lint"], &[Extra::Person("owner".into())], None));

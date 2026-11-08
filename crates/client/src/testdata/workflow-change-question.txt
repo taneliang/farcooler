@@ -1,0 +1,39 @@
+Publish this workflow? 4 checks must pass, each ticket opens a pull request, you approve each ticket.
+
+The orchestrator’s reason: `Gate every push on the copy lint and the AgentKit tests.`
+
+This is the first workflow for this workspace.
+
+What runs as you:
+- The agent: `/usr/bin/claude`.
+- `make check`
+- `scripts/copy-lint.py --all`
+- `cargo test -p farcooler-daemon --lib -- --test-threads=1`
+- `swift test --package-path apps/shared/AgentKit`
+
+Checks that must pass:
+- `make check` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
+- `scripts/copy-lint.py --all` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
+- `cargo test -p farcooler-daemon --lib -- --test-threads=1` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
+- `swift test --package-path apps/shared/AgentKit` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
+
+How code lands:
+- Each ticket opens a pull request against `main`. A person merges it.
+- It waits for CI to pass on what landed.
+
+Who approves:
+- You approve each ticket before it lands.
+
+In full, exactly as it runs:
+- The agent runs `/usr/bin/claude`, with no environment variables, for up to 1 s.
+- Check 1 runs `/bin/sh` `-c` `make check`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
+- Check 2 runs `/bin/sh` `-c` `scripts/copy-lint.py --all`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
+- Check 3 runs `/bin/sh` `-c` `cargo test -p farcooler-daemon --lib -- --test-threads=1`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
+- Check 4 runs `/bin/sh` `-c` `swift test --package-path apps/shared/AgentKit`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
+- No reviewer command.
+- CI is the `ci` workflow on `push` in `o/r` on GitHub, read by running `/bin/sh` `-c` `true`, with no environment variables, for up to 1 s.
+- Pull requests open in `far-cooler/overnight` on GitHub, against `main`. Their branches are pushed to `ssh://git@example.com/far-cooler/overnight.git`. They're opened by running `/bin/sh` `-c` `gh pr create --fill`, with no environment variables, for up to 1 s.
+- Code is read from `/r` from commit `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, and its landing ref there is `refs/heads/main`.
+- Code lands on `refs/heads/main` in `/srv/landing.git`, as job `landing-1`. Where that repository pushes is fixed by its config, digest `wf1:0123456789abcdef`.
+
+To publish exactly this, answer `approve a1b2c3`. To leave things as they are, answer `decline`. Nothing changes until you answer.

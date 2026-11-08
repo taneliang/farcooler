@@ -145,8 +145,13 @@ pub fn wire(draft: &Draft) -> serde_json::Value {
 /// The words that approve it come last, after the whole change, so only a view that shows all of it shows them.
 fn question(draft: &Draft) -> String {
     let bundle = crate::landing_templates::Bundle { definition: draft.definition.clone(), adapter: draft.adapter.clone() };
-    format!("{}\n\n{}\n\nTo publish exactly this, answer `{APPROVE} {}`. To leave things as they are, answer `{DECLINE}`. Nothing changes until you answer.",
-        workflow_summary::headline(&bundle), draft.summary, code(&draft.digest))
+    compose(&workflow_summary::headline(&bundle), &draft.summary, &code(&draft.digest))
+}
+
+/// The question's text: the headline, the whole change, and last the words that approve it. The apps' Review
+/// screens read this shape back (`crates/client/src/testdata/workflow-change-question.txt` pins it).
+pub(crate) fn compose(headline: &str, summary: &str, code: &str) -> String {
+    format!("{headline}\n\n{summary}\n\nTo publish exactly this, answer `{APPROVE} {code}`. To leave things as they are, answer `{DECLINE}`. Nothing changes until you answer.")
 }
 
 /// Ask the draft's question on its card, as the daemon, and remember which note asked it.
