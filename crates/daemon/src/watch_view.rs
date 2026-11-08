@@ -59,8 +59,8 @@ mod tests;
 pub(crate) fn start(
     push: farcooler_transport::PushSender, caller: crate::people::Person, workspace: uuid::Uuid,
     payload: &farcooler_protocol::v1::WorkflowCommand,
-) -> crate::Result<(tokio::task::JoinHandle<()>, farcooler_protocol::v1::TerminalAttachResult)> {
-    use crate::DomainError;
+) -> farcooler_core::Result<(tokio::task::JoinHandle<()>, farcooler_protocol::v1::TerminalAttachResult)> {
+    use farcooler_core::DomainError;
     if caller != crate::people::Person::Owner {
         return Err(DomainError::ScopeDenied { needed: "owner" });
     }
