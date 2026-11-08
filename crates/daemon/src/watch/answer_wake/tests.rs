@@ -481,8 +481,13 @@ async fn a_shell_in_the_foreground_is_never_typed_into() {
     // between the answer and the shell.
     let shell = ["/bin/zsh", "/usr/bin/zsh", "/bin/bash"].into_iter().find(|s| std::path::Path::new(s).exists()).unwrap();
     let flags = if shell.ends_with("zsh") { "-f -i" } else { "--norc -i" };
-    b.run_in(&agent, &format!("/bin/sh -c 'cat {capture}; exec {shell} {flags}'")).await;
-    b.screen_with(agent.id, "for shortcuts").await;
+    // Quoted: a checkout under "Application Support" made `cat` fail, so the
+    // pane never showed claude's screen and this waited out `screen_with`'s
+    // 15 s, testing only an empty shell (ov-993).
+    let capture = crate::service::shell_quote(&capture);
+    b.run_in(&agent, &format!("/bin/sh -c {}", crate::service::shell_quote(&format!("cat {capture}; exec {shell} {flags}")))).await;
+    let screen = b.screen_with(agent.id, "for shortcuts").await;
+    assert!(screen.contains("for shortcuts"), "claude's screen never drew: {screen}");
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
