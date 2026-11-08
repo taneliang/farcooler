@@ -26,6 +26,11 @@ impl WorktreeHost {
     }
 }
 
+/// Two branch names that can't both exist: the same, or one a path prefix of the other (`foo`, `foo/bar`).
+fn clashes(a: &str, b: &str) -> bool {
+    a == b || a.strip_prefix(b).is_some_and(|r| r.starts_with('/')) || b.strip_prefix(a).is_some_and(|r| r.starts_with('/'))
+}
+
 impl Runtime {
     /// A Start that names a worktree: where it goes, and main's commit now, which the run records. Refuses a
     /// name or branch that is taken, before anything is made. `None` for any other action, a Start that names
@@ -47,10 +52,29 @@ impl Runtime {
             .map_err(|_| Error::Refused("unknown repository"))?;
         let path = host.dir.join(farcooler_core::names::slug(&repository.display_name)).join(farcooler_core::names::slug(&named.name));
         if path.try_exists()? { return Err(Error::Domain(DomainError::WorktreeExists)); }
-        // Any branch of that name, here or on a remote: the run's branch is new, as `fork_only` makes it.
-        let taken = adapters::git(&config.repository, &["for-each-ref", "--format=%(refname)",
-            &format!("refs/heads/{}", named.branch), &format!("refs/remotes/*/{}", named.branch)]).await?;
-        if !taken.trim().is_empty() { return Err(Error::Domain(DomainError::BranchExists)); }
+        // What git itself accepts as a branch name, so a name it would refuse fails here and not at Provision.
+        if adapters::git(&config.repository, &["check-ref-format", "--branch", &named.branch]).await.is_err() {
+            return Err(Error::Domain(DomainError::InvalidArgument { what: "branch" }));
+        }
+        // Another run in this workspace already holds the tree or the branch, though it may not be made yet.
+        if let Some(state) = self.state(workspace)? {
+            let held = |f: &dyn Fn(&RunTree) -> bool| state.items.values().filter_map(|i| i.tree.as_ref()).any(f);
+            if held(&|t| t.path == path.to_string_lossy()) { return Err(Error::Domain(DomainError::WorktreeExists)); }
+            if held(&|t| clashes(&t.branch, &named.branch)) { return Err(Error::Domain(DomainError::BranchExists)); }
+        }
+        // Any branch of that name, here or on a remote, or one that clashes with it by prefix (`foo` beside
+        // `foo/bar`): the run's branch is new, as `fork_only` makes it.
+        let mut patterns = vec!["for-each-ref".to_string(), "--format=%(refname)".into(),
+            format!("refs/heads/{}", named.branch), format!("refs/remotes/*/{}", named.branch)];
+        let parents: Vec<&str> = named.branch.match_indices('/').map(|(i, _)| &named.branch[..i]).collect();
+        for parent in &parents { patterns.push(format!("refs/heads/{parent}")); patterns.push(format!("refs/remotes/*/{parent}")); }
+        let refs: Vec<&str> = patterns.iter().map(String::as_str).collect();
+        let found = adapters::git(&config.repository, &refs).await?;
+        let clash = found.lines().any(|line| {
+            let name = line.strip_prefix("refs/heads/").or_else(|| line.strip_prefix("refs/remotes/").and_then(|r| r.split_once('/').map(|x| x.1)));
+            name.is_some_and(|n| clashes(n, &named.branch))
+        });
+        if clash { return Err(Error::Domain(DomainError::BranchExists)); }
         let base = adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?;
         let tree = RunTree { name: named.name.clone(), branch: named.branch.clone(), path: path.to_string_lossy().into_owned(), base };
         if !tree.valid() { return Err(Error::Refused("invalid worktree")); }

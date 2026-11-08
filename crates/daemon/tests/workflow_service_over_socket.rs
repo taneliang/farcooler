@@ -461,5 +461,48 @@ async fn workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at
     drop(link);host.close().await;
 }
 
+/// ov-967 (review): a Start that names a bad branch, one that clashes with a branch by prefix, or a tree an
+/// earlier Start already holds is refused at Start, so no ticket sticks at Uncertain on a name git would refuse.
+#[tokio::test]
+async fn workflow_service_refuses_a_bad_or_taken_named_tree_at_start() {
+    if person_terminal("workflow_service_refuses_a_bad_or_taken_named_tree_at_start").await { return; }
+    use farcooler_protocol::workflow_commands::NamedTree;
+    let (dir,config)=configured(false,"pass").await;
+    let host=Host::open(dir.path()).await; let workspace=host.workspace; let mut link=host.connect().await;
+    let definition=config.definition().unwrap();
+    let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    let first=host.service.store.create_task(workspace,"first",farcooler_store::models::Actor::User).unwrap();
+    let second=host.service.store.create_task(workspace,"second",farcooler_store::models::Actor::User).unwrap();
+    host.service.track_tickets(Some(first.id)).await;
+    host.service.track_tickets(Some(second.id)).await;
+    git(&config.repository,&["branch","clash"]).await.unwrap();
+    let start=|id:&str,key:&str,snapshot:&serde_json::Value,name:&str,branch:&str| { let item=&snapshot["state"]["items"][key];
+        Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:key.into(),
+            run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+            worktree:Some(NamedTree { name:name.into(),branch:branch.into() }) } };
+    // Names git refuses and the cheap check misses, and a branch that is the prefix of another.
+    for (id,branch) in [("dot","e-liang/.hidden"),("lock","e-liang/x.lock/y"),("child","clash/child")] {
+        let snapshot=get(&mut link,workspace).await;
+        let refused=try_call(&mut link,workspace,start(id,&first.key,&snapshot,"fresh",branch)).await;
+        assert!(refused.is_err(),"{branch} must be refused at Start: {refused:?}");
+    }
+    let snapshot=get(&mut link,workspace).await;
+    assert!(snapshot["state"]["items"][&first.key]["tree"].is_null(),"a refused Start records nothing");
+    // Hold the repository lock so the first run's tree is recorded but not yet made.
+    let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
+    let lock=host.service.repo_lock(repository);
+    let held=lock.lock().await;
+    accepted(&call(&mut link,workspace,start("one",&first.key,&snapshot,"shared","e-liang/one")).await);
+    for (id,name,branch) in [("same-tree","shared","e-liang/two"),("same-branch","other","e-liang/one")] {
+        let snapshot=get(&mut link,workspace).await;
+        let refused=try_call(&mut link,workspace,start(id,&second.key,&snapshot,name,branch)).await;
+        assert!(refused.as_ref().is_err_and(|e| e.contains("already exists")),"{id}: {refused:?}");
+    }
+    drop(held);
+    drop(link);host.close().await;
+}
+
 #[path = "workflow_service/safety.rs"]
 mod safety;
