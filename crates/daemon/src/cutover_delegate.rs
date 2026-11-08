@@ -17,6 +17,14 @@
 //! any tmux server: an orphan the pane left to pid 1, another pane, and a pane
 //! restarted since are all refused, and the owner runs the rest by hand.
 //!
+//! **On the owner's word.** The live Prepare admits the orchestrator only on
+//! the owner's grant, an "Allow cutover once" said from the app or their phone,
+//! and spends it (`cutover_grant`); the pin names the grant, and Commit's
+//! journal entry says which one. Each recovery step asks the database again,
+//! read-only, whether the pane is still the workspace's orchestrator on the
+//! runner's login with no member leading it
+//! (`engine_cutover::startup::owners_orchestrator`).
+//!
 //! **No new way in.** This file sits beside the database and its hold mark,
 //! and anything that can write it can already write those. The seat walk was
 //! always a guardrail against an agent *asking* for the owner's steps
@@ -47,12 +55,14 @@ pub struct Delegate {
     /// (`claude_registry::process_incarnation`).
     pub pane_pid: i32,
     pub pane_start: i64,
+    /// The owner's answer that granted it, spent by this Prepare.
+    pub grant: Uuid,
 }
 
 impl Delegate {
     /// Who asked, for the journal: `caller` is the process's own note.
     pub fn note(&self, caller: &str) -> String {
-        format!("the owner's orchestrator (terminal {}, workspace {}), acting for the owner: {caller}", self.terminal, self.workspace)
+        format!("the owner's orchestrator (terminal {}, workspace {}), acting for the owner on their grant (answer {}): {caller}", self.terminal, self.workspace, self.grant)
     }
 }
 
@@ -85,13 +95,25 @@ fn read(root: &Path) -> Option<Delegate> {
 }
 
 /// The delegate a recovery daemon admits caller `pid` as: the one named for
-/// the attempt in hand, when `pid` runs inside its pane.
+/// the attempt in hand, when `pid` runs inside its pane and the database
+/// still says that pane is the owner's orchestrator.
 pub fn admits(root: &Path, pid: i32) -> Option<Delegate> {
     let delegate = read(root)?;
     let table = crate::proc_table::snapshot()?;
     let procs = crate::caller_seat::procs(&table);
     let servers = crate::caller_seat::tmux_servers(&procs);
-    within(pid, &procs, &servers, &delegate, &crate::claude_registry::process_incarnation).then_some(delegate)
+    if !within(pid, &procs, &servers, &delegate, &crate::claude_registry::process_incarnation) { return None; }
+    still_the_owners(&crate::cutover_admin::database(root), &delegate).then_some(delegate)
+}
+
+/// Whether the database says now that the delegate's pane is its workspace's
+/// orchestrator, on the runner's login, with no member leading the workspace.
+/// One that can't be read says no.
+pub(crate) fn still_the_owners(db: &Path, delegate: &Delegate) -> bool {
+    farcooler_store::engine_cutover::startup::owners_orchestrator(db, delegate.terminal, delegate.workspace).unwrap_or_else(|error| {
+        tracing::warn!(%error, "the cutover's orchestrator could not be checked");
+        false
+    })
 }
 
 /// Whether `pid`, or a parent of it met before any tmux server, is the
@@ -125,7 +147,9 @@ pub(crate) async fn admit(
     };
     let pane_pid = svc.inventory_snapshot().panes.iter().find(|p| p.terminal_id == term.id).map(|p| p.stamp.pid as i32).ok_or(DomainError::AuthRequired)?;
     let pane_start = crate::claude_registry::process_incarnation(pane_pid).ok_or(DomainError::AuthRequired)?;
-    let delegate = Delegate { attempt: attempt.into(), terminal: term.id, workspace, pane_pid, pane_start };
+    // Last, once everything else admits it: the owner's word, spent here.
+    let grant = crate::cutover_grant::spend(&svc.store, workspace, attempt, crate::step_up_rpc::now_ms())?.answer;
+    let delegate = Delegate { attempt: attempt.into(), terminal: term.id, workspace, pane_pid, pane_start, grant };
     Ok((admission, Some(delegate)))
 }
 

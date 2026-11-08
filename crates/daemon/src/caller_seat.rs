@@ -233,6 +233,14 @@ fn vouches_for_a_person(pid: i32, app: Option<&Path>) -> bool {
     app.is_some_and(|app| crate::proc_table::path_of(pid).is_some_and(|exe| Path::new(&exe).starts_with(app.join("Contents/MacOS"))))
 }
 
+/// Whether process `pid` is this daemon's own Mac app, by its code signature:
+/// it satisfies the designated requirement of the bundle this daemon ships in
+/// (`code_identity`, ov-974). The CLI and the daemon in that bundle are other
+/// programs, and a process off the app, on Linux or in a build tree, is none.
+pub fn is_own_app(pid: i32) -> bool {
+    own_app().is_some_and(|app| crate::code_identity::satisfies(pid, &app))
+}
+
 /// Whether `pid` runs as root (`proc_table::uid_of`). A test can't start a
 /// root process, so it names its stand-in for root's `sshd` here
 /// (`test_support::Outside::under_root`).

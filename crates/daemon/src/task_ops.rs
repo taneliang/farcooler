@@ -584,7 +584,7 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
 /// a person's action (`pr_actions`). A request over the wire goes through
 /// `note_from`, with its caller's seat.
 pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Result<pb::TaskNote> {
-    note_from(svc, watcher, req, crate::caller_seat::Seat::Person)
+    note_from(svc, watcher, req, crate::caller_seat::Seat::Person, "cli")
 }
 
 /// `task.note`: append one entry to a task's record.
@@ -607,7 +607,10 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
 /// (`Watcher::route_of`), never typed as the person's turn (R-78). One from
 /// a caller not known to be a person is refused `in_pane`. A caller's own
 /// `extra.message` is refused: it is the runner's record of a message.
-pub fn note_from(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend, seat: crate::caller_seat::Seat) -> Result<pb::TaskNote> {
+///
+/// A person's answer is stamped with where it was said, `said_from` (the
+/// daemon's `cutover_grant::said_from`, ov-974); a caller's own is refused.
+pub fn note_from(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend, seat: crate::caller_seat::Seat, said_from: &'static str) -> Result<pb::TaskNote> {
     let id = required_id(&req.task_id)?;
     let mut actor = actor_from_wire(&req.actor)?;
     let kind =
@@ -642,12 +645,15 @@ pub fn note_from(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend, sea
     // `message` is the runner's record of a queued message (who it is from,
     // whether it was said in a pane): a caller writing one would queue a
     // note and name its sender.
-    if extra.get("message").is_some() {
+    if extra.get("message").is_some() || extra.get(crate::cutover_grant::SAID_FROM).is_some() {
         return Err(DomainError::InvalidArgument { what: "extra_json" });
     }
     let mut in_pane = false;
     if kind == NoteKind::Answer && actor == Actor::User {
         (actor, in_pane) = answer_actor(&svc.store, seat, &mut extra)?;
+        if actor == Actor::User && let Some(map) = extra.as_object_mut() {
+            map.insert(crate::cutover_grant::SAID_FROM.into(), said_from.into());
+        }
     }
     // Whose card a person's answer settled, when it wasn't theirs (ov-737).
     crate::answered_for::stamp(&svc.store, id, kind, actor, &mut extra)?;

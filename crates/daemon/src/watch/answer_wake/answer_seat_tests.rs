@@ -69,7 +69,7 @@ async fn an_answer_from_an_unreadable_seat_is_refused() {
     let b = board().await;
     let req = answer_request(&b, "Use the second option");
     let Some(pb::request::Payload::TaskNoteAppend(p)) = req.payload else { unreachable!() };
-    let said = crate::task_ops::note_from(&b.svc, &b.watcher, &p, crate::caller_seat::Seat::Unreadable);
+    let said = crate::task_ops::note_from(&b.svc, &b.watcher, &p, crate::caller_seat::Seat::Unreadable, "cli");
     assert!(matches!(said, Err(DomainError::Conflict { what: "in_pane" })), "{said:?}");
     assert!(b.svc.store.notes_for(b.task.id, Some(NoteKind::Answer)).unwrap().is_empty(), "nothing filed");
     assert!(b.svc.store.pending_answer_wakes().unwrap().is_empty(), "nothing queued");
@@ -165,7 +165,7 @@ async fn an_agent_outside_every_pane_is_unknown_not_the_person() {
     b.doing(lane.id, AgentActivity::Idle).await;
     let req = answer_request(&b, "Use the second option");
     let Some(pb::request::Payload::TaskNoteAppend(p)) = req.payload else { unreachable!() };
-    crate::task_ops::note_from(&b.svc, &b.watcher, &p, Seat::Agent(None)).expect("recorded");
+    crate::task_ops::note_from(&b.svc, &b.watcher, &p, Seat::Agent(None), "cli").expect("recorded");
     let note = b.svc.store.notes_for(b.task.id, Some(NoteKind::Answer)).unwrap().remove(0);
     assert_eq!(note.actor, Actor::Unknown);
     b.pump().await;
@@ -227,4 +227,34 @@ async fn an_answer_an_agent_left_behind_is_refused() {
     b.pump().await;
     assert_eq!(mailbox.take_oldest().unwrap(), None, "never mailboxed");
     assert!(!si.log().contains("PASTE"), "typed as the person's turn: {}", si.log());
+}
+
+/// ov-974: no answer the CLI writes grants a cutover, whoever runs it: a
+/// claude in a pane answering the ask (`task answer`, `task note --kind
+/// answer`, any `--actor`) goes in as the agent's, and a person's own shell
+/// outside every pane, which an agent's orphan with a terminal of its own
+/// reads as too, is stamped `cli`. Only the app or the owner's phone grants.
+#[tokio::test]
+async fn no_answer_from_the_cli_grants_a_cutover() {
+    use crate::cutover_grant::{ALLOW, SAID_FROM, find};
+    let b = board().await;
+    b.svc.store.add_note(b.task.id, NoteKind::Question, Actor::Manager, "Run the cutover once?",
+        serde_json::json!({ "options": [ALLOW, "Wait for me"] })).unwrap();
+    let shell = b.adopted_shell().await;
+    let _claude = b.stand_in(&shell, "claude", "claude").await;
+    let pid = pid_in(&b, &shell, "claude").await;
+    assert_eq!(call_from(&b, pid, answer_request(&b, ALLOW)).await, None);
+    for actor in ["user", "manager"] {
+        let mut req = answer_with(&b, actor, "");
+        let Some(pb::request::Payload::TaskNoteAppend(p)) = req.payload.as_mut() else { unreachable!() };
+        p.body = ALLOW.into();
+        assert_eq!(call_from(&b, pid, req).await, None, "{actor}");
+    }
+    let outside = super::super::seat_tests::a_persons_outside(&b, 6305);
+    assert_eq!(call_from(&b, outside.pid, answer_request(&b, ALLOW)).await, None);
+    let answers = b.svc.store.notes_for(b.task.id, Some(NoteKind::Answer)).unwrap();
+    let person = answers.iter().find(|n| n.actor == Actor::User).expect("the person's answer is theirs");
+    assert_eq!(person.extra[SAID_FROM], "cli", "stamped by the daemon");
+    assert!(answers.iter().filter(|n| n.actor != Actor::User).all(|n| n.extra.get(SAID_FROM).is_none()), "an agent's is no one's word: {answers:?}");
+    assert_eq!(find(&b.svc.store, b.task.workspace_id, crate::step_up_rpc::now_ms()).unwrap(), None);
 }

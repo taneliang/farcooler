@@ -18,12 +18,13 @@ use crate::watch::Watcher;
 /// `peer` says whose read state a board read carries and a mark raises
 /// (ov-740, `people::reader_of`); on the local socket, a read from a pane
 /// carries its person's, a rep's its member's (`caller_person`, ov-744,
-/// ov-747), walked once per connection (`caller_pane`).
+/// ov-747), walked once per connection (`caller_pane`). `stepped` is the
+/// request's verified step-up, if it carried one (`step_up::OPTIONAL`).
 pub(crate) async fn dispatch(
     svc: &Service,
     watcher: &Watcher,
     peer: &farcooler_transport::Peer,
-    (caller_pid, caller_pane): (Option<i32>, &std::sync::OnceLock<uuid::Uuid>),
+    (caller_pid, caller_pane, stepped): (Option<i32>, &std::sync::OnceLock<uuid::Uuid>, Option<&crate::step_up::Stepped>),
     req: Request,
 ) -> Result<result::Value> {
     match req.method.as_str() {
@@ -96,12 +97,13 @@ pub(crate) async fn dispatch(
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
             // Only an answer claiming `user` needs its caller's seat (ov-630).
-            let seat = if p.kind == pb::TaskNoteKind::Answer as i32 && matches!(crate::task_ops::actor_from_wire(&p.actor), Ok(Actor::User)) {
-                crate::caller_seat::caller_seat(svc, caller_pid).await
+            // And where a person's was said, which only the app or the owner's phone grants with (ov-974).
+            let (seat, said_from) = if p.kind == pb::TaskNoteKind::Answer as i32 && matches!(crate::task_ops::actor_from_wire(&p.actor), Ok(Actor::User)) {
+                (crate::caller_seat::caller_seat(svc, caller_pid).await, crate::cutover_grant::said_from(svc, peer, caller_pid, stepped))
             } else {
-                crate::caller_seat::Seat::Person
+                (crate::caller_seat::Seat::Person, "cli")
             };
-            Ok(result::Value::TaskNote(crate::task_ops::note_from(svc, watcher, &p, seat)?))
+            Ok(result::Value::TaskNote(crate::task_ops::note_from(svc, watcher, &p, seat, said_from)?))
         }
 
         "task.block" => {

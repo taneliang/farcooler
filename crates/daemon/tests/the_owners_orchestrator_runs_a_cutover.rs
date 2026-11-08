@@ -61,6 +61,17 @@ impl Runner {
         service.add_root(repo.parent().unwrap()).await.expect("root");
         let repository = service.register_repository(&repo).await.expect("registered").id;
         let workspace = service.store.ensure_main_workspace(repository).unwrap().id;
+        // The owner's "Allow cutover once", said from the app, to the orchestrator's ask.
+        let service = std::sync::Arc::new(service);
+        use farcooler_store::models::{Actor, NoteKind};
+        let task = service.store.create_task(workspace, "Data: the engine cutover", Actor::Manager).unwrap().id;
+        service.store.add_note(task, NoteKind::Question, Actor::Manager, "Run the cutover once?",
+            serde_json::json!({ "options": [farcooler_daemon::cutover_grant::ALLOW, "Wait for me"] })).unwrap();
+        let answer = pb::TaskNoteAppend { task_id: task.as_bytes().to_vec().into(), kind: pb::TaskNoteKind::Answer as i32,
+            body: farcooler_daemon::cutover_grant::ALLOW.into(), actor: "user".into(), ..Default::default() };
+        let watcher = farcooler_daemon::watch::Watcher::new(service.clone());
+        farcooler_daemon::task_ops::note_from(&service, &watcher, &answer, farcooler_daemon::caller_seat::Seat::Person, "app").expect("granted");
+        drop(watcher);
         drop(service);
         let stand_in = dir.path().join("agent");
         let exe = std::env::current_exe().unwrap();
@@ -164,7 +175,7 @@ async fn the_owners_orchestrator_takes_a_real_runner_from_prepare_to_finish() {
         assert_eq!(recovery.try_wait().unwrap(), None, "recovery stays up through {op}");
     }
     let asked = std::fs::read_to_string(runner.artifacts().join("journal/commit-requested-1.json")).expect("the Commit names who asked");
-    assert!(asked.contains("the owner's orchestrator") && asked.contains("acting for the owner") && asked.contains("pid "), "{asked}");
+    assert!(asked.contains("the owner's orchestrator") && asked.contains("acting for the owner on their grant (answer ") && asked.contains("pid "), "{asked}");
     runner.ask_from_the_pane(r#"{"op":"Finish"}"#).await.expect("finish");
     let status = tokio::time::timeout(Duration::from_secs(30), recovery.wait()).await.expect("recovery ends with the attempt").unwrap();
     assert_eq!(status.code(), Some(farcooler_daemon::rpc::recovery::RESTART_EXIT), "{status:?}");

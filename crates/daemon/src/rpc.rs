@@ -1976,9 +1976,9 @@ impl Rpc {
             // The arms live in `rpc_board`; every route is named here.
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
             | "task.set_status" | "task.block" | "task.set_wait" | "task.set_line"
-            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), req).await,
+            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane, self.stepped.get()), req).await,
             // A note is a board route; a person's answer on a workflow draft's card is also its approval (ov-971).
-            "task.note" => crate::workflow_drafts::note(self, crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), req).await?).await,
+            "task.note" => crate::workflow_drafts::note(self, crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane, self.stepped.get()), req).await?).await,
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.events" | "board_theme.create" | "board_theme.update" | "board_theme.move"
             | "board_theme.cards" | "line.set" | "line.order" | "agent.record" | "agent.work" | "agent.end"

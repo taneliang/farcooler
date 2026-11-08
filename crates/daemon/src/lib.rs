@@ -3,6 +3,8 @@ pub(crate) mod activity_source;
 pub mod cutover_gate;
 pub mod cutover_admin;
 pub mod cutover_delegate;
+pub mod cutover_grant;
+pub mod code_identity;
 pub mod writer_gate;
 pub mod writer_join;
 pub mod answered_for;

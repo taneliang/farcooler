@@ -134,3 +134,22 @@ pub(crate) fn admit_or_refuse(db: &Path) -> farcooler_core::Result<std::fs::File
     ordinary_admission(db).map_err(refused)?;
     Ok(lock)
 }
+
+/// Whether `terminal` is still `workspace`'s orchestrator on the runner's own
+/// login, as the database says now (ov-974): its role, no member login and no
+/// rep on the pane, and no member leading the workspace. Read-only, for a
+/// recovery process, which holds no Store; nothing else can write these while
+/// recovery holds the file, so this guards an edited or restored file.
+pub fn owners_orchestrator(db: &Path, terminal: uuid::Uuid, workspace: uuid::Uuid) -> Result<bool> {
+    let conn = readonly(db)?;
+    let (t, w) = (terminal.as_bytes().to_vec(), workspace.as_bytes().to_vec());
+    let role: Option<(i64, Option<Vec<u8>>)> =
+        conn.query_row("SELECT role, workspace_id FROM terminals WHERE id = ?1", [&t], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    let Some((role, Some(home))) = role else { return Ok(false) };
+    if role != crate::models::TerminalRole::Orchestrator.as_i64() { return Ok(false); }
+    let none = |sql: &str, id: &Vec<u8>| -> Result<bool> { Ok(conn.query_row(sql, [id], |_| Ok(())).optional()?.is_none()) };
+    Ok(home == w
+        && none("SELECT 1 FROM terminal_logins WHERE terminal_id = ?1", &t)?
+        && none("SELECT 1 FROM reps WHERE terminal_id = ?1", &t)?
+        && none("SELECT 1 FROM workspace_leads WHERE workspace_id = ?1", &w)?)
+}

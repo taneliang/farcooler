@@ -67,6 +67,12 @@ pub const METHODS: [&str; 8] = [
     "member.set_access", "client.set_cap",
 ];
 
+/// The methods that may carry a step-up and never need one (ov-974): a
+/// person's answer signed on their phone is said by that phone's key, which
+/// is what grants a cutover (`cutover_grant`). Unsigned, it is an answer as
+/// before.
+pub const OPTIONAL: [&str; 1] = ["task.note"];
+
 /// What a browser's key may do (decision 2): take access away. Never add,
 /// bind, raise, propose or approve a key.
 pub const DEFENSIVE: [&str; 2] = ["client.revoke", "member.remove"];
@@ -345,7 +351,7 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         }
         return Ok((req, None));
     };
-    if !METHODS.contains(&req.method.as_str()) {
+    if !METHODS.contains(&req.method.as_str()) && !OPTIONAL.contains(&req.method.as_str()) {
         tracing::info!(method = %req.method, "refused: a step-up on a method that takes none");
         return Err(DomainError::Conflict { what: "step_up_unneeded" });
     }
@@ -355,6 +361,7 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         return Err(DomainError::Conflict { what: "step_up_unneeded" });
     };
     if step_up.alg == crate::approvals::ALG_APPROVAL {
+        if OPTIONAL.contains(&req.method.as_str()) { return Err(DomainError::Conflict { what: "step_up_unneeded" }); }
         return admit_approved(svc, peer, req, device, now_ms);
     }
     let key = svc.store.step_up_key(device)?.filter(|k| k.trusted).ok_or(DomainError::Conflict { what: "key_untrusted" })?;

@@ -71,3 +71,60 @@
 
 `crates/daemon/assets/manager/SKILL.md` "Cutover": the owner's orchestrator may
 run it for the owner, from its own pane; no other agent ever does.
+
+## Fix round: the owner's grant (review: pane descent admits everything under the pane)
+
+Pane descent alone admits the orchestrator's shell commands, subagents and
+scripts. So the live Prepare also needs the owner's word, once.
+
+- **The grant** (`crates/daemon/src/cutover_grant.rs`). An answer
+  `Allow cutover once` (exact, trimmed, any case) to a question on the same
+  card that offered it, on a card of the orchestrator's own workspace, actor
+  `user`, `said_from` `app` or `device`, at most 24 hours old, not superseded
+  and not spent. The live Prepare spends it (a `runner` note on the card naming
+  the answer and the attempt) under one lock, after every other check, before
+  the hold. Recovery steps ride the attempt the Prepare pinned.
+- **Where the seat is recorded.** The note's `actor`: an answer claiming `user`
+  is walked (`task_ops::answer_actor`, ov-630), so one from a pane is
+  `manager`/`agent:…`/`unknown` whatever `--actor` says. The walk is a
+  guardrail (an orphan with a terminal of its own reads as a person), so the
+  grant doesn't rest on it: `task.note` also stamps `extra.said_from`, the
+  daemon's word, each from an authenticated seat (orchestrator, from the
+  ov-971 review):
+  - `app`: the caller process satisfies the designated code requirement of the
+    bundle this daemon ships in (`code_identity`, Security.framework by pid,
+    start time rechecked). The live Canary's DR pins
+    `identifier "com.farcooler.FarCooler.canary"` and team `H6A2TRW47J`; its
+    running app process passes it and its bundled CLI fails it (checked with
+    `codesign --verify -R`, read-only). The app talks to `farcoolerd.sock`
+    from its own process (lsof), so the daemon sees the app's pid.
+  - `device`: the answer carries a step-up (ov-856) verified against the
+    owner's phone's trusted key, over this very request. `task.note` takes an
+    optional step-up (`step_up::OPTIONAL`) and never needs one. A browser's
+    passkey and a member's key don't count. A device line alone is a preamble
+    any local process can write, and an ssh session one any process of the
+    owner's can open, so neither counts.
+  - `cli`: anything else, the CLI in any terminal included.
+  A caller sending `said_from` is refused, as with `message`.
+- **Recheck in recovery.** Nothing but recovery can write the database while it
+  holds it, so a lead, role or login can't change there; the recheck guards an
+  edited or restored file. Each recovery step, `cutover_delegate::admits` reads
+  the database read-only (`engine_cutover::startup::owners_orchestrator`): the
+  terminal is still the workspace's orchestrator, with no member login, no rep,
+  and no member leading the workspace (the owner's case of
+  `refuse_another_leads_login`).
+- **Journal.** Commit's note names the grant's answer id. `record_caller`
+  already fsyncs the entry and its directory (`closing.rs:58-59`).
+- **Not built here.** iOS and Android don't sign an answer yet, so until a
+  follow-up ships that, the owner grants from the Mac app. The watch can't
+  sign either.
+
+Tests, each red with its check removed: `cutover_grant_tests.rs` (no grant,
+agent-written, `--actor`, a forged stamp, a terminal's, old, spent, unasked,
+another board; the app's grants once, the phone's signed answer grants and
+its unsigned one doesn't), `code_identity` (a process is the program its
+signature says),
+`answer_seat_tests::no_answer_from_the_cli_grants_a_cutover` (real processes),
+`recovery_tests::live_prepare_refuses_the_owners_orchestrator_without_the_owners_grant`,
+`cutover_delegate_tests::every_recovery_step_rechecks_role_login_and_lead`, and
+the e2e, now with the owner's grant.
