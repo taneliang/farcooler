@@ -200,17 +200,25 @@ fn device_model_key(client_id: &str) -> String {
     format!("device_model:{client_id}")
 }
 
-/// A model a device said, as one short printable line (ov-989): control and
-/// format characters (a bidi override included) dropped, runs of space made
-/// one, at most 40 characters. It is shown to the owner deciding whether to
-/// vouch, so it can't carry a line break or reorder what's beside it.
+/// A model a device said, as one short printable line (ov-989): control, format and invisible characters
+/// dropped (bidi controls, zero-width and soft-hyphen, Mongolian and Arabic marks, tag characters,
+/// variation selectors), combining marks dropped so a mark can't stack past its line, runs of space made
+/// one, at most 40 characters. It is shown to the owner deciding whether to vouch, so it can't carry a
+/// line break or reorder what's beside it. With marks and joiners gone, a character is a grapheme, so
+/// the cap never cuts one in two.
 pub fn clean_model(said: &str) -> String {
-    let kept: String = said.chars().map(|c| if c.is_whitespace() { ' ' } else { c }).filter(|c| !c.is_control() && !is_format(*c)).collect();
+    let kept: String = said.chars().map(|c| if c.is_whitespace() { ' ' } else { c }).filter(|c| !c.is_control() && !is_invisible(*c)).collect();
     kept.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(40).collect::<String>().trim().to_string()
 }
 
-fn is_format(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}' | '\u{FEFF}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0000}'..='\u{E007F}' | '\u{E0100}'..='\u{E01EF}'
+            // Combining marks: the blocks a name could stack on itself.
+            | '\u{0300}'..='\u{036F}' | '\u{1AB0}'..='\u{1AFF}' | '\u{1DC0}'..='\u{1DFF}' | '\u{20D0}'..='\u{20FF}' | '\u{FE20}'..='\u{FE2F}'
+    )
 }
 
 fn paired_via_key(client_id: &str) -> String {

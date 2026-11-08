@@ -122,4 +122,8 @@ fn the_model_a_device_said_is_kept_clean() {
     assert_eq!(store.device_model("phone").unwrap(), "", "forgotten");
     assert_eq!(clean_model("  Pixel\n\t9  Pro\u{202e} "), "Pixel 9 Pro");
     assert_eq!(clean_model(&"x".repeat(100)).chars().count(), 40);
+    // The ones a first pass missed: Arabic letter mark, Mongolian vowel separator, soft hyphen, tag characters,
+    // variation selectors, and a stack of combining marks.
+    assert_eq!(clean_model("A\u{061C}B\u{180E}C\u{00AD}D\u{E0041}\u{E007F}E\u{FE0F}F"), "ABCDEF");
+    assert_eq!(clean_model(&format!("Pi{}xel", "\u{0301}".repeat(30))), "Pixel", "marks don't stack");
 }

@@ -153,11 +153,6 @@ class PeopleAccess private constructor(
 
         /** How and when [device] was paired, under its name where its approval is offered (ov-982). */
         fun pairedLine(device: Device, runner: String): String {
-            val model = device.model.trim()
-            return if (model.isEmpty()) pairedHow(device, runner) else "$model. " + pairedHow(device, runner)
-        }
-
-        private fun pairedHow(device: Device, runner: String): String {
             val how = when (device.pairedVia) {
                 PairedVia.APP -> "Paired in Far Cooler on $runner"
                 PairedVia.DEVICE -> "Added from ${device.pairedBy ?: "another device"}"
@@ -168,6 +163,12 @@ class PeopleAccess private constructor(
             val shown = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(at))
             return "$how, $shown."
         }
+
+        /**
+         * What the device said it is, on a line of its own and labeled as its claim (ov-989); never part of
+         * [pairedLine], beside which the device's own words could read as something Far Cooler vouches for.
+         */
+        fun modelLine(device: Device): String? = device.model.trim().takeIf { it.isNotEmpty() }?.let { "Says it’s: $it" }
 
         /** The flag on a device paired outside the app's own pairing (ov-982). */
         const val PAIRED_OUTSIDE_BADGE = "Not paired in Far Cooler"

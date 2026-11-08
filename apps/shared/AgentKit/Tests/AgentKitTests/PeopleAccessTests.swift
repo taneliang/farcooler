@@ -211,8 +211,10 @@ struct PeopleAccessTests {
         let by = Dictionary(uniqueKeysWithValues: mac.people.flatMap(\.devices).map { ($0.id, $0) })
         let said = try #require(by["pad-o"]), silent = try #require(by["old-o"])
         #expect(said.model == "iPhone 17 Pro")
-        #expect(PeopleAccess.pairedLine(for: said, runner: "Mac").hasPrefix("iPhone 17 Pro. Paired in Far Cooler on Mac"))
-        #expect(silent.model == "" && PeopleAccess.pairedLine(for: silent, runner: "Mac").hasPrefix("Paired in Far Cooler"))
+        #expect(PeopleAccess.modelLine(for: said) == "Says it’s: iPhone 17 Pro", "its own labeled claim")
+        #expect(PeopleAccess.pairedLine(for: said, runner: "Mac") == PeopleAccess.pairedLine(for: silent, runner: "Mac"),
+                "the route line never carries what the device said")
+        #expect(silent.model == "" && PeopleAccess.modelLine(for: silent) == nil)
     }
 
     /// The review's path (ov-982 B1): an agent pairs from a terminal, its key

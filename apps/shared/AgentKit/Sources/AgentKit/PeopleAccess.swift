@@ -307,10 +307,6 @@ public struct PeopleAccess: Equatable, Sendable {
     /// How and when `device` was paired, under its name in the approve list
     /// (ov-982). `runner` names the runner's Mac: "this Mac" on its own.
     public static func pairedLine(for device: Device, runner: String = "this Mac") -> String {
-        let model = device.model.trimmingCharacters(in: .whitespaces)
-        return model.isEmpty ? pairedHow(device, runner: runner) : "\(model). " + pairedHow(device, runner: runner)
-    }
-    private static func pairedHow(_ device: Device, runner: String) -> String {
         let how: String
         switch device.pairedVia {
         case .app: how = "Paired in Far Cooler on \(runner)"
@@ -320,6 +316,13 @@ public struct PeopleAccess: Equatable, Sendable {
         }
         guard let at = device.pairedAt else { return how + "." }
         return how + ", " + at.formatted(date: .abbreviated, time: .shortened) + "."
+    }
+    /// What the device said it is, on a line of its own and labeled as its claim (ov-989). Never part of
+    /// ``pairedLine(for:runner:)``: the device chose these words, and beside the pairing route they could
+    /// read as something Far Cooler vouches for. Nil when it said none.
+    public static func modelLine(for device: Device) -> String? {
+        let model = device.model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return model.isEmpty ? nil : "Says it’s: \(model)"
     }
     /// The flag on a device paired outside Far Cooler's own pairing (ov-982).
     public static let pairedOutsideBadge = "Not Paired in Far Cooler"

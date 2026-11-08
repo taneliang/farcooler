@@ -261,6 +261,14 @@ private fun WaitingRow(device: PeopleAccess.Device, access: PeopleAccess, runner
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag("waiting-paired-${device.id}"),
                 )
+                PeopleAccess.modelLine(device)?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.testTag("waiting-model-${device.id}"),
+                    )
+                }
             }
             Text(
                 PeopleAccess.spoken(device.code),

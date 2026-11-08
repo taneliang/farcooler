@@ -281,6 +281,11 @@ private struct PairedLine: View {
         Text(PeopleAccess.pairedLine(for: device, runner: runner))
             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("\(id)-paired-\(device.id)")
+        if let said = PeopleAccess.modelLine(for: device) {
+            Text(said)
+                .font(.caption2).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(id)-model-\(device.id)")
+        }
     }
 }
 

@@ -174,8 +174,12 @@ class PeopleAccessTest {
         ).jsonObject
         val by = PeopleAccess.of(said, null, "")!!.people.flatMap { it.devices }.associateBy { it.id }
         assertEquals("iPhone 17 Pro", by.getValue("pad-o").model)
-        assertTrue(PeopleAccess.pairedLine(by.getValue("pad-o"), "Mac").startsWith("iPhone 17 Pro. Paired in Far Cooler on Mac"))
+        assertEquals("Says it’s: iPhone 17 Pro", PeopleAccess.modelLine(by.getValue("pad-o")))
+        assertEquals(
+            "the route line never carries what the device said",
+            PeopleAccess.pairedLine(by.getValue("old-o"), "Mac"), PeopleAccess.pairedLine(by.getValue("pad-o"), "Mac"),
+        )
         assertEquals("", by.getValue("old-o").model)
-        assertTrue(PeopleAccess.pairedLine(by.getValue("old-o"), "Mac").startsWith("Paired in Far Cooler"))
+        assertNull(PeopleAccess.modelLine(by.getValue("old-o")))
     }
 }
