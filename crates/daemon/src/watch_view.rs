@@ -50,10 +50,6 @@ pub fn item_of(payload: &farcooler_protocol::v1::WorkflowCommand) -> Option<Stri
     serde_json::from_str::<Ask>(&payload.json).ok().map(|a| a.item)
 }
 
-#[cfg(test)]
-#[path = "watch_view_tests.rs"]
-mod tests;
-
 /// Attach to the agent `payload` names, read-only: the owner's alone to ask. Returns the task that streams the
 /// pane to `push` and the reply that announces the pane's size ahead of its picture.
 pub(crate) fn start(
@@ -83,3 +79,7 @@ pub(crate) fn start(
     };
     Ok((task, reply))
 }
+
+#[cfg(test)]
+#[path = "watch_view_tests.rs"]
+mod tests;

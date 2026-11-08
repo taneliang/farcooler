@@ -27,7 +27,7 @@ fn this_module_has_no_way_to_type_or_resize() {
     for verb in ["send_keys", "send_literal", "send_bytes_hex", "send_bytes", "resize", "set_pane_size", "input_from", "mark_input", "paste", "send_input", "input_channel", ".tell(", "interrupt", "send-keys", "resize_terminal", ".tmux"] {
         assert!(!code.contains(verb) && !handler.contains(verb), "the watch path mentions {verb}");
     }
-    assert!(handler.contains(".attach("));
+    assert!(code.contains(".attach("));
 }
 
 // ---- a real pane: a watcher sees it and cannot touch it ----
