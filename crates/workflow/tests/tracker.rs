@@ -43,7 +43,7 @@ fn start(item: &str, d: Definition) -> Command { start_with(item, d, &[]) }
 fn start_with(item: &str, d: Definition, picks: &[(&str, &str)]) -> Command {
     Command::Start { item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
         dependencies: BTreeSet::new(), initial_candidate: None, definition: d,
-        models: picks.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect() }
+        models: picks.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect(), tree: None }
 }
 /// The coding definition, with its build step listing the models it may run with: the first is the default.
 fn coding_with_models(models: &[&str]) -> Definition {
@@ -154,7 +154,7 @@ fn only_a_tracker_only_ticket_can_start_and_only_with_a_real_definition() {
     assert_eq!(log.try_run(start("ov-1", coding()), person), Err(Refusal::Unauthorized));
     assert_eq!(log.try_run(start("ov-1", Definition::ticket()), Grant::Controller), Err(Refusal::Invalid), "a tracker is not a run");
     assert_eq!(log.try_run(Command::Start { item: "ov-1".into(), policy_pin: "p".into(), resource: "r".into(),
-        dependencies: BTreeSet::new(), initial_candidate: Some("x".into()), definition: coding(), models: Default::default() }, Grant::Controller),
+        dependencies: BTreeSet::new(), initial_candidate: Some("x".into()), definition: coding(), models: Default::default(), tree: None }, Grant::Controller),
         Err(Refusal::Evidence), "a build makes its own candidate");
     log.try_run(start("ov-1", coding()), Grant::Controller).unwrap();
     assert_eq!(log.try_run(start("ov-1", coding()), Grant::Controller), Err(Refusal::Phase), "a run cannot start twice");

@@ -216,11 +216,14 @@ impl Exec {
         let tree = self.tree(binding);
         let EffectKind::Execute(kind) = &binding.effect.kind else { unreachable!() };
         match kind {
-            StageKind::Provision => {
-                let branch = format!("wf-{}", &digest(&(workspace, &binding.effect.item))[4..]);
-                crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await
-                    .map_err(|_| Error::Refused("configured worktree provisioning uncertain"))?;
-            }
+            StageKind::Provision => match &binding.effect.tree {
+                Some(named) => self.provision_named(workspace, binding, named).await?,
+                None => {
+                    let branch = format!("wf-{}", &digest(&(workspace, &binding.effect.item))[4..]);
+                    crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await
+                        .map_err(|_| Error::Refused("configured worktree provisioning uncertain"))?;
+                }
+            },
             StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::Route =>
                 return self.execute_verb(binding, kind, cancel).await,
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
@@ -294,7 +297,8 @@ impl Exec {
         let candidate = self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
         if !sha(&candidate) { return Err(Error::Refused("invalid candidate SHA")); }
         let branch = self.git_recorded(binding, &tree, &["symbolic-ref", "HEAD"]).await?;
-        if branch != format!("refs/heads/wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]) {
+        let owned = binding.effect.tree.as_ref().map_or_else(|| format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]), |t| t.branch.clone());
+        if branch != format!("refs/heads/{owned}") {
             return Err(Error::Refused("worktree branch is not owned by this item"));
         }
         Ok(candidate)

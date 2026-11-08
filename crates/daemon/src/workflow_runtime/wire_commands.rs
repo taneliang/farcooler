@@ -12,7 +12,12 @@ impl CommandHandle {
     }
 }
 impl Runtime {
+    #[cfg(test)]
     pub(super) fn wire_command(&self, workspace: &str, principal: &str, action: Action) -> Result<serde_json::Value> {
+        self.wire_command_with(workspace, principal, action, None)
+    }
+    /// `tree` is what `prepare_start` resolved for a Start that names a worktree (ov-967).
+    pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, action: Action, tree: Option<RunTree>) -> Result<serde_json::Value> {
         let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         if matches!(action, Action::Get) {
@@ -124,14 +129,17 @@ impl Runtime {
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                     }
                 }
-                Action::Start { item, run, pin, start_pin, models, .. } => {
+                Action::Start { item, run, pin, start_pin, models, worktree, .. } => {
                     let configuration = self.store.workflow_configuration(workspace)?.filter(|c| &c.pin == start_pin);
                     match configuration {
                         Some(configuration) if state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) => {
                             self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
+                            if worktree.as_ref().map(|w| (&w.name, &w.branch)) != tree.as_ref().map(|t| (&t.name, &t.branch)) {
+                                return Err(Error::Refused("a named worktree is prepared by the runner before Start"));
+                            }
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| start_pin.clone());
                             let input = input(Command::Start { item:item.clone(),definition:configuration.definition,
-                                policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:models.clone() },Grant::Controller);
+                                policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:models.clone(),tree:tree.clone() },Grant::Controller);
                             self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                         }
                         _ => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
@@ -222,7 +230,7 @@ mod tests {
         let definition = coding_definition(false); let start_pin = definition.pin();
         ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None,adapter:None,mutation:m("publish",state.revision,3),expected_pin:None,definition }).unwrap());
         let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
-        let start = |id,pin:&str| Action::Start { mutation:m(id,state.revision,4),item:"a".into(),run:item.run.clone(),pin:item.pin.clone(),start_pin:pin.into(),models:Default::default() };
+        let start = |id,pin:&str| Action::Start { mutation:m(id,state.revision,4),item:"a".into(),run:item.run.clone(),pin:item.pin.clone(),start_pin:pin.into(),models:Default::default(),worktree:None };
         let stale = runtime.wire_command("ws","orchestrator",start("wrong","wf1:other")).unwrap();
         assert!(stale.to_string().contains("Stale"),"{stale}");
         ok(&runtime.wire_command("ws","orchestrator",start("start",&start_pin)).unwrap());

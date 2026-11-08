@@ -2055,7 +2055,8 @@ pub struct Service {
     /// Never pruned. A `Mutex<()>` is two words, repositories are counted in
     /// tens, and a registry that removes entries has to prove nobody is waiting
     /// on the one it is removing.
-    repo_locks: std::sync::Mutex<std::collections::HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>,
+    /// Shared with the workflow runtime, which makes a run's named worktree under the same lock (ov-967).
+    repo_locks: crate::workflow_runtime::RepoLocks,
     /// Each followed agent pane's bracketed-paste record, for a tmux too old
     /// to report it (`paste_mode`).
     paste_modes: Arc<crate::paste_mode::Following>,
@@ -2178,7 +2179,7 @@ impl Service {
             gh_limit: Arc::new(tokio::sync::Semaphore::new(crate::stack::GH_MAX_CONCURRENT)),
             default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
-            repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
+            repo_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             paste_modes: Arc::new(crate::paste_mode::Following::new()),
             worker_seen: Default::default(),
         };
@@ -2577,6 +2578,12 @@ impl Service {
         let dir = self.root.join("worktrees");
         std::fs::create_dir_all(&dir).map_err(|_| DomainError::OperationFailed)?;
         Ok(dir)
+    }
+
+    /// What the workflow runtime needs to make a run's worktree one the app lists (ov-967).
+    pub(crate) fn worktree_host(&self) -> Result<crate::workflow_runtime::WorktreeHost> {
+        Ok(crate::workflow_runtime::WorktreeHost { dir: self.worktrees_dir()?, install_id: self.install_id.clone(),
+            locks: Arc::clone(&self.repo_locks) })
     }
 
     /// Where a worktree of this name goes, once it is known nothing is there.

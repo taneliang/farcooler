@@ -26,6 +26,7 @@ impl Service {
         let wake=self.workflow_notice_wake.clone();
         self.store.set_workflow_notice_waker(Some(std::sync::Arc::new(move||wake.notify_one())));
         runtime.notice_wake = Some(self.workflow_notice_wake.clone());
+        runtime.host = self.worktree_host().ok();
         let handle = runtime.command_handle(&runtime.controller())?;
         let (stop, signal) = watch::channel(false);
         let notices = tokio::spawn(crate::workflow_notices::run(self.store.clone(),self.inventory.clone(),self.workflow_notice_wake.clone(),signal.clone()));

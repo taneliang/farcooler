@@ -103,7 +103,7 @@ impl WorkflowCmd {
             Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
             Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation(),item,column }),
             Self::Move { workspace,item,to,run,pin,identity } => (workspace,Action::Move { mutation:identity.mutation(),item,run,pin,to }),
-            Self::Start { workspace,item,start_pin,run,pin,models,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)? }),
+            Self::Start { workspace,item,start_pin,run,pin,models,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,worktree:None }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
         })
     }

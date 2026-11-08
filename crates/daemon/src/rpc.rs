@@ -786,7 +786,7 @@ impl Rpc {
                 ).await?;
                 admission.permits(&action)?;
                 let value = handle.wire_command(admission, action).await
-                    .map_err(|_| DomainError::NotFound)?;
+                    .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:value.to_string() }))
             }
             "workflow.cutover" => {

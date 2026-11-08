@@ -48,7 +48,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
-                models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)? };
+                models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
@@ -219,7 +219,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
-                                grouped_in: None, models: BTreeMap::new() });
+                                grouped_in: None, models: BTreeMap::new(), tree: None });
                             gid
                         }
                     };
@@ -256,13 +256,14 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     // Each column is a run of its own, so a decision made in the last one cannot be replayed in this one.
                     if item.phase == Phase::WaitingApproval { item.run = run_id(&item, id, input); }
                 }
-                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, models, .. } => {
+                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, models, tree, .. } => {
                     controller(input)?;
                     if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval { return Err(Refusal::Phase); }
                     definition.validate()?;
                     if definition.is_ticket() { return Err(Refusal::Invalid); }
                     if !valid_id(resource) || !valid_id(policy_pin) || dependencies.len() > 128 { return Err(Refusal::Invalid); }
                     let picked = definition.picked_models(models).ok_or(Refusal::Invalid)?;
+                    if tree.as_ref().is_some_and(|t| !t.valid()) { return Err(Refusal::Invalid); }
                     if matches!(definition.stages[0].kind, StageKind::Tracker) != initial_candidate.is_some()
                         || initial_candidate.as_ref().is_some_and(|c| !valid_id(c))
                     { return Err(Refusal::Evidence); }
@@ -281,7 +282,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     item.candidate = initial_candidate.clone(); item.stage = 0; item.iteration = 0; item.attempt = 1;
                     item.phase = Phase::Blocked; item.run = String::new(); item.pending = None; item.last_evidence = None;
                     item.stopping = None; item.rework_history = Vec::new(); item.back_edges = BTreeMap::new(); item.retries = 0;
-                    item.models = picked;
+                    item.models = picked; item.tree = tree.clone();
                 }
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             }
@@ -443,7 +444,7 @@ fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mu
         definition_pin: item.pin.clone(), policy_pin: item.policy_pin.clone(),
         candidate: item.candidate.clone(), members: item.members.clone(), kind,
         operation: item.definition.stages[item.stage].operation.clone(), created_ms,
-        model: item.models.get(&item.definition.stages[item.stage].id).cloned() });
+        model: item.models.get(&item.definition.stages[item.stage].id).cloned(), tree: item.tree.clone() });
 }
 fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     if !valid_id(&e.candidate) || !valid_id(&e.manifest) || !valid_id(&e.receipt)

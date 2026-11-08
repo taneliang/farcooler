@@ -23,6 +23,8 @@ mod coding_pr;
 pub use coding::{CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
 mod wire_commands;
+mod named_tree;
+pub use named_tree::{RepoLocks, WorktreeHost};
 mod admission;
 pub(crate) use admission::Admission;
 #[cfg(test)]
@@ -40,6 +42,10 @@ pub enum Error {
     Encoding(#[from] serde_json::Error),
     #[error("runtime refused: {0}")]
     Refused(&'static str),
+    /// A refusal the caller can act on, said as the runner says it for a worktree (ov-967): a taken branch or
+    /// name, or one that isn't valid. Every other workflow error reaches the caller as not found.
+    #[error("runtime: {0}")]
+    Domain(farcooler_core::error::DomainError),
 }
 /// How many effects may run at once. Waiting on a person or on CI is not an effect.
 pub const DEFAULT_EFFECT_CAP: usize = 4;
@@ -125,6 +131,8 @@ pub struct Exec {
     /// When this copy was started, by the sweep's clock and by the monotonic one, so a wait measures
     /// its patience on the same clock its effect was created on.
     launched: Option<(i64, std::time::Instant)>,
+    /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
+    pub host: Option<WorktreeHost>,
 }
 impl Exec {
     /// The sweep's clock, moved on by the time this effect has been running.
@@ -274,7 +282,7 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
-            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None },
+            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -628,6 +636,7 @@ impl Runtime {
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
                     self.validate_wire_publication(&admission.workspace(), admission.principal(), &action).await?;
+                    let tree = self.prepare_start(&admission.workspace(), admission.principal(), &action).await?;
                     // No await separates final retained authority recheck from receipt/transaction.
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
@@ -635,7 +644,7 @@ impl Runtime {
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
                     } else {
-                        self.wire_command(&admission.workspace(), admission.principal(), *action)?
+                        self.wire_command_with(&admission.workspace(), admission.principal(), *action, tree)?
                     };
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);

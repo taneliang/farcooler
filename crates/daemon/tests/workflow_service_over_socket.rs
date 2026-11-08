@@ -405,5 +405,61 @@ async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfigura
     drop(link);host.close().await;
 }
 
+/// `call`, keeping a refusal the runner answers with an error instead of a receipt.
+async fn try_call(link:&mut Link, workspace:Uuid, action:Action) -> Result<serde_json::Value,String> {
+    let mut req=farcooler_transport::request(action.method());
+    req.target_resource_id=Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
+    req.payload=Some(request::Payload::WorkflowCommand(pb::WorkflowCommand {schema:1,json:serde_json::to_string(&action).unwrap()}));
+    match link.call(req).await { Ok(reply)=>match reply.value { Some(result::Value::WorkflowReply(reply))=>Ok(serde_json::from_str(&reply.json).unwrap()), other=>Err(format!("{other:?}")) },
+        Err(error)=>Err(error.to_string()) }
+}
+
+/// ov-967: a ticket started with a worktree and branch the orchestrator names runs in a worktree the app lists,
+/// claimed for the workspace, on that branch, from main as it is at Start (not as it was at publish). A branch
+/// that already exists is refused, and nothing is made.
+#[tokio::test]
+async fn workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at_start() {
+    if person_terminal("workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at_start").await { return; }
+    use farcooler_protocol::workflow_commands::NamedTree;
+    let (dir,config)=configured(false,"pass").await;
+    let host=Host::open(dir.path()).await; let workspace=host.workspace; let mut link=host.connect().await;
+    let definition=config.definition().unwrap();
+    let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    let ticket=host.service.store.create_task(workspace,"named",farcooler_store::models::Actor::User).unwrap();
+    host.service.track_tickets(Some(ticket.id)).await;
+    // Main moves on after publishing.
+    git(&config.repository,&["-c","user.name=Test","-c","user.email=test@localhost","-c","commit.gpgsign=false","commit","--allow-empty","-m","later"]).await.unwrap();
+    let main=git(&config.repository,&["rev-parse","HEAD"]).await.unwrap();
+    git(&config.repository,&["update-ref",&config.landing_ref,&main]).await.unwrap();
+    assert_ne!(main,config.base);
+    let existing=git(&config.repository,&["branch","--show-current"]).await.unwrap();
+    let start=|id:&str,snapshot:&serde_json::Value,branch:&str| { let item=&snapshot["state"]["items"][&ticket.key];
+        Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
+            run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+            worktree:Some(NamedTree { name:"phones-plan".into(),branch:branch.into() }) } };
+    let snapshot=get(&mut link,workspace).await;
+    let refused=try_call(&mut link,workspace,start("taken",&snapshot,&existing)).await;
+    assert!(refused.as_ref().is_err_and(|e| e.contains("already exists")),"{refused:?}");
+    let listed=|| host.service.store.list_worktrees_for_repository(host.service.store.get_workspace(workspace).unwrap().repository_id).unwrap();
+    assert!(!listed().iter().any(|w| w.worktree_path.ends_with("phones-plan")),"a refused Start makes nothing");
+    let snapshot=get(&mut link,workspace).await;
+    accepted(&call(&mut link,workspace,start("start",&snapshot,"e-liang/phones-plan")).await);
+    tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
+        let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+        if state.items.get(&ticket.key).is_some_and(|i| i.phase==Phase::Done) { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }}).await.unwrap();
+    let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+    let tree=state.items[&ticket.key].tree.clone().expect("the run records its tree");
+    assert_eq!((tree.name.as_str(),tree.branch.as_str(),tree.base.as_str()),("phones-plan","e-liang/phones-plan",main.as_str()),"main at Start");
+    let row=listed().into_iter().find(|w| w.worktree_path==tree.path).expect("the app lists it");
+    assert_eq!((row.branch.as_str(),row.workspace_id),("e-liang/phones-plan",Some(workspace)),"on the named branch, claimed for the workspace");
+    assert!(tree.path.contains("/state/worktrees/"),"where the app keeps worktrees, not the runtime's private root: {}",tree.path);
+    assert_eq!(git(Path::new(&tree.path),&["merge-base","HEAD",&main]).await.unwrap(),main,"built on main as it was at Start");
+    drop(link);host.close().await;
+}
+
 #[path = "workflow_service/safety.rs"]
 mod safety;

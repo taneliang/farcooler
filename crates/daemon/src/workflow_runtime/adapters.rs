@@ -93,7 +93,10 @@ impl Exec {
                     || !matches!(effect.kind, EffectKind::Execute(StageKind::Provision))
                 { return Err(Error::Refused("cannot repair an admitted or historical base")); }
             }
-            let base = if matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) {
+            let base = if let (EffectKind::Execute(StageKind::Provision), Some(tree)) = (&effect.kind, &effect.tree) {
+                // Main as it was at Start, which the run recorded (ov-967).
+                tree.base.clone()
+            } else if matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) {
                 git(&self.repository(), &["rev-parse", self.landing_ref()]).await?
             } else { self.base.clone() };
             // A crash while writing leaves only an ignored private temporary file.
@@ -127,6 +130,8 @@ impl Exec {
         durable(&self.journal_path(&journal.binding.effect), &serde_json::to_vec(journal)?)
     }
     pub(super) fn tree(&self, binding: &Binding) -> PathBuf {
+        // A worktree the orchestrator named at Start (ov-967), or the run's private one.
+        if let Some(tree) = &binding.effect.tree { return PathBuf::from(&tree.path); }
         self.root.join(format!("tree-{}", digest(&(&binding.workspace, &binding.effect.item))))
     }
     pub(super) async fn git_recorded(&self, binding: &Binding, tree: &Path, args: &[&str]) -> Result<String> {

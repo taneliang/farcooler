@@ -22,7 +22,7 @@ fn group(at: usize, phase: Phase, candidate: Option<&str>, members: &[&str]) -> 
         rework_history: vec![], back_edges: BTreeMap::new(), retries: 0, pushed: None,
         members: members.iter().map(|m| Member { item: (*m).into(), candidate: format!("cand-{m}") }).collect(),
         handed: vec![], since_ms: 0, wait_since: None,
-        group_of: Some(GroupOf { name: "landing".into(), pin: "pin".into() }), grouped_in: None, models: BTreeMap::new() }
+        group_of: Some(GroupOf { name: "landing".into(), pin: "pin".into() }), grouped_in: None, models: BTreeMap::new(), tree: None }
 }
 fn ci(sha: &str, status: CiStatus) -> CiRead {
     CiRead { subject: sha_subject(sha), sha: sha.into(), status, url: String::new(), jobs: vec![], fetched_at: 1, changed_at: 1, asked_at: 1 }

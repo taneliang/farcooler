@@ -66,6 +66,21 @@ pub struct Item {
     /// default (ov-966). Empty when the definition lists none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, String>,
+    /// The worktree the orchestrator named at Start, and main's commit then (ov-967). `None`: a private tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<RunTree>,
+}
+/// A run's worktree, named by the orchestrator at Start: one the app lists, on `branch`, made at `path` from
+/// `base`, which is main as it was at Start (ov-967).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunTree { pub name: String, pub branch: String, pub path: String, pub base: String }
+impl RunTree {
+    /// Bounded and plain. The runner checks the names as `worktree.create` does before it sends one.
+    pub fn valid(&self) -> bool {
+        let plain = |s: &str| !s.is_empty() && s.len() <= 256 && !s.contains('\0') && !s.bytes().any(|b| b.is_ascii_control());
+        plain(&self.name) && plain(&self.branch) && plain(&self.path) && self.path.starts_with('/')
+            && self.base.len() == 40 && self.base.bytes().all(|b| b.is_ascii_hexdigit())
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member { pub item: String, pub candidate: String }
@@ -149,7 +164,9 @@ pub enum Command {
     /// `models` picks a model for a build step, by step id, from the ones the definition lists (ov-966).
     Start { item: String, definition: Definition, policy_pin: String, resource: String,
         dependencies: BTreeSet<String>, initial_candidate: Option<String>,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")] models: BTreeMap<String, String> },
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")] models: BTreeMap<String, String>,
+        /// The worktree the run makes and works in (ov-967). `None` keeps the runtime's private tree.
+        #[serde(default, skip_serializing_if = "Option::is_none")] tree: Option<RunTree> },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,6 +200,9 @@ pub struct Effect {
     /// A build step's model, from the item's record (ov-966), so a launch reads it from the effect alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The item's named worktree (ov-967), so every step finds the tree from the effect alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<RunTree>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {
