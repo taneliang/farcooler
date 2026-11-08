@@ -117,7 +117,7 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? =
             listOf("item", "run", "definition_pin", "policy_pin", "candidate", "pending_effect", "iteration", "attempt", "fence", "reworks_remaining").forEach { key ->
                 run.text(key)?.let { Text("$key: $it") }
             }
-            if (onWatch != null) Button(onClick = onWatch) { Text("Watch Agent") }
+            if (onWatch != null) Button(onClick = onWatch) { Text("Watch agent") }
             run.value["latest_evidence"]?.takeUnless { it == JsonNull }?.jsonObject?.forEach { (key, value) -> Text("Evidence $key: ${value.jsonPrimitive.content}") }
             listOf("stage", "gate").forEach { key ->
                 run.value[key]?.takeUnless { it == JsonNull }?.jsonObject?.let { value ->
