@@ -30,9 +30,9 @@
 //!   The device must be bound to the owner (`owner_devices`, confirmed), and
 //!   its key vouched for with the owner present: approved by the Mac app with
 //!   Touch ID, or by a device of theirs already vouched for, with its own
-//!   step-up (`step_up_rpc::vouch_of`). A key trusted on the walk alone (the
-//!   CLI's `people approve`, the socket's `set_step_up_key` or enroll) signs
-//!   admin actions as before, and never a grant;
+//!   step-up (`step_up_rpc::vouch_of`). A key trusted with no vouch (by a
+//!   trusted device that isn't vouched for, or on the walk alone by a build
+//!   before ov-980) signs admin actions, and never a grant;
 //! - `cli`: anything else, the CLI in any terminal included.
 //!
 //! Only `app` and `device` grant.

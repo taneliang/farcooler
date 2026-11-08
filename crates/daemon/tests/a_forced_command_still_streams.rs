@@ -682,6 +682,12 @@ async fn start() -> Runner {
     // A daemon on the socket before the first connection, so the session sshd
     // starts takes the relay branch — the branch a real runner takes, and the
     // one where an attachment reaches the process that owns the tmux inventory.
+    //
+    // And the daemon reads the file sshd does, as a real runner's does: one
+    // with a `FARCOOLER_HOME` reads its own, and refuses a session naming a
+    // device it has no line for (ov-980, `sessions::admit_preamble`).
+    std::fs::create_dir_all(runtime.join("ssh")).expect("the daemon's ssh directory");
+    std::os::unix::fs::symlink(&authorized_keys, runtime.join("ssh").join("authorized_keys")).expect("the daemon's fence is sshd's");
     let daemon = listening_daemon_in(&runtime, &home).await;
     let sshd = Sshd { pid: await_sshd(&pid_file, port, &log).await };
 

@@ -410,9 +410,15 @@ async fn a_proposed_key_signs_nothing_until_it_is_approved() {
         payload: Some(request::Payload::ClientApproveStepUp(pb::ClientApproveStepUp { client_id: "phone-d".into(), code: code.into() })),
         ..Default::default()
     };
-    assert!(word(call(&r.socket(), approve("000000")).await).ends_with("wrong_code"), "the wrong digits");
+    // Dan's own other trusted device approves it, stepped up for it.
+    let pad = Device::new("pad-d", 23);
+    r.trust(&pad, ALG_DEVICE);
+    let by_pad = r.conn("pad-d");
+    let n = nonce(&by_pad).await;
+    assert!(word(call(&by_pad, pad.step(&r.pin, approve("000000"), &n)).await).ends_with("wrong_code"), "the wrong digits");
     assert!(!r.svc.store.step_up_key("phone-d").unwrap().unwrap().trusted);
-    call(&r.socket(), approve(&code)).await.expect("the runner's own socket approves");
+    let n = nonce(&by_pad).await;
+    call(&by_pad, pad.step(&r.pin, approve(&code), &n)).await.expect("Dan's trusted pad approves");
 
     let n = nonce(&conn).await;
     call(&conn, dan.step(&r.pin, remove_req("carol"), &n)).await.expect("an Admin removes a Viewer with a trusted key");
@@ -484,13 +490,91 @@ async fn a_pane_writes_and_approves_no_key() {
     let person = crate::test_support::Outside::a_person(dir.path(), 6592);
     let outside = factory(&svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
     call(&outside, set_key).await.expect("a person at the socket");
-    assert!(svc.store.step_up_key("phone-x").unwrap().unwrap().trusted, "the socket's key is trusted");
+    assert!(!svc.store.step_up_key("phone-x").unwrap().unwrap().trusted, "the socket's key is a proposal (ov-980)");
     let approve = Request {
         method: "client.approve_step_up".into(),
         payload: Some(request::Payload::ClientApproveStepUp(pb::ClientApproveStepUp { client_id: "phone-x".into(), code: code_of(ALG_DEVICE, &device.public()) })),
         ..Default::default()
     };
     assert!(word(call(&in_pane, approve).await).ends_with("person_only"), "an approval from a pane");
+}
+
+/// ov-980: a caller the walk takes for a person, on the runner's socket,
+/// trusts no key. Its key for another device is a proposal, its approval is
+/// refused `presence_needed` (only the Mac app with Touch ID, or a trusted
+/// device, approves), and a key its enroll carries is a proposal too. So the
+/// ov-974 review's chain ends with no trusted key: a made-up id, its own key
+/// and a preamble it wrote by hand take no admin action.
+#[tokio::test]
+async fn a_walk_only_caller_trusts_no_key() {
+    let r = runner().await;
+    let socket = r.socket();
+    let set_key = |id: &str, device: &Device| Request {
+        method: "client.set_step_up_key".into(),
+        payload: Some(request::Payload::ClientSetStepUpKey(pb::ClientSetStepUpKey { client_id: id.into(), key: Some(device.wire_key(ALG_DEVICE)) })),
+        ..Default::default()
+    };
+    let approve = |id: &str, device: &Device| Request {
+        method: "client.approve_step_up".into(),
+        payload: Some(request::Payload::ClientApproveStepUp(pb::ClientApproveStepUp { client_id: id.into(), code: code_of(ALG_DEVICE, &device.public()) })),
+        ..Default::default()
+    };
+
+    // The owner's own iPad, and an id nobody enrolled.
+    let ipad = Device::new("ipad-o", 41);
+    let made_up = Device::new("made-up-1", 42);
+    for device in [&ipad, &made_up] {
+        match call(&socket, set_key(device.id, device)).await.expect("a key from the socket") {
+            result::Value::StepUpKeyState(s) => assert_eq!(s.state, "proposed", "{}", device.id),
+            other => panic!("{other:?}"),
+        }
+        let refused = word(call(&socket, approve(device.id, device)).await);
+        assert!(refused.ends_with("presence_needed"), "{}: {refused}", device.id);
+        assert!(!r.svc.store.step_up_key(device.id).unwrap().unwrap().trusted, "{}", device.id);
+    }
+
+    // An enroll from the socket carrying a key: the line, and a proposal.
+    let fresh = Device::new("new-o", 43);
+    call(&socket, enroll_req(61, "new-o", Scope::Control, false, Some(fresh.wire_key(ALG_DEVICE)))).await.expect("the socket enrolls");
+    assert!(!r.svc.store.step_up_key("new-o").unwrap().unwrap().trusted, "an enroll's key from the socket");
+
+    // The chain: the made-up id's own connection, served as if its preamble
+    // were admitted (it isn't: `an_unknown_device_gets_no_session`). Its key
+    // is a proposal, and signs nothing.
+    let conn = r.conn(made_up.id);
+    let n = nonce(&conn).await;
+    let untrusted = word(call(&conn, made_up.step(&r.pin, revoke_req("pad-b", false), &n)).await);
+    assert!(untrusted.ends_with("key_untrusted"), "{untrusted}");
+    assert!(lines(&r).contains(&"pad-b".to_string()), "Bob's pad is still there");
+}
+
+/// ov-980: a session whose preamble names a device id this runner has no
+/// record of is refused, so a made-up id is never anyone's, the owner's
+/// least. A real device always has one: a line of ours, Key A or Key B (a
+/// Mac's plain line, which the access migration doesn't bind), or, once its
+/// line is gone, a revoked mark (it hears its farewell) or a release (it
+/// learns it was released). The local socket names no device, and is served.
+#[tokio::test]
+async fn an_unknown_device_gets_no_session() {
+    use farcooler_transport::SessionPreamble;
+    let r = runner().await;
+    let said = |id: &str| SessionPreamble { scope: "host_admin".into(), client: Some(id.into()) };
+    let admitted = |id: &str| crate::sessions::admit_preamble(&r.svc, Some(&said(id))).map(|p| p.client_id);
+    assert_eq!(admitted("made-up-1"), None, "an id nobody enrolled");
+    assert_eq!(admitted("phone-o"), Some(Some("phone-o".into())), "the owner's phone, by its line");
+    assert!(crate::sessions::admit_preamble(&r.svc, None).is_some_and(|p| p.client_id.is_none()), "the local socket");
+
+    // A Mac's plain line, which the access migration leaves unbound.
+    call(&r.socket(), enroll_req(62, "mac-o", Scope::HostAdmin, true, None)).await.expect("a Key B line");
+    assert_eq!(admitted("mac-o"), Some(Some("mac-o".into())), "a Mac by its plain line");
+    // Revoked: its line is gone and it still hears its farewell.
+    call(&r.socket(), revoke_req("pad-b", false)).await.expect("revoked");
+    assert!(!lines(&r).contains(&"pad-b".to_string()));
+    assert_eq!(admitted("pad-b"), Some(Some("pad-b".into())), "a revoked device, to hear its farewell");
+    // Released with no line: it learns it was.
+    r.svc.store.set_member("erin", "Erin", &["phone-e".into()]).unwrap();
+    r.svc.store.remove_member("erin").unwrap();
+    assert_eq!(admitted("phone-e"), Some(Some("phone-e".into())), "a released device, to learn it was");
 }
 
 // MARK: - Who may step up

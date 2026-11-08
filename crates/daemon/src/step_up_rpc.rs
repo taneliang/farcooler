@@ -5,14 +5,18 @@
 //!
 //! - **A key is a proposal until a person says otherwise.** A device may
 //!   propose its own, never a browser (decision 2), and a proposal signs
-//!   nothing. The runner's own socket, outside a pane, writes a trusted key
-//!   for any device. An enroll stepped up by a trusted key writes the new
-//!   device's trusted (`person_access::enroll`).
-//! - **An approval names the key.** It carries the six digits the proposing
-//!   device shows (`step_up::code_of`), so the person approves the key in
-//!   their hand, not a label the proposer chose. It comes from the socket
-//!   outside a pane, or from another trusted device of the same person, with
-//!   its own step-up. A proposal older than ten minutes is refused.
+//!   nothing. The runner's own socket, outside a pane, proposes one for any
+//!   device: no more, since the process walk is all it knows of its caller
+//!   (ov-980). An enroll stepped up by a trusted key writes the new device's
+//!   trusted (`person_access::enroll`).
+//! - **An approval names the key, and needs someone present** (ov-980). It
+//!   carries the six digits the proposing device shows (`step_up::code_of`),
+//!   so the person approves the key in their hand, not a label the proposer
+//!   chose. It comes from the Mac app on the socket, with Touch ID or the
+//!   login password over this approval, or from another trusted device of
+//!   the same person, with its own step-up. Anything else on the socket, the
+//!   CLI's `people approve` included, is refused `presence_needed`. A
+//!   proposal older than ten minutes is refused.
 //! - **A vouch says the owner was there** (ov-974): an approval by the Mac
 //!   app with Touch ID, or by a device of the owner's already vouched for,
 //!   also vouches for the key ([`vouch_of`]). Only a vouched key signs a
@@ -70,10 +74,13 @@ pub async fn set_key(svc: &Service, peer: &Peer, caller_pid: Option<i32>, p: pb:
             tracing::info!("recorded the Mac app's step-up key");
             return Ok(state(step_up::LOCAL_APP, &row));
         }
-        // The runner's own socket, outside a pane: trusted at once.
+        // The runner's own socket, outside a pane: a proposal, like any
+        // other (ov-980). The walk is all the socket knows of its caller, and
+        // `script` or `ssh localhost` gets past it, so a key is trusted only
+        // by an approval with someone present.
         None => {
             crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?;
-            (p.client_id.trim().to_string(), true)
+            (p.client_id.trim().to_string(), false)
         }
         // A device proposes its own, and only its own.
         Some(own) => {
@@ -99,8 +106,18 @@ pub async fn set_key(svc: &Service, peer: &Peer, caller_pid: Option<i32>, p: pb:
 /// `client.approve_step_up`: trust `p.client_id`'s proposed key, given its code.
 pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, stepped: Option<&Stepped>, p: pb::ClientApproveStepUp) -> Result<result::Value> {
     let target = p.client_id.trim();
+    let vouched = vouch_of(&svc.store, peer, caller_pid, stepped, &crate::caller_seat::is_own_app)?;
     match peer.client_id.as_deref() {
-        None => crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?,
+        // On the socket only the Mac app approves, with its own key's step-up
+        // over this approval: Touch ID or the login password (ov-980). The
+        // CLI's `people approve` passes the walk alone, and is refused.
+        None => {
+            crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?;
+            if vouched.is_none() {
+                tracing::warn!(device = target, "refused: an approval on the socket with nobody present");
+                return Err(DomainError::Conflict { what: "presence_needed" });
+            }
+        }
         Some(approver) => {
             // Another trusted device of the same person, stepped up for this.
             if !step_up::may_admin(&svc.store, peer, stepped, "client.approve_step_up")? || approver == target {
@@ -118,7 +135,7 @@ pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, steppe
         return Err(DomainError::Conflict { what: "wrong_code" });
     }
     svc.store.trust_step_up_key(target, now_ms())?;
-    if let Some(by) = vouch_of(&svc.store, peer, caller_pid, stepped, &crate::caller_seat::is_own_app)? {
+    if let Some(by) = vouched {
         svc.store.vouch_step_up_key(target, &by)?;
         tracing::info!(device = target, by = %by, "a step-up key was vouched for with its owner present");
     }
@@ -132,8 +149,7 @@ pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, steppe
 ///
 /// - On the socket, the Mac app, by its code signature and its own key's
 ///   step-up over this approval, which asks for Touch ID or the login
-///   password. The CLI's `people approve` passes the walk and trusts a key,
-///   and vouches for none.
+///   password. Nothing else on the socket approves at all (ov-980).
 /// - On a device's line, a device bound to the owner whose own key is
 ///   vouched for, stepped up for this approval.
 ///

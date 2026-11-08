@@ -26,7 +26,7 @@ use farcooler_daemon::{
     paths,
     rpc::RpcFactory,
     service::Service,
-    sessions::peer_from_preamble,
+    sessions::admit_preamble,
     watch::Watcher,
 };
 use farcooler_protocol::v1::Scope;
@@ -452,11 +452,14 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
             // Present but unreadable is a different matter, and refuses. See
             // `scope_from_word`.
             //
-            // Both rules live in `peer_from_preamble` rather than here, because
+            // The rules live in `sessions` rather than here, because
             // this is a binary: a test cannot call this closure, and the copy it
             // would have to write instead is a second answer about who a caller
             // is — asserted against, while the daemon uses the first one.
-            let peer = peer_from_preamble(preamble.as_ref())?;
+            //
+            // A device id this runner has no record of is refused too
+            // (ov-980, `admit_preamble`): any local process can write one.
+            let peer = admit_preamble(&service, preamble.as_ref())?;
             Some((
                 HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() },
                 // Which pane a local caller runs in is read from its pid, never
@@ -715,6 +718,18 @@ async fn serve_stdio_session() -> Result<(), i32> {
     // honest scope of what a revocation here can close: exactly this session.
     // A device with a session against the daemon on the socket is closed by
     // that daemon, and this process is only ever reached when there is none.
+    // A `--client` this runner has no record of is refused, as the socket
+    // refuses it (ov-980, `admit_preamble`): a plain line's session names its
+    // own, and so can any local process that runs this.
+    if let Some(device) = session.client.as_deref()
+        && !farcooler_daemon::sessions::is_known_device(&service, device)
+    {
+        tracing::warn!(device, "refused: a session naming a device this runner has no record of");
+        if let Err(sent) = farcooler_transport::refuse_stdio(farcooler_core::DomainError::NotYours { what: "not_yours" }).await {
+            tracing::debug!(error = %sent, "the session closed before it could be refused");
+        }
+        return Err(1);
+    }
     let stop = Arc::new(tokio::sync::Notify::new());
     let served = farcooler_transport::serve_stdio(
         cfg,

@@ -2,14 +2,15 @@
 //! section 3): the key it signs admin actions with, in its own table and never
 //! read back from the SSH line (B3).
 //!
-//! - **`trusted` or `proposed`.** Only the runner's socket, a stepped-up
-//!   enroll by a trusted key of the same person, or an approval writes a
-//!   trusted key. Every other key is a proposal, and a proposal signs nothing.
+//! - **`trusted` or `proposed`.** Only a stepped-up enroll by a trusted key of
+//!   the same person, or an approval with someone present (ov-980), writes a
+//!   trusted key, and the Mac app its own (`replace_step_up_key`). Every other
+//!   key is a proposal, and a proposal signs nothing.
 //! - **A proposal lives ten minutes** ([`PROPOSAL_MS`]): an approval after that
 //!   is refused, so a sheet left open on someone's Mac can't trust a key
 //!   proposed yesterday.
 //! - **One key per device.** A second is refused `key_exists`; rotating needs
-//!   the socket or a revoke and a new enroll, which clears the row.
+//!   a revoke and a new enroll, which clears the row.
 //! - **`sign_count`** is a WebAuthn passkey's counter, kept so a cloned
 //!   authenticator's lower count is refused ([`Store::use_sign_count`]).
 //! - Trusting a key bumps the generation of the person the device is bound
@@ -62,9 +63,9 @@ impl Store {
     }
 
     /// Record `device`'s key, `trusted` or proposed. A device with a trusted
-    /// key is refused `key_exists`: rotating needs the socket or a revoke and
-    /// a new enroll. A proposal is replaceable, by a new proposal or by the
-    /// socket's trusted key, because it signs nothing and expires after
+    /// key is refused `key_exists`: rotating needs a revoke and a new enroll.
+    /// A proposal is replaceable, by a new proposal or by a trusted key,
+    /// because it signs nothing and expires after
     /// [`PROPOSAL_MS`]; were it not, a device whose proposal went stale could
     /// never ask again. Bumps nothing: see the module.
     pub fn put_step_up_key(&self, device: &str, alg: &str, public_key: &[u8], trusted: bool, now_ms: i64) -> Result<()> {

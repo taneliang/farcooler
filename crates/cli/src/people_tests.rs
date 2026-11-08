@@ -268,7 +268,7 @@ async fn refusals_are_said_in_words() {
     let mut link = Runner { refuse: Some((pb::ErrorCode::ResourceConflict, "rep_running")), ..runner() };
     let refused = rep_on(&mut link, rep_args("farcooler rep alice"), Some(WS.to_string()), false).await.unwrap_err();
     assert_eq!(refused.to_string(), "their rep is already running on this board");
-    for what in ["handle", "member_name", "device_taken", "rep_running", "command_preset", "device"] {
+    for what in ["handle", "member_name", "device_taken", "rep_running", "command_preset", "device", "presence_needed"] {
         let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
         assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
     }

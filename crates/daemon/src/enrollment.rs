@@ -252,17 +252,19 @@ async fn enroll_held(
     // (ov-856): the enroller is the owner's own device or this runner's socket.
     let member_enrolls = by_member.is_some();
     // The new device's step-up key (ov-856, B3): trusted from this write only
-    // when the runner's own socket asked, or a device that stepped up for this
-    // enroll did and the device is its own person's. Every other key is a
-    // proposal, and waits for an approval.
+    // when a device that stepped up for this enroll asked, with its own
+    // trusted key, and the device is its own person's. Every other key is a
+    // proposal, and waits for an approval with someone present: the runner's
+    // socket's too, since the process walk is all it knows of its caller
+    // (ov-980).
     let step_key = request.step_up_key.clone().map(|key| {
-        let trusted = caller.as_ref().is_none_or(|c| c.session.client_id().is_none() || (c.stepped_up.is_some() && !request.for_teammate));
+        let trusted = caller.as_ref().is_some_and(|c| c.session.client_id().is_some() && c.stepped_up.is_some() && !request.for_teammate);
         (key, trusted)
     });
     let owner_binds = by_member.is_none() && !request.for_teammate;
     // And vouched for (ov-974, B1) when the owner's own vouched device stepped
     // up for this enroll: the owner was there, so the new key may sign a
-    // cutover grant. The socket's enroll trusts a key and vouches for none.
+    // cutover grant.
     let vouched_by = caller.as_ref().and_then(|c| c.stepped_up.as_ref())
         .filter(|s| owner_binds && s.method == "client.enroll" && !s.browser && crate::cutover_grant::owners_vouched_device(&store, &s.device))
         .map(|s| s.device.clone());

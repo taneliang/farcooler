@@ -44,6 +44,44 @@ pub fn peer_from_preamble(preamble: Option<&SessionPreamble>) -> Option<Peer> {
     }
 }
 
+/// [`peer_from_preamble`], refusing a preamble that names a device this runner
+/// has no record of (ov-980).
+///
+/// Any local process can write a preamble, and before this one naming a
+/// made-up id was the owner's: bound to no member and never released. A real
+/// device always has a record: a line naming it in `authorized_keys`, Key A
+/// or Key B, however its options were edited (`farcooler_fence::names_client`),
+/// or, once it's gone, a revoked mark (so it still hears its farewell,
+/// ov-820) or a release (so it learns it was released, ov-758). A preamble
+/// naming none of these is refused, like one with a scope word this daemon
+/// doesn't have. A file that can't be read refuses nobody: sshd reads the
+/// same file, and a device must never be locked out by a read this daemon
+/// couldn't make.
+pub fn admit_preamble(svc: &crate::service::Service, preamble: Option<&SessionPreamble>) -> Option<Peer> {
+    let peer = peer_from_preamble(preamble)?;
+    match peer.client_id.as_deref() {
+        Some(device) if !is_known_device(svc, device) => {
+            tracing::warn!(device, "refused: a session naming a device this runner has no record of");
+            None
+        }
+        _ => Some(peer),
+    }
+}
+
+/// Whether `device` is one this runner has a record of: see [`admit_preamble`].
+pub fn is_known_device(svc: &crate::service::Service, device: &str) -> bool {
+    match std::fs::read_to_string(svc.authorized_keys()) {
+        Ok(text) if farcooler_fence::names_client(&text, device) => return true,
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            tracing::warn!(device, error = %err, "couldn't read authorized_keys to place a device; admitting it");
+            return true;
+        }
+    }
+    svc.sessions().is_marked(device) || svc.store.device_released(device).unwrap_or(true)
+}
+
 /// Every connection this daemon is currently serving.
 ///
 /// One per `Service`, because that is the unit a runner's live state belongs

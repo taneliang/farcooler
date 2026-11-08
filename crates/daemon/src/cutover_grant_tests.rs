@@ -239,10 +239,11 @@ fn approve(device: &str, code: &str) -> pb::Request {
 
 /// B1 of the second review: a process the walk takes for a person puts a key
 /// on the socket for an id nobody enrolled, names that id in a preamble of
-/// its own, and signs the grant. Trusted, but no device of the owner's and
-/// vouched for by nobody: refused, and nothing grants. The same for a key
-/// trusted on the walk under the owner's own phone's id, and for a vouched
-/// key on a device nobody bound to the owner.
+/// its own, and signs the grant. The key is a proposal now, and the preamble
+/// refused (ov-980). Even with a key trusted behind the runner's back, as an
+/// older build trusted it, and vouched for: no device of the owner's, so
+/// refused `key_unvouched`. The same for a key trusted on the walk under the
+/// owner's own phone's id. Nothing grants.
 #[tokio::test]
 async fn a_key_trusted_on_the_walk_alone_never_grants() {
     use crate::rpc_people::tests::{call, factory};
@@ -252,8 +253,12 @@ async fn a_key_trusted_on_the_walk_alone_never_grants() {
     let made_up = Device::new("made-up-1", 31);
     let put = pb::Request { method: "client.set_step_up_key".into(), payload: Some(pb::request::Payload::ClientSetStepUpKey(pb::ClientSetStepUpKey {
         client_id: made_up.id.into(), key: Some(made_up.wire_key(crate::step_up::ALG_DEVICE)) })), ..Default::default() };
-    call(&r.socket(), put).await.expect("the socket outside a pane trusts a key, as before");
-    assert!(r.svc.store.step_up_key(made_up.id).unwrap().unwrap().trusted);
+    call(&r.socket(), put).await.expect("the socket outside a pane proposes a key");
+    assert!(!r.svc.store.step_up_key(made_up.id).unwrap().unwrap().trusted, "a proposal (ov-980)");
+    // Trusted behind the runner's back, as a build before ov-980 trusted it.
+    r.trust(&made_up, crate::step_up::ALG_DEVICE);
+    // A connection naming it is refused (ov-980, `sessions::admit_preamble`);
+    // were one served, its grant is refused all the same.
     for scope in [farcooler_protocol::v1::Scope::HostAdmin, farcooler_protocol::v1::Scope::Control] {
         let conn = factory(&r.svc, Some(made_up.id), scope);
         let n = nonce(&conn).await;
@@ -299,8 +304,8 @@ async fn a_vouched_device_vouches_for_the_owners_next() {
     call(&conn, first.step(&r.pin, approve(second.id, &code), &n)).await.expect("an approval by a trusted device");
     assert!(r.svc.store.step_up_key(second.id).unwrap().unwrap().trusted);
     assert_eq!(r.svc.store.step_up_vouched_by(second.id).unwrap(), None, "approved by an unvouched device");
-    // Nor does the socket's, the CLI's `people approve`.
-    call(&r.socket(), approve(second.id, &code)).await.expect("the socket approves a trusted key again");
+    // Nor does the socket's, the CLI's `people approve`: refused (ov-980).
+    assert!(crate::step_up::tests::word(call(&r.socket(), approve(second.id, &code)).await).ends_with("presence_needed"));
     assert_eq!(r.svc.store.step_up_vouched_by(second.id).unwrap(), None, "approved on the walk");
 
     // Once the first is vouched for, approving the second (trusted already) vouches for it.
@@ -352,7 +357,8 @@ async fn an_enroll_by_a_vouched_phone_vouches_for_the_new_key() {
     let n = nonce(&conn).await;
     call(&conn, phone.step(&r.pin, enroll_req(42, c.id, Scope::Control, false, Some(c.wire_key(crate::step_up::ALG_DEVICE))), &n)).await.expect("a vouched phone's enroll");
     let by = |id| r.svc.store.step_up_vouched_by(id).unwrap();
-    assert!([a.id, b.id, c.id].iter().all(|id| r.svc.store.step_up_key(id).unwrap().unwrap().trusted));
+    let trusted = |id| r.svc.store.step_up_key(id).unwrap().unwrap().trusted;
+    assert_eq!((trusted(a.id), trusted(b.id), trusted(c.id)), (true, false, true), "the socket's enroll proposes (ov-980)");
     assert_eq!((by(a.id), by(b.id), by(c.id).as_deref()), (None, None, Some(phone.id)));
 }
 
