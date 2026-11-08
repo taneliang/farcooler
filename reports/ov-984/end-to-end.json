@@ -1,0 +1,27 @@
+{
+ "before": {
+  "artifacts": false,
+  "attempt": null,
+  "authority": null,
+  "baseline": null,
+  "crash_journal": false,
+  "open_elsewhere": [],
+  "ordinary_startup": "refused: cutover refused: pre-cutover schema requires the explicit authenticated cutover",
+  "schema": 1
+ },
+ "swift": "\u25c7 Test run started.\n\u21b3 Testing Library Version: 2084\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite RunnerUpgradeEndToEnd started.\n\u25c7 Test theButtonFinishesARealUpgrade() started.\n\u2714 Test theButtonFinishesARealUpgrade() passed after 3.356 seconds.\n\u2714 Suite RunnerUpgradeEndToEnd passed after 3.357 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 3.357 seconds.\n\nEXIT 0\n",
+ "after": {
+  "artifacts": false,
+  "attempt": null,
+  "authority": {
+   "incarnation": 1,
+   "manifest": "wf1:e631ffa415332890d73e8a986cc22fb465bc5706e9e3b4e83ce28a46f116cab6",
+   "phase": "released"
+  },
+  "baseline": null,
+  "crash_journal": false,
+  "open_elsewhere": [],
+  "ordinary_startup": "Existing",
+  "schema": 1
+ }
+}

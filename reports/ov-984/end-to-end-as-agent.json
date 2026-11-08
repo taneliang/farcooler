@@ -1,0 +1,23 @@
+{
+ "before": {
+  "artifacts": false,
+  "attempt": null,
+  "authority": null,
+  "baseline": null,
+  "crash_journal": false,
+  "open_elsewhere": [],
+  "ordinary_startup": "refused: cutover refused: pre-cutover schema requires the explicit authenticated cutover",
+  "schema": 1
+ },
+ "agent": "rade() recorded an issue at RunnerUpgradeEndToEnd.swift:23:9: Expectation failed: upgrade.phase == .done\n\u21b3 .failed(Far_Cooler.RunnerUpgrade.Failed.step(Far_Cooler.RunnerUpgrade.Step.prepare), detail: \"error: scope denied: person required\\ncode: scope-denied\")\n\u21b3 upgrade.phase == .done \u2192 false\n\u21b3   upgrade.phase \u2192 .failed(Far_Cooler.RunnerUpgrade.Failed.step(Far_Cooler.RunnerUpgrade.Step.prepare), detail: \"error: scope denied: person required\\ncode: scope-denied\")\n\u21b3     failed \u2192 (Far_Cooler.RunnerUpgrade.Failed.step(Far_Cooler.RunnerUpgrade.Step.prepare), detail: \"error: scope denied: person required\\ncode: scope-denied\")\n\u21b3       .0 \u2192 .step(Far_Cooler.RunnerUpgrade.Step.prepare)\n\u21b3         step \u2192 .prepare\n\u21b3       detail \u2192 \"error: scope denied: person required\n        code: scope-denied\"\n\u2718 Test theButtonFinishesARealUpgrade() failed after 0.020 seconds with 1 issue.\n\u2718 Suite RunnerUpgradeEndToEnd failed after 0.020 seconds with 1 issue.\n\u21b3 /// Opt-in (FARCOOLER_UPGRADE_E2E, set by `reports/ov-984/end-to-end.py`): the\n\u21b3 /// recovery screen's model runs the real CLI against a real scratch runner on\n\u21b3 /// schema 60, serving recovery, from Prepare to Finish. Only Touch ID stands\n\u21b3 /// in: a test can't put a finger on the sensor. The harness runs this test as\n\u21b3 /// a person outside every pane, which the app is to the runner's seat check.\n\u2718 Test run with 1 test in 1 suite failed after 0.020 seconds with 1 issue.\nNote: Some test targets reported failures:\n  - CeremonyTests (Swift Testing)\n",
+ "after-agent": {
+  "artifacts": false,
+  "attempt": null,
+  "authority": null,
+  "baseline": null,
+  "crash_journal": false,
+  "open_elsewhere": [],
+  "ordinary_startup": "refused: cutover refused: pre-cutover schema requires the explicit authenticated cutover",
+  "schema": 1
+ }
+}

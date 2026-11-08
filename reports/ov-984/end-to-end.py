@@ -48,6 +48,10 @@ def up():
         assert time.time() < end and d.poll() is None
         time.sleep(.02)
     return d
+# --as-agent: the same test run from the agent's own shell (this one, under
+# claude). The runner's seat check must refuse it at the first step, with the
+# data untouched: the button is the person's, not a way in for an agent.
+as_agent = '--as-agent' in sys.argv
 seen = {}
 d = None
 try:
@@ -55,9 +59,19 @@ try:
     d = up()
     seen['before'] = inspect()
     assert seen['before']['ordinary_startup'].startswith('refused'), seen['before']
-    swift = person(['/usr/bin/xcrun', 'swift', 'test', '--skip-build', '--filter', 'RunnerUpgradeEndToEnd'],
-                   extra={'PATH': os.environ['PATH'], 'HOME': os.environ['HOME'], 'FARCOOLER_BIN': str(cli), 'FARCOOLER_UPGRADE_E2E': '1'},
-                   cwd=str(root / 'apps/macos'))
+    argv = ['/usr/bin/xcrun', 'swift', 'test', '--skip-build', '--filter', 'RunnerUpgradeEndToEnd']
+    extra = {'PATH': os.environ['PATH'], 'HOME': os.environ['HOME'], 'FARCOOLER_BIN': str(cli), 'FARCOOLER_UPGRADE_E2E': '1'}
+    if as_agent:
+        r = subprocess.run(argv, env={**env, **extra}, cwd=str(root / 'apps/macos'), capture_output=True, text=True)
+        seen['agent'] = (r.stdout + r.stderr)[-1500:]
+        assert r.returncode != 0 and 'theButtonFinishesARealUpgrade' in seen['agent'], seen['agent']
+        assert d.poll() is None, 'recovery still serving'
+        seen['after-agent'] = inspect()
+        assert seen['after-agent']['authority'] == seen['before']['authority'] and not seen['after-agent']['artifacts'], seen['after-agent']
+        print(seen['agent'][-800:])
+        print('ov-984 as an agent: refused at the first step, data untouched')
+        sys.exit(0)
+    swift = person(argv, extra=extra, cwd=str(root / 'apps/macos'))
     seen['swift'] = swift[-1500:]
     print(swift[-1500:], flush=True)
     assert 'EXIT 0' in swift and 'theButtonFinishesARealUpgrade' in swift and 'passed' in swift, 'the model run failed'
@@ -74,5 +88,5 @@ finally:
         except Exception: d.kill()
     install = home / 'install-id'
     if install.exists(): subprocess.run(['/usr/bin/env', 'tmux', '-L', 'farcooler-' + install.read_text().strip(), 'kill-server'], env=env, capture_output=True)
-    json.dump(seen, open(root / 'reports/ov-984/end-to-end.json', 'w'), indent=1, default=str)
+    json.dump(seen, open(root / ('reports/ov-984/end-to-end%s.json' % ('-as-agent' if as_agent else '')), 'w'), indent=1, default=str)
     shutil.rmtree(base, ignore_errors=True)
