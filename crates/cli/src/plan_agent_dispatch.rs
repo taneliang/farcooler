@@ -49,9 +49,10 @@ pub(crate) struct AgentDispatchArgs {
     /// What the new worktree's branch starts from.
     #[arg(long, default_value = "HEAD")]
     base: String,
-    /// The agent to start: claude, codex or cursor, with an optional `:model`.
-    #[arg(long, default_value = "claude")]
-    harness: String,
+    /// The agent to start: claude, codex or cursor, with an optional `:model`. Claude when left out. On tracked
+    /// tickets it picks the build step's model from the ones the published workflow lists (ov-966).
+    #[arg(long)]
+    harness: Option<String>,
     /// What it's for, for people: "Phones show the plan".
     #[arg(long)]
     title: Option<String>,
@@ -82,12 +83,14 @@ pub(super) async fn dispatch<L: DispatchLink>(
     let Some((first, rest)) = tickets.split_first() else { return Err("Name a ticket with --ticket.".into()) };
     // A ticket the engine tracks is started by the engine (ov-962); only the rest open a pane.
     let role_name = super::role_word(args.role.wire() as i32);
-    // The flags a start can't honor, named if the tickets are tracked (`--base` and `--harness` count when changed).
+    // The flags a start can't honor, named if the tickets are tracked (`--base` counts when changed).
     let dropped: Vec<&str> = [
         ("--worktree", args.worktree.is_some()), ("--new", args.new.is_some()), ("--branch", args.branch.is_some()),
-        ("--base", args.base != "HEAD"), ("--harness", args.harness != "claude"), ("--title", args.title.is_some()), ("--again", args.again),
+        ("--base", args.base != "HEAD"), ("--title", args.title.is_some()), ("--again", args.again),
     ].into_iter().filter(|(_, given)| *given).map(|(flag, _)| flag).collect();
-    let unanswered = match super::start::through_engine(link, &tickets, args.role.wire() == pb::AgentRole::Builder, &role_name.to_lowercase(), json, &dropped).await? {
+    let asked = super::start::Asked { builder: args.role.wire() == pb::AgentRole::Builder, role: &role_name.to_lowercase(), dropped: &dropped,
+        harness: args.harness.as_deref() };
+    let unanswered = match super::start::through_engine(link, &tickets, asked, json).await? {
         super::start::Engine::Started(said) => return Ok(said),
         super::start::Engine::Pane { unanswered } => unanswered,
     };
@@ -104,7 +107,7 @@ pub(super) async fn dispatch<L: DispatchLink>(
     let asked = crate::tasks::Dispatch {
         task: first,
         lane: worktree,
-        preset: &args.harness,
+        preset: args.harness.as_deref().unwrap_or("claude"),
         actor: actor_for(Some(actor))?,
         again: args.again,
         agent: Some(agent),

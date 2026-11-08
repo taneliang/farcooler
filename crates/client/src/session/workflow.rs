@@ -26,6 +26,9 @@ pub struct WorkflowCommandIdentity { pub id: String, pub sequence: u64, pub revi
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreparedWorkflowAction { pub schema: u32, pub workspace: Uuid, pub json: String }
+// An intent carries a workflow command, which grew with Start's model picks (ov-966). The result is made
+// once per command and matched by value, so boxing it would only cost the callers.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum PreparedWorkflowResult {

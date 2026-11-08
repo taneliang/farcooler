@@ -326,7 +326,9 @@ async fn nothing_starts_that_the_engine_cannot_take() {
     let mut link = with_engine(&mixed);
     link.refuse_start = Some("Resource");
     let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
-    assert!(said.starts_with("The engine didn't start ov-2: something else holds what it needs."), "{said}");
+    assert!(said.starts_with("The engine didn't start ov-2: something else holds what it needs, or a subagent still works it or it has a block."), "{said}");
+    // What to do about the second (ov-965): the commands that settle each.
+    assert!(said.contains("`farcooler agent end <agent> --verdict stopped`") && said.contains("`farcooler task block ov-2 --on <key> --clear`"), "{said}");
     for m in ["terminal.create", "worktree.create"] {
         assert!(!link.methods().contains(&m), "{:?}", link.methods());
     }
@@ -337,8 +339,8 @@ async fn nothing_starts_that_the_engine_cannot_take() {
 async fn a_flag_the_engine_would_drop_is_named() {
     let held = [("ov-2", "ticket/v1", "WaitingApproval")];
     let mut link = with_engine(&held);
-    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane --harness claude:sonnet").await.unwrap_err().to_string();
-    assert!(said.contains("--worktree and --harness would be ignored"), "{said}");
+    let said = say(&mut link, "--role builder --ticket ov-2 --worktree lane --title Phones").await.unwrap_err().to_string();
+    assert!(said.contains("--worktree and --title would be ignored"), "{said}");
     assert!(said.ends_with("Leave them out and dispatch again."), "{said}");
     assert!(starts(&link).is_empty(), "{:?}", link.methods());
     let mut link = with_engine(&held);
@@ -403,4 +405,46 @@ async fn task_dispatch_makes_no_worktree_when_the_engine_cannot_be_asked() {
     let said = super::super::start::refuse_tracked(&mut link, &items()[1], true).await.unwrap_err().to_string();
     assert!(said.contains("no worktree was made"), "{said}");
     super::super::start::refuse_tracked(&mut link, &items()[1], false).await.unwrap();
+}
+
+/// ov-966: the published workflow with a build step that lists the models it may run with.
+fn with_models(held: &[(&str, &str, &str)], models: serde_json::Value) -> Runner {
+    let mut link = with_engine(held);
+    link.engine.as_mut().unwrap()["configuration"]["definition"] = json!({"models": models});
+    link
+}
+
+/// ov-966: `--harness` on tracked tickets is the orchestrator's model pick for the build step, sent with each
+/// Start. Left out, nothing is picked and each run takes the step's default.
+#[tokio::test]
+async fn harness_on_tracked_tickets_picks_the_build_steps_model() {
+    let held = [("ov-2", "ticket/v1", "WaitingApproval"), ("ov-3", "ticket/v1", "WaitingApproval")];
+    let mut link = with_models(&held, json!({"build": ["claude:opus", "codex:gpt-5.5"]}));
+    say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --harness codex:gpt-5.5").await.unwrap();
+    let sent = starts(&link);
+    assert_eq!(sent.len(), 2);
+    assert!(sent.iter().all(|s| s["models"] == json!({"build": "codex:gpt-5.5"})), "{sent:?}");
+    let mut link = with_models(&held, json!({"build": ["claude:opus", "codex:gpt-5.5"]}));
+    say(&mut link, "--role builder --ticket ov-2").await.unwrap();
+    assert!(starts(&link)[0].get("models").is_none(), "no pick, the default: {:?}", starts(&link));
+}
+
+/// A pick the workflow can't take is refused before anything starts, with what to do instead.
+#[tokio::test]
+async fn a_harness_the_workflow_cannot_take_is_refused_with_what_to_do() {
+    let held = [("ov-2", "ticket/v1", "WaitingApproval")];
+    let cases = [
+        (json!({"build": ["claude:opus", "codex:gpt-5.5"]}), "--harness cursor",
+            "The published workflow's build step runs claude:opus or codex:gpt-5.5, not cursor. Pick one of those, or leave --harness out for claude:opus."),
+        (serde_json::Value::Null, "--harness codex",
+            "The published workflow doesn't let the orchestrator pick a model, so --harness would be ignored. Leave it out, or publish a workflow whose build step lists the models it may run with."),
+        (json!({"build": ["claude:opus"], "fix": ["codex"]}), "--harness codex",
+            "The published workflow lists models for more than one step (build and fix). Start each ticket with `farcooler workflow start --model <step>=<model>`."),
+    ];
+    for (models, flag, words) in cases {
+        let mut link = with_models(&held, models);
+        let said = say(&mut link, &format!("--role builder --ticket ov-2 {flag}")).await.unwrap_err().to_string();
+        assert_eq!(said, words);
+        assert!(starts(&link).is_empty(), "{:?}", link.methods());
+    }
 }

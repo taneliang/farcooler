@@ -75,7 +75,10 @@ pub enum WorkflowCmd {
     /// Move a tracked ticket to a column: backlog, todo, doing, review or decision; done or cancelled close it.
     Move { workspace:Uuid,item:String,#[arg(long)] to:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Start a run on a tracked ticket under the published definition `--start-pin`.
-    Start { workspace:Uuid,item:String,#[arg(long)] start_pin:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    Start { workspace:Uuid,item:String,#[arg(long)] start_pin:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+        /// A build step's model, as `<step>=<model>` (`build=codex:gpt-5.5`), from the ones the workflow lists. Once per
+        /// step; a step left out runs with its default.
+        #[arg(long="model",value_name="STEP=MODEL")] models:Vec<String>,#[command(flatten)] identity:Identity },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -100,10 +103,21 @@ impl WorkflowCmd {
             Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
             Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation(),item,column }),
             Self::Move { workspace,item,to,run,pin,identity } => (workspace,Action::Move { mutation:identity.mutation(),item,run,pin,to }),
-            Self::Start { workspace,item,start_pin,run,pin,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:Default::default() }),
+            Self::Start { workspace,item,start_pin,run,pin,models,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)? }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
         })
     }
+}
+/// `<step>=<model>` pairs, each step once.
+fn picks(given:&[String]) -> Result<std::collections::BTreeMap<String,String>,Box<dyn std::error::Error>> {
+    let mut picks=std::collections::BTreeMap::new();
+    for pair in given {
+        let Some((step,model))=pair.split_once('=').filter(|(s,m)| !s.is_empty() && !m.is_empty()) else {
+            return Err(format!("--model takes <step>=<model>, such as build=codex:gpt-5.5, not {pair}.").into());
+        };
+        if picks.insert(step.to_string(),model.to_string()).is_some() { return Err(format!("--model names the {step} step twice. Pick one model for it.").into()); }
+    }
+    Ok(picks)
 }
 fn read_file(path:&std::path::Path) -> Result<Vec<u8>,Box<dyn std::error::Error>> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -176,6 +190,20 @@ mod tests {
                 assert_eq!(farcooler_protocol::workflow_commands::parse(&raw).unwrap(),action);
                 assert!(matches!(action,Action::Review{reason:Some(r),passed:false,mutation,..} if r==reason && mutation.revision==u64::MAX-1 && mutation.epoch==u64::MAX && mutation.sequence==u64::MAX));
             } else {assert!(result.is_err());}
+        }
+    }
+    /// ov-966: `--model <step>=<model>` picks a step's model at Start, once per step.
+    #[test]
+    fn workflow_start_takes_a_model_per_step() {
+        let args=["farcooler","workflow","start","00000000-0000-0000-0000-000000000000","ov-7","--start-pin","p","--run","run","--pin","pin",
+            "--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        let action=|extra:&[&str]| { let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(args.iter().chain(extra)).unwrap().command else {panic!()}; cmd.action() };
+        let Action::Start{models,..}=action(&["--model","build=codex:gpt-5.5"]).unwrap().1 else {panic!()};
+        assert_eq!(models,[("build".to_string(),"codex:gpt-5.5".to_string())].into());
+        let Action::Start{models,..}=action(&[]).unwrap().1 else {panic!()};
+        assert!(models.is_empty());
+        for bad in [&["--model","codex"][..],&["--model","build=a","--model","build=b"],&["--model","=codex"],&["--model","build="]] {
+            assert!(action(bad).is_err(),"{bad:?}");
         }
     }
     #[test]

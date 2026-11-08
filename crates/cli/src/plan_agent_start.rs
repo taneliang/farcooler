@@ -9,6 +9,7 @@ use farcooler_protocol::capability;
 use farcooler_protocol::v1::{self as pb, result};
 use farcooler_protocol::workflow_commands::{Action, Mutation};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 use super::{Failed, unreadable};
@@ -33,6 +34,8 @@ struct Snapshot {
     items: Value,
     /// Items that finished and left `items` (a closed ticket is here from the step after it closes).
     archive: Value,
+    /// The published workflow's build steps that list models, each with its list, the first being the default (ov-966).
+    models: Vec<(String, Vec<String>)>,
 }
 
 /// What `workflow get` said: the board's state, nothing held yet, or no answer at all (a seat the
@@ -63,6 +66,9 @@ fn read(reply: pb::Result) -> Option<Option<Snapshot>> {
         published: value.pointer("/configuration/pin").and_then(Value::as_str).map(String::from),
         items: state.get("items").cloned().unwrap_or(Value::Null),
         archive: state.get("archive").cloned().unwrap_or(Value::Null),
+        models: value.pointer("/configuration/definition/models").and_then(Value::as_object).map(|m| m.iter().map(|(step, list)| {
+            (step.clone(), list.as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect())
+        }).collect()).unwrap_or_default(),
     }))
 }
 
@@ -98,12 +104,16 @@ pub(super) enum Engine {
     Pane { unanswered: bool },
 }
 
-/// How the engine's refusal reads to the person who asked.
-fn refusal_words(refusal: &str) -> &'static str {
-    match refusal {
+/// How the engine's refusal reads to the person who asked. `key` is the ticket, for a command to run.
+fn refusal_words(refusal: &str, key: &str) -> String {
+    String::from(match refusal {
         "Stale" => "the board moved while it was starting",
         "Phase" => "it isn't waiting to be started any more",
-        "Resource" => "something else holds what it needs",
+        // The store refuses a Start this way while the card has open subagent records or blocks, which a run would
+        // fence and so never settle (ov-965). The orchestrator settles those, so say how.
+        "Resource" => return format!("something else holds what it needs, or a subagent still works it or it has a block. \
+            End its subagents with `farcooler agent end <agent> --verdict stopped`, clear its blocks with \
+            `farcooler task block {key} --on <key> --clear`, and dispatch again"),
         "Blocked" => "it's waiting on another ticket",
         "Limit" => "the board's limit on runs is reached",
         "Unauthorized" => "this seat can't start it",
@@ -112,21 +122,43 @@ fn refusal_words(refusal: &str) -> &'static str {
         "Definition" | "Invalid" => "the published workflow doesn't fit it",
         "Evidence" => "its evidence doesn't match",
         _ => "the engine refused it",
+    })
+}
+
+/// What the person asked of `agent dispatch` that the engine reads.
+pub(super) struct Asked<'a> {
+    pub builder: bool,
+    pub role: &'a str,
+    /// The flags the person gave that a start can't honor.
+    pub dropped: &'a [&'a str],
+    /// `--harness`, when given: the build step's model (ov-966).
+    pub harness: Option<&'a str>,
+}
+
+/// The model picks a Start sends for `--harness`: the one build step that lists models, if it lists this one.
+fn picks(seen: &Snapshot, harness: Option<&str>) -> Result<BTreeMap<String, String>, Failed> {
+    let Some(model) = harness else { return Ok(BTreeMap::new()) };
+    match seen.models.as_slice() {
+        [] => Err("The published workflow doesn't let the orchestrator pick a model, so --harness would be ignored. Leave it out, or publish a workflow whose build step lists the models it may run with.".into()),
+        [(step, models)] if models.iter().any(|m| m == model) => Ok([(step.clone(), model.to_string())].into()),
+        [(step, models)] => Err(format!("The published workflow's {step} step runs {}, not {model}. Pick one of those, or leave --harness out for {}.",
+            models.join(" or "), models.first().map_or("its default", String::as_str)).into()),
+        several => Err(format!("The published workflow lists models for more than one step ({}). Start each ticket with `farcooler workflow start --model <step>=<model>`.",
+            several.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join(" and ")).into()),
     }
 }
 
 /// Starts a builder's tickets through the engine when it holds them. A pane when it holds none. A mix,
 /// a ticket the engine can't start, a reviewer, a workspace with nothing published, or a flag the engine
-/// would drop is refused whole before anything starts. `dropped` names the flags the person gave that a
-/// start can't honor: it starts its own agent in its own worktree under the published workflow.
+/// would drop is refused whole before anything starts, as is a `--harness` the workflow can't take. The engine
+/// starts its own agent in its own worktree under the published workflow, with the model `--harness` picks.
 pub(super) async fn through_engine<L: DispatchLink>(
     link: &mut L,
     tickets: &[pb::Task],
-    builder: bool,
-    role: &str,
+    asked: Asked<'_>,
     json: bool,
-    dropped: &[&str],
 ) -> Result<Engine, Failed> {
+    let Asked { builder, role, dropped, harness } = asked;
     let pane = |unanswered| Ok(Engine::Pane { unanswered });
     if !link.capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return pane(false); }
     let Some(first) = tickets.first() else { return pane(false) };
@@ -154,6 +186,7 @@ pub(super) async fn through_engine<L: DispatchLink>(
         let (them, flags) = (if dropped.len() == 1 { "it" } else { "them" }, dropped.join(" and "));
         return Err(format!("The engine starts a tracked ticket's agent itself, in a worktree of its own, so {flags} would be ignored. Leave {them} out and dispatch again.").into());
     }
+    let models = picks(&seen, harness)?;
     let mut started = Vec::new();
     for ticket in tickets {
         // Each start moves the revision, so every ticket reads the state again. A start the board moved
@@ -167,7 +200,7 @@ pub(super) async fn through_engine<L: DispatchLink>(
             };
             let action = Action::Start {
                 mutation: Mutation { id: format!("dispatch-{}-{}", ticket.key, seen.revision), revision: seen.revision, epoch: seen.epoch, sequence: now_millis() },
-                item: ticket.key.clone(), run, pin, start_pin, models: Default::default(),
+                item: ticket.key.clone(), run, pin, start_pin, models: models.clone(),
             };
             let request = crate::workflow::request(workspace, &action).map_err(|_| unreadable())?;
             let reply = link.call(request).await.map_err(|_| Failed::from(format!("{} couldn't be started: the engine didn't answer.", ticket.key)))?;
@@ -177,7 +210,7 @@ pub(super) async fn through_engine<L: DispatchLink>(
             let said = refusal.as_str().map_or_else(|| refusal.to_string(), String::from);
             if said == "Stale" && !retried { retried = true; continue; }
             let done = if started.is_empty() { String::new() } else { format!(" {} already started.", started.join(", ")) };
-            return Err(format!("The engine didn't start {}: {}.{done}", ticket.key, refusal_words(&said)).into());
+            return Err(format!("The engine didn't start {}: {}.{done}", ticket.key, refusal_words(&said, &ticket.key)).into());
         }
         started.push(ticket.key.clone());
     }
