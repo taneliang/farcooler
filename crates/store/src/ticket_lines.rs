@@ -186,8 +186,6 @@ pub enum LineSubject {
     Theme(Uuid),
     Ticket(Uuid),
     Landing(Uuid),
-    /// A ticket going on or coming off a landing: in both timelines.
-    TicketOnLanding { task: Uuid, landing: Uuid },
 }
 
 /// One entry in a theme's, a ticket's or a landing's timeline.
@@ -221,7 +219,6 @@ pub(crate) fn line_event(
         LineSubject::Theme(id) => (Some(id), None, None),
         LineSubject::Ticket(id) => (None, Some(id), None),
         LineSubject::Landing(id) => (None, None, Some(id)),
-        LineSubject::TicketOnLanding { task, landing } => (None, Some(task), Some(landing)),
     };
     conn.execute(
         "INSERT INTO line_events (id, at, actor, theme_id, task_id, landing_id, kind, body, extra)
@@ -330,16 +327,8 @@ fn check_parent(conn: &Connection, task: Uuid, parent: Uuid) -> Result<()> {
     Ok(())
 }
 
-/// Move `task` to `to`, and write it down. `landing` is the landing that lands
-/// it, which may land a whole same-branch group and a stack at once.
-pub(crate) fn move_stage(
-    conn: &Connection,
-    task: Uuid,
-    to: Stage,
-    sha: Option<&str>,
-    landing: Option<Uuid>,
-    actor: Actor,
-) -> Result<()> {
+/// Move `task` to `to`, and write it down.
+pub(crate) fn move_stage(conn: &Connection, task: Uuid, to: Stage, sha: Option<&str>, actor: Actor) -> Result<()> {
     let line = line_in(conn, task)?;
     if line.stage == to {
         return Ok(());
@@ -347,7 +336,7 @@ pub(crate) fn move_stage(
     if !line.stage.can_move_to(to) {
         return Err(invalid(if line.stage.is_closed() { "ticket_closed" } else { "stage" }));
     }
-    if to == Stage::Landed && landing.is_none() {
+    if to == Stage::Landed {
         if let Some(parent) = line.stack_parent
             && line_in(conn, parent)?.stage != Stage::Landed
         {
@@ -377,10 +366,7 @@ pub(crate) fn move_stage(
         params![uuid_blob(task), to.as_str(), now_millis(), rank_kept, sha],
     )
     .map_err(map_err)?;
-    let subject = match landing {
-        Some(landing) => LineSubject::TicketOnLanding { task, landing },
-        None => LineSubject::Ticket(task),
-    };
+    let subject = LineSubject::Ticket(task);
     // Landing straight from review is one write that passes through landing,
     // and the timeline says so, as it would for the two writes.
     let from = if line.stage == Stage::Reviewing && to == Stage::Landed {
@@ -492,10 +478,7 @@ impl Store {
             line_event(&tx, LineSubject::Ticket(task), "line", actor, &body, extra)?;
         }
         match update.stage {
-            Some(to) => {
-                move_stage(&tx, task, to, sha.as_deref(), None, actor)?;
-                crate::collecting::stage_moved(&tx, task, before.stage, to, actor)?;
-            }
+            Some(to) => move_stage(&tx, task, to, sha.as_deref(), actor)?,
             None if sha.is_some() && before.stage == Stage::Landed => {
                 tx.execute("UPDATE ticket_lines SET landed_sha = ?2 WHERE task_id = ?1", params![uuid_blob(task), sha])
                     .map_err(map_err)?;
@@ -578,7 +561,7 @@ impl Store {
     pub fn line_events(&self, subject: LineSubject, since_ms: i64) -> Result<Vec<LineEvent>> {
         let (column, id) = match subject {
             LineSubject::Theme(id) => ("theme_id", id),
-            LineSubject::Ticket(id) | LineSubject::TicketOnLanding { task: id, .. } => ("task_id", id),
+            LineSubject::Ticket(id) => ("task_id", id),
             LineSubject::Landing(id) => ("landing_id", id),
         };
         let conn = self.conn();

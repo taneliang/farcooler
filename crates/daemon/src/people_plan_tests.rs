@@ -454,10 +454,9 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
 }
 
 /// A member moving a ticket to review starts no landing and wakes nobody to
-/// land it (ov-736, review M2): only the landing stage joins the collecting
-/// landing, and the departure the orchestrator is told of comes from that.
-/// The owner moves the ticket to building; Bob moves it to review, and the
-/// board has no landing, nothing departed, and no notice queued for anyone.
+/// land it (ov-736, review M2). The owner moves the ticket to building; Bob
+/// moves it to review, and the board has no landing and no notice queued for
+/// anyone.
 #[tokio::test]
 async fn a_member_moving_a_ticket_to_review_wakes_nobody() {
     use request::Payload as P;
@@ -474,7 +473,6 @@ async fn a_member_moving_a_ticket_to_review_wakes_nobody() {
     let plan = plan_as(&r, OWNERS_PHONE, Scope::Control).await;
     assert_eq!(plan.lines[0].stage, pb::TicketStage::Reviewing as i32);
     assert!(plan.landings.is_empty(), "no landing: {:?}", plan.landings);
-    assert!(r.svc.store.departures_untold(r.workspace).unwrap().is_empty(), "nothing departed");
     let notes: Vec<String> = r.svc.store.notes_for(task, None).unwrap().iter().map(|n| n.actor.to_string()).collect();
     assert_eq!(notes.len(), notes_before, "no notice on the card: {notes:?}");
     let refused = call(&factory(&r.svc, BOB, Scope::Control), "line.set", to(pb::TicketStage::Landing)).await;

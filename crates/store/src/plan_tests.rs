@@ -1,7 +1,6 @@
 use super::*;
 
 use crate::agents::{AgentPlace, AgentRole, NewAgent};
-use crate::landings::{LandingUpdate, NewLanding, Route};
 use crate::models::NoteKind;
 use crate::models::Task;
 use crate::models::TaskStatus::{Done, InProgress, InReview};
@@ -243,11 +242,10 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
     let r = store.add_ruling(main, &ruling, &[t[0].id, t[2].id], Actor::Manager).unwrap();
     store.set_ruling(r.id, crate::rulings::RulingState::Confirmed, Some("Fine."), Actor::Manager).unwrap();
     store.add_ruling(main, &ruling, &[t[1].id], Actor::Manager).unwrap();
-    let landing = store.landing_of(t[1].id).unwrap().expect("a reviewed ticket joins the collecting landing");
-    let pushed = LandingUpdate { sha: Some("1a1b3275".into()), ..Default::default() };
-    store.update_landing(landing.id, &pushed, Actor::Manager).unwrap();
-    let new = NewLanding { route: Route::Ask, base: "origin/main".into(), title: String::new(), lander: None, collecting: false };
-    assert!(store.start_landing(main, &new, &[], Actor::Manager).is_ok());
+    // Landing history from before the engine landed (ov-960): one pushed, one left open.
+    let now = crate::tasks::now_millis();
+    crate::testing::old_landing(&store, main, 1, "pushed", Some("1a1b3275"), &[t[1].id, t[2].id], now);
+    crate::testing::old_landing(&store, main, 2, "open", None, &[], now);
     let ci = crate::board_ci::CiRead {
         subject: crate::board_ci::sha_subject("1a1b3275"),
         sha: "1a1b3275".into(),

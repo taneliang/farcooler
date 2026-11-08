@@ -31,7 +31,6 @@ pub mod landings;
 pub mod landing_phase;
 mod lane_migrations;
 mod line_migration;
-pub mod collecting;
 pub mod lfs_pointers;
 mod migrate;
 pub mod read_counts;

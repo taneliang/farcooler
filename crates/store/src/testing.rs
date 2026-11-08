@@ -240,3 +240,25 @@ pub fn write_source_below_60(path: &Path, registry: u32) {
 pub fn count_rows_for_tests(store: &crate::Store, table: &str) -> i64 {
     store.conn().query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0)).unwrap()
 }
+
+/// A landing as the old landing code left it (ov-960): `state` (its stored
+/// word) since `state_since`, with `sha` pushed and `tickets` on it. Nothing
+/// writes landings any more, so a test seeds the history it reads.
+pub fn old_landing(store: &crate::Store, workspace: Uuid, number: u32, state: &str, sha: Option<&str>, tickets: &[Uuid], state_since: i64) -> Uuid {
+    let id = Uuid::now_v7();
+    let conn = store.conn();
+    conn.execute(
+        "INSERT INTO landings (id, workspace_id, number, route, base, pushed_sha, state, state_since, title, collecting, actor, created_at, resource_version)
+         VALUES (?1, ?2, ?3, 'push', 'origin/main', ?4, ?5, ?6, '', 0, 'manager', 1, 1)",
+        rusqlite::params![id.as_bytes().as_slice(), workspace.as_bytes().as_slice(), number, sha, state, state_since],
+    )
+    .unwrap();
+    for task in tickets {
+        conn.execute(
+            "INSERT INTO landing_tickets (landing_id, task_id, added_at) VALUES (?1, ?2, 1)",
+            rusqlite::params![id.as_bytes().as_slice(), task.as_bytes().as_slice()],
+        )
+        .unwrap();
+    }
+    id
+}

@@ -387,7 +387,7 @@ impl Store {
         let (column, id, workspace) = match subject {
             LineSubject::Theme(id) => ("theme_id", id, workspace_of(&tx, "board_themes", id)?),
             LineSubject::Ticket(id) => ("task_id", id, workspace_of(&tx, "tasks", id)?),
-            LineSubject::Landing(_) | LineSubject::TicketOnLanding { .. } => {
+            LineSubject::Landing(_) => {
                 return Err(DomainError::InvalidArgument { what: "budget" });
             }
         };

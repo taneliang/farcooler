@@ -1390,8 +1390,8 @@ mod rep_messages_tests;
 
 #[path = "agent_start_tests.rs"]
 mod agent_start_tests;
-#[path = "departure_tests.rs"]
-mod departure_tests;
+#[path = "notice_wait_tests.rs"]
+mod notice_wait_tests;
 
 #[path = "mid_turn_tests.rs"]
 mod mid_turn_tests;

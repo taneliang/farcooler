@@ -109,7 +109,7 @@ fn released_holds_still_let_go_and_ci_chips_no_longer_move_landings() {
     // A CI read moves the chip and only the chip: the pushed landing stays where it was.
     let read = CiRead { subject: crate::board_ci::sha_subject("exact-sha"), sha: "exact-sha".into(), status: CiStatus::Passed, url: String::new(),
         jobs: Vec::new(), fetched_at: 5, changed_at: 5, asked_at: 5 };
-    assert!(s.record_ci(r.ws, &read).unwrap().landings_moved.is_empty());
+    assert!(s.record_ci(r.ws, &read).unwrap().changed);
     assert_eq!(s.conn().query_row("SELECT state FROM landings", [], |x| x.get::<_, String>(0)).unwrap(), "pushed");
     assert_eq!(s.conn().query_row("SELECT status FROM board_ci", [], |x| x.get::<_, String>(0)).unwrap(), "passed");
 }
@@ -149,7 +149,8 @@ fn a_stage_move_into_or_out_of_landing_works_after_release() {
     for stage in [Stage::Building, Stage::Reviewing] { s.update_line(r.free, &up(stage), user).unwrap(); }
     let into = s.update_line(r.free, &up(Stage::Landing), user);
     assert!(into.is_ok(), "into landing: {into:?}");
-    assert!(s.landing_of(r.free).unwrap().is_none(), "no legacy landing is joined after release");
+    let joined: i64 = s.conn().query_row("SELECT count(*) FROM landing_tickets WHERE task_id=?1", [r.free.as_bytes().as_slice()], |x| x.get(0)).unwrap();
+    assert_eq!(joined, 0, "no legacy landing is joined after release");
     // A card stranded on an open landing at cutover can still be moved back by hand.
     s.conn().execute_batch("DROP TRIGGER engine_fence_landings_i; DROP TRIGGER engine_fence_landing_tickets_i").unwrap();
     s.conn().execute("INSERT INTO landings(id,workspace_id,number,route,base,state,state_since,title,collecting,actor,created_at,resource_version) VALUES(x'03030303030303030303030303030303',?1,3,'push','main','open',2,'t',1,'user',1,1)", [r.ws.as_bytes().as_slice()]).unwrap();
@@ -174,8 +175,7 @@ fn a_main_ci_read_after_release_does_not_send_the_collecting_landing_off() {
     s.conn().execute("UPDATE ticket_lines SET stage='landing' WHERE task_id=?1", [r.other.as_bytes().as_slice()]).unwrap();
     let read = CiRead { subject: MAIN_SUBJECT.into(), sha: "abc".into(), status: CiStatus::Passed, url: String::new(),
         jobs: Vec::new(), fetched_at: 5, changed_at: 5, asked_at: 5 };
-    let write = s.record_ci(r.ws, &read).unwrap();
-    assert!(write.landings_moved.is_empty());
+    s.record_ci(r.ws, &read).unwrap();
     assert_eq!(s.conn().query_row("SELECT state||collecting FROM landings WHERE number=4", [], |x| x.get::<_, String>(0)).unwrap(), "open1", "the collecting landing stays");
 }
 
@@ -324,35 +324,21 @@ fn a_tracked_ticket_keeps_its_wait_and_blocks_after_release() {
     assert!(s.set_block(r.owned, r.other, None).is_err());
 }
 
-/// ov-987: Landing 373 pushed, its tickets were closed, and then the board was
-/// cut over. Every `landing set` and `landing start --record-only` after that
-/// came back "this task changed while you were reading it", which no rereading
-/// fixes: the cutover freezes the landing tables. Each write says so instead,
-/// and leaves the landing as it was.
+/// ov-987, ov-960: Landing 373 pushed, its tickets were closed, and then the
+/// board was cut over, so it sat on the plan saying "Checking on CI" with
+/// nothing left to check. It reads as history now: landed, since its push,
+/// and kept as it was left.
 #[test]
-fn released_landing_writes_say_the_engine_lands_now_not_that_the_task_changed() {
-    use crate::landings::{LandingState, LandingUpdate, NewLanding, Route};
+fn the_landing_pushed_before_release_reads_as_settled_history() {
+    use crate::landing_phase::LandingPhase;
+    use crate::landings::LandingState;
     let r = released();
     let s = &r.store;
     let pushed = uuid::Uuid::from_bytes([2; 16]);
-    // Its tickets were done before anyone moved the landing (the fence is lifted only to seed the ticket).
-    s.conn().execute_batch("DROP TRIGGER engine_fence_landing_tickets_i").unwrap();
-    s.conn().execute("INSERT INTO landing_tickets(landing_id,task_id,added_at) VALUES(?1,?2,1)",
-        [pushed.as_bytes().as_slice(), r.free.as_bytes().as_slice()]).unwrap();
-    s.set_task_status(r.free, TaskStatus::Done, Actor::User).unwrap();
-    let says = |e: farcooler_core::DomainError| matches!(e, farcooler_core::DomainError::InvalidArgument { what: "engine_lands" });
-    let sha = LandingUpdate { sha: Some("abcdef1".into()), ..Default::default() };
-    let green = LandingUpdate { state: Some(LandingState::Green), ..Default::default() };
-    let landed = LandingUpdate { state: Some(LandingState::Landed), ..Default::default() };
-    for (what, update) in [("--sha", sha), ("--state green", green), ("--state landed", landed)] {
-        let err = s.update_landing(pushed, &update, Actor::User).unwrap_err();
-        assert!(says(err.clone()), "landing set {what}: {err:?}");
-    }
-    let new = NewLanding { route: Route::Push, base: "main".into(), title: String::new(), lander: None, collecting: false };
-    let err = s.start_landing(r.ws, &new, &[r.other], Actor::User).unwrap_err();
-    assert!(says(err.clone()), "landing start --record-only: {err:?}");
-    assert!(says(s.land_asked(pushed, Actor::User).unwrap_err()), "the Land button");
-    assert!(says(s.hold_for_you(pushed, "asks first", Actor::Runner).unwrap_err()), "the ask route");
+    let plan = s.plan(r.ws, 0).unwrap();
+    let view = plan.landings.iter().find(|v| v.landing.id == pushed).expect("on the plan while it is recent");
+    assert_eq!((view.phase, view.phase_since), (LandingPhase::Landed, 2), "settled, not waiting for CI");
     let after = s.landing(pushed).unwrap();
     assert_eq!((after.state, after.pushed_sha.as_deref()), (LandingState::Pushed, Some("exact-sha")), "and the landing is kept as it was");
+    assert!(s.plan(r.ws, 3).unwrap().landings.iter().all(|v| v.landing.id != pushed), "and leaves the plan with the settled ones");
 }

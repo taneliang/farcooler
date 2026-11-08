@@ -244,7 +244,7 @@ fn trains_become_landings_with_their_numbers_and_tickets() {
     assert_eq!(lander.role, AgentRole::Lander);
     // site-4, ready, is on the open train it was labelled with, and at most one
     // landing a board collects.
-    let site = b.store.landing_of(t[4].id).unwrap().expect("site-4 is on a landing");
+    let site = landings.iter().find(|l| l.tickets.contains(&t[4].id) && !l.state.is_settled()).expect("site-4 is on a landing");
     assert_eq!(site.id.as_bytes().as_slice(), site_train.as_slice());
     assert!(!site.state.is_settled());
     assert_eq!(landings.iter().filter(|l| l.collecting).count(), 1, "it still collects");

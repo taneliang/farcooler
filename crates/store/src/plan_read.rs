@@ -19,8 +19,8 @@ use farcooler_core::Result;
 
 use crate::board_ci::{CiRead, ci_of};
 use crate::error::map_err;
-use crate::landing_phase::{LandingPhase, PhaseInput, TicketOn, derive, last_ticket_on, left_ready_at};
-use crate::landings::{Landing, LandingState, landing_title, landings_for_plan};
+use crate::landing_phase::{LandingPhase, history};
+use crate::landings::{Landing, landing_title, landings_for_plan};
 use crate::models::{TaskStatus, get_uuid, uuid_blob};
 use crate::plan::{BoardTheme, THEME_COLS, row_to_theme};
 use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, ticket_days, trend_start};
@@ -140,7 +140,8 @@ pub struct LineView {
     pub budget_tokens: Option<u64>,
     /// Has sat in a stage that isn't waiting or finished for over an hour.
     pub stale: bool,
-    /// The number of the live landing it is on.
+    /// The number of the live landing it is on. Always none since the old
+    /// landings became history (ov-960); kept for the wire.
     pub landing: Option<u32>,
 }
 
@@ -175,10 +176,9 @@ pub struct Plan {
     /// Decided for you (ov-304): every standing ruling, newest first, then the
     /// settled ones, most recently settled first (`rulings_of` says how many).
     pub rulings: Vec<Ruling>,
-    /// Every landing not landed or dropped, oldest first, then those settled
-    /// since `closed_since_ms`, most recent first. The collecting landing with
-    /// nothing on it is left out: it is the board's standing place for the
-    /// next ticket, not a landing anyone should draw.
+    /// The old landings that moved since `closed_since_ms`, most recent first,
+    /// each read as history (ov-960); then the engine's landing groups
+    /// (ov-958).
     pub landings: Vec<LandingView>,
     /// What the runner last read of CI for the subjects the board names: its
     /// landings' pushed SHAs, and its pages' CI references (ov-306).
@@ -312,7 +312,6 @@ impl Store {
         let budgets = budgets_of(&conn, workspace)?;
         let trend_from = trend_start(now_ms);
         let mut trends = vec![[0.0f64; TREND_DAYS]; themes.len()];
-        let on_landing = live_landing_numbers(&conn, workspace)?;
         let mut lines = Vec::new();
         for line in crate::ticket_lines::lines_of(&conn, workspace)? {
             if !statuses.contains_key(&line.task_id) {
@@ -339,8 +338,8 @@ impl Store {
             let fix_rounds = fix_rounds_of(&conn, line.task_id)?;
             let stale = !line.stage.is_closed() && line.stage != Stage::Waiting && now_ms - line.stage_since > STALE_AFTER_MS;
             let budget_tokens = budgets.get(&line.task_id).copied();
-            let landing = on_landing.get(&line.task_id).copied();
-            lines.push(LineView { line, work, fix_rounds, spend, budget_tokens, stale, landing });
+            // No ticket is on an old landing any more: they are history (ov-960).
+            lines.push(LineView { line, work, fix_rounds, spend, budget_tokens, stale, landing: None });
         }
         for ((view, sum), days) in themes.iter_mut().zip(&sums).zip(&trends) {
             view.spend = sum.total();
@@ -356,22 +355,9 @@ impl Store {
             view.last_moved_at = theme_last_moved(view, &lines, &rulings, &moved);
         }
 
-        let views: HashMap<Uuid, &LineView> = lines.iter().map(|v| (v.line.task_id, v)).collect();
-        let all = landings_for_plan(&conn, workspace, closed_since_ms)?;
-        let main_red = ci_of(&conn, workspace)?
-            .iter()
-            .any(|c| c.subject == crate::board_ci::MAIN_SUBJECT && c.status == crate::board_ci::CiStatus::Failed);
-        let in_front = |l: &Landing| {
-            matches!(l.state, LandingState::Gating | LandingState::Pushed | LandingState::Green | LandingState::Red)
-                || (l.state == LandingState::Open && !l.collecting)
-        };
-        let fronts: Vec<Uuid> = all.iter().filter(|l| in_front(l)).map(|l| l.id).collect();
+        // The old landings are history: each reads as where it ended (ov-960).
         let mut landings = Vec::new();
-        for landing in all {
-            if landing.collecting && landing.tickets.is_empty() {
-                continue;
-            }
-            let ahead = fronts.iter().any(|id| *id != landing.id);
+        for landing in landings_for_plan(&conn, workspace, closed_since_ms)? {
             for task in &landing.tickets {
                 if statuses.contains_key(task) {
                     named.insert(*task, ());
@@ -384,46 +370,18 @@ impl Store {
                 .map(|c| sentence(&c.title))
                 .collect::<Vec<_>>()
                 .join("; ");
-            let (spend, lander) = match landing.lander_id {
-                Some(id) => {
-                    let agent = crate::agents::agent_in(&conn, id)?;
-                    (spend_of_agent(&conn, &agent)?, Some(agent))
-                }
-                None => (Spend::default(), None),
+            let spend = match landing.lander_id {
+                Some(id) => spend_of_agent(&conn, &crate::agents::agent_in(&conn, id)?)?,
+                None => Spend::default(),
             };
-            let on: Vec<TicketOn> = landing
-                .tickets
-                .iter()
-                .filter_map(|t| views.get(t).map(|v| (t, v)))
-                .map(|(t, v)| {
-                    Ok(TicketOn {
-                        task: *t,
-                        stage: v.line.stage,
-                        stage_since: v.line.stage_since,
-                        left_ready_at: left_ready_at(&conn, *t)?,
-                    })
-                })
-                .collect::<Result<_>>()?;
-            let open = lander.as_ref().filter(|a| a.ended_at.is_none());
-            let derived = derive(&PhaseInput {
-                state: landing.state,
-                state_since: landing.state_since,
-                lander_open: open.is_some(),
-                lander_started_at: open.map(|a| a.started_at),
-                last_ticket_on: last_ticket_on(&conn, landing.id)?,
-                tickets: &on,
-                collecting: landing.collecting,
-                main_red,
-                ahead,
-                now: now_ms,
-            });
+            let ended = history(&landing);
             landings.push(LandingView {
                 title: landing_title(&landing),
                 landing,
                 summary,
                 spend,
-                phase: derived.phase,
-                phase_since: derived.since,
+                phase: ended.phase,
+                phase_since: ended.since,
             });
         }
         let ci = ci_of(&conn, workspace)?;
@@ -464,20 +422,6 @@ impl Store {
             agents_spend: Spend::default(),
         })
     }
-}
-
-/// The number of the live landing each ticket of `workspace` is on.
-fn live_landing_numbers(conn: &Connection, workspace: Uuid) -> Result<HashMap<Uuid, u32>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT lt.task_id, l.number FROM landing_tickets lt JOIN landings l ON l.id = lt.landing_id
-              WHERE l.workspace_id = ?1 AND l.state NOT IN ('landed', 'dropped')",
-        )
-        .map_err(map_err)?;
-    let rows = stmt
-        .query_map(params![uuid_blob(workspace)], |r| Ok((get_uuid(r, 0)?, r.get::<_, i64>(1)?.max(0) as u32)))
-        .map_err(map_err)?;
-    rows.collect::<rusqlite::Result<HashMap<_, _>>>().map_err(map_err)
 }
 
 /// When each card last moved, by task id: `Task::updated_at`, the card's own

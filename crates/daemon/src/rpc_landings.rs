@@ -1,127 +1,23 @@
-//! Landings (ov-309, ov-872): `landing.start` and `landing.set`, behind
-//! `board_line`. Read through `plan.get`, whose `Plan.landings` and `Plan.ci`
-//! this file also converts.
+//! Landings (ov-309, ov-872) as the plan read carries them: the old landing
+//! rows, kept as history, and the engine's landing groups (ov-958). This file
+//! converts `Plan.landings` and `Plan.ci` for `plan.get`.
 //!
-//! Part of the plan layer, and beside the board as it is: nothing here touches
-//! `task_ops` or emits `task_changed`. Each write announces `plan_changed`
-//! once, and a write that gives a landing a SHA asks the CI watch
-//! (`ci_watch.rs`) to read it now rather than at its next turn.
-
-use std::sync::Arc;
+//! The old writes, `landing.start` and `landing.set`, are gone (ov-960): the
+//! workflow engine lands, so both are refused with `engine_lands`, which an
+//! old client turns into a sentence that says so.
 
 use farcooler_core::{DomainError, Result};
-use farcooler_protocol::v1::{self as pb, Request, request, result};
+use farcooler_protocol::v1::{self as pb, result};
 use farcooler_store::board_ci::{CiRead, CiStatus};
 use farcooler_store::landing_phase::LandingPhase;
-use farcooler_store::landings::{Landing, LandingState, LandingUpdate, NewLanding, Route, landing_title};
+use farcooler_store::landings::{Landing, LandingState, Route, landing_title};
 use farcooler_store::plan_read::LandingView;
 
-use crate::service::Service;
-use crate::task_ops::{actor_from_wire, required_id};
-use crate::watch::Watcher;
 use crate::wire::id_bytes;
 
-/// A landing approval needs process evidence, as a hook answer does. An
-/// agent's CLI outside a pane defaults to `user` too: the wire actor can
-/// narrow approval further in landing_run, but cannot prove it.
-pub(crate) async fn start_from(svc: &Arc<Service>, watcher: &Arc<Watcher>, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {
-    if matches!(&req.payload, Some(request::Payload::LandingStart(p)) if p.run && p.land)
-        && crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person
-    {
-        return Err(DomainError::InvalidArgument { what: "land_is_yours" });
-    }
-    dispatch(svc, watcher, req).await
-}
-
-/// One landing route, as `rpc_plan::dispatch` hands it over.
-pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, req: Request) -> Result<result::Value> {
-    let missing = || DomainError::InvalidArgument { what: "payload" };
-    let ids = |raw: &[bytes::Bytes]| raw.iter().map(|id| required_id(id)).collect::<Result<Vec<_>>>();
-    // After the cutover the engine lands, and the old landings are frozen history (ov-987). Said
-    // before a landing job is admitted, which the store's own refusal would come too late for.
-    if !svc.store.legacy_authority() {
-        return Err(DomainError::InvalidArgument { what: "engine_lands" });
-    }
-    match (req.method.as_str(), req.payload) {
-        ("landing.start", Some(request::Payload::LandingStart(p))) if p.run => {
-            let landing = crate::landing_run::start(svc, watcher, p).await?;
-            Ok(result::Value::Landing(view_of(svc, &landing)?))
-        }
-        ("landing.start", Some(request::Payload::LandingStart(p))) => {
-            let workspace = required_id(&p.workspace_id)?;
-            let actor = actor_from_wire(&p.actor)?;
-            let new = NewLanding {
-                route: route_of(p.route)?,
-                base: p.base,
-                title: p.title,
-                lander: p.lander_id.as_deref().map(required_id).transpose()?,
-                collecting: false,
-            };
-            let landing = svc.store.start_landing(workspace, &new, &ids(&p.task_ids)?, actor)?;
-            watcher.announce_plan_changed(workspace, actor);
-            watcher.tell_departures();
-            Ok(result::Value::Landing(view_of(svc, &landing)?))
-        }
-        ("landing.set", Some(request::Payload::LandingSet(p))) => {
-            let id = required_id(&p.landing_id)?;
-            let actor = actor_from_wire(&p.actor)?;
-            let state = match pb::LandingState::try_from(p.state) {
-                Ok(pb::LandingState::Unspecified) => None,
-                Ok(s) => Some(landing_state(s).ok_or(DomainError::InvalidArgument { what: "state" })?),
-                Err(_) => return Err(DomainError::InvalidArgument { what: "state" }),
-            };
-            let pushed = p.sha.is_some();
-            let update = LandingUpdate {
-                state,
-                base: p.base,
-                title: p.title,
-                lander: p.lander_id.as_deref().map(required_id).transpose()?,
-                sha: p.sha,
-                add_tickets: ids(&p.add_task_ids)?,
-                remove_tickets: ids(&p.remove_task_ids)?,
-                expect: None,
-            };
-            let landing = svc.store.update_landing(id, &update, actor)?;
-            watcher.announce_plan_changed(landing.workspace_id, actor);
-            // A landing that settled, or was dropped, may have sent the collecting one off.
-            watcher.tell_departures();
-            if pushed {
-                crate::ci_watch::kick();
-            }
-            Ok(result::Value::Landing(view_of(svc, &landing)?))
-        }
-        ("landing.start" | "landing.set", _) => Err(missing()),
-        (other, _) => {
-            tracing::error!(method = %other, "a landing route with no handler");
-            Err(DomainError::NotFound)
-        }
-    }
-}
-
-/// A landing as the plan read says it, so a write answers with what a read
-/// would: its title, summary, phase and lander's spend.
-fn view_of(svc: &Service, landing: &Landing) -> Result<pb::Landing> {
-    let plan = svc.store.plan(landing.workspace_id, i64::MIN)?;
-    // The collecting landing with nothing on it is left out of the plan read,
-    // so a write to it answers with the landing as it is.
-    Ok(plan.landings.iter().find(|l| l.landing.id == landing.id).map_or_else(
-        || {
-            let mut wire = pb_landing(landing);
-            wire.phase = pb::LandingPhase::WaitingForTickets as i32;
-            wire.phase_since = landing.state_since;
-            wire
-        },
-        pb_landing_view,
-    ))
-}
-
-fn route_of(raw: i32) -> Result<Route> {
-    match pb::LandingRoute::try_from(raw) {
-        Ok(pb::LandingRoute::Push | pb::LandingRoute::Unspecified) => Ok(Route::Push),
-        Ok(pb::LandingRoute::PullRequest) => Ok(Route::PullRequest),
-        Ok(pb::LandingRoute::Ask) => Ok(Route::Ask),
-        Err(_) => Err(DomainError::InvalidArgument { what: "route" }),
-    }
+/// `landing.start` and `landing.set`: the engine lands now (ov-960).
+pub(crate) fn refuse() -> Result<result::Value> {
+    Err(DomainError::InvalidArgument { what: "engine_lands" })
 }
 
 fn pb_route(r: Route) -> pb::LandingRoute {
@@ -130,19 +26,6 @@ fn pb_route(r: Route) -> pb::LandingRoute {
         Route::PullRequest => pb::LandingRoute::PullRequest,
         Route::Ask => pb::LandingRoute::Ask,
     }
-}
-
-fn landing_state(s: pb::LandingState) -> Option<LandingState> {
-    Some(match s {
-        pb::LandingState::Open => LandingState::Open,
-        pb::LandingState::Gating => LandingState::Gating,
-        pb::LandingState::Pushed => LandingState::Pushed,
-        pb::LandingState::Green => LandingState::Green,
-        pb::LandingState::Red => LandingState::Red,
-        pb::LandingState::Landed => LandingState::Landed,
-        pb::LandingState::Dropped => LandingState::Dropped,
-        pb::LandingState::Unspecified => return None,
-    })
 }
 
 fn pb_landing_state(s: LandingState) -> pb::LandingState {
@@ -242,23 +125,9 @@ pub(crate) fn pb_ci(r: &CiRead) -> pb::BoardCiRead {
 mod tests {
     use super::*;
 
-    /// ov-987: once the board has moved to the workflow engine, both landing
-    /// routes say so before anything else is read: before a landing job is
-    /// admitted, and before an unknown landing is looked up.
-    #[tokio::test]
-    async fn a_released_board_says_the_engine_lands_before_anything_else() {
-        let dir = tempfile::tempdir().unwrap();
-        let svc = Arc::new(Service::open_in(dir.path().to_path_buf()).await.unwrap());
-        let watcher = Watcher::new(svc.clone());
-        let db = rusqlite::Connection::open(dir.path().join("farcooler.db")).unwrap();
-        db.execute("UPDATE engine_cutover_authority SET phase = 'released'", []).unwrap();
-        let some = id_bytes(uuid::Uuid::now_v7());
-        let run = pb::LandingStart { run: true, workspace_id: some.clone(), task_ids: vec![some.clone()], ..Default::default() };
-        let set = pb::LandingSet { landing_id: some, sha: Some("abcdef1".into()), ..Default::default() };
-        for (method, payload) in [("landing.start", request::Payload::LandingStart(run)), ("landing.set", request::Payload::LandingSet(set))] {
-            let req = Request { method: method.into(), payload: Some(payload), ..Default::default() };
-            let err = dispatch(&svc, &watcher, req).await.unwrap_err();
-            assert!(matches!(err, DomainError::InvalidArgument { what: "engine_lands" }), "{method}: {err:?}");
-        }
+    /// ov-960: both old landing writes are refused, whatever they carry.
+    #[test]
+    fn the_old_landing_writes_say_the_engine_lands() {
+        assert!(matches!(refuse(), Err(DomainError::InvalidArgument { what: "engine_lands" })));
     }
 }

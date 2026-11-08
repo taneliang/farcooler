@@ -52,7 +52,6 @@ mod reap;
 mod screen_cache;
 mod registry_join;
 mod agent_start;
-mod collecting_scan;
 mod code_share;
 use code_share::code_share;
 mod timing;
@@ -4518,12 +4517,6 @@ impl Watcher {
                 }
                 _ = backstop.tick() => {
                     self.service.backstop_reconcile().await;
-                    // Lanes that are ready and on no train join the open one
-                    // (ov-520). Off the watch task: it writes the store.
-                    if let Ok(ticket) = self.service.writers.admit("line-jobs") {
-                        let me = self.clone();
-                        tokio::task::spawn_blocking(move || { me.collect_ready_tickets(); ticket.finish(); });
-                    }
                 }
                 // Its first tick is immediate and that is wanted: every worktree
                 // is unprobed at startup, so this pass is what puts a number

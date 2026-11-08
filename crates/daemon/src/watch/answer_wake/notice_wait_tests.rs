@@ -1,4 +1,4 @@
-//! ov-827, acceptance 2: a runner notice (a landing ready, a wake) takes the
+//! ov-827, acceptance 2: a runner notice (a wake, a workflow's word) takes the
 //! same path as a person's message left in the box by a turn begun after the
 //! paste. It waits in the box, marked pasted (`finish`), through a long turn
 //! and a dialog answered from the phone, and is sent once the turn ends:
@@ -7,6 +7,25 @@
 //! in the box, where it stayed (the owner's departure notice, Oct 26).
 
 use super::*;
+
+/// The runner's notice these tests send the orchestrator.
+const NOTICE: &str = "Landing 1 is ready for its checks.";
+
+/// A runner notice filed on the board's card for the orchestrator, and queued,
+/// as the runner sends one (`Store::send_runner_notice`). Landings that leave
+/// on their own were the first such notice; they are gone (ov-960), and the
+/// path every runner notice takes is what these tests hold.
+fn notify(b: &Board) {
+    let extra = serde_json::json!({ "message": { "to": "the orchestrator", "about": "ov-827" } });
+    b.svc.store.send_runner_notice(b.task.id, NOTICE, extra).unwrap();
+    b.watcher.message_queued();
+}
+
+/// The runner's notices filed on the board's card.
+fn notices(b: &Board) -> Vec<String> {
+    let notes = b.svc.store.notes_for(b.task.id, None).unwrap();
+    notes.into_iter().filter(|n| n.actor == Actor::Runner && n.body == NOTICE).map(|n| n.body).collect()
+}
 
 /// A key typed in Far Cooler's terminal, input-marked as the phone's is.
 async fn typed_marked(b: &Board, terminal: Uuid, hex: &str) {
@@ -33,10 +52,9 @@ async fn a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ticket_to("", Stage::Landing);
-    b.watcher.tell_departures();
+    notify(&b);
     b.pump().await;
-    assert_eq!(b.departure_notices(&[&b.task]).len(), 1);
+    assert_eq!(notices(&b).len(), 1);
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
     let waiting = b.svc.store.pending_message_wakes().unwrap();
     assert!(waiting.len() == 1 && waiting[0].pasted_at.is_some(), "it waits in the box: {waiting:?}\n{}", si.log());
@@ -64,7 +82,7 @@ async fn a_runner_notice_left_by_a_long_turn_is_sent_when_it_ends() {
     }
     let log = si.log();
     let sent = si.submitted();
-    assert!(sent.len() == 1 && sent[0].contains(&format!("Landing 1 is ready for its checks: {}.", b.task.key)), "{log}\n{:?}", b.progress());
+    assert!(sent.len() == 1 && sent[0].contains(NOTICE), "{log}\n{:?}", b.progress());
     assert_eq!(log.matches("ENTER").count(), 1, "{log}");
     assert!(log.find("ENTER").unwrap() > log.rfind("MODE idle").unwrap(), "{log}");
     assert!(b.svc.store.pending_message_wakes().unwrap().is_empty());
@@ -83,8 +101,7 @@ async fn one_stray_idle_frame_gets_a_waiting_notice_no_enter() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ticket_to("", Stage::Landing);
-    b.watcher.tell_departures();
+    notify(&b);
     b.pump().await;
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
     pumping(&b, Duration::from_millis(600)).await;
@@ -112,8 +129,7 @@ async fn a_notice_whose_turn_was_stopped_is_taken_back(key: &str) {
     let si = b.stand_in_with(&orchestrator, "claude", "claude", "STAND_IN_DRAFT=1").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ticket_to("", Stage::Landing);
-    b.watcher.tell_departures();
+    notify(&b);
     b.pump().await;
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
     pumping(&b, Duration::from_millis(600)).await;
@@ -158,8 +174,7 @@ async fn a_notice_whose_turn_is_stopped_mid_pass_gets_no_enter() {
     let si = b.stand_in_with(&orchestrator, "claude", "claude", "STAND_IN_DRAFT=1").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("working-on-paste").await;
-    b.ticket_to("", Stage::Landing);
-    b.watcher.tell_departures();
+    notify(&b);
     b.pump().await;
     crate::watch::answer_wake::tests::compose_held_tests::logs(&si, "PASTE ").await;
     pumping(&b, Duration::from_millis(600)).await;

@@ -6,7 +6,6 @@ use super::*;
 use farcooler_core::usage::TokenCounts;
 
 use crate::agents::{AgentPlace, AgentRole, NewAgent};
-use crate::landings::LandingUpdate;
 use crate::models::{Actor, Task};
 use crate::plan::NewTheme;
 use crate::rulings::NewRuling;
@@ -184,34 +183,6 @@ fn finished_tickets_age_out_and_a_long_stage_is_stale() {
     to(&store, t[1].id, Stage::Building);
     store.conn().execute("UPDATE ticket_lines SET stage_since = ?1", [old]).unwrap();
     assert!(line(&store.plan(main, 0).unwrap(), t[1].id).stale);
-}
-
-/// A landing reads "Landing N", says what it carries in its tickets' words,
-/// each of its tickets knows its number, and the empty collecting landing is
-/// left out.
-#[test]
-fn a_landing_reads_its_number_and_what_it_carries() {
-    let (store, main, t) = board(2);
-    for task in [t[0].id, t[1].id] {
-        on_line(&store, task);
-        for stage in [Stage::Building, Stage::Reviewing, Stage::Landing] {
-            to(&store, task, stage);
-        }
-    }
-    let plan = store.plan(main, 0).unwrap();
-    let first = &plan.landings[0];
-    assert_eq!(first.title, format!("Landing {}", first.landing.number));
-    assert_eq!(first.summary, "Task 0", "the area lead dropped, capitalized");
-    assert_eq!(line(&plan, t[0].id).landing, Some(first.landing.number));
-    assert_eq!(first.phase, crate::landing_phase::LandingPhase::GatingLocally, "it left at once");
-    let second = &plan.landings[1];
-    assert_eq!(second.summary, "Task 1");
-    assert_eq!(second.phase, crate::landing_phase::LandingPhase::WaitingForPreviousLanding);
-    assert_eq!(plan.landings.len(), 2, "no empty collecting landing");
-
-    let titled = LandingUpdate { title: Some("Agents message the plan".into()), ..Default::default() };
-    store.update_landing(first.landing.id, &titled, Actor::Manager).unwrap();
-    assert_eq!(store.plan(main, 0).unwrap().landings[0].title, "Agents message the plan");
 }
 
 fn conn_set(store: &Store, sql: &str) {

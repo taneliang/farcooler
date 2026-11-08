@@ -106,8 +106,6 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             }
             let workspace = svc.store.get_task(task)?.workspace_id;
             watcher.announce_plan_changed(workspace, actor);
-            // A ticket passing review may have sent the collecting landing off.
-            watcher.tell_departures();
             // A ticket that moved into review, a fix or landing wants its pull
             // request read now; any other update does not.
             if crate::plan_stage::enters_active(was, stage) {
@@ -226,7 +224,6 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             Ok(result::Value::BoardThemeView(theme_view(svc, theme)?))
         }
         "ruling.add" | "ruling.set" | "ruling.keep_all" => crate::rpc_rulings::dispatch(svc, watcher, req),
-        "landing.start" | "landing.set" => crate::rpc_landings::dispatch(svc, watcher, req).await,
         other => {
             tracing::error!(method = %other, "a plan route with no handler");
             Err(DomainError::NotFound)

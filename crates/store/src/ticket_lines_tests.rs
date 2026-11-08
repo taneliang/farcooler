@@ -108,7 +108,6 @@ fn a_stacked_ticket_lands_after_its_parent() {
     stack(t[1], t[0]).unwrap();
     assert_eq!(refused(stack(t[0], t[1])), "stack_cycle");
     walk(&store, t[1], Stage::Landing);
-    assert_eq!(store.landing_of(t[1]).unwrap(), None, "it waits for its parent to go on a landing");
     assert_eq!(refused(to(&store, t[1], Stage::Landed)), "parent_not_landed");
     walk(&store, t[0], Stage::Landed);
     assert_eq!(to(&store, t[1], Stage::Landed).unwrap().stage, Stage::Landed);

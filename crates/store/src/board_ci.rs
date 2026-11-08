@@ -1,5 +1,5 @@
 //! What the runner last read of CI (ov-309, ov-306): one row per subject a
-//! board names, so a landing's pushed SHA and a page's CI reference draw from
+//! board names, so a landing group's pushed SHA and a page's CI reference draw from
 //! the same read.
 //!
 //! A **subject** is `sha:<sha>` (every run on that commit), `run:<id>` (one
@@ -17,7 +17,7 @@ use uuid::Uuid;
 use farcooler_core::Result;
 
 use crate::error::map_err;
-use crate::models::{Actor, uuid_blob};
+use crate::models::uuid_blob;
 use crate::store::Store;
 use crate::tasks::now_millis;
 
@@ -210,13 +210,12 @@ pub struct CiWrite {
     /// What was heard differs from the last read (its status, SHA, link or a
     /// job), so a client with the plan open should read it again.
     pub changed: bool,
-    /// Landings moved to green, red or back to pushed by it.
-    pub landings_moved: Vec<Uuid>,
 }
 
 impl Store {
     /// Keep what the runner just heard about `read.subject` on `workspace`'s
-    /// board, and move the landings that follow it. An `unknown` read never
+    /// board. A read moves only the chip: the old landings are history
+    /// (ov-960), and the engine's groups read CI themselves. An `unknown` read never
     /// replaces a known one: GitHub being unreachable says nothing new about
     /// the runs, so only `fetched_at` moves.
     pub fn record_ci(&self, workspace: Uuid, read: &CiRead) -> Result<CiWrite> {
@@ -263,18 +262,8 @@ impl Store {
             ],
         )
         .map_err(map_err)?;
-        // Following a landing is legacy authority; after release the chip is the
-        // whole write (ov-947).
-        let legacy = crate::engine_cutover::legacy_authority(&tx);
-        let landings_moved = if legacy { crate::landings::follow_ci(&tx, workspace, &read.subject, read.status)? } else { Vec::new() };
-        // Main turning from red may be what the collecting landing was waiting for.
-        let departed = if legacy && read.subject == MAIN_SUBJECT && read.status != CiStatus::Failed {
-            crate::collecting::depart(&tx, workspace, Actor::Runner)?.is_some()
-        } else {
-            false
-        };
         tx.commit().map_err(map_err)?;
-        Ok(CiWrite { changed: changed || departed || !landings_moved.is_empty(), landings_moved })
+        Ok(CiWrite { changed })
     }
 
     /// Forget the reads of subjects `workspace`'s board no longer names. How

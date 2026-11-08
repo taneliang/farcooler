@@ -355,7 +355,7 @@ impl Exec {
         let argv = vec![program, "push".into(), "--porcelain".into(),
             "--no-follow-tags".into(), "--recurse-submodules=no".into(), "--signed=false".into(),
             format!("--force-with-lease={}:{base}", identity.target),
-            identity.repository.to_string_lossy().into_owned(), crate::landing_job::push_target(&candidate, &identity.target)];
+            identity.repository.to_string_lossy().into_owned(), super::coding_landing::push_target(&candidate, &identity.target)];
         let log = self.remote_log(binding);
         durable(&log, b"")?;
         let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, &log, Duration::from_secs(60), cancel).await?;

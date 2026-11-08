@@ -325,9 +325,11 @@ async fn an_answer_from_a_members_own_pane_is_theirs() {
     assert_eq!(said["for"]["handle"], "bob", "for Bob: {said}");
 }
 
-/// Landing approval uses the same process evidence as answering a held ask.
+/// The old landing job's approval is gone with the job (ov-960): the engine
+/// lands, so `landing.start --land` is refused the same way from an agent and
+/// from a person's own shell, before any seat is weighed.
 #[tokio::test]
-async fn landing_approval_cannot_be_forged_with_a_user_actor() {
+async fn landing_start_says_the_engine_lands_from_every_seat() {
     let mut s = seats().await;
     let agent = s.under_claude_outside();
     let (_, person) = s.shell_pane().await;
@@ -339,14 +341,10 @@ async fn landing_approval_cannot_be_forged_with_a_user_actor() {
         })),
         ..Default::default()
     };
-    for caller in [agent, NOBODY, crate::caller_seat::UNKNOWN_PID] {
+    for caller in [agent, NOBODY, crate::caller_seat::UNKNOWN_PID, person] {
         for actor in ["user", ""] {
             let got = refusal(&from(&s.svc, Some(caller)), req(actor)).await;
-            assert_eq!(got.map(|(_, what)| what).as_deref(), Some("land_is_yours"), "caller {caller}, actor {actor:?}");
+            assert_eq!(got.map(|(_, what)| what).as_deref(), Some("engine_lands"), "caller {caller}, actor {actor:?}");
         }
-    }
-    for actor in ["user", ""] {
-        let got = refusal(&from(&s.svc, Some(person)), req(actor)).await;
-        assert_eq!(got.map(|(_, what)| what).as_deref(), Some("no_landing_rules"), "a person proceeds to charter validation");
     }
 }

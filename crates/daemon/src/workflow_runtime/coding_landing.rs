@@ -1,6 +1,11 @@
 //! Explicit, trusted-local retained landing transport identity. No network remote.
 use super::*;
 
+/// A push refspec: the candidate commit onto the target ref.
+pub(crate) fn push_target(candidate: &str, target: &str) -> String {
+    format!("{candidate}:{target}")
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LandingFact {
@@ -60,7 +65,7 @@ impl Exec {
             return Err(Error::Refused("local landing config redirects transport"));
         }
         let (program, environment) = self.git_environment().await?;
-        let target = crate::landing_job::push_target(candidate, &identity.target);
+        let target = push_target(candidate, &identity.target);
         let argv = vec![program, "push".into(), "--porcelain".into(),
             // Local push policy must not expand this one-ref operation to tags,
             // submodule remotes or signing machinery outside its pinned identity.
@@ -149,7 +154,7 @@ mod tests {
             if !crash {
                 // Visible exact candidate alone is not this operation's push receipt.
                 let status = tokio::process::Command::new("/usr/bin/git").current_dir(runtime.repository())
-                    .args(["push", identity.repository.to_str().unwrap(), &crate::landing_job::push_target(candidate, &identity.target)])
+                    .args(["push", identity.repository.to_str().unwrap(), &push_target(candidate, &identity.target)])
                     .status().await.unwrap(); assert!(status.success());
             }
             let (_hold, cancelled) = tokio::sync::watch::channel(false);

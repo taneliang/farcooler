@@ -1,4 +1,4 @@
-//! A supervised process group for workflow fixtures and the retained landing gate.
+//! A supervised process group for workflow fixtures and configured commands.
 //! A leader exiting is not proof that its background writers have stopped.
 use std::path::Path;
 use std::process::Stdio;
@@ -51,12 +51,6 @@ fn has_exited(pid: u32) -> std::io::Result<bool> {
         return Ok(false);
     }
     Ok(unsafe { info.si_pid() } == pid as i32)
-}
-
-pub(crate) async fn run(tree: &Path, script: &str, log: &Path, limit: Duration)
-    -> std::io::Result<bool>
-{
-    supervised(tree, script, log, limit, None).await
 }
 
 pub(crate) async fn fixture(tree: &Path, script: &str, log: &Path, limit: Duration,
@@ -193,8 +187,8 @@ mod tests {
     async fn workflow_runtime_exited_leader_keeps_group_owned_until_descendant_stops() {
         let dir = tempfile::tempdir().unwrap();
         let result = TEST_SIGNAL_PINNED.scope(std::cell::Cell::new(false), async {
-            let result = run(dir.path(), "sleep 30 & echo $! > descendant.pid; exit 0",
-                &dir.path().join("leader.log"), Duration::from_secs(2)).await.unwrap();
+            let result = supervised(dir.path(), "sleep 30 & echo $! > descendant.pid; exit 0",
+                &dir.path().join("leader.log"), Duration::from_secs(2), None).await.unwrap();
             TEST_SIGNAL_PINNED.with(|pinned| assert!(pinned.get(), "leader was reaped before group signal"));
             result
         }).await;
@@ -208,13 +202,13 @@ mod tests {
     async fn workflow_runtime_process_timeout_and_cancel_kill_owned_group() {
         let dir = tempfile::tempdir().unwrap();
         let script = "echo $$ > leader.pid; sleep 30 & wait";
-        assert_eq!(run(dir.path(), script, &dir.path().join("timeout.log"), Duration::from_millis(50))
+        assert_eq!(supervised(dir.path(), script, &dir.path().join("timeout.log"), Duration::from_millis(50), None)
             .await.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
         let pid: i32 = std::fs::read_to_string(dir.path().join("leader.pid")).unwrap().trim().parse().unwrap();
         assert_ne!(unsafe { libc::killpg(pid, 0) }, 0);
         let tree = dir.path().to_path_buf();
         let task = tokio::spawn(async move {
-            run(&tree, script, &tree.join("cancel.log"), Duration::from_secs(30)).await
+            supervised(&tree, script, &tree.join("cancel.log"), Duration::from_secs(30), None).await
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
         let pid: i32 = std::fs::read_to_string(dir.path().join("leader.pid")).unwrap().trim().parse().unwrap();
