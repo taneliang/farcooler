@@ -178,17 +178,15 @@ fn landing_is_watched_and_cleaned_up() {
         assert!(land.contains("as a background command"), "{h:?}: {land}");
         assert!(land.contains("delete its build output, and `worktree remove` it"), "{h:?}: {land}");
         assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
-        assert!(land.contains("farcooler landing start --record-only --repo <repo> --ticket <key>"), "{h:?}: {land}");
-        // With a charter's `## Landing` section the runner lands (ov-872).
-        assert!(land.contains("farcooler landing start <key> <key> --repo <repo>"), "{h:?}: {land}");
-        assert!(land.contains("never pass `--land` yourself"), "{h:?}: {land}");
+        // The engine lands; the old landing job and its writes are gone (ov-960).
+        assert!(land.contains("**The workflow engine lands.**"), "{h:?}: {land}");
+        assert!(land.contains("`workflow queue` puts a ticket waiting at its landing step into the group"), "{h:?}: {land}");
+        assert!(land.contains("Landings from before the engine are history"), "{h:?}: {land}");
+        for gone in ["landing start", "landing set", "landing move", "--record-only", "collecting landing", "--land`"] {
+            assert!(!land.contains(gone), "{h:?} still shows {gone:?}: {land}");
+        }
         assert!(land.contains("- Route `services/site/**`: ask"), "{h:?}: {land}");
-        assert!(land.contains("farcooler landing set <N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
-        assert!(land.contains("keep landings on the plan by hand, never on a hand-kept page"), "{h:?}: {land}");
-        // A PR-mode rehearsal is dropped, never landed: its SHA is never on main (ov-503).
-        assert!(land.contains("`landing set <N> --state dropped`"), "{h:?}: {land}");
-        assert!(!land.contains("landing set <N> --state landed"), "{h:?}: {land}");
-        assert!(land.contains("`plan ticket set <key> --stage landed --sha <sha>` per merged PR"), "{h:?}: {land}");
+        assert!(land.contains("`plan ticket set <key> --stage landed --sha <sha>`"), "{h:?}: {land}");
         assert!(!land.contains("page set trains"), "{h:?}: the hand-kept page is gone: {land}");
         assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
         assert!(land.contains("Local gates mirror CI"), "{h:?}: {land}");
@@ -230,7 +228,8 @@ fn every_plan_and_page_write_names_the_manager() {
         .unwrap()
         .contents;
     let writes = plan_and_page_writes(&text);
-    assert!(writes.len() >= 7, "too few plan writes to check: {writes:?}");
+    // Five since the landing writes left the skill with the old landing job (ov-960).
+    assert!(writes.len() >= 5, "too few plan writes to check: {writes:?}");
     assert!(!text.contains("plan lane") && !text.contains("plan train"), "a retired verb is still shown");
     for line in writes {
         assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
@@ -241,13 +240,12 @@ fn plan_and_page_writes(text: &str) -> Vec<&str> {
     text
         .lines()
         .filter(|l| {
-            ["farcooler plan ", "farcooler agent ", "farcooler landing ", "farcooler message ", "farcooler page set "]
+            // `landing` only reads now (ov-960), so no landing command is a write.
+            ["farcooler plan ", "farcooler agent ", "farcooler message ", "farcooler page set "]
                 .iter()
                 .any(|w| l.starts_with(w))
                 // `plan --repo <repo>` reads the plan; it writes nothing.
                 && !l.starts_with("farcooler plan --")
-                // LandingShow has no actor argument: it only reads a landing.
-                && !l.starts_with("farcooler landing show ")
         })
         .collect()
 }
@@ -255,23 +253,21 @@ fn plan_and_page_writes(text: &str) -> Vec<&str> {
 #[test]
 fn landing_reads_are_exempt_but_untagged_writes_are_still_checked() {
     let commands = "farcooler landing show 1 --repo overnight\n\
-        farcooler landing start ov-1 --repo overnight\n\
-        farcooler landing set 1 --state dropped\n\
-        farcooler landing move ov-1 --repo overnight\n\
+        farcooler landing list --repo overnight\n\
+        farcooler plan --repo overnight\n\
         farcooler plan ticket set ov-1 --stage landing\n\
         farcooler agent stop ov-1\n\
         farcooler message ov-1 hello\n\
         farcooler page set status --body hello";
     let writes = plan_and_page_writes(commands);
-    assert_eq!(writes.len(), 7, "{writes:?}");
+    assert_eq!(writes.len(), 4, "{writes:?}");
     assert!(writes.iter().all(|line| !line.contains("--actor manager")));
-    assert!(writes.iter().all(|line| !line.starts_with("farcooler landing show ")));
+    assert!(writes.iter().all(|line| !line.starts_with("farcooler landing ")));
 }
 
 /// The owner's conventions ship as defaults a charter overrides (ov-463):
 /// landings are numbered "Landing N", agents and landings carry titles for
-/// people, a landing names its lander, and ready tickets join the collecting
-/// landing.
+/// people, and a ticket that isn't ready leaves its landing group.
 /// S21 to S23 in `scripts/manager-skill-pressure` score the first three from
 /// what an agent ran; this holds the words.
 #[test]
@@ -289,7 +285,7 @@ fn the_owners_conventions_ship_as_defaults() {
             "Cards are `<Area>: <outcome>`",
             "Each `--option` of an ask is a short name",
             "Ready work never waits for a ticket still building or in a fix",
-            "To let a landing go without a ticket that isn't ready: `farcooler landing move <key> --repo <repo> --actor manager`",
+            "To let a landing go without a ticket that isn't ready, take it out of the group: `farcooler workflow leave`",
             "Chain them and the push with `&&`, never `;`",
             "judged by exit codes, never by grepping output",
             "A test nobody has seen fail proves nothing",
@@ -309,9 +305,7 @@ fn the_owners_conventions_ship_as_defaults() {
         let third = section(&body, "3. Dispatch");
         assert!(third.contains("--branch <branch> --title \"<what it does>\" --actor manager"), "{h:?}: {third}");
         let land = section(&body, "4. Land");
-        assert!(land.contains("joins the board's collecting landing, which leaves for its gate by itself when nothing is ahead and main is green"), "{h:?}: {land}");
-        assert!(land.contains("Name its lander (`--lander`)"), "{h:?}: {land}");
-        assert!(land.contains("--base origin/main --title \"<what it carries>\" --lander <agent> --actor manager"), "{h:?}: {land}");
+        assert!(land.contains("joins that step's open group, which leaves for its gate by itself when nothing is ahead"), "{h:?}: {land}");
         assert!(!body.contains("integ-N>"), "{h:?}: a command still names integ-N");
     }
 }

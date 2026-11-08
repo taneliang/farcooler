@@ -9,31 +9,11 @@ async fn landing_in(link: &mut Runner, args: &str, json: bool) -> Result<String,
         crate::Command::Landing(a) => a.cmd,
         _ => panic!("not landing"),
     };
-    landing::run_on(link, &the_board(), cmd, "manager", json, NOW).await
+    landing::run_on(link, &the_board(), cmd, json, NOW).await
 }
 
 async fn landing_say(link: &mut Runner, args: &str) -> Result<String, Failed> {
     landing_in(link, args, false).await
-}
-
-/// A plan where Landing 9 is still open with ov-1 on it, and Landing 10,
-/// the collecting one, open behind it.
-fn two_open() -> pb::Plan {
-    let mut plan = the_plan();
-    let nine = &mut plan.landings[0];
-    nine.state = pb::LandingState::Open as i32;
-    nine.pushed_sha = None;
-    nine.phase = pb::LandingPhase::Integrating as i32;
-    let ten = pb::Landing {
-        id: tid(0x6002),
-        number: 10,
-        state: pb::LandingState::Open as i32,
-        collecting: true,
-        task_ids: vec![tid(0x1004)],
-        ..Default::default()
-    };
-    plan.landings.push(ten);
-    plan
 }
 
 /// `landing list` says each landing's line, base, how long it's been where it
@@ -89,154 +69,16 @@ async fn show_takes_the_number_and_reads_the_timeline() {
     assert_eq!((json["number"].as_u64(), json["events"].as_array().map(Vec::len)), (Some(9), Some(0)));
 }
 
-/// `landing start` sends its tickets by id, route, base, title and lander,
-/// behind `board_line`, and answers with the landing it made.
+/// The engine lands (ov-960): `landing start`, `set` and `move` are gone, and
+/// a runner without the line is told before anything is sent.
 #[tokio::test]
-async fn start_sends_everything_in_one_write() {
-    let mut link = runner();
-    let said = landing_say(&mut link, "start --record-only --ticket ov-1 --route pull_request --base origin/main --title Polish --lander a002").await.unwrap();
-    assert_eq!(
-        said,
-        "Polish (Landing 10) · Open · by pull request · ov-1 · lander Lander sonnet (0000a002)\n  cut from origin/main · open for under a minute"
-    );
-    let r = last(&link);
-    assert_eq!((r.method.as_str(), r.required_capabilities.clone()), ("landing.start", vec![capability::BOARD_LINE.to_string()]));
-    let Some(request::Payload::LandingStart(p)) = &r.payload else { panic!() };
-    assert_eq!((p.route, p.base.as_str(), p.title.as_str()), (pb::LandingRoute::PullRequest as i32, "origin/main", "Polish"));
-    assert_eq!((p.task_ids.clone(), p.lander_id.clone(), p.workspace_id.clone()), (vec![tid(0x1001)], Some(tid(LANDER)), id_bytes(WORKSPACE)));
-    landing_say(&mut link, "start --record-only").await.expect("a landing of none takes up the collecting one");
-    let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
-    assert_eq!(p.route, pb::LandingRoute::Unspecified as i32, "the runner's default is push");
-}
-
-/// `landing start KEY` asks the runner to run the landing (ov-872): `run`
-/// set, the charter choosing the route, and a line saying where to follow
-/// it. `--land` says you said land it. A recorded landing doesn't run.
-#[tokio::test]
-async fn start_hands_the_landing_to_the_runner() {
-    let mut link = runner();
-    let said = landing_say(&mut link, "start ov-1").await.unwrap();
-    assert!(said.ends_with("The runner is landing it. `farcooler landing show 10` follows its steps."), "{said}");
-    let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
-    assert_eq!((p.run, p.land, p.task_ids.clone()), (true, false, vec![tid(0x1001)]));
-    assert_eq!(p.route, pb::LandingRoute::Unspecified as i32, "the charter chooses");
-    landing_say(&mut link, "start ov-1 --land").await.unwrap();
-    let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
-    assert!(p.run && p.land);
-    landing_say(&mut link, "start --record-only --ticket ov-1").await.unwrap();
-    let Some(request::Payload::LandingStart(p)) = &last(&link).payload else { panic!() };
-    assert!(!p.run && !p.land);
-    let err = landing_say(&mut link, "start").await.unwrap_err();
-    assert_eq!(err.to_string(), "Name a ticket to land, like `farcooler landing start ov-12`.");
-}
-
-/// Only a ticket ready to land goes on a landing: one in review goes on with
-/// `--force`, moved to landing first, and any other is refused before
-/// anything is sent.
-#[tokio::test]
-async fn only_a_ready_ticket_lands_and_force_moves_one_in_review() {
-    let mut plan = the_plan();
-    plan.lines[0].stage = pb::TicketStage::Reviewing as i32;
-    let mut link = Runner { plan: Some(plan.clone()), ..runner() };
-    let err = landing_say(&mut link, "start --ticket ov-2").await.unwrap_err();
-    assert_eq!(err.to_string(), "ov-2 is in review. Move it to landing when its review is clean, or add --force to put it on a landing now.");
-    let err = landing_say(&mut link, "start --ticket ov-3").await.unwrap_err();
-    assert_eq!(err.to_string(), "ov-3 is landed already, so it can't go on a landing.");
-    assert!(link.sent.iter().all(|r| r.method != "landing.start" && r.method != "line.set"), "refused before the wire");
-
-    landing_say(&mut link, "start --ticket ov-2 --ticket ov-1 --force").await.unwrap();
-    let writes: Vec<&str> = link.sent.iter().map(|r| r.method.as_str()).filter(|m| *m != "plan.get" && *m != "task.list").collect();
-    assert_eq!(writes, ["line.set", "landing.start"], "moved to landing, then started");
-    let moved = link.sent.iter().find(|r| r.method == "line.set").unwrap();
-    let Some(request::Payload::LineSet(p)) = &moved.payload else { panic!() };
-    assert_eq!((p.task_id.clone(), p.stage), (tid(0x1002), Some(pb::TicketStage::Landing as i32)));
-
-    plan.lines[0].stage = pb::TicketStage::Waiting as i32;
-    let mut link = Runner { plan: Some(plan), ..runner() };
-    let err = landing_say(&mut link, "start --ticket ov-2 --force").await.unwrap_err();
-    assert_eq!(err.to_string(), "ov-2 is waiting. A landing takes only tickets that are ready to land, so it waits for the next one.");
-    assert!(landing_say(&mut link, "start --force").await.is_err(), "--force needs a ticket");
-    assert!(landing_say(&mut link, "start --record-only --force").await.is_err(), "a recorded --force needs a ticket too");
-}
-
-/// `landing set` records a SHA, moves the landing and its tickets, and is
-/// refused for a settled landing before anything is sent.
-#[tokio::test]
-async fn set_records_a_sha_and_moves_the_landing() {
-    let mut link = runner();
-    let said = landing_say(&mut link, "set 9 --sha abc1234").await.unwrap();
-    assert!(said.starts_with("Mac interface polish (Landing 9) · Checking on CI · abc1234"), "{said}");
-    let Some(request::Payload::LandingSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!((p.landing_id.clone(), p.sha.as_deref(), p.state), (tid(0x6001), Some("abc1234"), pb::LandingState::Unspecified as i32));
-    landing_say(&mut link, "set 9 --state landed --remove ov-1 --lander a002").await.unwrap();
-    let Some(request::Payload::LandingSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!((p.state, p.remove_task_ids.clone(), p.lander_id.clone()), (pb::LandingState::Landed as i32, vec![tid(0x1001)], Some(tid(LANDER))));
-
-    let err = landing_say(&mut link, "set 9 --add ov-2").await.unwrap_err();
-    assert!(err.to_string().starts_with("ov-2 is waiting. A landing takes only tickets"), "{err}");
-    let mut plan = the_plan();
-    plan.landings[0].state = pb::LandingState::Landed as i32;
-    let mut landed = Runner { plan: Some(plan), ..runner() };
-    let err = landing_say(&mut landed, "set 9 --title x").await.unwrap_err();
-    assert_eq!(err.to_string(), "That landing has landed or been dropped, so it takes no more moves, SHAs or tickets.");
-    assert!(landed.sent.iter().all(|r| r.method != "landing.set"));
-}
-
-/// `landing move` puts a ticket ready to land on the next open landing in
-/// one write, and takes it off when there's none; a landing past open keeps
-/// its tickets.
-#[tokio::test]
-async fn move_sends_a_ticket_to_the_next_landing() {
-    let mut link = Runner { plan: Some(two_open()), ..runner() };
-    assert_eq!(landing_say(&mut link, "move ov-1").await.unwrap(), "Moved ov-1 from Mac interface polish (Landing 9) to Landing 10.");
-    let Some(request::Payload::LandingSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!((p.landing_id.clone(), p.add_task_ids.clone(), p.remove_task_ids.len()), (tid(0x6002), vec![tid(0x1001)], 0));
-    let json: Value = serde_json::from_str(&landing_in(&mut link, "move ov-1 --to 10", true).await.unwrap()).unwrap();
-    assert_eq!(json, json!({ "ticket": "ov-1", "from": 9, "to": 10 }));
-
-    let mut alone = two_open();
-    alone.landings.pop();
-    let mut link = Runner { plan: Some(alone), ..runner() };
-    let said = landing_say(&mut link, "move ov-1").await.unwrap();
-    assert_eq!(
-        said,
-        "Took ov-1 off Mac interface polish (Landing 9). It stays off until you put it on a landing with `farcooler landing start --ticket ov-1`, or it goes back through review."
-    );
-    let Some(request::Payload::LandingSet(p)) = &last(&link).payload else { panic!() };
-    assert_eq!((p.landing_id.clone(), p.remove_task_ids.clone()), (tid(0x6001), vec![tid(0x1001)]));
-
-    let mut link = runner();
-    let err = landing_say(&mut link, "move ov-1").await.unwrap_err();
-    assert_eq!(err.to_string(), "Mac interface polish (Landing 9) has already gone to gating or CI, so a ticket can't come off it now.");
-    let err = landing_say(&mut link, "move ov-2").await.unwrap_err();
-    assert_eq!(err.to_string(), "ov-2 isn't on a landing.");
-    assert!(link.sent.iter().all(|r| r.method != "landing.set"));
-}
-
-/// A refusal reads as a landing's sentence, and a runner without the line is
-/// told before anything is sent.
-#[tokio::test]
-async fn refusals_read_as_landing_sentences() {
-    let mut link = Runner { plan: Some(two_open()), ..runner() };
-    link.refuse = Some("landing_moving");
-    let err = landing_say(&mut link, "move ov-1").await.unwrap_err();
-    assert_eq!(err.to_string(), "That landing has already gone to gating or CI, so a ticket can't come off it. Wait for it to land, or drop it.");
-    link.refuse = Some("sha");
-    let err = landing_say(&mut link, "set 9 --sha zz").await.unwrap_err();
-    assert!(err.to_string().starts_with("Give the SHA it pushed with --sha"), "{err}");
-    // After the cutover (ov-987): what a stale read can't explain, said plainly, with what to run instead.
-    link.refuse = Some("engine_lands");
-    for args in ["set 9 --sha abc1234", "set 9 --state green", "start --record-only --ticket ov-1"] {
-        let err = landing_say(&mut link, args).await.unwrap_err();
-        assert!(err.to_string().starts_with("This board lands through the workflow engine now"), "{args}: {err}");
-        assert!(err.to_string().contains("`farcooler workflow get <board>`"), "{args}: {err}");
+async fn landings_are_only_read_here() {
+    for args in ["start ov-1", "start --record-only --ticket ov-1", "set 9 --sha abc1234", "move ov-1"] {
+        let argv = format!("farcooler landing {args} --workspace main");
+        assert!(crate::Cli::try_parse_from(argv.split_whitespace()).is_err(), "{args} still parses");
     }
-
     let mut old = runner();
     old.capabilities.retain(|c| c != capability::BOARD_LINE);
     assert_eq!(landing_say(&mut old, "list").await.unwrap_err().to_string(), NEEDS_LINE);
     assert!(old.sent.is_empty());
-    for route in ["push", "pull_request", "pull-request", "ask"] {
-        assert!(crate::Cli::try_parse_from(["farcooler", "landing", "start", "--record-only", "--route", route]).is_ok(), "{route}");
-    }
 }

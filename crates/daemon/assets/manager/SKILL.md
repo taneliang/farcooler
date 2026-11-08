@@ -144,30 +144,19 @@ Sonnet for well-defined work. Log each ticket's tokens, model and fix rounds; ro
 
 ## 4. Land
 
-Every non-trivial change gets an agent's review first. Move reviewed tickets to landing (`plan ticket set <key> --stage landing`);
-each joins the board's collecting landing, which leaves for its gate by itself when nothing is ahead and main is green;
-the runner tells you when it does. One lander rebases what it carries, applies the reviews' fixes and runs every gate once.
-Never queue landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket. Name its lander
-(`--lander`). Local gates mirror CI: every step and its environment (display scale, `CI=true`, shard timeouts).
+Every non-trivial change gets an agent's review first. Move reviewed tickets to landing (`plan ticket set <key> --stage landing`).
+Never queue landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket.
+Local gates mirror CI: every step and its environment (display scale, `CI=true`, shard timeouts).
 A CI-only failure earns a local gate. A red main comes first; when a known-flaky test did it, rerun the failed job once,
 file a flaky card, and keep landing on the rerun's result.
 
-**With a `## Landing` section, the runner lands.** `landing start <key>...` hands off the tickets. Routes follow changed files:
-first matching rule per file, else the default; most careful file wins. Push tickets wait for green base CI, cherry-pick,
-gate, push and watch CI (rerun canceled CI once), then land with their SHA. A failed batch gate splits the batch in two.
-Ask routes wait on the owner in Needs You (`--land`); never pass `--land` yourself. Conflicts, red gates or red CI stop
-the job with why on its timeline: fix or return the ticket, then restart. One job runs per board.
+**The workflow engine lands.** A ticket whose run reaches its definition's landing step joins that step's open group, which leaves
+for its gate by itself when nothing is ahead. The group folds, gates, pushes and watches CI (a canceled run reruns once); a failed
+batch gate splits it in two. `workflow queue` puts a ticket waiting at its landing step into the group and `workflow leave` takes one
+out before the group leaves, each with the run, pin and revision from `workflow get`. `landing show <N>` follows a group.
+Landings from before the engine are history: `landing list` shows each as it ended, and nothing moves them.
 ```
-## Landing
-- Route: push
-- Route `services/site/**`: ask
-- Gate: `scripts/landing-gate.sh`
-```
-Routes: push, pull request or ask. Globs: `*` stays in a folder, `**` crosses them. Repeat `Gate:` for multiple commands;
-each runs with `sh -c` in the landing worktree. `none` skips gates; a push-capable section must name a gate.
-Optional defaults: `Base: main`, `Remote: origin`, `CI: github` (or none). An invalid section refuses the edit with its line.
-```
-{{cli}} landing start <key> <key> --repo <repo> --title "<what it carries>" --actor manager
+{{cli}} workflow get <workspace>
 {{cli}} landing show <N> --repo <repo>
 ```
 **Landing as a definition.** Draft one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) for the owner to publish;
@@ -175,15 +164,19 @@ you never publish. `import-landing` reads the charter's `## Landing` once (path 
 is a command (`--gate`, the whole list each time; `--gate-env NAME=value`), an agent the engine starts (`--agent-gate`), you (`--orchestrator-gate`,
 then `workflow review`) or the owner (`--person-gate owner`); each holds the ticket for its verdict. `--route 'site/**=ask'` routes by changed paths. PR templates aren't live: don't publish them.
 ```
+## Landing
+- Route: push
+- Route `services/site/**`: ask
+- Gate: `scripts/landing-gate.sh`
+```
+Routes: push, pull request or ask. Globs: `*` stays in a folder, `**` crosses them. Repeat `Gate:` for multiple commands.
+`none` skips gates; a push-capable section must name a gate. Optional defaults: `Base: main`, `Remote: origin`, `CI: github` (or none).
+An invalid section refuses the edit with its line.
+```
 {{cli}} workspace import-landing <workspace> --out landing.json
 {{cli}} workspace landing-template <workspace> batched-push --gate "scripts/landing-gate.sh" --person-gate owner --out landing.json
 ```
-Without one, keep landings on the plan by hand, never on a hand-kept page: record tickets when gating now, move to
-`--state gating`, then set the pushed SHA. The runner tracks its CI; Now shows it above its tickets.
-```
-{{cli}} landing start --record-only --repo <repo> --ticket <key> --ticket <key> --base origin/main --title "<what it carries>" --lander <agent> --actor manager
-{{cli}} landing set <N> --repo <repo> --sha <pushed sha> --actor manager
-```
+Without a published landing definition, a lander lands by hand: it rebases what it carries, applies the reviews' fixes and runs every gate once.
 - **Direct.** Rebase onto main (merge only if the charter permits), check unpushed work, push, watch, close on green CI.
 - **PR.** Never push main and never merge without the required approvals: no admin bypass, no dismissed reviews,
   no resolving another's thread, and never approve. One PR per card, under the owner's own `gh` login so teammates approve; stack only
@@ -197,8 +190,8 @@ Without one, keep landings on the plan by hand, never on a hand-kept page: recor
 After every push or CI rerun, take its run from `gh run list` (never decide there is no CI from the remote's URL; say if
 none is listed) and start `gh run watch <id> --exit-status` as a background command. Red reaches you; green frees the next
 landing. Without a watch, check before stopping. On landing, tick each verified `--met` line, close (`task set --status done`),
-copy reports, delete its build output, and `worktree remove` it. Direct: green on main lands the landing and its tickets.
-PR: `plan ticket set <key> --stage landed --sha <sha>` per merged PR; `landing set <N> --state dropped` for the rehearsal.
+copy reports, delete its build output, and `worktree remove` it. A ticket landed by hand: `plan ticket set <key> --stage landed --sha <sha>`,
+per merged PR in PR mode.
 A page names live data, never types it: `{"ci":"main"}`, `{"ci":"<sha>"}`, `{"cards":"in_review"}`, theme `"show":"spend"`.
 
 ## 5. Check in
@@ -270,7 +263,7 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
   generated files, test floors); gate the combined tree where they might. Two
   tickets in one module are sequenced or stacked, or reserve shared numbers
   (migrations, wire tags) up front. To let a landing go without a ticket that
-  isn't ready: `{{cli}} landing move <key> --repo <repo> --actor manager`.
+  isn't ready, take it out of the group: `{{cli}} workflow leave`.
 - **Gates.** Every CI step (read from the remote's main), built for every
   platform the change touches, judged by exit codes, never by grepping output.
   Chain them and the push with `&&`, never `;`: `lint && test && git push`.

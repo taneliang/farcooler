@@ -236,8 +236,8 @@ pub async fn agents(runner: Option<&str>, args: AgentArgs, json: bool) -> Fallib
 
 /// `farcooler landing ...`, on a connected runner.
 pub async fn landings(runner: Option<&str>, args: LandingArgs, json: bool) -> Fallible {
-    let (mut link, board, actor) = open(runner, &args.common).await?;
-    println!("{}", landing::run_on(&mut link, &board, args.cmd, &actor, json, now_ms()).await?);
+    let (mut link, board, _) = open(runner, &args.common).await?;
+    println!("{}", landing::run_on(&mut link, &board, args.cmd, json, now_ms()).await?);
     Ok(())
 }
 
