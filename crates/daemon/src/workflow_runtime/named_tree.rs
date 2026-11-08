@@ -97,10 +97,16 @@ impl Exec {
             .map_err(|_| Error::Refused("named worktree provisioning uncertain"))?;
         crate::git::mark_owner(path, &host.install_id).await;
         if created.forked { crate::git::mark_forked(path, &host.install_id).await; }
-        let row = self.store.create_worktree(repository, &tree.branch, &tree.path, false)
-            .map_err(|_| Error::Refused("named worktree could not be recorded"))?;
-        self.store.claim_worktree(row.id, board, farcooler_store::models::ClaimSource::Explicit)
-            .map_err(|_| Error::Refused("named worktree could not be claimed"))?;
+        // The tree is made, so a failure to record or claim it takes it back out (it is clean and at its base),
+        // and a retry can name the same tree and branch again.
+        let recorded = self.store.create_worktree(repository, &tree.branch, &tree.path, false)
+            .map_err(|_| Error::Refused("named worktree could not be recorded"))
+            .and_then(|row| self.store.claim_worktree(row.id, board, farcooler_store::models::ClaimSource::Explicit)
+                .map_err(|_| { let _ = self.store.delete_worktree(row.id, row.resource_version); Error::Refused("named worktree could not be claimed") }));
+        if let Err(error) = recorded {
+            let _ = crate::git::rollback_worktree(&self.repository(), &tree.branch, path, &tree.base).await;
+            return Err(error);
+        }
         Ok(())
     }
 }

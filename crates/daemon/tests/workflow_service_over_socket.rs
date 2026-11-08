@@ -504,5 +504,41 @@ async fn workflow_service_refuses_a_bad_or_taken_named_tree_at_start() {
     drop(link);host.close().await;
 }
 
+/// ov-967 (review): when the run's tree is made but the app's row for it can't be written, the run takes the
+/// tree and branch it just made back out, so a retry can name them again.
+#[tokio::test]
+async fn workflow_service_unmakes_a_named_tree_it_could_not_record() {
+    if person_terminal("workflow_service_unmakes_a_named_tree_it_could_not_record").await { return; }
+    use farcooler_protocol::workflow_commands::NamedTree;
+    let (dir,config)=configured(false,"pass").await;
+    let host=Host::open(dir.path()).await; let workspace=host.workspace; let mut link=host.connect().await;
+    let definition=config.definition().unwrap();
+    let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    let ticket=host.service.store.create_task(workspace,"unrecorded",farcooler_store::models::Actor::User).unwrap();
+    host.service.track_tickets(Some(ticket.id)).await;
+    let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
+    let lock=host.service.repo_lock(repository);
+    let held=lock.lock().await;
+    let snapshot=get(&mut link,workspace).await; let item=&snapshot["state"]["items"][&ticket.key];
+    accepted(&call(&mut link,workspace,Action::Start { mutation:mutation("start",snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
+        run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+        worktree:Some(NamedTree { name:"unrecorded".into(),branch:"e-liang/unrecorded".into() }) }).await);
+    let tree=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap().items[&ticket.key].tree.clone().unwrap();
+    // A row already holds that path, so the run's own row can't be written.
+    host.service.store.create_worktree(repository,"blocker",&tree.path,false).unwrap();
+    drop(held);
+    tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
+        let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+        if state.items.get(&ticket.key).is_some_and(|i| matches!(i.phase,Phase::Uncertain|Phase::Failed)) { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }}).await.unwrap();
+    assert!(!Path::new(&tree.path).exists(),"the tree it made is taken out");
+    let branches=git(&config.repository,&["branch","--list","e-liang/unrecorded"]).await.unwrap();
+    assert!(branches.is_empty(),"and its branch: {branches}");
+    drop(link);host.close().await;
+}
+
 #[path = "workflow_service/safety.rs"]
 mod safety;
