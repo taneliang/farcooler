@@ -95,3 +95,24 @@ The flag stays true, and flipping it is the owner's call.
 
 - Trusting a key on the walk, or on any code shown or typed on the runner. Both are forgeable by an agent, as shown above.
 - Treating an ssh session as remote by its `SSH_CONNECTION` address. An agent can ssh to the box's own public address.
+
+## As built (option 1, the orchestrator's ruling)
+
+- **The wire is unchanged.** The phone sends `client.approve_step_up` naming itself, with the first-key code, signed by the key it proposed. `step_up::admit` lets only that request (a device approving its own id) verify against a proposal. `first_key::trust` decides the rest:
+  - the device has a line here, and is the owner's;
+  - no key of the owner's (`local:app` included) is trusted yet;
+  - the proposal is fresh;
+  - the code matches the kept hash.
+  
+  The code is spent by a rename to `first-key-code.used` before the key is trusted. The key is vouched for (`first-key-code`).
+- **The code is 25 Crockford base32 characters (125 bits), in five groups.** It's printed as text; a QR code would need a new crate in the CLI. Phones accept any case, spaces and dashes, and read O, I and L as 0, 1 and 1.
+- **The runner keeps the hash with `farcooler runner keep-first-key <hash>` (hidden).** It's created with `create_new` and is never replaced, and it answers `kept`, `waiting` or `used` with the path.
+- **When `runner install` makes no code:**
+  - when the runner's ed25519 host key is one of this computer's ("No first-key code was made: <runner> is this computer…");
+  - when either side's keys can't be read;
+  - when a code is waiting already: it says "A first-key code was already made for <runner>…", naming the file to delete.
+- **Phones:** "Enter First-Key Code" under the six digits (iOS and Android). It opens a field and Allow With Code, and refusals have sentences (`first_key_wrong`, `first_key_taken`).
+- **Tests:**
+  - daemon: `a_first_key_code_trusts_the_owners_phone_once` and `with_no_first_key_code_a_phone_is_refused`. Each of seven guards was mutated and went red;
+  - CLI: `no_first_key_code_is_made_for_this_computer` (red with the check off) and `the_runners_answer_is_read_and_said_in_words`;
+  - phones: the iOS UI test `testAFirstKeyCodeAllowsThisPhone`, plus the Android controller and view tests and the `people-first-key` capture.

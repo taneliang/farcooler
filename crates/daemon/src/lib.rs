@@ -70,6 +70,7 @@ pub mod access_migration;
 pub mod person_access;
 mod person_access_change;
 mod teammate_bind;
+pub mod first_key;
 pub mod step_up;
 mod step_up_rpc;
 mod approvals;

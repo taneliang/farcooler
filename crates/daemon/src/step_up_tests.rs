@@ -876,3 +876,110 @@ async fn the_model_a_device_said_at_pairing_reaches_the_owners_list() {
     assert_eq!(model("odd-m"), "Pixel 9Pro", "no line break, no reordering");
     assert_eq!(model("mute-m"), "");
 }
+
+// MARK: - A first key on a runner with no Mac app (ov-988)
+
+/// ov-988: on a runner with no Mac app, the owner's phone trusts its own key
+/// with the first-key code the installer showed on another computer. Only the
+/// owner's own enrolled device, signing with the key it proposed, with the
+/// code, and only once: a made-up device, the socket, a wrong code, a second
+/// use and a runner that already trusts a key of the owner's are refused.
+#[tokio::test]
+async fn a_first_key_code_trusts_the_owners_phone_once() {
+    let r = runner().await;
+    let code = crate::first_key::code();
+    assert_eq!(crate::first_key::keep(r.svc.root_dir(), &crate::first_key::hash_of(&code)).unwrap(), crate::first_key::Kept::Kept);
+    let first = |id: &str, code: &str| Request {
+        method: "client.approve_step_up".into(),
+        payload: Some(request::Payload::ClientApproveStepUp(pb::ClientApproveStepUp { client_id: id.into(), code: code.into() })),
+        ..Default::default()
+    };
+    let propose = |device: &Device| Request {
+        method: "client.set_step_up_key".into(),
+        payload: Some(request::Payload::ClientSetStepUpKey(pb::ClientSetStepUpKey { client_id: String::new(), key: Some(device.wire_key(ALG_DEVICE)) })),
+        ..Default::default()
+    };
+
+    // A made-up device, served as if its preamble were admitted, with the
+    // right code and its own key: it has no line, so it is nobody's phone.
+    let made_up = Device::new("made-up-2", 51);
+    let conn = r.conn(made_up.id);
+    call(&conn, propose(&made_up)).await.expect("a proposal");
+    let n = nonce(&conn).await;
+    let refused = word(call(&conn, made_up.step(&r.pin, first(made_up.id, &code), &n)).await);
+    assert!(refused.contains("not_yours"), "a made-up device: {refused}");
+    assert!(!r.svc.store.step_up_key(made_up.id).unwrap().unwrap().trusted);
+
+    // The socket, with the code: nobody is present there.
+    let phone = Device::new("phone-o", 52);
+    let conn = r.conn("phone-o");
+    call(&conn, propose(&phone)).await.expect("the phone proposes its key");
+    let socket = word(call(&r.socket(), first("phone-o", &code)).await);
+    assert!(socket.ends_with("presence_needed"), "the socket: {socket}");
+
+    // A Member's phone is not the owner's.
+    let bob = Device::new("phone-b", 53);
+    let by_bob = r.conn("phone-b");
+    call(&by_bob, propose(&bob)).await.expect("Bob proposes");
+    let n = nonce(&by_bob).await;
+    let member = word(call(&by_bob, bob.step(&r.pin, first("phone-b", &code), &n)).await);
+    assert!(member.contains("not_yours"), "a Member's phone: {member}");
+
+    // Unsigned, and signed by another key: the code alone trusts nothing.
+    let unsigned = word(call(&conn, first("phone-o", &code)).await);
+    assert!(unsigned.ends_with("step_up_needed"), "unsigned: {unsigned}");
+    let n = nonce(&conn).await;
+    let forged = word(call(&conn, Device::new("phone-o", 54).step(&r.pin, first("phone-o", &code), &n)).await);
+    assert!(forged.ends_with("step_up_failed"), "another key's signature: {forged}");
+
+    // A wrong code.
+    let n = nonce(&conn).await;
+    let wrong = word(call(&conn, phone.step(&r.pin, first("phone-o", &crate::first_key::code()), &n)).await);
+    assert!(wrong.ends_with("first_key_wrong"), "a wrong code: {wrong}");
+    assert!(!r.svc.store.step_up_key("phone-o").unwrap().unwrap().trusted);
+
+    // The owner's phone, its own key, the code, typed as a person would.
+    let typed = code.to_lowercase().replace('-', " ");
+    let n = nonce(&conn).await;
+    call(&conn, phone.step(&r.pin, first("phone-o", &typed), &n)).await.expect("the owner's phone with the code");
+    assert!(r.svc.store.step_up_key("phone-o").unwrap().unwrap().trusted);
+    assert_eq!(r.svc.store.step_up_vouched_by("phone-o").unwrap().as_deref(), Some(crate::first_key::VOUCHER), "the owner was there");
+
+    // A second device with the same code: a key of the owner's is trusted now.
+    let other = Device::new("web-o", 55);
+    let by_other = r.conn("web-o");
+    call(&by_other, propose(&other)).await.expect("the owner's other device proposes");
+    let n = nonce(&by_other).await;
+    let taken = word(call(&by_other, other.step(&r.pin, first("web-o", &code), &n)).await);
+    assert!(taken.ends_with("first_key_taken"), "once a key is trusted: {taken}");
+
+    // And with that key gone, the code is still spent.
+    call(&r.socket(), revoke_req("phone-o", false)).await.expect("the phone is revoked");
+    assert!(r.svc.store.step_up_key("phone-o").unwrap().is_none());
+    let n = nonce(&by_other).await;
+    let spent = word(call(&by_other, other.step(&r.pin, first("web-o", &code), &n)).await);
+    assert!(spent.ends_with("first_key_wrong"), "a second use: {spent}");
+    assert!(!r.svc.store.step_up_key("web-o").unwrap().unwrap().trusted);
+    assert_eq!(crate::first_key::keep(r.svc.root_dir(), &crate::first_key::hash_of(&crate::first_key::code())).unwrap(), crate::first_key::Kept::Used, "a spent code is never replaced");
+}
+
+/// ov-988: with no code on the runner, the phone is told so.
+#[tokio::test]
+async fn with_no_first_key_code_a_phone_is_refused() {
+    let r = runner().await;
+    let phone = Device::new("phone-o", 56);
+    let conn = r.conn("phone-o");
+    call(&conn, Request {
+        method: "client.set_step_up_key".into(),
+        payload: Some(request::Payload::ClientSetStepUpKey(pb::ClientSetStepUpKey { client_id: String::new(), key: Some(phone.wire_key(ALG_DEVICE)) })),
+        ..Default::default()
+    }).await.expect("a proposal");
+    let n = nonce(&conn).await;
+    let req = Request {
+        method: "client.approve_step_up".into(),
+        payload: Some(request::Payload::ClientApproveStepUp(pb::ClientApproveStepUp { client_id: "phone-o".into(), code: crate::first_key::code() })),
+        ..Default::default()
+    };
+    let none = word(call(&conn, phone.step(&r.pin, req, &n)).await);
+    assert!(none.ends_with("first_key_wrong"), "{none}");
+}

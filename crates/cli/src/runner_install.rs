@@ -340,6 +340,7 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
     }
 
     let persistence = register_service(target, probe.persistence).await?;
+    first_key(target).await;
 
     println!();
     println!("Installed on {target}.");
@@ -370,6 +371,111 @@ pub async fn install(target: &str, from: Option<&Path>) -> Fallible {
     println!();
     println!("Check it:   farcooler --runner {target} status");
     Ok(())
+}
+
+/// Make the runner's first-key code (ov-988): how its owner trusts their
+/// phone's admin key on a runner with no Mac app. Made here, on the computer
+/// the installer runs on, and shown only here; the runner keeps its hash.
+///
+/// None when the runner is this computer: the code would then be on the
+/// runner, where an agent could read it from a terminal. Never a second one:
+/// the runner keeps the first it was given (`first_key::keep`).
+async fn first_key(target: &str) {
+    let here = farcooler_daemon::step_up::host_pins(Path::new("/etc/ssh"));
+    let there = match remote_capture(target, "cat /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null; true").await {
+        Ok(text) => pins_in(&text),
+        Err(_) => Vec::new(),
+    };
+    let said = match first_key_plan(&here, &there) {
+        FirstKeyPlan::Make => {
+            let code = farcooler_daemon::first_key::code();
+            let hash = farcooler_daemon::first_key::hash_of(&code);
+            let cli = format!("~/.local/bin/{}", cli_name());
+            let answer = remote_capture(target, &format!("{cli} runner keep-first-key {hash}")).await.ok();
+            first_key_words(FirstKeyPlan::Make, answer.as_deref().and_then(kept_answer), &code, target)
+        }
+        plan => first_key_words(plan, None, "", target),
+    };
+    if let Some(said) = said {
+        println!();
+        println!("{said}");
+    }
+}
+
+/// `runner keep-first-key`'s answer: what the runner did, and where it keeps the hash.
+fn kept_answer(said: &str) -> Option<(farcooler_daemon::first_key::Kept, String)> {
+    let (word, path) = said.trim().split_once('\t')?;
+    Some((farcooler_daemon::first_key::Kept::from_word(word)?, path.to_string()))
+}
+
+/// Whether to make a first-key code for a runner whose sshd host keys are
+/// `there`, from a computer whose own are `here`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FirstKeyPlan {
+    Make,
+    /// The runner is this computer: one of its host keys is ours.
+    ThisComputer,
+    /// Either side's host keys couldn't be read, so it can't be told.
+    CantTell,
+}
+
+fn first_key_plan(here: &[String], there: &[String]) -> FirstKeyPlan {
+    if here.is_empty() || there.is_empty() {
+        FirstKeyPlan::CantTell
+    } else if there.iter().any(|pin| here.contains(pin)) {
+        FirstKeyPlan::ThisComputer
+    } else {
+        FirstKeyPlan::Make
+    }
+}
+
+/// The `SHA256:` fingerprints of the OpenSSH public keys in `text`, one a line.
+fn pins_in(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| ssh_key::PublicKey::from_openssh(line.trim()).ok())
+        .map(|key| key.fingerprint(ssh_key::HashAlg::Sha256).to_string())
+        .collect()
+}
+
+/// What the installer says about the first-key code, if anything. `kept` is
+/// what the runner answered, when a `code` was sent: what it did, and where
+/// it keeps the hash.
+fn first_key_words(plan: FirstKeyPlan, kept: Option<(farcooler_daemon::first_key::Kept, String)>, code: &str, target: &str) -> Option<String> {
+    use farcooler_daemon::first_key::Kept;
+    Some(match (plan, kept) {
+        (FirstKeyPlan::ThisComputer, _) => format!(
+            "No first-key code was made: {target} is this computer, and an agent on it could read a code shown here.\n\
+             If you have no Mac to approve your phone, run this install again from another computer."
+        ),
+        (FirstKeyPlan::CantTell, _) => format!(
+            "No first-key code was made: couldn't read the host keys of {target} or of this computer, so couldn't tell they're different machines."
+        ),
+        (FirstKeyPlan::Make, Some((Kept::Kept, _))) => format!(
+            "First-key code for {target}:\n\n    {code}\n\n\
+             On your phone, open {target} in Far Cooler, go to People, tap Allow Admin Actions, then Enter First-Key Code.\n\
+             It works once, and only until a device of yours allows admin actions there. Far Cooler doesn't keep it anywhere, so use it now or write it down."
+        ),
+        (FirstKeyPlan::Make, Some((Kept::Waiting, path))) => format!(
+            "A first-key code was already made for {target}, so this install made no new one.\n\
+             If you didn't make it, delete {path} on {target}, then run this install again from another computer."
+        ),
+        (FirstKeyPlan::Make, Some((Kept::Used, _))) => return None,
+        (FirstKeyPlan::Make, None) => format!(
+            "No first-key code was made: {target} didn't keep it. Its runner may be older than this install."
+        ),
+    })
+}
+
+/// `runner keep-first-key`: on the runner, keep `hash` (see [`first_key`]),
+/// and say what happened and where, tab-separated.
+pub fn keep_first_key(hash: &str) -> Fallible {
+    println!("{}", keep_answer(&farcooler_daemon::paths::ensure_runtime_dir()?, hash)?);
+    Ok(())
+}
+
+fn keep_answer(dir: &Path, hash: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let kept = farcooler_daemon::first_key::keep(dir, hash.trim()).map_err(|_| "that isn't a first-key code's hash")?;
+    Ok(format!("{}\t{}", kept.word(), dir.join(farcooler_daemon::first_key::FILE).display()))
 }
 
 /// Register whatever this host uses to keep a user daemon alive.
@@ -1308,4 +1414,71 @@ mod tests {
         assert_eq!(downgrade_refusal("box", Some(&at(0))), None, "too old to say");
         assert_eq!(downgrade_refusal("box", None), None, "unreachable");
     }
+
+    // MARK: - The first-key code (ov-988)
+
+    /// The runner is this computer when one of its host keys is ours: then no
+    /// code is made, since an agent on it could read one shown here. Read
+    /// from this machine's own sshd keys both ways, as the installer reads
+    /// them, so `localhost` is this computer.
+    #[test]
+    fn no_first_key_code_is_made_for_this_computer() {
+        let here = farcooler_daemon::step_up::host_pins(Path::new("/etc/ssh"));
+        let there = pins_in(&std::fs::read_to_string("/etc/ssh/ssh_host_ed25519_key.pub").unwrap_or_default());
+        if here.is_empty() {
+            assert_eq!(first_key_plan(&here, &there), FirstKeyPlan::CantTell, "no host key here");
+        } else {
+            assert_eq!(first_key_plan(&here, &there), FirstKeyPlan::ThisComputer);
+        }
+        let other = pins_in(&crate::runner_install::tests::ed25519_line(7));
+        assert_eq!(other.len(), 1);
+        let mine = pins_in(&crate::runner_install::tests::ed25519_line(8));
+        assert_eq!(first_key_plan(&mine, &other), FirstKeyPlan::Make, "another machine");
+        assert_eq!(first_key_plan(&[mine[0].clone(), other[0].clone()], &other), FirstKeyPlan::ThisComputer, "any key in common");
+        assert_eq!(first_key_plan(&mine, &[]), FirstKeyPlan::CantTell, "its keys unread");
+        assert_eq!(first_key_plan(&[], &other), FirstKeyPlan::CantTell, "ours unread");
+        let said = first_key_words(FirstKeyPlan::ThisComputer, None, "", "you@box").unwrap();
+        assert!(said.starts_with("No first-key code was made: you@box is this computer"), "{said}");
+        assert!(said.contains("from another computer"), "{said}");
+    }
+
+    pub(super) fn ed25519_line(n: u8) -> String {
+        use ssh_key::public::{Ed25519PublicKey, KeyData};
+        ssh_key::PublicKey::new(KeyData::Ed25519(Ed25519PublicKey([n; 32])), "root@box").to_openssh().unwrap()
+    }
+
+    /// What the runner's `keep-first-key` prints is what the installer reads,
+    /// and each answer is said in words: the code once, the path of one
+    /// already made, nothing for one used.
+    #[test]
+    fn the_runners_answer_is_read_and_said_in_words() {
+        use farcooler_daemon::first_key::{Kept, code, hash_of};
+        let dir = tempfile::tempdir().unwrap();
+        let first = code();
+        let kept = kept_answer(&keep_answer(dir.path(), &hash_of(&first)).unwrap()).expect("an answer");
+        assert_eq!(kept.0, Kept::Kept);
+        let said = first_key_words(FirstKeyPlan::Make, Some(kept), &first, "you@box").unwrap();
+        assert!(said.starts_with("First-key code for you@box:"), "{said}");
+        assert!(said.contains(&format!("\n    {first}\n")), "the code, on a line of its own: {said}");
+        assert!(said.contains("Enter First-Key Code"), "{said}");
+
+        let again = kept_answer(&keep_answer(dir.path(), &hash_of(&code())).unwrap()).expect("an answer");
+        assert_eq!(again.0, Kept::Waiting);
+        let path = dir.path().join(farcooler_daemon::first_key::FILE).display().to_string();
+        assert_eq!(again.1, path);
+        let said = first_key_words(FirstKeyPlan::Make, Some(again), "unused", "you@box").unwrap();
+        assert_eq!(
+            said,
+            format!("A first-key code was already made for you@box, so this install made no new one.\nIf you didn't make it, delete {path} on you@box, then run this install again from another computer.")
+        );
+        assert!(!said.contains("unused"), "a code the runner didn't keep is never shown");
+
+        std::fs::rename(dir.path().join(farcooler_daemon::first_key::FILE), dir.path().join(farcooler_daemon::first_key::USED)).unwrap();
+        let used = kept_answer(&keep_answer(dir.path(), &hash_of(&code())).unwrap()).expect("an answer");
+        assert_eq!(first_key_words(FirstKeyPlan::Make, Some(used), "x", "you@box"), None);
+        assert!(first_key_words(FirstKeyPlan::Make, None, "x", "you@box").unwrap().contains("didn't keep it"));
+        assert!(keep_answer(dir.path(), "not a hash").is_err());
+        assert_eq!(kept_answer("bash: farcooler: command not found"), None);
+    }
+
 }

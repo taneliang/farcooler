@@ -62,6 +62,15 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Every device whose step-up key is trusted (ov-988: whether the owner
+    /// already has one, so a first-key code has nothing left to do).
+    pub fn trusted_step_up_devices(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT client_id FROM step_up_keys WHERE state = 'trusted' ORDER BY client_id").map_err(map_err)?;
+        let rows = stmt.query_map([], |r| r.get(0)).map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<String>>>().map_err(map_err)
+    }
+
     /// Record `device`'s key, `trusted` or proposed. A device with a trusted
     /// key is refused `key_exists`: rotating needs a revoke and a new enroll.
     /// A proposal is replaceable, by a new proposal or by a trusted key,

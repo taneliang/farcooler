@@ -17,6 +17,9 @@
 //!   the same person, with its own step-up. Anything else on the socket, the
 //!   CLI's `people approve` included, is refused `presence_needed`. A
 //!   proposal older than ten minutes is refused.
+//! - **Or the first-key code** (ov-988), on a runner with no Mac app: a
+//!   device approving its own key, signed by that key, with the code the
+//!   installer showed on another computer (`first_key`).
 //! - **A vouch says the owner was there** (ov-974): an approval by the Mac
 //!   app with Touch ID, or by a device of the owner's already vouched for,
 //!   also vouches for the key ([`vouch_of`]). Only a vouched key signs a
@@ -117,6 +120,13 @@ pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, steppe
                 tracing::warn!(device = target, "refused: an approval on the socket with nobody present");
                 return Err(DomainError::Conflict { what: "presence_needed" });
             }
+        }
+        // A device's own key, with the first-key code the installer showed
+        // (ov-988): for an owner whose runner has no Mac app.
+        Some(approver) if approver == target => {
+            crate::first_key::trust(svc, target, stepped, &p.code).await?;
+            let row = svc.store.step_up_key(target)?.ok_or(DomainError::OperationFailed)?;
+            return Ok(state(target, &row));
         }
         Some(approver) => {
             // Another trusted device of the same person, stepped up for this.

@@ -596,6 +596,14 @@ enum RunnerCmd {
     /// runners already in it alone.
     #[command(hide = true)]
     StoreNodeKey,
+    /// Keep a first-key code's hash where the daemon reads it (ov-988), and
+    /// print `kept`, `waiting` (one was made before) or `used`.
+    ///
+    /// What `runner install` runs on the runner. Never replaces a code that
+    /// was kept, so no command here makes a second one; the code itself is
+    /// only ever on the computer the installer ran on.
+    #[command(hide = true)]
+    KeepFirstKey { hash: String },
     /// Keep the tunneled runners read from stdin where `runner pipe` finds them.
     ///
     /// Stdin is `[{"id","token"}]`. Writes `runners.json` owner-only and leaves
@@ -1290,6 +1298,7 @@ async fn run() -> Fallible {
         Command::RunnerCmd(RunnerCmd::Pipe { id }) => runner_pipe::run(&id).await,
         Command::RunnerCmd(RunnerCmd::MintNodeKey) => node_key::mint(),
         Command::RunnerCmd(RunnerCmd::StoreNodeKey) => node_key::store(),
+        Command::RunnerCmd(RunnerCmd::KeepFirstKey { hash }) => runner_install::keep_first_key(&hash),
         Command::RunnerCmd(RunnerCmd::StoreRunners) => node_key::store_runners(),
         Command::RunnerCmd(RunnerCmd::ForgetRunners) => node_key::forget_runners(),
         Command::RunnerCmd(RunnerCmd::PinnedKey { id }) => node_key::pinned_key(&id),

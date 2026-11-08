@@ -122,6 +122,24 @@ farcooler runner install you@box --from /path/to/checkout/target/release
    will not survive the night.
 7. Enables and starts the service.
 
+### The first-key code
+
+At its end, `runner install` prints a **first-key code**: 25 characters, made on
+the computer the installer ran on. Changes to who has access ask a phone for Face
+ID or a fingerprint, and the runner only trusts a phone's admin key when someone
+it can believe is present approves it: Far Cooler on the runner's own Mac, with
+Touch ID, or another of your devices it already trusts. A Linux runner has
+neither, so on your phone open the runner's People, tap Allow Admin Actions,
+then Enter First-Key Code. It works once, and only until a device of yours
+allows admin actions there; from then on, that device approves the next.
+
+The runner keeps only the code's hash, and never a second one. So the installer
+makes no code when the runner is the machine it runs on, since an agent there
+could read it from the terminal: install from another computer. A runner
+installed before codes existed gets one the first time the installer runs
+against it; if the installer says one was already made and you didn't make it,
+delete the file it names on the runner and install again from another computer.
+
 ## Using a runner
 
 Every command takes `--runner`:

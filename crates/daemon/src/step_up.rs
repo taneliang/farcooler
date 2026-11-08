@@ -101,6 +101,18 @@ pub const DEFENSIVE: [&str; 2] = ["client.revoke", "member.remove"];
 /// whether it follows a minimum app version, is the coordinator's call, not a
 /// slice's. A browser is never in this transition: it can't hold a key to ask
 /// for, see [`browser_refused`].
+///
+/// **On a runner with no Mac app** (a Linux box, a Mac reached over ssh):
+/// flipping this ends admin there for every keyless phone, and nothing on
+/// the runner can give it back, because since ov-980 a key is trusted only
+/// with someone present and the runner's own socket is no proof of that.
+/// What gives it back is a key trusted one of two ways: by a device of the
+/// owner's already trusted, or, for the owner's first, with the first-key
+/// code `runner install` showed on the computer it ran on (`first_key`,
+/// ov-988). A runner installed before ov-988 has no code until its owner runs
+/// the installer once from another computer. So flip it only once the phones
+/// that take a code have shipped, and those owners have been told to make
+/// one: else they are locked out of remote admin until they do.
 pub const KEYLESS_PHONES_ALLOWED: bool = true;
 
 /// How long a challenge lives.
@@ -380,7 +392,12 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         if OPTIONAL.contains(&req.method.as_str()) { return Err(DomainError::Conflict { what: "step_up_unneeded" }); }
         return admit_approved(svc, peer, req, device, now_ms);
     }
-    let key = svc.store.step_up_key(device)?.filter(|k| k.trusted).ok_or(DomainError::Conflict { what: "key_untrusted" })?;
+    // A device approving its own key signs with that key while it is still a
+    // proposal: the first-key code's route (ov-988). What it may do with the
+    // signature is `first_key::trust`'s to say, and nothing else reads it.
+    let own_approval = req.method == "client.approve_step_up"
+        && matches!(&req.payload, Some(farcooler_protocol::v1::request::Payload::ClientApproveStepUp(p)) if p.client_id.trim() == device);
+    let key = svc.store.step_up_key(device)?.filter(|k| k.trusted || own_approval).ok_or(DomainError::Conflict { what: "key_untrusted" })?;
     // The nonce is spent before the signature is looked at, and stays spent.
     if !session.challenges().take(&step_up.nonce, now_ms) {
         tracing::info!(method = %req.method, "refused: a step-up with a challenge that is spent, expired or not this session's");
