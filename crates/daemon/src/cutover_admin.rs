@@ -43,7 +43,10 @@ pub fn inspect(root: &Path) -> Value {
     let admission = match startup::readonly_admission(&db) { Ok(a) => format!("{a:?}"), Err(e) => format!("refused: {e}") };
     let authority = startup::read_authority(&db).ok().flatten();
     let baseline = transfer::validate_artifacts(&db).ok().map(|(b, _)| json!({"attempt": b.attempt, "registry": b.registry, "raw_hash": b.raw_hash}));
-    json!({"schema": 1, "ordinary_startup": admission, "artifacts": startup::artifact_dir(&db).exists(),
+    // The attempt in hand, held or prepared: a Prepare under any other is
+    // refused, so the Mac's Finish Upgrade prepares under this one (ov-984).
+    let attempt = transfer::attempt_in_hand(&db);
+    json!({"schema": 1, "ordinary_startup": admission, "artifacts": startup::artifact_dir(&db).exists(), "attempt": attempt,
         "crash_journal": startup::crash_journal(&db), "authority": authority, "baseline": baseline,
         "open_elsewhere": owners::other_holders(&db).ok()})
 }

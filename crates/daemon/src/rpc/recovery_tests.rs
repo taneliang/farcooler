@@ -114,6 +114,19 @@ async fn recovery_prepares_then_recovers_a_real_database_back_to_ordinary_servic
     assert_eq!(op(&owner, INSPECT).await.unwrap()["ordinary_startup"], "Existing");
     drop(crate::service::Service::open_in(root).await.expect("ordinary service is back"));
 }
+/// The Mac's Finish Upgrade prepares under the attempt a live Prepare held, or
+/// Prepare refuses it as another's (ov-984): `inspect` names the one in hand.
+#[tokio::test]
+async fn inspect_names_the_attempt_in_hand() {
+    let (_dir, root) = closed_root().await;
+    let db = crate::cutover_admin::database(&root);
+    let owner = person(&root);
+    assert_eq!(op(&owner, INSPECT).await.unwrap()["attempt"], serde_json::Value::Null, "none before a hold");
+    transfer::hold(&db, "a-1").unwrap();
+    assert_eq!(op(&owner, INSPECT).await.unwrap()["attempt"], "a-1", "the hold's");
+    prepare(&owner).await.unwrap();
+    assert_eq!(op(&owner, INSPECT).await.unwrap()["attempt"], "a-1", "the baseline's");
+}
 #[tokio::test]
 async fn recovery_prepare_refuses_while_any_process_has_the_database_open() {
     let (_dir, root) = closed_root().await;
