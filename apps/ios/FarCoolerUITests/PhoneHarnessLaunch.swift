@@ -87,13 +87,22 @@ extension XCUIApplication {
     /// Scroll the front-most list down, in drags shorter than the list, until
     /// `element` is drawn: a lazy list draws only what is near its window, and
     /// the Plan's sections put a ticket or a theme well below the first screen.
+    ///
+    /// A runner that reads slowly (CI's) has not drawn the screen's top when
+    /// the first drags begin, and they scroll past what is about to load (the
+    /// Plan's facts, in the nightlies of Nov 6-8). So a miss goes back to the
+    /// top and waits once more, on what the screen then shows (ov-703).
     @discardableResult
     func reveal(_ element: XCUIElement, drags: Int = 40) -> Bool {
         let target = element.firstMatch
-        for _ in 0..<drags where !target.exists {
-            let list = collectionViews.allElementsBoundByIndex.last { $0.exists && $0.isHittable } ?? collectionViews.firstMatch
-            list.swipeUp(velocity: .slow)
+        func list() -> XCUIElement {
+            collectionViews.allElementsBoundByIndex.last { $0.exists && $0.isHittable } ?? collectionViews.firstMatch
         }
+        for _ in 0..<drags where !target.exists { list().swipeUp(velocity: .slow) }
+        if target.exists { return true }
+        for _ in 0..<drags { list().swipeDown(velocity: .fast) }
+        if target.waitForExistence(timeout: 10) { return true }
+        for _ in 0..<drags where !target.exists { list().swipeUp(velocity: .slow) }
         return target.exists
     }
 
