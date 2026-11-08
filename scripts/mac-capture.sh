@@ -35,6 +35,7 @@
 #   FARCOOLER_CAPTURE_SCALE   the bitmap's scale, 1 or 2; unset, the window's own
 #   FARCOOLER_CAPTURE_WAIT    seconds a window settles before it's drawn (5)
 #   FARCOOLER_CAPTURE_WIDTH   the window's width in points (1360)
+#   FARCOOLER_CAPTURE_ASK_FILE a file whose text is the seeded decision's question, with Approve and Decline for options
 #   FARCOOLER_CAPTURE_PEEK    set: the plan peeked over the chat, as ⌥⌘P does
 #   FARCOOLER_CAPTURE_RULING_ACTIONS  set: Keep, Reverse and Discuss drawn on each open
 #                             ruling, as when the pointer is on it (a capture can't hover)
@@ -172,7 +173,12 @@ if [ ! -f "$seed" ]; then
     fc task set "$started" --repo demo --status in_progress >/dev/null
     asked=$(fc --json task create --workspace "$ws" --title "Round half-cents" --intent "Pick a rounding rule." \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])')
-    fc task ask "$asked" --repo demo --actor manager --body "Banker's rounding, or half up?" >/dev/null
+    # A long real question, from a file: the decision card of an orchestrator's workflow draft (ov-971).
+    if [ -n "${FARCOOLER_CAPTURE_ASK_FILE:-}" ]; then
+        fc task ask "$asked" --repo demo --actor manager --body "$(cat "$FARCOOLER_CAPTURE_ASK_FILE")" --option Approve --option Decline >/dev/null
+    else
+        fc task ask "$asked" --repo demo --actor manager --body "Banker's rounding, or half up?" >/dev/null
+    fi
     done_key=$(fc --json task create --workspace "$ws" --title "Name the currency field" \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])')
     fc task set "$done_key" --repo demo --status done >/dev/null
