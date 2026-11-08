@@ -963,6 +963,36 @@ async fn a_first_key_code_trusts_the_owners_phone_once() {
     assert_eq!(crate::first_key::keep(r.svc.root_dir(), &crate::first_key::hash_of(&crate::first_key::code())).unwrap(), crate::first_key::Kept::Used, "a spent code is never replaced");
 }
 
+/// ov-988 review B1: the code trusts the key that signed, never one swapped
+/// in since. The socket replaces a proposal for any id, so between the
+/// phone's signature being checked and its key being trusted an agent's key
+/// could be what's stored. That's refused, nothing is trusted, and the code
+/// isn't spent: the owner, asking again, is trusted.
+#[tokio::test]
+async fn a_first_key_code_trusts_only_the_key_that_signed() {
+    let r = runner().await;
+    let code = crate::first_key::code();
+    crate::first_key::keep(r.svc.root_dir(), &crate::first_key::hash_of(&code)).unwrap();
+    let phone = Device::new("phone-o", 57);
+    let agent = Device::new("phone-o", 58);
+    r.svc.store.put_step_up_key("phone-o", ALG_DEVICE, &phone.public(), false, now_ms()).unwrap();
+    // The phone's signature was checked against its own key...
+    let signed = Stepped { method: "client.approve_step_up".into(), digest: [0; 32], device: "phone-o".into(), browser: false, key: phone.public() };
+    // ...and then the socket swapped the agent's in.
+    r.svc.store.put_step_up_key("phone-o", ALG_DEVICE, &agent.public(), false, now_ms()).unwrap();
+    let swapped = crate::first_key::trust(&r.svc, "phone-o", Some(&signed), &code).await;
+    assert!(matches!(swapped, Err(DomainError::Conflict { what: "key_changed" })), "{swapped:?}");
+    let stored = r.svc.store.step_up_key("phone-o").unwrap().unwrap();
+    assert!(!stored.trusted, "the agent's key was trusted with the owner's code");
+    assert!(r.svc.root_dir().join(crate::first_key::FILE).exists(), "the code wasn't spent on a refusal");
+
+    // The phone proposes again, and the same code trusts its key.
+    r.svc.store.put_step_up_key("phone-o", ALG_DEVICE, &phone.public(), false, now_ms()).unwrap();
+    crate::first_key::trust(&r.svc, "phone-o", Some(&signed), &code).await.expect("the phone's own key");
+    let stored = r.svc.store.step_up_key("phone-o").unwrap().unwrap();
+    assert!(stored.trusted && stored.public_key == phone.public());
+}
+
 /// ov-988: with no code on the runner, the phone is told so.
 #[tokio::test]
 async fn with_no_first_key_code_a_phone_is_refused() {

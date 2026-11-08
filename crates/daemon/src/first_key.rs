@@ -132,7 +132,7 @@ fn wrong() -> DomainError {
 /// is the owner's with a line here, no key of the owner's is trusted yet,
 /// and `code` is the one kept. Spends the code.
 pub async fn trust(svc: &Service, device: &str, stepped: Option<&Stepped>, code: &str) -> Result<()> {
-    let signed = stepped.is_some_and(|s| s.method == "client.approve_step_up" && s.device == device && !s.browser);
+    let signed = stepped.is_some_and(|s| s.method == "client.approve_step_up" && s.device == device && !s.browser && !s.key.is_empty());
     if !signed {
         return Err(DomainError::Conflict { what: "step_up_needed" });
     }
@@ -163,7 +163,18 @@ pub async fn trust(svc: &Service, device: &str, stepped: Option<&Stepped>, code:
     }
     // Spent before the key is trusted, by a rename only one caller wins.
     std::fs::rename(dir.join(FILE), dir.join(USED)).map_err(|_| wrong())?;
-    svc.store.trust_step_up_key(device, crate::step_up_rpc::now_ms())?;
+    // Only the key that signed (review B1): the socket can replace a
+    // proposal for any id, so what is stored now may be another key. Then
+    // nothing is trusted and the code is put back for the owner to try again.
+    let signer = &stepped.expect("checked signed above").key;
+    if let Err(e) = svc.store.trust_step_up_key_if(device, signer, crate::step_up_rpc::now_ms()) {
+        if std::fs::rename(dir.join(USED), dir.join(FILE)).is_err() {
+            tracing::error!(device, "couldn't put an unused first-key code back");
+        }
+        tracing::warn!(device, "refused: the key that signed for a first-key code isn't the one stored now");
+        return Err(e);
+    }
+    // Trusted, it can't be replaced (`put_step_up_key`), so this vouches for it.
     svc.store.vouch_step_up_key(device, VOUCHER)?;
     tracing::info!(device, "the owner's first step-up key was trusted with the first-key code");
     Ok(())

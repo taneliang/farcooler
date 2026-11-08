@@ -110,9 +110,12 @@ pub const DEFENSIVE: [&str; 2] = ["client.revoke", "member.remove"];
 /// owner's already trusted, or, for the owner's first, with the first-key
 /// code `runner install` showed on the computer it ran on (`first_key`,
 /// ov-988). A runner installed before ov-988 has no code until its owner runs
-/// the installer once from another computer. So flip it only once the phones
-/// that take a code have shipped, and those owners have been told to make
-/// one: else they are locked out of remote admin until they do.
+/// the installer once from another computer, and until then anything running
+/// as the runner's Unix user can keep a code of its own there (`runner
+/// keep-first-key`, the ov-988 review's B2, the owner's to rule on). So flip
+/// it only once the phones that take a code have shipped, and those owners
+/// have been told to make one: else they are locked out of remote admin
+/// until they do.
 pub const KEYLESS_PHONES_ALLOWED: bool = true;
 
 /// How long a challenge lives.
@@ -181,6 +184,11 @@ pub struct Stepped {
     pub device: String,
     /// The key was a browser's passkey.
     pub browser: bool,
+    /// The public key the signature was checked against, as it was then
+    /// (ov-988, B1): what an approval of that key may trust, and nothing a
+    /// proposal swapped in since. Empty for a phone's approval, which no key
+    /// of this device signed.
+    pub key: Vec<u8>,
 }
 
 /// Whether the person behind `peer`'s device, stepped up for `method`, may
@@ -419,7 +427,7 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         svc.store.use_sign_count(device, count)?;
     }
     let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
-    let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser };
+    let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser, key: key.public_key.clone() };
     if !may_admin(&svc.store, peer, Some(&stepped), &req.method)? {
         return Err(DomainError::NotYours { what: "not_admin" });
     }
@@ -443,7 +451,7 @@ fn admit_local(svc: &Service, session: &Session, req: Request, now_ms: i64) -> R
     let context = Context { client_id: LOCAL_APP, host_pins: &pins, app_host: farcooler_fence::app_host() };
     verify(&key.alg, &key.public_key, step_up, &context).inspect_err(|_| tracing::warn!(method = %req.method, "refused: the Mac app's step-up didn't verify"))?;
     let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
-    Ok((executed, Some(Stepped { method: req.method.clone(), digest, device: LOCAL_APP.to_string(), browser: false })))
+    Ok((executed, Some(Stepped { method: req.method.clone(), digest, device: LOCAL_APP.to_string(), browser: false, key: key.public_key.clone() })))
 }
 
 /// A request the person's phone approved (ov-858): the approval is spent, once,
@@ -462,7 +470,7 @@ fn admit_approved(svc: &Service, peer: &Peer, req: Request, device: &str, now_ms
     if !crate::approvals::ASKABLE.contains(&executed.method.as_str()) || crate::step_up_rpc::is_browser(svc, device)? {
         return Err(DomainError::Conflict { what: "defensive_only" });
     }
-    let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser: false };
+    let stepped = Stepped { method: req.method.clone(), digest, device: device.to_string(), browser: false, key: Vec::new() };
     if !may_admin(&svc.store, peer, Some(&stepped), &req.method)? {
         return Err(DomainError::NotYours { what: "not_admin" });
     }

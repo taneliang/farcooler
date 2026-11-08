@@ -137,8 +137,10 @@ The runner keeps only the code's hash, and never a second one. So the installer
 makes no code when the runner is the machine it runs on, since an agent there
 could read it from the terminal: install from another computer. A runner
 installed before codes existed gets one the first time the installer runs
-against it; if the installer says one was already made and you didn't make it,
-delete the file it names on the runner and install again from another computer.
+against it. If the installer says one was already made, or already used, and
+that wasn't you, delete the file it names on the runner and install again from
+another computer. Until a runner has a code made that way, anything running as
+its Unix user could make one of its own (ov-988 review B2).
 
 ## Using a runner
 

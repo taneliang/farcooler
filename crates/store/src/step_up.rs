@@ -128,6 +128,36 @@ impl Store {
         tx.commit().map_err(map_err)
     }
 
+    /// Trust `device`'s proposal only if it is still `public_key`, the key an
+    /// approval checked (ov-988 review B1): a proposal is replaceable until
+    /// it is trusted, so trusting "whatever is stored now" could trust a key
+    /// swapped in after the check. Refused `key_changed` when the stored key
+    /// isn't that one, `not_found` with none, `proposal_expired` past
+    /// [`PROPOSAL_MS`]. That key trusted already stays so.
+    pub fn trust_step_up_key_if(&self, device: &str, public_key: &[u8], now_ms: i64) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let row: Option<(String, i64, Vec<u8>)> = tx
+            .query_row("SELECT state, registered_at, pubkey FROM step_up_keys WHERE client_id = ?1", [device], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional()
+            .map_err(map_err)?;
+        match row {
+            None => return Err(DomainError::NotFound),
+            Some((_, _, stored)) if stored != public_key => return Err(DomainError::Conflict { what: "key_changed" }),
+            Some((state, _, _)) if state == "trusted" => return Ok(()),
+            Some((_, at, _)) if now_ms - at > PROPOSAL_MS => return Err(DomainError::Conflict { what: "proposal_expired" }),
+            Some(_) => {}
+        }
+        let changed = tx
+            .execute("UPDATE step_up_keys SET state = 'trusted' WHERE client_id = ?1 AND state = 'proposed' AND pubkey = ?2", params![device, public_key])
+            .map_err(map_err)?;
+        if changed != 1 {
+            return Err(DomainError::Conflict { what: "key_changed" });
+        }
+        crate::access_ops::bump_holder_in(&tx, device)?;
+        tx.commit().map_err(map_err)
+    }
+
     /// Record that `by` vouched for `device`'s trusted key with the owner
     /// present (ov-974, B1): the Mac app with Touch ID, or a device the owner
     /// already vouched for, with its own step-up. Bound to the key's bytes, so
@@ -212,6 +242,25 @@ mod tests {
         assert!(s.step_up_key("pad-b").unwrap().unwrap().trusted);
         assert_eq!(s.access_generation("bob").unwrap(), before + 1);
         assert!(matches!(s.trust_step_up_key("nowhere", 0), Err(DomainError::NotFound)));
+    }
+
+    /// ov-988 review B1: an approval trusts the key it checked, and a
+    /// proposal swapped in since is refused and left a proposal.
+    #[test]
+    fn only_the_checked_key_is_trusted() {
+        let s = store();
+        s.put_step_up_key("pad-b", "p256-sha256", &[4; 65], false, 1_000).unwrap();
+        s.put_step_up_key("pad-b", "p256-sha256", &[5; 65], false, 1_000).unwrap();
+        let before = s.access_generation("bob").unwrap();
+        assert!(matches!(s.trust_step_up_key_if("pad-b", &[4; 65], 1_000), Err(DomainError::Conflict { what: "key_changed" })));
+        assert!(!s.step_up_key("pad-b").unwrap().unwrap().trusted);
+        assert_eq!(s.access_generation("bob").unwrap(), before, "nothing moved");
+        assert!(matches!(s.trust_step_up_key_if("pad-b", &[5; 65], 1_000 + PROPOSAL_MS + 1), Err(DomainError::Conflict { what: "proposal_expired" })));
+        s.trust_step_up_key_if("pad-b", &[5; 65], 1_000).unwrap();
+        assert!(s.step_up_key("pad-b").unwrap().unwrap().trusted);
+        s.trust_step_up_key_if("pad-b", &[5; 65], 1_000).expect("that key, trusted already");
+        assert!(matches!(s.trust_step_up_key_if("pad-b", &[4; 65], 1_000), Err(DomainError::Conflict { what: "key_changed" })));
+        assert!(matches!(s.trust_step_up_key_if("nowhere", &[4; 65], 0), Err(DomainError::NotFound)));
     }
 
     /// A proposal is replaced by a new one, however old; a trusted key is

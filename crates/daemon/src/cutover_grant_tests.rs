@@ -33,7 +33,7 @@ fn only_the_apps_signature_and_the_owners_phone_key_say_a_grant() {
     let local = Peer { client_id: None, scope: farcooler_protocol::v1::Scope::HostAdmin };
     let phone = Peer { client_id: Some("phone-1".into()), scope: farcooler_protocol::v1::Scope::Control };
     let app = |pid: i32| pid == 10;
-    let signed = |method: &str, device: &str, browser: bool| crate::step_up::Stepped { method: method.into(), digest: [0; 32], device: device.into(), browser };
+    let signed = |method: &str, device: &str, browser: bool| crate::step_up::Stepped { method: method.into(), digest: [0; 32], device: device.into(), browser, key: Vec::new() };
     let answer = signed("task.note", "phone-1", false);
     let macs = signed("task.note", crate::step_up::LOCAL_APP, false);
     assert_eq!(said_from_with(&local, Some(10), Some(&macs), || true, &app), "app", "the app, by its code signature and its key");
@@ -326,7 +326,7 @@ fn only_the_app_vouches_on_the_socket() {
     let store = Store::open_in_memory().unwrap();
     let local = Peer { client_id: None, scope: farcooler_protocol::v1::Scope::HostAdmin };
     let app = |pid: i32| pid == 10;
-    let signed = |method: &str, device: &str, browser: bool| crate::step_up::Stepped { method: method.into(), digest: [0; 32], device: device.into(), browser };
+    let signed = |method: &str, device: &str, browser: bool| crate::step_up::Stepped { method: method.into(), digest: [0; 32], device: device.into(), browser, key: Vec::new() };
     let by = |pid, stepped: Option<&crate::step_up::Stepped>| crate::step_up_rpc::vouch_of(&store, &local, pid, stepped, &app).unwrap();
     let ok = signed("client.approve_step_up", crate::step_up::LOCAL_APP, false);
     assert_eq!(by(Some(10), Some(&ok)).as_deref(), Some(crate::step_up::LOCAL_APP), "the app, with Touch ID");

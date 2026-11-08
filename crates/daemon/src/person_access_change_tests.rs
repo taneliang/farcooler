@@ -135,7 +135,7 @@ async fn a_member_changes_nothing_and_a_demotion_in_between_refuses() {
     let n = nonce(&conn).await;
     let _ = (&dan, &n);
     let peer = farcooler_transport::Peer { client_id: Some("phone-d".into()), scope: Scope::Control };
-    let stepped = crate::step_up::Stepped { method: "member.set_access".into(), digest: [0; 32], device: "phone-d".into(), browser: false };
+    let stepped = crate::step_up::Stepped { method: "member.set_access".into(), digest: [0; 32], device: "phone-d".into(), browser: false, key: Vec::new() };
     let guard = authorize(
         &r.svc,
         &peer,

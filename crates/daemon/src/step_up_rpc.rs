@@ -144,7 +144,9 @@ pub async fn approve(svc: &Service, peer: &Peer, caller_pid: Option<i32>, steppe
     if step_up::code_of(&row.alg, &row.public_key) != p.code.trim() {
         return Err(DomainError::Conflict { what: "wrong_code" });
     }
-    svc.store.trust_step_up_key(target, now_ms())?;
+    // The key whose code was checked, and no proposal swapped in since
+    // (ov-988 review B1).
+    svc.store.trust_step_up_key_if(target, &row.public_key, now_ms())?;
     if let Some(by) = vouched {
         svc.store.vouch_step_up_key(target, &by)?;
         tracing::info!(device = target, by = %by, "a step-up key was vouched for with its owner present");

@@ -396,10 +396,8 @@ async fn first_key(target: &str) {
         }
         plan => first_key_words(plan, None, "", target),
     };
-    if let Some(said) = said {
-        println!();
-        println!("{said}");
-    }
+    println!();
+    println!("{said}");
 }
 
 /// `runner keep-first-key`'s answer: what the runner did, and where it keeps the hash.
@@ -437,12 +435,13 @@ fn pins_in(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// What the installer says about the first-key code, if anything. `kept` is
+/// What the installer says about the first-key code: always something, so an
+/// owner is never left guessing whether a code exists (ov-988 review). `kept` is
 /// what the runner answered, when a `code` was sent: what it did, and where
 /// it keeps the hash.
-fn first_key_words(plan: FirstKeyPlan, kept: Option<(farcooler_daemon::first_key::Kept, String)>, code: &str, target: &str) -> Option<String> {
+fn first_key_words(plan: FirstKeyPlan, kept: Option<(farcooler_daemon::first_key::Kept, String)>, code: &str, target: &str) -> String {
     use farcooler_daemon::first_key::Kept;
-    Some(match (plan, kept) {
+    match (plan, kept) {
         (FirstKeyPlan::ThisComputer, _) => format!(
             "No first-key code was made: {target} is this computer, and an agent on it could read a code shown here.\n\
              If you have no Mac to approve your phone, run this install again from another computer."
@@ -459,11 +458,15 @@ fn first_key_words(plan: FirstKeyPlan, kept: Option<(farcooler_daemon::first_key
             "A first-key code was already made for {target}, so this install made no new one.\n\
              If you didn't make it, delete {path} on {target}, then run this install again from another computer."
         ),
-        (FirstKeyPlan::Make, Some((Kept::Used, _))) => return None,
+        (FirstKeyPlan::Make, Some((Kept::Used, path))) => format!(
+            "A first-key code was already used on {target}, so this install made no new one.\n\
+             If no phone of yours allows admin actions there, something else used it: delete {path}.used on {target}, \
+             then run this install again from another computer."
+        ),
         (FirstKeyPlan::Make, None) => format!(
             "No first-key code was made: {target} didn't keep it. Its runner may be older than this install."
         ),
-    })
+    }
 }
 
 /// `runner keep-first-key`: on the runner, keep `hash` (see [`first_key`]),
@@ -1437,7 +1440,7 @@ mod tests {
         assert_eq!(first_key_plan(&[mine[0].clone(), other[0].clone()], &other), FirstKeyPlan::ThisComputer, "any key in common");
         assert_eq!(first_key_plan(&mine, &[]), FirstKeyPlan::CantTell, "its keys unread");
         assert_eq!(first_key_plan(&[], &other), FirstKeyPlan::CantTell, "ours unread");
-        let said = first_key_words(FirstKeyPlan::ThisComputer, None, "", "you@box").unwrap();
+        let said = first_key_words(FirstKeyPlan::ThisComputer, None, "", "you@box");
         assert!(said.starts_with("No first-key code was made: you@box is this computer"), "{said}");
         assert!(said.contains("from another computer"), "{said}");
     }
@@ -1457,7 +1460,7 @@ mod tests {
         let first = code();
         let kept = kept_answer(&keep_answer(dir.path(), &hash_of(&first)).unwrap()).expect("an answer");
         assert_eq!(kept.0, Kept::Kept);
-        let said = first_key_words(FirstKeyPlan::Make, Some(kept), &first, "you@box").unwrap();
+        let said = first_key_words(FirstKeyPlan::Make, Some(kept), &first, "you@box");
         assert!(said.starts_with("First-key code for you@box:"), "{said}");
         assert!(said.contains(&format!("\n    {first}\n")), "the code, on a line of its own: {said}");
         assert!(said.contains("Enter First-Key Code"), "{said}");
@@ -1466,7 +1469,7 @@ mod tests {
         assert_eq!(again.0, Kept::Waiting);
         let path = dir.path().join(farcooler_daemon::first_key::FILE).display().to_string();
         assert_eq!(again.1, path);
-        let said = first_key_words(FirstKeyPlan::Make, Some(again), "unused", "you@box").unwrap();
+        let said = first_key_words(FirstKeyPlan::Make, Some(again), "unused", "you@box");
         assert_eq!(
             said,
             format!("A first-key code was already made for you@box, so this install made no new one.\nIf you didn't make it, delete {path} on you@box, then run this install again from another computer.")
@@ -1475,8 +1478,12 @@ mod tests {
 
         std::fs::rename(dir.path().join(farcooler_daemon::first_key::FILE), dir.path().join(farcooler_daemon::first_key::USED)).unwrap();
         let used = kept_answer(&keep_answer(dir.path(), &hash_of(&code())).unwrap()).expect("an answer");
-        assert_eq!(first_key_words(FirstKeyPlan::Make, Some(used), "x", "you@box"), None);
-        assert!(first_key_words(FirstKeyPlan::Make, None, "x", "you@box").unwrap().contains("didn't keep it"));
+        let said = first_key_words(FirstKeyPlan::Make, Some(used), "x", "you@box");
+        assert_eq!(
+            said,
+            format!("A first-key code was already used on you@box, so this install made no new one.\nIf no phone of yours allows admin actions there, something else used it: delete {path}.used on you@box, then run this install again from another computer.")
+        );
+        assert!(first_key_words(FirstKeyPlan::Make, None, "x", "you@box").contains("didn't keep it"));
         assert!(keep_answer(dir.path(), "not a hash").is_err());
         assert_eq!(kept_answer("bash: farcooler: command not found"), None);
     }
