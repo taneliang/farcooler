@@ -198,6 +198,10 @@ async fn the_owners_signed_cutover_answer_goes_through_the_bridge() {
     dispatch(&session, "task.note", &args).await.expect("a plain answer is still an answer");
     assert_eq!(find(store, workspace, now()).unwrap(), None, "unsigned, it grants nothing");
 
+    // The grant must be the only answer to the card's latest question (M2),
+    // so the signed one answers a fresh ask, not the one the plain answer did.
+    store.add_note(task, NoteKind::Question, Actor::Manager, "Run it once, now?", json!({ "options": [ALLOW, "Wait for me"] })).unwrap();
+
     // Trusted on the walk alone, the key signs and the grant is refused,
     // until the owner vouches for it with presence (B1 of the second review).
     let prepared = begin(&session, "task.note", args.clone(), &pin).await;
