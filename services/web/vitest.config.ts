@@ -10,6 +10,10 @@ export default defineWorkersConfig({
   // test/needs.test.ts the fixture every client decodes (repo test/fixtures).
   server: { fs: { allow: [fileURLToPath(new URL('../..', import.meta.url))] } },
   test: {
+    // The workflow card's two Node scripts take a compiled-modules directory
+    // as an argument, so vitest running them bare would only fail. They run
+    // through scripts/workflow-test.mjs (npm run test:workflow).
+    exclude: ['**/node_modules/**', 'test/workflow.test.mjs', 'test/workflow-session.test.mjs'],
     poolOptions: {
       workers: {
         singleWorker: true,

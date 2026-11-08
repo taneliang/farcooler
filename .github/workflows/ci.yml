@@ -1411,6 +1411,9 @@ jobs:
       # Inside workerd: the flag, the CSP, the host check and the API's CSRF
       # checks each have a test that goes red without them.
       - run: npm test
+      # The workflow card's two Node tests (vitest leaves them out): the
+      # client modules compiled by esbuild, then each test against them.
+      - run: npm run test:workflow
       # A real sshd, for crates/web's passkey test below and the browser check:
       # only sshd verifies a passkey's webauthn-sk signature. The image ships
       # openssh-server; this installs it if one ever doesn't.
