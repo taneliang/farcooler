@@ -158,7 +158,8 @@ pub fn owners_orchestrator(db: &Path, terminal: uuid::Uuid, workspace: uuid::Uui
 /// `now_ms` (ov-974), as the database says now, read-only for a recovery
 /// process: the owner's own answer, said from the app or their phone
 /// (`said_from`), no older than `max_age_ms`, and spent by the runner on this
-/// attempt and no other (`cutover_grant` in the daemon writes both keys).
+/// attempt and no other, a spend given back not counting (`cutover_grant` in
+/// the daemon writes these keys).
 pub fn grant_holds(db: &Path, answer: uuid::Uuid, attempt: &str, now_ms: i64, max_age_ms: i64) -> Result<bool> {
     let conn = readonly(db)?;
     let row: Option<(Vec<u8>, String, String, i64, String)> = conn
@@ -173,15 +174,24 @@ pub fn grant_holds(db: &Path, answer: uuid::Uuid, attempt: &str, now_ms: i64, ma
         return Ok(false);
     }
     let id = answer.to_string();
-    let mut notes = conn.prepare("SELECT extra FROM task_notes WHERE task_id = ?1 AND actor = 'runner'")?;
-    let spent_on: Vec<String> = notes
+    let mut notes = conn.prepare("SELECT extra FROM task_notes WHERE task_id = ?1 AND actor = 'runner' ORDER BY at, rowid")?;
+    let extras: Vec<serde_json::Value> = notes
         .query_map([task], |r| r.get::<_, String>(0))?
         .filter_map(|e| e.ok())
         .filter_map(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
-        .filter_map(|e| {
-            let spend = e.get("cutover_grant")?;
-            (spend.get("answer")?.as_str()? == id).then(|| spend.get("attempt").and_then(|a| a.as_str()).unwrap_or_default().to_string())
-        })
         .collect();
+    let by = |key: &str| -> Vec<String> {
+        extras.iter()
+            .filter_map(|e| e.get(key))
+            .filter(|s| s.get("answer").and_then(|a| a.as_str()) == Some(id.as_str()))
+            .map(|s| s.get("attempt").and_then(|a| a.as_str()).unwrap_or_default().to_string())
+            .collect()
+    };
+    // A spend a failed hold gave back (`cutover_grant_returned`) is no spend.
+    let mut returned = by("cutover_grant_returned");
+    let spent_on: Vec<String> = by("cutover_grant").into_iter().filter(|attempt| match returned.iter().position(|r| r == attempt) {
+        Some(at) => { returned.remove(at); false }
+        None => true,
+    }).collect();
     Ok(spent_on == [attempt])
 }

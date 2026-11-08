@@ -314,3 +314,17 @@ async fn recovery_runs_the_pinned_orchestrator_from_prepare_to_finish() {
     for step in [r#"{"op":"Verify"}"#, r#"{"op":"Release"}"#, r#"{"op":"Finish"}"#] { op(&orchestrator, step).await.unwrap_or_else(|e| panic!("{step}: {e}")); }
     assert!(!root.join(crate::cutover_delegate::FILE).exists(), "Finish forgets the pane");
 }
+
+/// M1 of the second review: the pinned orchestrator whose grant passed a day
+/// mid-recovery is refused with a sentence that says only the owner can
+/// finish it; anyone else is refused as before.
+#[tokio::test]
+async fn a_lapsed_grant_says_the_owner_finishes_it() {
+    let (_dir, root) = closed_root().await;
+    transfer::hold(&crate::cutover_admin::database(&root), "a-1").unwrap();
+    let lapsed = RecoveryHandler::with_walk(root.clone(), local(), Some(7), |_| Seat::Unreadable, |_| Some(1)).with_lapsed(|_, _| true);
+    let said = op(&lapsed, INSPECT).await.unwrap_err();
+    assert!(said.contains("Only the owner can finish it now"), "{said}");
+    let other = RecoveryHandler::with_walk(root.clone(), local(), Some(7), |_| Seat::Unreadable, |_| Some(1)).with_lapsed(|_, _| false);
+    assert!(!op(&other, INSPECT).await.unwrap_err().contains("Only the owner"));
+}

@@ -52,6 +52,8 @@ pub const MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
 pub const SAID_FROM: &str = "said_from";
 /// The key in the runner's note that spends a grant.
 const SPENDS: &str = "cutover_grant";
+/// The key in the runner's note that gives one back.
+const RETURNED: &str = "cutover_grant_returned";
 
 /// Where a person's answer claiming `user` was said, by the daemon: `app`,
 /// `device` or `cli`. `stepped` is the request's verified step-up, if any.
@@ -96,32 +98,56 @@ pub struct Grant {
     pub task: Uuid,
 }
 
-/// Held from finding a grant to spending it, so two Prepares never spend one.
+/// Held from checking a grant to spending it, so two Prepares never spend one.
 static SPENDING: Mutex<()> = Mutex::new(());
 
-/// Spend the newest grant on a card of `workspace` for `attempt`, or refuse.
-pub fn spend(store: &Store, workspace: Uuid, attempt: &str, now_ms: i64) -> Result<Grant> {
-    let _held = SPENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(grant) = find(store, workspace, now_ms)? else {
-        return Err(DomainError::refused(format!(
-            "The owner hasn't allowed this cutover. Ask them on a card, with the option “{ALLOW}”, and they answer it from the Far Cooler app or their phone."
-        )));
-    };
-    store.add_note(grant.task, NoteKind::Progress, Actor::Runner, &format!("The owner's “{ALLOW}” was spent on cutover attempt {attempt}."),
-        serde_json::json!({ SPENDS: { "answer": grant.answer.to_string(), "attempt": attempt } }))?;
-    Ok(grant)
+/// The refusal when the owner hasn't allowed it.
+fn not_allowed() -> DomainError {
+    DomainError::refused(format!(
+        "The owner hasn't allowed this cutover. Ask them on a card, with the option “{ALLOW}”, and they answer it from the Far Cooler app or their phone."
+    ))
 }
 
-/// The newest unspent grant on a card of `workspace`, if any.
+/// The newest grant on a card of `workspace`, or the refusal. Writes nothing:
+/// the Prepare spends it last, just before the hold (`spend`).
+pub fn required(store: &Store, workspace: Uuid, now_ms: i64) -> Result<Grant> {
+    find(store, workspace, now_ms)?.ok_or_else(not_allowed)
+}
+
+/// Spend `grant` on `attempt`, if it still grants: the runner writes a note
+/// naming the answer and the attempt (M1 of the second review: the last thing
+/// before the hold mark, after the drain and the caller's recheck; a hold
+/// that then fails gives it back, `give_back`).
+pub fn spend(store: &Store, grant: &Grant, attempt: &str, now_ms: i64) -> Result<()> {
+    let _held = SPENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let notes = store.notes_for(grant.task, None)?;
+    let Some(answer) = notes.iter().find(|n| n.id == grant.answer) else { return Err(not_allowed()) };
+    if !grants(answer, now_ms) || !asked(&notes, answer) || !spent_on(&notes, grant.answer).is_empty() {
+        return Err(not_allowed());
+    }
+    store.add_note(grant.task, NoteKind::Progress, Actor::Runner, &format!("The owner's “{ALLOW}” was spent on cutover attempt {attempt}."),
+        serde_json::json!({ SPENDS: { "answer": grant.answer.to_string(), "attempt": attempt } }))?;
+    Ok(())
+}
+
+/// Give `grant` back from `attempt`, whose hold failed: nothing was held, so
+/// the owner's word is still good for the next Prepare.
+pub fn give_back(store: &Store, grant: &Grant, attempt: &str) -> Result<()> {
+    store.add_note(grant.task, NoteKind::Progress, Actor::Runner, &format!("The owner's “{ALLOW}” was given back: cutover attempt {attempt} wasn't held."),
+        serde_json::json!({ RETURNED: { "answer": grant.answer.to_string(), "attempt": attempt } }))?;
+    Ok(())
+}
+
+/// The newest unspent grant on a card of `workspace`, if any. Read by a plain
+/// query, not the full-text index (M5 of the second review).
 pub fn find(store: &Store, workspace: Uuid, now_ms: i64) -> Result<Option<Grant>> {
-    let repository = store.get_workspace(workspace)?.repository_id;
-    for hit in store.search_notes(repository, ALLOW, Some(NoteKind::Answer))?.into_iter().rev() {
-        if hit.superseded || !grants(&hit.note, now_ms) || store.get_task(hit.note.task_id)?.workspace_id != workspace {
+    for answer in store.owner_answers_since(workspace, now_ms.saturating_sub(MAX_AGE_MS))? {
+        if !grants(&answer, now_ms) {
             continue;
         }
-        let notes = store.notes_for(hit.note.task_id, None)?;
-        if asked(&notes, &hit.note) && !spent(&notes, hit.note.id) {
-            return Ok(Some(Grant { answer: hit.note.id, task: hit.note.task_id }));
+        let notes = store.notes_for(answer.task_id, None)?;
+        if asked(&notes, &answer) && spent_on(&notes, answer.id).is_empty() {
+            return Ok(Some(Grant { answer: answer.id, task: answer.task_id }));
         }
     }
     Ok(None)
@@ -143,18 +169,39 @@ fn grants(note: &TaskNote, now_ms: i64) -> bool {
         && now_ms - note.at <= MAX_AGE_MS
 }
 
-/// Whether a question before `answer` on its card offered `ALLOW`.
+/// Whether `answer` is the one answer to its card's latest question, and that
+/// question offered `ALLOW` (M2 of the second review). A question asked since
+/// replaces it; another answer of the person's to it, before or after (a
+/// "Wait for me", or the same words again), means this one no longer stands.
+/// An answer a later note corrects is not counted; the correction is.
 fn asked(notes: &[TaskNote], answer: &TaskNote) -> bool {
-    notes.iter().take_while(|n| n.id != answer.id).any(|n| {
-        n.kind == NoteKind::Question
-            && n.extra.get("options").and_then(|o| o.as_array()).is_some_and(|o| o.iter().any(|v| v.as_str().is_some_and(|v| same(v, ALLOW))))
-    })
+    let Some(question) = notes.iter().rposition(|n| n.kind == NoteKind::Question) else { return false };
+    let offered = notes[question].extra.get("options").and_then(|o| o.as_array())
+        .is_some_and(|o| o.iter().any(|v| v.as_str().is_some_and(|v| same(v, ALLOW))));
+    let corrected = |id: Uuid| notes.iter().any(|n| n.supersedes == Some(id));
+    let answers: Vec<Uuid> = notes[question + 1..].iter()
+        .filter(|n| n.kind == NoteKind::Answer && n.actor == Actor::User && !corrected(n.id))
+        .map(|n| n.id)
+        .collect();
+    offered && answers == [answer.id]
 }
 
-/// Whether the runner has spent `answer`.
-fn spent(notes: &[TaskNote], answer: Uuid) -> bool {
+/// The attempts the runner spent `answer` on and didn't give back.
+fn spent_on(notes: &[TaskNote], answer: Uuid) -> Vec<String> {
     let id = answer.to_string();
-    notes.iter().any(|n| n.actor == Actor::Runner && n.extra.get(SPENDS).and_then(|s| s.get("answer")).and_then(|a| a.as_str()) == Some(id.as_str()))
+    let by = |key: &str| -> Vec<String> {
+        notes.iter()
+            .filter(|n| n.actor == Actor::Runner)
+            .filter_map(|n| n.extra.get(key))
+            .filter(|s| s.get("answer").and_then(|a| a.as_str()) == Some(id.as_str()))
+            .map(|s| s.get("attempt").and_then(|a| a.as_str()).unwrap_or_default().to_string())
+            .collect()
+    };
+    let mut returned = by(RETURNED);
+    by(SPENDS).into_iter().filter(|attempt| match returned.iter().position(|r| r == attempt) {
+        Some(at) => { returned.remove(at); false }
+        None => true,
+    }).collect()
 }
 
 #[cfg(test)]

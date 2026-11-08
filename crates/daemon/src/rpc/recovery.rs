@@ -18,6 +18,8 @@ pub type SeatOf = fn(i32) -> Seat;
 pub type StartOf = fn(i32) -> Option<i64>;
 /// The orchestrator pinned for the attempt in hand that a caller runs inside.
 pub type DelegateOf = fn(&std::path::Path, i32) -> Option<crate::cutover_delegate::Delegate>;
+/// Whether a caller is that orchestrator, and only its grant has lapsed.
+pub type LapsedOf = fn(&std::path::Path, i32) -> bool;
 
 /// Who a recovery daemon admitted.
 enum Caller { Person, Orchestrator(crate::cutover_delegate::Delegate) }
@@ -26,17 +28,19 @@ enum Caller { Person, Orchestrator(crate::cutover_delegate::Delegate) }
 /// restart a daemon only on failure, and the next start is ordinary service.
 pub const RESTART_EXIT: i32 = 75;
 
-pub struct RecoveryHandler { root: std::path::PathBuf, peer: Peer, caller: Option<(i32, Option<i64>)>, seat_of: SeatOf, start_of: StartOf, delegate_of: DelegateOf, done: std::sync::Arc<tokio::sync::Notify> }
+pub struct RecoveryHandler { root: std::path::PathBuf, peer: Peer, caller: Option<(i32, Option<i64>)>, seat_of: SeatOf, start_of: StartOf, delegate_of: DelegateOf, lapsed_of: LapsedOf, done: std::sync::Arc<tokio::sync::Notify> }
 impl RecoveryHandler {
     pub fn new(root: std::path::PathBuf, peer: Peer, pid: Option<i32>) -> Self {
         Self::with_walk(root, peer, pid, recovery_seat, crate::claude_registry::process_incarnation)
     }
     pub(crate) fn with_walk(root: std::path::PathBuf, peer: Peer, pid: Option<i32>, seat_of: SeatOf, start_of: StartOf) -> Self {
-        Self { root, peer, caller: pid.map(|pid| (pid, start_of(pid))), seat_of, start_of, delegate_of: crate::cutover_delegate::admits, done: Default::default() }
+        Self { root, peer, caller: pid.map(|pid| (pid, start_of(pid))), seat_of, start_of, delegate_of: crate::cutover_delegate::admits, lapsed_of: crate::cutover_delegate::lapsed, done: Default::default() }
     }
     fn ending(mut self, done: std::sync::Arc<tokio::sync::Notify>) -> Self { self.done = done; self }
     #[cfg(test)]
-    pub(crate) fn with_delegate(mut self, delegate_of: DelegateOf) -> Self { self.delegate_of = delegate_of; self }
+    pub(crate) fn with_delegate(mut self, delegate_of: DelegateOf) -> Self { self.delegate_of = delegate_of; self.lapsed_of = |_, _| false; self }
+    #[cfg(test)]
+    pub(crate) fn with_lapsed(mut self, lapsed_of: LapsedOf) -> Self { self.lapsed_of = lapsed_of; self }
     /// A person outside every pane, or a process inside the pane pinned for
     /// the attempt in hand; either still the process that connected.
     fn admitted(&self) -> Option<Caller> {
@@ -61,7 +65,14 @@ impl RecoveryHandler {
         if self.peer.client_id.is_some() || self.peer.scope != farcooler_protocol::v1::Scope::HostAdmin {
             return Err(DomainError::ScopeDenied { needed: "owner" });
         }
-        let Some(caller) = self.admitted() else { return Err(DomainError::ScopeDenied { needed: "person" }) };
+        let Some(caller) = self.admitted() else {
+            // The owner's orchestrator whose grant passed a day mid-recovery
+            // hears why, and who can finish it (M1).
+            if self.caller.is_some_and(|(pid, _)| (self.lapsed_of)(&self.root, pid)) {
+                return Err(DomainError::refused(crate::cutover_delegate::LAPSED.to_string()));
+            }
+            return Err(DomainError::ScopeDenied { needed: "person" });
+        };
         let Some(request::Payload::WorkflowCommand(p)) = &req.payload else { return Err(DomainError::NotFound) };
         if p.schema != 1 { return Err(DomainError::NotFound); }
         let op = workflow_cutover::parse(&p.json).map_err(|_| DomainError::NotFound)?;

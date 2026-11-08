@@ -100,14 +100,43 @@ fn read(root: &Path) -> Option<Delegate> {
 /// the attempt in hand, when `pid` runs inside its pane and the database
 /// still says that pane is the owner's orchestrator.
 pub fn admits(root: &Path, pid: i32) -> Option<Delegate> {
+    admits_at(root, pid, crate::step_up_rpc::now_ms())
+}
+
+/// [`admits`] at `now_ms`.
+pub(crate) fn admits_at(root: &Path, pid: i32, now_ms: i64) -> Option<Delegate> {
+    let delegate = pinned_for(root, pid)?;
+    let db = crate::cutover_admin::database(root);
+    grant_holds(&db, &delegate, now_ms).then_some(delegate)
+}
+
+/// Whether `pid` is the owner's orchestrator pinned for the attempt in hand,
+/// still so by the database, and only the owner's grant no longer holds: a
+/// day has passed since the answer (M1 of the second review). Nothing the
+/// orchestrator does can renew it, since only a live Prepare spends a grant
+/// and the live daemon is down; the owner runs Recover or Finish by hand.
+pub fn lapsed(root: &Path, pid: i32) -> bool {
+    lapsed_at(root, pid, crate::step_up_rpc::now_ms())
+}
+
+/// [`lapsed`] at `now_ms`.
+pub(crate) fn lapsed_at(root: &Path, pid: i32, now_ms: i64) -> bool {
+    pinned_for(root, pid).is_some_and(|delegate| !grant_holds(&crate::cutover_admin::database(root), &delegate, now_ms))
+}
+
+/// The delegate named for the attempt in hand, when `pid` runs inside its pane
+/// and the database still says that pane is the owner's orchestrator.
+fn pinned_for(root: &Path, pid: i32) -> Option<Delegate> {
     let delegate = read(root)?;
     let table = crate::proc_table::snapshot()?;
     let procs = crate::caller_seat::procs(&table);
     let servers = crate::caller_seat::tmux_servers(&procs);
     if !within(pid, &procs, &servers, &delegate, &crate::claude_registry::process_incarnation) { return None; }
-    let db = crate::cutover_admin::database(root);
-    (still_the_owners(&db, &delegate) && grant_holds(&db, &delegate, crate::step_up_rpc::now_ms())).then_some(delegate)
+    still_the_owners(&crate::cutover_admin::database(root), &delegate).then_some(delegate)
 }
+
+/// What a recovery daemon says to the owner's orchestrator whose grant lapsed.
+pub const LAPSED: &str = "The owner's “Allow cutover once” is more than a day old, so their orchestrator can't go on with this cutover. Only the owner can finish it now: they run Recover or Finish themselves, from a terminal of their own.";
 
 /// Whether the owner's grant that admitted the delegate still does at
 /// `now_ms`: under `cutover_grant::MAX_AGE_MS` old, and spent on this attempt
@@ -144,12 +173,21 @@ pub(crate) fn within(pid: i32, procs: &HashMap<i32, Proc>, servers: &HashSet<i32
     false
 }
 
+/// The owner's orchestrator as the live Prepare admitted it: the pane to pin
+/// for recovery, and the owner's grant to spend just before the hold.
+pub(crate) struct Pinned {
+    pub delegate: Delegate,
+    pub grant: crate::cutover_grant::Grant,
+}
+
 /// The live daemon's Prepare admission: a person, or the owner's
-/// orchestrator, with the pane to pin for recovery when it is the latter.
+/// orchestrator, with the pane to pin and the grant to spend when it is the
+/// latter. Writes nothing: the Prepare spends the grant last, after the drain
+/// and the recheck, and gives it back if the hold then fails (M1).
 pub(crate) async fn admit(
     svc: &Arc<crate::service::Service>, peer: Peer, session: Arc<crate::sessions::Session>, caller_pid: Option<i32>,
     caller_pane: Arc<OnceLock<Uuid>>, attempt: &str,
-) -> Result<(Admission, Option<Delegate>)> {
+) -> Result<(Admission, Option<Pinned>)> {
     let workspace = match crate::caller_seat::caller_seat(svc, caller_pid).await {
         Seat::Agent(Some(pane)) => svc.store.get_terminal(pane)?.workspace_id.ok_or(DomainError::ScopeDenied { needed: "workspace orchestrator" })?,
         _ => Admission::HOST_WIDE,
@@ -161,10 +199,42 @@ pub(crate) async fn admit(
     };
     let pane_pid = svc.inventory_snapshot().panes.iter().find(|p| p.terminal_id == term.id).map(|p| p.stamp.pid as i32).ok_or(DomainError::AuthRequired)?;
     let pane_start = crate::claude_registry::process_incarnation(pane_pid).ok_or(DomainError::AuthRequired)?;
-    // Last, once everything else admits it: the owner's word, spent here.
-    let grant = crate::cutover_grant::spend(&svc.store, workspace, attempt, crate::step_up_rpc::now_ms())?.answer;
-    let delegate = Delegate { attempt: attempt.into(), terminal: term.id, workspace, pane_pid, pane_start, grant };
-    Ok((admission, Some(delegate)))
+    // Last, once everything else admits it: the owner's word.
+    let grant = crate::cutover_grant::required(&svc.store, workspace, crate::step_up_rpc::now_ms())?;
+    let delegate = Delegate { attempt: attempt.into(), terminal: term.id, workspace, pane_pid, pane_start, grant: grant.answer };
+    Ok((admission, Some(Pinned { delegate, grant })))
+}
+
+/// The live Prepare once admitted: pin the pane (or forget any), then drain
+/// and hold. The owner's grant is spent last, after the drain and the
+/// caller's recheck, just before the hold mark; a hold that fails gives it
+/// back, so only a crash between the two costs the owner an ask (M1).
+pub(crate) async fn pin_and_hold(
+    svc: &crate::service::Service, admission: &Admission, pinned: Option<&Pinned>, attempt: &str,
+) -> Result<std::result::Result<serde_json::Value, crate::cutover_admin::Refused>> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let root = svc.root_dir();
+    match pinned { Some(p) => write(root, &p.delegate), None => forget(root) }
+        .map_err(|error| { tracing::warn!(%error, "cutover delegate not recorded"); DomainError::OperationFailed })?;
+    let spent = AtomicBool::new(false);
+    let held = crate::cutover_admin::hold(svc, attempt, || {
+        admission.recheck_now().map_err(|_| crate::cutover_admin::Refused("the caller lost access during the drain".into()))?;
+        if let Some(p) = pinned {
+            crate::cutover_grant::spend(&svc.store, &p.grant, attempt, crate::step_up_rpc::now_ms())
+                .map_err(|error| crate::cutover_admin::Refused(error.to_string()))?;
+            spent.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    }).await;
+    if held.is_err() {
+        let _ = forget(root);
+        if let (Some(p), true) = (pinned, spent.load(Ordering::SeqCst)) {
+            if let Err(error) = crate::cutover_grant::give_back(&svc.store, &p.grant, attempt) {
+                tracing::warn!(%error, "the owner's cutover grant could not be given back");
+            }
+        }
+    }
+    Ok(held)
 }
 
 #[cfg(test)]

@@ -815,14 +815,9 @@ impl Rpc {
                 let value = match &op {
                     Cutover::Prepare { attempt } => {
                         // A person, or the owner's orchestrator, pinned for recovery (ov-974).
-                        let (admission, delegate) = crate::cutover_delegate::admit(svc, self.peer.clone(), self.session.clone(),
+                        let (admission, pinned) = crate::cutover_delegate::admit(svc, self.peer.clone(), self.session.clone(),
                             self.caller_pid, self.caller_pane.clone(), attempt).await?;
-                        let root = svc.root_dir();
-                        match &delegate { Some(d) => crate::cutover_delegate::write(root, d), None => crate::cutover_delegate::forget(root) }
-                            .map_err(|error| { tracing::warn!(%error, "cutover delegate not recorded"); DomainError::OperationFailed })?;
-                        let held = crate::cutover_admin::hold(svc, attempt, || admission.recheck_now()
-                            .map_err(|_| crate::cutover_admin::Refused("the caller lost access during the drain".into()))).await;
-                        if held.is_err() { let _ = crate::cutover_delegate::forget(root); }
+                        let held = crate::cutover_delegate::pin_and_hold(svc, &admission, pinned.as_ref(), attempt).await?;
                         let stop = self.stop.clone();
                         crate::cutover_admin::STOPPED_FOR_PREPARE.store(true, std::sync::atomic::Ordering::SeqCst);
                         tokio::spawn(async move {

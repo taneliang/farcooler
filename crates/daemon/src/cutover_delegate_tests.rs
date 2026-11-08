@@ -54,7 +54,10 @@ fn granted(svc: &crate::service::Service, workspace: Uuid, attempt: &str) -> Uui
     let task = svc.store.create_task(workspace, "Data: the engine cutover", Actor::Manager).unwrap().id;
     svc.store.add_note(task, NoteKind::Question, Actor::Manager, "Run it once?", serde_json::json!({ "options": [ALLOW] })).unwrap();
     svc.store.add_note(task, NoteKind::Answer, Actor::User, ALLOW, serde_json::json!({ SAID_FROM: "app" })).unwrap();
-    crate::cutover_grant::spend(&svc.store, workspace, attempt, crate::step_up_rpc::now_ms()).unwrap().answer
+    let now = crate::step_up_rpc::now_ms();
+    let grant = crate::cutover_grant::required(&svc.store, workspace, now).unwrap();
+    crate::cutover_grant::spend(&svc.store, &grant, attempt, now).unwrap();
+    grant.answer
 }
 
 #[tokio::test]
@@ -81,6 +84,14 @@ async fn a_delegate_is_read_only_for_the_attempt_in_hand_and_only_for_its_pane()
     assert_eq!(admits(root, me), None, "a pane the database doesn't know");
     write(root, &Delegate { attempt: "a-2".into(), grant: Uuid::now_v7(), ..delegate.clone() }).unwrap();
     assert_eq!(admits(root, me), None, "a grant the database doesn't know");
+    // M4: the pinned pane, its grant past a day mid-recovery. Refused, and
+    // told why: only the owner finishes it now.
+    write(root, &Delegate { attempt: "a-2".into(), ..delegate.clone() }).unwrap();
+    let (now, max) = (crate::step_up_rpc::now_ms(), crate::cutover_grant::MAX_AGE_MS);
+    assert!(admits_at(root, me, now + max - 60_000).is_some() && !lapsed_at(root, me, now + max - 60_000), "a day less a minute on");
+    assert_eq!(admits_at(root, me, now + max + 60_000), None, "a day and a minute on");
+    assert!(lapsed_at(root, me, now + max + 60_000), "lapsed, and said so");
+    assert!(!lapsed_at(root, 1, now + max + 60_000), "a caller outside the pane hears nothing of it");
     forget(root).unwrap();
     forget(root).unwrap();
     assert_eq!(admits(root, me), None);

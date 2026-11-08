@@ -58,10 +58,12 @@ async fn the_owners_answer_from_the_app_grants_once() {
     let note = said(&card, Seat::Person, "app").unwrap();
     let written = card.svc.store.notes_for(card.task, Some(NoteKind::Answer)).unwrap().pop().unwrap();
     assert_eq!((written.actor, written.extra[SAID_FROM].as_str()), (Actor::User, Some("app")), "the daemon's stamp");
-    let grant = spend(&card.svc.store, card.workspace, "a-1", now()).expect("granted");
+    let grant = required(&card.svc.store, card.workspace, now()).expect("granted");
     assert_eq!(grant.answer.as_bytes().as_slice(), note.id.as_ref());
+    spend(&card.svc.store, &grant, "a-1", now()).expect("spent once");
     assert_eq!(find(&card.svc.store, card.workspace, now()).unwrap(), None, "spent");
-    assert!(spend(&card.svc.store, card.workspace, "a-2", now()).is_err(), "a spent grant admits no second Prepare");
+    assert!(spend(&card.svc.store, &grant, "a-2", now()).is_err(), "a spent grant admits no second Prepare");
+    assert!(required(&card.svc.store, card.workspace, now()).is_err());
     let record = card.svc.store.notes_for(card.task, Some(NoteKind::Progress)).unwrap();
     assert!(record.iter().any(|n| n.actor == Actor::Runner && n.body.contains("a-1")), "the spend is on the card: {record:?}");
 }
@@ -76,7 +78,7 @@ async fn the_owners_answer_from_their_phone_grants() {
 #[tokio::test]
 async fn no_answer_grants_nothing() {
     let card = asked_card().await;
-    assert!(spend(&card.svc.store, card.workspace, "a-1", now()).is_err());
+    assert!(required(&card.svc.store, card.workspace, now()).is_err());
 }
 
 #[tokio::test]
@@ -121,6 +123,8 @@ async fn a_grant_answers_an_ask_on_its_own_board() {
     crate::task_ops::note_from(&card.svc, &card.watcher, &answer(&card, "user", "Allow cutover once, after lunch", ""), Seat::Person, "app").unwrap();
     assert_eq!(find(&card.svc.store, card.workspace, now()).unwrap(), None, "no question offered it there, or it's not the option");
     let other = card.svc.store.create_workspace(card.svc.store.get_workspace(card.workspace).unwrap().repository_id, "Other", "oth").unwrap().id;
+    // Asked again, since the question has an answer already (M2).
+    card.svc.store.add_note(card.task, NoteKind::Question, Actor::Manager, "Run it once?", serde_json::json!({ "options": [ALLOW] })).unwrap();
     said(&card, Seat::Person, "app").unwrap();
     assert_eq!(find(&card.svc.store, other, now()).unwrap(), None, "another board's orchestrator");
     assert!(find(&card.svc.store, card.workspace, now()).unwrap().is_some());
@@ -156,6 +160,8 @@ async fn the_owners_phone_grants_by_signing_its_answer() {
     assert_eq!(r.svc.store.notes_for(task, Some(NoteKind::Answer)).unwrap().len(), 1, "the refused grant wrote nothing");
     r.svc.store.vouch_step_up_key("phone-o", crate::step_up::LOCAL_APP).unwrap();
 
+    // Asked again, since the plain answer answered the first (M2).
+    r.svc.store.add_note(task, NoteKind::Question, Actor::Manager, "Run the cutover once?", serde_json::json!({ "options": [ALLOW] })).unwrap();
     let n = nonce(&conn).await;
     call(&conn, phone.step(&r.pin, answer(), &n)).await.expect("a signed answer");
     let said = r.svc.store.notes_for(task, Some(NoteKind::Answer)).unwrap().pop().unwrap();
@@ -348,4 +354,63 @@ async fn an_enroll_by_a_vouched_phone_vouches_for_the_new_key() {
     let by = |id| r.svc.store.step_up_vouched_by(id).unwrap();
     assert!([a.id, b.id, c.id].iter().all(|id| r.svc.store.step_up_key(id).unwrap().unwrap().trusted));
     assert_eq!((by(a.id), by(b.id), by(c.id).as_deref()), (None, None, Some(phone.id)));
+}
+
+/// M1 of the second review: a hold that fails gives the grant back, so the
+/// next Prepare needs no new answer; given back once, it is spent again once.
+/// The recovery check counts a spend given back as none.
+#[tokio::test]
+async fn a_failed_hold_gives_the_grant_back() {
+    let card = asked_card().await;
+    said(&card, Seat::Person, "app").unwrap();
+    let grant = required(&card.svc.store, card.workspace, now()).unwrap();
+    spend(&card.svc.store, &grant, "a-1", now()).unwrap();
+    assert_eq!(find(&card.svc.store, card.workspace, now()).unwrap(), None);
+    give_back(&card.svc.store, &grant, "a-1").unwrap();
+    assert_eq!(find(&card.svc.store, card.workspace, now()).unwrap().as_ref(), Some(&grant), "given back");
+    spend(&card.svc.store, &grant, "a-2", now()).unwrap();
+    let db = crate::cutover_admin::database(card.svc.root_dir());
+    let holds = |attempt: &str| farcooler_store::engine_cutover::startup::grant_holds(&db, grant.answer, attempt, now(), MAX_AGE_MS).unwrap();
+    assert!(holds("a-2") && !holds("a-1"), "spent on a-2 alone; a-1 was given back");
+    assert!(spend(&card.svc.store, &grant, "a-3", now()).is_err(), "spent again");
+}
+
+/// M2 of the second review: a grant answers its card's latest question, and
+/// is the one answer to it. A question asked since replaces it; a second
+/// answer, before or after, means it no longer stands. A corrected answer
+/// gives way to its correction.
+#[tokio::test]
+async fn a_grant_answers_the_latest_question_alone() {
+    let ask = |card: &Card, options: serde_json::Value| { card.svc.store.add_note(card.task, NoteKind::Question, Actor::Manager, "Again?", serde_json::json!({ "options": options })).unwrap(); };
+    let plain = |card: &Card, body: &str, from: &'static str| crate::task_ops::note_from(&card.svc, &card.watcher, &answer(card, "user", body, ""), Seat::Person, from).unwrap();
+
+    // A question asked since, without the option, replaces the one answered.
+    let card = asked_card().await;
+    said(&card, Seat::Person, "app").unwrap();
+    ask(&card, serde_json::json!(["Yes", "No"]));
+    assert_eq!(find(&card.svc.store, card.workspace, now()).unwrap(), None, "replaced by a later question");
+
+    // "Wait for me" after the grant takes it back.
+    let card = asked_card().await;
+    said(&card, Seat::Person, "app").unwrap();
+    plain(&card, "Wait for me", "cli");
+    assert_eq!(find(&card.svc.store, card.workspace, now()).unwrap(), None, "taken back");
+
+    // A question already answered: a second "Allow" is no new grant.
+    let card = asked_card().await;
+    plain(&card, "Wait for me", "cli");
+    said(&card, Seat::Person, "app").unwrap();
+    assert_eq!(find(&card.svc.store, card.workspace, now()).unwrap(), None, "the question was answered already");
+
+    // Asked again with the option: a fresh answer grants.
+    ask(&card, serde_json::json!([ALLOW]));
+    said(&card, Seat::Person, "app").unwrap();
+    assert!(find(&card.svc.store, card.workspace, now()).unwrap().is_some(), "the latest question, answered once");
+
+    // A "Wait for me" corrected to the grant: the correction stands alone.
+    let card = asked_card().await;
+    let wait = plain(&card, "Wait for me", "cli");
+    let wait = Uuid::from_slice(&wait.id).unwrap();
+    card.svc.store.add_note_superseding(card.task, NoteKind::Answer, Actor::User, ALLOW, serde_json::json!({ SAID_FROM: "app" }), wait).unwrap();
+    assert!(find(&card.svc.store, card.workspace, now()).unwrap().is_some(), "the correction");
 }
