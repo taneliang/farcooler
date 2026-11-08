@@ -165,4 +165,34 @@ struct PeopleAccessTests {
         #expect(phone.thisDevice?.needsVouch == true, "the phone shows its own code until then")
         #expect(PeopleAccess.vouchPrompt(for: try #require(mac.toVouch.first)).contains("418 207"))
     }
+
+    /// ov-982: each device to approve says when and how it was paired,
+    /// and one paired outside Far Cooler is flagged. The row shape is
+    /// the one `members_json`'s test pins on the runner's side.
+    @Test("Each device says how and when it was paired")
+    func pairedFacts() throws {
+        let members = Data(
+            #"""
+            {"members":[],"claude_account":"","you":"",
+            "device_access":[
+              {"client_id":"phone-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"","step_up_at":5,"step_up_vouched":true,"paired_at":1731000000000,"paired_via":"app","paired_by":""},
+              {"client_id":"cli-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"418207","step_up_at":5,"paired_at":1731000000000,"paired_via":"terminal","paired_by":""},
+              {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"221133","step_up_at":5,"paired_at":1731000000000,"paired_via":"device","paired_by":"phone-o"},
+              {"client_id":"old-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"990011","step_up_at":5,"paired_at":0,"paired_via":"","paired_by":""}
+            ]}
+            """#.utf8)
+        let mac = try #require(PeopleAccess(members: members, isSocket: true))
+        let by = Dictionary(uniqueKeysWithValues: mac.people.flatMap(\.devices).map { ($0.id, $0) })
+        let cli = try #require(by["cli-o"]), pad = try #require(by["pad-o"]), old = try #require(by["old-o"])
+        #expect(cli.pairedVia == .terminal && cli.pairedOutsideApp)
+        #expect(cli.pairedAt == Date(timeIntervalSince1970: 1_731_000_000))
+        #expect(pad.pairedVia == .device && !pad.pairedOutsideApp)
+        #expect(pad.pairedBy != nil && pad.pairedBy != "", "the phone that added it is named")
+        #expect(old.pairedVia == nil && old.pairedAt == nil && !old.pairedOutsideApp,
+                "a device from before the record is not flagged: nothing says it came from outside")
+        #expect(PeopleAccess.pairedLine(for: cli, runner: "Mac").contains("terminal"))
+        #expect(PeopleAccess.pairedLine(for: pad, runner: "Mac").hasPrefix("Added from "))
+        #expect(PeopleAccess.pairedLine(for: old, runner: "Mac").contains("before Far Cooler kept a record"))
+        #expect(PeopleAccess.pairedOutsideConfirmTitle(for: cli).hasSuffix("Anyway?"))
+    }
 }

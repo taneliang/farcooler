@@ -40,6 +40,16 @@ public enum PersonAccess: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// How a device was paired, as the runner recorded it (ov-982).
+public enum PairedVia: String, Sendable {
+    /// Far Cooler's own pairing, on the runner's Mac.
+    case app
+    /// Added by another device.
+    case device
+    /// From a terminal on the runner, or anything else that isn't the app.
+    case terminal
+}
+
 /// Where a device's step-up key stands, as the runner tells it.
 public enum StepUpKeyStanding: String, Sendable {
     /// No key: the device keeps what it had until it registers one.
@@ -87,6 +97,15 @@ public struct PeopleAccess: Equatable, Sendable {
         /// A trusted key the owner approved with Touch ID on their Mac, or from
         /// a device of theirs approved so (ov-974): it may allow a cutover.
         public var vouched: Bool = false
+        /// When it was paired, or nil for one paired before the runner kept it (ov-982).
+        public var pairedAt: Date? = nil
+        /// How it was paired, or nil for one paired before the runner kept it.
+        public var pairedVia: PairedVia? = nil
+        /// The device that paired it, by name, when ``pairedVia`` is `.device`.
+        public var pairedBy: String? = nil
+        /// Paired from a terminal on the runner, not by Far Cooler's own
+        /// pairing: the Mac asks a second time before approving it (ov-982).
+        public var pairedOutsideApp: Bool { pairedVia == .terminal }
         /// How many devices are in this device's removal: itself and what it added.
         public var removal: Int { 1 + added }
         /// The owner's device whose trusted key nobody vouched for yet, with
@@ -163,7 +182,10 @@ public struct PeopleAccess: Equatable, Sendable {
                 code: row?.step_up_code ?? "",
                 added: added[id] ?? 0,
                 person: person, personName: personName,
-                vouched: row?.step_up_vouched ?? false)
+                vouched: row?.step_up_vouched ?? false,
+                pairedAt: (row?.paired_at ?? 0) > 0 ? Date(timeIntervalSince1970: Double(row?.paired_at ?? 0) / 1000) : nil,
+                pairedVia: PairedVia(rawValue: row?.paired_via ?? ""),
+                pairedBy: (row?.paired_by ?? "").isEmpty ? nil : name(of: row?.paired_by ?? ""))
         }
 
         var people: [Person] = []
@@ -278,6 +300,31 @@ public struct PeopleAccess: Equatable, Sendable {
     public static func vouchPrompt(for device: Device) -> String {
         "Only approve this if you’re holding \(device.name) right now. Check that it shows \(spoken(device.code))."
     }
+    /// How and when `device` was paired, under its name in the approve list
+    /// (ov-982). `runner` names the runner's Mac: "this Mac" on its own.
+    public static func pairedLine(for device: Device, runner: String = "this Mac") -> String {
+        let how: String
+        switch device.pairedVia {
+        case .app: how = "Paired in Far Cooler on \(runner)"
+        case .device: how = "Added from \(device.pairedBy ?? "another device")"
+        case .terminal: how = "Paired from a terminal on \(runner)"
+        case nil: return "Paired before Far Cooler kept a record of how."
+        }
+        guard let at = device.pairedAt else { return how + "." }
+        return how + ", " + at.formatted(date: .abbreviated, time: .shortened) + "."
+    }
+    /// The flag on a device paired outside Far Cooler's own pairing (ov-982).
+    public static let pairedOutsideBadge = "Not Paired in Far Cooler"
+    public static func pairedOutsideWarning(runner: String = "this Mac") -> String {
+        "Something on \(runner) added this device outside Far Cooler, such as a command in Terminal or an agent. Approve it only if you added it yourself."
+    }
+    /// The second question before approving such a device.
+    public static func pairedOutsideConfirmTitle(for device: Device) -> String {
+        "Approve \(device.name) Anyway?"
+    }
+    public static let pairedOutsideConfirmMessage =
+        "It wasn’t paired in Far Cooler. Once approved, it can allow your orchestrator to run the cutover."
+    public static let pairedOutsideConfirmButton = "Approve Anyway"
     /// On the owner's own device, until their Mac approves it (ov-974).
     public static let vouchHere =
         "To allow the cutover from this device, approve it once in People on your Mac. Check that it shows this code."
@@ -327,6 +374,9 @@ public struct PeopleAccess: Equatable, Sendable {
         let step_up: String
         let step_up_code: String
         let step_up_vouched: Bool
+        let paired_at: Int64
+        let paired_via: String
+        let paired_by: String
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
@@ -337,8 +387,13 @@ public struct PeopleAccess: Equatable, Sendable {
             step_up = try c.decodeIfPresent(String.self, forKey: .step_up) ?? ""
             step_up_code = try c.decodeIfPresent(String.self, forKey: .step_up_code) ?? ""
             step_up_vouched = try c.decodeIfPresent(Bool.self, forKey: .step_up_vouched) ?? false
+            paired_at = try c.decodeIfPresent(Int64.self, forKey: .paired_at) ?? 0
+            paired_via = try c.decodeIfPresent(String.self, forKey: .paired_via) ?? ""
+            paired_by = try c.decodeIfPresent(String.self, forKey: .paired_by) ?? ""
         }
-        enum Keys: String, CodingKey { case client_id, person, cap, check, step_up, step_up_code, step_up_vouched }
+        enum Keys: String, CodingKey {
+            case client_id, person, cap, check, step_up, step_up_code, step_up_vouched, paired_at, paired_via, paired_by
+        }
     }
 
     struct MembersWire: Decodable {

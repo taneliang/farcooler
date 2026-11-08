@@ -351,27 +351,57 @@ private struct ThisDeviceAdminSection: View {
 }
 
 /// One of the owner's devices their Mac can approve for the cutover (ov-974):
-/// its name and code, and Approve, which asks for Touch ID.
+/// its name, how and when it was paired, its code, and Approve, which asks
+/// for Touch ID. One paired outside Far Cooler is flagged, and Approve asks a
+/// second time before Touch ID (ov-982): an agent can pair a device it names.
 private struct VouchRow: View {
     let device: PeopleAccess.Device
     let actions: PeopleAccessActions
+    @State private var confirming = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(device.name).lineLimit(2).accessibilityIdentifier("vouch-\(device.id)")
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(device.name).lineLimit(2).accessibilityIdentifier("vouch-\(device.id)")
+                    Text(PeopleAccess.pairedLine(for: device))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("vouch-paired-\(device.id)")
+                }
                 Spacer(minLength: 8)
                 Text(PeopleAccess.spoken(device.code))
                     .font(.title3.monospacedDigit().weight(.semibold))
+                    .fixedSize()
                     .accessibilityLabel("Code \(device.code.map(String.init).joined(separator: " "))")
                     .accessibilityIdentifier("vouch-code-\(device.id)")
+            }
+            if device.pairedOutsideApp {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(PeopleAccess.pairedOutsideBadge, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    Text(PeopleAccess.pairedOutsideWarning())
+                        .font(.caption).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("vouch-outside-\(device.id)")
             }
             Text(PeopleAccess.vouchPrompt(for: device))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let approve = actions.approve {
-                Button("Approve") { Task { await approve(device) } }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("vouch-approve-\(device.id)")
+                Button("Approve") {
+                    if device.pairedOutsideApp { confirming = true } else { Task { await approve(device) } }
+                }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("vouch-approve-\(device.id)")
+                .confirmationDialog(
+                    PeopleAccess.pairedOutsideConfirmTitle(for: device), isPresented: $confirming, titleVisibility: .visible
+                ) {
+                    Button(PeopleAccess.pairedOutsideConfirmButton, role: .destructive) { Task { await approve(device) } }
+                        .accessibilityIdentifier("vouch-approve-anyway-\(device.id)")
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(PeopleAccess.pairedOutsideConfirmMessage)
+                }
             }
         }
         .accessibilityElement(children: .contain)
