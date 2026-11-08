@@ -688,7 +688,8 @@ class Connection(
      * The task stays in Needs Decision until its orchestrator moves it; the
      * item ends because the answer is newer than the question.
      */
-    suspend fun answerDecision(task: String, body: String) {
+    suspend fun answerDecision(task: String, body: String, stepUp: (() -> StepUp?)? = null) {
+        if (com.farcooler.model.CutoverGrant.isGrant(body)) return answerCutoverGrant(task, stepUp?.invoke())
         core.call(com.farcooler.model.TaskAnswer.METHOD, com.farcooler.model.TaskAnswer.request(task, body))
         readNeedsYou()
     }

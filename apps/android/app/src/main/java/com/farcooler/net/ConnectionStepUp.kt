@@ -37,3 +37,26 @@ suspend fun Connection.peopleAccess(): PeopleAccess? {
     val clients = attempt { core.call("client.list", JsonObject(emptyMap())) }.getOrNull()
     return PeopleAccess.of(members, clients, ownClientId.orEmpty())
 }
+
+/**
+ * "Allow cutover once" (ov-974, ov-977): signed with this phone's step-up key after its screen lock, which is what
+ * tells the runner the owner said it. Never sent plain, since a plain one grants nothing: a phone with no trusted
+ * key is told how to get one, as a [com.farcooler.model.GrantNotSent].
+ */
+suspend fun Connection.answerCutoverGrant(task: String, flow: StepUp?) {
+    val runner = host.label
+    val words = com.farcooler.model.StepUpWords
+    if (flow == null || !flow.hasKey) throw com.farcooler.model.GrantNotSent(words.sentenceForRefusal("key_untrusted", runner, "phone"))
+    try {
+        flow.perform(
+            com.farcooler.model.TaskAnswer.METHOD, com.farcooler.model.TaskAnswer.request(task, com.farcooler.model.CutoverGrant.ALLOW),
+            com.farcooler.model.CutoverGrant.reason(runner), hasTrustedKey = true,
+        )
+    } catch (e: com.farcooler.model.StepUpFailure) {
+        throw com.farcooler.model.GrantNotSent(words.sentence(e, runner, "phone").orEmpty())
+    } catch (e: com.farcooler.core.CoreException) {
+        throw com.farcooler.model.GrantNotSent(words.sentenceForRefusal(e.what ?: e.word.orEmpty(), runner, "phone"))
+    } finally {
+        readNeedsYou()
+    }
+}

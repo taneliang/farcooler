@@ -52,6 +52,20 @@ pub async fn set_key(svc: &Service, peer: &Peer, caller_pid: Option<i32>, p: pb:
     let key = p.key.ok_or(DomainError::InvalidArgument { what: "step_up_key" })?;
     step_up::check_key(&key.alg, &key.public_key)?;
     let (device, trusted) = match peer.client_id.as_deref() {
+        // The Mac app's own key (ov-974): only the app, by its code
+        // signature, never the walk, and it may replace its own. Its code
+        // makes only a Secure Enclave key that needs Touch ID or the login
+        // password, so a replacement is as good as the first.
+        None if p.client_id.trim() == step_up::LOCAL_APP => {
+            if key.alg != step_up::ALG_DEVICE || !caller_pid.is_some_and(crate::caller_seat::is_own_app) {
+                tracing::warn!("refused: the Mac app's step-up key from something that isn't the app");
+                return Err(DomainError::NotYours { what: "not_yours" });
+            }
+            svc.store.replace_step_up_key(step_up::LOCAL_APP, &key.alg, &key.public_key, now_ms())?;
+            let row = svc.store.step_up_key(step_up::LOCAL_APP)?.ok_or(DomainError::OperationFailed)?;
+            tracing::info!("recorded the Mac app's step-up key");
+            return Ok(state(step_up::LOCAL_APP, &row));
+        }
         // The runner's own socket, outside a pane: trusted at once.
         None => {
             crate::person_access::refuse_admin_from_pane(svc, caller_pid).await?;

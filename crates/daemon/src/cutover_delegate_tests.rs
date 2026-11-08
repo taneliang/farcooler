@@ -39,6 +39,24 @@ async fn the_owners_orchestrator() -> (crate::test_support::ScratchDir, std::syn
     (dir, svc, pane, workspace)
 }
 
+/// The one card `granted` made on `workspace`.
+fn task_of(svc: &crate::service::Service, workspace: Uuid) -> Uuid {
+    let repository = svc.store.get_workspace(workspace).unwrap().repository_id;
+    let hits = svc.store.search_notes(repository, crate::cutover_grant::ALLOW, Some(farcooler_store::models::NoteKind::Answer)).unwrap();
+    hits[0].note.task_id
+}
+
+/// The owner's "Allow cutover once" on a card of `workspace`, said from the
+/// app, and spent on `attempt` as the live Prepare spends it.
+fn granted(svc: &crate::service::Service, workspace: Uuid, attempt: &str) -> Uuid {
+    use crate::cutover_grant::{ALLOW, SAID_FROM};
+    use farcooler_store::models::{Actor, NoteKind};
+    let task = svc.store.create_task(workspace, "Data: the engine cutover", Actor::Manager).unwrap().id;
+    svc.store.add_note(task, NoteKind::Question, Actor::Manager, "Run it once?", serde_json::json!({ "options": [ALLOW] })).unwrap();
+    svc.store.add_note(task, NoteKind::Answer, Actor::User, ALLOW, serde_json::json!({ SAID_FROM: "app" })).unwrap();
+    crate::cutover_grant::spend(&svc.store, workspace, attempt, crate::step_up_rpc::now_ms()).unwrap().answer
+}
+
 #[tokio::test]
 async fn a_delegate_is_read_only_for_the_attempt_in_hand_and_only_for_its_pane() {
     let (_dir, svc, terminal, workspace) = the_owners_orchestrator().await;
@@ -47,7 +65,8 @@ async fn a_delegate_is_read_only_for_the_attempt_in_hand_and_only_for_its_pane()
     // This test's own process stands in for the pane root.
     let me = std::process::id() as i32;
     let start = crate::claude_registry::process_incarnation(me).unwrap();
-    let delegate = Delegate { attempt: "a-1".into(), terminal, workspace, pane_pid: me, pane_start: start, grant: Uuid::now_v7() };
+    let grant = granted(&svc, workspace, "a-2");
+    let delegate = Delegate { attempt: "a-1".into(), terminal, workspace, pane_pid: me, pane_start: start, grant };
     write(root, &delegate).unwrap();
     assert_eq!(admits(root, me), None, "nothing is held: no attempt is in hand");
     transfer::hold(&db, "a-2").unwrap();
@@ -60,6 +79,8 @@ async fn a_delegate_is_read_only_for_the_attempt_in_hand_and_only_for_its_pane()
     assert_eq!(admits(root, me), None, "a pane this process isn't in");
     write(root, &Delegate { attempt: "a-2".into(), terminal: Uuid::now_v7(), ..delegate.clone() }).unwrap();
     assert_eq!(admits(root, me), None, "a pane the database doesn't know");
+    write(root, &Delegate { attempt: "a-2".into(), grant: Uuid::now_v7(), ..delegate.clone() }).unwrap();
+    assert_eq!(admits(root, me), None, "a grant the database doesn't know");
     forget(root).unwrap();
     forget(root).unwrap();
     assert_eq!(admits(root, me), None);
@@ -91,4 +112,28 @@ async fn every_recovery_step_rechecks_role_login_and_lead() {
     svc.store.set_terminal_role(terminal, farcooler_store::models::TerminalRole::Agent).unwrap();
     assert!(!still_the_owners(&db, &pinned), "no longer the orchestrator");
     assert!(!still_the_owners(&svc.root_dir().join("nowhere.sqlite"), &pinned), "a database that can't be read");
+}
+
+/// Each recovery step asks the database again about the grant, as the live
+/// Prepare did: under a day old, and spent on this attempt and no other.
+#[tokio::test]
+async fn every_recovery_step_rechecks_the_grants_age_and_spend() {
+    let (_dir, svc, terminal, workspace) = the_owners_orchestrator().await;
+    let db = crate::cutover_admin::database(svc.root_dir());
+    let grant = granted(&svc, workspace, "a-1");
+    let now = crate::step_up_rpc::now_ms();
+    let pinned = Delegate { attempt: "a-1".into(), terminal, workspace, pane_pid: 9, pane_start: 1, grant };
+    assert!(grant_holds(&db, &pinned, now), "the owner's grant, spent on this attempt");
+    let max = crate::cutover_grant::MAX_AGE_MS;
+    assert!(grant_holds(&db, &pinned, now + max - 60_000), "a day less a minute on");
+    assert!(!grant_holds(&db, &pinned, now + max + 60_000), "a day and a minute on: lapsed mid-recovery");
+    assert!(!grant_holds(&db, &Delegate { attempt: "a-2".into(), ..pinned.clone() }, now), "spent on another attempt");
+    assert!(!grant_holds(&db, &Delegate { grant: Uuid::now_v7(), ..pinned.clone() }, now), "no such answer");
+
+    // Spent again on another attempt (a restored file): it holds for neither.
+    let card = task_of(&svc, workspace);
+    svc.store.add_note(card, farcooler_store::models::NoteKind::Progress, farcooler_store::models::Actor::Runner, "spent again",
+        serde_json::json!({ "cutover_grant": { "answer": grant.to_string(), "attempt": "a-3" } })).unwrap();
+    assert!(!grant_holds(&db, &pinned, now), "a grant spent twice");
+    assert!(!grant_holds(&svc.root_dir().join("nowhere.sqlite"), &pinned, now), "a database that can't be read");
 }

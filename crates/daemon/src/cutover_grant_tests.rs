@@ -35,10 +35,15 @@ fn only_the_apps_signature_and_the_owners_phone_key_say_a_grant() {
     let app = |pid: i32| pid == 10;
     let signed = |method: &str, device: &str, browser: bool| crate::step_up::Stepped { method: method.into(), digest: [0; 32], device: device.into(), browser };
     let answer = signed("task.note", "phone-1", false);
-    assert_eq!(said_from_with(&local, Some(10), None, || true, &app), "app", "the app, by its code signature");
+    let macs = signed("task.note", crate::step_up::LOCAL_APP, false);
+    assert_eq!(said_from_with(&local, Some(10), Some(&macs), || true, &app), "app", "the app, by its code signature and its key");
+    assert_eq!(said_from_with(&local, Some(10), None, || true, &app), "cli", "the app's binary unsigned: anything may run it, or click it");
+    assert_eq!(said_from_with(&local, Some(11), Some(&macs), || true, &app), "cli", "the app's key, from something that isn't the app");
+    assert_eq!(said_from_with(&local, Some(10), Some(&signed("member.set", crate::step_up::LOCAL_APP, false)), || true, &app), "cli", "the app's key, for something else");
     assert_eq!(said_from_with(&local, Some(11), None, || true, &app), "cli", "a CLI in any terminal");
-    assert_eq!(said_from_with(&local, None, None, || true, &app), "cli", "the in-process session");
-    assert_eq!(said_from_with(&local, Some(11), Some(&answer), || true, &app), "cli", "the socket has no device to sign");
+    assert_eq!(said_from_with(&local, None, Some(&macs), || true, &app), "cli", "the in-process session");
+    assert_eq!(said_from_with(&local, Some(10), Some(&answer), || true, &app), "cli", "a phone's key on the socket");
+    assert_eq!(said_from_with(&phone, Some(10), Some(&signed("task.note", crate::step_up::LOCAL_APP, false)), || true, &app), "cli", "the app's key named on a phone's line");
     assert_eq!(said_from_with(&phone, Some(10), Some(&answer), || true, &app), "device", "the owner's phone, by its key");
     assert_eq!(said_from_with(&phone, Some(10), None, || true, &app), "cli", "a line named for the phone, unsigned: a preamble anyone local can write");
     assert_eq!(said_from_with(&phone, None, Some(&signed("task.note", "phone-2", false)), || true, &app), "cli", "another device's key");
@@ -153,4 +158,51 @@ async fn the_owners_phone_grants_by_signing_its_answer() {
     let stolen = Device::new("phone-o", 12);
     let n = nonce(&conn).await;
     assert!(call(&conn, stolen.step(&r.pin, answer(), &n)).await.is_err(), "a key the runner never trusted");
+}
+
+/// The Mac app says it by signing the answer with its own key, on the
+/// runner's socket, through `Rpc` as its connection does. Only the app puts
+/// that key on the runner (`step_up_rpc::set_key`); the signed answer goes
+/// through once per challenge; another key, or none, is refused. (Whether the
+/// caller is the app is its code signature, above: a test is no app, so the
+/// signed answer here is stamped `cli`.)
+#[tokio::test]
+async fn the_macs_answer_is_signed_by_the_apps_key_once() {
+    use crate::rpc_people::tests::call;
+    use crate::step_up::tests::{Device, nonce, runner, word};
+    use crate::step_up::{ALG_DEVICE, LOCAL_APP, LOCAL_PIN};
+    let r = runner().await;
+    let root = r.svc.store.create_repository_root(r.svc.host_id, "/r", 0).unwrap();
+    let repo = r.svc.store.create_repository(r.svc.host_id, root.id, "demo", "/r/demo/.git", "").unwrap();
+    let workspace = r.svc.store.ensure_main_workspace(repo.id).unwrap().id;
+    let task = r.svc.store.create_task(workspace, "Data: the engine cutover", Actor::Manager).unwrap().id;
+    r.svc.store.add_note(task, NoteKind::Question, Actor::Manager, "Run the cutover once?", serde_json::json!({ "options": [ALLOW] })).unwrap();
+    let answer = || pb::Request { method: "task.note".into(), payload: Some(pb::request::Payload::TaskNoteAppend(pb::TaskNoteAppend {
+        task_id: task.as_bytes().to_vec().into(), kind: pb::TaskNoteKind::Answer as i32, body: ALLOW.into(), actor: "user".into(), ..Default::default() })), ..Default::default() };
+    let mac = Device::new(LOCAL_APP, 21);
+    let socket = r.socket();
+
+    // Only the app writes its key: the socket outside a pane is not enough.
+    let put = pb::Request { method: "client.set_step_up_key".into(), payload: Some(pb::request::Payload::ClientSetStepUpKey(pb::ClientSetStepUpKey {
+        client_id: LOCAL_APP.into(), key: Some(mac.wire_key(ALG_DEVICE)) })), ..Default::default() };
+    assert!(word(call(&socket, put).await).ends_with("not_yours"), "the app's key from something that isn't the app");
+    assert!(r.svc.store.step_up_key(LOCAL_APP).unwrap().is_none());
+
+    let n = nonce(&socket).await;
+    assert!(word(call(&socket, mac.step(LOCAL_PIN, answer(), &n)).await).ends_with("key_untrusted"), "no key on the runner yet");
+    r.svc.store.replace_step_up_key(LOCAL_APP, ALG_DEVICE, &mac.public(), now()).unwrap();
+
+    let n = nonce(&socket).await;
+    let signed = mac.step(LOCAL_PIN, answer(), &n);
+    call(&socket, signed.clone()).await.expect("the app's signed answer");
+    assert!(word(call(&socket, signed).await).ends_with("challenge_expired"), "the same signature again: replayed");
+    let n = nonce(&socket).await;
+    assert!(word(call(&socket, Device::new(LOCAL_APP, 22).step(LOCAL_PIN, answer(), &n)).await).ends_with("step_up_failed"), "another key");
+    let n = nonce(&socket).await;
+    assert!(word(call(&socket, mac.step(&r.pin, answer(), &n)).await).ends_with("host_pin_mismatch"), "a statement for a device's line");
+    let n = nonce(&socket).await;
+    let revoke = crate::step_up::tests::revoke_req("pad-b", false);
+    assert!(word(call(&socket, mac.step(LOCAL_PIN, revoke, &n)).await).ends_with("step_up_unneeded"), "the app's key signs an answer, nothing else");
+    let said: Vec<_> = r.svc.store.notes_for(task, Some(NoteKind::Answer)).unwrap();
+    assert_eq!(said.len(), 1, "one answer written: {said:?}");
 }

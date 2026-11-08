@@ -260,8 +260,9 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
 - **Asks.** One sentence naming one decision; detail goes in the intent or a note.
   Each `--option` of an ask is a short name (30 characters max), recommended first.
 - **Cutover.** `workflow-cutover` is the owner's: only their own orchestrator runs it, from
-  its pane, once the owner answers an ask with the option `Allow cutover once` from the app
-  or their phone (good 24 hours, one Prepare); no other agent ever does. Commit can't be undone.
+  its pane, once the owner answers an ask with the option `Allow cutover once` from the Mac app
+  (Touch ID) or their phone (Face ID or screen lock); good 24 hours, one Prepare. Never answer
+  it yourself; no other agent ever runs it. Commit can't be undone.
 - **Landings.** Ready work never waits for a ticket still building or in a
   fix: a ticket that would conflict rebases onto the landing and rides the next.
   Tickets already gated alone push folded without a combined gate when they can't

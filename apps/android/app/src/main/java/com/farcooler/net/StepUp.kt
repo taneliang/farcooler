@@ -43,6 +43,9 @@ class StepUp(
     /** The runner's host key as this device pinned it, never as the runner said. */
     private val hostPin: String,
 ) {
+    /** Whether this device has a key to sign with at all (trusted or not is the runner's to say). */
+    val hasKey: Boolean get() = signer.publicKey != null
+
     /**
      * [method] with [args] (the ones the plain call takes), asking for the person's verification when this device
      * holds a trusted key. A device without one keeps its old way until it registers (the transition); and a runner

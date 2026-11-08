@@ -73,6 +73,7 @@ import com.farcooler.model.idleWithoutOrchestrator
 import com.farcooler.model.reassurance
 import com.farcooler.net.Connection
 import com.farcooler.net.rethrowIfCancellation
+import com.farcooler.net.stepUp
 import kotlinx.coroutines.launch
 
 /**
@@ -346,6 +347,7 @@ internal fun NeedsYouItemRow(
     may: NeedsYouMay? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val item = row.item
     val daemon = connection?.daemon?.collectAsStateWithLifecycle()?.value
     // Below Control scope a runner sends no actions, and "Answer" would be
@@ -375,7 +377,7 @@ internal fun NeedsYouItemRow(
                 answer(live)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
-                refusal = NeedsYouAnswer.refusal((e as? CoreException)?.what, agent)
+                refusal = if (e is com.farcooler.model.GrantNotSent) e.sentence.ifEmpty { null } else NeedsYouAnswer.refusal((e as? CoreException)?.what, agent)
             } finally {
                 sending = null
             }
@@ -396,7 +398,7 @@ internal fun NeedsYouItemRow(
             }
             NeedsYouKind.DECISION, NeedsYouKind.PR_THREAD -> {
                 val task = item.task?.id ?: return
-                send(id) { it.answerDecision(task, body) }
+                send(id) { live -> live.answerDecision(task, body) { live.stepUp(context) } }
             }
             else -> onOpen()
         }

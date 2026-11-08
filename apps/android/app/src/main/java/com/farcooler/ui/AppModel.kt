@@ -22,6 +22,7 @@ import com.farcooler.model.NeedsYouKind
 import com.farcooler.model.RunnerLink
 import com.farcooler.model.Terminal
 import com.farcooler.net.Connection
+import com.farcooler.net.stepUp
 import com.farcooler.data.PreferenceReviewStorage
 import com.farcooler.net.FleetRepository
 import com.farcooler.net.Reachability
@@ -698,8 +699,8 @@ class AppModel(
                         it.task?.id == target.taskId
                 }
                 if (!waiting) return "${answer.key} isn’t waiting on a decision anymore."
-                return runCatching { connection.answerDecision(target.taskId, answer.body) }
-                    .fold({ null }, { "Far Cooler couldn’t send your answer to ${answer.key}." })
+                return runCatching { connection.answerDecision(target.taskId, answer.body) { connection.stepUp(getApplication<Application>()) } }
+                    .fold({ null }, { (it as? com.farcooler.model.GrantNotSent)?.sentence?.ifEmpty { null } ?: "Far Cooler couldn’t send your answer to ${answer.key}." })
             }
             if (over) return "Your phone can’t reach the runner ${answer.key} is on right now."
             delay(500)

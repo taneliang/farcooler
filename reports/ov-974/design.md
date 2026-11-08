@@ -128,3 +128,104 @@ signature says),
 `recovery_tests::live_prepare_refuses_the_owners_orchestrator_without_the_owners_grant`,
 `cutover_delegate_tests::every_recovery_step_rechecks_role_login_and_lead`, and
 the e2e, now with the owner's grant.
+
+## Second fix round: every grant needs the owner present
+
+The review found that any process running the app's binary passes its code
+signature, that age and spend were checked only at Prepare, and that the
+routes writing an answer weren't listed. ov-977 (phones sign the grant) folds
+in here.
+
+### Where the brief is wrong
+
+- `MacRemoteStepUp.swift` isn't the pattern for the Mac's own grant: it asks the
+  iPhone to approve, for a Mac reaching another runner as a paired device. The
+  owner's Mac talks to its own runner's socket, which had no step-up at all
+  (`step_up::admit` refused one there: `step_up_unneeded`).
+- The Mac app never sent its answers itself: `DaemonClient.answerTask` runs the
+  bundled CLI, which fails the app's code signature. So the round-one `app`
+  stamp could never come from the real app's answer button. The grant now goes
+  out in-process (`RunnerCore`), signed.
+- `step_up.rs:431-439` doesn't exist at `210fb000d` (the file is 421 lines).
+  The replay guard is the challenge's single spend, `Challenges::take`
+  (`step_up.rs:135`), called before any signature is read.
+
+### The Mac grant
+
+- **The key.** A CryptoKit Secure Enclave P-256 key with `.privateKeyUsage` and
+  `.userPresence` (Touch ID, or the login password), made by the app
+  (`MacStepUpSigner`). A keychain enclave key needs an `application-identifier`
+  the app lacks; CryptoKit's doesn't (checked: an unentitled binary on this Mac
+  makes one and reloads it from its wrapped blob). The blob lives in the app's
+  Application Support and is useless off this Mac's enclave or without the
+  person. Each signature gets a fresh `LAContext` with no reuse window.
+- **On the runner.** The key is kept as `step_up_keys` row `local:app`
+  (`step_up::LOCAL_APP`). A device's client id never holds a `:`
+  (`farcooler_fence`), so no line can be it. `client.set_step_up_key` for
+  `local:app` is taken only from a caller that passes `caller_seat::is_own_app`
+  (code signature, never the walk), only `p256-sha256`, and the app may replace
+  its own key: its code makes nothing but enclave keys that need the person, so
+  a replacement is as good as the first.
+- **The signature.** `step_up::admit` takes a step-up on the socket for an
+  `OPTIONAL` method (`task.note`) only, verified against `local:app` with host
+  pin `local`: the challenge is spent first, the request run is the one signed
+  (`signed_request`), and the statement names `local:app`.
+- **The stamp.** `said_from` is `app` only when the request carries that
+  verified step-up for `task.note` *and* the caller passes the code signature.
+  Neither alone: the binary can be run, and its window driven, by anything; only
+  the person can put a finger on the sensor.
+- **No other way to make the app answer.** `AppControl`'s socket serves
+  `about`, `version` and `update` only; its one URL scheme is AuthKit's sign-in
+  callback (`Info.plist`), and it has no AppleScript dictionary. And whatever reaches `answerTask` (a button, a
+  notification action, accessibility) ends at the Touch ID prompt.
+
+### Phones (ov-977)
+
+`task.note` joins the client core's step-up builder (`session/step_up.rs`
+`build`): an answer only, built as the plain one is, with its target. iOS
+(`Connection.answerCutoverGrant`) and Android (`Connection.answerCutoverGrant`)
+send "Allow cutover once" only signed, after Face ID, the passcode or the screen
+lock; never plain, and a phone with no key is told how to get one. Every other
+answer goes out as before. The watch relays to the phone, which prompts there.
+
+### Rechecked at every recovery step
+
+`cutover_delegate::admits` now also asks `grant_holds`
+(`engine_cutover::startup::grant_holds`, read-only): the pinned answer is the
+owner's, said from `app` or `device`, under `MAX_AGE_MS` old *now*, and spent by
+the runner on this attempt and no other.
+
+### Every route that writes an Answer note as `user`
+
+| Route | `said_from` | `at` |
+|---|---|---|
+| `task.note` over RPC (`rpc_board.rs:101`, CLI, apps, web, phones) → `task_ops::note_from` | the daemon's `cutover_grant::said_from`; a caller's own is refused `extra_json` (`task_ops.rs:644`) | the store's clock |
+| `pr_actions` thread reply → `task_ops::note` | always `cli` (`task_ops.rs:585`) | the store's clock |
+| tests and migrations (`insert_note_with_at_for_test`, `migrate.rs` backfills) | none | not reachable from a request |
+
+`Store::append` stamps `at` with `now_millis()` (`tasks.rs:312`); no request
+field sets it. `TaskNoteAppend` has no `at`.
+
+### Replay
+
+A step-up's nonce is one of at most four live per session, 60 s, spent by
+`take` before the signature is checked and spent whatever follows
+(`step_up.rs:135`, `admit_local`). The same signed request sent again is
+refused `challenge_expired`; a client-side token is spent by `step_up.finish`.
+A spent grant admits no second Prepare, and a grant spent twice holds for
+neither attempt in recovery.
+
+### Tests (each red with its check removed)
+
+- `cutover_grant_tests::only_the_apps_signature_and_the_owners_phone_key_say_a_grant`:
+  the app unsigned, the app's key from another process, the app's key for
+  another method, a phone's key on the socket.
+- `cutover_grant_tests::the_macs_answer_is_signed_by_the_apps_key_once`
+  (through `Rpc`): only the app writes `local:app`; no key, replay, another key,
+  a device's pin, another method are each refused.
+- `cutover_delegate_tests::every_recovery_step_rechecks_the_grants_age_and_spend`
+  and the delegate test's unknown grant.
+- `step_up_phone_tests::the_owners_signed_cutover_answer_goes_through_the_bridge`
+  (client core to daemon): unsigned grants nothing, signed is `device`, a spent
+  token is refused, a signed note that isn't an answer is refused.
+- AgentKit `StepUpTests.cutoverGrant`; Android `CutoverGrantTest`.

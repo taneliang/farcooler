@@ -49,9 +49,10 @@ pub(super) async fn finish(session: &Session, args: &Value) -> Result<Value, Ses
     step_up::value_json(&session.step_up_finish(text(args, "token"), signature).await?)
 }
 
-/// `{publicKey}`: propose this device's key (the 65-byte point, base64).
-/// Answers `{clientId, state, code}`.
+/// `{publicKey, clientId?}`: propose this device's key (the 65-byte point,
+/// base64); `clientId` is `local:app` for the Mac app's own key on its own
+/// runner (ov-974), and absent otherwise. Answers `{clientId, state, code}`.
 pub(super) async fn propose(session: &Session, args: &Value) -> Result<Value, SessionError> {
     let key = bytes("step_up.propose", args, "publicKey")?;
-    Ok(step_up::key_state_json(&session.step_up_propose(key).await?))
+    Ok(step_up::key_state_json(&session.step_up_propose_as(key, text(args, "clientId")).await?))
 }

@@ -111,6 +111,7 @@ import com.farcooler.model.RunnerNeedsYouItem
 import com.farcooler.model.TaskStatus
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.net.rethrowIfCancellation
+import com.farcooler.net.stepUp
 import com.farcooler.net.Connection
 import com.farcooler.net.draftPrompt
 import com.farcooler.net.TerminalRef
@@ -988,6 +989,7 @@ fun TaskDetailScreen(
 @Composable
 private fun AnswerDecision(connection: Connection, row: TaskRow) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var writing by remember { mutableStateOf(false) }
     var sending by remember { mutableStateOf(false) }
     var refusal by remember { mutableStateOf<String?>(null) }
@@ -1012,10 +1014,10 @@ private fun AnswerDecision(connection: Connection, row: TaskRow) {
                     refusal = null
                     scope.launch {
                         try {
-                            connection.answerDecision(row.id, text.trim())
+                            connection.answerDecision(row.id, text.trim()) { connection.stepUp(context) }
                         } catch (e: Exception) {
                             e.rethrowIfCancellation()
-                            refusal = NeedsYouAnswer.refusal((e as? CoreException)?.what, "the runner")
+                            refusal = if (e is com.farcooler.model.GrantNotSent) e.sentence.ifEmpty { null } else NeedsYouAnswer.refusal((e as? CoreException)?.what, "the runner")
                         } finally {
                             sending = false
                         }

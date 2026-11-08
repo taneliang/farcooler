@@ -23,7 +23,9 @@
 //! journal entry says which one. Each recovery step asks the database again,
 //! read-only, whether the pane is still the workspace's orchestrator on the
 //! runner's login with no member leading it
-//! (`engine_cutover::startup::owners_orchestrator`).
+//! (`engine_cutover::startup::owners_orchestrator`), and whether the grant is
+//! still under a day old and spent on this attempt alone
+//! (`engine_cutover::startup::grant_holds`).
 //!
 //! **No new way in.** This file sits beside the database and its hold mark,
 //! and anything that can write it can already write those. The seat walk was
@@ -103,7 +105,19 @@ pub fn admits(root: &Path, pid: i32) -> Option<Delegate> {
     let procs = crate::caller_seat::procs(&table);
     let servers = crate::caller_seat::tmux_servers(&procs);
     if !within(pid, &procs, &servers, &delegate, &crate::claude_registry::process_incarnation) { return None; }
-    still_the_owners(&crate::cutover_admin::database(root), &delegate).then_some(delegate)
+    let db = crate::cutover_admin::database(root);
+    (still_the_owners(&db, &delegate) && grant_holds(&db, &delegate, crate::step_up_rpc::now_ms())).then_some(delegate)
+}
+
+/// Whether the owner's grant that admitted the delegate still does at
+/// `now_ms`: under `cutover_grant::MAX_AGE_MS` old, and spent on this attempt
+/// alone. Asked at every recovery step, as at Prepare. One that can't be read
+/// says no.
+pub(crate) fn grant_holds(db: &Path, delegate: &Delegate, now_ms: i64) -> bool {
+    farcooler_store::engine_cutover::startup::grant_holds(db, delegate.grant, &delegate.attempt, now_ms, crate::cutover_grant::MAX_AGE_MS).unwrap_or_else(|error| {
+        tracing::warn!(%error, "the owner's cutover grant could not be checked");
+        false
+    })
 }
 
 /// Whether the database says now that the delegate's pane is its workspace's

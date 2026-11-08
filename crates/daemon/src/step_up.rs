@@ -73,6 +73,16 @@ pub const METHODS: [&str; 8] = [
 /// before.
 pub const OPTIONAL: [&str; 1] = ["task.note"];
 
+/// The Mac app's own key on the runner's socket (ov-974): a Secure Enclave
+/// key that asks for Touch ID or the login password each time it signs. It
+/// signs only an [`OPTIONAL`] method, and only the app puts it here
+/// (`step_up_rpc::set_key`, by the app's code signature). Not a client id: a
+/// device's never holds a `:` (`farcooler_fence`), so no line can be it.
+pub const LOCAL_APP: &str = "local:app";
+/// The host pin a [`LOCAL_APP`] statement names: the socket has no host key
+/// to pin, and the key is this runner's alone.
+pub const LOCAL_PIN: &str = "local";
+
 /// What a browser's key may do (decision 2): take access away. Never add,
 /// bind, raise, propose or approve a key.
 pub const DEFENSIVE: [&str; 2] = ["client.revoke", "member.remove"];
@@ -355,9 +365,12 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         tracing::info!(method = %req.method, "refused: a step-up on a method that takes none");
         return Err(DomainError::Conflict { what: "step_up_unneeded" });
     }
-    // The runner's own socket needs none, and a device that is named in a
-    // preamble is that device (S4).
+    // The runner's own socket needs none, save the Mac app's signed answer;
+    // and a device that is named in a preamble is that device (S4).
     let Some(device) = peer.client_id.as_deref() else {
+        if OPTIONAL.contains(&req.method.as_str()) && step_up.alg == ALG_DEVICE {
+            return admit_local(svc, session, req, now_ms);
+        }
         return Err(DomainError::Conflict { what: "step_up_unneeded" });
     };
     if step_up.alg == crate::approvals::ALG_APPROVAL {
@@ -391,6 +404,26 @@ pub async fn admit(svc: &Service, peer: &Peer, session: &Session, req: Request, 
         return Err(DomainError::NotYours { what: "not_admin" });
     }
     Ok((executed, Some(stepped)))
+}
+
+/// A request on the runner's socket signed with the Mac app's key
+/// ([`LOCAL_APP`]): its challenge spent once, the request run the one signed.
+/// Whether the caller is the app is `cutover_grant::said_from`'s to ask, by
+/// its code signature; this says only that the key signed it.
+fn admit_local(svc: &Service, session: &Session, req: Request, now_ms: i64) -> Result<(Request, Option<Stepped>)> {
+    let step_up = req.step_up.as_ref().expect("the caller saw a step_up");
+    let key = svc.store.step_up_key(LOCAL_APP)?.filter(|k| k.trusted && k.alg == ALG_DEVICE).ok_or(DomainError::Conflict { what: "key_untrusted" })?;
+    // The nonce is spent before the signature is looked at, and stays spent.
+    if !session.challenges().take(&step_up.nonce, now_ms) {
+        tracing::info!(method = %req.method, "refused: a step-up on the socket with a challenge that is spent, expired or not this session's");
+        return Err(DomainError::Conflict { what: "challenge_expired" });
+    }
+    let executed = signed_request(&req, &step_up.action_bytes)?;
+    let pins = [LOCAL_PIN.to_string()];
+    let context = Context { client_id: LOCAL_APP, host_pins: &pins, app_host: farcooler_fence::app_host() };
+    verify(&key.alg, &key.public_key, step_up, &context).inspect_err(|_| tracing::warn!(method = %req.method, "refused: the Mac app's step-up didn't verify"))?;
+    let digest: [u8; 32] = Sha256::digest(&step_up.action_bytes).into();
+    Ok((executed, Some(Stepped { method: req.method.clone(), digest, device: LOCAL_APP.to_string(), browser: false })))
 }
 
 /// A request the person's phone approved (ov-858): the approval is spent, once,

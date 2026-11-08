@@ -15,9 +15,15 @@
 //! answer was said, [`SAID_FROM`], in the daemon's own words, never a
 //! caller's (`task_ops::note_from` refuses one a caller sends), each from an
 //! authenticated seat, never from the process walk:
-//! - `app`: the caller process satisfies the code signature of the app bundle
-//!   this daemon ships in (`caller_seat::is_own_app`, `code_identity`). The
-//!   bundle's CLI is another program, so `farcooler task answer` is not it;
+//! - `app`: the answer carries a step-up signed by the Mac app's own key
+//!   (`step_up::LOCAL_APP`), a Secure Enclave key that asks for Touch ID or
+//!   the login password, over this very request; and the caller process
+//!   satisfies the code signature of the app bundle this daemon ships in
+//!   (`caller_seat::is_own_app`, `code_identity`). The signature is the
+//!   owner's presence: anything may run the app's binary, and its
+//!   accessibility can be driven, but neither puts a finger on the sensor.
+//!   The bundle's CLI is another program, so `farcooler task answer` is not
+//!   it;
 //! - `device`: the answer carries a step-up (ov-856) signed by the owner's
 //!   phone's trusted key over this very request (`step_up::OPTIONAL`), the key
 //!   that asks for Face ID or the passcode; a browser's passkey doesn't count;
@@ -61,8 +67,11 @@ pub(crate) fn said_from_with(
         let signed = stepped.is_some_and(|s| s.method == "task.note" && s.device == device && !s.browser);
         return if signed && owners_device() { "device" } else { "cli" };
     }
+    // The app says it with its own key too, which asks for Touch ID or the
+    // login password: running the app's binary passes its code signature.
+    let signed = stepped.is_some_and(|s| s.method == "task.note" && s.device == crate::step_up::LOCAL_APP && !s.browser);
     match caller_pid {
-        Some(pid) if is_app(pid) => "app",
+        Some(pid) if signed && is_app(pid) => "app",
         _ => "cli",
     }
 }

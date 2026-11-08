@@ -153,3 +153,35 @@ pub fn owners_orchestrator(db: &Path, terminal: uuid::Uuid, workspace: uuid::Uui
         && none("SELECT 1 FROM reps WHERE terminal_id = ?1", &t)?
         && none("SELECT 1 FROM workspace_leads WHERE workspace_id = ?1", &w)?)
 }
+
+/// Whether the owner's grant `answer` still admits cutover `attempt` at
+/// `now_ms` (ov-974), as the database says now, read-only for a recovery
+/// process: the owner's own answer, said from the app or their phone
+/// (`said_from`), no older than `max_age_ms`, and spent by the runner on this
+/// attempt and no other (`cutover_grant` in the daemon writes both keys).
+pub fn grant_holds(db: &Path, answer: uuid::Uuid, attempt: &str, now_ms: i64, max_age_ms: i64) -> Result<bool> {
+    let conn = readonly(db)?;
+    let row: Option<(Vec<u8>, String, String, i64, String)> = conn
+        .query_row("SELECT task_id, kind, actor, at, extra FROM task_notes WHERE id = ?1", [answer.as_bytes().to_vec()], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .optional()?;
+    let Some((task, kind, actor, at, extra)) = row else { return Ok(false) };
+    let extra: serde_json::Value = serde_json::from_str(&extra).unwrap_or_default();
+    let said = matches!(extra.get("said_from").and_then(|v| v.as_str()), Some("app" | "device"));
+    if kind != "answer" || actor != "user" || !said || at > now_ms || now_ms - at > max_age_ms {
+        return Ok(false);
+    }
+    let id = answer.to_string();
+    let mut notes = conn.prepare("SELECT extra FROM task_notes WHERE task_id = ?1 AND actor = 'runner'")?;
+    let spent_on: Vec<String> = notes
+        .query_map([task], |r| r.get::<_, String>(0))?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
+        .filter_map(|e| {
+            let spend = e.get("cutover_grant")?;
+            (spend.get("answer")?.as_str()? == id).then(|| spend.get("attempt").and_then(|a| a.as_str()).unwrap_or_default().to_string())
+        })
+        .collect();
+    Ok(spent_on == [attempt])
+}

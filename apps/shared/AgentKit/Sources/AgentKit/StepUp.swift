@@ -97,8 +97,31 @@ public struct StepUp {
     }
 }
 
+/// The owner's "Allow cutover once" (ov-974): the one answer a phone or the
+/// Mac signs, because only a signed one tells the runner the owner was there
+/// to say it. Every other answer goes out plain, as before.
+public enum CutoverGrant {
+    /// The option an orchestrator offers (`cutover_grant::ALLOW`).
+    public static let allow = "Allow cutover once"
+
+    /// Whether `body` is the grant, as the runner reads it: the option's
+    /// words, any case, trimmed.
+    public static func isGrant(_ body: String) -> Bool {
+        body.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == allow.lowercased()
+    }
+
+    /// `task.note`'s arguments for the grant on `task`, as a plain answer's.
+    public static func request(task: String) -> [String: Any] {
+        ["task": task, "kind": "answer", "body": allow]
+    }
+}
+
 /// What a prompt says, per action (§8 of the design).
 public enum StepUpReason {
+    public static func allowCutover(runner: String) -> String {
+        "Allow your orchestrator on \(runner) to run the cutover once."
+    }
+
     public static func remove(person: String, runner: String) -> String {
         "Remove \(person) from \(runner)."
     }

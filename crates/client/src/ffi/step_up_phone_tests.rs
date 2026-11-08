@@ -174,3 +174,40 @@ async fn a_trusted_device_approves_the_others_code() {
 
 #[path = "step_up_access_tests.rs"]
 mod access;
+
+/// The owner's "Allow cutover once" from their phone (ov-974, ov-977): built
+/// and signed through the bridge as the apps do, it reaches the runner as the
+/// owner's answer said from their device, and grants. The same answer plain
+/// is still an answer, and grants nothing; a signed one is good once.
+#[tokio::test]
+async fn the_owners_signed_cutover_answer_goes_through_the_bridge() {
+    use farcooler_daemon::cutover_grant::{ALLOW, SAID_FROM, find};
+    use farcooler_store::models::{Actor, NoteKind};
+    let (runner, session, pin) = a_runner_with_an_owners_phone().await;
+    let key = Key::new(15);
+    trust(&runner, &key);
+    let store = &runner.service.store;
+    let root = store.create_repository_root(runner.service.host_id, "/r", 0).unwrap();
+    let repo = store.create_repository(runner.service.host_id, root.id, "demo", "/r/demo/.git", "").unwrap();
+    let workspace = store.ensure_main_workspace(repo.id).unwrap().id;
+    let task = store.create_task(workspace, "Data: the engine cutover", Actor::Manager).unwrap().id;
+    store.add_note(task, NoteKind::Question, Actor::Manager, "Run it once?", json!({ "options": [ALLOW, "Wait for me"] })).unwrap();
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    let args = json!({ "task": task.to_string(), "kind": "answer", "body": ALLOW });
+
+    dispatch(&session, "task.note", &args).await.expect("a plain answer is still an answer");
+    assert_eq!(find(store, workspace, now()).unwrap(), None, "unsigned, it grants nothing");
+
+    let prepared = begin(&session, "task.note", args.clone(), &pin).await;
+    let signature = key.sign(&base64::decode(prepared["statement"].as_str().unwrap()).unwrap());
+    let said = dispatch(&session, "step_up.finish", &json!({ "token": prepared["token"], "signature": signature })).await.expect("a signed answer");
+    assert_eq!(said["body"].as_str(), Some(ALLOW), "{said}");
+    let written = store.notes_for(task, Some(NoteKind::Answer)).unwrap().pop().unwrap();
+    assert_eq!((written.actor, written.extra[SAID_FROM].as_str()), (Actor::User, Some("device")));
+    assert!(find(store, workspace, now()).unwrap().is_some(), "the owner's phone, by its key");
+
+    let again = dispatch(&session, "step_up.finish", &json!({ "token": prepared["token"], "signature": signature })).await;
+    { let said = refusal(again); assert!(said.contains("already used"), "{said}"); }
+    let other = dispatch(&session, "step_up.begin", &json!({ "method": "task.note", "args": { "task": task.to_string(), "kind": "comment", "body": "x" }, "clientId": "phone-o", "hostPin": pin })).await;
+    assert!(other.is_err(), "a signed note is an answer and only an answer");
+}

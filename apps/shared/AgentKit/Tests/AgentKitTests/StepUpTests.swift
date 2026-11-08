@@ -88,6 +88,20 @@ struct StepUpTests {
             "the DER signature over the statement the core built")
     }
 
+    @Test("The owner's cutover grant is the option's own words, sent as a signed answer (ov-974)")
+    func cutoverGrant() async throws {
+        #expect(CutoverGrant.isGrant(" allow cutover ONCE \n"))
+        #expect(!CutoverGrant.isGrant("Allow cutover once, after lunch") && !CutoverGrant.isGrant("Wait for me"))
+        let core = Core()
+        let signer = Signer()
+        _ = try await step(core, signer).perform(
+            "task.note", CutoverGrant.request(task: "t-1"), reason: StepUpReason.allowCutover(runner: "studio"), hasTrustedKey: true)
+        #expect(core.methods == ["step_up.begin", "step_up.finish"], "never the plain answer")
+        let args = core.calls[0].args["args"] as? [String: Any]
+        #expect(args?["task"] as? String == "t-1" && args?["kind"] as? String == "answer" && args?["body"] as? String == CutoverGrant.allow)
+        #expect(signer.prompts == ["Allow your orchestrator on studio to run the cutover once."])
+    }
+
     @Test("Without a trusted key the old way stands, and nobody is asked for a face")
     func keyless() async throws {
         let core = Core()

@@ -30,3 +30,22 @@ object TaskAnswer {
         put("body", body)
     }
 }
+
+/**
+ * The owner's "Allow cutover once" (ov-974, ov-977): the one answer this phone signs, with its step-up key after a
+ * fingerprint, face or screen lock, because only a signed one tells the runner the owner was there to say it. Every
+ * other answer goes out plain, as before. AgentKit's `CutoverGrant`.
+ */
+object CutoverGrant {
+    /** The option an orchestrator offers (`cutover_grant::ALLOW`). */
+    const val ALLOW = "Allow cutover once"
+
+    /** Whether [body] is the grant, as the runner reads it: the option's words, any case, trimmed. */
+    fun isGrant(body: String): Boolean = body.trim().lowercase() == ALLOW.lowercase()
+
+    /** What the prompt says. */
+    fun reason(runner: String) = "Allow your orchestrator on $runner to run the cutover once."
+}
+
+/** A grant that didn't go, in the sentence to show; the person closing the prompt is an empty one. */
+class GrantNotSent(val sentence: String) : Exception(sentence)

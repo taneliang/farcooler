@@ -48,6 +48,7 @@ pub(super) fn build(method: &str, args: &serde_json::Value) -> Result<farcooler_
         value if value.is_empty() => Err(SessionError::Protocol(format!("{method} needs a {key}"))),
         value => Ok(value),
     };
+    let mut target = None;
     let payload = match method {
         "client.revoke" => request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
             client_id: need("clientId")?,
@@ -78,9 +79,24 @@ pub(super) fn build(method: &str, args: &serde_json::Value) -> Result<farcooler_
         "member.set_role" => {
             request::Payload::MemberSetRole(farcooler_protocol::v1::MemberSetRole { handle: need("handle")?, role: need("role")? })
         }
+        // The owner's answer, signed so it says they were there (ov-974): an
+        // answer only, built as the plain one is (`ffi::task_note_of`).
+        "task.note" => {
+            let task = need("task")?.parse::<uuid::Uuid>().map_err(|_| SessionError::Protocol("task.note needs a task".into()))?;
+            if text("kind") != "answer" {
+                return Err(SessionError::Protocol("a signed task.note is an answer, and only an answer".into()));
+            }
+            need("body")?;
+            let body = args.get("body").and_then(|v| v.as_str()).unwrap_or_default();
+            target = Some(task);
+            request::Payload::TaskNoteAppend(crate::session::task_note_append(task, farcooler_protocol::v1::TaskNoteKind::Answer, body))
+        }
         other => return Err(SessionError::Protocol(format!("{other} takes no step-up from an app"))),
     };
     let mut built = farcooler_transport::request(method);
+    if let Some(task) = target {
+        built.target_resource_id = Some(bytes::Bytes::copy_from_slice(task.as_bytes()));
+    }
     built.required_capabilities = vec![farcooler_protocol::capability::STEP_UP.to_string()];
     if matches!(method, "member.set_access" | "client.set_cap") || args.get("teammate").is_some() {
         built.required_capabilities.push(farcooler_protocol::capability::PERSON_ACCESS.to_string());
@@ -193,10 +209,18 @@ impl Session {
     /// state (`proposed`) and the six digits the device shows and an approver
     /// checks. A proposal signs nothing until a person approves it.
     pub async fn step_up_propose(&self, public_key: Vec<u8>) -> Result<farcooler_protocol::v1::StepUpKeyState, SessionError> {
+        self.step_up_propose_as(public_key, "").await
+    }
+
+    /// `step_up_propose`, naming the id the key is for: empty is this
+    /// device's own; `local:app` is the Mac app's key on its own runner's
+    /// socket (ov-974), which the runner takes only from the app itself and
+    /// trusts at once.
+    pub async fn step_up_propose_as(&self, public_key: Vec<u8>, client_id: &str) -> Result<farcooler_protocol::v1::StepUpKeyState, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::STEP_UP, "client.set_step_up_key")?;
         let required = vec![farcooler_protocol::capability::STEP_UP.to_string()];
         let payload = request::Payload::ClientSetStepUpKey(farcooler_protocol::v1::ClientSetStepUpKey {
-            client_id: String::new(),
+            client_id: client_id.to_string(),
             key: Some(farcooler_protocol::v1::StepUpKey { alg: ALG.to_string(), public_key: public_key.into() }),
         });
         match self.value_requiring("client.set_step_up_key", None, Some(payload), required).await? {
@@ -214,6 +238,7 @@ pub(crate) fn value_json(value: &result::Value) -> Result<serde_json::Value, Ses
         result::Value::ClientEnroll(r) => enroll_json(r),
         result::Value::MemberList(l) => crate::members_json::members_json(l),
         result::Value::StepUpKeyState(s) => key_state_json(s),
+        result::Value::TaskNote(n) => crate::tasks_json::note_json(n),
         other => return Err(wrong("step_up_answer", other)),
     })
 }

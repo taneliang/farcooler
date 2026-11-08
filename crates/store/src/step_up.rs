@@ -83,6 +83,20 @@ impl Store {
         Ok(())
     }
 
+    /// Record `device`'s key as trusted, replacing whatever it had: the Mac
+    /// app's own key on the runner's socket (ov-974), which only the app puts
+    /// here (`step_up_rpc::set_key`). Resets the counter.
+    pub fn replace_step_up_key(&self, device: &str, alg: &str, public_key: &[u8], now_ms: i64) -> Result<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO step_up_keys (client_id, alg, pubkey, state, registered_at, sign_count) VALUES (?1, ?2, ?3, 'trusted', ?4, 0)
+                 ON CONFLICT (client_id) DO UPDATE SET alg = ?2, pubkey = ?3, state = 'trusted', registered_at = ?4, sign_count = 0",
+                params![device, alg, public_key, now_ms],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+
     /// Trust `device`'s proposed key. Refused `not_found` with no proposal,
     /// and `proposal_expired` once [`PROPOSAL_MS`] has passed. A key that is
     /// trusted already stays so.
