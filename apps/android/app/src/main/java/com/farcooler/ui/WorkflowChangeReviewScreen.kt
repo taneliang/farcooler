@@ -50,6 +50,21 @@ internal fun WorkflowChangeReviewDialog(
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
+            WorkflowChangeReviewBody(review, sending, refusal, onApprove, onDecline, onDismiss)
+        }
+    }
+}
+
+/** The review itself, apart from the dialog that holds it, so a capture can draw it. */
+@Composable
+internal fun WorkflowChangeReviewBody(
+    review: WorkflowChangeReview,
+    sending: Boolean,
+    refusal: String?,
+    onApprove: (String) -> Unit,
+    onDecline: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
             Column(
                 Modifier.verticalScroll(rememberScrollState()).padding(16.dp).testTag("workflow-change-review"),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -87,8 +102,6 @@ internal fun WorkflowChangeReviewDialog(
                 }
                 refusal?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
-        }
-    }
 }
 
 /** A line with its `code` spans in monospace, the backticks dropped. */
