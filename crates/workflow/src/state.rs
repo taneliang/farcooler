@@ -133,6 +133,18 @@ pub struct State {
 pub struct Archived {
     pub phase: Phase,
     pub candidate: Option<String>,
+    /// A group that landed: what the board needs to keep drawing it. Absent for tickets, and for
+    /// archives written before groups were kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<ArchivedGroup>,
+}
+/// A finished group's name, tickets and clock, kept so its landing stays on the board.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchivedGroup {
+    pub name: String,
+    pub tickets: Vec<String>,
+    pub pushed: Option<String>,
+    pub since_ms: i64,
 }
 impl State {
     pub fn empty(workspace: String, epoch: u64) -> Self {

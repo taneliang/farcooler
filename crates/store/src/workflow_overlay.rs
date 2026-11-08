@@ -14,8 +14,9 @@
 //! | Failed after a push, CI's read of that commit failed | CI failed |
 //! | Any other failure, or uncertain | Stalled |
 //!
-//! A group that has finished leaves live state on the next step, so a landed group is not drawn
-//! here: its tickets' cards say Landed, and the event log keeps the rest.
+//! A group that landed leaves live state on the next step but keeps an archive entry (name,
+//! tickets, pushed commit, time), so it stays drawn as Landed until its tickets leave the board.
+//! A ticket draws in one group only: a live group wins, then the newest finished one.
 use std::collections::BTreeMap;
 
 use rusqlite::{OptionalExtension, params};
@@ -49,6 +50,9 @@ pub struct GroupLanding {
 }
 
 impl GroupLanding {
+    /// Landed, failed or cancelled: it will not move again.
+    pub fn is_finished(&self) -> bool { matches!(self.phase, Phase::Done | Phase::Failed | Phase::Cancelled) }
+
     /// What it is doing, given what CI says of its pushed commit.
     pub fn phase(&self, ci: Option<&CiRead>) -> LandingPhase {
         match (&self.phase, &self.verb) {
@@ -107,9 +111,13 @@ fn pushed(item: &Item) -> Option<String> {
     (item.stage > push).then(|| item.candidate.clone()).flatten()
 }
 
-/// Every live group in `state`, with tickets resolved by `task_of`.
+/// Every group in `state` worth drawing, with tickets resolved by `task_of`: the live ones, any
+/// that failed and wait to be cancelled, and the ones that landed (kept in the archive). A ticket
+/// draws in one group only: a live group first, then the newest finished one, so a rejected
+/// ticket that rebuilt shows on its new group and not on the stale one. A finished group left
+/// with no ticket is not drawn.
 pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &dyn Fn(&str) -> i64) -> Vec<GroupLanding> {
-    state.items.iter().filter(|(_, i)| is_group(i)).map(|(id, item)| {
+    let mut all: Vec<GroupLanding> = state.items.iter().filter(|(_, i)| is_group(i)).map(|(id, item)| {
         let name = item.group_of.as_ref().map(|g| g.name.clone()).unwrap_or_default();
         let sha = pushed(item);
         GroupLanding {
@@ -118,7 +126,29 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
             after_push: sha.is_some(), pushed_sha: sha, since: if item.since_ms > 0 { item.since_ms } else { since(id) },
             phase: item.phase.clone(), verb: item.definition.stages.get(item.stage).map(|s| s.kind.clone()),
         }
-    }).collect()
+    }).collect();
+    // A group that landed has left live state; its archive entry keeps what the board draws.
+    for (id, archived) in &state.archive {
+        let (Phase::Done, Some(group)) = (&archived.phase, &archived.group) else { continue };
+        all.push(GroupLanding {
+            group: id.clone(), name: group.name.clone(),
+            tickets: group.tickets.iter().filter_map(|i| task_of(i)).collect(),
+            pushed_sha: group.pushed.clone(), after_push: group.pushed.is_some(),
+            since: if group.since_ms > 0 { group.since_ms } else { since(id) },
+            phase: Phase::Done, verb: None,
+        });
+    }
+    let finished = GroupLanding::is_finished;
+    let mut order: Vec<usize> = (0..all.len()).collect();
+    order.sort_by_key(|&i| (finished(&all[i]), std::cmp::Reverse(all[i].since)));
+    let mut claimed = std::collections::BTreeSet::new();
+    let mut keep = vec![true; all.len()];
+    for i in order {
+        let had = all[i].tickets.len();
+        all[i].tickets.retain(|t| claimed.insert(*t));
+        keep[i] = !(finished(&all[i]) && had > 0 && all[i].tickets.is_empty());
+    }
+    all.into_iter().zip(keep).filter_map(|(g, k)| k.then_some(g)).collect()
 }
 
 impl Store {
@@ -128,7 +158,7 @@ impl Store {
         let Some(state) = self.workflow_state(&name).map_err(|e| { tracing::warn!(error = %e, "workflow state unreadable"); farcooler_core::DomainError::OperationFailed })? else {
             return Ok(Vec::new());
         };
-        if !state.items.values().any(is_group) { return Ok(Vec::new()); }
+        if !state.items.values().any(is_group) && !state.archive.values().any(|a| a.group.is_some()) { return Ok(Vec::new()); }
         let conn = self.conn();
         let owned: BTreeMap<String, Uuid> = {
             let mut stmt = conn
@@ -162,7 +192,7 @@ impl Store {
         for name in self.workflow_workspaces().map_err(|e| { tracing::warn!(error = %e, "workflow state unreadable"); farcooler_core::DomainError::OperationFailed })? {
             let Ok(workspace) = Uuid::parse_str(&name) else { continue };
             for group in self.workflow_groups(workspace)? {
-                if let Some(sha) = group.pushed_sha { out.push((workspace, sha_subject(&sha))); }
+                if group.phase != Phase::Done && let Some(sha) = group.pushed_sha { out.push((workspace, sha_subject(&sha))); }
             }
         }
         Ok(out)

@@ -231,3 +231,73 @@ fn the_notice_that_a_group_failed_names_the_tickets_it_ran() {
     let failed = notices.iter().map(|(_, d)| &d.notice).find(|n| n.item == group).expect("a notice for the group");
     assert_eq!(failed.tickets, vec!["a".to_string()]);
 }
+
+// ov-995: a landed group stays drawn, and a ticket draws in one group only.
+
+#[test]
+fn a_landed_group_stays_drawn_after_the_step_that_archives_it() {
+    let (mut e, group) = engine_group("a", 4);
+    e.observe(&group, |ev| Outcome::Passed(Evidence { candidate: "f".repeat(40), ..ev }));
+    assert_eq!(e.state.items[&group].phase, Phase::Done);
+    // Any later step archives the finished group; the ticket's card moves on too.
+    e.run(Command::Advance, Grant::Controller);
+    assert!(!e.state.items.contains_key(&group), "the engine archived it");
+    let g = viewed(&e, "a", &group);
+    assert_eq!(g.phase(None), LandingPhase::Landed);
+    assert_eq!(g.tickets.len(), 1, "the landed group still names its ticket");
+    assert!(g.pushed_sha.is_some());
+    assert!(g.since > 0);
+}
+
+#[test]
+fn a_ticket_draws_on_its_live_group_not_on_the_stale_failed_one() {
+    let mut state = State::empty("w".into(), 1);
+    let mut stale = group(4, Phase::Failed, Some("abc1234"), &[]);
+    stale.handed = vec!["t".into()];
+    stale.since_ms = 100;
+    let mut live = group(1, Phase::Running, None, &["t"]);
+    live.since_ms = 200;
+    state.items.insert("group-00000000000000000001-landing".into(), stale);
+    state.items.insert("group-00000000000000000002-landing".into(), live);
+    let id = Uuid::from_u128(9);
+    let groups = groups_in(&state, &|i| (i == "t").then_some(id), &|_| 0);
+    assert_eq!(groups.len(), 1, "the stale group has nothing left to show: {groups:?}");
+    assert_eq!(groups[0].group, "group-00000000000000000002-landing");
+    assert_eq!(groups[0].tickets, vec![id]);
+}
+
+#[test]
+fn a_stale_group_keeps_the_tickets_the_live_group_does_not_hold() {
+    let mut state = State::empty("w".into(), 1);
+    let mut stale = group(4, Phase::Failed, Some("abc1234"), &[]);
+    stale.handed = vec!["t".into(), "u".into()];
+    state.items.insert("group-00000000000000000001-landing".into(), stale);
+    state.items.insert("group-00000000000000000002-landing".into(), group(1, Phase::Running, None, &["t"]));
+    let (t, u) = (Uuid::from_u128(1), Uuid::from_u128(2));
+    let groups = groups_in(&state, &|i| match i { "t" => Some(t), "u" => Some(u), _ => None }, &|_| 0);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].tickets, vec![u]);
+    assert_eq!(groups[1].tickets, vec![t]);
+}
+
+#[test]
+fn a_landed_group_leaves_the_plan_when_its_tickets_leave_the_board() {
+    let (store, ws, tasks) = board_with_group(group(4, Phase::Running, Some("abc1234"), &[]), &["only"]);
+    // Archive it as the engine does: the group is gone from items, kept in the archive.
+    let mut state = store.workflow_state(&ws.to_string()).unwrap().unwrap();
+    let key = "group-00000000000000000002-landing".to_string();
+    let item = state.items.remove(&key).unwrap();
+    state.archive.insert(key, Archived { phase: Phase::Done, candidate: item.candidate.clone(),
+        group: Some(ArchivedGroup { name: "landing".into(), tickets: vec![tasks[0].key.clone()], pushed: item.candidate, since_ms: 5 }) });
+    store.conn().execute("UPDATE workflow_states SET state = ?2 WHERE workspace = ?1",
+        params![ws.to_string(), serde_json::to_string(&state).unwrap()]).unwrap();
+    let plan = store.plan(ws, i64::MIN).unwrap();
+    let [view] = plan.landings.as_slice() else { panic!("a landed group draws: {}", plan.landings.len()) };
+    assert_eq!(view.phase, LandingPhase::Landed);
+    assert_eq!(view.landing.tickets, vec![tasks[0].id]);
+    assert!(store.workflow_ci_subjects().unwrap().is_empty(), "nobody watches CI for a landing that landed");
+    let repo: Uuid = store.conn().query_row("SELECT repository_id FROM workspaces WHERE id = ?1", params![ws.as_bytes().as_slice()], |r| get_uuid(r, 0)).unwrap();
+    let elsewhere = store.create_workspace(repo, "Elsewhere", "el").unwrap();
+    store.move_tasks(&[tasks[0].id], elsewhere.id, Actor::User).unwrap();
+    assert!(store.plan(ws, i64::MIN).unwrap().landings.is_empty(), "its ticket left the board");
+}

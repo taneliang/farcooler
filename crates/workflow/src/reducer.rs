@@ -376,7 +376,9 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
         // A ticket reopened this step stays (ov-968).
         if next.items.get(&id).is_some_and(|i| matches!(i.phase, Phase::Done | Phase::Cancelled)) {
             let item = next.items.remove(&id).ok_or(Refusal::Missing)?;
-            next.archive.insert(id, Archived { phase: item.phase, candidate: item.candidate });
+            let group = item.group_of.as_ref().map(|g| ArchivedGroup {
+                name: g.name.clone(), tickets: item.handed.clone(), pushed: item.pushed.clone().or_else(|| item.candidate.clone()), since_ms: item.since_ms });
+            next.archive.insert(id, Archived { phase: item.phase, candidate: item.candidate, group });
         }
     }
     // A group that ended hands each member its result, through the member's own join routes.
