@@ -73,10 +73,18 @@ struct RunnerUpgradeView: View {
             steps(current: current)
         case .recovering:
             Text("Putting your data back as it was before the upgrade.")
-        case .failed(let failed, _):
+        case .failed(let failed, let detail):
             VStack(spacing: 8) {
                 Text(Self.sentence(for: failed))
                 Text(RunnerUpgrade.recoverCopy(for: failed))
+                // The runner's own words in a box, never the app's voice:
+                // under the sentences, since the actions row lays out across.
+                if !detail.isEmpty {
+                    DetailBox(text: detail)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: 420)
+                        .padding(.top, 4)
+                }
             }
         case .done:
             Text("Opening your work…")
@@ -112,15 +120,11 @@ struct RunnerUpgradeView: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        .frame(maxWidth: EmptyStateRows.width, alignment: .leading)
+        // Its own width, so the list sits centered under the title.
+        .fixedSize()
     }
 
     @ViewBuilder private var actions: some View {
-        if case .failed(_, let detail) = upgrade.phase, !detail.isEmpty {
-            // The runner's own words in a box, never the app's voice.
-            DetailBox(text: detail)
-                .frame(maxWidth: 420)
-        }
         ForEach(Self.actions(for: upgrade.phase), id: \.self) { action in
             switch action {
             case .finish:
