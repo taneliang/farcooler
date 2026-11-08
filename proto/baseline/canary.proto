@@ -1,4 +1,4 @@
-// Shipped by Canary at f60fee4e63bb6e5fff5befc6c62e24e5db2f190c. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 4dcdef76541c66681afe04dcc0d816158c9213d6. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -96,6 +96,7 @@ message Request {
   optional StepUp step_up = 9;
 
   oneof payload {
+    WorkflowCommand workflow_command = 640;
     Empty empty = 20;
     RepositoryRootAdd repository_root_add = 21;
     RepositoryRegister repository_register = 22;
@@ -403,6 +404,10 @@ message Request {
   reserved 611 to 619;
 }
 
+// Closed JSON v1 contract: crates/protocol/src/workflow_commands.rs.
+message WorkflowCommand { uint32 schema = 1; string json = 2; }
+message WorkflowReply { uint32 schema = 1; string json = 2; }
+
 message Response {
   bytes request_id = 1;
   oneof outcome {
@@ -437,6 +442,7 @@ message Error {
 
 message Result {
   oneof value {
+    WorkflowReply workflow_reply = 640;
     Host host = 1;
     RepositoryRoot repository_root = 2;
     RepositoryRootList repository_root_list = 3;
