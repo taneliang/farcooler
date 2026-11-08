@@ -66,7 +66,10 @@ impl Runtime {
         }
         // Another run in this workspace already holds the tree or the branch, though it may not be made yet.
         if let Some(state) = self.state(workspace)? {
-            let held = |f: &dyn Fn(&RunTree) -> bool| state.items.values().filter_map(|i| i.tree.as_ref()).any(f);
+            let held = |f: &dyn Fn(&RunTree) -> bool| state.items.values()
+                // A run that has ended holds its name only while its tree is still there (ov-979).
+                .filter(|i| !matches!(i.phase, Phase::Done | Phase::Failed | Phase::Cancelled) || i.tree.as_ref().is_some_and(|t| Path::new(&t.path).exists()))
+                .filter_map(|i| i.tree.as_ref()).any(f);
             if held(&|t| t.path == path.to_string_lossy()) { return Err(Error::Domain(DomainError::WorktreeExists)); }
             if held(&|t| clashes(&t.branch, &named.branch)) { return Err(Error::Domain(DomainError::BranchExists)); }
         }
@@ -142,12 +145,45 @@ async fn adopted_at(repository: &Path, branch: &str) -> Result<Option<PathBuf>> 
     }
 }
 
-/// A named tree is visible, so people may have changes in it. A gate restarting there stops and asks instead of
-/// running `reset --hard` and `clean` over them.
-pub(super) async fn refuse_foreign_changes(tree: &Path) -> Result<()> {
-    if crate::git::is_dirty(tree).await.unwrap_or(true) {
-        return Err(Error::Refused("the run's worktree has changes the run didn't make; commit or remove them to continue"));
+const FOREIGN: &str = "the run's worktree has changes the run didn't make; copy them somewhere else or discard them, then try again";
+
+/// The file a Run gate leaves in the tree's git directory (outside the working files, so it is never a change)
+/// while it runs. Its modification time is when the gate began, on a tree that had just been checked clean.
+async fn gate_marker(tree: &Path) -> Result<PathBuf> {
+    Ok(PathBuf::from(adapters::git(tree, &["rev-parse", "--absolute-git-dir"]).await?).join("farcooler-run-gate"))
+}
+/// A Run gate is about to start in a named tree: note when, so a crash can tell what the gate left behind.
+pub(super) async fn mark_gate(tree: &Path) -> Result<()> {
+    std::fs::write(gate_marker(tree).await?, b"")?;
+    Ok(())
+}
+/// The gate ended on its own, so it left nothing to tell apart.
+pub(super) async fn clear_gate(tree: &Path) {
+    if let Ok(marker) = gate_marker(tree).await { let _ = std::fs::remove_file(marker); }
+}
+
+/// A named tree is visible, so people may have changes in it, and a Run gate restarting there must never wipe
+/// them (ov-967). After a crash the tree may hold the dead gate's own leftovers. They are told apart by time:
+/// the tree was clean when the gate began (the marker), so a change older than that is a person's, and one
+/// newer was made while the gate ran. If every change is newer it is restored or removed, path by path, and
+/// the run goes on; if any is older, staged, deleted or unmarked, nothing is touched and the run stops and asks.
+pub(super) async fn recover_gate_leftovers(tree: &Path) -> Result<()> {
+    let changes = crate::change_set::working_tree(tree).await.map_err(|_| Error::Refused(FOREIGN))?;
+    if !changes.is_dirty() { clear_gate(tree).await; return Ok(()); }
+    let started = gate_marker(tree).await.ok().and_then(|m| std::fs::metadata(m).ok()).and_then(|m| m.modified().ok())
+        .ok_or(Error::Refused(FOREIGN))?;
+    if !changes.staged.is_empty() || !changes.conflicted.is_empty() { return Err(Error::Refused(FOREIGN)); }
+    let newer = |change: &crate::change_set::FileChange| -> bool {
+        !change.submodule && change.status != crate::change_set::FileStatus::Deleted
+            && std::fs::symlink_metadata(tree.join(&change.path)).and_then(|m| m.modified()).is_ok_and(|t| t >= started)
+    };
+    if !changes.unstaged.iter().chain(&changes.untracked).all(newer) { return Err(Error::Refused(FOREIGN)); }
+    if !changes.unstaged.is_empty() {
+        let mut args = vec!["checkout", "--quiet", "--"];
+        args.extend(changes.unstaged.iter().map(|c| c.path.as_str()));
+        adapters::git(tree, &args).await?;
     }
+    for change in &changes.untracked { std::fs::remove_file(tree.join(&change.path))?; }
     Ok(())
 }
 
@@ -224,17 +260,60 @@ impl Exec {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn a_dirty_named_tree_is_refused_and_left_alone_and_a_clean_one_passes() {
+    fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        let git = |args: &[&str]| { let ok = std::process::Command::new("/usr/bin/git").current_dir(dir.path())
+        for args in [&["init", "-q"][..], &["commit", "-q", "--allow-empty", "-m", "base"]] { git(dir.path(), args); }
+        std::fs::write(dir.path().join("tracked.txt"), "one").unwrap();
+        git(dir.path(), &["add", "tracked.txt"]);
+        git(dir.path(), &["commit", "-q", "-m", "tracked"]);
+        dir
+    }
+    fn git(dir: &Path, args: &[&str]) {
+        let ok = std::process::Command::new("/usr/bin/git").current_dir(dir)
             .args(["-c", "user.name=T", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false"]).args(args)
-            .status().unwrap().success(); assert!(ok, "{args:?}"); };
-        git(&["init", "-q"]);
-        git(&["commit", "-q", "--allow-empty", "-m", "base"]);
-        refuse_foreign_changes(dir.path()).await.unwrap();
+            .status().unwrap().success();
+        assert!(ok, "{args:?}");
+    }
+    fn later() { std::thread::sleep(std::time::Duration::from_millis(30)); }
+
+    #[tokio::test]
+    async fn a_clean_tree_passes_and_a_person_s_changes_are_left_alone() {
+        let dir = repo();
+        recover_gate_leftovers(dir.path()).await.unwrap();
+        // Their work is there before the gate began: it is older than the marker.
         std::fs::write(dir.path().join("mine.txt"), "someone's work").unwrap();
-        assert!(refuse_foreign_changes(dir.path()).await.is_err());
+        std::fs::write(dir.path().join("tracked.txt"), "someone's edit").unwrap();
+        later();
+        mark_gate(dir.path()).await.unwrap();
+        later();
+        std::fs::write(dir.path().join("half-built.txt"), "the gate's").unwrap();
+        let error = recover_gate_leftovers(dir.path()).await.unwrap_err().to_string();
+        assert!(error.contains("copy them somewhere else or discard them") && !error.contains("commit"), "{error}");
+        assert_eq!(std::fs::read_to_string(dir.path().join("mine.txt")).unwrap(), "someone's work");
+        assert_eq!(std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(), "someone's edit");
+        assert!(dir.path().join("half-built.txt").exists(), "all or nothing: not even the gate's file goes while a person's change is there");
+    }
+
+    #[tokio::test]
+    async fn a_dead_gate_s_own_leftovers_are_cleared_and_nothing_else() {
+        let dir = repo();
+        std::fs::create_dir(dir.path().join("out")).unwrap();
+        later();
+        mark_gate(dir.path()).await.unwrap();
+        later();
+        std::fs::write(dir.path().join("out/half-built.txt"), "the gate's").unwrap();
+        std::fs::write(dir.path().join("tracked.txt"), "the gate rewrote this").unwrap();
+        recover_gate_leftovers(dir.path()).await.unwrap();
+        assert!(!dir.path().join("out/half-built.txt").exists());
+        assert_eq!(std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(), "one");
+        assert!(!crate::git::is_dirty(dir.path()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn changes_with_no_gate_marker_are_a_person_s() {
+        let dir = repo();
+        std::fs::write(dir.path().join("mine.txt"), "someone's work").unwrap();
+        assert!(recover_gate_leftovers(dir.path()).await.is_err());
         assert_eq!(std::fs::read_to_string(dir.path().join("mine.txt")).unwrap(), "someone's work");
     }
 }

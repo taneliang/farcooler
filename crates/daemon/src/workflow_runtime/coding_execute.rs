@@ -206,12 +206,28 @@ impl Exec {
         // The model the run picked at Start (ov-966); a native harness launches it, a command one is told.
         if let Some(model) = &effect.model { command.environment.insert("FARCOOLER_WORKFLOW_MODEL".into(), model.clone()); }
     }
+    /// A gate that was ended mid-run (a restart, a crash) may have left files in the tree. In a private tree
+    /// they are ours and the candidate is a commit, so start the run from exactly the commit. A tree the app
+    /// lists is one people edit in: only what the dead gate itself left is removed, never what a person made
+    /// (ov-967, ov-979).
+    pub(super) async fn settle_run_tree(&self, binding: &Binding, tree: &Path) -> Result<()> {
+        if binding.effect.tree.is_some() {
+            named_tree::recover_gate_leftovers(tree).await
+        } else {
+            self.git_recorded(binding, tree, &["reset", "--hard", "--quiet"]).await?;
+            self.git_recorded(binding, tree, &["clean", "-fdq"]).await?;
+            Ok(())
+        }
+    }
     async fn run_coding(&self, binding: &Binding, command: CodingCommand,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         let log = self.process_log(binding);
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
         durable(&log, b"")?;
+        // A named tree is one people edit in: note when a Run gate began, so a crash can tell its leftovers (ov-979).
+        let marked = binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run));
+        if marked { named_tree::mark_gate(&self.tree(binding)).await?; }
         let exit = if self.is_native_agent(binding) {
             self.run_native(binding, &command, cancel).await?
         } else {
@@ -221,6 +237,7 @@ impl Exec {
             crate::effect_runner::owned(&self.tree(binding), &command.argv, &command.environment,
                 &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref()).await?
         };
+        if marked { named_tree::clear_gate(&self.tree(binding)).await; }
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: command.environment, exit, log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
@@ -291,17 +308,7 @@ impl Exec {
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
-                // A gate that was ended mid-run (a restart, a crash) may have left files in the tree. They are
-                // ours and the candidate is a commit, so start the run from exactly the commit.
-                if matches!(kind, StageKind::Run) && tree.try_exists()? {
-                    if binding.effect.tree.is_some() {
-                        // A tree the app lists is one people edit in: never wipe what the run didn't make (ov-967).
-                        named_tree::refuse_foreign_changes(&tree).await?;
-                    } else {
-                        self.git_recorded(binding, &tree, &["reset", "--hard", "--quiet"]).await?;
-                        self.git_recorded(binding, &tree, &["clean", "-fdq"]).await?;
-                    }
-                }
+                if matches!(kind, StageKind::Run) && tree.try_exists()? { self.settle_run_tree(binding, &tree).await?; }
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
                 self.run_coding(binding, self.coding_command(binding)?, cancel).await?;

@@ -466,6 +466,19 @@ async fn workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at
     assert_eq!((row.branch.as_str(),row.workspace_id),("e-liang/phones-plan",Some(workspace)),"on the named branch, claimed for the workspace");
     assert!(tree.path.contains("/state/worktrees/"),"where the app keeps worktrees, not the runtime's private root: {}",tree.path);
     assert_eq!(git(Path::new(&tree.path),&["merge-base","HEAD",&main]).await.unwrap(),main,"built on main as it was at Start");
+    // ov-979: while the finished run's tree is there its name is taken; once the tree and branch are gone it's free.
+    let second=host.service.store.create_task(workspace,"again",farcooler_store::models::Actor::User).unwrap();
+    host.service.track_tickets(Some(second.id)).await;
+    let again=|id:&str,snapshot:&serde_json::Value| { let item=&snapshot["state"]["items"][&second.key];
+        Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),3),item:second.key.clone(),
+            run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+            worktree:Some(NamedTree { name:"phones-plan".into(),branch:"e-liang/phones-plan".into() }) } };
+    let snapshot=get(&mut link,workspace).await;
+    assert!(try_call(&mut link,workspace,again("taken-still",&snapshot)).await.is_err(),"its tree is still there");
+    git(&config.repository,&["worktree","remove","--force",&tree.path]).await.unwrap();
+    git(&config.repository,&["branch","-D","e-liang/phones-plan"]).await.unwrap();
+    let snapshot=get(&mut link,workspace).await;
+    accepted(&call(&mut link,workspace,again("freed",&snapshot)).await);
     drop(link);host.close().await;
 }
 

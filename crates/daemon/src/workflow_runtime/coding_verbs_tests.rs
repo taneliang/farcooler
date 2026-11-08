@@ -471,6 +471,31 @@ async fn a_gate_left_running_by_a_dead_daemon_is_ended_and_run_again() {
     assert_eq!(outbox(&runtime, StageKind::Run), 2, "the gate ran again on a clean tree");
 }
 
+/// ov-979: the Run gate's restart in a tree the app lists clears only what the dead gate left, and refuses a
+/// person's work. Removing the call in `execute_coding` turns the private-tree test above red; this one pins
+/// the named branch of what it calls.
+#[tokio::test]
+async fn a_run_gate_restarting_in_a_named_tree_keeps_a_persons_changes() {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..4 { runtime.pump(time).await.unwrap(); }
+    let mut binding = admitted(&runtime).await;
+    let path = runtime.tree(&binding);
+    binding.effect.tree = Some(RunTree { name: "n".into(), branch: "b".into(), path: path.to_string_lossy().into_owned(), base: binding.base.clone() });
+    std::fs::write(path.join("mine.txt"), "a person's work").unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    named_tree::mark_gate(&path).await.unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    std::fs::write(path.join("half-built.txt"), "left by the gate").unwrap();
+    assert!(runtime.settle_run_tree(&binding, &path).await.is_err(), "a person's change stops the run");
+    assert!(path.join("mine.txt").exists() && path.join("half-built.txt").exists(), "and nothing is cleaned");
+    std::fs::remove_file(path.join("mine.txt")).unwrap();
+    runtime.settle_run_tree(&binding, &path).await.unwrap();
+    assert!(!path.join("half-built.txt").exists(), "the dead gate's own leftover is cleared");
+}
+
 #[tokio::test]
 async fn a_group_whose_leader_is_killed_but_not_yet_reaped_is_not_an_error() {
     // macOS answers EPERM to killpg(pid, 0) while only a zombie is left; that is a group on its way out.
