@@ -132,11 +132,9 @@ SHARDS = {
     ],
     "phone3": [
         "PlanRulingsUITests",  # 351 s; -phone-harness -phone-plan -phone-rulings (ov-304)
-        "PhonePlanColumnUITests",  # not measured yet; -phone-harness -phone-plan -phone-agents (ov-874)
         "RunnerReachTests",  # 8 s; seeded -hosts at an address that never answers
         "SealedReplyUITests",  # 50 s; -sealed-reply (ov-770)
         "FailedLaunchTests",  # under 1 s; launches no app of ours (ov-703)
-        "NativeAgentViewTests",  # 515 s; -native-agent-harness. Moved from shell (ov-594: 80%)
         "ConversationScreenUITests",  # 648 s (371 to 763); -native-agent-harness, -phone-harness -phone-native (ov-609)
         "NativeAnswersUITests",  # 116 s; -native-agent-harness -native-held-ask (ov-370). Moved from shell (ov-722, Oct 30)
     ],
@@ -147,8 +145,22 @@ SHARDS = {
         "PhoneReopenTests",  # 168 s; -phone-harness. Moved from phone
         "AgentsUITests",  # 252 s; -phone-harness -phone-native -native-agents (ov-619). Moved from phone3 (ov-722)
         "ConversationScrollUITests",  # 351 s; -native-agent-harness -native-live (ov-626). Moved from phone3
-        "GlassUITests",  # 194 s; -native-agent-harness, -phone-harness -phone-native -native-agents (ov-789)
-        "BoardUnreadUITests",  # 89 s; -phone-harness (ov-113). Moved from shell (ov-722, Oct 30)
+    ],
+    # Added on Nov 9 (ov-722; nightlies 42267859912, 42393666427, 42503388166): `phone3` was
+    # cancelled at the timeout (45 to 47 min) all three nights, so the logs hold only the classes it
+    # reached: ConversationScreenUITests 898 s, NativeAgentViewTests 747, PhonePlanColumnUITests 376
+    # and NativeAnswersUITests 109 (a mean over the three), with PlanRulingsUITests (351 s on Oct 30),
+    # SealedReplyUITests (50) and RunnerReachTests (8) never reached: about 2,540 s of tests, 3,000 s
+    # with the job's 400. The two biggest classes it held move here, and GlassUITests (258 s) and
+    # BoardUnreadUITests (95 s) join them from phone4, which ran 33 min (73%). By those means:
+    # phone3 1,417 s of tests, phone4 about 1,730, phone6 1,476; with the job's 400 s on top, 1,820 to
+    # 2,130 s: 67 to 79% of 2,700 at the worst, a mean about 70%. Classes the cancelled runs never
+    # reached are estimates; the next nightly's budget job is the measure.
+    "phone6": [
+        "NativeAgentViewTests",  # 747 s (675 to 854); -native-agent-harness. Moved from phone3 (ov-722)
+        "PhonePlanColumnUITests",  # 376 s (266 to 482); -phone-harness -phone-plan -phone-agents (ov-874). Moved from phone3 (ov-722)
+        "GlassUITests",  # 258 s; -native-agent-harness, -phone-harness -phone-native -native-agents (ov-789). Moved from phone4 (ov-722)
+        "BoardUnreadUITests",  # 95 s; -phone-harness (ov-113). Moved from phone4 (ov-722)
     ],
     # The team classes, added on Oct 30 when `phone` was cancelled at the
     # timeout (ov-722): moved from phone, and RunnerPeopleUITests from phone2.
