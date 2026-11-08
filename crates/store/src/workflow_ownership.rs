@@ -28,8 +28,8 @@ pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
     }
     let Command::Enqueue { item, definition, .. } = &input.command else { return Ok(true) };
     let Some(task) = task(tx,input,item)? else { return Ok(true) };
-    // A migrated card must be retained-intent. Its history stays inert (a landed line, a settled
-    // landing, a dead pane), but anything live after release is a hand worker the engine must
+    // A migrated card must be retained-intent. Its history stays inert (a landed line, an old
+    // landing in any state since ov-960, a dead pane), but anything live after release is a hand worker the engine must
     // not run beside: the same facts `preflight` quarantines at cutover, plus live panes and
     // open work, which only a post-release hand agent can have (ov-946).
     let migrated: Option<String> = tx.query_row("SELECT disposition FROM engine_cutover_items WHERE task=?1", [&task], |r|r.get(0)).optional()?;
@@ -37,13 +37,12 @@ pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
         Some(d) if d != "retained-intent" => return Ok(false),
         Some(_) => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1 AND exit_code IS NULL AND exit_signal IS NULL)
             OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1 AND stage NOT IN ('landed','dropped'))
-            OR EXISTS(SELECT 1 FROM landing_tickets lt JOIN landings l ON l.id=lt.landing_id WHERE lt.task_id=?1 AND l.state NOT IN ('landed','dropped'))
             OR EXISTS(SELECT 1 FROM task_blocks WHERE task_id=?1)
             OR EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND wait_kind IS NOT NULL)
             OR EXISTS(SELECT 1 FROM check_in_schedules WHERE task_id=?1 AND state='enabled')",
-        // A ticket tracked with no run takes over an existing card and its line; only a live worker or landing blocks it.
-        None if definition.is_ticket() => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1 AND exit_code IS NULL AND exit_signal IS NULL)
-            OR EXISTS(SELECT 1 FROM landing_tickets lt JOIN landings l ON l.id=lt.landing_id WHERE lt.task_id=?1 AND l.state NOT IN ('landed','dropped'))",
+        // A ticket tracked with no run takes over an existing card and its line; only a live worker blocks it.
+        // The old landings are history whatever state they were left in, so none holds a ticket (ov-960).
+        None if definition.is_ticket() => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1 AND exit_code IS NULL AND exit_signal IS NULL)",
         None => "OR EXISTS(SELECT 1 FROM terminals WHERE task_id=?1)
             OR EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=?1)
             OR EXISTS(SELECT 1 FROM landing_tickets WHERE task_id=?1)",

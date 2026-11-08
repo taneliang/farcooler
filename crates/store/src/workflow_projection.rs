@@ -33,7 +33,7 @@ pub(crate) fn refuse_unless_at_rest(conn: &Connection, task: uuid::Uuid) -> Doma
 
 /// Open cards no run owns: (workspace, key, column the card is in). The engine tracks these (ov-951).
 /// A rep's desk card is a person's thread, not work, so it is never one (ov-962). Nor is a card the engine
-/// would refuse (a live worker or open landing, or what a migrated card keeps): it stays out, and asking the
+/// would refuse (a live worker, or what a migrated card keeps; an old landing holds no card, ov-960): it stays out, and asking the
 /// engine each start would write one permanent refusal receipt per card per start.
 pub fn untracked(conn: &Connection, only: Option<uuid::Uuid>) -> rusqlite::Result<Vec<(uuid::Uuid, String, TaskStatus)>> {
     let mut statement = conn.prepare("SELECT t.workspace_id, t.key, t.status FROM tasks t
@@ -42,7 +42,6 @@ pub fn untracked(conn: &Connection, only: Option<uuid::Uuid>) -> rusqlite::Resul
         AND NOT EXISTS(SELECT 1 FROM rep_desks d WHERE d.task_id=t.id)
         AND NOT EXISTS(SELECT 1 FROM ticket_work w WHERE w.task_id=t.id AND w.ended_at IS NULL)
         AND NOT EXISTS(SELECT 1 FROM terminals x WHERE x.task_id=t.id AND x.exit_code IS NULL AND x.exit_signal IS NULL)
-        AND NOT EXISTS(SELECT 1 FROM landing_tickets lt JOIN landings l ON l.id=lt.landing_id WHERE lt.task_id=t.id AND l.state NOT IN ('landed','dropped'))
         AND COALESCE((SELECT c.disposition FROM engine_cutover_items c WHERE c.task=t.id),'retained-intent')='retained-intent'
         AND (NOT EXISTS(SELECT 1 FROM engine_cutover_items c WHERE c.task=t.id) OR NOT (
             EXISTS(SELECT 1 FROM ticket_lines WHERE task_id=t.id AND stage NOT IN ('landed','dropped'))

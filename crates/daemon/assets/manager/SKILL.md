@@ -145,7 +145,6 @@ Sonnet for well-defined work. Log each ticket's tokens, model and fix rounds; ro
 ## 4. Land
 
 Every non-trivial change gets an agent's review first. Move reviewed tickets to landing (`plan ticket set <key> --stage landing`).
-Never queue landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket.
 Local gates mirror CI: every step and its environment (display scale, `CI=true`, shard timeouts).
 A CI-only failure earns a local gate. A red main comes first; when a known-flaky test did it, rerun the failed job once,
 file a flaky card, and keep landing on the rerun's result.
@@ -153,10 +152,9 @@ file a flaky card, and keep landing on the rerun's result.
 **The workflow engine lands.** A ticket whose run reaches its definition's landing step joins that step's open group, which leaves
 for its gate by itself when nothing is ahead. The group folds, gates, pushes and watches CI (a canceled run reruns once); a failed
 batch gate splits it in two. `workflow queue` puts a ticket waiting at its landing step into the group and `workflow leave` takes one
-out before the group leaves, each with the run, pin and revision from `workflow get`. `landing show <N>` follows a group.
-Landings from before the engine are history: `landing list` shows each as it ended, and nothing moves them.
+out before the group leaves, each with the run, pin and revision that `workflow get` reads for the board's id. `landing show <N>`
+follows a group. Landings from before the engine are history: `landing list` shows each as it ended, and nothing moves them.
 ```
-{{cli}} workflow get <workspace>
 {{cli}} landing show <N> --repo <repo>
 ```
 **Landing as a definition.** Draft one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) for the owner to publish;
@@ -177,6 +175,7 @@ An invalid section refuses the edit with its line.
 {{cli}} workspace landing-template <workspace> batched-push --gate "scripts/landing-gate.sh" --person-gate owner --out landing.json
 ```
 Without a published landing definition, a lander lands by hand: it rebases what it carries, applies the reviews' fixes and runs every gate once.
+Never queue those landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket.
 - **Direct.** Rebase onto main (merge only if the charter permits), check unpushed work, push, watch, close on green CI.
 - **PR.** Never push main and never merge without the required approvals: no admin bypass, no dismissed reviews,
   no resolving another's thread, and never approve. One PR per card, under the owner's own `gh` login so teammates approve; stack only
@@ -263,7 +262,7 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
   generated files, test floors); gate the combined tree where they might. Two
   tickets in one module are sequenced or stacked, or reserve shared numbers
   (migrations, wire tags) up front. To let a landing go without a ticket that
-  isn't ready, take it out of the group: `{{cli}} workflow leave`.
+  isn't ready, take it out of the group with `workflow leave`.
 - **Gates.** Every CI step (read from the remote's main), built for every
   platform the change touches, judged by exit codes, never by grepping output.
   Chain them and the push with `&&`, never `;`: `lint && test && git push`.

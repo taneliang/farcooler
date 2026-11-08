@@ -285,7 +285,7 @@ fn the_owners_conventions_ship_as_defaults() {
             "Cards are `<Area>: <outcome>`",
             "Each `--option` of an ask is a short name",
             "Ready work never waits for a ticket still building or in a fix",
-            "To let a landing go without a ticket that isn't ready, take it out of the group: `farcooler workflow leave`",
+            "To let a landing go without a ticket that isn't ready, take it out of the group with `workflow leave`",
             "Chain them and the push with `&&`, never `;`",
             "judged by exit codes, never by grepping output",
             "A test nobody has seen fail proves nothing",
@@ -419,8 +419,8 @@ fn the_orchestrator_ranks_themes_and_records_overrides() {
     }
 }
 
-/// Landings fold (ov-796): ready tickets join the waiting landing rather than
-/// queue behind it, with the reasons to split; a flaky red main is rerun once
+/// Landings by hand fold (ov-796; the engine's groups do it themselves,
+/// ov-960): ready tickets join the waiting landing rather than queue behind it, with the reasons to split; a flaky red main is rerun once
 /// and a folded ticket that might interact gets a combined gate.
 #[test]
 fn ready_tickets_fold_into_the_waiting_landing() {
@@ -428,7 +428,7 @@ fn ready_tickets_fold_into_the_waiting_landing() {
         let body = skill(h);
         let land = section(&body, "4. Land");
         for rule in [
-            "Never queue landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket",
+            "Never queue those landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket",
             "when a known-flaky test did it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result",
         ] {
             assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
