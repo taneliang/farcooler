@@ -364,6 +364,8 @@ internal fun NeedsYouItemRow(
     var sending by remember(item.id) { mutableStateOf<String?>(null) }
     var refusal by remember(item.id) { mutableStateOf<String?>(null) }
     var writing by remember(item.id) { mutableStateOf(false) }
+    var reviewing by remember(item.id) { mutableStateOf(false) }
+    val review = remember(item.question) { com.farcooler.model.WorkflowChangeReview.parse(item.question) }
     // An answer to someone else's item, held until the person confirms it (ov-737).
     var confirming by remember(item.id) { mutableStateOf<(() -> Unit)?>(null) }
     val agent = item.terminal?.label?.ifBlank { null } ?: "the agent"
@@ -484,7 +486,19 @@ internal fun NeedsYouItemRow(
                         button.actions, sending, onAnswer = { confirmed { answer(it.id, it.id) } },
                     )
                     NeedsYouButton.Write ->
-                        if (sending == WRITTEN) {
+                        if (review != null) {
+                            // A workflow change: read all of it, then Approve at its end (ov-978).
+                            if (sending == WRITTEN) {
+                                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                }
+                            } else {
+                                Button(
+                                    onClick = { reviewing = true }, enabled = sending == null,
+                                    modifier = Modifier.testTag("needs-you-review-${item.id}"),
+                                ) { Text("Review change") }
+                            }
+                        } else if (sending == WRITTEN) {
                             Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
@@ -538,6 +552,15 @@ internal fun NeedsYouItemRow(
                 ) { Text("Answer") }
             },
             dismissButton = { TextButton(onClick = { confirming = null }) { Text("Cancel") } },
+        )
+    }
+
+    if (reviewing && review != null) {
+        WorkflowChangeReviewDialog(
+            review = review, sending = sending != null, refusal = refusal,
+            onApprove = { words -> confirmed { reviewing = false; answer(WRITTEN, words) } },
+            onDecline = { words -> confirmed { reviewing = false; answer(WRITTEN, words) } },
+            onDismiss = { reviewing = false },
         )
     }
 
