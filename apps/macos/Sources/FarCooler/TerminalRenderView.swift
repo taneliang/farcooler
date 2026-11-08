@@ -44,6 +44,9 @@ enum TerminalMetrics {
 final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     /// Encoded bytes leaving the terminal, ready for the pane.
     var onInput: (([UInt8]) -> Void)?
+    /// A view that only looks (ov-972): the wheel always scrolls its own history and a plain drag always
+    /// selects, whatever mouse mode the program has set, because a mouse report would go nowhere.
+    var readOnly = false
     /// An image was pasted or dropped. Handled above this view, because getting
     /// it onto the runner the pane is on is a daemon conversation, not drawing.
     var onPasteImage: ((PastedImage) -> Void)?
@@ -1256,7 +1259,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
 
         // Shift is the universal override for "I want to select, not click" —
         // without it there is no way to copy text out of a full-screen program.
-        if !event.modifierFlags.contains(.shift),
+        if !event.modifierFlags.contains(.shift), !readOnly,
             let bytes = core.encode(
                 mouse: UInt32(FARCOOLER_VT_MOUSE_LEFT), action: UInt32(FARCOOLER_VT_MOUSE_PRESS),
                 column: point.column, row: point.row, modifiers: modifiers(for: event))
@@ -1320,6 +1323,7 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         var bytes: [UInt8] = []
         for _ in 0..<abs(ticks) {
             guard
+                !readOnly,
                 let chunk = core.encode(
                     mouse: button, action: UInt32(FARCOOLER_VT_MOUSE_PRESS),
                     column: point.column, row: point.row, modifiers: modifiers(for: event))
