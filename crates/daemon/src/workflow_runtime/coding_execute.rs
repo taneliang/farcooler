@@ -262,7 +262,7 @@ impl Exec {
             None => None,
         };
         let exit = async {
-            Ok::<_, Error>(if self.is_native_build(binding) {
+            Ok::<_, Error>(if self.is_native_agent(binding) {
                 self.run_native(binding, &command, cancel).await?
             } else {
                 // A gate can run for hours and leave the daemon behind it: its owner is recorded so a
