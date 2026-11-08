@@ -142,6 +142,17 @@ impl TerminalSink {
         self.push.push_pinned(vec![gap]);
     }
 
+    /// Tell the watcher the attach failed while the pane still runs (`GAP_REASON_UNSPECIFIED`, which no ordinary
+    /// resync sends), so it says "lost the connection" rather than waiting on a picture that will not come.
+    pub(crate) fn watch_failed(&self) {
+        let gap = self.frame(farcooler_protocol::v1::terminal_frame::Kind::Gap(farcooler_protocol::v1::Gap {
+            resumed_at_sequence: self.sequence,
+            lost_bytes: None,
+            reason: farcooler_protocol::v1::GapReason::Unspecified as i32,
+        }));
+        self.push.push_pinned(vec![gap]);
+    }
+
     fn frame(&self, kind: farcooler_protocol::v1::terminal_frame::Kind) -> farcooler_protocol::v1::Event {
         farcooler_protocol::v1::Event {
             event_id: farcooler_protocol::ids::new_id(),

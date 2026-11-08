@@ -72,6 +72,9 @@ pub(crate) fn start(
         // while the agent still runs must not tell the owner it ended.
         if crate::stream_end::pane_is_over(&watched, &shown).await {
             ending.pane_gone();
+        } else {
+            // The attach ended and the agent still runs: tell the watcher, or it waits on a picture for ever.
+            ending.watch_failed();
         }
     });
     let reply = farcooler_protocol::v1::TerminalAttachResult {

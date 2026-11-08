@@ -422,6 +422,12 @@ impl Session {
                         let _ = sink.shutdown().await;
                         return;
                     }
+                    // The runner couldn't keep the attach going while the agent still runs.
+                    Some(farcooler_protocol::v1::terminal_frame::Kind::Gap(gap))
+                        if gap.reason == farcooler_protocol::v1::GapReason::Unspecified as i32 =>
+                    {
+                        break;
+                    }
                     _ => {}
                 }
             }

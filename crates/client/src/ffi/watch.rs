@@ -34,7 +34,10 @@ pub unsafe extern "C" fn farcooler_client_watch_start(
             let reader = match session.watch_stream(id, &item).await {
                 Ok(reader) => reader,
                 Err(e) => {
-                    push_line(&finished, json!({ "stream": name, "error": e.to_string() }).to_string());
+                    // `denied`: the runner refused this person (only the owner may watch), which is not "not running".
+                    let denied = matches!(&e, crate::session::SessionError::Refused { code, .. }
+                        if *code == farcooler_protocol::v1::ErrorCode::ScopeDenied as i32);
+                    push_line(&finished, json!({ "stream": name, "error": e.to_string(), "denied": denied }).to_string());
                     return;
                 }
             };

@@ -108,3 +108,31 @@ async fn a_watcher_sees_the_agent_and_nothing_it_does_reaches_the_pane() {
     task.abort();
     farcooler_tmux::reap_server(server.socket());
 }
+
+// ---- who may watch, and what a failed attach tells the watcher (ov-976 review) ----
+
+#[test]
+fn only_the_owner_may_watch() {
+    let (push, _rx) = farcooler_transport::push_queue(8);
+    let ask = payload(r#"{"item":"ov-9"}"#);
+    for who in [crate::people::Person::Member("alice".into())] {
+        let refused = start(push.clone(), who, Uuid::now_v7(), &ask);
+        assert!(matches!(refused, Err(farcooler_core::DomainError::ScopeDenied { needed: "owner" })), "a member got past the owner check");
+    }
+    // The owner is let through the check: with nothing running for the item the answer is "not found", not a refusal.
+    let owner = start(push, crate::people::Person::Owner, Uuid::now_v7(), &ask);
+    assert!(matches!(owner, Err(farcooler_core::DomainError::NotFound)));
+}
+
+#[tokio::test]
+async fn a_failed_attach_while_the_agent_runs_says_so() {
+    let (push, mut rx) = farcooler_transport::push_queue(8);
+    crate::resync::TerminalSink::new(push, Uuid::now_v7(), 0).watch_failed();
+    let event = rx.recv().await.expect("a frame");
+    let Some(farcooler_protocol::v1::event::Payload::TerminalFrame(frame)) = event.payload else { panic!("not a terminal frame") };
+    let Some(farcooler_protocol::v1::terminal_frame::Kind::Gap(gap)) = frame.kind else { panic!("not a gap") };
+    assert_eq!(gap.reason, farcooler_protocol::v1::GapReason::Unspecified as i32);
+    // And the watch task sends it: the attach's end is not silence while the pane lives.
+    let source = include_str!("watch_view.rs").split("#[cfg(test)]").next().unwrap();
+    assert!(source.contains("ending.watch_failed()"), "a failed attach is never reported");
+}
