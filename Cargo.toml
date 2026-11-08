@@ -81,3 +81,11 @@ icu_normalizer = "2"
 [profile.release]
 lto = "thin"
 strip = true
+
+# Dependencies built optimized in dev and test builds; the workspace's own
+# crates stay unoptimized for quick rebuilds (ov-993). Tests spend much of
+# their CPU in serde_json, sha2, SQLite and tokio: a cutover boundary test took
+# 3.6 s of CPU unoptimized and 1.8 s with this. Built once, cached by CI's
+# rust-cache like any dependency.
+[profile.dev.package."*"]
+opt-level = 2
