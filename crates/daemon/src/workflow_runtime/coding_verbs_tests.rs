@@ -474,9 +474,11 @@ async fn a_gate_left_running_by_a_dead_daemon_is_ended_and_run_again() {
     assert_eq!(outbox(&runtime, StageKind::Run), 2, "the gate ran again on a clean tree");
 }
 
-/// ov-979: a Run gate in a tree the app lists has what it writes noted as it runs. The daemon dies mid-gate; on
-/// restart a person's work stops the run and nothing is cleaned, and once it is gone only the gate's own file goes.
-/// Removing the call in `execute_coding` turns the private-tree test above red; this one runs the named branch.
+/// ov-979: a Run gate in a tree the app lists has what changes noted as it runs. A person works in the tree
+/// while the gate runs, then the daemon dies. On restart the run stops and lists every change, marks what the
+/// ledger saw (the person's file too: a look can't tell who wrote it) as likely leftovers, and removes nothing.
+/// Once the person has discarded them, the run goes on. Removing the call in `execute_coding` turns the
+/// private-tree test above red; this one runs the named branch.
 #[tokio::test]
 async fn a_run_gate_restarting_in_a_named_tree_keeps_a_persons_changes() {
     let (_dir, mut runtime) = lander("gate-slow").await;
@@ -491,22 +493,30 @@ async fn a_run_gate_restarting_in_a_named_tree_keeps_a_persons_changes() {
     let (exec, running) = (runtime.exec.clone(), binding.clone());
     let (_cancel, cancelled) = tokio::sync::watch::channel(false);
     let gate = tokio::spawn(async move { exec.execute_coding("w", &running, cancelled).await });
+    let noted = |name: &str| std::fs::read_to_string(&ledger).is_ok_and(|l| l.contains(name));
     tokio::time::timeout(Duration::from_secs(30), async { loop {
-        if std::fs::read_to_string(&ledger).is_ok_and(|l| l.contains("half-built.out")) { break; }
+        if noted("half-built.out") { break; }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }}).await.expect("the running gate's file was noted");
+    // A person works in the tree while the gate runs, and the daemon notes it.
+    std::fs::write(path.join("mine.txt"), "a person's work").unwrap();
+    tokio::time::timeout(Duration::from_secs(30), async { loop {
+        if noted("mine.txt") { break; }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }}).await.expect("the person's file was noted");
     // The daemon dies mid-gate; its gate is ended on restart. The ledger outlives them both.
     gate.abort();
     assert!(gate.await.unwrap_err().is_cancelled());
     assert!(crate::effect_runner::Owner::reap(&runtime.owner_path(&binding)).await.unwrap());
     assert!(ledger.exists());
-    std::fs::write(path.join("mine.txt"), "a person's work").unwrap();
     let error = runtime.settle_run_tree(&binding, &path).await.unwrap_err().to_string();
-    assert!(error.contains("mine.txt") && !error.contains("half-built"), "a person's change stops the run: {error}");
-    assert!(path.join("mine.txt").exists() && path.join("half-built.out").exists(), "and nothing is cleaned");
+    assert!(error.contains("half-built.out, mine.txt. Likely left by the stopped gate: half-built.out, mine.txt."), "{error}");
+    assert_eq!(std::fs::read_to_string(path.join("mine.txt")).unwrap(), "a person's work", "the person's work stays");
+    assert!(path.join("half-built.out").exists(), "and nothing is cleaned");
+    // The person discards both.
     std::fs::remove_file(path.join("mine.txt")).unwrap();
+    std::fs::remove_file(path.join("half-built.out")).unwrap();
     runtime.settle_run_tree(&binding, &path).await.unwrap();
-    assert!(!path.join("half-built.out").exists(), "the dead gate's own leftover is cleared");
     assert!(!ledger.exists());
 }
 
@@ -526,6 +536,7 @@ async fn a_named_tree_s_gate_that_ends_leaves_no_ledger() {
     assert!(path.join("stray.out").exists());
     assert!(!runtime.gate_files_path(&binding).exists());
     assert!(runtime.settle_run_tree(&binding, &path).await.is_err(), "what a finished gate left is a person's to judge");
+    assert!(path.join("stray.out").exists());
 }
 
 #[tokio::test]

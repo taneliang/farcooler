@@ -213,11 +213,11 @@ impl Exec {
     }
     /// A gate that was ended mid-run (a restart, a crash) may have left files in the tree. In a private tree
     /// they are ours and the candidate is a commit, so start the run from exactly the commit. A tree the app
-    /// lists is one people edit in: only what the dead gate itself left is removed, never what a person made
-    /// (ov-967, ov-979).
+    /// lists is one people edit in: any change there stops the run, and the person keeps or discards it; the run
+    /// never removes or puts back a file there itself (ov-967, ov-979).
     pub(super) async fn settle_run_tree(&self, binding: &Binding, tree: &Path) -> Result<()> {
         if binding.effect.tree.is_some() {
-            named_tree::recover_gate_leftovers(tree, &self.gate_files_path(binding), &binding.effect.run,
+            named_tree::stop_on_changes(tree, &self.gate_files_path(binding), &binding.effect.run,
                 binding.effect.candidate.as_deref()).await
         } else {
             self.git_recorded(binding, tree, &["reset", "--hard", "--quiet"]).await?;
@@ -231,8 +231,8 @@ impl Exec {
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
         durable(&log, b"")?;
-        // A named tree is one people edit in: what a Run gate changes there is noted as it runs, so after a crash
-        // only the dead gate's own files are cleared (ov-979).
+        // A named tree is one people edit in: what a Run gate changes there is noted as it runs, so a crash that
+        // stops the run can mark those files as its likely leftovers (ov-979). They are only marked, never cleared.
         let ledger = (binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)))
             .then(|| self.gate_files_path(binding));
         let looking = match &ledger {
