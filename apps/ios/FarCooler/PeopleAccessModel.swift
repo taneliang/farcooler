@@ -50,7 +50,8 @@ final class PeopleAccessModel: ObservableObject {
             limitToViewer: hasTrustedKey ? { [weak self] device in await self?.limit(device) } : nil,
             setAccess: hasTrustedKey ? { [weak self] person, new in await self?.setAccess(person, to: new) } : nil,
             approve: { [weak self] device in await self?.approve(device) },
-            allowAdminActions: { [weak self] in await self?.allowAdminActions() })
+            allowAdminActions: { [weak self] in await self?.allowAdminActions() },
+            allowWithCode: { [weak self] code in await self?.allowWithCode(code) })
     }
 
     private var hasTrustedKey: Bool { access?.thisDevice?.stepUp == .trusted }
@@ -97,6 +98,27 @@ final class PeopleAccessModel: ObservableObject {
         let reason = StepUpReason.approve(device: target.name)
         let args: [String: Any] = ["clientId": target.id, "code": target.code]
         if await perform("client.approve_step_up", args, reason: reason) { await reload() }
+    }
+
+    /// Trust this phone's waiting key with the first-key code the runner's
+    /// installer showed (ov-988): an approval of its own key, signed by it.
+    func allowWithCode(_ code: String) async {
+        guard let me = access?.thisDevice else { return }
+        let args: [String: Any] = ["clientId": me.id, "code": code]
+        guard let stepUp = connection.stepUp() else {
+            note = StepUpWords.sentence(for: .keyUnavailable, runner: runner, device: device)
+            return
+        }
+        do {
+            _ = try await stepUp.perform("client.approve_step_up", args, reason: StepUpReason.allowWithCode(runner: runner), hasTrustedKey: true)
+            note = nil
+            shownCode = nil
+            await reload()
+        } catch let error as StepUpError {
+            note = StepUpWords.sentence(for: error, runner: runner, device: device)
+        } catch {
+            note = StepUpWords.sentence(forRefusal: StepUpRefusals.word(error), runner: runner, device: device)
+        }
     }
 
     /// Offer this phone's key and show the digits another of the person's

@@ -94,7 +94,7 @@ struct PhoneApprovalTests {
 
     @Test("Each refusal has a sentence with no runner word in it")
     func words() {
-        for word in ["no_approver", "approval_denied", "approval_expired", "key_unvouched", "presence_needed"] {
+        for word in ["no_approver", "approval_denied", "approval_expired", "key_unvouched", "presence_needed", "first_key_wrong", "first_key_taken"] {
             let said = StepUpWords.sentence(forRefusal: word, runner: "box", device: "Mac")
             #expect(said != "Couldn’t do that. Try again." && !said.contains("_"), "\(word): \(said)")
         }

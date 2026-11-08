@@ -133,6 +133,49 @@ final class PeopleAccessUITests: XCTestCase {
         keep(app, "people-allow-admin-iphone-light", expecting: .reads(code, "273 905"))
     }
 
+    /// ov-988: with no other device to approve it, the owner enters the
+    /// first-key code the installer showed. A wrong one is said in words; the
+    /// right one, signed by this phone's own key, turns admin actions on.
+    func testAFirstKeyCodeAllowsThisPhone() {
+        let app = people()
+        let allow = element(app, "admin-actions-allow")
+        XCTAssertTrue(app.reveal(allow), "no Allow Admin Actions: \(app.debugDescription)")
+        allow.tap()
+        let open = element(app, "first-key-open")
+        XCTAssertTrue(app.reveal(open), "no Enter First-Key Code: \(app.debugDescription)")
+        XCTAssertEqual(open.label, "Enter First-Key Code")
+        open.tap()
+        let field = app.textFields["first-key-field"].firstMatch
+        XCTAssertTrue(app.reveal(field), app.debugDescription)
+        // Longer than an identifier query takes (128 characters), so matched by label.
+        let explainer = "No other device to approve this one? When you installed this runner, the installer showed a first-key code on the computer it ran on. Enter it here. It works once."
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@", explainer)).firstMatch.exists, "no explainer: \(app.debugDescription)")
+        let send = element(app, "first-key-allow")
+        XCTAssertFalse(send.isEnabled, "Allow With Code before a whole code is typed")
+
+        field.tap()
+        field.typeText("7K3QM-9ZD2X-R4HBW-6NTFV-8PJ5D\n")
+        XCTAssertTrue(app.reveal(send))
+        send.tap()
+        let note = element(app, "people-access-note")
+        XCTAssertTrue(app.reveal(note), app.debugDescription)
+        XCTAssertEqual(note.label, "That first-key code doesn’t match, or it was already used. Check it and try again.")
+        keep(app, "people-first-key-iphone-light", expecting: .reads(note, note.label))
+
+        XCTAssertTrue(app.reveal(field))
+        // At its end, so the deletes take the whole wrong code.
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 40))
+        XCTAssertTrue(["", "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"].contains(field.value as? String ?? "?"), "the field should be empty: \(String(describing: field.value))")
+        field.typeText("7k3qm 9zd2x r4hbw 6ntfv 8pj5c\n")
+        XCTAssertTrue(app.reveal(send))
+        send.tap()
+        waitForSent(app, "prompt Allow admin actions on studio from this device.")
+        waitForSent(app, "first key")
+        XCTAssertTrue(app.reveal(element(app, "admin-actions-on")), "admin actions should be on: \(app.debugDescription)")
+        XCTAssertFalse(element(app, "people-access-note").exists, "the refusal is gone")
+    }
+
     func testOnlyTheSamePersonsOtherDeviceCanBeAllowedFromThisPhone() {
         let app = people(["-phone-access-trusted"])
         XCTAssertTrue(app.reveal(element(app, "admin-actions-on")), "this phone's key should be on")

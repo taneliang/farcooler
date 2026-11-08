@@ -137,6 +137,12 @@ class PeopleAccess private constructor(
         const val VIEWER_BADGE = "Viewer on this device"
         const val SHELL_BADGE = "Has a shell"
         const val CHECK_HEADER = "Check these devices"
+        /** The first-key code (ov-988), for an owner whose runner has no Mac app and no other device to approve this one. */
+        const val FIRST_KEY_OPEN = "Enter first-key code"
+        const val FIRST_KEY_EXPLAINER =
+            "No other device to approve this one? When you installed this runner, the installer showed a first-key code on the computer it ran on. Enter it here. It works once."
+        const val FIRST_KEY_PLACEHOLDER = "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+        const val FIRST_KEY_BUTTON = "Allow with code"
         const val CHECK_FOOTER = "A teammate’s device added these. Remove any you don’t recognize."
         const val WAITING_HEADER = "Waiting for approval"
         const val WAITING_FOOTER =

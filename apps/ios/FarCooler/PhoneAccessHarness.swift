@@ -30,6 +30,9 @@ final class AccessStandIn {
         StepUpSigners.shared = HarnessStepUpSigner()
     }
 
+    /// The first-key code this runner's installer showed (ov-988).
+    static let firstKeyCode = "7K3QM-9ZD2X-R4HBW-6NTFV-8PJ5C"
+
     /// The capabilities this runner adds.
     static let capabilities = ["person_access", "step_up", "enrollment", "representatives", "member_roles"]
 
@@ -132,6 +135,16 @@ final class AccessStandIn {
             if args["cap"] as? String == "viewer" { capped.insert(id) } else { capped.remove(id) }
             record("cap \(id)=\(args["cap"] as? String ?? "")")
             return members()
+        case "client.approve_step_up" where args["clientId"] as? String == own:
+            // This phone's own key, with the first-key code the installer
+            // showed (ov-988), as the runner reads it: case and dashes aside.
+            let typed = (args["code"] as? String ?? "").uppercased().filter { $0.isLetter || $0.isNumber }
+            guard typed == Self.firstKeyCode.filter({ $0 != "-" }) else {
+                throw ClientCore.CoreError.rejected("code", word: "resource-conflict", what: "first_key_wrong")
+            }
+            trustedKeys.insert("self")
+            record("first key")
+            return ["clientId": own, "state": "trusted", "code": ""]
         case "client.approve_step_up":
             let id = args["clientId"] as? String ?? ""
             guard args["code"] as? String == (id == "ipad-o" ? "418207" : "730412") else {

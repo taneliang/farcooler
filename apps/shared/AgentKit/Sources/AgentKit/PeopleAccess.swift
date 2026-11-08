@@ -347,6 +347,13 @@ public struct PeopleAccess: Equatable, Sendable {
     /// On the owner's own device, until their Mac approves it (ov-974).
     public static let vouchHere =
         "To allow the cutover from this device, approve it once in People on your Mac. Check that it shows this code."
+    /// The first-key code (ov-988), for an owner whose runner has no Mac app
+    /// and who has no other device to approve this one.
+    public static let firstKeyOpen = "Enter First-Key Code"
+    public static let firstKeyExplainer =
+        "No other device to approve this one? When you installed this runner, the installer showed a first-key code on the computer it ran on. Enter it here. It works once."
+    public static let firstKeyPlaceholder = "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+    public static let firstKeyButton = "Allow With Code"
     public static let limitToViewer = "Limit to Viewer"
     public static let removeDevice = "Remove Device…"
 

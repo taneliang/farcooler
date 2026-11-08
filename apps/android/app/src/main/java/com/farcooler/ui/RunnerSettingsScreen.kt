@@ -363,6 +363,7 @@ fun RunnerSettingsScreen(
                             else { person, new -> scope.launch { accessController.setAccess(person, new) } },
                             approve = { device -> scope.launch { accessController.approve(device) } },
                             allowAdminActions = { scope.launch { accessController.allowAdminActions() } },
+                            allowWithCode = { code -> scope.launch { accessController.allowWithCode(code) } },
                         ),
                         accessController.shownCode, accessController.note,
                     )

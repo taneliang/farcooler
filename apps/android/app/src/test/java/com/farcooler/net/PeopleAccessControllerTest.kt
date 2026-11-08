@@ -142,6 +142,33 @@ class PeopleAccessControllerTest {
         assertTrue("no prompt: a proposal signs nothing", f.signer.prompts.isEmpty())
     }
 
+    /** ov-988: the first-key code approves this phone's own key, signed by it, with a prompt that names the runner. */
+    @Test
+    fun aFirstKeyCodeApprovesThisPhonesOwnKeySigned() = runTest {
+        val f = fixture(thisKey = "proposed")
+        f.controller.load()
+        f.controller.allowWithCode("7K3QM-9ZD2X-R4HBW-6NTFV-8PJ5C")
+        assertEquals(listOf("step_up.begin", "step_up.finish"), f.core.methods)
+        val begun = f.core.calls[0].second
+        assertEquals("client.approve_step_up", begun["method"]!!.jsonPrimitive.content)
+        assertEquals("phone-o", begun["args"]!!.jsonObject["clientId"]!!.jsonPrimitive.content)
+        assertEquals("7K3QM-9ZD2X-R4HBW-6NTFV-8PJ5C", begun["args"]!!.jsonObject["code"]!!.jsonPrimitive.content)
+        assertEquals(listOf("Allow admin actions on studio from this device."), f.signer.prompts)
+        assertNull(f.controller.note)
+    }
+
+    @Test
+    fun aWrongFirstKeyCodeIsSaidInWords() = runTest {
+        val f = fixture(thisKey = "proposed")
+        f.core.failFinishWith = CoreException("no", word = "resource-conflict", what = "first_key_wrong")
+        f.controller.load()
+        f.controller.allowWithCode("7K3QM-9ZD2X-R4HBW-6NTFV-8PJ5D")
+        assertEquals("That first-key code doesn’t match, or it was already used. Check it and try again.", f.controller.note)
+        f.core.failFinishWith = CoreException("no", word = "resource-conflict", what = "first_key_taken")
+        f.controller.allowWithCode("7K3QM-9ZD2X-R4HBW-6NTFV-8PJ5C")
+        assertEquals("A device of yours already allows admin actions on studio. Approve this phone from that one.", f.controller.note)
+    }
+
     @Test
     fun aPhoneThatCannotMakeAStepUpSaysSoInsteadOfDoingNothing() = runTest {
         val core = Core()

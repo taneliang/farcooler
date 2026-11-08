@@ -34,6 +34,9 @@ object StepUpReason {
 
     fun approve(device: String) = "Allow $device to approve changes to who has access."
 
+    /** Trusting this phone's own key with the first-key code (ov-988). */
+    fun allowWithCode(runner: String) = "Allow admin actions on $runner from this device."
+
     private fun article(word: String) = if (word.first() in "AEIOU") "an" else "a"
 }
 
@@ -60,6 +63,8 @@ object StepUpWords {
         "access_exists" -> "They already have a different access on $runner. Change it from People." // casing ok: Owner, Admin and Viewer are access names
         "handle_taken", "device_taken" -> "That person or device is already on $runner, under another name."
         "scope_access" -> "That access doesn’t fit the device’s line. Try again."
+        "first_key_wrong" -> "That first-key code doesn’t match, or it was already used. Check it and try again."
+        "first_key_taken" -> "A device of yours already allows admin actions on $runner. Approve this $device from that one."
         "wrong_code" -> "That code doesn’t match. Check the other device and try again."
         "proposal_expired" -> "That request timed out. Ask again on the other device."
         "key_unvouched" -> "To allow the cutover from this $device, approve it once in People on your Mac, with Touch ID." // casing ok: People is the screen's name

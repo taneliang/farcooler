@@ -14,6 +14,9 @@ public struct PeopleAccessActions {
     public var approve: ((PeopleAccess.Device) async -> Void)?
     /// Offer this device's own key for approval.
     public var allowAdminActions: (() async -> Void)?
+    /// Trust this device's waiting key with the first-key code the installer
+    /// showed (ov-988): for a runner with no Mac app and no other device.
+    public var allowWithCode: ((String) async -> Void)?
     /// This device asks the person's iPhone to approve its admin actions
     /// (ov-858), as a Mac that isn't the runner does: it keeps no key of its own.
     public var asksPhone: Bool
@@ -24,8 +27,10 @@ public struct PeopleAccessActions {
         setAccess: ((PeopleAccess.Person, PersonAccess) async -> Void)? = nil,
         approve: ((PeopleAccess.Device) async -> Void)? = nil,
         allowAdminActions: (() async -> Void)? = nil,
+        allowWithCode: ((String) async -> Void)? = nil,
         asksPhone: Bool = false
     ) {
+        self.allowWithCode = allowWithCode
         self.asksPhone = asksPhone
         self.removeDevice = removeDevice
         self.limitToViewer = limitToViewer
@@ -389,8 +394,12 @@ private struct ThisDeviceAdminSection: View {
                 }
             case .proposed:
                 waiting(code: shownCode ?? device.code)
+                if let allowWithCode = actions.allowWithCode { FirstKeyCodeEntry(allow: allowWithCode) }
             case .none, .expired:
-                if let shownCode { waiting(code: shownCode) } else if let allow = actions.allowAdminActions {
+                if let shownCode {
+                    waiting(code: shownCode)
+                    if let allowWithCode = actions.allowWithCode { FirstKeyCodeEntry(allow: allowWithCode) }
+                } else if let allow = actions.allowAdminActions {
                     Button("Allow Admin Actions") { Task { await allow() } }
                         .accessibilityIdentifier("admin-actions-allow")
                 }
@@ -417,6 +426,43 @@ private struct ThisDeviceAdminSection: View {
         case .proposed: "Open People on another of your devices and allow this one. It checks this code."
         case .none, .expired:
             "Changes to who has access then ask for Face ID or your passcode on this device."
+        }
+    }
+}
+
+/// The first-key code, for an owner with no other device to approve this one
+/// (ov-988): the runner's installer showed it on the computer it ran on. Shut
+/// until asked for, so the six digits stay the way most people go.
+private struct FirstKeyCodeEntry: View {
+    let allow: (String) async -> Void
+    @State private var open = false
+    @State private var typed = ""
+    @State private var sending = false
+
+    var body: some View {
+        if open {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(PeopleAccess.firstKeyExplainer).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                TextField(PeopleAccess.firstKeyPlaceholder, text: $typed)
+                    .font(.body.monospaced())
+                    .autocorrectionDisabled()
+                    #if os(iOS)
+                    .textInputAutocapitalization(.characters)
+                    #endif
+                    .accessibilityIdentifier("first-key-field")
+                Button(PeopleAccess.firstKeyButton) {
+                    sending = true
+                    Task {
+                        await allow(typed)
+                        sending = false
+                    }
+                }
+                .disabled(sending || typed.filter { $0.isLetter || $0.isNumber }.count != 25)
+                .accessibilityIdentifier("first-key-allow")
+            }
+        } else {
+            Button(PeopleAccess.firstKeyOpen) { open = true }
+                .accessibilityIdentifier("first-key-open")
         }
     }
 }

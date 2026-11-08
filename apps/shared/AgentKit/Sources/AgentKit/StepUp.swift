@@ -138,6 +138,11 @@ public enum StepUpReason {
         "Add \(device) to \(runner) as \(article(access.title)) \(access.title)."
     }
 
+    /// Trusting this device's own key with the first-key code (ov-988).
+    public static func allowWithCode(runner: String) -> String {
+        "Allow admin actions on \(runner) from this device."
+    }
+
     public static func approve(device: String) -> String {
         "Allow \(device) to approve changes to who has access."
     }
@@ -188,6 +193,10 @@ public enum StepUpWords {
             "That person or device is already on \(runner), under another name."
         case "scope_access":
             "A Viewer’s device can only look. Choose Viewer, or add it as a Member."
+        case "first_key_wrong":
+            "That first-key code doesn’t match, or it was already used. Check it and try again."
+        case "first_key_taken":
+            "A device of yours already allows admin actions on \(runner). Approve this \(device) from that one."
         case "wrong_code":
             "That code doesn’t match. Check the other device and try again."
         case "no_approver":

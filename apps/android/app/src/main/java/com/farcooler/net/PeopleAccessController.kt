@@ -96,6 +96,33 @@ class PeopleAccessController(
         if (perform("client.approve_step_up", args, StepUpReason.approve(target.name))) load()
     }
 
+    /**
+     * Trust this phone's waiting key with the first-key code the runner's installer showed (ov-988): an approval of
+     * its own key, signed by it.
+     */
+    suspend fun allowWithCode(code: String) {
+        val me = access?.thisDevice ?: return
+        val flow = stepUp()
+        if (flow == null) {
+            note = StepUpWords.sentence(StepUpFailure.KeyUnavailable, runner, device)
+            return
+        }
+        val args = buildJsonObject {
+            put("clientId", me.id)
+            put("code", code)
+        }
+        try {
+            flow.perform("client.approve_step_up", args, StepUpReason.allowWithCode(runner), hasTrustedKey = true)
+            note = null
+            shownCode = null
+            load()
+        } catch (e: StepUpFailure) {
+            note = StepUpWords.sentence(e, runner, device)
+        } catch (e: CoreException) {
+            note = StepUpWords.sentenceForRefusal(e.what ?: e.word.orEmpty(), runner, device)
+        }
+    }
+
     /** Offer this phone's key and show the digits another of the person's devices checks. */
     suspend fun allowAdminActions() {
         val flow = stepUp()

@@ -218,6 +218,66 @@ class PeopleAccessViewTest {
         shown(screen()) { root, _ -> assertNotNull("a trusted key says admin actions are on", tagged(root, "admin-actions-on")) }
     }
 
+    /** ov-988: under the digits, the first-key code, shut until asked for; Allow with code only for a whole code. */
+    @Test
+    fun `the first-key code opens under the digits and sends what was typed`() {
+        val proposed = PeopleAccess.of(members.withoutOwnKey(), clients, "phone-o")!!
+        shown(screen(shownCode = "273905", on = proposed)) { root, _ ->
+            assertNull("no entry where it can't be sent", tagged(root, "first-key-open"))
+        }
+        val sent = mutableListOf<String>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { it.setContent { FarCoolerTheme { screen(PeopleAccessActions(allowWithCode = { sent += it }), shownCode = "273905", on = proposed)() } } }
+            settle()
+            scenario.onActivity {
+                val root = everyRoot().first()
+                val open = tagged(root, "first-key-open")!!
+                assertNull(tagged(root, "first-key-field"))
+                open.config[SemanticsActions.OnClick].action!!.invoke()
+            }
+            settle()
+            scenario.onActivity {
+                val root = everyRoot().first()
+                val said = mutableListOf<String>().also { texts(root, it) }
+                assertTrue(said.toString(), PeopleAccess.FIRST_KEY_EXPLAINER in said)
+                val field = tagged(root, "first-key-field")!!
+                field.config[SemanticsActions.SetText].action!!.invoke(androidx.compose.ui.text.AnnotatedString("7K3QM-9ZD2X"))
+            }
+            settle()
+            scenario.onActivity {
+                val allow = tagged(everyRoot().first(), "first-key-allow")!!
+                assertTrue("Allow with code waits for a whole code", allow.config.contains(SemanticsProperties.Disabled))
+                tagged(everyRoot().first(), "first-key-field")!!.config[SemanticsActions.SetText].action!!
+                    .invoke(androidx.compose.ui.text.AnnotatedString("7k3qm 9zd2x r4hbw 6ntfv 8pj5c"))
+            }
+            settle()
+            scenario.onActivity {
+                val allow = tagged(everyRoot().first(), "first-key-allow")!!
+                assertFalse(allow.config.contains(SemanticsProperties.Disabled))
+                allow.config[SemanticsActions.OnClick].action!!.invoke()
+            }
+        }
+        assertEquals(listOf("7k3qm 9zd2x r4hbw 6ntfv 8pj5c"), sent)
+    }
+
+    @Test fun firstKeyCode() = Capture.both("people-first-key") {
+        androidx.compose.runtime.CompositionLocalProvider(com.farcooler.ui.LocalFirstKeyTyped provides "7K3QM-9ZD2X-R4HBW-6NTFV-8PJ5C") {
+            screen(
+                PeopleAccessActions(allowWithCode = {}),
+                shownCode = "273905",
+                note = "That first-key code doesn’t match, or it was already used. Check it and try again.",
+                on = PeopleAccess.of(onlyMyPhone, clients, "phone-o")!!,
+            )()
+        }
+    }
+
+    /** A Linux runner with no Mac: the owner's phone alone, its key waiting (ov-988). */
+    private val onlyMyPhone = Json.parseToJsonElement(
+        """{"members":[],"claude_account":"","you":"",
+          "device_access":[
+            {"client_id":"phone-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"273905","step_up_at":9}]}""",
+    ).jsonObject
+
     /** The same runner with this phone's own key not yet trusted. */
     private fun JsonObject.withoutOwnKey(): JsonObject {
         val rows = (this["device_access"] as JsonArray).map { row ->

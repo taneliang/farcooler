@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -16,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -23,13 +25,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.FirstStep
@@ -46,6 +51,8 @@ class PeopleAccessActions(
     val setAccess: ((PeopleAccess.Person, PersonAccess) -> Unit)? = null,
     val approve: ((PeopleAccess.Device) -> Unit)? = null,
     val allowAdminActions: (() -> Unit)? = null,
+    /** Trust this phone's waiting key with the installer's first-key code (ov-988). */
+    val allowWithCode: ((String) -> Unit)? = null,
 )
 
 /**
@@ -337,11 +344,15 @@ private fun ThisDeviceAdmin(device: PeopleAccess.Device, shownCode: String?, act
                     Text(PeopleAccess.spoken(device.code), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.testTag("vouch-code"))
                 }
             }
-            StepUpKeyStanding.PROPOSED -> Waiting(shownCode ?: device.code)
+            StepUpKeyStanding.PROPOSED -> {
+                Waiting(shownCode ?: device.code)
+                actions.allowWithCode?.let { FirstKeyCodeEntry(it) }
+            }
             StepUpKeyStanding.NONE, StepUpKeyStanding.EXPIRED -> {
                 val allow = actions.allowAdminActions
                 if (shownCode != null) {
                     Waiting(shownCode)
+                    actions.allowWithCode?.let { FirstKeyCodeEntry(it) }
                 } else if (allow != null) {
                     OutlinedButton(onClick = allow, modifier = Modifier.testTag("admin-actions-allow")) { Text("Allow admin actions") }
                 }
@@ -357,6 +368,40 @@ private fun ThisDeviceAdmin(device: PeopleAccess.Device, shownCode: String?, act
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** What the first-key entry starts open with, for a picture of it typed into; null starts it shut. */
+internal val LocalFirstKeyTyped = androidx.compose.runtime.compositionLocalOf<String?> { null }
+
+/**
+ * The first-key code, for an owner with no other device to approve this one (ov-988): the runner's installer showed
+ * it on the computer it ran on. Shut until asked for, so the six digits stay the way most people go.
+ */
+@Composable
+private fun FirstKeyCodeEntry(allow: (String) -> Unit) {
+    val preview = LocalFirstKeyTyped.current
+    var open by rememberSaveable { mutableStateOf(preview != null) }
+    var typed by rememberSaveable { mutableStateOf(preview.orEmpty()) }
+    if (!open) {
+        TextButton(onClick = { open = true }, modifier = Modifier.testTag("first-key-open")) { Text(PeopleAccess.FIRST_KEY_OPEN) }
+        return
+    }
+    Text(PeopleAccess.FIRST_KEY_EXPLAINER, style = MaterialTheme.typography.bodyMedium)
+    OutlinedTextField(
+        value = typed,
+        onValueChange = { typed = it },
+        // A step smaller than body text, so 29 characters fit on one line on the narrowest phone.
+        placeholder = { Text(PeopleAccess.FIRST_KEY_PLACEHOLDER, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) },
+        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth().testTag("first-key-field"),
+    )
+    OutlinedButton(
+        onClick = { allow(typed) },
+        enabled = typed.count { it.isLetterOrDigit() } == 25,
+        modifier = Modifier.testTag("first-key-allow"),
+    ) { Text(PeopleAccess.FIRST_KEY_BUTTON) }
 }
 
 @Composable
