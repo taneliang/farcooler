@@ -16,7 +16,11 @@ args = sys.argv[1:]
 open(log_path, 'a').write(json.dumps(dict(args=args, env=sorted(os.environ))) + '\n')
 try: state = json.load(open(state_path))
 except FileNotFoundError: state = dict(prs=[], looks=0)
-def save(): json.dump(state, open(state_path, 'w'))
+# Written beside and renamed over: the runtime SIGKILLs a gh it cuts off, and a save cut off after
+# truncating the file in place would leave every later reader an empty GitHub.
+def save():
+    with open(state_path + '.tmp', 'w') as f: json.dump(state, f)
+    os.replace(state_path + '.tmp', state_path)
 def opt(name): return args[args.index(name) + 1]
 def review(login, review_state, oid, at):
     # The shape of one entry of `reviews` in `gh pr list --json reviews`.
