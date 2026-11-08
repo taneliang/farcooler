@@ -18,12 +18,15 @@ struct AgentTerminalWatch: View {
     @Environment(\.dismiss) private var dismiss
     @State private var gotBytes = false
     @State private var ended = false
+    @State private var exitStatus: Int32 = 0
 
-    /// What to tell the owner when the stream stops: nothing while it runs, "finished" after a picture,
-    /// and the reason when there never was one (a review, a merge, or an agent that already ended).
-    static func status(gotBytes: Bool, ended: Bool) -> String? {
+    /// What to tell the owner when the stream stops: nothing while it runs, "finished" only when the
+    /// watch ended cleanly (the engine reaped the pane), a dropped link when it did not, and the reason
+    /// when there never was a picture (a review, a merge, or an agent that already ended).
+    static func status(gotBytes: Bool, ended: Bool, exitStatus: Int32 = 0) -> String? {
         guard ended else { return nil }
-        return gotBytes ? "Finished" : "This agent isn’t running right now."
+        guard gotBytes else { return "This agent isn’t running right now." }
+        return exitStatus == 0 ? "Finished" : "Lost the connection to this agent."
     }
 
     var body: some View {
@@ -31,7 +34,7 @@ struct AgentTerminalWatch: View {
             HStack {
                 Text("Watching \(item)").font(.headline)
                 Text("Read-only").font(.caption).foregroundStyle(.secondary)
-                if gotBytes, let done = Self.status(gotBytes: gotBytes, ended: ended) {
+                if gotBytes, let done = Self.status(gotBytes: gotBytes, ended: ended, exitStatus: exitStatus) {
                     Text(done).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -46,7 +49,7 @@ struct AgentTerminalWatch: View {
                     item: item, command: AgentTerminalCanvas.command(workspace: workspace, item: item),
                     binary: binary, environment: environment, hostArguments: hostArguments,
                     linkGeneration: linkGeneration,
-                    onBytes: { gotBytes = true }, onEnd: { ended = true })
+                    onBytes: { gotBytes = true }, onEnd: { ended = true }, onExit: { exitStatus = $0 })
                     .overlay {
                         if let why = Self.status(gotBytes: gotBytes, ended: ended), !gotBytes {
                             Text(why).foregroundStyle(.secondary)
@@ -68,6 +71,7 @@ struct AgentTerminalCanvas: NSViewRepresentable {
     let linkGeneration: Int
     var onBytes: @MainActor @Sendable () -> Void = {}
     var onEnd: @MainActor @Sendable () -> Void = {}
+    var onExit: @MainActor @Sendable (Int32) -> Void = { _ in }
 
     /// The whole of what this view ever asks the CLI to do. Pinned by a test.
     static func command(workspace: String, item: String) -> [String] { ["workflow", "watch", workspace, item] }
@@ -75,7 +79,34 @@ struct AgentTerminalCanvas: NSViewRepresentable {
     final class Coordinator { var stream: TerminalStream? }
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> TerminalRenderView {
+    /// Holds the terminal at the agent's own column count and scrolls when the window is narrower, so
+    /// no part of the pane is cut off and the font stays readable.
+    final class Scroller: NSScrollView {
+        var terminal: TerminalRenderView?
+        /// Size the document to the pane's grid, or to the window if that is larger.
+        func fitDocument() {
+            guard let terminal else { return }
+            let want = terminal.contentSize
+            let visible = contentSize
+            let size = CGSize(width: max(want.width, visible.width), height: max(want.height, visible.height))
+            if terminal.frame.size != size { terminal.setFrameSize(size) }
+        }
+        override func tile() { super.tile(); fitDocument() }
+    }
+
+    func makeNSView(context: Context) -> Scroller {
+        let scroller = Scroller()
+        scroller.hasHorizontalScroller = true
+        scroller.hasVerticalScroller = true
+        scroller.autohidesScrollers = true
+        scroller.drawsBackground = false
+        let view = makeTerminal(context: context)
+        scroller.terminal = view
+        scroller.documentView = view
+        return scroller
+    }
+
+    private func makeTerminal(context: Context) -> TerminalRenderView {
         let view = TerminalRenderView()
         Self.makeReadOnly(view, item: item)
         view.setPaneGrid(nil)
@@ -83,10 +114,17 @@ struct AgentTerminalCanvas: NSViewRepresentable {
         view.trustStreamSizes(true)
         view.beginLiveCore()
         let box = MainActorBox(view)
-        let (seen, over) = (onBytes, onEnd)
+        let (seen, over, left) = (onBytes, onEnd, onExit)
         let stream = TerminalStream(onBytes: { bytes in
-            DispatchQueue.main.async { MainActor.assumeIsolated { box.value.feed(bytes); seen() } }
-        }, onEnd: { DispatchQueue.main.async { MainActor.assumeIsolated { over() } } })
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    box.value.feed(bytes)
+                    (box.value.enclosingScrollView as? Scroller)?.fitDocument()
+                    seen()
+                }
+            }
+        }, onEnd: { DispatchQueue.main.async { MainActor.assumeIsolated { over() } } },
+        onExit: { code in DispatchQueue.main.async { MainActor.assumeIsolated { left(code) } } })
         if let binary {
             stream.start(binary: binary, terminal: "", environment: environment, host: hostArguments, command: command)
         }
@@ -94,9 +132,9 @@ struct AgentTerminalCanvas: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: TerminalRenderView, context: Context) {}
+    func updateNSView(_ view: Scroller, context: Context) {}
 
-    static func dismantleNSView(_ view: TerminalRenderView, coordinator: Coordinator) {
+    static func dismantleNSView(_ view: Scroller, coordinator: Coordinator) {
         coordinator.stream?.stop()
         coordinator.stream = nil
     }

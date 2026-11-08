@@ -519,6 +519,14 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
         let paddingLeft: CGFloat
     }
 
+    /// The size that shows the emulator's whole grid at the current font, padding included.
+    var contentSize: CGSize {
+        let g = grid
+        return CGSize(
+            width: padding.left + padding.right + CGFloat(g.columns) * cellWidth,
+            height: padding.top + padding.bottom + CGFloat(g.rows) * cellHeight)
+    }
+
     var metrics: Metrics {
         Metrics(
             cellWidth: cellWidth, cellHeight: cellHeight,
@@ -1310,6 +1318,11 @@ final class TerminalRenderView: NSView, NSUserInterfaceValidations {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        // A watching view may sit in a scroll view; a sideways swipe is that scroll view's.
+        if readOnly, abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+            nextResponder?.scrollWheel(with: event)
+            return
+        }
         // Ask the core first: a full-screen program may want the wheel, in
         // which case it becomes a mouse report or arrow keys, and scrolling our
         // own view would be wrong.

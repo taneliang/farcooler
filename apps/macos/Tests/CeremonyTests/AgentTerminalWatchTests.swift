@@ -123,4 +123,27 @@ struct AgentTerminalWatchTests {
         #expect(AgentTerminalWatch.status(gotBytes: true, ended: true) == "Finished")
         #expect(AgentTerminalWatch.status(gotBytes: false, ended: true) == "This agent isn’t running right now.")
     }
+
+    @Test("A stream that dropped is not called finished")
+    func aDroppedLinkIsNotFinished() {
+        #expect(AgentTerminalWatch.status(gotBytes: true, ended: true, exitStatus: 1) == "Lost the connection to this agent.")
+    }
+
+    @MainActor
+    @Test("A pane wider than the window scrolls sideways at full size instead of being cut off")
+    func aWidePaneScrolls() {
+        let scroller = AgentTerminalCanvas.Scroller()
+        scroller.frame = NSRect(x: 0, y: 0, width: 640, height: 420)
+        let view = TerminalRenderView()
+        AgentTerminalCanvas.makeReadOnly(view)
+        view.trustStreamSizes(true)
+        view.reset(columns: 120, rows: 40)
+        scroller.terminal = view
+        scroller.documentView = view
+        scroller.layoutSubtreeIfNeeded()
+        scroller.fitDocument()
+        #expect(view.frame.width >= view.contentSize.width, "the 120-column screen is clipped")
+        #expect(view.frame.width > 640, "nothing to scroll to")
+        #expect(view.grid == PaneGrid(columns: 120, rows: 40), "sizing the view changed the agent's grid")
+    }
 }

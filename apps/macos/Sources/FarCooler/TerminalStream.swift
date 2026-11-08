@@ -39,13 +39,17 @@ final class TerminalStream {
     private var attachment: Pipe?
     private let onBytes: @Sendable ([UInt8]) -> Void
     private let onEnd: @Sendable () -> Void
+    /// Told how the process exited, for a viewer that must tell "over" from "dropped".
+    private let onExit: (@Sendable (Int32) -> Void)?
 
     init(
         onBytes: @escaping @Sendable ([UInt8]) -> Void,
-        onEnd: @escaping @Sendable () -> Void = {}
+        onEnd: @escaping @Sendable () -> Void = {},
+        onExit: (@Sendable (Int32) -> Void)? = nil
     ) {
         self.onBytes = onBytes
         self.onEnd = onEnd
+        self.onExit = onExit
     }
 
     /// `sizes` asks for the runner's size markers. See `StreamSizes`.
@@ -87,8 +91,9 @@ final class TerminalStream {
             onBytes([UInt8](data))
         }
 
-        p.terminationHandler = { [onEnd] _ in
+        p.terminationHandler = { [onEnd, onExit] done in
             handle.readabilityHandler = nil
+            onExit?(done.terminationStatus)
             onEnd()
         }
 
