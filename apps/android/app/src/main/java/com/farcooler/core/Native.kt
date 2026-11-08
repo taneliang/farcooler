@@ -94,6 +94,9 @@ internal object NativeClient {
 
     external fun nativeStreamStart(handle: Long, terminal: String): Boolean
 
+    /** Watch an engine agent's terminal, read-only. `farcooler_client_watch_start`. */
+    external fun nativeWatchStart(handle: Long, workspace: String, item: String): Boolean
+
     external fun nativeStreamStop(handle: Long, terminal: String)
 
     external fun nativeGenerateKey(comment: String): String?

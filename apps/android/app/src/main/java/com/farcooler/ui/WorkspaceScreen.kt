@@ -736,7 +736,10 @@ private fun AuthenticatedWorkflowButton(model: AppModel, host: String, workspace
     }
     val connection = model.fleet.connection(host)
     val link = connection?.link?.collectAsStateWithLifecycle()?.value
-    androidx.compose.runtime.CompositionLocalProvider(LocalWorkflowPort provides port.takeIf { link == RunnerLink.ANSWERING }) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalWorkflowPort provides port.takeIf { link == RunnerLink.ANSWERING },
+        LocalAgentWatch provides connection?.core.takeIf { link == RunnerLink.ANSWERING },
+    ) {
         WorkflowRunsButton(host, workspace)
     }
 }

@@ -54,6 +54,8 @@ fun WorkflowRunsButton(host: String, workspace: String) {
 @Composable
 fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
     val port = LocalWorkflowPort.current
+    val watcher = LocalAgentWatch.current
+    var watching by rememberSaveable(host, workspace) { mutableStateOf<String?>(null) }
     val model = remember(host, workspace) { WorkflowRunsModel(host, workspace) }
     val view by model.view.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -84,8 +86,14 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
         if (view.notice.isNotEmpty()) Text(view.notice)
         if (selected != null) TextButton(onClick = { select(null) }) { Text("All runs") }
         val run = view.presentation?.runs?.firstOrNull { it.item == selected }
+        val agent = watching
+        if (agent != null && watcher != null) Dialog(onDismissRequest = { watching = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            androidx.compose.material3.Surface { AgentWatchView(workspace, agent, watcher) { watching = null } }
+        }
         if (run != null) {
-            WorkflowRunCard(run, view.ready && !view.busy && port != null, performReason = { action, reason ->
+            WorkflowRunCard(run, view.ready && !view.busy && port != null,
+                onWatch = if (watcher != null && run.text("pending_effect") != null) ({ watching = run.item }) else null,
+                performReason = { action, reason ->
                 scope.launch { model.perform(run.item, action, port, reason) }
             }) { action -> scope.launch { model.perform(run.item, action, port) } }
         } else {
@@ -99,7 +107,7 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
     }
 }
 @Composable
-fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, performReason: (WorkflowAction, String) -> Unit = { _, _ -> }, perform: (WorkflowAction) -> Unit) {
+fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? = null, performReason: (WorkflowAction, String) -> Unit = { _, _ -> }, perform: (WorkflowAction) -> Unit) {
     // Finite identity slots. Values remain lossless JsonPrimitive strings,
     // including u64 fence values, and content wraps without ellipsis.
     SelectionContainer {
@@ -109,6 +117,7 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, performReason: (Workflow
             listOf("item", "run", "definition_pin", "policy_pin", "candidate", "pending_effect", "iteration", "attempt", "fence", "reworks_remaining").forEach { key ->
                 run.text(key)?.let { Text("$key: $it") }
             }
+            if (onWatch != null) Button(onClick = onWatch) { Text("Watch Agent") }
             run.value["latest_evidence"]?.takeUnless { it == JsonNull }?.jsonObject?.forEach { (key, value) -> Text("Evidence $key: ${value.jsonPrimitive.content}") }
             listOf("stage", "gate").forEach { key ->
                 run.value[key]?.takeUnless { it == JsonNull }?.jsonObject?.let { value ->

@@ -95,7 +95,7 @@ val Throwable.refusalWord: String?
  * identifiable in a trace: a native crash on an anonymous pool thread tells you
  * nothing about who was calling.
  */
-class ClientCore : TerminalTransport {
+class ClientCore : TerminalTransport, AgentWatchTransport {
     private val dispatcher =
         Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "farcooler-client").apply { isDaemon = true }
@@ -230,6 +230,24 @@ class ClientCore : TerminalTransport {
         if (!started) streams.remove(terminal)
         return started
     }
+
+    override suspend fun startWatch(
+        workspace: String,
+        item: String,
+        onChunk: (ByteArray) -> Unit,
+        onEnd: (String?) -> Unit,
+    ): Boolean {
+        val h = ensureHandle()
+        if (h == 0L) return false
+        startPumping()
+        val name = "watch:$workspace/$item"
+        streams[name] = Stream(onChunk, onEnd)
+        val started = withContext(dispatcher) { NativeClient.nativeWatchStart(h, workspace, item) }
+        if (!started) streams.remove(name)
+        return started
+    }
+
+    override suspend fun stopWatch(workspace: String, item: String) = stopStream("watch:$workspace/$item")
 
     /** Stop watching. Safe when nothing is running. */
     override suspend fun stopStream(terminal: String) {
@@ -395,7 +413,10 @@ class ClientCore : TerminalTransport {
         // Anything that is not a chunk ends the stream: the pane finished, or
         // it could not be opened at all.
         streams.remove(terminal)
-        stream.onEnd(line["error"]?.jsonPrimitive?.contentOrNull)
+        stream.onEnd(
+            if (line["lost"]?.jsonPrimitive?.booleanOrNull == true) AgentWatchTransport.LOST
+            else line["error"]?.jsonPrimitive?.contentOrNull,
+        )
     }
 
     companion object {
