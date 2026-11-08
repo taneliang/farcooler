@@ -115,10 +115,8 @@ async fn a_watcher_sees_the_agent_and_nothing_it_does_reaches_the_pane() {
 fn only_the_owner_may_watch() {
     let (push, _rx) = farcooler_transport::push_queue(8);
     let ask = payload(r#"{"item":"ov-9"}"#);
-    for who in [crate::people::Person::Member("alice".into())] {
-        let refused = start(push.clone(), who, Uuid::now_v7(), &ask);
-        assert!(matches!(refused, Err(farcooler_core::DomainError::ScopeDenied { needed: "owner" })), "a member got past the owner check");
-    }
+    let member = start(push.clone(), crate::people::Person::Member("alice".into()), Uuid::now_v7(), &ask);
+    assert!(matches!(member, Err(farcooler_core::DomainError::ScopeDenied { needed: "owner" })), "a member got past the owner check");
     // The owner is let through the check: with nothing running for the item the answer is "not found", not a refusal.
     let owner = start(push, crate::people::Person::Owner, Uuid::now_v7(), &ask);
     assert!(matches!(owner, Err(farcooler_core::DomainError::NotFound)));
