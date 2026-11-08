@@ -9,9 +9,13 @@ use uuid::Uuid;
 
 #[derive(Args, Clone, Default)]
 pub struct Gates {
-    /// Add a gate an agent decides, using the runner's configured reviewer.
+    /// Add a gate an agent decides. The engine starts the agent, and it must give a verdict; on a runner that
+    /// can't start agents, its configured reviewer runs instead.
     #[arg(long)]
     pub agent_gate: bool,
+    /// Add a gate the orchestrator decides: the ticket waits for its word, however it chooses to review.
+    #[arg(long)]
+    pub orchestrator_gate: bool,
     /// Add a gate a person decides: the ticket waits for their word. Only `owner` can decide. Repeat for several.
     #[arg(long, value_name = "PERSON")]
     pub person_gate: Vec<String>,
@@ -22,7 +26,8 @@ pub struct Gates {
 }
 impl Gates {
     fn extras(&self) -> Vec<Extra> {
-        self.agent_gate.then_some(Extra::Agent).into_iter().chain(self.person_gate.iter().map(|p| Extra::Person(p.clone()))).collect()
+        self.agent_gate.then_some(Extra::Agent).into_iter().chain(self.orchestrator_gate.then_some(Extra::Orchestrator))
+            .chain(self.person_gate.iter().map(|p| Extra::Person(p.clone()))).collect()
     }
 }
 
@@ -198,12 +203,13 @@ mod tests {
     #[test]
     fn a_template_takes_gates_of_all_three_kinds_from_flags() {
         let held = held(&get(None)).unwrap();
-        let gates = Gates { agent_gate: false, person_gate: vec!["owner".into()], gate_env: vec![] };
+        let gates = Gates { agent_gate: false, orchestrator_gate: true, person_gate: vec!["owner".into()], gate_env: vec![] };
         let bundle = template("batched-push", &held, &["make check".into()], &gates, &Routes::default(), Some(4)).unwrap();
         assert_eq!(bundle.definition.groups["landing"].limit, 4);
-        assert!(bundle.definition.stages.iter().any(|s| matches!(&s.kind, lt::StageKind::Review(lt::Reviewer::Person(p)) if p == "owner")));
-        // An agent gate needs the reviewer this runner doesn't have.
-        let agent = Gates { agent_gate: true, person_gate: vec![], gate_env: vec![] };
+        let reviews: Vec<_> = bundle.definition.stages.iter().filter_map(|s| match &s.kind { lt::StageKind::Review(r) => Some(r.clone()), _ => None }).collect();
+        assert_eq!(reviews, [lt::Reviewer::Orchestrator("orchestrator".into()), lt::Reviewer::Person("owner".into())]);
+        // An agent gate needs an agent to start or a reviewer to run, and this runner has neither.
+        let agent = Gates { agent_gate: true, orchestrator_gate: false, person_gate: vec![], gate_env: vec![] };
         assert_eq!(template("batched-push", &held, &["make check".into()], &agent, &Routes::default(), None).unwrap_err(), lt::Error::NoReviewer);
     }
 }

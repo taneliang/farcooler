@@ -60,8 +60,22 @@ async fn a_person_gate_needs_no_configured_reviewer_and_an_agent_gate_does() {
     assert!(runtime.coding.as_ref().unwrap().reviewer.is_none());
     let person = built(&runtime, &plan(Template::BatchedPush, vec![Gate::Command(1), Gate::Person { principal: "owner".into() }]));
     runtime.coding.as_ref().unwrap().validate_definition(&person).expect("a person decides; nothing runs");
-    let agent = built(&runtime, &plan(Template::BatchedPush, vec![Gate::Command(1), Gate::Agent { argument: "reviewer".into() }]));
+    let agent = built(&runtime, &plan(Template::BatchedPush, vec![Gate::Command(1), Gate::Reviewer { argument: "reviewer".into() }]));
     assert!(runtime.coding.as_ref().unwrap().validate_definition(&agent).is_err(), "no reviewer is configured to run");
+}
+
+#[tokio::test]
+async fn an_orchestrator_gate_needs_no_configured_reviewer_and_an_engine_agent_gate_needs_a_native_harness() {
+    let (_dir, runtime) = lander("pass").await;
+    let config = runtime.coding.as_ref().unwrap();
+    let orchestrator = built(&runtime, &plan(Template::BatchedPush, vec![Gate::Command(1), Gate::Orchestrator { principal: "orchestrator".into() }]));
+    config.validate_definition(&orchestrator).expect("the orchestrator decides; nothing runs");
+    let agent = built(&runtime, &plan(Template::BatchedPush, vec![Gate::Command(1), Gate::Agent]));
+    assert!(config.validate_definition(&agent).is_err(), "a command harness can't start an agent");
+    // A draft's agent gate on that runner is refused, since it has no reviewer to fall back on either.
+    assert_eq!(lt::template("ticket-push", config, &["make check".into()], &[Extra::Agent], &lt::Options::default()).unwrap_err(), lt::Error::NoReviewer);
+    let drafted = lt::template("ticket-push", config, &["make check".into()], &[Extra::Orchestrator], &lt::Options::default()).unwrap();
+    assert!(drafted.definition.stages.iter().any(|s| s.kind == StageKind::Review(Reviewer::Orchestrator("orchestrator".into()))));
 }
 
 #[tokio::test]

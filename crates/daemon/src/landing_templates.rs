@@ -5,7 +5,7 @@
 //! reads the draft and publishes it, as for any definition.
 use farcooler_core::charter_landing::{self, Route};
 use crate::path_routes::PathRules;
-use farcooler_protocol::workflow_config::{AdapterConfiguration, CodingCommand, CodingConfig};
+use farcooler_protocol::workflow_config::{AdapterConfiguration, CodingCommand, CodingConfig, CodingHarness};
 pub use farcooler_workflow::templates::Template;
 pub use farcooler_workflow::{Reviewer, StageKind};
 use farcooler_workflow::templates::{self, Gate, PathRoutes, Pins, Plan};
@@ -81,7 +81,7 @@ impl std::fmt::Display for Error {
             Self::NoAdapter => f.write_str("This workspace has no adapter settings yet, so there is nothing to pin a definition to."),
             Self::BadEnvironment(text) => write!(f, "`{text}` isn't a gate setting. Write it as NAME=value."),
             Self::NotADecider(who) => write!(f, "{who} can't decide a gate. Only the owner can, so name owner."),
-            Self::NoReviewer => f.write_str("An agent gate needs a reviewer, and this runner isn't set up with one."),
+            Self::NoReviewer => f.write_str("An agent gate needs an agent to start or a reviewer to run, and this runner isn't set up with either."),
             Self::BadRoute(text) => write!(f, "`{text}` isn't a route. Write it as PATTERN=push or PATTERN=ask."),
             Self::MixedRoutes => f.write_str("This charter sends some paths by pull request and others another way, and a definition can't say that yet. Make them all one route, or wait for the pull request steps."),
             Self::BatchTooLarge => write!(f, "A batch holds at most {MAX_BATCH} tickets, so a failing one can always be found by splitting."),
@@ -92,7 +92,14 @@ impl std::error::Error for Error {}
 
 /// A gate beyond the charter's commands. The charter can only say commands; an agent or a person is chosen here.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Extra { Agent, Person(String) }
+pub enum Extra {
+    /// An agent reviews: one the engine starts when the runner has a native harness, else the configured reviewer.
+    Agent,
+    /// The orchestrator decides (ov-969).
+    Orchestrator,
+    /// A named person decides.
+    Person(String),
+}
 
 /// The most tickets a batch may hold: the split limit halves it down to single tickets.
 pub const MAX_BATCH: u8 = 8;
@@ -116,6 +123,16 @@ fn command(text: &str, environment: &std::collections::BTreeMap<String, String>)
     CodingCommand { argv: vec!["/bin/sh".into(), "-c".into(), text.into()], environment: environment.clone(), timeout_ms: GATE_TIMEOUT_MS }
 }
 
+/// An agent, orchestrator or person gate. An agent gate is one the engine starts wherever the runner can start an
+/// agent (ov-969); a runner with only a command harness falls back to its configured review command.
+fn extra_gate(config: &CodingConfig, extra: &Extra) -> Result<Gate, Error> {
+    Ok(match extra {
+        Extra::Agent if matches!(config.harness, CodingHarness::Native { .. }) => Gate::Agent,
+        Extra::Agent => Gate::Reviewer { argument: config.reviewer.as_ref().ok_or(Error::NoReviewer)?.identity.clone() },
+        Extra::Orchestrator => Gate::Orchestrator { principal: "orchestrator".into() },
+        Extra::Person(p) => person(p)?,
+    })
+}
 fn person(principal: &str) -> Result<Gate, Error> {
     if principal != "owner" { return Err(Error::NotADecider(principal.into())); }
     Ok(Gate::Person { principal: principal.into() })
@@ -167,12 +184,7 @@ pub fn import_charter(charter: &str, config: &CodingConfig, published: Option<&s
         config.checks.push(if text == NO_GATE { CodingCommand { argv: vec![NO_GATE.into()], ..command("", &environment) } } else { command(text, &environment) });
     }
     if route == Route::Ask { gates.push(person("owner")?); }
-    for e in extra {
-        gates.push(match e {
-            Extra::Agent => Gate::Agent { argument: config.reviewer.as_ref().ok_or(Error::NoReviewer)?.identity.clone() },
-            Extra::Person(p) => person(p)?,
-        });
-    }
+    for e in extra { gates.push(extra_gate(&config, e)?); }
     if template == Template::TicketPr { notes.push("A pull request route can't be published yet: the steps that open and merge pull requests aren't built in.".into()); }
     let mut plan = Plan::new(template, gates);
     plan.ci = rules.ci;
@@ -226,12 +238,7 @@ pub fn template(name: &str, config: &CodingConfig, commands: &[String], extra: &
         gates.push(Gate::Command(config.checks.len()));
         config.checks.push(command(text, &environment));
     }
-    for e in extra {
-        gates.push(match e {
-            Extra::Agent => Gate::Agent { argument: config.reviewer.as_ref().ok_or(Error::NoReviewer)?.identity.clone() },
-            Extra::Person(p) => person(p)?,
-        });
-    }
+    for e in extra { gates.push(extra_gate(&config, e)?); }
     let mut plan = Plan::new(template, gates);
     if let Some(batch) = options.batch { plan.batch = batch; }
     plan.paths = paths.map(|p| {

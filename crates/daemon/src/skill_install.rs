@@ -1132,7 +1132,9 @@ mod tests {
         // (ov-959): eight lines.
         // 354 once agents were told never to run the cutover commands, which
         // an unplanned Commit cannot undo (ov-963): two lines.
-        assert!(lines <= 354, "{lines} lines");
+        // 355 once a gate could be an agent the engine starts or the
+        // orchestrator, each holding the ticket for its verdict (ov-969): one line.
+        assert!(lines <= 355, "{lines} lines");
     }
 
     #[test]

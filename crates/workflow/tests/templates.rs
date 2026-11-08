@@ -55,13 +55,23 @@ fn a_push_template_lands_through_base_fold_gate_push_ci() {
 }
 #[test]
 fn a_push_with_no_command_gate_is_not_built() {
-    for gates in [vec![], vec![Gate::Agent { argument: "reviewer".into() }], vec![Gate::Person { principal: "owner".into() }]] {
+    for gates in [vec![], vec![Gate::Reviewer { argument: "reviewer".into() }], vec![Gate::Person { principal: "owner".into() }]] {
         assert_eq!(build(&Plan::new(Template::BatchedPush, gates), &Fixture), Err(Refusal::Definition));
     }
 }
 #[test]
+fn an_agent_and_the_orchestrator_can_each_decide_a_gate() {
+    let gates = vec![Gate::Command(0), Gate::Agent, Gate::Orchestrator { principal: "orchestrator".into() }, Gate::Person { principal: "owner".into() }];
+    let d = make(&Plan::new(Template::TicketPush, gates));
+    let reviews: Vec<_> = d.stages.iter().filter(|s| matches!(s.kind, StageKind::Review(_)))
+        .map(|s| (s.kind.clone(), s.operation.arguments[1].as_str())).collect();
+    assert_eq!(reviews, [(StageKind::Review(Reviewer::Agent), "agent"),
+        (StageKind::Review(Reviewer::Orchestrator("orchestrator".into())), "orchestrator:orchestrator"),
+        (StageKind::Review(Reviewer::Person("owner".into())), "person:owner")]);
+}
+#[test]
 fn each_gate_can_be_a_command_an_agent_or_a_person_and_keeps_its_order() {
-    let gates = vec![Gate::Command(0), Gate::Agent { argument: "reviewer".into() }, Gate::Person { principal: "owner".into() }, Gate::Command(1)];
+    let gates = vec![Gate::Command(0), Gate::Reviewer { argument: "reviewer".into() }, Gate::Person { principal: "owner".into() }, Gate::Command(1)];
     let d = make(&Plan::new(Template::BatchedPush, gates.clone()));
     assert_eq!(ids(&d), ["provision", "build", "gate-0", "gate-1", "join"]);
     assert_eq!(d.stages[2].kind, StageKind::Review(Reviewer::Dispatch));
@@ -206,7 +216,7 @@ fn a_batched_pull_request_rehearses_together_and_a_person_merges_afterwards() {
 fn a_gate_that_rejects_sends_a_ticket_back_to_build_on_every_template() {
     for t in Template::ALL {
         let mut w = Walk::new();
-        let gates = vec![Gate::Command(0), Gate::Agent { argument: "reviewer".into() }];
+        let gates = vec![Gate::Command(0), Gate::Reviewer { argument: "reviewer".into() }];
         let d = build(&Plan::new(t, gates), &Fixture).unwrap();
         w.enqueue("one", d);
         while !w.at("one").starts_with("gate-") { w.tick(); }

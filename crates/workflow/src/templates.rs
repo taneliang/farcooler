@@ -39,14 +39,18 @@ impl Template {
     }
 }
 
-/// One gate, in the order it runs. Any of the three can stand at any place a gate can.
+/// One gate, in the order it runs. Any of them can stand at any place a gate can.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Gate {
     /// A command the host pinned, by its place in the configured checks. Runs on the folded result when
     /// the template folds, else on the ticket.
     Command(usize),
-    /// An agent reviews the ticket, with the host's configured reviewer.
-    Agent { argument: String },
+    /// The host's configured review command reviews the ticket.
+    Reviewer { argument: String },
+    /// An agent the engine starts reviews the ticket, and must give a verdict (ov-969).
+    Agent,
+    /// The orchestrator decides, however it chooses to review. Nothing runs; the ticket waits for its word.
+    Orchestrator { principal: String },
     /// A named person decides. Nothing runs; the ticket waits for their word.
     Person { principal: String },
 }
@@ -115,7 +119,9 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
         let stage = match gate {
             Gate::Command(i) if !t.batched() && !t.pushes() => m.stage(&id, StageKind::Check, "coding-check/v1", &i.to_string()),
             Gate::Command(_) => continue,
-            Gate::Agent { argument } => m.stage(&id, StageKind::Review(Reviewer::Dispatch), "coding-review/v1", argument),
+            Gate::Reviewer { argument } => m.stage(&id, StageKind::Review(Reviewer::Dispatch), "coding-review/v1", argument),
+            Gate::Agent => m.stage(&id, StageKind::Review(Reviewer::Agent), "coding-review/v1", "agent"),
+            Gate::Orchestrator { principal } => m.stage(&id, StageKind::Review(Reviewer::Orchestrator(principal.clone())), "coding-review/v1", &format!("orchestrator:{principal}")),
             Gate::Person { principal } => m.stage(&id, StageKind::Review(Reviewer::Person(principal.clone())), "coding-review/v1", &format!("person:{principal}")),
         };
         judged += 1;
