@@ -325,6 +325,14 @@ public struct PeopleAccess: Equatable, Sendable {
     public static let pairedOutsideConfirmMessage =
         "It wasn’t paired in Far Cooler. Once approved, it can allow your orchestrator to run the cutover."
     public static let pairedOutsideConfirmButton = "Approve Anyway"
+    /// What the first press of Approve or Allow on `device` does (ov-982).
+    /// Every approval in People goes through this, whichever list shows it:
+    /// an agent's device waits under Waiting for Approval, since its key
+    /// arrives as a proposal (ov-980).
+    public enum FirstStep: Equatable { case approve, askAgain }
+    public static func firstStep(approving device: Device) -> FirstStep {
+        device.pairedOutsideApp ? .askAgain : .approve
+    }
     /// On the owner's own device, until their Mac approves it (ov-974).
     public static let vouchHere =
         "To allow the cutover from this device, approve it once in People on your Mac. Check that it shows this code."

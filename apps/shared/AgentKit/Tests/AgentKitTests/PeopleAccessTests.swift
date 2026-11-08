@@ -195,4 +195,29 @@ struct PeopleAccessTests {
         #expect(PeopleAccess.pairedLine(for: old, runner: "Mac").contains("before Far Cooler kept a record"))
         #expect(PeopleAccess.pairedOutsideConfirmTitle(for: cli).hasSuffix("Anyway?"))
     }
+
+    /// The review's path (ov-982 B1): an agent pairs from a terminal, its key
+    /// arrives as a proposal (ov-980), and the Mac lists it under Waiting for
+    /// Approval, where one press of Allow trusted and vouched for it. Wherever
+    /// its approval is offered, the first press asks again.
+    @Test("A device paired from a terminal is asked about twice, in whichever list it waits")
+    func askedTwiceWherever() throws {
+        let members = Data(
+            #"""
+            {"members":[],"claude_account":"","you":"",
+            "device_access":[
+              {"client_id":"cli-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"418207","step_up_at":5,"step_up_vouched":false,"paired_at":1731000000000,"paired_via":"terminal","paired_by":""},
+              {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"221133","step_up_at":5,"step_up_vouched":false,"paired_at":1731000000000,"paired_via":"app","paired_by":""},
+              {"client_id":"old-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"990011","step_up_at":5,"paired_at":1731000000000,"paired_via":"terminal","paired_by":""}
+            ]}
+            """#.utf8)
+        let mac = try #require(PeopleAccess(members: members, isSocket: true))
+        let waiting = try #require(mac.shownWaiting.first { $0.id == "cli-o" }, "the agent's device waits for approval")
+        #expect(mac.mayAllow(waiting))
+        #expect(PeopleAccess.firstStep(approving: waiting) == .askAgain, "Allow asks again first")
+        let vouch = try #require(mac.toVouch.first { $0.id == "old-o" })
+        #expect(PeopleAccess.firstStep(approving: vouch) == .askAgain, "and so does Approve on the cutover list")
+        let inApp = try #require(mac.shownWaiting.first { $0.id == "pad-o" })
+        #expect(PeopleAccess.firstStep(approving: inApp) == .approve, "one paired in Far Cooler is approved at once")
+    }
 }

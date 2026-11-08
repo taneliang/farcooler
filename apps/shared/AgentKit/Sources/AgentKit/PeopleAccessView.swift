@@ -81,7 +81,7 @@ public struct PeopleAccessSections: View {
             }
             if !access.shownWaiting.isEmpty {
                 Section {
-                    ForEach(access.shownWaiting) { WaitingRow(device: $0, access: access, actions: actions) }
+                    ForEach(access.shownWaiting) { WaitingRow(device: $0, access: access, runner: access.isSocket ? "this Mac" : runner, actions: actions) }
                 } header: {
                     Text(PeopleAccess.waitingHeader).accessibilityIdentifier("people-waiting")
                 } footer: {
@@ -239,33 +239,99 @@ private struct DeviceRow: View {
 private struct WaitingRow: View {
     let device: PeopleAccess.Device
     let access: PeopleAccess
+    let runner: String
     let actions: PeopleAccessActions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(device.name).lineLimit(2).accessibilityIdentifier("waiting-\(device.id)")
                     if !device.personName.isEmpty {
                         Text(device.personName).font(.caption).foregroundStyle(.secondary)
                             .accessibilityIdentifier("waiting-person-\(device.id)")
                     }
+                    PairedLine(device: device, runner: runner, id: "waiting")
                 }
                 Spacer(minLength: 8)
                 Text(PeopleAccess.spoken(device.code))
                     .font(.title3.monospacedDigit().weight(.semibold))
+                    .fixedSize()
                     .accessibilityLabel("Code \(device.code.map(String.init).joined(separator: " "))")
                     .accessibilityIdentifier("waiting-code-\(device.id)")
             }
+            PairedOutsideFlag(device: device, runner: runner, id: "waiting")
             Text(PeopleAccess.approvalPrompt(for: device))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let approve = actions.approve, access.mayAllow(device) {
-                Button("Allow") { Task { await approve(device) } }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("waiting-allow-\(device.id)")
+                ApproveButton(title: "Allow", device: device, approve: approve, id: "waiting-allow")
             }
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// How and when a device was paired, under its name (ov-982).
+private struct PairedLine: View {
+    let device: PeopleAccess.Device
+    let runner: String
+    let id: String
+
+    var body: some View {
+        Text(PeopleAccess.pairedLine(for: device, runner: runner))
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("\(id)-paired-\(device.id)")
+    }
+}
+
+/// The flag on a device paired outside Far Cooler (ov-982).
+private struct PairedOutsideFlag: View {
+    let device: PeopleAccess.Device
+    let runner: String
+    let id: String
+
+    var body: some View {
+        if device.pairedOutsideApp {
+            VStack(alignment: .leading, spacing: 2) {
+                Label(PeopleAccess.pairedOutsideBadge, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                Text(PeopleAccess.pairedOutsideWarning(runner: runner))
+                    .font(.caption).fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("\(id)-outside-\(device.id)")
+        }
+    }
+}
+
+/// Approve or Allow, for every list in People: its first press does what
+/// `PeopleAccess.firstStep(approving:)` says, so a device paired outside
+/// Far Cooler is asked about again wherever it waits (ov-982).
+private struct ApproveButton: View {
+    let title: String
+    let device: PeopleAccess.Device
+    let approve: (PeopleAccess.Device) async -> Void
+    let id: String
+    @State private var confirming = false
+
+    var body: some View {
+        Button(title) {
+            switch PeopleAccess.firstStep(approving: device) {
+            case .approve: Task { await approve(device) }
+            case .askAgain: confirming = true
+            }
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("\(id)-\(device.id)")
+        .confirmationDialog(
+            PeopleAccess.pairedOutsideConfirmTitle(for: device), isPresented: $confirming, titleVisibility: .visible
+        ) {
+            Button(PeopleAccess.pairedOutsideConfirmButton, role: .destructive) { Task { await approve(device) } }
+                .accessibilityIdentifier("\(id)-anyway-\(device.id)")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(PeopleAccess.pairedOutsideConfirmMessage)
+        }
     }
 }
 
@@ -357,16 +423,13 @@ private struct ThisDeviceAdminSection: View {
 private struct VouchRow: View {
     let device: PeopleAccess.Device
     let actions: PeopleAccessActions
-    @State private var confirming = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(device.name).lineLimit(2).accessibilityIdentifier("vouch-\(device.id)")
-                    Text(PeopleAccess.pairedLine(for: device))
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("vouch-paired-\(device.id)")
+                    PairedLine(device: device, runner: "this Mac", id: "vouch")
                 }
                 Spacer(minLength: 8)
                 Text(PeopleAccess.spoken(device.code))
@@ -375,33 +438,11 @@ private struct VouchRow: View {
                     .accessibilityLabel("Code \(device.code.map(String.init).joined(separator: " "))")
                     .accessibilityIdentifier("vouch-code-\(device.id)")
             }
-            if device.pairedOutsideApp {
-                VStack(alignment: .leading, spacing: 2) {
-                    Label(PeopleAccess.pairedOutsideBadge, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
-                    Text(PeopleAccess.pairedOutsideWarning())
-                        .font(.caption).fixedSize(horizontal: false, vertical: true)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("vouch-outside-\(device.id)")
-            }
+            PairedOutsideFlag(device: device, runner: "this Mac", id: "vouch")
             Text(PeopleAccess.vouchPrompt(for: device))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let approve = actions.approve {
-                Button("Approve") {
-                    if device.pairedOutsideApp { confirming = true } else { Task { await approve(device) } }
-                }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("vouch-approve-\(device.id)")
-                .confirmationDialog(
-                    PeopleAccess.pairedOutsideConfirmTitle(for: device), isPresented: $confirming, titleVisibility: .visible
-                ) {
-                    Button(PeopleAccess.pairedOutsideConfirmButton, role: .destructive) { Task { await approve(device) } }
-                        .accessibilityIdentifier("vouch-approve-anyway-\(device.id)")
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text(PeopleAccess.pairedOutsideConfirmMessage)
-                }
+                ApproveButton(title: "Approve", device: device, approve: approve, id: "vouch-approve")
             }
         }
         .accessibilityElement(children: .contain)
