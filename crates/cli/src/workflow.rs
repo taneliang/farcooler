@@ -78,7 +78,12 @@ pub enum WorkflowCmd {
     Start { workspace:Uuid,item:String,#[arg(long)] start_pin:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         /// A build step's model, as `<step>=<model>` (`build=codex:gpt-5.5`), from the ones the workflow lists. Once per
         /// step; a step left out runs with its default.
-        #[arg(long="model",value_name="STEP=MODEL")] models:Vec<String>,#[command(flatten)] identity:Identity },
+        #[arg(long="model",value_name="STEP=MODEL")] models:Vec<String>,
+        /// The worktree the run makes and works in, which the app lists, from main as it is at Start. With --branch.
+        #[arg(long,requires="branch")] worktree:Option<String>,
+        /// The new branch for --worktree. One that exists, here or on a remote, is refused.
+        #[arg(long,requires="worktree")] branch:Option<String>,
+        #[command(flatten)] identity:Identity },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -103,7 +108,8 @@ impl WorkflowCmd {
             Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
             Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation(),item,column }),
             Self::Move { workspace,item,to,run,pin,identity } => (workspace,Action::Move { mutation:identity.mutation(),item,run,pin,to }),
-            Self::Start { workspace,item,start_pin,run,pin,models,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,worktree:None }),
+            Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,
+                worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch }) }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
         })
     }
@@ -191,6 +197,17 @@ mod tests {
                 assert!(matches!(action,Action::Review{reason:Some(r),passed:false,mutation,..} if r==reason && mutation.revision==u64::MAX-1 && mutation.epoch==u64::MAX && mutation.sequence==u64::MAX));
             } else {assert!(result.is_err());}
         }
+    }
+    /// ov-967: `--worktree` and `--branch` name the worktree the run makes, together or not at all.
+    #[test]
+    fn workflow_start_names_its_worktree_and_branch_together() {
+        let args=["farcooler","workflow","start","00000000-0000-0000-0000-000000000000","ov-7","--start-pin","p","--run","run","--pin","pin",
+            "--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        let parsed=|extra:&[&str]| crate::Cli::try_parse_from(args.iter().chain(extra));
+        let crate::Command::Workflow(cmd)=parsed(&["--worktree","phones","--branch","e-liang/phones"]).unwrap().command else {panic!()};
+        let Action::Start{worktree,..}=cmd.action().unwrap().1 else {panic!()};
+        assert_eq!(worktree,Some(farcooler_protocol::workflow_commands::NamedTree{name:"phones".into(),branch:"e-liang/phones".into()}));
+        assert!(parsed(&["--worktree","phones"]).is_err() && parsed(&["--branch","b"]).is_err());
     }
     /// ov-966: `--model <step>=<model>` picks a step's model at Start, once per step.
     #[test]

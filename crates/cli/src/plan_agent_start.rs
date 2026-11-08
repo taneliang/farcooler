@@ -7,7 +7,8 @@
 
 use farcooler_protocol::capability;
 use farcooler_protocol::v1::{self as pb, result};
-use farcooler_protocol::workflow_commands::{Action, Mutation};
+use farcooler_protocol::workflow_commands::{Action, Mutation, NamedTree};
+use farcooler_transport::ClientError;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -125,6 +126,17 @@ fn refusal_words(refusal: &str, key: &str) -> String {
     })
 }
 
+/// A Start the runner refused because the worktree it names is taken (ov-967), said as that.
+fn taken(error: &ClientError, key: &str, worktree: Option<&NamedTree>) -> Option<Failed> {
+    let (ClientError::Daemon { code, .. }, Some(tree)) = (error, worktree) else { return None };
+    match pb::ErrorCode::try_from(*code).ok()? {
+        pb::ErrorCode::BranchExists => Some(format!("{key} wasn't started: the branch {} already exists. Name a new one with --branch.", tree.branch).into()),
+        pb::ErrorCode::WorktreeExists => Some(format!("{key} wasn't started: a worktree named {} already exists. Name another with --new.", tree.name).into()),
+        pb::ErrorCode::InvalidArgument => Some(format!("{key} wasn't started: the runner won't take {} as a worktree name or {} as a branch.", tree.name, tree.branch).into()),
+        _ => None,
+    }
+}
+
 /// What the person asked of `agent dispatch` that the engine reads.
 pub(super) struct Asked<'a> {
     pub builder: bool,
@@ -133,6 +145,8 @@ pub(super) struct Asked<'a> {
     pub dropped: &'a [&'a str],
     /// `--harness`, when given: the build step's model (ov-966).
     pub harness: Option<&'a str>,
+    /// `--new` and `--branch`: the worktree the run makes, which the app lists (ov-967).
+    pub worktree: Option<&'a NamedTree>,
 }
 
 /// The model picks a Start sends for `--harness`: the one build step that lists models, if it lists this one.
@@ -158,7 +172,7 @@ pub(super) async fn through_engine<L: DispatchLink>(
     asked: Asked<'_>,
     json: bool,
 ) -> Result<Engine, Failed> {
-    let Asked { builder, role, dropped, harness } = asked;
+    let Asked { builder, role, dropped, harness, worktree } = asked;
     let pane = |unanswered| Ok(Engine::Pane { unanswered });
     if !link.capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return pane(false); }
     let Some(first) = tickets.first() else { return pane(false) };
@@ -187,6 +201,9 @@ pub(super) async fn through_engine<L: DispatchLink>(
         return Err(format!("The engine starts a tracked ticket's agent itself, in a worktree of its own, so {flags} would be ignored. Leave {them} out and dispatch again.").into());
     }
     let models = picks(&seen, harness)?;
+    if worktree.is_some() && tickets.len() > 1 {
+        return Err("Each run makes its own worktree, so --new and --branch name one ticket's. Dispatch them one at a time, each with its own.".into());
+    }
     let mut started = Vec::new();
     for ticket in tickets {
         // Each start moves the revision, so every ticket reads the state again. A start the board moved
@@ -200,10 +217,11 @@ pub(super) async fn through_engine<L: DispatchLink>(
             };
             let action = Action::Start {
                 mutation: Mutation { id: format!("dispatch-{}-{}", ticket.key, seen.revision), revision: seen.revision, epoch: seen.epoch, sequence: now_millis() },
-                item: ticket.key.clone(), run, pin, start_pin, models: models.clone(), worktree: None,
+                item: ticket.key.clone(), run, pin, start_pin, models: models.clone(), worktree: worktree.cloned(),
             };
             let request = crate::workflow::request(workspace, &action).map_err(|_| unreadable())?;
-            let reply = link.call(request).await.map_err(|_| Failed::from(format!("{} couldn't be started: the engine didn't answer.", ticket.key)))?;
+            let reply = link.call(request).await.map_err(|e| taken(&e, &ticket.key, worktree)
+                .unwrap_or_else(|| Failed::from(format!("{} couldn't be started: the engine didn't answer.", ticket.key))))?;
             let Some(result::Value::WorkflowReply(reply)) = reply.value else { return Err(unreadable()) };
             let value: Value = serde_json::from_str(&reply.json).map_err(|_| unreadable())?;
             let Some(refusal) = value.pointer("/receipt/result/Err") else { break };
@@ -215,6 +233,11 @@ pub(super) async fn through_engine<L: DispatchLink>(
         started.push(ticket.key.clone());
     }
     let list = started.join(", then ");
+    if let (Some(tree), false) = (worktree, json) {
+        return Ok(Engine::Started(format!(
+            "The engine is starting {list} in the worktree {}, on the branch {}. The run makes the worktree, which the app lists, from main as it is now, and starts its own agent under the board's published workflow, so no pane was opened here.\nWatch it with `farcooler workflow get {workspace}`.",
+            tree.name, tree.branch)));
+    }
     if json {
         return Ok(Engine::Started(json!({ "through": "engine", "role": "builder", "tickets": started }).to_string()));
     }

@@ -40,13 +40,15 @@ struct Runner {
     refuse_start: Option<&'static str>,
     /// `workflow get` fails, as for a seat the engine turns away.
     engine_unanswered: bool,
+    /// `workflow.start` fails with this code, as the runner refuses a taken branch or name (ov-967).
+    start_error: Option<pb::ErrorCode>,
     /// `terminal.create` fails, as it does on a card the engine holds.
     refuse_pane: bool,
 }
 
 fn runner() -> Runner {
     let caps = ["workstreams", "tasks", capability::BOARD_PLAN, capability::BOARD_LINE, capability::TERMINAL_TASK];
-    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None, engine: None, refuse_start: None, engine_unanswered: false, refuse_pane: false }
+    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None, engine: None, refuse_start: None, engine_unanswered: false, start_error: None, refuse_pane: false }
 }
 
 fn items() -> Vec<pb::Task> {
@@ -70,6 +72,9 @@ impl DispatchLink for Runner {
         };
         if (method == "workflow.get" && self.engine_unanswered) || (method == "terminal.create" && self.refuse_pane) {
             return Err(ClientError::Closed);
+        }
+        if let Some(code) = self.start_error.filter(|_| method == "workflow.start") {
+            return Err(ClientError::Daemon { code: code as i32, retryable: false, message: String::new(), what: String::new() });
         }
         let value = match (method.as_str(), payload) {
             ("workflow.get", _) => result::Value::WorkflowReply(pb::WorkflowReply {
@@ -344,8 +349,8 @@ async fn a_flag_the_engine_would_drop_is_named() {
     assert!(said.ends_with("Leave them out and dispatch again."), "{said}");
     assert!(starts(&link).is_empty(), "{:?}", link.methods());
     let mut link = with_engine(&held);
-    let said = say(&mut link, "--role builder --ticket ov-2 --new lane --branch b").await.unwrap_err().to_string();
-    assert!(said.contains("--new and --branch would be ignored"), "{said}");
+    let said = say(&mut link, "--role builder --ticket ov-2 --new lane --branch b --base main").await.unwrap_err().to_string();
+    assert!(said.contains("so --base would be ignored. Leave it out"), "{said}");
     // Untracked tickets keep every flag, and a pane still needs its worktree.
     let mut link = with_engine(&[("ov-9", "ticket/v1", "WaitingApproval")]);
     assert!(say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string().contains("Name a worktree"));
@@ -446,5 +451,35 @@ async fn a_harness_the_workflow_cannot_take_is_refused_with_what_to_do() {
         let said = say(&mut link, &format!("--role builder --ticket ov-2 {flag}")).await.unwrap_err().to_string();
         assert_eq!(said, words);
         assert!(starts(&link).is_empty(), "{:?}", link.methods());
+    }
+}
+
+/// ov-967: `--new` and `--branch` on a tracked ticket name the worktree its run makes, which the app lists.
+#[tokio::test]
+async fn new_and_branch_on_a_tracked_ticket_name_its_runs_worktree() {
+    let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval")]);
+    let said = say(&mut link, "--role builder --ticket ov-2 --new phones --branch e-liang/phones").await.unwrap();
+    assert_eq!(starts(&link)[0]["worktree"], json!({"name": "phones", "branch": "e-liang/phones"}));
+    assert!(said.contains("in the worktree phones, on the branch e-liang/phones"), "{said}");
+    for m in ["worktree.create", "terminal.create"] { assert!(!link.methods().contains(&m), "the run makes it: {:?}", link.methods()); }
+}
+
+/// Each run makes its own worktree, so one name can't cover several tickets; and a taken branch or name is
+/// said as itself, not as an engine that didn't answer.
+#[tokio::test]
+async fn a_named_worktree_is_one_per_ticket_and_a_taken_one_is_said() {
+    let held = [("ov-2", "ticket/v1", "WaitingApproval"), ("ov-3", "ticket/v1", "WaitingApproval")];
+    let mut link = with_engine(&held);
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --new phones --branch b").await.unwrap_err().to_string();
+    assert_eq!(said, "Each run makes its own worktree, so --new and --branch name one ticket's. Dispatch them one at a time, each with its own.");
+    assert!(starts(&link).is_empty());
+    for (code, words) in [
+        (pb::ErrorCode::BranchExists, "ov-2 wasn't started: the branch b already exists. Name a new one with --branch."),
+        (pb::ErrorCode::WorktreeExists, "ov-2 wasn't started: a worktree named phones already exists. Name another with --new."),
+    ] {
+        let mut link = with_engine(&held[..1]);
+        link.start_error = Some(code);
+        let said = say(&mut link, "--role builder --ticket ov-2 --new phones --branch b").await.unwrap_err().to_string();
+        assert_eq!(said, words);
     }
 }

@@ -166,7 +166,7 @@ pub enum Command {
         dependencies: BTreeSet<String>, initial_candidate: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")] models: BTreeMap<String, String>,
         /// The worktree the run makes and works in (ov-967). `None` keeps the runtime's private tree.
-        #[serde(default, skip_serializing_if = "Option::is_none")] tree: Option<RunTree> },
+        #[serde(default, skip_serializing_if = "Option::is_none")] tree: Option<Box<RunTree>> },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

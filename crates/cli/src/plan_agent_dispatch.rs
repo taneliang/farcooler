@@ -83,13 +83,14 @@ pub(super) async fn dispatch<L: DispatchLink>(
     let Some((first, rest)) = tickets.split_first() else { return Err("Name a ticket with --ticket.".into()) };
     // A ticket the engine tracks is started by the engine (ov-962); only the rest open a pane.
     let role_name = super::role_word(args.role.wire() as i32);
-    // The flags a start can't honor, named if the tickets are tracked (`--base` counts when changed).
+    // The flags a start can't honor, named if the tickets are tracked (`--base` counts when changed): a run
+    // makes its own worktree from main as it is at Start, so it can't take one that exists (ov-967).
     let dropped: Vec<&str> = [
-        ("--worktree", args.worktree.is_some()), ("--new", args.new.is_some()), ("--branch", args.branch.is_some()),
-        ("--base", args.base != "HEAD"), ("--title", args.title.is_some()), ("--again", args.again),
+        ("--worktree", args.worktree.is_some()), ("--base", args.base != "HEAD"), ("--title", args.title.is_some()), ("--again", args.again),
     ].into_iter().filter(|(_, given)| *given).map(|(flag, _)| flag).collect();
+    let named = args.new.clone().zip(args.branch.clone()).map(|(name, branch)| farcooler_protocol::workflow_commands::NamedTree { name, branch });
     let asked = super::start::Asked { builder: args.role.wire() == pb::AgentRole::Builder, role: &role_name.to_lowercase(), dropped: &dropped,
-        harness: args.harness.as_deref() };
+        harness: args.harness.as_deref(), worktree: named.as_ref() };
     let unanswered = match super::start::through_engine(link, &tickets, asked, json).await? {
         super::start::Engine::Started(said) => return Ok(said),
         super::start::Engine::Pane { unanswered } => unanswered,

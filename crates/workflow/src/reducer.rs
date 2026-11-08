@@ -282,7 +282,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     item.candidate = initial_candidate.clone(); item.stage = 0; item.iteration = 0; item.attempt = 1;
                     item.phase = Phase::Blocked; item.run = String::new(); item.pending = None; item.last_evidence = None;
                     item.stopping = None; item.rework_history = Vec::new(); item.back_edges = BTreeMap::new(); item.retries = 0;
-                    item.models = picked; item.tree = tree.clone();
+                    item.models = picked; item.tree = tree.as_deref().cloned();
                 }
                 Command::Enqueue { .. } | Command::Advance => unreachable!(),
             }
