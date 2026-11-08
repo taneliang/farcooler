@@ -1,5 +1,7 @@
+import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -27,7 +29,7 @@ struct AgentTerminalWatchSpecimenTests {
             window.isReleasedWhenClosed = false
             window.appearance = NSAppearance(named: .darkAqua)
             window.contentView = NSHostingView(rootView: sheet)
-            window.orderFrontRegardless()
+            TestWindow.show(window)
             let until = Date().addingTimeInterval(3)
             while Date() < until { try await Task.sleep(for: .milliseconds(50)) }
             // A real screenshot of the window: the terminal draws on the GPU, which an offscreen

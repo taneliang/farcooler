@@ -2054,8 +2054,7 @@ pub struct Service {
     ///
     /// Never pruned. A `Mutex<()>` is two words, repositories are counted in
     /// tens, and a registry that removes entries has to prove nobody is waiting
-    /// on the one it is removing.
-    /// Shared with the workflow runtime, which makes a run's named worktree under the same lock (ov-967).
+    /// on the one it is removing. Shared with the workflow runtime's named worktrees (ov-967).
     repo_locks: crate::workflow_runtime::RepoLocks,
     /// Each followed agent pane's bracketed-paste record, for a tmux too old
     /// to report it (`paste_mode`).
@@ -2581,10 +2580,7 @@ impl Service {
     }
 
     /// What the workflow runtime needs to make a run's worktree one the app lists (ov-967).
-    pub(crate) fn worktree_host(&self) -> Result<crate::workflow_runtime::WorktreeHost> {
-        Ok(crate::workflow_runtime::WorktreeHost { dir: self.worktrees_dir()?, install_id: self.install_id.clone(),
-            locks: Arc::clone(&self.repo_locks) })
-    }
+    pub(crate) fn worktree_host(&self) -> Result<crate::workflow_runtime::WorktreeHost> { Ok(crate::workflow_runtime::WorktreeHost { dir: self.worktrees_dir()?, install_id: self.install_id.clone(), locks: self.repo_locks.clone() }) }
 
     /// Where a worktree of this name goes, once it is known nothing is there.
     ///

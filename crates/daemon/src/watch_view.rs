@@ -53,3 +53,33 @@ pub fn item_of(payload: &farcooler_protocol::v1::WorkflowCommand) -> Option<Stri
 #[cfg(test)]
 #[path = "watch_view_tests.rs"]
 mod tests;
+
+/// Attach to the agent `payload` names, read-only: the owner's alone to ask. Returns the task that streams the
+/// pane to `push` and the reply that announces the pane's size ahead of its picture.
+pub(crate) fn start(
+    push: farcooler_transport::PushSender, caller: crate::people::Person, workspace: uuid::Uuid,
+    payload: &farcooler_protocol::v1::WorkflowCommand,
+) -> crate::Result<(tokio::task::JoinHandle<()>, farcooler_protocol::v1::TerminalAttachResult)> {
+    use crate::DomainError;
+    if caller != crate::people::Person::Owner {
+        return Err(DomainError::ScopeDenied { needed: "owner" });
+    }
+    let item = item_of(payload).ok_or(DomainError::NotFound)?;
+    let (runtime, pane) = lookup(&workspace.to_string(), &item).ok_or(DomainError::NotFound)?;
+    let (columns, rows) = (pane.columns, pane.rows);
+    let sink = crate::resync::TerminalSink::new(push.clone(), pane.terminal_id, 0);
+    let ending = crate::resync::TerminalSink::new(push, pane.terminal_id, 0);
+    let task = tokio::spawn(async move {
+        let (watched, shown) = (runtime.clone(), pane.clone());
+        let _ = runtime.attach(pane, sink).await;
+        // Say "finished" only when tmux confirms the pane is gone. An attach that failed
+        // while the agent still runs must not tell the owner it ended.
+        if crate::stream_end::pane_is_over(&watched, &shown).await {
+            ending.pane_gone();
+        }
+    });
+    let reply = farcooler_protocol::v1::TerminalAttachResult {
+        epoch: 0, next_sequence: 0, oldest_sequence: 0, columns, rows, resume_token: String::new(),
+    };
+    Ok((task, reply))
+}

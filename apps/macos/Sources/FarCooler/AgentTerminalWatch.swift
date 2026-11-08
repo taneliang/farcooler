@@ -1,3 +1,4 @@
+import AgentKit
 import AppKit
 import SwiftUI
 
@@ -35,17 +36,17 @@ struct AgentTerminalWatch: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Watching \(item)").font(.headline)
-                Text("Read-only").font(.caption).foregroundStyle(.secondary)
+                Text("Read-only").font(.caption).foregroundStyle(.quietInk)
                 if gotBytes, let done = Self.status(gotBytes: gotBytes, exitStatus: exitStatus) {
-                    Text(done).font(.caption).foregroundStyle(.secondary)
+                    Text(done).font(.caption).foregroundStyle(.quietInk)
                 }
                 Spacer()
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             .padding(10)
-            Divider()
+            Color.clear.frame(height: 0).separator(.split, edge: .bottom)
             if binary == nil {
-                Text("This runner isn’t reachable right now.").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text("This runner isn’t reachable right now.").foregroundStyle(.quietInk).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 AgentTerminalCanvas(
                     item: item, command: AgentTerminalCanvas.command(workspace: workspace, item: item),
@@ -54,7 +55,7 @@ struct AgentTerminalWatch: View {
                     onBytes: { gotBytes = true }, onExit: { exitStatus = $0 })
                     .overlay {
                         if let why = Self.status(gotBytes: gotBytes, exitStatus: exitStatus), !gotBytes {
-                            Text(why).foregroundStyle(.secondary)
+                            Text(why).foregroundStyle(.quietInk)
                         }
                     }
                     .id("\(workspace)/\(item)#\(linkGeneration)")

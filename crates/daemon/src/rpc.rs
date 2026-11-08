@@ -57,8 +57,8 @@ impl Drop for Attachment {
 
 pub struct Rpc {
     workflow: Option<crate::workflow_runtime::CommandHandle>,
-    service: Arc<Service>,
-    watcher: Arc<crate::watch::Watcher>,
+    pub(crate) service: Arc<Service>,
+    pub(crate) watcher: Arc<crate::watch::Watcher>,
     /// Where `terminal.attach` sends this connection's terminal bytes.
     ///
     /// Per connection, not per runner: an attachment is the answer to one
@@ -139,12 +139,9 @@ impl Rpc {
         crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane)
     }
 
-    pub(crate) fn service(&self) -> &Arc<Service> { &self.service }
-    pub(crate) fn watcher(&self) -> &Arc<crate::watch::Watcher> { &self.watcher }
-    /// This connection's caller, admitted to `workspace` as the workflow commands admit them.
-    pub(crate) async fn admit(&self, workspace: Uuid) -> Result<crate::workflow_runtime::Admission> {
-        crate::workflow_runtime::Admission::capture(self.service.clone(), self.peer.clone(), self.session.clone(), self.caller_pid, self.caller_pane.clone(), workspace).await
-    }
+    /// This connection's caller, admitted to a workspace as the workflow commands admit them.
+    pub(crate) async fn admit(&self, ws: Uuid) -> Result<crate::workflow_runtime::Admission> { crate::workflow_runtime::Admission::capture(
+        self.service.clone(), self.peer.clone(), self.session.clone(), self.caller_pid, self.caller_pane.clone(), ws).await }
 }
 
 /// One `Rpc` per request, over one shared `Service`, for one connection.
@@ -787,13 +784,9 @@ impl Rpc {
                 let action: Action = farcooler_protocol::workflow_commands::parse(&p.json).map_err(|_| DomainError::NotFound)?;
                 if action.method() != req.method { return Err(DomainError::NotFound); }
                 let handle = self.workflow.as_ref().ok_or(DomainError::CapabilityUnsupported { needed: "workflow execution service" })?;
-                let admission = crate::workflow_runtime::Admission::capture(
-                    svc.clone(), self.peer.clone(), self.session.clone(), self.caller_pid,
-                    self.caller_pane.clone(), workspace,
-                ).await?;
+                let admission = self.admit(workspace).await?;
                 admission.permits(&action)?;
-                // A proposal is filed and asked of a person here; it never reaches the engine (ov-971).
-                if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }
+                if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)
                 let value = handle.wire_command(admission, action).await
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:value.to_string() }))
@@ -804,30 +797,12 @@ impl Rpc {
             "workflow.watch" => {
                 let workspace = Self::target(&req)?;
                 svc.store.get_workspace(workspace)?;
-                if self.caller()? != crate::people::Person::Owner {
-                    return Err(DomainError::ScopeDenied { needed: "owner" });
-                }
                 let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
-                let item = crate::watch_view::item_of(&p).ok_or(DomainError::NotFound)?;
-                let (runtime, pane) = crate::watch_view::lookup(&workspace.to_string(), &item).ok_or(DomainError::NotFound)?;
-                let (columns, rows) = (pane.columns, pane.rows);
-                let sink = crate::resync::TerminalSink::new(self.push.clone(), pane.terminal_id, 0);
-                let ending = crate::resync::TerminalSink::new(self.push.clone(), pane.terminal_id, 0);
-                let task = tokio::spawn(async move {
-                    let (watched, shown) = (runtime.clone(), pane.clone());
-                    let _ = runtime.attach(pane, sink).await;
-                    // Say "finished" only when tmux confirms the pane is gone. An attach that failed
-                    // while the agent still runs must not tell the owner it ended.
-                    if crate::stream_end::pane_is_over(&watched, &shown).await {
-                        ending.pane_gone();
-                    }
-                });
+                let (task, reply) = crate::watch_view::start(self.push.clone(), self.caller()?, workspace, &p)?;
                 if let Ok(mut held) = self.attachment.lock() {
                     held.replace(Attachment(task));
                 }
-                Ok(result::Value::TerminalAttach(farcooler_protocol::v1::TerminalAttachResult {
-                    epoch: 0, next_sequence: 0, oldest_sequence: 0, columns, rows, resume_token: String::new(),
-                }))
+                Ok(result::Value::TerminalAttach(reply))
             }
             "workflow.cutover" => {
                 use farcooler_protocol::workflow_cutover::{self, Cutover};
@@ -839,8 +814,7 @@ impl Rpc {
                 // drain and stop so that the next start can do the rest.
                 let value = match &op {
                     Cutover::Prepare { attempt } => {
-                        let admission = crate::workflow_runtime::Admission::capture(svc.clone(), self.peer.clone(), self.session.clone(),
-                            self.caller_pid, self.caller_pane.clone(), crate::workflow_runtime::Admission::HOST_WIDE).await?;
+                        let admission = self.admit(crate::workflow_runtime::Admission::HOST_WIDE).await?;
                         admission.require_person()?;
                         let held = crate::cutover_admin::hold(svc, attempt, || admission.recheck_now()
                             .map_err(|_| crate::cutover_admin::Refused("the caller lost access during the drain".into()))).await;
@@ -1998,10 +1972,8 @@ impl Rpc {
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
             | "task.set_status" | "task.block" | "task.set_wait" | "task.set_line"
             | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), req).await,
-
             // A note is a board route; a person's answer on a workflow draft's card is also its approval (ov-971).
             "task.note" => crate::workflow_drafts::note(self, crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), req).await?).await,
-
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.events" | "board_theme.create" | "board_theme.update" | "board_theme.move"
             | "board_theme.cards" | "line.set" | "line.order" | "agent.record" | "agent.work" | "agent.end"

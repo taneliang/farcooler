@@ -262,7 +262,7 @@ pub(crate) async fn note(rpc: &crate::rpc::Rpc, value: farcooler_protocol::v1::r
 /// the card out of Needs You.
 pub(crate) async fn after_note(rpc: &crate::rpc::Rpc, note: &pb::TaskNote) {
     if note.kind != pb::TaskNoteKind::Answer as i32 || note.actor != "user" { return; }
-    let svc = rpc.service();
+    let svc = &rpc.service;
     let (Ok(task), Ok(answer)) = (crate::task_ops::required_id(&note.task_id), crate::task_ops::required_id(&note.id)) else { return };
     let Some(draft) = for_task(svc, task).filter(|d| d.state == State::Pending) else { return };
     // The question it follows is the daemon's, and the draft is what that question was asked with.
@@ -272,7 +272,7 @@ pub(crate) async fn after_note(rpc: &crate::rpc::Rpc, note: &pb::TaskNote) {
     if asked_with != Some(draft.digest.as_str()) || content_digest(&draft.definition, &draft.adapter, &draft.summary) != draft.digest {
         // The draft isn't what the card was asked with: something edited it after. It can never be approved.
         if settle(svc, &draft.id, State::Pending, State::Failed, Some(answer)).unwrap_or(false) {
-            close_card(svc, rpc.watcher(), task, TaskStatus::Cancelled, "Not published. The draft changed after you were asked, so it isn’t what you read. Ask the orchestrator to draft it again.");
+            close_card(svc, &rpc.watcher, task, TaskStatus::Cancelled, "Not published. The draft changed after you were asked, so it isn’t what you read. Ask the orchestrator to draft it again.");
         }
         return;
     }
@@ -280,33 +280,33 @@ pub(crate) async fn after_note(rpc: &crate::rpc::Rpc, note: &pb::TaskNote) {
     let owner = matches!(rpc.caller(), Ok(crate::people::Person::Owner));
     let words = note.body.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     if owner && words == DECLINE {
-        if settle(svc, &draft.id, State::Pending, State::Declined, Some(answer)).unwrap_or(false) { close_card(svc, rpc.watcher(), task, TaskStatus::Cancelled, "Declined. The workflow is unchanged."); }
+        if settle(svc, &draft.id, State::Pending, State::Declined, Some(answer)).unwrap_or(false) { close_card(svc, &rpc.watcher, task, TaskStatus::Cancelled, "Declined. The workflow is unchanged."); }
     } else if owner && words == format!("{APPROVE} {}", code(&draft.digest)) {
         approve(rpc, draft, task, answer).await;
     } else {
         let why = if owner { format!("Nothing was published. To publish this change, read it on the card and answer with the words at its end. To leave things as they are, answer `{DECLINE}`.") }
             else { "Nothing was published. Only the owner can approve or decline a workflow change.".to_string() };
         let _ = svc.store.add_note(task, NoteKind::Finding, Actor::Manager, &why, serde_json::json!({}));
-        if ask(svc, &draft, task).is_ok() && let Ok(card) = svc.store.get_task(task) { rpc.watcher().announce_task_changed(&card, None, Actor::Manager); }
-        rpc.watcher().announce_needs_you();
+        if ask(svc, &draft, task).is_ok() && let Ok(card) = svc.store.get_task(task) { rpc.watcher.announce_task_changed(&card, None, Actor::Manager); }
+        rpc.watcher.announce_needs_you();
     }
 }
 
 async fn approve(rpc: &crate::rpc::Rpc, draft: Draft, card: Uuid, answer: Uuid) {
-    let svc = rpc.service();
+    let svc = &rpc.service;
     let ws = draft.workspace.to_string();
     let live = svc.store.workflow_configuration(&ws).ok().flatten().map(|c| c.pin);
     if live != draft.expected_pin {
         if settle(svc, &draft.id, State::Pending, State::OutOfDate, Some(answer)).unwrap_or(false) {
-            close_card(svc, rpc.watcher(), card, TaskStatus::Cancelled, "Not published. The workflow changed after this was drafted. Ask the orchestrator to draft it again.");
+            close_card(svc, &rpc.watcher, card, TaskStatus::Cancelled, "Not published. The workflow changed after this was drafted. Ask the orchestrator to draft it again.");
         }
         return;
     }
     // Claimed under the lock, so a proposal replacing it now can't, and a second answer can't publish it twice.
     if !settle(svc, &draft.id, State::Pending, State::Publishing, Some(answer)).unwrap_or(false) { return; }
     match publish(rpc, &draft).await {
-        Ok(()) => { if settle(svc, &draft.id, State::Publishing, State::Approved, None).unwrap_or(false) { close_card(svc, rpc.watcher(), card, TaskStatus::Done, "Approved and published."); } }
-        Err(why) => { if settle(svc, &draft.id, State::Publishing, State::Failed, None).unwrap_or(false) { close_card(svc, rpc.watcher(), card, TaskStatus::Cancelled, &format!("Not published. {why}")); } }
+        Ok(()) => { if settle(svc, &draft.id, State::Publishing, State::Approved, None).unwrap_or(false) { close_card(svc, &rpc.watcher, card, TaskStatus::Done, "Approved and published."); } }
+        Err(why) => { if settle(svc, &draft.id, State::Publishing, State::Failed, None).unwrap_or(false) { close_card(svc, &rpc.watcher, card, TaskStatus::Cancelled, &format!("Not published. {why}")); } }
     }
 }
 
@@ -314,7 +314,7 @@ async fn approve(rpc: &crate::rpc::Rpc, draft: Draft, card: Uuid, answer: Uuid) 
 /// so a retry is the same receipt.
 async fn publish(rpc: &crate::rpc::Rpc, draft: &Draft) -> std::result::Result<(), String> {
     fn refused<E>(_: E) -> String { "Far Cooler couldn’t publish it just now.".to_string() }
-    let handle = rpc.service().workflow_handle().ok_or("The workflow engine isn’t running.".to_string())?;
+    let handle = rpc.service.workflow_handle().ok_or("The workflow engine isn’t running.".to_string())?;
     let admit = || rpc.admit(draft.workspace);
     let state = handle.wire_command(admit().await.map_err(refused)?, Action::Get).await.map_err(refused)?;
     let (revision, epoch) = (state.pointer("/state/revision").and_then(|v| v.as_u64()).unwrap_or(0), state.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1));
