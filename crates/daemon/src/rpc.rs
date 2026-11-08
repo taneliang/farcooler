@@ -135,7 +135,7 @@ impl Rpc {
 
     /// Whose this call is (`caller_person`, ov-747): its device's person, or
     /// on the local socket its pane's, walked once for the connection.
-    fn caller(&self) -> Result<crate::people::Person> {
+    pub(crate) fn caller(&self) -> Result<crate::people::Person> {
         crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane)
     }
 

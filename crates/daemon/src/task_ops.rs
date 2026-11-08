@@ -522,6 +522,8 @@ pub fn update(svc: &Service, watcher: &Watcher, req: &pb::TaskUpdate) -> Result<
         labels: req.labels.clone(),
         worktree_id: optional_id(req.worktree_id.as_ref(), "worktree_id")?,
     };
+    // A workflow draft's card is the daemon's to word (ov-971).
+    crate::workflow_drafts::refuse_on_card(svc, id, None, &serde_json::Value::Null, None)?;
     let before = svc.store.get_task(id)?;
     let task = svc.store.update_task(id, req.expected_version, &update)?;
     announce(watcher, &task, actor);
@@ -635,6 +637,8 @@ pub fn note_from(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend, sea
     let supersedes = optional_id(req.supersedes.as_ref(), "supersedes")?;
     // And its comment stays its own: its workspace's cards, its own notes (ov-527).
     crate::people::refuse_rep_reach(&svc.store, actor, id, &extra, supersedes)?;
+    // A workflow draft's card asks only what the daemon asked (ov-971).
+    crate::workflow_drafts::refuse_on_card(svc, id, Some(kind), &extra, supersedes)?;
     // `message` is the runner's record of a queued message (who it is from,
     // whether it was said in a pane): a caller writing one would queue a
     // note and name its sender.

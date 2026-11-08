@@ -2,12 +2,18 @@
 //!
 //! A draft is a definition and the adapter settings it is pinned to, with the pin of the workflow it was
 //! drafted against. `propose` files it, renders its summary from the definition (`workflow_summary`), and opens
-//! a card in Needs Decision with **Approve** and **Decline**. That card is the whole approval surface: it is
-//! already a row, with buttons, on the Mac, the iPhone and Android.
+//! a card in Needs Decision that asks a person.
 //!
-//! **Nothing publishes without a person.** The only way out of `Pending` into a published workflow is
-//! `after_note`: a person's answer to the draft's own card, not said from a pane (an orchestrator's answer is
-//! the manager's and decides nothing). It publishes through the ordinary `Publish` command, admitted as that
+//! **A person approves only what they read.** The card has no quick-answer options, so no Needs You row and
+//! no notification carries an Approve button: those show the headline, never the change. The card's full
+//! question ends with the words that approve it, `approve <code>`, where the code is cut from the digest of
+//! the definition, the adapter and the summary. Only a client that shows the whole question shows the code,
+//! and an answer approves only the draft whose content it was cut from.
+//!
+//! **Nothing publishes without the owner.** The only way out of `Pending` into a published workflow is
+//! `after_note`: the owner's answer to the draft's own, latest question, not said from a pane (an
+//! orchestrator's answer is the manager's and decides nothing). Nobody else can ask on a draft's card or
+//! rewrite it (`refuse_on_card`). It publishes through the ordinary `Publish` command, admitted as that
 //! person, so every check `workspace set-workflow` makes is made here too.
 //!
 //! Drafts live in one JSON file each under the runtime root. A new table would change the schema the engine
@@ -25,9 +31,11 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-/// The words on the card's two buttons. An answer is matched on these exactly.
-pub const APPROVE: &str = "Approve";
-pub const DECLINE: &str = "Decline";
+/// The words that answer a draft's card. Approve takes the draft's code after it.
+pub const APPROVE: &str = "approve";
+pub const DECLINE: &str = "decline";
+/// The key a draft's question carries in its note's `extra`. Only the daemon writes it.
+pub const EXTRA: &str = "workflow_draft";
 const MAX_REASON: usize = 2000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +49,8 @@ pub enum State {
     OutOfDate,
     /// A newer draft took its place.
     Replaced,
+    /// The owner approved it and it is being published now.
+    Publishing,
     /// A person approved it and publishing was refused. The card says why.
     Failed,
 }
@@ -62,7 +72,24 @@ pub struct Draft {
     pub expected_pin: Option<String>,
     pub created_at: i64,
     pub decided_at: Option<i64>,
+    /// The digest of the definition, the adapter and the summary. The card's question carries it too, in the
+    /// database, so a draft file edited after the person read it no longer matches.
+    #[serde(default)]
+    pub digest: String,
+    /// The daemon's question on the card, the one an answer must follow.
+    #[serde(default)]
+    pub question: Option<Uuid>,
+    /// The answer that decided it.
+    #[serde(default)]
+    pub answer: Option<Uuid>,
 }
+
+/// What a draft's content digests to.
+fn content_digest(definition: &Definition, adapter: &AdapterConfiguration, summary: &str) -> String {
+    farcooler_workflow::digest(&("workflow-draft/v1", definition, adapter, summary))
+}
+/// The code a person types to approve: six characters of the content digest.
+pub fn code(digest: &str) -> String { digest.trim_start_matches("wf1:").chars().take(6).collect() }
 
 static LOCK: Mutex<()> = Mutex::new(());
 fn now() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64) }
@@ -95,13 +122,14 @@ pub fn list(svc: &Service, workspace: Option<Uuid>) -> Vec<Draft> {
 }
 fn for_task(svc: &Service, task: Uuid) -> Option<Draft> { list(svc, None).into_iter().find(|d| d.task == Some(task)) }
 
-/// Move a draft out of `Pending`, once. False when someone already did.
-fn decide(svc: &Service, id: &str, to: State) -> Result<bool> {
+/// Move a draft from `from` to `to`, once, under the lock. False when it isn't in `from` any more.
+fn settle(svc: &Service, id: &str, from: State, to: State, answer: Option<Uuid>) -> Result<bool> {
     let _held = LOCK.lock().map_err(|_| DomainError::OperationFailed)?;
     let Some(mut draft) = get(svc, id)? else { return Ok(false) };
-    if draft.state != State::Pending { return Ok(false); }
+    if draft.state != from { return Ok(false); }
     draft.state = to;
     draft.decided_at = Some(now());
+    if answer.is_some() { draft.answer = answer; }
     write(svc, &draft)?;
     Ok(true)
 }
@@ -110,13 +138,41 @@ fn decide(svc: &Service, id: &str, to: State) -> Result<bool> {
 pub fn wire(draft: &Draft) -> serde_json::Value {
     serde_json::json!({ "id": draft.id, "state": draft.state, "reason": draft.reason, "summary": draft.summary,
         "card": draft.task, "drafted_against": draft.expected_pin, "created_at": draft.created_at, "decided_at": draft.decided_at,
-        "source": draft.definition.source })
+        "source": draft.definition.source, "answer": draft.answer })
 }
 
 /// What the card asks, in the person's terms. The summary is the daemon's; the reason is labeled the orchestrator's.
+/// The words that approve it come last, after the whole change, so only a view that shows all of it shows them.
 fn question(draft: &Draft) -> String {
     let bundle = crate::landing_templates::Bundle { definition: draft.definition.clone(), adapter: draft.adapter.clone() };
-    format!("{}\n\n{}\n\nApprove to publish this workflow. Decline to leave things as they are. Nothing changes until you answer.", workflow_summary::headline(&bundle), draft.summary)
+    format!("{}\n\n{}\n\nTo publish exactly this, answer `{APPROVE} {}`. To leave things as they are, answer `{DECLINE}`. Nothing changes until you answer.",
+        workflow_summary::headline(&bundle), draft.summary, code(&draft.digest))
+}
+
+/// Ask the draft's question on its card, as the daemon, and remember which note asked it.
+fn ask(svc: &Service, draft: &Draft, card: Uuid) -> Result<()> {
+    let note = svc.store.add_note(card, NoteKind::Question, Actor::Manager, &question(draft),
+        serde_json::json!({ EXTRA: { "id": draft.id, "digest": draft.digest } }))?;
+    let _held = LOCK.lock().map_err(|_| DomainError::OperationFailed)?;
+    let mut now = get(svc, &draft.id)?.ok_or(DomainError::NotFound)?;
+    now.task = Some(card);
+    now.question = Some(note.id);
+    write(svc, &now)
+}
+
+/// Whether `card` is a draft's card: one the daemon asked a draft's question on.
+pub fn is_draft_card(svc: &Service, card: Uuid) -> bool {
+    svc.store.notes_for(card, Some(NoteKind::Question)).unwrap_or_default().iter().any(|n| n.actor == Actor::Manager && n.extra.get(EXTRA).is_some())
+}
+
+/// A draft's card says only what the daemon wrote: nobody else asks on it, decides on it, replaces one of its
+/// notes, or rewrites its title or description. And no caller writes a draft's mark on any card.
+pub fn refuse_on_card(svc: &Service, card: Uuid, kind: Option<NoteKind>, extra: &serde_json::Value, supersedes: Option<Uuid>) -> Result<()> {
+    let refused = Err(DomainError::Conflict { what: EXTRA });
+    if extra.get(EXTRA).is_some() { return refused; }
+    let asks = matches!(kind, None | Some(NoteKind::Question | NoteKind::Decision)) || supersedes.is_some();
+    if asks && is_draft_card(svc, card) { return refused; }
+    Ok(())
 }
 
 /// File a proposal and ask a person. Returns the draft, already pending on its card.
@@ -131,8 +187,10 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
     let bundle = crate::landing_templates::Bundle { definition, adapter };
     let summary = workflow_summary::summarize(reason, &bundle, current.as_ref().map(|c| &c.definition));
     let crate::landing_templates::Bundle { definition, adapter } = bundle;
-    let mut draft = Draft { id: Uuid::now_v7().simple().to_string()[20..].to_string(), workspace, task: None, state: State::Pending,
-        reason: reason.into(), summary, definition, adapter, expected_pin: current.map(|c| c.pin), created_at: now(), decided_at: None };
+    let digest = content_digest(&definition, &adapter, &summary);
+    let draft = Draft { id: Uuid::now_v7().simple().to_string()[20..].to_string(), workspace, task: None, state: State::Pending,
+        reason: reason.into(), summary, definition, adapter, expected_pin: current.map(|c| c.pin), created_at: now(), decided_at: None,
+        digest, question: None, answer: None };
     // One question at a time: an earlier pending draft of this workspace is replaced, and its card closed.
     let mut replaced = Vec::new();
     {
@@ -148,15 +206,11 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
     for card in replaced { close_card(svc, watcher, card, TaskStatus::Cancelled, "A newer proposal replaced this one."); }
     let title = format!("Workflow: approve {}", draft.definition.source.rsplit('/').next().unwrap_or("a change"));
     let card = svc.store.create_task(workspace, &title, Actor::Manager)?;
-    svc.store.add_note(card.id, NoteKind::Question, Actor::Manager, &question(&draft), serde_json::json!({ "options": [APPROVE, DECLINE] }))?;
+    ask(svc, &draft, card.id)?;
     let card = svc.store.set_task_status(card.id, TaskStatus::NeedsDecision, Actor::Manager)?;
-    draft.task = Some(card.id);
-    let _held = LOCK.lock().map_err(|_| DomainError::OperationFailed)?;
-    write(svc, &draft)?;
-    drop(_held);
     watcher.announce_task_changed(&card, None, Actor::Manager);
     watcher.announce_needs_you();
-    Ok(draft)
+    get(svc, &draft.id)?.ok_or(DomainError::NotFound)
 }
 
 /// Close the draft's card, through the engine when the board's workflow holds it.
@@ -201,36 +255,58 @@ pub(crate) async fn note(rpc: &crate::rpc::Rpc, value: farcooler_protocol::v1::r
     Ok(value)
 }
 
-/// A person's word on a draft's card. Called after every `task.note`; does nothing unless the note is an answer
-/// by the person themself (not said from a pane) to a pending draft's card, saying exactly Approve or Decline.
+/// The owner's word on a draft's card. Called after every `task.note`; does nothing unless the note is an
+/// answer by the owner themself (not said from a pane) to a pending draft's card, after the daemon's own,
+/// latest question, whose content still digests to what the card was asked with. `decline` declines it;
+/// `approve <code>` with this draft's code approves it. Any other answer asks again, since an answer takes
+/// the card out of Needs You.
 pub(crate) async fn after_note(rpc: &crate::rpc::Rpc, note: &pb::TaskNote) {
     if note.kind != pb::TaskNoteKind::Answer as i32 || note.actor != "user" { return; }
-    if serde_json::from_str::<serde_json::Value>(&note.extra_json).ok().is_some_and(|e| e.pointer("/message/in_pane").is_some()) { return; }
     let svc = rpc.service();
-    let Some(task) = crate::task_ops::required_id(&note.task_id).ok() else { return };
+    let (Ok(task), Ok(answer)) = (crate::task_ops::required_id(&note.task_id), crate::task_ops::required_id(&note.id)) else { return };
     let Some(draft) = for_task(svc, task).filter(|d| d.state == State::Pending) else { return };
-    let words = note.body.trim();
-    if words.eq_ignore_ascii_case(DECLINE) {
-        if decide(svc, &draft.id, State::Declined).unwrap_or(false) { close_card(svc, rpc.watcher(), task, TaskStatus::Cancelled, "Declined. The workflow is unchanged."); }
-    } else if words.eq_ignore_ascii_case(APPROVE) {
-        approve(rpc, draft, task).await;
+    // The question it follows is the daemon's, and the draft is what that question was asked with.
+    let questions = svc.store.notes_for(task, Some(NoteKind::Question)).unwrap_or_default();
+    let Some(asked) = questions.last().filter(|q| Some(q.id) == draft.question && q.actor == Actor::Manager) else { return };
+    let asked_with = asked.extra.pointer(&format!("/{EXTRA}/digest")).and_then(|d| d.as_str());
+    if asked_with != Some(draft.digest.as_str()) || content_digest(&draft.definition, &draft.adapter, &draft.summary) != draft.digest {
+        // The draft isn't what the card was asked with: something edited it after. It can never be approved.
+        if settle(svc, &draft.id, State::Pending, State::Failed, Some(answer)).unwrap_or(false) {
+            close_card(svc, rpc.watcher(), task, TaskStatus::Cancelled, "Not published. The draft changed after you were asked, so it isn’t what you read. Ask the orchestrator to draft it again.");
+        }
+        return;
+    }
+    // A member's answer is not the owner's: it decides nothing, and the owner is asked again.
+    let owner = matches!(rpc.caller(), Ok(crate::people::Person::Owner));
+    let words = note.body.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    if owner && words == DECLINE {
+        if settle(svc, &draft.id, State::Pending, State::Declined, Some(answer)).unwrap_or(false) { close_card(svc, rpc.watcher(), task, TaskStatus::Cancelled, "Declined. The workflow is unchanged."); }
+    } else if owner && words == format!("{APPROVE} {}", code(&draft.digest)) {
+        approve(rpc, draft, task, answer).await;
+    } else {
+        let why = if owner { format!("Nothing was published. To publish this change, read it on the card and answer with the words at its end. To leave things as they are, answer `{DECLINE}`.") }
+            else { "Nothing was published. Only the owner can approve or decline a workflow change.".to_string() };
+        let _ = svc.store.add_note(task, NoteKind::Finding, Actor::Manager, &why, serde_json::json!({}));
+        if ask(svc, &draft, task).is_ok() && let Ok(card) = svc.store.get_task(task) { rpc.watcher().announce_task_changed(&card, None, Actor::Manager); }
+        rpc.watcher().announce_needs_you();
     }
 }
 
-async fn approve(rpc: &crate::rpc::Rpc, draft: Draft, card: Uuid) {
+async fn approve(rpc: &crate::rpc::Rpc, draft: Draft, card: Uuid, answer: Uuid) {
     let svc = rpc.service();
     let ws = draft.workspace.to_string();
     let live = svc.store.workflow_configuration(&ws).ok().flatten().map(|c| c.pin);
     if live != draft.expected_pin {
-        if decide(svc, &draft.id, State::OutOfDate).unwrap_or(false) {
+        if settle(svc, &draft.id, State::Pending, State::OutOfDate, Some(answer)).unwrap_or(false) {
             close_card(svc, rpc.watcher(), card, TaskStatus::Cancelled, "Not published. The workflow changed after this was drafted. Ask the orchestrator to draft it again.");
         }
         return;
     }
-    let outcome = publish(rpc, &draft).await;
-    match outcome {
-        Ok(()) => { if decide(svc, &draft.id, State::Approved).unwrap_or(false) { close_card(svc, rpc.watcher(), card, TaskStatus::Done, "Approved and published."); } }
-        Err(why) => { if decide(svc, &draft.id, State::Failed).unwrap_or(false) { close_card(svc, rpc.watcher(), card, TaskStatus::Cancelled, &format!("Not published. {why}")); } }
+    // Claimed under the lock, so a proposal replacing it now can't, and a second answer can't publish it twice.
+    if !settle(svc, &draft.id, State::Pending, State::Publishing, Some(answer)).unwrap_or(false) { return; }
+    match publish(rpc, &draft).await {
+        Ok(()) => { if settle(svc, &draft.id, State::Publishing, State::Approved, None).unwrap_or(false) { close_card(svc, rpc.watcher(), card, TaskStatus::Done, "Approved and published."); } }
+        Err(why) => { if settle(svc, &draft.id, State::Publishing, State::Failed, None).unwrap_or(false) { close_card(svc, rpc.watcher(), card, TaskStatus::Cancelled, &format!("Not published. {why}")); } }
     }
 }
 

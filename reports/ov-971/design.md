@@ -25,3 +25,22 @@ Four labeled short paragraphs: **Runs as you** (the commands the workflow starts
 
 - Phones: free through the decision card. Nothing native to file unless the long-summary check shows a problem.
 - A change that edits the *current* definition: v1 takes the same template inputs (gates, batch, routes) and shows the diff. Free-form edits of a published definition are filed.
+
+## Fix round: what a person approves is what runs
+
+The independent review (`.claude/agent/reports/ov-971/independent-review.md`) and the manager's ruling found three gaps. How each is closed:
+
+- **The question on the card is the daemon's.** `task.note` refuses a Question or Decision on a draft's card, and any note that supersedes one of its notes. `task.update` refuses to reword the card. No caller may write the `workflow_draft` mark. An answer counts only if it follows the daemon's own latest question, recorded in the draft as `question`.
+- **The summary shows everything.** A last part, "In full, exactly as it runs", gives every argv, every environment variable, the reviewer, CI, `gh`, the pull request repository and remote, and the landing mirror with its config digest. Every value is escaped, so a gate can't draw lines or close its code span. `in_full` names every adapter field, and a test walks every value in the adapter's JSON.
+- **Approve is never one tap from the headline.** The card has no quick-answer options, so no row, notification or watch shows an Approve button on any client, old or new. The full question ends with ``answer `approve <code>` ``. The code is six characters of the digest of the definition, the adapter and the summary.
+  - A row or notification that shows only the headline never shows the code.
+  - The card on Mac and iOS shows the question in full, and so does Android's Answer dialog.
+  - Any other answer publishes nothing. The daemon asks again, so the card stays in Needs You.
+- **The draft is bound to what was asked.** The digest is in the question note in the database. Approving re-digests the draft file and compares, so a file edited after the person read it doesn't publish (M1).
+- **Smaller fixes.**
+  - Only the owner's answer decides (M4). Approve claims the draft (`publishing`) under the lock before it publishes (M3). The deciding answer is recorded (M2).
+
+Limits:
+
+- Approving takes typing, not one tap. A native "Review and Approve" button that sends the words from the full view is the follow-up.
+- The code proves which view the answer came from, not who sent it. The seat guardrail (`caller_seat`) is unchanged, so ov-974 still needs an owner-device signature.
