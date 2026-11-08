@@ -466,19 +466,6 @@ async fn workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at
     assert_eq!((row.branch.as_str(),row.workspace_id),("e-liang/phones-plan",Some(workspace)),"on the named branch, claimed for the workspace");
     assert!(tree.path.contains("/state/worktrees/"),"where the app keeps worktrees, not the runtime's private root: {}",tree.path);
     assert_eq!(git(Path::new(&tree.path),&["merge-base","HEAD",&main]).await.unwrap(),main,"built on main as it was at Start");
-    // ov-979: while the finished run's tree is there its name is taken; once the tree and branch are gone it's free.
-    let second=host.service.store.create_task(workspace,"again",farcooler_store::models::Actor::User).unwrap();
-    host.service.track_tickets(Some(second.id)).await;
-    let again=|id:&str,snapshot:&serde_json::Value| { let item=&snapshot["state"]["items"][&second.key];
-        Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),3),item:second.key.clone(),
-            run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-            worktree:Some(NamedTree { name:"phones-plan".into(),branch:"e-liang/phones-plan".into() }) } };
-    let snapshot=get(&mut link,workspace).await;
-    assert!(try_call(&mut link,workspace,again("taken-still",&snapshot)).await.is_err(),"its tree is still there");
-    git(&config.repository,&["worktree","remove","--force",&tree.path]).await.unwrap();
-    git(&config.repository,&["branch","-D","e-liang/phones-plan"]).await.unwrap();
-    let snapshot=get(&mut link,workspace).await;
-    accepted(&call(&mut link,workspace,again("freed",&snapshot)).await);
     drop(link);host.close().await;
 }
 
@@ -522,6 +509,52 @@ async fn workflow_service_refuses_a_bad_or_taken_named_tree_at_start() {
         assert!(refused.as_ref().is_err_and(|e| e.contains("already exists")),"{id}: {refused:?}");
     }
     drop(held);
+    drop(link);host.close().await;
+}
+
+/// ov-979: a name is held by a run until the run ends and its tree is gone. A run cancelled before its tree was
+/// made frees its name and branch, where they used to stay reserved for good.
+#[tokio::test]
+async fn workflow_service_frees_a_named_tree_when_its_run_ends() {
+    if person_terminal("workflow_service_frees_a_named_tree_when_its_run_ends").await { return; }
+    use farcooler_protocol::workflow_commands::NamedTree;
+    let (dir,config)=configured(false,"pass").await;
+    let host=Host::open(dir.path()).await; let workspace=host.workspace; let mut link=host.connect().await;
+    let definition=config.definition().unwrap();
+    let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    let first=host.service.store.create_task(workspace,"first",farcooler_store::models::Actor::User).unwrap();
+    let second=host.service.store.create_task(workspace,"second",farcooler_store::models::Actor::User).unwrap();
+    host.service.track_tickets(Some(first.id)).await;
+    host.service.track_tickets(Some(second.id)).await;
+    let start=|id:&str,key:&str,seq:u64,snapshot:&serde_json::Value| { let item=&snapshot["state"]["items"][key];
+        Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),seq),item:key.into(),
+            run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+            worktree:Some(NamedTree { name:"shared".into(),branch:"e-liang/shared".into() }) } };
+    // With the repository lock held the tree is recorded but never made, then the run is cancelled.
+    let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
+    let held=host.service.repo_lock(repository).lock_owned().await;
+    let snapshot=get(&mut link,workspace).await;
+    accepted(&call(&mut link,workspace,start("one",&first.key,2,&snapshot)).await);
+    let snapshot=get(&mut link,workspace).await;
+    assert!(try_call(&mut link,workspace,start("while-running",&second.key,3,&snapshot)).await.is_err(),"a live run holds its name");
+    let item=&snapshot["state"]["items"][&first.key];
+    accepted(&call(&mut link,workspace,Action::Cancel { mutation:mutation("cancel",snapshot["state"]["revision"].as_u64().unwrap(),4),
+        item:first.key.clone(),run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into() }).await);
+    drop(held);
+    tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
+        let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+        if state.items.get(&first.key).is_some_and(|i| i.phase==Phase::Cancelled) { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }}).await.unwrap();
+    // The run is over; take its tree and branch away if it got as far as making them.
+    let tree=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap().items[&first.key].tree.clone().unwrap();
+    let _=git(&config.repository,&["worktree","remove","--force",&tree.path]).await;
+    let _=git(&config.repository,&["branch","-D","e-liang/shared"]).await;
+    assert!(!Path::new(&tree.path).exists());
+    let snapshot=get(&mut link,workspace).await;
+    accepted(&call(&mut link,workspace,start("again",&second.key,5,&snapshot)).await);
     drop(link);host.close().await;
 }
 
