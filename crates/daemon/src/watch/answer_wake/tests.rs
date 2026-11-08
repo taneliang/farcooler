@@ -276,6 +276,31 @@ impl Board {
         panic!("the stream record never said Some(true), in three redraws");
     }
 
+    /// After a restart on a tmux older than 3.7, which cannot say whether a
+    /// pane accepts a paste: follow the pane and have the stand-in set
+    /// bracketing again, as `settle_stand_in` does for a first start. A newer
+    /// tmux tells the flag at once and needs nothing.
+    async fn relearn_bracketing(&self, terminal: &Terminal, si: &StandIn) {
+        if tmux_tells_bracketing() {
+            return;
+        }
+        self.watcher.sample().await;
+        for _ in 0..750 {
+            if self.svc.paste_mode_followed(terminal.id).await {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        si.show("working").await;
+        si.show("idle").await;
+        for _ in 0..750 {
+            if self.svc.streamed_bracketed_paste(terminal.id).await.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     /// The stand-in run as Node runs an npm install: a copy of perl named
     /// `node`, running the stand-in from a script named `script`.
     async fn node_stand_in(&self, terminal: &Terminal, script: &str) -> StandIn {

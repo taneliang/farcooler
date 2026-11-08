@@ -368,6 +368,7 @@ async fn a_manual_message_after_cutover_is_told_once_and_the_old_queue_stays_ine
     farcooler_store::testing::released_transfer_for_tests(&db, "e2e");
     let svc = Arc::new(Service::open_in(root).await.expect("released engine is admitted by the gate"));
     let b = Board { dir, watcher: Watcher::new(svc.clone()), svc, lane, task };
+    b.relearn_bracketing(&orchestrator, &si).await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     assert!(b.messages().is_empty(), "the pre-cutover message is not pending");
     b.pump().await;

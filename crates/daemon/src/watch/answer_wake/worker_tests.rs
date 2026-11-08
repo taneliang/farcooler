@@ -341,6 +341,7 @@ async fn a_hold_and_an_answer_after_cutover_are_each_told_once() {
     let svc = Arc::new(Service::open_in(root).await.expect("released engine is admitted by the gate"));
     let b = Board { dir, watcher: Watcher::new(svc.clone()), svc, lane, task };
     b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
+    b.relearn_bracketing(&orchestrator, &si).await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     b.hold_ended();
     assert_eq!(b.holds().len(), 1, "the hold is queued through the engine");
