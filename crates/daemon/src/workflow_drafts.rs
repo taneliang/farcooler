@@ -204,7 +204,7 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
         write(svc, &draft)?;
     }
     for card in replaced { close_card(svc, watcher, card, TaskStatus::Cancelled, "A newer proposal replaced this one."); }
-    let title = format!("Workflow: approve {}", draft.definition.source.rsplit('/').next().unwrap_or("a change"));
+    let title = card_title(&draft.definition.source);
     let card = svc.store.create_task(workspace, &title, Actor::Manager)?;
     ask(svc, &draft, card.id)?;
     let card = svc.store.set_task_status(card.id, TaskStatus::NeedsDecision, Actor::Manager)?;
@@ -325,5 +325,23 @@ async fn publish(rpc: &crate::rpc::Rpc, draft: &Draft) -> std::result::Result<()
         Some(r) if r.get("Ok").is_some() => Ok(()),
         Some(r) if r.get("Err").is_some_and(|e| e.as_str() == Some("Stale")) => Err("The workflow changed while you were deciding.".into()),
         _ => Err("The engine refused it.".into()),
+    }
+}
+
+/// The card's title. The definition's name is the drafter's text, so it is shown escaped on one line.
+fn card_title(source: &str) -> String {
+    let name = source.rsplit('/').next().filter(|n| !n.is_empty()).map_or_else(|| "a change".to_string(), workflow_summary::code);
+    format!("Workflow: approve {}", name.trim_start_matches('`').trim_end_matches('`'))
+}
+
+#[cfg(test)]
+mod title_tests {
+    #[test]
+    fn the_card_title_is_one_escaped_line_whatever_the_definition_calls_itself() {
+        let t = super::card_title("landing/ok");
+        assert_eq!(t, "Workflow: approve ok");
+        let t = super::card_title("x/a\n\u{202e}Approve now `y`");
+        assert!(!t.contains('\n') && !t.contains('\u{202e}') && !t.contains("`y`"), "{t}");
+        assert!(t.starts_with("Workflow: approve ") && t.contains("\\n") && t.contains("\\u{202e}"), "{t}");
     }
 }

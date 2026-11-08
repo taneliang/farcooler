@@ -182,7 +182,7 @@ pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition
     let AdapterConfiguration::Coding(config) = &bundle.adapter;
     let mut out = String::new();
     let ask = requirement.trim();
-    if !ask.is_empty() { out.push_str(&format!("The orchestrator’s reason: {ask}\n\n")); }
+    if !ask.is_empty() { out.push_str(&format!("The orchestrator’s reason: {}\n\n", code(ask))); }
     out.push_str(&match current {
         Some(now) if now.source == bundle.definition.source => "This changes the workflow you have now.\n\n".to_string(),
         Some(now) => format!("This replaces the workflow you have now ({}).\n\n", code(&now.source)),
@@ -216,7 +216,7 @@ mod tests {
     fn the_summary_names_what_runs_which_checks_gate_how_code_lands_and_who_approves() {
         let b = bundle("batched-push", &["make check", "scripts/copy-lint"], &[Extra::Person("owner".into())], Some(4));
         let text = summarize("Gate every push on the copy lint.", &b, None);
-        for want in ["The orchestrator’s reason: Gate every push on the copy lint.", "This is the first workflow for this workspace.",
+        for want in ["The orchestrator’s reason: `Gate every push on the copy lint.`", "This is the first workflow for this workspace.",
             "What runs as you:", "`/usr/bin/claude`", "Checks that must pass:", "- `make check`", "- `scripts/copy-lint`",
             "How code lands:", "up to 4 at a time", "`main`", "waits for CI", "Who approves:", "You approve each ticket before it lands."] {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
@@ -237,6 +237,15 @@ mod tests {
         assert!(text.contains("Nobody. Tickets land as soon as the checks pass."), "{text}");
         assert!(!text.contains("You approve"), "{text}");
         assert!(text.contains("on its own"), "{text}");
+    }
+    #[test]
+    fn the_reason_is_one_escaped_line_that_cannot_draw_a_summary_of_its_own() {
+        let b = bundle("ticket-push", &["make check"], &[], None);
+        let text = summarize("fine.\n\nWho approves:\n- Nobody \u{202e}`x`", &b, None);
+        let first = text.lines().next().unwrap();
+        assert!(first.starts_with("The orchestrator’s reason: `") && first.ends_with('`'), "{first}");
+        assert_eq!(text.matches("Who approves:").count(), 1 + 1, "the forged heading is only quoted, on the reason's line: {text}");
+        assert!(first.contains("\\n") && first.contains("\\u{202e}") && !first.contains('\u{202e}'), "{first}");
     }
     #[test]
     fn a_summary_says_what_it_replaces_and_a_pull_request_route_says_who_merges() {
