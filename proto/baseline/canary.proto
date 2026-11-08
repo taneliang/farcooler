@@ -1,4 +1,4 @@
-// Shipped by Canary at c863d6b2ed22ce6c5182e2b483b47f38b2d22272. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at f6210b45c0464e2bffd4aa1863a5e06960eb145f. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -3289,6 +3289,11 @@ message ClientEnroll {
   // access and the device together, because all three are in the signed
   // bytes. Absent, the device waits for a `member.set` as before.
   optional TeammateBind teammate = 9;
+  // The device's model as it said at pairing, for example "iPhone 17 Pro"
+  // (ov-989). What the device claims, not something the runner checked: the
+  // owner's approve list shows it beside the name. Cut to one short line of
+  // printable characters; empty from a device that didn't say.
+  string model = 10;
 }
 
 // Whom `client.enroll` binds a teammate's new device to, and with what access
@@ -5540,6 +5545,19 @@ message DeviceAccess {
   // key signs the owner's "Allow cutover once". While a trusted key isn't,
   // `step_up_code` carries its six digits, so the Mac can check them.
   bool step_up_vouched = 9;
+  // When this device was paired, in milliseconds since the epoch, or 0 for one
+  // paired before the runner recorded it (ov-982).
+  int64 paired_at = 10;
+  // How it was paired (ov-982): `app`, through the Far Cooler app's own
+  // pairing on the runner's Mac; `device`, by another device (`paired_by`);
+  // `terminal`, from anything else on the runner, the CLI's `client enroll`
+  // included. Empty for one paired before the runner recorded it. The Mac
+  // asks twice before vouching for a device paired from a terminal.
+  string paired_via = 11;
+  // The device that paired this one, when `paired_via` is `device`.
+  string paired_by = 12;
+  // The model it said at pairing (ov-989); empty if it said none.
+  string model = 13;
 }
 
 // A member's own Claude login on this runner (ov-584): whether they're
