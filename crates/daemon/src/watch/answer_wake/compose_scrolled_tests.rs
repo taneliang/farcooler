@@ -24,12 +24,18 @@ fn tall() -> String {
 /// box in it, `env` added.
 async fn short_pane(b: &Board, terminal: &Terminal, env: &str) -> StandIn {
     b.svc.resize_terminal(terminal.id, 40, 24).await.expect("resized");
+    // Read from tmux, not the inventory's last snapshot: nothing here
+    // refreshes that, so a wait on it used to spend all of its 15 s (ov-993).
+    let mut sized = false;
     for _ in 0..750 {
-        if b.svc.screen(terminal.id).await.is_ok_and(|(_, columns, rows)| (columns, rows) == (40, 24)) {
+        let snapshot = b.svc.inventory.refresh().await;
+        if snapshot.claimants(terminal.id).first().is_some_and(|p| (p.columns, p.rows) == (40, 24)) {
+            sized = true;
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    assert!(sized, "the pane never became 40x24");
     let si = b.stand_in_with(terminal, "claude", "claude", &format!("STAND_IN_DRAFT=1 {env}")).await;
     b.doing(terminal.id, AgentActivity::Idle).await;
     b.svc.hooks().asks().heard("stand-in", false);

@@ -145,7 +145,15 @@ fn catch_up(watcher: &TreeWatcher, sent: &[PathBuf]) {
 ///
 /// Panics at `DEADLINE` naming the attempts and the last few deliveries.
 #[cfg(target_os = "macos")]
-pub(super) fn await_delivered(watcher: &TreeWatcher, witness: &Witness, mut stimulus: impl FnMut(u32) -> PathBuf) {
+pub(super) fn await_delivered(watcher: &TreeWatcher, witness: &Witness, stimulus: impl FnMut(u32) -> PathBuf) {
+    await_delivered_within(watcher, witness, BACKEND_GRACE, stimulus);
+}
+
+/// `await_delivered`, with the backend trailing the witness by at most
+/// `grace`. Only the routed-away test passes a shorter one, so its red case
+/// fails in a second instead of `BACKEND_GRACE` (ov-993).
+#[cfg(target_os = "macos")]
+fn await_delivered_within(watcher: &TreeWatcher, witness: &Witness, grace: Duration, mut stimulus: impl FnMut(u32) -> PathBuf) {
     let start = Instant::now();
     let mut sent: Vec<PathBuf> = Vec::new();
     let mut attempts = 0;
@@ -181,10 +189,10 @@ pub(super) fn await_delivered(watcher: &TreeWatcher, witness: &Witness, mut stim
             witnessed = Some(Instant::now());
         }
         if let Some(at) = witnessed {
-            if at.elapsed() > BACKEND_GRACE {
+            if at.elapsed() > grace {
                 let tail: Vec<_> = watcher.delivered.lock().unwrap().iter().rev().take(10).cloned().collect();
                 panic!(
-                    "a witness stream saw {} (one of {attempts} attempts) {BACKEND_GRACE:?} ago and the backend never \
+                    "a witness stream saw {} (one of {attempts} attempts) {grace:?} ago and the backend never \
                      delivered it: routed away. The last deliveries were {tail:?}",
                     sent[0].display()
                 );
@@ -244,7 +252,10 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let elsewhere = std::fs::canonicalize(elsewhere.path()).unwrap();
         let witness = Witness::on(&elsewhere, true, &elsewhere);
-        await_delivered(&watcher, &witness, |attempt| {
+        // A second's grace, not `BACKEND_GRACE`'s 45: the backend watches
+        // another directory, so no grace ends any other way than "routed
+        // away", which is what this proves (not `DEADLINE`'s "never delivered").
+        await_delivered_within(&watcher, &witness, Duration::from_secs(1), |attempt| {
             let sentinel = elsewhere.join(format!("fc-settle-away-{attempt}"));
             std::fs::write(&sentinel, "").unwrap();
             std::fs::canonicalize(&sentinel).unwrap()

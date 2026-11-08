@@ -667,7 +667,10 @@ async fn a_finish_that_times_out_during_a_removal_leaves_no_sign_in() {
     let (dir, svc, _main, _serial) = runner().await;
     let hangs = script(&dir.path().join("hangs.sh"), &format!("#!/bin/sh\n{{ IFS= read -r line; sleep 120; }} | {} \"$@\"\n", shell_quote(FAKE)));
     use_the_stand_in(&svc, &hangs);
-    *lock(&svc.claude_logins.sign_ins.waits) = Waits { finish: Duration::from_secs(2), ..Waits::default() };
+    // The removal's `auth logout` runs the same hanging stand-in, so it
+    // spends `command` in full: 1 s, not the default 20 (ov-993). The
+    // finish still outlasts the 500 ms before the removal starts.
+    *lock(&svc.claude_logins.sign_ins.waits) = Waits { finish: Duration::from_millis(1500), command: Duration::from_secs(1), ..Waits::default() };
     let alice = factory(&svc, Some("phone-a"), Scope::Read);
     let sign_in = started(&alice, "alice").await;
     let group = svc.claude_logins.sign_ins.pid_of("alice").expect("running");

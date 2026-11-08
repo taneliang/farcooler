@@ -53,11 +53,11 @@ fn socket_path(socket: &str, tmpdir: Option<&std::path::Path>) -> PathBuf {
 
 /// The server's PID. Asked of the server first; a hung one does not answer,
 /// so the fallback is whoever has the socket open.
-fn server_pid(tmux: &std::path::Path, socket: &str, tmpdir: Option<&std::path::Path>) -> Option<i32> {
+fn server_pid(tmux: &std::path::Path, socket: &str, tmpdir: Option<&std::path::Path>, waits: Waits) -> Option<i32> {
     let mut ask = Command::new(tmux);
     with_tmpdir(&mut ask, tmpdir);
     ask.args(["-L", socket, "display-message", "-p", "#{pid}"]);
-    if let Some(pid) = run_bounded(ask, ASK).and_then(|s| s.trim().parse().ok()) {
+    if let Some(pid) = run_bounded(ask, waits.ask).and_then(|s| s.trim().parse().ok()) {
         return Some(pid);
     }
     // Canonical, because lsof matches the resolved name: `/tmp` is a link to
@@ -106,20 +106,33 @@ pub fn reap_server(socket: &str) {
 /// must say where the socket is, or the lookup falls to `/tmp`, finds no
 /// server, and the real one outlives the test (ov-985).
 pub fn reap_server_in(socket: &str, tmpdir: Option<&std::path::Path>) {
+    reap_within(socket, tmpdir, Waits { ask: ASK, grace: GRACE });
+}
+
+/// How long the server is asked, and how long it gets after each signal.
+#[derive(Clone, Copy)]
+struct Waits {
+    ask: Duration,
+    grace: Duration,
+}
+
+/// `reap_server_in` with its waits given: a test of a server that answers
+/// nothing spends every one of them, so it passes shorter ones (ov-993).
+fn reap_within(socket: &str, tmpdir: Option<&std::path::Path>, waits: Waits) {
     let Some(tmux) = farcooler_core::programs::find("tmux") else { return };
-    let pid = server_pid(&tmux, socket, tmpdir);
+    let pid = server_pid(&tmux, socket, tmpdir, waits);
     let mut kill = Command::new(&tmux);
     with_tmpdir(&mut kill, tmpdir);
     kill.args(["-L", socket, "kill-server"]);
-    let _ = run_bounded(kill, ASK);
+    let _ = run_bounded(kill, waits.ask);
     let Some(pid) = pid else { return };
-    if wait_dead(pid, GRACE) {
+    if wait_dead(pid, waits.grace) {
         return;
     }
     for signal in [libc::SIGTERM, libc::SIGKILL] {
         // SAFETY: a signal to a PID we read from this socket's own server.
         unsafe { libc::kill(pid, signal) };
-        if wait_dead(pid, GRACE) {
+        if wait_dead(pid, waits.grace) {
             return;
         }
     }
@@ -167,7 +180,11 @@ mod tests {
         // SAFETY: SIGSTOP to the server this test just started.
         unsafe { libc::kill(pid, libc::SIGSTOP) };
         let started = Instant::now();
-        reap_server(&socket);
+        // Every wait is spent here, so shorter ones than production's 3 s
+        // asks and 2 s graces: the path through them is the same. `lsof`,
+        // the fallback that finds the PID, keeps `ASK`.
+        let waits = Waits { ask: Duration::from_millis(500), grace: Duration::from_millis(300) };
+        reap_within(&socket, None, waits);
         assert!(!alive(pid), "a stopped server {pid} outlived reap_server");
         assert!(started.elapsed() < Duration::from_secs(20), "teardown was not bounded: {:?}", started.elapsed());
     }

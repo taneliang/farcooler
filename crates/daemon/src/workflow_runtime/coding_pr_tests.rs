@@ -456,8 +456,22 @@ async fn restarts_during_the_wait_for_a_merge_spend_no_attempts() {
     enqueue_item(&mut runtime, "w", "one", definition);
     let root = runtime.root.clone();
     // `pump` blocks while the wait runs, so each life of the runtime is cut off from outside: a crash in mid-wait. The first life has the whole pipeline to run first.
+    // Each life is cut off once the wait has asked GitHub at least once in it: the wait's poll log exists
+    // (the first life runs the whole pipeline before it), then the stub's log grows by a call. Not a fixed
+    // 4 s per life (ov-993): the poll runs every 20 ms.
+    let looks = || std::fs::read_to_string(&f.log).map(|t| t.lines().count()).unwrap_or(0);
+    let polling = || std::fs::read_dir(root.join("receipts")).is_ok_and(|d| d.flatten().any(|e| e.file_name().to_string_lossy().ends_with(".gh-poll.output")));
     for round in 0..7u32 {
-        let _ = tokio::time::timeout(Duration::from_secs(if round == 0 { 20 } else { 4 }), async { for time in (2 + round * 1000)..(400 + round * 1000) { runtime.pump(time.into()).await.unwrap(); } }).await;
+        let asked = async {
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            while !polling() { assert!(std::time::Instant::now() < deadline, "round {round}: the wait never polled"); tokio::time::sleep(Duration::from_millis(10)).await; }
+            let before = looks();
+            while looks() <= before { assert!(std::time::Instant::now() < deadline, "round {round}: the wait never asked"); tokio::time::sleep(Duration::from_millis(10)).await; }
+        };
+        tokio::select! {
+            () = async { for time in (2 + round * 1000)..(400 + round * 1000) { runtime.pump(time.into()).await.unwrap(); } } => {}
+            () = asked => {}
+        }
         let item = runtime.state("w").unwrap().unwrap().items["one"].clone();
         assert_eq!((item.phase.clone(), item.attempt, item.definition.stages[item.stage].kind.clone()), (Phase::Running, 1, StageKind::AwaitPr), "round {round}");
         drop(runtime);
