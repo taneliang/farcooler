@@ -23,11 +23,14 @@ final class AgentWatchCaptureTests: XCTestCase {
     func testCaptureTheReviewScreen() throws {
         let dir = try directory()
         let app = XCUIApplication.phoneHarness(["-push-task", "bil-7", "-phone-workflow-change"])
-        let approve = app.buttons["workflow-change-approve"]
+        let approve = app.buttons["Approve"]
         let review = app.descendants(matching: .any)["workflow-change-review"]
         XCTAssertTrue(review.waitForExistence(timeout: 30), "no Review view on the task")
         try save("review-top", in: dir)
-        for _ in 0..<12 where !(approve.exists && approve.isHittable) { app.swipeUp() }
+        // Short drags, so a button is never scrolled past between two looks.
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+        for _ in 0..<40 where !(approve.exists && approve.isHittable) { from.press(forDuration: 0.05, thenDragTo: to) }
         XCTAssertTrue(approve.exists, "Approve is not at the end of the change")
         try save("review-end", in: dir)
     }
