@@ -83,13 +83,12 @@ struct AgentTerminalCanvas: NSViewRepresentable {
     /// no part of the pane is cut off and the font stays readable.
     final class Scroller: NSScrollView {
         var terminal: TerminalRenderView?
-        /// Size the document to the pane's grid, or to the window if that is larger.
+        /// Size the document to exactly the pane's grid, never to the window. A larger view would ask
+        /// the emulator for more columns than the agent's pane has, and the picture would be cleared.
         func fitDocument() {
             guard let terminal else { return }
-            let want = terminal.contentSize
-            let visible = contentSize
-            let size = CGSize(width: max(want.width, visible.width), height: max(want.height, visible.height))
-            if terminal.frame.size != size { terminal.setFrameSize(size) }
+            let size = terminal.contentSize
+            if size.width > 0, terminal.frame.size != size { terminal.setFrameSize(size) }
         }
         override func tile() { super.tile(); fitDocument() }
     }

@@ -142,8 +142,25 @@ struct AgentTerminalWatchTests {
         scroller.documentView = view
         scroller.layoutSubtreeIfNeeded()
         scroller.fitDocument()
-        #expect(view.frame.width >= view.contentSize.width, "the 120-column screen is clipped")
+        #expect(view.frame.size == view.contentSize, "the view is not exactly the pane's size")
         #expect(view.frame.width > 640, "nothing to scroll to")
         #expect(view.grid == PaneGrid(columns: 120, rows: 40), "sizing the view changed the agent's grid")
+    }
+
+    @MainActor
+    @Test("A window wider than the pane leaves the agent's grid alone")
+    func aWideWindowKeepsThePaneGrid() {
+        let scroller = AgentTerminalCanvas.Scroller()
+        scroller.frame = NSRect(x: 0, y: 0, width: 1600, height: 900)
+        let view = TerminalRenderView()
+        AgentTerminalCanvas.makeReadOnly(view)
+        view.trustStreamSizes(true)
+        view.reset(columns: 120, rows: 40)
+        scroller.terminal = view
+        scroller.documentView = view
+        scroller.layoutSubtreeIfNeeded()
+        scroller.fitDocument()
+        #expect(view.frame.width < 1600, "the view grew to the window")
+        #expect(view.grid == PaneGrid(columns: 120, rows: 40))
     }
 }
