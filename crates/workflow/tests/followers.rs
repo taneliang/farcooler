@@ -69,22 +69,29 @@ fn one_run_carries_three_tickets_and_they_land_with_it() {
     assert!(log.state.items["ov-2"].follows.is_none());
     log.track("ov-4");
     assert!(["ov-1", "ov-2", "ov-3"].iter().all(|t| log.state.archive[*t].phase == Phase::Done), "all three leave live state");
+    // Landed, a follower is a ticket of its own again: it reopens alone (ov-968).
+    log.try_run(Command::Reopen { item: "ov-2".into(), definition: Definition::ticket_at("todo").unwrap(), policy_pin: "policy-1".into(),
+        resource: "res-ov-2".into() }, Grant::Controller).unwrap();
+    assert_eq!((log.phase("ov-2"), log.state.items["ov-2"].follows.clone()), (Phase::WaitingApproval, None));
 }
 
 #[test]
-fn a_cancelled_run_cancels_its_followers_and_a_failed_one_keeps_them() {
+fn a_cancelled_run_hands_its_followers_back_and_a_failed_one_keeps_them() {
     let mut log = three();
     log.start("ov-1", &["ov-2"]).unwrap();
     log.observe("ov-1", Outcome::Passed(ev("c1")));
     log.observe("ov-1", Outcome::Rejected(ev("c1")));
     assert_eq!((log.phase("ov-1"), log.phase("ov-2")), (Phase::Failed, Phase::WaitingApproval));
     assert_eq!(log.state.items["ov-2"].follows.as_deref(), Some("ov-1"), "a failed run still has its tickets");
+    let fence = log.state.items["ov-2"].fence;
     log.try_run(Command::Cancel { item: "ov-1".into() }, Grant::Controller).unwrap();
-    assert_eq!((log.phase("ov-1"), log.phase("ov-2")), (Phase::Cancelled, Phase::Cancelled));
-    // Closed, a follower is a ticket of its own again: it reopens alone (ov-968).
-    log.try_run(Command::Reopen { item: "ov-2".into(), definition: Definition::ticket_at("todo").unwrap(), policy_pin: "policy-1".into(),
-        resource: "res-ov-2".into() }, Grant::Controller).unwrap();
-    assert_eq!((log.phase("ov-2"), log.state.items["ov-2"].follows.clone()), (Phase::WaitingApproval, None));
+    // Cancelling the run drops its own ticket. The one it carried goes back to rest, where it was before.
+    assert_eq!((log.phase("ov-1"), log.phase("ov-2")), (Phase::Cancelled, Phase::WaitingApproval));
+    let ov2 = &log.state.items["ov-2"];
+    assert_eq!((ov2.follows.clone(), ov2.stage, ov2.fence), (None, 0, fence + 1), "at rest, its old stage, fenced past the run");
+    // A ticket of its own again: it moves and starts alone.
+    log.start("ov-2", &[]).unwrap();
+    assert_eq!(log.effects[0].item, "ov-2");
 }
 
 #[test]

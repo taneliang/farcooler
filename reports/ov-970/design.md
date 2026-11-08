@@ -20,9 +20,13 @@ option 5B: one run for several tickets, a lead with the rest following it. Stack
    column and line stage. While it follows, it isn't at rest, so the orchestrator's line writes are refused
    on it as they are on the lead. `Move`, `Start`, `SendBack` and another `Start --with` naming it are refused
    (`Phase`).
-3. **They close with it.** When the lead ends `Done` or `Cancelled`, each follower ends the same way in the
-   same step and stops following. A failed lead leaves them following, and the board shows them as needing
-   a decision, like the lead. A follower that closed can be reopened on its own (ov-968).
+3. **They land with it.** When the lead ends `Done`, each follower ends `Done` in the same step, and its
+   card and line go to done/landed with the lead's. When the lead is `Cancelled`, each follower goes back to
+   rest as it was before the Start: cancelling a run drops its own ticket, not the others it carried. Its
+   line goes back to waiting, and it can be moved or dispatched again. A failed lead leaves them following,
+   and the board shows them as needing a decision, like the lead; cancelling it is how to let them go. A
+   landed follower can be reopened on its own (ov-968). (Changed in review: a cancelled lead first cancelled
+   its followers too, and their lines stayed where the run last was.)
 4. **One agent, one branch, one pull request.** The followers ride on every effect (`Effect.with`), so the
    agent's brief names all the tickets: "You are working on tickets ov-1, ov-2 and ov-3." The run's tree,
    branch and pull request are the lead's, as for any run.

@@ -406,14 +406,16 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             next.items.insert(member.item, ticket);
         }
     }
-    // A run that ended takes the tickets that follow it to the same end (ov-970). A failed one keeps them.
+    // A run that lands takes the tickets that follow it with it (ov-970). A cancelled one hands them back at
+    // rest, as they were before it started: cancelling a run drops its own ticket, not the others it carried.
+    // A failed one keeps them.
     let closing: Vec<(String, Phase)> = next.items.values().filter(|i| matches!(i.phase, Phase::Done | Phase::Cancelled))
         .flat_map(|lead| lead.followers.iter().map(|f| (f.clone(), lead.phase.clone()))).collect();
     for (follower, phase) in closing {
         let Some(ticket) = next.items.get_mut(&follower).filter(|t| t.follows.is_some()) else { continue };
-        if phase == Phase::Done { ticket.stage = ticket.definition.stages.len(); }
+        if phase == Phase::Done { ticket.stage = ticket.definition.stages.len(); ticket.phase = Phase::Done; }
         ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
-        ticket.phase = phase; ticket.follows = None;
+        ticket.follows = None;
     }
     // Completion of a prerequisite can release blocked work without another controller command.
     let ready_ids: Vec<_> = next.items.iter().filter(|(_, i)| i.phase == Phase::Blocked && ready(&next, i, input))

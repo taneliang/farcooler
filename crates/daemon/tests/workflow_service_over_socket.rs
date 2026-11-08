@@ -632,14 +632,16 @@ async fn workflow_service_one_run_carries_three_tickets_on_one_branch() {
         with:rest.iter().map(|t| t.key.clone()).collect() }).await);
     let lead_status=host.service.store.get_task(lead.id).unwrap().status;
     assert_ne!(lead_status,TaskStatus::Backlog,"the run moved the lead's card");
-    for t in rest { assert_eq!(host.service.store.get_task(t.id).unwrap().status,lead_status,"{} follows the run's column",t.key); }
+    let line=|t:uuid::Uuid| host.service.store.ticket_line(t).unwrap().stage;
+    for t in rest { assert_eq!((host.service.store.get_task(t.id).unwrap().status,line(t.id)),(lead_status,line(lead.id)),"{} follows the run's column and line",t.key); }
     drop(held);
     tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
         let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
         if state.items.get(&lead.key).is_some_and(|i| i.phase==Phase::Done) { break; }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }}).await.unwrap();
-    for t in &tickets { assert_eq!(host.service.store.get_task(t.id).unwrap().status,TaskStatus::Done,"{} landed with the run",t.key); }
+    // Each card ends where the run did, on the plan's line as well as in its column.
+    for t in &tickets { assert_eq!((host.service.store.get_task(t.id).unwrap().status,line(t.id)),(TaskStatus::Done,farcooler_store::ticket_lines::Stage::Landed),"{} landed with the run",t.key); }
     let listed=host.service.store.list_worktrees_for_repository(repository).unwrap();
     assert_eq!(listed.iter().filter(|w| w.branch.starts_with("e-liang/")).count(),1,"one worktree, one branch");
     let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();

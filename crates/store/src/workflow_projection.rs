@@ -118,6 +118,10 @@ const GUARDS: [&str; 6] = ["engine_task_execution_fence", "engine_task_wait_fenc
 /// Returns the cards it moved, for the announce after the commit.
 pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> Result<Vec<BoardMove>> {
     let mut moves = Vec::new();
+    // Tickets let go this step by a run that ended: landed with it, or handed back at rest. Their lines were the
+    // run's, so the projection writes where they end; the run is archived next step, and nothing else would.
+    let let_go: std::collections::BTreeSet<&str> = state.items.values().filter(|i| matches!(i.phase, Phase::Done | Phase::Cancelled))
+        .flat_map(|lead| lead.followers.iter().map(String::as_str)).collect();
     for (name, item) in &state.items {
         let task: Option<Vec<u8>> = tx.query_row("SELECT task_id FROM workflow_owned_items WHERE workspace=?1 AND item=?2",
             params![workspace, name], |r| r.get(0)).optional()?.flatten();
@@ -129,7 +133,7 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
         let line: Option<String> = tx.query_row("SELECT stage FROM ticket_lines WHERE task_id=?1", [&task], |r| r.get(0)).optional()?;
         // A ticket with no run holds only its column. Its line, rank and hold are the board's own history, and
         // tracking a card must not rewrite them (ov-962); the run that Start makes projects the line.
-        let ticket = item.definition.is_ticket() && lead.is_none();
+        let ticket = item.definition.is_ticket() && lead.is_none() && !let_go.contains(name.as_str());
         let differs = have.as_deref() != Some(status.as_str()) || (!ticket && line.as_deref() != Some(stage.as_str()));
         if differs { moves.push((task, status, stage, have, line, ticket)); }
     }

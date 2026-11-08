@@ -23,6 +23,13 @@ impl Board {
         self.store.workflow_apply(&Input { schema: 1, id: id.into(), workspace: self.ws.to_string(), expected_revision: revision, epoch: 1,
             source: "controller".into(), source_sequence: n, now_ms: 0, grant: Grant::Controller, busy_resources: Default::default(), command }).unwrap()
     }
+    fn apply_as(&self, id: &str, grant: Grant, command: Command) -> crate::workflow::Receipt {
+        let n = self.sequence.get() + 1;
+        self.sequence.set(n);
+        let revision = self.store.workflow_state(&self.ws.to_string()).unwrap().map_or(0, |s| s.revision);
+        self.store.workflow_apply(&Input { schema: 1, id: id.into(), workspace: self.ws.to_string(), expected_revision: revision, epoch: 1,
+            source: "controller".into(), source_sequence: n, now_ms: 0, grant, busy_resources: Default::default(), command }).unwrap()
+    }
     fn cookie(&self) -> i64 { self.store.conn().query_row("PRAGMA schema_version", [], |r| r.get(0)).unwrap() }
     fn resting(&self) -> Vec<uuid::Uuid> {
         let conn = self.store.conn();
@@ -468,5 +475,52 @@ fn a_follower_is_fenced_with_the_run_it_follows() {
         assert!(start(&b, "start-2"), "{phase:?}: settled, Start goes through");
         assert!(!b.resting().contains(&follower.id), "{phase:?}: a follower isn't at rest");
         assert!(s.record_worker(follower.id, &worker("f2"), user).is_err(), "{phase:?}: and its records are the run's");
+    }
+}
+
+/// ov-970: a follower's line goes where its run's goes, to the end. A landed run leaves it landed, and a
+/// cancelled run hands it back at rest, its line waiting again, rather than cancelling a ticket nobody dropped.
+#[test]
+fn a_followers_line_ends_where_its_run_ends() {
+    for (phase, landed) in [(Phase::Legacy, true), (Phase::Released, true), (Phase::Legacy, false), (Phase::Released, false)] {
+        let b = board(phase);
+        let s = &b.store;
+        let follower = s.create_task(b.ws, "follower", Actor::User).unwrap();
+        let definition = Definition::ticket();
+        let policy_pin = s.workflow_ticket_bundle(&definition).unwrap();
+        assert!(b.apply("follower", Command::Enqueue { item: follower.key.clone(), policy_pin, resource: "own-follower".into(),
+            dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition }).result.is_ok());
+        let tracker = Definition::tracker("owner");
+        assert!(b.apply("start", Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker, models: Default::default(), tree: None,
+            with: vec![follower.key.clone()] }).result.is_ok());
+        let seen = |t: uuid::Uuid| (s.get_task(t).unwrap().status, s.ticket_line(t).unwrap().stage);
+        assert_eq!(seen(follower.id), seen(b.ticket.id), "{phase:?}: it follows the run's column and line");
+        let item = s.workflow_state(&b.ws.to_string()).unwrap().unwrap().items[&b.ticket.key].clone();
+        let (grant, command) = if landed {
+            (Grant::Decision { principal: "owner".into() }, Command::Approve { item: b.ticket.key.clone(), run: item.run, pin: item.pin, candidate: item.candidate })
+        } else { (Grant::Controller, Command::Cancel { item: b.ticket.key.clone() }) };
+        assert!(b.apply_as("end", grant, command).result.is_ok(), "{phase:?}: the run ends");
+        if landed {
+            // Approved, the checklist runs and passes.
+            let state = s.workflow_state(&b.ws.to_string()).unwrap().unwrap();
+            let item = &state.items[&b.ticket.key];
+            let effect = item.pending.clone().unwrap();
+            let claim = s.workflow_claim_effect(&state.workspace, &effect, "fixture", state.revision, state.epoch, 1000, 2000).unwrap().unwrap();
+            assert!(s.workflow_admit_effect(&claim, 1001).unwrap());
+            let proof = farcooler_workflow::Evidence { candidate: item.candidate.clone().unwrap(), manifest: "m".into(), receipt: "r".into(),
+                policy_pin: item.policy_pin.clone() };
+            assert!(b.apply_as("passed", Grant::Operation { effect: effect.clone(), run: item.run.clone(), fence: item.fence },
+                Command::Observe { item: b.ticket.key.clone(), effect, run: item.run.clone(), fence: item.fence,
+                    outcome: farcooler_workflow::Outcome::Passed(proof) }).result.is_ok(), "{phase:?}: the run lands");
+        }
+        if landed {
+            assert_eq!(seen(b.ticket.id), (TaskStatus::Done, Stage::Landed), "{phase:?}");
+            assert_eq!(seen(follower.id), (TaskStatus::Done, Stage::Landed), "{phase:?}: it landed with its run");
+        } else {
+            assert_eq!(seen(b.ticket.id), (TaskStatus::Cancelled, Stage::Dropped), "{phase:?}");
+            assert_eq!(seen(follower.id), (TaskStatus::Backlog, Stage::Waiting), "{phase:?}: it's back where it was, waiting");
+            assert!(b.resting().contains(&follower.id), "{phase:?}: and at rest, the orchestrator's to place again");
+        }
     }
 }
