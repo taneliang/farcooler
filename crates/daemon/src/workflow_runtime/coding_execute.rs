@@ -28,6 +28,24 @@ pub struct CodingReviewReceipt {
     pub passed: bool,
 }
 
+/// Write an agent gate's verdict where its step reads it (ov-969): `farcooler workflow verdict`, run by the reviewing
+/// agent, whose environment the step pinned. `env` reads that environment. Returns where the receipt went.
+pub fn write_agent_verdict(env: impl Fn(&str) -> Option<String>, passed: bool) -> Result<PathBuf> {
+    let var = |key: &str| env(key).filter(|v| !v.is_empty()).ok_or(Error::Refused("not run by an agent's review gate"));
+    let receipt = PathBuf::from(var("FARCOOLER_RECEIPT")?);
+    let parent = receipt.parent().filter(|p| receipt.is_absolute() && p.is_dir())
+        .ok_or(Error::Refused("not run by an agent's review gate"))?;
+    let body = serde_json::to_vec(&CodingReviewReceipt { binding: var("FARCOOLER_OPERATION_BINDING")?,
+        identity: AGENT_REVIEWER.into(), candidate: var("FARCOOLER_CANDIDATE")?, passed })?;
+    // A fresh file renamed into place: the step reads one whole verdict, the last one given, and never follows a link.
+    let draft = parent.join(format!(".verdict-{}", Uuid::now_v7()));
+    let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).custom_flags(libc::O_NOFOLLOW).open(&draft)?;
+    std::io::Write::write_all(&mut file, &body)?;
+    file.sync_all()?;
+    std::fs::rename(&draft, &receipt)?;
+    Ok(receipt)
+}
+
 /// The provider hook must supply a real provider observation (offline tests use
 /// deterministic stand-ins). The embedded run is parsed by retained ci_watch.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,9 +95,11 @@ impl Exec {
         let operation = &binding.effect.operation;
         let EffectKind::Execute(kind) = &binding.effect.kind else { return Err(Error::Refused("not an execution")); };
         let mut command = match kind {
-            StageKind::Build => match &config.harness {
-                CodingHarness::Command(command) => command.clone(),
-                CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process } => {
+            // A build, or an agent's review gate (ov-969): both start the agent the run picked.
+            StageKind::Build | StageKind::Review(Reviewer::Agent) => match &config.harness {
+                CodingHarness::Command(command) if matches!(kind, StageKind::Build) => command.clone(),
+                CodingHarness::Command(_) => return Err(Error::Refused("an agent's review gate needs a native harness")),
+                CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt: _, process } => {
                     // The model the run picked at Start, or the configured preset when the workflow lists none (ov-966).
                     let preset = binding.effect.model.as_deref().unwrap_or(preset);
                     let claude = preset.split(':').next() == Some("claude");
@@ -90,7 +110,7 @@ impl Exec {
                         LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
                     }
                     let extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
-                        plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(Self::briefed(prompt, &binding.effect.item))),
+                        plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(self.native_prompt(binding)?)),
                         ..Default::default() };
                     let launch = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
                     let mut command = process.clone();
@@ -99,7 +119,7 @@ impl Exec {
                     if let Some(argv) = super::coding_native::TEST_ARGV.with(|p| p.borrow().clone()) {
                         command.argv = argv;
                         // The fake agent reports what it was launched with, as a real one would, so the turn check can't drift.
-                        command.environment.insert("TEST_LAUNCHED_PROMPT".into(), Self::briefed(prompt, &binding.effect.item));
+                        command.environment.insert("TEST_LAUNCHED_PROMPT".into(), self.native_prompt(binding)?);
                     }
                     command.environment.entry("TERM".into()).or_insert_with(|| "xterm-256color".into());
                     command.environment.entry("COLORTERM".into()).or_insert_with(|| "truecolor".into());
@@ -117,6 +137,26 @@ impl Exec {
         };
         self.pin_context(&mut command, binding, &binding.effect.candidate.clone().unwrap_or_default(), &self.provider_path(binding));
         Ok(command)
+    }
+    /// What a native agent is launched with: a build's published prompt, or the review brief for an agent's gate.
+    pub(super) fn native_prompt(&self, binding: &Binding) -> Result<String> {
+        let Some(CodingConfig { harness: CodingHarness::Native { prompt, .. }, .. }) = &self.coding else {
+            return Err(Error::Refused("not a native harness"));
+        };
+        Ok(match &binding.effect.kind {
+            EffectKind::Execute(StageKind::Review(Reviewer::Agent)) => Self::reviewing(&binding.effect.item),
+            _ => Self::briefed(prompt, &binding.effect.item),
+        })
+    }
+    /// An agent gate's brief (ov-969). Fixed text, so a recovery rebuilds the same command. The verdict is the
+    /// receipt `farcooler workflow verdict` writes: whatever the agent says in its turn decides nothing.
+    pub(super) fn reviewing(item: &str) -> String {
+        format!("You are reviewing ticket {item}. Read it first with `farcooler task show {item}`. The work under review is \
+            the commits from $FARCOOLER_BASE to $FARCOOLER_CANDIDATE in this worktree. Review it against the ticket. Don't \
+            change, commit or stage anything here.\n\nWhen you've decided, record your verdict with \
+            `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false`, then end your turn. \
+            Only that command's verdict counts. If you end your turn without one, the review hasn't happened, and it \
+            runs again.")
     }
     /// The published prompt, led by the card this run is for. The card's own words are read by the agent
     /// (`farcooler task show`), not copied here, so a recovery rebuilds the same command whatever the card says now.
@@ -150,7 +190,7 @@ impl Exec {
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
         durable(&log, b"")?;
-        let exit = if self.is_native_build(binding) {
+        let exit = if self.is_native_agent(binding) {
             self.run_native(binding, &command, cancel).await?
         } else {
             // A gate can run for hours and leave the daemon behind it: its owner is recorded so a
@@ -191,7 +231,7 @@ impl Exec {
         let original_binding = Binding::new(&binding.workspace, &original.effect,
             original.resource_generation.ok_or(Error::Refused("missing original generation"))?,
             binding.iteration, &binding.base);
-        if self.is_native_build(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
+        if self.is_native_agent(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
             self.cancel_interrupted_native(&original_binding).await?;
             let command = self.bound_command(&original_binding, false)?;
             let fact = ProcessFact { binding: original_binding.clone(), argv: command.argv,
@@ -341,7 +381,7 @@ impl Exec {
                 || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
                 return Err(Error::Refused("configured process receipt mismatch"));
             }
-            if self.is_native_build(binding) { self.verify_native_settlement(binding, fact.exit)?; }
+            if self.is_native_agent(binding) { self.verify_native_settlement(binding, fact.exit)?; }
             // Even a dirty interrupted build can settle cancellation once this
             // exact owned group has been reaped; it supplies no candidate success.
             if fact.exit != Some(0) { return Ok(Outcome::SafeFailure); }
@@ -377,12 +417,18 @@ impl Exec {
                     candidate = binding.effect.candidate.clone().ok_or(Error::Refused("missing candidate"))?;
                 }
                 if matches!(kind, StageKind::Review(_) | StageKind::Ci) {
-                    let raw = self.bytes(&self.provider_path(binding))?;
+                    let agent = matches!(kind, StageKind::Review(Reviewer::Agent));
+                    let raw = match self.bytes(&self.provider_path(binding)) {
+                        // An agent that ended its turn without a verdict gave none: it never passes, and it runs again (ov-969).
+                        Err(Error::Io(error)) if agent && error.kind() == std::io::ErrorKind::NotFound => return Ok(Outcome::SafeFailure),
+                        raw => raw?,
+                    };
                     let config = self.coding.as_ref().ok_or(Error::Refused("missing config"))?;
                     if matches!(kind, StageKind::Review(_)) {
                         let receipt: CodingReviewReceipt = serde_json::from_slice(&raw)?;
+                        let identity = if agent { Some(AGENT_REVIEWER) } else { config.reviewer.as_ref().map(|r| r.identity.as_str()) };
                         if receipt.binding != digest(binding) || receipt.candidate != candidate
-                            || Some(receipt.identity.as_str()) != config.reviewer.as_ref().map(|r| r.identity.as_str()) {
+                            || Some(receipt.identity.as_str()) != identity {
                             return Err(Error::Refused("foreign review receipt"));
                         }
                         passed = receipt.passed;

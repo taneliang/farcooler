@@ -58,8 +58,9 @@ fn gone(pid: i32) -> bool {
 }
 
 impl Exec {
-    pub(super) fn is_native_build(&self, binding: &Binding) -> bool {
-        matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
+    /// A step that starts a native agent: a build, or an agent's review gate (ov-969).
+    pub(super) fn is_native_agent(&self, binding: &Binding) -> bool {
+        matches!(&binding.effect.kind, EffectKind::Execute(kind) if starts_agent(kind))
             && matches!(self.coding.as_ref().map(|c| &c.harness), Some(CodingHarness::Native { .. }))
     }
     /// Each native build listens on a socket of its own, so builds run side by side. The pinned
@@ -203,9 +204,8 @@ impl Exec {
             }
             if session.as_ref() != Some(sid) { continue; }
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
-                let Some(CodingConfig { harness: CodingHarness::Native { prompt, .. }, .. }) = &self.coding else { unreachable!() };
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
-                if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(Self::briefed(prompt, &binding.effect.item).as_str()) { prompted = true; }
+                if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(self.native_prompt(binding)?.as_str()) { prompted = true; }
             }
             let events = assembler.accept(line.agent, &line.event, &line.payload);
             hooks.push(line);
@@ -288,12 +288,12 @@ impl Exec {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use super::super::{coding_tests::{configured, admitted}, tests::{enqueue, finish}};
-    struct Fake;
+    pub(crate) struct Fake;
     impl Drop for Fake { fn drop(&mut self) { TEST_ARGV.with(|p| *p.borrow_mut() = None); } }
-    async fn native(mode: &str) -> (tempfile::TempDir, Runtime, Fake) { native_agent(mode, "claude").await }
+    pub(crate) async fn native(mode: &str) -> (tempfile::TempDir, Runtime, Fake) { native_agent(mode, "claude").await }
     async fn native_agent(mode: &str, agent: &str) -> (tempfile::TempDir, Runtime, Fake) {
         assert!(farcooler_core::programs::find("tmux").is_some(), "native ownership proof requires real tmux");
         let (dir, mut runtime) = configured(false, "pass").await;

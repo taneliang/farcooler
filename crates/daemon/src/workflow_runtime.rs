@@ -20,8 +20,8 @@ mod coding_landing;
 mod coding_verbs;
 mod coding_settle;
 mod coding_pr;
-pub use coding::{CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile};
-pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt};
+pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile};
+pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict};
 mod wire_commands;
 mod named_tree;
 pub use named_tree::{RepoLocks, WorktreeHost};
@@ -777,3 +777,5 @@ mod landing_templates_tests;
 
 #[cfg(test)]
 mod coding_pr_tests;
+#[cfg(test)]
+mod gate_tests;

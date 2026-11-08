@@ -105,7 +105,8 @@ fn approvers(definition: &Definition) -> Vec<String> {
         match &s.kind {
             StageKind::Review(Reviewer::Person(p)) if p == "owner" => lines.push("You approve each ticket before it lands.".into()),
             StageKind::Review(Reviewer::Person(p)) => lines.push(format!("{} approves each ticket before it lands.", code(p))),
-            StageKind::Review(Reviewer::Dispatch) => lines.push("A reviewer agent reviews each ticket.".into()),
+            StageKind::Review(Reviewer::Dispatch) => lines.push("The configured reviewer reviews each ticket.".into()),
+            StageKind::Review(Reviewer::Agent) => lines.push("An agent reviews each ticket, and it must give a verdict.".into()),
             StageKind::Review(Reviewer::Orchestrator(_)) => lines.push("The orchestrator reviews each ticket.".into()),
             _ => {}
         }

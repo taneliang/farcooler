@@ -87,6 +87,10 @@ pub enum WorkflowCmd {
     /// Stream a running engine agent's terminal to stdout, read-only: its picture, then live bytes, until
     /// the agent's turn ends. Nothing is ever sent to the agent. Owner only.
     Watch { workspace:Uuid,item:String },
+    /// For an agent the engine started to review a ticket: record your verdict. Only this counts; what you
+    /// say in your turn doesn't. Run it before you end your turn, or the review runs again. Writes the step's
+    /// receipt locally and talks to no runner.
+    Verdict { #[arg(long, action = clap::ArgAction::Set, required = true)] passed:bool },
 }
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
@@ -115,6 +119,7 @@ impl WorkflowCmd {
                 worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch }) }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
             Self::Watch { .. } => return Err("watch is a stream, not a command".into()),
+            Self::Verdict { .. } => return Err("a verdict is written where the review step reads it, not sent".into()),
         })
     }
 }
@@ -203,6 +208,15 @@ async fn watch(runner:Option<&str>, workspace:Uuid, item:String) -> Fallible {
 }
 pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible {
     if let WorkflowCmd::Watch { workspace,item } = cmd { return watch(runner,workspace,item).await; }
+    if let WorkflowCmd::Verdict { passed } = cmd {
+        farcooler_daemon::workflow_runtime::write_agent_verdict(|key| std::env::var(key).ok(), passed)
+            .map_err(|error| match error {
+                farcooler_daemon::workflow_runtime::Error::Refused(_) => "This only works inside an agent the engine started to review a ticket.".to_string(),
+                error => format!("Couldn't record the verdict: {error}"),
+            })?;
+        println!("{}", if passed { "Recorded: passed." } else { "Recorded: not passed." });
+        return Ok(());
+    }
     let (workspace,action) = cmd.action()?;
     let mut link = crate::connect_to(runner).await?;
     send(&mut link,workspace,action,json).await

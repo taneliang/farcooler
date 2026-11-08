@@ -142,6 +142,8 @@ impl CodingConfigExt for CodingConfig {
             arguments: vec![self.pin(), argument.into(), every_ms.to_string(), patience_ms.to_string()] }
     }
 }
+/// The identity an agent's review gate pins, and the one its verdict receipt carries (ov-969).
+pub const AGENT_REVIEWER: &str = "agent";
 /// The longest any configured command may run: the landing job's own allowance for a gate.
 pub const MAX_COMMAND_MS: u64 = 3 * 3_600_000;
 /// How often a waiting step looks, and the longest it may wait.
@@ -178,6 +180,16 @@ impl Pinned for CodingConfig {
                 // review that pins the configured reviewer's identity (the older form) falls to the next arm.
                 StageKind::Review(Reviewer::Person(person)) if built && !landed
                     && stage.operation == self.operation("coding-review/v1", &format!("person:{person}")) => stage.operation.clone(),
+                // The orchestrator decides, however it chooses to review, and nothing runs: no reviewer is configured (ov-969).
+                StageKind::Review(Reviewer::Orchestrator(principal)) if built && !landed
+                    && stage.operation == self.operation("coding-review/v1", &format!("orchestrator:{principal}")) => stage.operation.clone(),
+                // An agent the engine starts, which only a native harness can launch. No review command runs (ov-969).
+                StageKind::Review(Reviewer::Agent) if built && !landed => {
+                    if !matches!(self.harness, CodingHarness::Native { .. }) {
+                        return Err(Error::Refused("an agent's review gate needs a native harness"));
+                    }
+                    self.operation("coding-review/v1", AGENT_REVIEWER)
+                },
                 StageKind::Review(_) if built && (!landed || definition.max_reworks == 0) =>
                     self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity),
                 StageKind::Land if built && !landed => { landed = true; self.operation("coding-land/v1", &self.landing_ref) },
