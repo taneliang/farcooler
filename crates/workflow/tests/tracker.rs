@@ -35,7 +35,7 @@ fn coding() -> Definition {
     let op = |a: &str| OperationSpec { adapter_version: a.into(), arguments: vec![], environment: Default::default() };
     let stage = |id: &str, kind| Stage { id: id.into(), kind, progression: Progression::Automatic, max_attempts: 1,
         operation: op("coding/v1"), routes: Default::default(), limit: 0 };
-    Definition { schema: 1, source: "coding/v1".into(), max_reworks: 0, rework_target: None, groups: Default::default(), models: Default::default(),
+    Definition { schema: 1, source: "coding/v1".into(), max_reworks: 0, rework_target: None, groups: Default::default(), models: Default::default(), send_backs: None,
         stages: vec![stage("build", StageKind::Build), stage("check", StageKind::Check)] }
 }
 fn start(item: &str, d: Definition) -> Command { start_with(item, d, &[]) }

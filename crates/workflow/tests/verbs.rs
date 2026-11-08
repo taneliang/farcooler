@@ -23,7 +23,7 @@ fn definition(steps: Vec<Stage>) -> Definition {
     join.operation.arguments.clear();
     Definition { schema: 2, source: "landing/v1".into(), max_reworks: 0, rework_target: None,
         stages: vec![step("build", StageKind::Action("build".into())), join],
-        groups: [("landing".to_string(), GroupDef { limit: 8, exclusive: "ref:origin:main".into(), steps })].into(), models: Default::default() }
+        groups: [("landing".to_string(), GroupDef { limit: 8, exclusive: "ref:origin:main".into(), steps })].into(), models: Default::default(), send_backs: None }
 }
 fn invalid(edit: impl FnOnce(&mut Vec<Stage>)) -> bool {
     let mut s = steps(); edit(&mut s); definition(s).validate() == Err(Refusal::Definition)

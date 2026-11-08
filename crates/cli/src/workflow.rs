@@ -81,9 +81,19 @@ pub enum WorkflowCmd {
         #[arg(long="model",value_name="STEP=MODEL")] models:Vec<String>,
         /// The worktree the run makes and works in, which the app lists, from main as it is at Start. With --branch.
         #[arg(long,requires="branch")] worktree:Option<String>,
-        /// The new branch for --worktree. One that exists, here or on a remote, is refused.
+        /// The new branch for --worktree. One that exists, here or on a remote, is refused, unless --adopt.
         #[arg(long,requires="worktree")] branch:Option<String>,
+        /// Carry on from --branch, which exists with work on it: in the worktree that already has it checked out,
+        /// or in a new one named --worktree. The agent is told the work is there.
+        #[arg(long,requires="branch")] adopt:bool,
         #[command(flatten)] identity:Identity },
+    /// Send a run back to its build step, which starts again in the same worktree. The agent is told --reason.
+    /// Taken while the run waits for a review, an approval or its landing group, or has failed.
+    SendBack { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+        /// Why, for the agent: what to change. At most 4096 bytes; the first 1500 are in its brief.
+        #[arg(long)] reason:String,#[command(flatten)] identity:Identity },
+    /// Reopen a closed ticket: it comes back as a ticket at rest, in --column (todo when left out), under its own name.
+    Reopen { workspace:Uuid,item:String,#[arg(long)] column:Option<String>,#[command(flatten)] identity:Identity },
     /// Stream a running engine agent's terminal to stdout, read-only: its picture, then live bytes, until
     /// the agent's turn ends. Nothing is ever sent to the agent. Owner only.
     Watch { workspace:Uuid,item:String },
@@ -115,8 +125,15 @@ impl WorkflowCmd {
             Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
             Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation(),item,column }),
             Self::Move { workspace,item,to,run,pin,identity } => (workspace,Action::Move { mutation:identity.mutation(),item,run,pin,to }),
-            Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,
-                worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch }) }),
+            Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,adopt,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,
+                worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch,adopt }) }),
+            Self::SendBack { workspace,item,run,pin,reason,identity } => {
+                if !farcooler_protocol::workflow_commands::valid_rework_reason(&reason) {
+                    return Err("The reason must say something, in at most 4096 bytes, with no control characters but tabs and line breaks.".into());
+                }
+                (workspace,Action::SendBack { mutation:identity.mutation(),item,run,pin,reason })
+            }
+            Self::Reopen { workspace,item,column,identity } => (workspace,Action::Reopen { mutation:identity.mutation(),item,column }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
             Self::Watch { .. } => return Err("watch is a stream, not a command".into()),
             Self::Verdict { .. } => return Err("a verdict is written where the review step reads it, not sent".into()),
@@ -279,8 +296,32 @@ mod tests {
         let parsed=|extra:&[&str]| crate::Cli::try_parse_from(args.iter().chain(extra));
         let crate::Command::Workflow(cmd)=parsed(&["--worktree","phones","--branch","e-liang/phones"]).unwrap().command else {panic!()};
         let Action::Start{worktree,..}=cmd.action().unwrap().1 else {panic!()};
-        assert_eq!(worktree,Some(farcooler_protocol::workflow_commands::NamedTree{name:"phones".into(),branch:"e-liang/phones".into()}));
+        assert_eq!(worktree,Some(farcooler_protocol::workflow_commands::NamedTree{name:"phones".into(),branch:"e-liang/phones".into(),adopt:false}));
         assert!(parsed(&["--worktree","phones"]).is_err() && parsed(&["--branch","b"]).is_err());
+        // ov-968: --adopt carries on from the branch, which must be named.
+        let crate::Command::Workflow(cmd)=parsed(&["--worktree","phones","--branch","e-liang/phones","--adopt"]).unwrap().command else {panic!()};
+        let (workspace,action)=cmd.action().unwrap();
+        let Some(request::Payload::WorkflowCommand(body))=super::request(workspace,&action).unwrap().payload else {panic!()};
+        assert!(body.json.ends_with(r#""worktree":{"name":"phones","branch":"e-liang/phones","adopt":true}}"#),"{}",body.json);
+        assert!(parsed(&["--adopt"]).is_err());
+    }
+    /// ov-968: send a run back with a reason the agent is told, and reopen a closed ticket, each its own method.
+    #[test]
+    fn workflow_send_back_and_reopen_travel_as_their_own_methods() {
+        let ids=["--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        let action=|args:&[&str]| { let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(["farcooler","workflow"].iter().chain(args).chain(&ids)).unwrap().command else {panic!()}; cmd.action() };
+        let back=["send-back","00000000-0000-0000-0000-000000000000","ov-7","--run","run","--pin","pin","--reason"];
+        let (workspace,sent)=action(&[&back[..],&["Bound the retry loop."]].concat()).unwrap();
+        let request=super::request(workspace,&sent).unwrap();
+        assert_eq!(request.method,"workflow.send_back");
+        let Some(request::Payload::WorkflowCommand(body))=request.payload else {panic!()};
+        assert_eq!(body.json,r#"{"action":"SendBack","mutation":{"id":"same","revision":5,"epoch":1,"sequence":2},"item":"ov-7","run":"run","pin":"pin","reason":"Bound the retry loop."}"#);
+        for bad in [" ","bell\u{7}"] { assert!(action(&[&back[..],&[bad]].concat()).is_err(),"{bad:?}"); }
+        let (workspace,reopen)=action(&["reopen","00000000-0000-0000-0000-000000000000","ov-7","--column","doing"]).unwrap();
+        assert!(matches!(&reopen,Action::Reopen{item,column:Some(c),..} if item=="ov-7" && c=="doing"));
+        assert_eq!(super::request(workspace,&reopen).unwrap().method,"workflow.reopen");
+        let (_,reopen)=action(&["reopen","00000000-0000-0000-0000-000000000000","ov-7"]).unwrap();
+        assert!(matches!(reopen,Action::Reopen{column:None,..}),"the runner picks the column");
     }
     /// ov-966: `--model <step>=<model>` picks a step's model at Start, once per step.
     #[test]

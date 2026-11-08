@@ -48,11 +48,21 @@ pub enum Action {
     Propose { reason: String, definition: Definition, adapter: Box<crate::workflow_config::AdapterConfiguration> },
     /// Read the workspace's drafts, or one by id: pending, approved, declined, out of date, replaced.
     Drafts { #[serde(default, skip_serializing_if = "Option::is_none")] draft: Option<String> },
+    /// Send a run back to its last build step, which starts again in the same worktree and is told `reason`
+    /// (ov-968). Taken while the run waits (for a review, an approval or its landing group) or has failed.
+    SendBack { mutation: Mutation, item: String, run: String, pin: String, reason: String },
+    /// Reopen a closed ticket: it comes back under the engine as a ticket at rest in `column` (`todo` when left
+    /// out), under its own name, so its history stays in one place (ov-968).
+    Reopen { mutation: Mutation, item: String, #[serde(default, skip_serializing_if = "Option::is_none")] column: Option<String> },
 }
 /// A worktree the orchestrator names for a run: what the app calls it, and its new branch (ov-967).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct NamedTree { pub name: String, pub branch: String }
+pub struct NamedTree { pub name: String, pub branch: String,
+    /// The branch exists, with work on it, and the run carries on from it (ov-968): in the worktree that already
+    /// has it checked out, or in a new one named `name`. Left out, the branch is new.
+    #[serde(default, skip_serializing_if = "is_false")] pub adopt: bool }
+fn is_false(b: &bool) -> bool { !*b }
 impl Action {
     pub fn method(&self) -> &'static str {
         match self {
@@ -71,6 +81,8 @@ impl Action {
             Self::Start { .. } => "workflow.start",
             Self::Propose { .. } => "workflow.propose",
             Self::Drafts { .. } => "workflow.drafts",
+            Self::SendBack { .. } => "workflow.send_back",
+            Self::Reopen { .. } => "workflow.reopen",
         }
     }
 }

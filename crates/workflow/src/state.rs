@@ -69,11 +69,26 @@ pub struct Item {
     /// The worktree the orchestrator named at Start, and main's commit then (ov-967). `None`: a private tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<RunTree>,
+    /// Each time the orchestrator sent the run back to its build step, oldest first (ov-968).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sent_back: Vec<SendBack>,
+    /// Why the run was last sent back to build, by the orchestrator or a review, until that build passes. Every
+    /// build effect carries it, so the agent is told (ov-968).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
 }
+/// One send-back: who asked (the input), when (the revision), from which step to which, on which run, and why.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendBack { pub id: String, pub revision: u64, pub run: String, pub from: String, pub to: String, pub reason: String }
 /// A run's worktree, named by the orchestrator at Start: one the app lists, on `branch`, made at `path` from
 /// `base`, which is main as it was at Start (ov-967).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RunTree { pub name: String, pub branch: String, pub path: String, pub base: String }
+pub struct RunTree { pub name: String, pub branch: String, pub path: String, pub base: String,
+    /// The branch existed before the run, with work on it, and the run carries on from it (ov-968). `path` is the
+    /// worktree that already has it checked out, or where Provision makes one on it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub adopted: bool }
+fn is_false(b: &bool) -> bool { !*b }
 impl RunTree {
     /// Bounded and plain. The runner checks the names as `worktree.create` does before it sends one.
     pub fn valid(&self) -> bool {
@@ -168,6 +183,11 @@ pub enum Command {
         /// The worktree the run makes and works in (ov-967). `None` keeps the runtime's private tree.
         #[serde(default, skip_serializing_if = "Option::is_none")] tree: Option<Box<RunTree>> },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
+    /// The orchestrator sends a run back to its last build step, with a reason the agent is told (ov-968).
+    SendBack { item: String, reason: String },
+    /// The orchestrator reopens a closed ticket: it comes back under its own name as a ticket at rest, on
+    /// `definition`, the tracker-only template at the column it reopens in (ov-968).
+    Reopen { item: String, definition: Definition, policy_pin: String, resource: String },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Evidence {
@@ -203,6 +223,9 @@ pub struct Effect {
     /// The item's named worktree (ov-967), so every step finds the tree from the effect alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<RunTree>,
+    /// A build step only: why the run was sent back to it (ov-968), so the launch says so from the effect alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {

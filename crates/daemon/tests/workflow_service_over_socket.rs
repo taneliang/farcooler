@@ -438,7 +438,7 @@ async fn workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at
     let start=|id:&str,snapshot:&serde_json::Value,branch:&str| { let item=&snapshot["state"]["items"][&ticket.key];
         Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-            worktree:Some(NamedTree { name:"phones-plan".into(),branch:branch.into() }) } };
+            worktree:Some(NamedTree { name:"phones-plan".into(),branch:branch.into(),adopt:false }) } };
     let snapshot=get(&mut link,workspace).await;
     let refused=try_call(&mut link,workspace,start("taken",&snapshot,&existing)).await;
     assert!(refused.as_ref().is_err_and(|e| e.contains("already exists")),"{refused:?}");
@@ -481,7 +481,7 @@ async fn workflow_service_refuses_a_bad_or_taken_named_tree_at_start() {
     let start=|id:&str,key:&str,snapshot:&serde_json::Value,name:&str,branch:&str| { let item=&snapshot["state"]["items"][key];
         Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:key.into(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-            worktree:Some(NamedTree { name:name.into(),branch:branch.into() }) } };
+            worktree:Some(NamedTree { name:name.into(),branch:branch.into(),adopt:false }) } };
     // Names git refuses and the cheap check misses, and a branch that is the prefix of another.
     for (id,branch) in [("dot","e-liang/.hidden"),("lock","e-liang/x.lock/y"),("child","clash/child")] {
         let snapshot=get(&mut link,workspace).await;
@@ -524,7 +524,7 @@ async fn workflow_service_unmakes_a_named_tree_it_could_not_record() {
     let snapshot=get(&mut link,workspace).await; let item=&snapshot["state"]["items"][&ticket.key];
     accepted(&call(&mut link,workspace,Action::Start { mutation:mutation("start",snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
         run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-        worktree:Some(NamedTree { name:"unrecorded".into(),branch:"e-liang/unrecorded".into() }) }).await);
+        worktree:Some(NamedTree { name:"unrecorded".into(),branch:"e-liang/unrecorded".into(),adopt:false }) }).await);
     let tree=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap().items[&ticket.key].tree.clone().unwrap();
     // A row already holds that path, so the run's own row can't be written.
     host.service.store.create_worktree(repository,"blocker",&tree.path,false).unwrap();
@@ -542,3 +542,61 @@ async fn workflow_service_unmakes_a_named_tree_it_could_not_record() {
 
 #[path = "workflow_service/safety.rs"]
 mod safety;
+
+/// ov-968: a ticket started on a branch that already has work adopts it: the run works in the worktree that has
+/// it checked out, carries on from its commits, and the app lists that worktree, claimed for the workspace. A
+/// branch that doesn't exist can't be adopted. Once the run has landed, the orchestrator reopens the ticket, and
+/// the card comes back off Done.
+#[tokio::test]
+async fn workflow_service_a_start_adopts_a_branch_with_work_and_a_closed_ticket_reopens() {
+    if person_terminal("workflow_service_a_start_adopts_a_branch_with_work_and_a_closed_ticket_reopens").await { return; }
+    use farcooler_protocol::workflow_commands::NamedTree;
+    let (dir,config)=configured(false,"pass").await;
+    let host=Host::open(dir.path()).await; let workspace=host.workspace; let mut link=host.connect().await;
+    let definition=config.definition().unwrap();
+    let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    let ticket=host.service.store.create_task(workspace,"adopted",farcooler_store::models::Actor::User).unwrap();
+    host.service.track_tickets(Some(ticket.id)).await;
+    // Earlier work: a branch off main, with a commit, checked out in a worktree of its own.
+    let earlier=dir.path().join("lanes").join("earlier");
+    git(&config.repository,&["worktree","add","--quiet","-b","e-liang/earlier",earlier.to_str().unwrap(),&config.base]).await.unwrap();
+    std::fs::write(earlier.join("earlier.txt"),"work from before").unwrap();
+    git(&earlier,&["add","earlier.txt"]).await.unwrap();
+    git(&earlier,&["-c","user.name=Test","-c","user.email=test@localhost","-c","commit.gpgsign=false","commit","--quiet","-m","earlier work"]).await.unwrap();
+    let work=git(&earlier,&["rev-parse","HEAD"]).await.unwrap();
+    let start=|id:&str,snapshot:&serde_json::Value,branch:&str| { let item=&snapshot["state"]["items"][&ticket.key];
+        Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
+            run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+            worktree:Some(NamedTree { name:"adopted".into(),branch:branch.into(),adopt:true }) } };
+    let snapshot=get(&mut link,workspace).await;
+    let refused=try_call(&mut link,workspace,start("missing",&snapshot,"e-liang/never-made")).await;
+    assert!(refused.is_err(),"a branch that doesn't exist can't be adopted: {refused:?}");
+    let snapshot=get(&mut link,workspace).await;
+    accepted(&call(&mut link,workspace,start("adopt",&snapshot,"e-liang/earlier")).await);
+    tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
+        let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+        if state.items.get(&ticket.key).is_some_and(|i| i.phase==Phase::Done) { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }}).await.unwrap();
+    let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+    let tree=state.items[&ticket.key].tree.clone().expect("the run records its tree");
+    assert!(tree.adopted);
+    assert_eq!(Path::new(&tree.path).canonicalize().unwrap(),earlier.canonicalize().unwrap(),"the worktree that had the branch");
+    assert!(git(&earlier,&["merge-base","--is-ancestor",&work,"HEAD"]).await.is_ok(),"the run carried on from the earlier work");
+    assert_ne!(git(&earlier,&["rev-parse","HEAD"]).await.unwrap(),work,"and built on it");
+    let listed=host.service.store.list_worktrees_for_repository(host.service.store.get_workspace(workspace).unwrap().repository_id).unwrap();
+    let row=listed.into_iter().find(|w| Path::new(&w.worktree_path).canonicalize().ok()==earlier.canonicalize().ok()).expect("the app lists it");
+    assert_eq!((row.branch.as_str(),row.workspace_id),("e-liang/earlier",Some(workspace)),"claimed for the workspace");
+    assert_eq!(host.service.store.get_task(ticket.id).unwrap().status,farcooler_store::models::TaskStatus::Done);
+    // Reopened through the orchestrator, under its own name: the card leaves Done for the column it names.
+    let snapshot=get(&mut link,workspace).await;
+    accepted(&call(&mut link,workspace,Action::Reopen { mutation:mutation("reopen",snapshot["state"]["revision"].as_u64().unwrap(),3),
+        item:ticket.key.clone(),column:Some("doing".into()) }).await);
+    let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+    let item=&state.items[&ticket.key];
+    assert_eq!((item.definition.stages[item.stage].id.as_str(),&item.phase),("doing",&Phase::WaitingApproval));
+    assert_eq!(host.service.store.get_task(ticket.id).unwrap().status,farcooler_store::models::TaskStatus::InProgress);
+    drop(link);host.close().await;
+}

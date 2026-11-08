@@ -34,7 +34,8 @@ impl Runtime {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
             | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
-            | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. } => mutation,
+            | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
+            | Action::SendBack { mutation, .. } | Action::Reopen { mutation, .. } => mutation,
             Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -146,6 +147,23 @@ impl Runtime {
                         }
                         _ => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
                     }
+                }
+                Action::SendBack { item, run, pin, reason, .. } => {
+                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                    } else {
+                        let input = input(Command::SendBack { item:item.clone(),reason:reason.clone() },Grant::Controller);
+                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                    }
+                }
+                Action::Reopen { item, column, .. } => {
+                    let Some(definition) = Definition::ticket_at(column.as_deref().unwrap_or("todo")) else {
+                        return Ok(serde_json::json!({"schema":1,"receipt":self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Invalid))?}));
+                    };
+                    self.validate_publication(&definition, None)?;
+                    let policy_pin = self.store.workflow_ticket_bundle(&definition)?;
+                    let input = input(Command::Reopen { item:item.clone(),definition,policy_pin,resource:Exec::item_resource(workspace, item) },Grant::Controller);
+                    self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                 }
                 Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
             }

@@ -27,6 +27,9 @@ enum Hold {
     Taken(&'static str),
 }
 
+/// Why a closed ticket can't be dispatched.
+const CLOSED: &str = "has closed under the engine";
+
 /// The state and published pin one `workflow get` answered.
 struct Snapshot {
     revision: u64,
@@ -78,7 +81,7 @@ impl Snapshot {
         let Some(item) = self.items.as_object().and_then(|m| m.iter().find(|(k, _)| k.eq_ignore_ascii_case(key))).map(|(_, v)| v) else {
             // A ticket that closed has left `items` by the next step, but the engine still owns its name.
             let closed = self.archive.as_object().is_some_and(|m| m.keys().any(|k| k.eq_ignore_ascii_case(key)));
-            return if closed { Hold::Taken("has closed under the engine") } else { Hold::None };
+            return if closed { Hold::Taken(CLOSED) } else { Hold::None };
         };
         let ticket = item.pointer("/definition/source").and_then(Value::as_str) == Some("ticket/v1");
         match (ticket, item.get("phase").and_then(Value::as_str)) {
@@ -86,7 +89,7 @@ impl Snapshot {
                 run: item.get("run").and_then(Value::as_str).unwrap_or_default().into(),
                 pin: item.get("pin").and_then(Value::as_str).unwrap_or_default().into(),
             },
-            (true, _) => Hold::Taken("has closed under the engine"),
+            (true, _) => Hold::Taken(CLOSED),
             (false, _) => Hold::Taken("already has a run under the engine"),
         }
     }
@@ -185,7 +188,10 @@ pub(super) async fn through_engine<L: DispatchLink>(
     let held: Vec<Hold> = tickets.iter().map(|t| seen.hold(&t.key)).collect();
     if held.iter().all(|h| *h == Hold::None) { return pane(false); }
     if let Some((t, Hold::Taken(why))) = tickets.iter().zip(&held).find(|(_, h)| matches!(h, Hold::Taken(_))) {
-        return Err(format!("{} {why}, so it can't be dispatched. Move it with `farcooler workflow`.", t.key).into());
+        // A closed ticket comes back through the engine (ov-968); one with a run is sent back, not dispatched again.
+        let next = if *why == CLOSED { format!("Reopen it with `farcooler workflow reopen {workspace} {}`, then dispatch again", t.key) }
+            else { "Send it back to its build step with `farcooler workflow send-back`".into() };
+        return Err(format!("{} {why}, so it can't be dispatched. {next}.", t.key).into());
     }
     if let Some((t, _)) = tickets.iter().zip(&held).find(|(_, h)| **h == Hold::None) {
         return Err(format!("{} isn't tracked by the engine and the others are. Dispatch it on its own.", t.key).into());

@@ -85,7 +85,7 @@ pub enum Why {
 pub fn member_ruling(method: M) -> Ruling {
     use Ruling::*;
     match method {
-        M::WorkspaceSetWorkflow | M::WorkflowEnqueue | M::WorkflowGet | M::WorkflowApprove | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue | M::WorkflowLeave | M::WorkflowSettle | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowPropose | M::WorkflowDrafts | M::WorkflowCutover | M::WorkflowReview | M::WorkflowWatch => Owners(Why::Reshapes),
+        M::WorkspaceSetWorkflow | M::WorkflowEnqueue | M::WorkflowGet | M::WorkflowApprove | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue | M::WorkflowLeave | M::WorkflowSettle | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowSendBack | M::WorkflowReopen | M::WorkflowPropose | M::WorkflowDrafts | M::WorkflowCutover | M::WorkflowReview | M::WorkflowWatch => Owners(Why::Reshapes),
         M::HostGet
         | M::HostHealth
         | M::DaemonVersion

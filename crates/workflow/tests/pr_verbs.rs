@@ -18,7 +18,7 @@ fn steps() -> Vec<Stage> {
         step("ci", StageKind::AwaitCi)]
 }
 fn definition(stages: Vec<Stage>) -> Definition {
-    Definition { schema: 2, source: "pr/v1".into(), max_reworks: 0, rework_target: None, stages, groups: BTreeMap::new(), models: BTreeMap::new() }
+    Definition { schema: 2, source: "pr/v1".into(), max_reworks: 0, rework_target: None, stages, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None }
 }
 fn invalid(edit: impl FnOnce(&mut Vec<Stage>)) -> bool {
     let mut s = steps(); edit(&mut s); definition(s).validate() == Err(Refusal::Definition)

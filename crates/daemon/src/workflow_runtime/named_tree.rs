@@ -50,8 +50,14 @@ impl Runtime {
         let board = Uuid::parse_str(workspace).map_err(|_| Error::Refused("invalid workspace"))?;
         let repository = self.store.get_workspace(board).and_then(|w| self.store.get_repository(w.repository_id))
             .map_err(|_| Error::Refused("unknown repository"))?;
-        let path = host.dir.join(farcooler_core::names::slug(&repository.display_name)).join(farcooler_core::names::slug(&named.name));
-        if path.try_exists()? { return Err(Error::Domain(DomainError::WorktreeExists)); }
+        let fresh = host.dir.join(farcooler_core::names::slug(&repository.display_name)).join(farcooler_core::names::slug(&named.name));
+        // An adopted branch is worked on where it is already checked out, or in a new tree on it (ov-968).
+        let path = match named.adopt.then(|| adopted_at(&config.repository, &named.branch)) {
+            Some(found) => found.await?.unwrap_or(fresh),
+            None => fresh,
+        };
+        let listed = named.adopt && path.try_exists()?;
+        if path.try_exists()? && !listed { return Err(Error::Domain(DomainError::WorktreeExists)); }
         // What git itself accepts as a branch name, so a name it would refuse fails here and not at Provision.
         if adapters::git(&config.repository, &["check-ref-format", "--branch", &named.branch]).await.is_err() {
             return Err(Error::Domain(DomainError::InvalidArgument { what: "branch" }));
@@ -74,11 +80,27 @@ impl Runtime {
             let name = line.strip_prefix("refs/heads/").or_else(|| line.strip_prefix("refs/remotes/").and_then(|r| r.split_once('/').map(|x| x.1)));
             name.is_some_and(|n| clashes(n, &named.branch))
         });
-        if clash { return Err(Error::Domain(DomainError::BranchExists)); }
+        if named.adopt {
+            // The branch to adopt is there, here or on a remote, under exactly its name.
+            let exact = found.lines().any(|line| line == format!("refs/heads/{}", named.branch)
+                || line.strip_prefix("refs/remotes/").and_then(|r| r.split_once('/')).is_some_and(|(_, n)| n == named.branch));
+            if !exact { return Err(Error::Domain(DomainError::InvalidArgument { what: "no such branch" })); }
+        } else if clash { return Err(Error::Domain(DomainError::BranchExists)); }
         let base = adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?;
-        let tree = RunTree { name: named.name.clone(), branch: named.branch.clone(), path: path.to_string_lossy().into_owned(), base };
+        let tree = RunTree { name: named.name.clone(), branch: named.branch.clone(), path: path.to_string_lossy().into_owned(), base,
+            adopted: named.adopt };
         if !tree.valid() { return Err(Error::Refused("invalid worktree")); }
         Ok(Some(tree))
+    }
+}
+
+/// The linked worktree that has `branch` checked out, if one does. The repository's own checkout is where a person
+/// works by hand, so a branch checked out there is refused rather than adopted.
+async fn adopted_at(repository: &Path, branch: &str) -> Result<Option<PathBuf>> {
+    let trees = crate::git::list_worktrees(repository).await.map_err(Error::Domain)?;
+    match trees.into_iter().find(|t| t.branch.as_deref() == Some(branch) && !t.prunable) {
+        Some(t) if t.is_main => Err(Error::Domain(DomainError::InvalidArgument { what: "branch checked out in the main checkout" })),
+        found => Ok(found.map(|t| PathBuf::from(t.path))),
     }
 }
 
@@ -100,6 +122,7 @@ impl Exec {
         let repository = self.store.get_workspace(board).map_err(|_| Error::Refused("unknown workspace"))?.repository_id;
         let lock = host.lock(repository);
         let _held = lock.lock().await;
+        if tree.adopted { return self.provision_adopted(board, repository, &host.install_id, tree).await; }
         let path = Path::new(&tree.path);
         if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
         let created = crate::git::create_worktree_with(&self.repository(), &tree.branch, &tree.base, path, true).await
@@ -115,6 +138,43 @@ impl Exec {
         if let Err(error) = recorded {
             let _ = crate::git::rollback_worktree(&self.repository(), &tree.branch, path, &tree.base).await;
             return Err(error);
+        }
+        Ok(())
+    }
+}
+
+impl Exec {
+    /// An adopted branch (ov-968): carry on in the worktree that has it checked out, or make one on it. The branch
+    /// is never made or deleted here. The tree must be clean and have no pane running in it, so the run is the
+    /// one writer; it is recorded and claimed for the board if it isn't already.
+    async fn provision_adopted(&self, board: Uuid, repository: Uuid, install_id: &str, tree: &RunTree) -> Result<()> {
+        let path = Path::new(&tree.path);
+        let row = self.store.list_worktrees_for_repository(repository).map_err(Error::Domain)?
+            .into_iter().find(|w| Path::new(&w.worktree_path) == path);
+        if path.try_exists()? {
+            let head = adapters::git(path, &["symbolic-ref", "HEAD"]).await?;
+            if head != format!("refs/heads/{}", tree.branch) { return Err(Error::Refused("the adopted worktree has moved to another branch")); }
+            refuse_foreign_changes(path).await?;
+            if let Some(row) = &row {
+                if row.workspace_id.is_some_and(|w| w != board) { return Err(Error::Refused("the adopted worktree belongs to another board")); }
+                let live = self.store.list_terminals_for_worktree(row.id).map_err(Error::Domain)?
+                    .iter().any(|t| t.exit_code.is_none() && t.exit_signal.is_none());
+                if live { return Err(Error::Refused("a pane is still running in the adopted worktree; close it so the run is its one writer")); }
+            }
+        } else {
+            if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+            crate::git::create_worktree_from_branch(&self.repository(), &tree.branch, path).await
+                .map_err(|_| Error::Refused("adopted worktree provisioning uncertain"))?;
+            crate::git::mark_owner(path, install_id).await;
+        }
+        let row = match row {
+            Some(row) => row,
+            None => self.store.create_worktree(repository, &tree.branch, &tree.path, false)
+                .map_err(|_| Error::Refused("adopted worktree could not be recorded"))?,
+        };
+        if row.workspace_id.is_none() {
+            self.store.claim_worktree(row.id, board, farcooler_store::models::ClaimSource::Explicit)
+                .map_err(|_| Error::Refused("adopted worktree could not be claimed"))?;
         }
         Ok(())
     }

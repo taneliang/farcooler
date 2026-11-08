@@ -140,7 +140,7 @@ fn per_ticket_pull_request(runtime: &Runtime, draft: bool, patience_ms: u64) -> 
     stages.push(wait);
     // The merge commit exists only on GitHub, so CI is read for it by the same hook the other CI steps use.
     stages.push(waiting(c, "ci", StageKind::AwaitCi, "coding-await-ci/v1", "offline/repository", patience_ms));
-    Definition { schema: 2, source: "pr-test/v1".into(), max_reworks: 0, rework_target: None, stages, groups: BTreeMap::new(), models: BTreeMap::new() }
+    Definition { schema: 2, source: "pr-test/v1".into(), max_reworks: 0, rework_target: None, stages, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None }
 }
 fn phase_of(state: &State, id: &str) -> Option<Phase> {
     state.items.get(id).map(|i| i.phase.clone()).or_else(|| state.archive.get(id).map(|a| a.phase.clone()))

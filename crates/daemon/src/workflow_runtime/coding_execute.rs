@@ -145,7 +145,7 @@ impl Exec {
         };
         Ok(match &binding.effect.kind {
             EffectKind::Execute(StageKind::Review(Reviewer::Agent)) => Self::reviewing(&binding.effect.item),
-            _ => Self::briefed(prompt, &binding.effect.item),
+            _ => Self::briefed(prompt, &binding.effect),
         })
     }
     /// An agent gate's brief (ov-969). Fixed text, so a recovery rebuilds the same command. The verdict is the
@@ -160,8 +160,22 @@ impl Exec {
     }
     /// The published prompt, led by the card this run is for. The card's own words are read by the agent
     /// (`farcooler task show`), not copied here, so a recovery rebuilds the same command whatever the card says now.
-    pub(super) fn briefed(prompt: &str, item: &str) -> String {
-        format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.\n\n{prompt}")
+    /// What the effect itself carries is said: an adopted branch's earlier work, and why the run was sent back (ov-968).
+    pub(super) fn briefed(prompt: &str, effect: &farcooler_workflow::Effect) -> String {
+        let item = &effect.item;
+        let mut brief = format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.");
+        if let Some(tree) = effect.tree.as_ref().filter(|t| t.adopted) {
+            brief.push_str(&format!("\n\nThis worktree is on the branch {}, which already has work on it. Read it first with \
+                `git log --stat $FARCOOLER_BASE..HEAD`, carry on from it, and bring the branch onto $FARCOOLER_BASE (main as it was when \
+                the run started) before you finish.", tree.branch));
+        }
+        if let Some(reason) = &effect.brief {
+            let (said, cut) = cut_at(reason, MAX_BRIEF_REASON_BYTES);
+            brief.push_str(&format!("\n\nThis ticket was sent back to you. Your earlier work is in this worktree; carry on from it. \
+                The reason it was sent back:\n\n{said}"));
+            if cut { brief.push_str(&format!("…\n\n(The reason is cut short here. Read all of it with `farcooler workflow get`, under {item}.)")); }
+        }
+        format!("{brief}\n\n{prompt}")
     }
     /// Context wins over command environment and is pinned in the process fact.
     pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) {
@@ -392,7 +406,9 @@ impl Exec {
         let mut passed = true;
         match kind {
             StageKind::Provision => {
-                if candidate != binding.base { return Err(Error::Refused("provisioned base changed")); }
+                // An adopted branch starts at its own work (ov-968); the build brings it onto the base.
+                let adopted = binding.effect.tree.as_ref().is_some_and(|t| t.adopted);
+                if candidate != binding.base && !adopted { return Err(Error::Refused("provisioned base changed")); }
             }
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;
@@ -457,4 +473,13 @@ impl Exec {
             policy_pin: binding.effect.policy_pin.clone() };
         Ok(if passed { Outcome::Passed(evidence) } else { Outcome::Rejected(evidence) })
     }
+}
+
+/// The most of a send-back reason the launch command carries, so it stays inside what tmux takes in one command.
+pub(super) const MAX_BRIEF_REASON_BYTES: usize = 1500;
+/// `text` cut to at most `max` bytes on a character boundary, and whether it was cut.
+fn cut_at(text: &str, max: usize) -> (&str, bool) {
+    if text.len() <= max { return (text, false); }
+    let end = (0..=max).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+    (&text[..end], true)
 }

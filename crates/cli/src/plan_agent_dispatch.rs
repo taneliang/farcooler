@@ -46,6 +46,10 @@ pub(crate) struct AgentDispatchArgs {
     /// The new worktree's branch.
     #[arg(long, requires = "new")]
     branch: Option<String>,
+    /// On a tracked ticket: --branch exists with work on it, and the run carries on from it, in the worktree that
+    /// already has it checked out or in a new one named --new (ov-968).
+    #[arg(long, requires = "branch")]
+    adopt: bool,
     /// What the new worktree's branch starts from.
     #[arg(long, default_value = "HEAD")]
     base: String,
@@ -88,13 +92,16 @@ pub(super) async fn dispatch<L: DispatchLink>(
     let dropped: Vec<&str> = [
         ("--worktree", args.worktree.is_some()), ("--base", args.base != "HEAD"), ("--title", args.title.is_some()), ("--again", args.again),
     ].into_iter().filter(|(_, given)| *given).map(|(flag, _)| flag).collect();
-    let named = args.new.clone().zip(args.branch.clone()).map(|(name, branch)| farcooler_protocol::workflow_commands::NamedTree { name, branch });
+    let named = args.new.clone().zip(args.branch.clone()).map(|(name, branch)| farcooler_protocol::workflow_commands::NamedTree { name, branch, adopt: args.adopt });
     let asked = super::start::Asked { builder: args.role.wire() == pb::AgentRole::Builder, role: &role_name.to_lowercase(), dropped: &dropped,
         harness: args.harness.as_deref(), worktree: named.as_ref() };
     let unanswered = match super::start::through_engine(link, &tickets, asked, json).await? {
         super::start::Engine::Started(said) => return Ok(said),
         super::start::Engine::Pane { unanswered } => unanswered,
     };
+    if args.adopt {
+        return Err("--adopt carries on a tracked ticket's branch through the engine. For a pane, dispatch into the branch's worktree with --worktree.".into());
+    }
     let worktree = match (args.worktree, args.new, args.branch) {
         (Some(named), _, _) => Lane::Existing(named),
         (None, Some(name), Some(branch)) => Lane::New { name, branch, base: args.base },

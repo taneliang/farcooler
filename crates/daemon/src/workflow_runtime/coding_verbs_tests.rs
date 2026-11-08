@@ -81,7 +81,7 @@ fn batched_push(runtime: &Runtime, base_mode: &str, patience_ms: u64) -> Definit
         stages: vec![stage(c, "provision", StageKind::Provision, "coding-worktree/v1", ""),
             stage(c, "build", StageKind::Build, "coding-harness/v1", ""),
             stage(c, "check", StageKind::Check, "coding-check/v1", "0"), join],
-        groups: [("landing".to_string(), GroupDef { limit: 4, exclusive: c.landing_resource().unwrap(), steps })].into(), models: Default::default() }
+        groups: [("landing".to_string(), GroupDef { limit: 4, exclusive: c.landing_resource().unwrap(), steps })].into(), models: Default::default(), send_backs: None }
 }
 pub(super) fn command(runtime: &Runtime, command: Command) -> Receipt {
     let controller = runtime.controller();

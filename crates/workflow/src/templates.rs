@@ -185,7 +185,7 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
             groups.insert("rehearsal".to_string(), GroupDef { limit: batch, exclusive: pins.landing_resource(), steps: folds(&m) });
         }
     }
-    let definition = Definition { schema: 2, source: plan.source.clone(), stages, max_reworks: 0, rework_target: None, groups, models: BTreeMap::new() };
+    let definition = Definition { schema: 2, source: plan.source.clone(), stages, max_reworks: 0, rework_target: None, groups, models: BTreeMap::new(), send_backs: None };
     definition.validate()?;
     Ok(definition)
 }
