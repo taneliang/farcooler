@@ -389,9 +389,8 @@ impl Store {
         drop(conn);
         for mut group in self.workflow_groups(workspace)? {
             // A ticket that left this board is not drawn on it; a finished group left empty goes too.
-            let before = group.tickets.len();
             group.tickets.retain(|t| statuses.contains_key(t));
-            if before > 0 && group.tickets.is_empty() && group.is_finished() {
+            if group.tickets.is_empty() && group.is_finished() {
                 continue;
             }
             let read = group.pushed_sha.as_deref().map(crate::board_ci::sha_subject).and_then(|s| ci.iter().find(|c| c.subject == s));

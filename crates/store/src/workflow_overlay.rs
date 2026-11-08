@@ -114,8 +114,8 @@ fn pushed(item: &Item) -> Option<String> {
 /// Every group in `state` worth drawing, with tickets resolved by `task_of`: the live ones, any
 /// that failed and wait to be cancelled, and the ones that landed (kept in the archive). A ticket
 /// draws in one group only: a live group first, then the newest finished one, so a rejected
-/// ticket that rebuilt shows on its new group and not on the stale one. A finished group left
-/// with no ticket is not drawn.
+/// ticket that rebuilt shows on its new group and not on the stale one. A finished group with
+/// no ticket left, or none it can name, is not drawn.
 pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &dyn Fn(&str) -> i64) -> Vec<GroupLanding> {
     let mut all: Vec<GroupLanding> = state.items.iter().filter(|(_, i)| is_group(i)).map(|(id, item)| {
         let name = item.group_of.as_ref().map(|g| g.name.clone()).unwrap_or_default();
@@ -144,9 +144,8 @@ pub fn groups_in(state: &State, task_of: &dyn Fn(&str) -> Option<Uuid>, since: &
     let mut claimed = std::collections::BTreeSet::new();
     let mut keep = vec![true; all.len()];
     for i in order {
-        let had = all[i].tickets.len();
         all[i].tickets.retain(|t| claimed.insert(*t));
-        keep[i] = !(finished(&all[i]) && had > 0 && all[i].tickets.is_empty());
+        keep[i] = !(finished(&all[i]) && all[i].tickets.is_empty());
     }
     all.into_iter().zip(keep).filter_map(|(g, k)| k.then_some(g)).collect()
 }

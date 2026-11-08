@@ -28,10 +28,12 @@ fn group(at: usize, phase: Phase, candidate: Option<&str>, members: &[&str]) -> 
 fn ci(sha: &str, status: CiStatus) -> CiRead {
     CiRead { subject: sha_subject(sha), sha: sha.into(), status, url: String::new(), jobs: vec![], fetched_at: 1, changed_at: 1, asked_at: 1 }
 }
-fn view(item: Item) -> GroupLanding {
+fn view(mut item: Item) -> GroupLanding {
+    // A finished group is drawn only when it can name a ticket.
+    if item.members.is_empty() { item.handed = vec!["t".into()]; }
     let mut state = State::empty("w".into(), 1);
     state.items.insert("group-1".into(), item);
-    groups_in(&state, &|_| None, &|_| 0).remove(0)
+    groups_in(&state, &|_| Some(Uuid::from_u128(1)), &|_| 0).remove(0)
 }
 
 #[test]
@@ -300,4 +302,18 @@ fn a_landed_group_leaves_the_plan_when_its_tickets_leave_the_board() {
     let elsewhere = store.create_workspace(repo, "Elsewhere", "el").unwrap();
     store.move_tasks(&[tasks[0].id], elsewhere.id, Actor::User).unwrap();
     assert!(store.plan(ws, i64::MIN).unwrap().landings.is_empty(), "its ticket left the board");
+}
+
+#[test]
+fn a_finished_group_with_no_ticket_to_name_is_not_drawn() {
+    let mut state = State::empty("w".into(), 1);
+    let mut failed = group(4, Phase::Failed, Some("abc1234"), &[]);
+    failed.handed = vec!["gone".into()];
+    state.items.insert("group-00000000000000000001-landing".into(), failed);
+    state.archive.insert("group-00000000000000000002-landing".into(), Archived { phase: Phase::Done, candidate: None,
+        group: Some(ArchivedGroup { name: "landing".into(), tickets: vec!["gone".into()], pushed: None, since_ms: 5 }) });
+    state.items.insert("group-00000000000000000003-landing".into(), group(1, Phase::Blocked, None, &[]));
+    let groups = groups_in(&state, &|_| None, &|_| 0);
+    assert_eq!(groups.len(), 1, "only the live group draws: {groups:?}");
+    assert_eq!(groups[0].group, "group-00000000000000000003-landing");
 }
