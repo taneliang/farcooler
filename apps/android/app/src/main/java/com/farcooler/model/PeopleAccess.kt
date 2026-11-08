@@ -76,7 +76,16 @@ class PeopleAccess private constructor(
         val personName: String,
         /** A trusted key the owner approved with Touch ID on their Mac, or from a device approved so (ov-974): it may allow a cutover. */
         val vouched: Boolean = false,
+        /** When the runner paired it, or null for a device from before it kept a record (ov-982). */
+        val pairedAt: Long? = null,
+        /** How it was paired, or null for a device from before the record. */
+        val pairedVia: PairedVia? = null,
+        /** The name of the device that added it, when [pairedVia] is [PairedVia.DEVICE]. */
+        val pairedBy: String? = null,
     ) {
+        /** Paired from a terminal on the runner, not in the app: an agent can do that, naming any device (ov-982). */
+        val pairedOutsideApp: Boolean get() = pairedVia == PairedVia.TERMINAL
+
         /** How many devices are in this device's removal: itself and what it added. */
         val removal: Int get() = 1 + added
 
@@ -139,6 +148,33 @@ class PeopleAccess private constructor(
         /** The approval sheet's sentence: only allow it holding the device. */
         fun approvalPrompt(device: Device): String =
             "Only allow this if you’re holding ${device.name} right now. Check that it shows ${spoken(device.code)}."
+
+        /** How and when [device] was paired, under its name where its approval is offered (ov-982). */
+        fun pairedLine(device: Device, runner: String): String {
+            val how = when (device.pairedVia) {
+                PairedVia.APP -> "Paired in Far Cooler on $runner"
+                PairedVia.DEVICE -> "Added from ${device.pairedBy ?: "another device"}"
+                PairedVia.TERMINAL -> "Paired from a terminal on $runner"
+                null -> return "Paired before Far Cooler kept a record of how."
+            }
+            val at = device.pairedAt ?: return "$how."
+            val shown = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(at))
+            return "$how, $shown."
+        }
+
+        /** The flag on a device paired outside the app's own pairing (ov-982). */
+        const val PAIRED_OUTSIDE_BADGE = "Not paired in Far Cooler"
+        fun pairedOutsideWarning(runner: String): String =
+            "Something on $runner added this device outside Far Cooler, such as a command in a terminal or an agent. Allow it only if you added it yourself."
+        fun pairedOutsideConfirmTitle(device: Device): String = "Approve ${device.name} anyway?"
+        const val PAIRED_OUTSIDE_CONFIRM_MESSAGE = "It wasn’t paired in Far Cooler. Once allowed, it can approve changes to who has access."
+        const val PAIRED_OUTSIDE_CONFIRM_BUTTON = "Approve anyway"
+
+        /**
+         * What the first press of Allow on [device] does (ov-982): a device paired outside the app is asked about
+         * again first. Its key arrives as a proposal (ov-980), so it waits here.
+         */
+        fun firstStep(device: Device): FirstStep = if (device.pairedOutsideApp) FirstStep.ASK_AGAIN else FirstStep.APPROVE
 
         /** The warning on a device with a shell on [runner]. */
         fun shellWarning(runner: String): String = "This device has a shell on $runner, so it can do everything."
@@ -215,6 +251,9 @@ class PeopleAccess private constructor(
                     person = person,
                     personName = personName,
                     vouched = row?.flag("step_up_vouched") ?: false,
+                    pairedAt = row?.text("paired_at")?.toLongOrNull()?.takeIf { it > 0 },
+                    pairedVia = PairedVia.of(row?.text("paired_via")),
+                    pairedBy = row?.text("paired_by")?.takeIf(String::isNotEmpty)?.let(::nameOf),
                 )
             }
 
@@ -245,3 +284,15 @@ class PeopleAccess private constructor(
         }
     }
 }
+
+/** How a device was paired, as the runner recorded it (ov-982). */
+enum class PairedVia(val wire: String) {
+    APP("app"), DEVICE("device"), TERMINAL("terminal");
+
+    companion object {
+        fun of(wire: String?): PairedVia? = entries.firstOrNull { it.wire == wire }
+    }
+}
+
+/** What the first press of Allow does (ov-982). */
+enum class FirstStep { APPROVE, ASK_AGAIN }

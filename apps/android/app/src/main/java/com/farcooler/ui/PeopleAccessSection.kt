@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.farcooler.model.FirstStep
 import com.farcooler.model.PeopleAccess
 import com.farcooler.model.PersonAccess
 import com.farcooler.model.StepUpKeyStanding
@@ -94,7 +95,7 @@ fun PeopleAccessSection(
     if (access.shownWaiting.isNotEmpty()) {
         SectionTitle(PeopleAccess.WAITING_HEADER)
         Column(Modifier.testTag("people-waiting"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            for (device in access.shownWaiting) WaitingRow(device, access, actions)
+            for (device in access.shownWaiting) WaitingRow(device, access, runner, actions)
         }
         Text(PeopleAccess.WAITING_FOOTER, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -240,10 +241,11 @@ private fun AccessControl(person: PeopleAccess.Person, access: PeopleAccess, act
 }
 
 @Composable
-private fun WaitingRow(device: PeopleAccess.Device, access: PeopleAccess, actions: PeopleAccessActions) {
+private fun WaitingRow(device: PeopleAccess.Device, access: PeopleAccess, runner: String, actions: PeopleAccessActions) {
+    var confirming by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().testTag("waiting-${device.id}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(device.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (device.personName.isNotEmpty()) {
                     Text(
@@ -253,13 +255,31 @@ private fun WaitingRow(device: PeopleAccess.Device, access: PeopleAccess, action
                         modifier = Modifier.testTag("waiting-person-${device.id}"),
                     )
                 }
+                Text(
+                    PeopleAccess.pairedLine(device, runner),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("waiting-paired-${device.id}"),
+                )
             }
             Text(
                 PeopleAccess.spoken(device.code),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
                 modifier = Modifier.testTag("waiting-code-${device.id}"),
             )
+        }
+        if (device.pairedOutsideApp) {
+            Column(Modifier.testTag("waiting-outside-${device.id}"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "⚠ ${PeopleAccess.PAIRED_OUTSIDE_BADGE}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                Text(PeopleAccess.pairedOutsideWarning(runner), style = MaterialTheme.typography.bodySmall)
+            }
         }
         Text(
             PeopleAccess.approvalPrompt(device),
@@ -268,7 +288,28 @@ private fun WaitingRow(device: PeopleAccess.Device, access: PeopleAccess, action
         )
         val approve = actions.approve
         if (approve != null && access.mayApprove(device, access.thisDevice)) {
-            OutlinedButton(onClick = { approve(device) }, modifier = Modifier.testTag("waiting-allow-${device.id}")) { Text("Allow") }
+            OutlinedButton(
+                onClick = {
+                    when (PeopleAccess.firstStep(device)) {
+                        FirstStep.APPROVE -> approve(device)
+                        FirstStep.ASK_AGAIN -> confirming = true
+                    }
+                },
+                modifier = Modifier.testTag("waiting-allow-${device.id}"),
+            ) { Text("Allow") }
+            if (confirming) {
+                AlertDialog(
+                    onDismissRequest = { confirming = false },
+                    title = { Text(PeopleAccess.pairedOutsideConfirmTitle(device)) },
+                    text = { Text(PeopleAccess.PAIRED_OUTSIDE_CONFIRM_MESSAGE) },
+                    confirmButton = {
+                        TextButton(onClick = { confirming = false; approve(device) }) {
+                            Text(PeopleAccess.PAIRED_OUTSIDE_CONFIRM_BUTTON, color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { confirming = false }) { Text("Cancel") } },
+                )
+            }
         }
     }
 }

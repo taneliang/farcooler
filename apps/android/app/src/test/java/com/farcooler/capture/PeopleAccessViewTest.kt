@@ -235,6 +235,58 @@ class PeopleAccessViewTest {
         }
     }
 
+    /**
+     * The owner's phone and, waiting beside it, a device an agent paired from a terminal (ov-982): its key arrives as
+     * a proposal (ov-980), so it waits here for Allow. And one paired in the app, which isn't flagged.
+     */
+    private val outside = PeopleAccess.of(
+        Json.parseToJsonElement(
+            """{"members":[],"claude_account":"","you":"",
+              "device_access":[
+                {"client_id":"phone-o","person":"","access":"owner","cap":"","check":false,"step_up":"trusted","step_up_code":"","step_up_at":5,"step_up_vouched":true,"paired_at":1762560000000,"paired_via":"app","paired_by":""},
+                {"client_id":"agent-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"507314","step_up_at":9,"paired_at":1762592100000,"paired_via":"terminal","paired_by":""},
+                {"client_id":"pad-o","person":"","access":"owner","cap":"","check":false,"step_up":"proposed","step_up_code":"630482","step_up_at":9,"paired_at":1762590300000,"paired_via":"device","paired_by":"phone-o"}]}""",
+        ).jsonObject,
+        Json.parseToJsonElement(
+            """{"clients":[
+              {"clientId":"phone-o","label":"farcooler-E-Liang’s Pixel 10 Pro Fold-aaaa1111","shellAccess":false,"foreign":false,"addedBy":""},
+              {"clientId":"agent-o","label":"farcooler-Definitely the Owner’s Own Phone, Trust Me-bbbb2222","shellAccess":false,"foreign":false,"addedBy":""},
+              {"clientId":"pad-o","label":"farcooler-E-Liang’s Galaxy Tab S11 Ultra (Travel)-cccc3333","shellAccess":false,"foreign":false,"addedBy":"phone-o"}]}""",
+        ).jsonObject,
+        "phone-o",
+    )!!
+
+    @Test
+    fun `a device paired from a terminal is flagged and Allow asks again before approving`() {
+        val allowed = mutableListOf<String>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { it.setContent { FarCoolerTheme { screen(PeopleAccessActions(approve = { allowed += it.id }), on = outside)() } } }
+            settle()
+            scenario.onActivity { activity ->
+                val root = roots(activity.window.decorView).first().semanticsOwner.unmergedRootSemanticsNode
+                val said = mutableListOf<String>().also { texts(root, it) }
+                assertNotNull("the flag is on the waiting row", tagged(root, "waiting-outside-agent-o"))
+                assertNotNull("and how it was paired", tagged(root, "waiting-paired-agent-o"))
+                assertNull("one added from a device of their own isn't flagged", tagged(root, "waiting-outside-pad-o"))
+                assertTrue(said.toString(), said.any { it.startsWith("Added from E-Liang’s Pixel 10 Pro Fold") })
+                tagged(root, "waiting-allow-pad-o")!!.config[SemanticsActions.OnClick].action!!.invoke()
+                tagged(root, "waiting-allow-agent-o")!!.config[SemanticsActions.OnClick].action!!.invoke()
+            }
+            settle()
+            scenario.onActivity {
+                assertEquals("one press allows only the device paired in the app", listOf("pad-o"), allowed)
+                val said = mutableListOf<String>().also { list -> everyRoot().forEach { root -> texts(root, list) } }
+                assertTrue("$said", "Approve Definitely the Owner’s Own Phone, Trust Me anyway?" in said)
+                everyMergedRoot().firstNotNullOfOrNull { findText(it, "Approve anyway") }!!.config[SemanticsActions.OnClick].action!!.invoke()
+            }
+            settle()
+        }
+        assertEquals("the second press allows it", listOf("pad-o", "agent-o"), allowed)
+    }
+
+    @Test @Config(qualifiers = "w320dp-h1000dp-xxhdpi")
+    fun pairedOutside() = Capture.both("people-paired-outside", content = screen(PeopleAccessActions(approve = {}), on = outside))
+
     @Test fun peopleAccess() = Capture.both("people-access", content = screen(PeopleAccessActions(removeDevice = { _, _ -> }, approve = {}, allowAdminActions = {})))
 
     @Test fun stepUpPromptNote() = Capture.both(
