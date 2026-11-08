@@ -25,6 +25,8 @@ SOURCES = [
     "ClientCore.swift",
     "Connection.swift",
     "ConnectionWorkflow.swift",
+    # The phone's read-only view of an engine agent's terminal (ov-976).
+    "AgentWatchView.swift",
     # Terminal and worktree calls, out of `Connection.swift` for its size budget (ov-818).
     "ConnectionQuickTask.swift",
     # Add Teammate's call to a runner (ov-854), out of `Connection.swift` for its size budget.
@@ -322,6 +324,8 @@ AGENTKIT_SOURCES = [
     "WorkflowRuns.swift",
     "WorkflowSession.swift",
     "WorkflowRunsView.swift",
+    # A running engine agent's terminal, read-only (ov-976).
+    "AgentWatch.swift",
     # The People screen (ov-856): Access, each person's devices, the step-up flow and its key, and the app lock.
     "PeopleAccess.swift",
     "PeopleAccessView.swift",

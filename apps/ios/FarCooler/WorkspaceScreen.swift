@@ -76,6 +76,10 @@ struct WorkspaceScreen: View {
             ToolbarItem(placement: .primaryAction) {
                 WorkflowRunsButton(host: place.runner, workspace: place.workspace)
                     .environment(\.workflowPort, connection.workflows.port(host: place.runner))
+                    .environment(\.workflowWatch, { workspace, item in
+                        AnyView(AgentWatchView(workspace: workspace, item: item,
+                                               transport: ClientCoreWatch(core: connection.core)))
+                    })
             }
             if let summary, let seat = subtitle(summary) {
                 ToolbarItem(placement: .principal) {

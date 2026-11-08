@@ -294,6 +294,24 @@ actor ClientCore {
         return started
     }
 
+    /// Watch a running engine agent's terminal, read-only (ov-976). Chunks and the end come back as
+    /// a terminal stream's do; `onEnd` gets nil when the agent's pane was reaped, "lost" when the
+    /// link dropped first, and the runner's words when it could not be opened. The returned name is
+    /// what `stopStream` takes.
+    func startWatch(
+        workspace: String, item: String,
+        onChunk: @escaping @Sendable ([UInt8]) -> Void,
+        onEnd: @escaping @Sendable (String?) -> Void
+    ) -> String? {
+        guard let handle else { return nil }
+        startPumping()
+        let name = "watch:\(workspace)/\(item)"
+        streams[name] = Stream(onChunk: onChunk, onEnd: onEnd)
+        let started = workspace.withCString { w in item.withCString { farcooler_client_watch_start(handle, w, $0) } }
+        if !started { streams[name] = nil; return nil }
+        return name
+    }
+
     /// Stop watching. Safe when nothing is running.
     func stopStream(_ terminal: String) {
         streams[terminal] = nil
@@ -442,7 +460,7 @@ actor ClientCore {
         // Anything that is not a chunk ends the stream: the pane finished, or
         // it could not be opened at all.
         streams[terminal] = nil
-        stream.onEnd(line["error"] as? String)
+        stream.onEnd((line["lost"] as? Bool) == true ? "lost" : line["error"] as? String)
     }
 }
 
