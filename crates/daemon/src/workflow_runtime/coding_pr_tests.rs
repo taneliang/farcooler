@@ -380,7 +380,7 @@ async fn a_commit_someone_else_pushed_to_the_head_branch_is_never_overwritten() 
     let remote = f.remote.clone();
     // A reviewer's commit is already on the item's head branch.
     let tree = adapters::git(&remote, &["rev-parse", "main^{tree}"]).await.unwrap();
-    let theirs = adapters::git(&remote, &["commit-tree", &tree, "-p", "main", "-m", "reviewer fix"]).await.unwrap();
+    let theirs = adapters::git(&remote, &["-c", "user.name=Test", "-c", "user.email=test@localhost", "commit-tree", &tree, "-p", "main", "-m", "reviewer fix"]).await.unwrap();
     let reference = format!("refs/heads/{}", head_of("one"));
     adapters::git(&remote, &["update-ref", &reference, &theirs]).await.unwrap();
     let definition = per_ticket_pull_request(&runtime, false, 5000);

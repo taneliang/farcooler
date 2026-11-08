@@ -292,7 +292,7 @@ async fn a_base_the_target_does_not_contain_still_refuses_a_publication() {
     let (_dir, runtime) = lander("pass").await;
     let mut config = runtime.coding.clone().unwrap();
     let tree = format!("{}^{{tree}}", config.base);
-    let unrelated = adapters::git(&runtime.repository(), &["commit-tree", "-m", "unrelated", &tree]).await.unwrap();
+    let unrelated = adapters::git(&runtime.repository(), &["-c", "user.name=Test", "-c", "user.email=test@localhost", "commit-tree", "-m", "unrelated", &tree]).await.unwrap();
     config.base = unrelated;
     assert!(super::service_owner::publication_base_current(&config).await.is_err());
 }
