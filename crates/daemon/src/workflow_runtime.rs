@@ -42,6 +42,9 @@ pub enum Error {
     Encoding(#[from] serde_json::Error),
     #[error("runtime refused: {0}")]
     Refused(&'static str),
+    /// The run stopped on changes in its named tree it can't show it made (ov-979), listed for the person.
+    #[error("runtime stopped: {0}")]
+    Kept(String),
     /// A refusal the caller can act on, said as the runner says it for a worktree (ov-967): a taken branch or
     /// name, or one that isn't valid. Every other workflow error reaches the caller as not found.
     #[error("runtime: {0}")]

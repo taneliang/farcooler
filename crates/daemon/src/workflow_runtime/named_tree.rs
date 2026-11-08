@@ -145,46 +145,118 @@ async fn adopted_at(repository: &Path, branch: &str) -> Result<Option<PathBuf>> 
     }
 }
 
-const FOREIGN: &str = "the run's worktree has changes the run didn't make; copy them somewhere else or discard them, then try again";
-
-/// The file a Run gate leaves in the tree's git directory (outside the working files, so it is never a change)
-/// while it runs. Its modification time is when the gate began, on a tree that had just been checked clean.
-async fn gate_marker(tree: &Path) -> Result<PathBuf> {
-    Ok(PathBuf::from(adapters::git(tree, &["rev-parse", "--absolute-git-dir"]).await?).join("farcooler-run-gate"))
+/// What a named tree's Run gate changed, noted by the daemon while the gate ran (ov-979): each path with the hash
+/// of what the gate left there (`None`: it deleted the file). A Run gate can be any command, so the daemon looks
+/// for it. The ledger is kept in the daemon's receipts, not in the tree, so nothing working in the tree can forge it.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub(super) struct GateFiles {
+    run: String,
+    candidate: Option<String>,
+    /// Changed already when the gate began, though the tree was just checked clean: never the gate's.
+    before: std::collections::BTreeSet<String>,
+    files: std::collections::BTreeMap<String, Option<String>>,
 }
-/// A Run gate is about to start in a named tree: note when, so a crash can tell what the gate left behind.
-pub(super) async fn mark_gate(tree: &Path) -> Result<()> {
-    std::fs::write(gate_marker(tree).await?, b"")?;
+
+/// How often a running gate's changes are noted. A file written after the last look is unrecorded, so a crash
+/// then makes the run ask, never guess.
+pub(super) const GATE_LOOK: std::time::Duration = std::time::Duration::from_secs(1);
+
+fn write_ledger(ledger: &Path, files: &GateFiles) -> Result<()> {
+    let temporary = ledger.with_extension(format!("{}.tmp", Uuid::now_v7()));
+    durable(&temporary, &serde_json::to_vec(files)?)?;
+    std::fs::rename(&temporary, ledger)?;
     Ok(())
 }
-/// The gate ended on its own, so it left nothing to tell apart.
-pub(super) async fn clear_gate(tree: &Path) {
-    if let Ok(marker) = gate_marker(tree).await { let _ = std::fs::remove_file(marker); }
+fn read_ledger(ledger: &Path) -> Result<Option<GateFiles>> {
+    match std::fs::read(ledger) {
+        Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+/// What is at a path now: a file's bytes, a link's target, or `None` when nothing is there.
+fn content_hash(path: &Path) -> Result<Option<String>> {
+    use sha2::Digest;
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let (kind, bytes) = if meta.file_type().is_symlink() {
+        ("link", std::fs::read_link(path)?.into_os_string().into_encoded_bytes())
+    } else if meta.is_file() { ("file", std::fs::read(path)?) } else { return Ok(Some("other".into())) };
+    let mut hash = sha2::Sha256::new();
+    hash.update(kind.as_bytes());
+    hash.update([0]);
+    hash.update(&bytes);
+    Ok(Some(format!("{:x}", hash.finalize())))
+}
+
+/// Every path the tree has changed now, as git sees it.
+async fn changed(tree: &Path) -> Result<crate::change_set::WorkingTree> {
+    crate::change_set::working_tree(tree).await.map_err(|_| Error::Refused("the run's worktree could not be read"))
+}
+/// A Run gate is about to start in a named tree that was just checked clean: open its ledger. Anything changed
+/// all the same (a person, in the moment since the check) is set aside as never the gate's.
+pub(super) async fn begin_gate(tree: &Path, ledger: &Path, run: &str, candidate: Option<&str>) -> Result<()> {
+    let now = changed(tree).await?;
+    let before = now.staged.iter().chain(&now.unstaged).chain(&now.untracked).map(|c| c.path.clone())
+        .chain(now.conflicted.iter().cloned()).collect();
+    write_ledger(ledger, &GateFiles { run: run.into(), candidate: candidate.map(Into::into), before, ..Default::default() })
+}
+/// Note what the running gate has changed so far, as it is now. A path changed again since the last look gets
+/// its new hash; one the gate has put back stays listed, and is never a change to recover.
+pub(super) async fn note_gate_files(tree: &Path, ledger: &Path) -> Result<()> {
+    let Some(mut files) = read_ledger(ledger)? else { return Ok(()) };
+    let changes = changed(tree).await?;
+    for change in changes.unstaged.iter().chain(&changes.untracked).filter(|c| !c.submodule && !files.before.contains(&c.path)) {
+        files.files.insert(change.path.clone(), content_hash(&tree.join(&change.path))?);
+    }
+    write_ledger(ledger, &files)
+}
+/// The gate is over, however it ended: what is in the tree now is no longer the gate's to clear.
+pub(super) fn end_gate(ledger: &Path) -> Result<()> {
+    match std::fs::remove_file(ledger) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.into()),
+        _ => Ok(()),
+    }
+}
+
+/// Why the run stopped, with the changes it found, as the person will read it.
+fn kept(paths: &[&str]) -> Error {
+    const SHOWN: usize = 10;
+    let mut list = paths.iter().take(SHOWN).copied().collect::<Vec<_>>().join(", ");
+    if paths.len() > SHOWN { list.push_str(&format!(" and {} more", paths.len() - SHOWN)); }
+    Error::Kept(format!("the run's worktree has changes the run can't show it made: {list}. \
+        Keep them by copying them somewhere else, or discard them, then try again"))
 }
 
 /// A named tree is visible, so people may have changes in it, and a Run gate restarting there must never wipe
-/// them (ov-967). After a crash the tree may hold the dead gate's own leftovers. They are told apart by time:
-/// the tree was clean when the gate began (the marker), so a change older than that is a person's, and one
-/// newer was made while the gate ran. If every change is newer it is restored or removed, path by path, and
-/// the run goes on; if any is older, staged, deleted or unmarked, nothing is touched and the run stops and asks.
-pub(super) async fn recover_gate_leftovers(tree: &Path) -> Result<()> {
-    let changes = crate::change_set::working_tree(tree).await.map_err(|_| Error::Refused(FOREIGN))?;
-    if !changes.is_dirty() { clear_gate(tree).await; return Ok(()); }
-    let started = gate_marker(tree).await.ok().and_then(|m| std::fs::metadata(m).ok()).and_then(|m| m.modified().ok())
-        .ok_or(Error::Refused(FOREIGN))?;
-    if !changes.staged.is_empty() || !changes.conflicted.is_empty() { return Err(Error::Refused(FOREIGN)); }
-    let newer = |change: &crate::change_set::FileChange| -> bool {
-        !change.submodule && change.status != crate::change_set::FileStatus::Deleted
-            && std::fs::symlink_metadata(tree.join(&change.path)).and_then(|m| m.modified()).is_ok_and(|t| t >= started)
-    };
-    if !changes.unstaged.iter().chain(&changes.untracked).all(newer) { return Err(Error::Refused(FOREIGN)); }
+/// them (ov-967). After a crash the tree may hold the dead gate's own leftovers. Only a change the gate's ledger
+/// lists, still exactly as the gate left it, is the gate's: it is restored or removed and the run goes on. Any
+/// other change (a person's, one the gate made after the last look, anything staged or conflicted), or a ledger
+/// from another run or candidate, stops the run with the list of what changed, and nothing is touched.
+pub(super) async fn recover_gate_leftovers(tree: &Path, ledger: &Path, run: &str, candidate: Option<&str>) -> Result<()> {
+    let changes = changed(tree).await?;
+    if !changes.is_dirty() { return end_gate(ledger); }
+    let files = read_ledger(ledger)?.filter(|f| f.run == run && f.candidate.as_deref() == candidate).unwrap_or_default();
+    // Staged and conflicted changes are never the gate's to put back, nor is a submodule's.
+    let mut foreign: Vec<&str> = changes.staged.iter().map(|c| c.path.as_str())
+        .chain(changes.conflicted.iter().map(String::as_str)).collect();
+    for change in changes.unstaged.iter().chain(&changes.untracked) {
+        let ours = !change.submodule
+            && content_hash(&tree.join(&change.path)).is_ok_and(|now| files.files.get(&change.path) == Some(&now));
+        if !ours { foreign.push(&change.path); }
+    }
+    if !foreign.is_empty() { foreign.sort_unstable(); foreign.dedup(); return Err(kept(&foreign)); }
+    // Everything is the gate's. A failure partway leaves the ledger, so a retry clears the rest.
     if !changes.unstaged.is_empty() {
         let mut args = vec!["checkout", "--quiet", "--"];
         args.extend(changes.unstaged.iter().map(|c| c.path.as_str()));
         adapters::git(tree, &args).await?;
     }
     for change in &changes.untracked { std::fs::remove_file(tree.join(&change.path))?; }
-    Ok(())
+    end_gate(ledger)
 }
 
 impl Exec {
@@ -274,46 +346,104 @@ mod tests {
             .status().unwrap().success();
         assert!(ok, "{args:?}");
     }
-    fn later() { std::thread::sleep(std::time::Duration::from_millis(30)); }
+    fn ledger(dir: &tempfile::TempDir) -> PathBuf { dir.path().join(".git").join("gate-files.json") }
+    async fn gate(dir: &tempfile::TempDir) -> PathBuf {
+        let ledger = ledger(dir);
+        begin_gate(dir.path(), &ledger, "run", Some("c")).await.unwrap();
+        ledger
+    }
+    async fn recover(dir: &tempfile::TempDir) -> Result<()> { recover_gate_leftovers(dir.path(), &ledger(dir), "run", Some("c")).await }
+    fn read(dir: &tempfile::TempDir, path: &str) -> String { std::fs::read_to_string(dir.path().join(path)).unwrap() }
 
     #[tokio::test]
     async fn a_clean_tree_passes_and_a_person_s_changes_are_left_alone() {
         let dir = repo();
-        recover_gate_leftovers(dir.path()).await.unwrap();
-        // Their work is there before the gate began: it is older than the marker.
+        recover(&dir).await.unwrap();
+        // Their work is there before the gate began, so the gate's ledger can't list it.
         std::fs::write(dir.path().join("mine.txt"), "someone's work").unwrap();
         std::fs::write(dir.path().join("tracked.txt"), "someone's edit").unwrap();
-        later();
-        mark_gate(dir.path()).await.unwrap();
-        later();
+        let ledger = gate(&dir).await;
         std::fs::write(dir.path().join("half-built.txt"), "the gate's").unwrap();
-        let error = recover_gate_leftovers(dir.path()).await.unwrap_err().to_string();
-        assert!(error.contains("copy them somewhere else or discard them") && !error.contains("commit"), "{error}");
-        assert_eq!(std::fs::read_to_string(dir.path().join("mine.txt")).unwrap(), "someone's work");
-        assert_eq!(std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(), "someone's edit");
+        note_gate_files(dir.path(), &ledger).await.unwrap();
+        let error = recover(&dir).await.unwrap_err().to_string();
+        assert!(error.contains("mine.txt, tracked.txt") && !error.contains("half-built"), "{error}");
+        assert!(error.contains("Keep them") && error.contains("discard them") && !error.contains("commit"), "{error}");
+        assert_eq!(read(&dir, "mine.txt"), "someone's work");
+        assert_eq!(read(&dir, "tracked.txt"), "someone's edit");
         assert!(dir.path().join("half-built.txt").exists(), "all or nothing: not even the gate's file goes while a person's change is there");
+        assert!(ledger.exists(), "the ledger stays for when the person has decided");
     }
 
     #[tokio::test]
     async fn a_dead_gate_s_own_leftovers_are_cleared_and_nothing_else() {
         let dir = repo();
+        std::fs::write(dir.path().join("gone.txt"), "kept by git").unwrap();
+        git(dir.path(), &["add", "gone.txt"]);
+        git(dir.path(), &["commit", "-q", "-m", "gone"]);
         std::fs::create_dir(dir.path().join("out")).unwrap();
-        later();
-        mark_gate(dir.path()).await.unwrap();
-        later();
+        let ledger = gate(&dir).await;
         std::fs::write(dir.path().join("out/half-built.txt"), "the gate's").unwrap();
         std::fs::write(dir.path().join("tracked.txt"), "the gate rewrote this").unwrap();
-        recover_gate_leftovers(dir.path()).await.unwrap();
+        std::fs::remove_file(dir.path().join("gone.txt")).unwrap();
+        note_gate_files(dir.path(), &ledger).await.unwrap();
+        // The daemon dies here; a restart recovers.
+        recover(&dir).await.unwrap();
         assert!(!dir.path().join("out/half-built.txt").exists());
-        assert_eq!(std::fs::read_to_string(dir.path().join("tracked.txt")).unwrap(), "one");
+        assert_eq!(read(&dir, "tracked.txt"), "one");
+        assert_eq!(read(&dir, "gone.txt"), "kept by git");
         assert!(!crate::git::is_dirty(dir.path()).await.unwrap());
+        assert!(!ledger.exists());
+    }
+
+    /// The blocker in the ov-979 review: the daemon dies mid-gate and a person keeps working in the tree.
+    #[tokio::test]
+    async fn a_person_s_edit_after_the_gate_began_survives_a_crash_restart() {
+        let dir = repo();
+        let ledger = gate(&dir).await;
+        std::fs::write(dir.path().join("out.txt"), "the gate's").unwrap();
+        std::fs::write(dir.path().join("log.txt"), "the gate's").unwrap();
+        note_gate_files(dir.path(), &ledger).await.unwrap();
+        // The daemon is dead: nothing more is noted, and a person works on.
+        std::fs::write(dir.path().join("mine.txt"), "someone's work").unwrap();
+        std::fs::write(dir.path().join("tracked.txt"), "someone's edit").unwrap();
+        std::fs::write(dir.path().join("out.txt"), "someone's fix to the gate's file").unwrap();
+        let error = recover(&dir).await.unwrap_err().to_string();
+        assert!(error.contains("mine.txt, out.txt, tracked.txt") && !error.contains("log.txt"), "{error}");
+        assert_eq!(read(&dir, "mine.txt"), "someone's work");
+        assert_eq!(read(&dir, "tracked.txt"), "someone's edit");
+        assert_eq!(read(&dir, "out.txt"), "someone's fix to the gate's file");
+        assert_eq!(read(&dir, "log.txt"), "the gate's");
     }
 
     #[tokio::test]
-    async fn changes_with_no_gate_marker_are_a_person_s() {
+    async fn a_ledger_from_another_run_or_candidate_proves_nothing() {
+        for (run, candidate) in [("another run", Some("c")), ("run", Some("an older candidate")), ("run", None)] {
+            let dir = repo();
+            let ledger = gate(&dir).await;
+            std::fs::write(dir.path().join("out.txt"), "the gate's").unwrap();
+            note_gate_files(dir.path(), &ledger).await.unwrap();
+            assert!(recover_gate_leftovers(dir.path(), &ledger, run, candidate).await.is_err(), "{run} {candidate:?}");
+            assert!(dir.path().join("out.txt").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_gate_that_ends_takes_its_ledger_with_it() {
+        let dir = repo();
+        let ledger = gate(&dir).await;
+        std::fs::write(dir.path().join("out.txt"), "the gate's").unwrap();
+        note_gate_files(dir.path(), &ledger).await.unwrap();
+        end_gate(&ledger).unwrap();
+        end_gate(&ledger).unwrap();
+        assert!(recover(&dir).await.is_err(), "what a finished gate left is no longer provably its own");
+        assert!(dir.path().join("out.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn changes_with_no_ledger_are_a_person_s() {
         let dir = repo();
         std::fs::write(dir.path().join("mine.txt"), "someone's work").unwrap();
-        assert!(recover_gate_leftovers(dir.path()).await.is_err());
-        assert_eq!(std::fs::read_to_string(dir.path().join("mine.txt")).unwrap(), "someone's work");
+        assert!(recover(&dir).await.is_err());
+        assert_eq!(read(&dir, "mine.txt"), "someone's work");
     }
 }

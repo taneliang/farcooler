@@ -66,6 +66,11 @@ impl Exec {
     fn provider_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provider.json", digest(&binding.effect)))
     }
+    /// The Run gate's ledger of what it changed in a named tree (ov-979). Kept per tree, so the gate that runs
+    /// again after a crash, a new effect, finds what the dead one left.
+    pub(super) fn gate_files_path(&self, binding: &Binding) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.gate-files.json", digest(&(&binding.workspace, &binding.effect.item))))
+    }
     pub(super) fn process_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.output", digest(&binding.effect)))
     }
@@ -212,7 +217,8 @@ impl Exec {
     /// (ov-967, ov-979).
     pub(super) async fn settle_run_tree(&self, binding: &Binding, tree: &Path) -> Result<()> {
         if binding.effect.tree.is_some() {
-            named_tree::recover_gate_leftovers(tree).await
+            named_tree::recover_gate_leftovers(tree, &self.gate_files_path(binding), &binding.effect.run,
+                binding.effect.candidate.as_deref()).await
         } else {
             self.git_recorded(binding, tree, &["reset", "--hard", "--quiet"]).await?;
             self.git_recorded(binding, tree, &["clean", "-fdq"]).await?;
@@ -225,19 +231,38 @@ impl Exec {
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
         durable(&log, b"")?;
-        // A named tree is one people edit in: note when a Run gate began, so a crash can tell its leftovers (ov-979).
-        let marked = binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run));
-        if marked { named_tree::mark_gate(&self.tree(binding)).await?; }
-        let exit = if self.is_native_agent(binding) {
-            self.run_native(binding, &command, cancel).await?
-        } else {
-            // A gate can run for hours and leave the daemon behind it: its owner is recorded so a
-            // recovery can end it before it runs again (a group's gate holds the whole landing target).
-            let owner = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)).then(|| self.owner_path(binding));
-            crate::effect_runner::owned(&self.tree(binding), &command.argv, &command.environment,
-                &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref()).await?
+        // A named tree is one people edit in: what a Run gate changes there is noted as it runs, so after a crash
+        // only the dead gate's own files are cleared (ov-979).
+        let ledger = (binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)))
+            .then(|| self.gate_files_path(binding));
+        let looking = match &ledger {
+            Some(ledger) => {
+                named_tree::begin_gate(&self.tree(binding), ledger, &binding.effect.run, binding.effect.candidate.as_deref()).await?;
+                let (tree, ledger) = (self.tree(binding), ledger.clone());
+                Some(tokio::spawn(async move { loop {
+                    tokio::time::sleep(named_tree::GATE_LOOK).await;
+                    if let Err(error) = named_tree::note_gate_files(&tree, &ledger).await {
+                        tracing::warn!(%error, "the gate's changes could not be noted");
+                    }
+                }}))
+            }
+            None => None,
         };
-        if marked { named_tree::clear_gate(&self.tree(binding)).await; }
+        let exit = async {
+            Ok::<_, Error>(if self.is_native_build(binding) {
+                self.run_native(binding, &command, cancel).await?
+            } else {
+                // A gate can run for hours and leave the daemon behind it: its owner is recorded so a
+                // recovery can end it before it runs again (a group's gate holds the whole landing target).
+                let owner = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)).then(|| self.owner_path(binding));
+                crate::effect_runner::owned(&self.tree(binding), &command.argv, &command.environment,
+                    &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref()).await?
+            })
+        }.await;
+        // However the gate ended, its ledger goes with it; only a crash leaves one behind.
+        if let Some(looking) = looking { looking.abort(); let _ = looking.await; }
+        if let Some(ledger) = &ledger { named_tree::end_gate(ledger)?; }
+        let exit = exit?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: command.environment, exit, log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)

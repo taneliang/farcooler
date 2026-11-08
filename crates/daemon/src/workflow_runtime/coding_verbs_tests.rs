@@ -9,6 +9,9 @@ use std::collections::BTreeMap;
 const GATE: &str = r#"elif stage == 'gate':
     if mode == 'gate-fail': sys.exit(5)
     if mode == 'gate-dirty': pathlib.Path('stray.out').write_text('left behind')
+    if mode == 'gate-slow':
+        pathlib.Path('half-built.out').write_text('left by the gate')
+        __import__('time').sleep(60)
     if mode == 'batch-fail':
         head = subprocess.check_output(['/usr/bin/git', '--git-dir', os.environ['REMOTE'], 'rev-parse', 'refs/heads/main']).decode().strip()
         if int(subprocess.check_output(['/usr/bin/git', 'rev-list', '--count', head + '..HEAD']).decode().strip()) > 1: sys.exit(5)
@@ -471,12 +474,12 @@ async fn a_gate_left_running_by_a_dead_daemon_is_ended_and_run_again() {
     assert_eq!(outbox(&runtime, StageKind::Run), 2, "the gate ran again on a clean tree");
 }
 
-/// ov-979: the Run gate's restart in a tree the app lists clears only what the dead gate left, and refuses a
-/// person's work. Removing the call in `execute_coding` turns the private-tree test above red; this one pins
-/// the named branch of what it calls.
+/// ov-979: a Run gate in a tree the app lists has what it writes noted as it runs. The daemon dies mid-gate; on
+/// restart a person's work stops the run and nothing is cleaned, and once it is gone only the gate's own file goes.
+/// Removing the call in `execute_coding` turns the private-tree test above red; this one runs the named branch.
 #[tokio::test]
 async fn a_run_gate_restarting_in_a_named_tree_keeps_a_persons_changes() {
-    let (_dir, mut runtime) = lander("pass").await;
+    let (_dir, mut runtime) = lander("gate-slow").await;
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "one", &definition).await;
     command(&runtime, Command::Queue { item: "one".into() });
@@ -484,16 +487,45 @@ async fn a_run_gate_restarting_in_a_named_tree_keeps_a_persons_changes() {
     let mut binding = admitted(&runtime).await;
     let path = runtime.tree(&binding);
     binding.effect.tree = Some(RunTree { name: "n".into(), branch: "b".into(), path: path.to_string_lossy().into_owned(), base: binding.base.clone() });
+    let ledger = runtime.gate_files_path(&binding);
+    let (exec, running) = (runtime.exec.clone(), binding.clone());
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let gate = tokio::spawn(async move { exec.execute_coding("w", &running, cancelled).await });
+    tokio::time::timeout(Duration::from_secs(30), async { loop {
+        if std::fs::read_to_string(&ledger).is_ok_and(|l| l.contains("half-built.out")) { break; }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }}).await.expect("the running gate's file was noted");
+    // The daemon dies mid-gate; its gate is ended on restart. The ledger outlives them both.
+    gate.abort();
+    assert!(gate.await.unwrap_err().is_cancelled());
+    assert!(crate::effect_runner::Owner::reap(&runtime.owner_path(&binding)).await.unwrap());
+    assert!(ledger.exists());
     std::fs::write(path.join("mine.txt"), "a person's work").unwrap();
-    std::thread::sleep(Duration::from_millis(30));
-    named_tree::mark_gate(&path).await.unwrap();
-    std::thread::sleep(Duration::from_millis(30));
-    std::fs::write(path.join("half-built.txt"), "left by the gate").unwrap();
-    assert!(runtime.settle_run_tree(&binding, &path).await.is_err(), "a person's change stops the run");
-    assert!(path.join("mine.txt").exists() && path.join("half-built.txt").exists(), "and nothing is cleaned");
+    let error = runtime.settle_run_tree(&binding, &path).await.unwrap_err().to_string();
+    assert!(error.contains("mine.txt") && !error.contains("half-built"), "a person's change stops the run: {error}");
+    assert!(path.join("mine.txt").exists() && path.join("half-built.out").exists(), "and nothing is cleaned");
     std::fs::remove_file(path.join("mine.txt")).unwrap();
     runtime.settle_run_tree(&binding, &path).await.unwrap();
-    assert!(!path.join("half-built.txt").exists(), "the dead gate's own leftover is cleared");
+    assert!(!path.join("half-built.out").exists(), "the dead gate's own leftover is cleared");
+    assert!(!ledger.exists());
+}
+
+/// ov-979: a gate that ends, however it ends, takes its ledger with it, so a later gate never reads a stale one.
+#[tokio::test]
+async fn a_named_tree_s_gate_that_ends_leaves_no_ledger() {
+    let (_dir, mut runtime) = lander("gate-dirty").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..4 { runtime.pump(time).await.unwrap(); }
+    let mut binding = admitted(&runtime).await;
+    let path = runtime.tree(&binding);
+    binding.effect.tree = Some(RunTree { name: "n".into(), branch: "b".into(), path: path.to_string_lossy().into_owned(), base: binding.base.clone() });
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    runtime.execute_coding("w", &binding, cancelled).await.unwrap();
+    assert!(path.join("stray.out").exists());
+    assert!(!runtime.gate_files_path(&binding).exists());
+    assert!(runtime.settle_run_tree(&binding, &path).await.is_err(), "what a finished gate left is a person's to judge");
 }
 
 #[tokio::test]
