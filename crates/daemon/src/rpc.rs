@@ -812,8 +812,11 @@ impl Rpc {
                 let (runtime, pane) = crate::watch_view::lookup(&workspace.to_string(), &item).ok_or(DomainError::NotFound)?;
                 let (columns, rows) = (pane.columns, pane.rows);
                 let sink = crate::resync::TerminalSink::new(self.push.clone(), pane.terminal_id, 0);
+                let ending = crate::resync::TerminalSink::new(self.push.clone(), pane.terminal_id, 0);
                 let task = tokio::spawn(async move {
                     let _ = runtime.attach(pane, sink).await;
+                    // The engine reaped the pane: say so, so the viewer can show "finished".
+                    ending.pane_gone();
                 });
                 if let Ok(mut held) = self.attachment.lock() {
                     held.replace(Attachment(task));

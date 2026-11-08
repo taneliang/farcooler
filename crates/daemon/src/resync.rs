@@ -131,6 +131,17 @@ impl TerminalSink {
         }
     }
 
+    /// Tell the client the pane it was watching is gone (`GAP_REASON_RUNTIME_LOST`). Only a watcher needs
+    /// it: an ordinary attachment ends with its terminal's own closing.
+    pub(crate) fn pane_gone(&self) {
+        let gap = self.frame(farcooler_protocol::v1::terminal_frame::Kind::Gap(farcooler_protocol::v1::Gap {
+            resumed_at_sequence: self.sequence,
+            lost_bytes: Some(0),
+            reason: farcooler_protocol::v1::GapReason::RuntimeLost as i32,
+        }));
+        self.push.push_pinned(vec![gap]);
+    }
+
     fn frame(&self, kind: farcooler_protocol::v1::terminal_frame::Kind) -> farcooler_protocol::v1::Event {
         farcooler_protocol::v1::Event {
             event_id: farcooler_protocol::ids::new_id(),
@@ -385,6 +396,19 @@ mod tests {
 
         // And live output flows again behind it.
         assert_eq!(sink.output(b"next".to_vec()), Taken::Sent);
+    }
+
+    /// **A watcher is told when the pane is gone** (ov-972 fix round). `attach` returning is the only sign
+    /// the engine reaped the pane, so the sink says so in the protocol's own word, `RuntimeLost`.
+    #[tokio::test]
+    async fn the_sink_can_tell_a_watcher_the_pane_is_gone() {
+        use farcooler_protocol::v1::{event::Payload, terminal_frame::Kind};
+        let (push, mut pushes) = farcooler_transport::push_queue(TERMINAL_BACKLOG_BYTES);
+        let sink = TerminalSink::new(push, Uuid::now_v7(), 0);
+        sink.pane_gone();
+        let Some(Payload::TerminalFrame(frame)) = pushes.recv().await.unwrap().payload else { panic!("not a frame") };
+        let Some(Kind::Gap(gap)) = frame.kind else { panic!("not a gap") };
+        assert_eq!(gap.reason, farcooler_protocol::v1::GapReason::RuntimeLost as i32);
     }
 
     /// **Attaching again on a connection that has stopped reading keeps one

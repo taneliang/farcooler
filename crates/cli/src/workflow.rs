@@ -177,6 +177,10 @@ pub fn watch_request(workspace:Uuid, item:&str) -> pb::Request {
     r
 }
 pub(crate) fn size_marker(columns:u32, rows:u32) -> Vec<u8> { format!("\x1bP>farcooler-size;{columns};{rows}\x1b\\").into_bytes() }
+/// The runner's word that the watched pane was reaped (`GAP_REASON_RUNTIME_LOST`).
+fn watch_ended(frame:&pb::TerminalFrame) -> bool {
+    matches!(&frame.kind, Some(pb::terminal_frame::Kind::Gap(g)) if g.reason==pb::GapReason::RuntimeLost as i32)
+}
 /// Print the agent's terminal bytes as they arrive. Writes only to stdout; the link is never written to
 /// again after the one request.
 async fn watch(runner:Option<&str>, workspace:Uuid, item:String) -> Fallible {
@@ -192,6 +196,7 @@ async fn watch(runner:Option<&str>, workspace:Uuid, item:String) -> Fallible {
     loop {
         let event = link.next_event().await?;
         let Some(pb::event::Payload::TerminalFrame(frame)) = event.payload else { continue };
+        if watch_ended(&frame) { return Ok(()); }
         let Some(pb::terminal_frame::Kind::Output(output)) = frame.kind else { continue };
         if out.write_all(&output.payload).is_err() || out.flush().is_err() { return Ok(()); }
     }
@@ -214,6 +219,13 @@ mod tests {
         let Some(request::Payload::WorkflowCommand(p)) = r.payload else { panic!() };
         assert_eq!(p.json, r#"{"item":"ov-9"}"#);
         assert_eq!(size_marker(120, 40), b"\x1bP>farcooler-size;120;40\x1b\\".to_vec(), "the viewer reads this as the runner's own marker");
+    }
+    #[test]
+    fn a_watch_ends_when_the_runner_says_the_pane_is_gone() {
+        let gap = |reason:pb::GapReason| pb::TerminalFrame { kind: Some(pb::terminal_frame::Kind::Gap(pb::Gap { reason: reason as i32, ..Default::default() })), ..Default::default() };
+        assert!(watch_ended(&gap(pb::GapReason::RuntimeLost)));
+        assert!(!watch_ended(&gap(pb::GapReason::ClientTooSlow)), "a slow client is resynced, not finished");
+        assert!(!watch_ended(&pb::TerminalFrame::default()));
     }
     #[test]
     fn workflow_removed_artifact_syntax_fails_at_parser() {

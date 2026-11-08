@@ -24,7 +24,7 @@ fn this_module_has_no_way_to_type_or_resize() {
     let code = source.split("#[cfg(test)]").next().unwrap();
     let strip = |text: &str| text.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
     let (code, handler) = (strip(code), strip(handler));
-    for verb in ["send_keys", "send_literal", "send_bytes_hex", "send_bytes", "resize", "set_pane_size", "input_from", "mark_input", "paste"] {
+    for verb in ["send_keys", "send_literal", "send_bytes_hex", "send_bytes", "resize", "set_pane_size", "input_from", "mark_input", "paste", "send_input", "input_channel", ".tell(", "interrupt", "send-keys", "resize_terminal", ".tmux"] {
         assert!(!code.contains(verb) && !handler.contains(verb), "the watch path mentions {verb}");
     }
     assert!(handler.contains(".attach("));
@@ -89,11 +89,10 @@ async fn a_watcher_sees_the_agent_and_nothing_it_does_reaches_the_pane() {
     assert!(text(&seen).contains("got engine"), "the live stream never carried the engine's line: {:?}", text(&seen));
 
     // What the daemon's own terminal verbs can do with this terminal's id: it is in no inventory they read.
-    let daemons = crate::runtime::Runtime::open_in(&dir.join("daemon")).await;
-    if let Ok(daemons) = daemons {
-        assert!(daemons.send_input(terminal, "typed by a viewer\n").await.is_err());
-        assert!(daemons.resolve_terminal(&terminal.simple().to_string()).is_err());
-    }
+    // Opened for real: a failure to open is a failure of the test, not a skipped check.
+    let daemons = crate::runtime::Runtime::open_in(&dir.join("daemon")).await.expect("a daemon runtime of its own");
+    assert!(daemons.send_input(terminal, "typed by a viewer\n").await.is_err());
+    assert!(daemons.resolve_terminal(&terminal.simple().to_string()).is_err());
     // And a watcher has no verb of its own: the only thing the handle is used for is `attach`.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
