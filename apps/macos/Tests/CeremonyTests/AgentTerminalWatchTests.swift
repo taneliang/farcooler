@@ -163,4 +163,14 @@ struct AgentTerminalWatchTests {
         #expect(view.frame.width < 1600, "the view grew to the window")
         #expect(view.grid == PaneGrid(columns: 120, rows: 40))
     }
+
+    @MainActor
+    @Test("The area around the pane is the terminal's own background, and the sideways scroller is always visible")
+    func theSurroundIsPaintedAndTheScrollerShows() {
+        let scroller = AgentTerminalCanvas.Scroller()
+        #expect(scroller.drawsBackground, "the area beside and below the pane is unpainted")
+        #expect(scroller.backgroundColor == Palette.background, "the fill is not the terminal's background")
+        #expect(scroller.hasHorizontalScroller && !scroller.autohidesScrollers, "nothing shows the picture continues sideways")
+        #expect(scroller.scrollerStyle == .legacy, "an overlay scroller hides itself until the pointer moves")
+    }
 }

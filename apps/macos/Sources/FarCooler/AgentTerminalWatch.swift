@@ -83,6 +83,20 @@ struct AgentTerminalCanvas: NSViewRepresentable {
     /// no part of the pane is cut off and the font stays readable.
     final class Scroller: NSScrollView {
         var terminal: TerminalRenderView?
+
+        /// The pane is a fixed grid, so the window is often larger than it. The rest is the terminal's own
+        /// background, so the picture reads as reaching the edges, and the scrollers are the always-visible
+        /// kind so a pane wider than the window shows there is more to the right.
+        init() {
+            super.init(frame: .zero)
+            hasHorizontalScroller = true
+            hasVerticalScroller = true
+            scrollerStyle = .legacy
+            autohidesScrollers = false
+            drawsBackground = true
+            backgroundColor = Palette.background
+        }
+        required init?(coder: NSCoder) { fatalError("not used") }
         /// Size the document to exactly the pane's grid, never to the window. A larger view would ask
         /// the emulator for more columns than the agent's pane has, and the picture would be cleared.
         func fitDocument() {
@@ -95,10 +109,6 @@ struct AgentTerminalCanvas: NSViewRepresentable {
 
     func makeNSView(context: Context) -> Scroller {
         let scroller = Scroller()
-        scroller.hasHorizontalScroller = true
-        scroller.hasVerticalScroller = true
-        scroller.autohidesScrollers = true
-        scroller.drawsBackground = false
         let view = makeTerminal(context: context)
         scroller.terminal = view
         scroller.documentView = view
