@@ -354,8 +354,8 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: ${{ matrix.os }}
     # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
-    # macOS 45: its runners have run 2-3x slower, and the crash-matrix binary alone takes about 6 min (ov-992).
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 45 || 35 }}
+    # macOS 60: its runners have run 2-3x slower, the crash-matrix binary alone takes about 6 min, and 35 min cut main off about 4900 of 6665 tests in (ov-992).
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 35 }}
     strategy:
       fail-fast: false
       matrix:
