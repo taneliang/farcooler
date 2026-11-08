@@ -488,7 +488,7 @@ async fn a_run_gate_restarting_in_a_named_tree_keeps_a_persons_changes() {
     for time in 2..4 { runtime.pump(time).await.unwrap(); }
     let mut binding = admitted(&runtime).await;
     let path = runtime.tree(&binding);
-    binding.effect.tree = Some(RunTree { name: "n".into(), branch: "b".into(), path: path.to_string_lossy().into_owned(), base: binding.base.clone() });
+    binding.effect.tree = Some(RunTree { name: "n".into(), branch: "b".into(), path: path.to_string_lossy().into_owned(), base: binding.base.clone(), adopted: false });
     let ledger = runtime.gate_files_path(&binding);
     let (exec, running) = (runtime.exec.clone(), binding.clone());
     let (_cancel, cancelled) = tokio::sync::watch::channel(false);
@@ -536,7 +536,7 @@ async fn a_named_tree_s_gate_that_ends_leaves_no_ledger() {
     for time in 2..4 { runtime.pump(time).await.unwrap(); }
     let mut binding = admitted(&runtime).await;
     let path = runtime.tree(&binding);
-    binding.effect.tree = Some(RunTree { name: "n".into(), branch: "b".into(), path: path.to_string_lossy().into_owned(), base: binding.base.clone() });
+    binding.effect.tree = Some(RunTree { name: "n".into(), branch: "b".into(), path: path.to_string_lossy().into_owned(), base: binding.base.clone(), adopted: false });
     let (_cancel, cancelled) = tokio::sync::watch::channel(false);
     runtime.execute_coding("w", &binding, cancelled).await.unwrap();
     assert!(path.join("stray.out").exists());

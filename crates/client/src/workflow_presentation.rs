@@ -110,6 +110,9 @@ pub struct Presentation {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error { Invalid, Unauthorized, Missing, Stale, Unavailable, ReasonRequired }
+// A command grew with Start's followers and a send-back's reason (ov-968, ov-970). An intent is made once per
+// action and matched by value, as `PreparedWorkflowResult` is, so boxing it would only cost the callers.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Intent {
     InspectLatestEvidence { evidence: Evidence },

@@ -531,7 +531,7 @@ async fn workflow_service_frees_a_named_tree_when_its_run_ends() {
     let start=|id:&str,key:&str,seq:u64,snapshot:&serde_json::Value| { let item=&snapshot["state"]["items"][key];
         Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),seq),item:key.into(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-            worktree:Some(NamedTree { name:"shared".into(),branch:"e-liang/shared".into() }) } };
+            worktree:Some(NamedTree { name:"shared".into(),branch:"e-liang/shared".into(),adopt:false }),with:vec![] } };
     // With the repository lock held the tree is recorded but never made, then the run is cancelled.
     let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
     let held=host.service.repo_lock(repository).lock_owned().await;

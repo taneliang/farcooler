@@ -14,7 +14,7 @@ fn stage(id: &str, kind: StageKind) -> Stage {
 /// One workflow with all three deciders, in the order a ticket meets them, then landing.
 fn three_gates() -> Definition {
     Definition { schema: 1, source: "gates/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
-        models: BTreeMap::from([("agent-review".into(), vec!["claude:opus".into(), "codex:gpt-5.5".into()])]),
+        models: BTreeMap::from([("agent-review".into(), vec!["claude:opus".into(), "codex:gpt-5.5".into()])]), send_backs: None,
         stages: vec![stage("provision", StageKind::Provision), stage("build", StageKind::Build),
             stage("agent-review", StageKind::Review(Reviewer::Agent)),
             stage("orchestrator-review", StageKind::Review(Reviewer::Orchestrator("orchestrator".into()))),

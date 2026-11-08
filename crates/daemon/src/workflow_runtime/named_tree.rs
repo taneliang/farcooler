@@ -294,6 +294,15 @@ impl Exec {
     }
 }
 
+/// An adopted tree must be clean (ov-968), so the run is its one writer. Changes in it are a person's, so the run
+/// refuses and leaves them as they are; nothing here resets or cleans (ov-979).
+pub(super) async fn refuse_adopting_changes(tree: &Path) -> Result<()> {
+    if crate::git::is_dirty(tree).await.unwrap_or(true) {
+        return Err(Error::Refused("the adopted worktree has changes; commit them to its branch or discard them, then start the run again"));
+    }
+    Ok(())
+}
+
 impl Exec {
     /// An adopted branch (ov-968): carry on in the worktree that has it checked out, or make one on it. The branch
     /// is never made or deleted here. The tree must be clean and have no pane running in it, so the run is the
@@ -305,7 +314,7 @@ impl Exec {
         if path.try_exists()? {
             let head = adapters::git(path, &["symbolic-ref", "HEAD"]).await?;
             if head != format!("refs/heads/{}", tree.branch) { return Err(Error::Refused("the adopted worktree has moved to another branch")); }
-            refuse_foreign_changes(path).await?;
+            refuse_adopting_changes(path).await?;
             // Start refused a tree the app doesn't list; one that lost its row since is refused here too.
             let Some(row) = &row else { return Err(Error::Refused("the adopted worktree isn't one the app lists")) };
             {
@@ -350,6 +359,14 @@ mod tests {
             .args(["-c", "user.name=T", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false"]).args(args)
             .status().unwrap().success();
         assert!(ok, "{args:?}");
+    }
+    #[tokio::test]
+    async fn an_adopted_tree_with_changes_is_refused_and_left_as_it_is() {
+        let dir = repo();
+        refuse_adopting_changes(dir.path()).await.unwrap();
+        std::fs::write(dir.path().join("mine.txt"), "someone's work").unwrap();
+        assert!(refuse_adopting_changes(dir.path()).await.is_err());
+        assert_eq!(read(&dir, "mine.txt"), "someone's work");
     }
     fn ledger(dir: &tempfile::TempDir) -> PathBuf { dir.path().join(".git").join("gate-files.json") }
     async fn gate(dir: &tempfile::TempDir) -> PathBuf {
