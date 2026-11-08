@@ -167,7 +167,7 @@ pub(super) async fn through_engine<L: DispatchLink>(
             };
             let action = Action::Start {
                 mutation: Mutation { id: format!("dispatch-{}-{}", ticket.key, seen.revision), revision: seen.revision, epoch: seen.epoch, sequence: now_millis() },
-                item: ticket.key.clone(), run, pin, start_pin,
+                item: ticket.key.clone(), run, pin, start_pin, models: Default::default(),
             };
             let request = crate::workflow::request(workspace, &action).map_err(|_| unreadable())?;
             let reply = link.call(request).await.map_err(|_| Failed::from(format!("{} couldn't be started: the engine didn't answer.", ticket.key)))?;

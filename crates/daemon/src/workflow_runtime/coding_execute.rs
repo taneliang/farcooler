@@ -80,8 +80,11 @@ impl Exec {
             StageKind::Build => match &config.harness {
                 CodingHarness::Command(command) => command.clone(),
                 CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process } => {
-                    if let Some(settings) = settings.as_ref().filter(|_| launch) { settings.verify()?; }
-                    if let Some(hooks) = project_hooks.as_ref().filter(|_| launch) {
+                    // The model the run picked at Start, or the configured preset when the workflow lists none (ov-966).
+                    let preset = binding.effect.model.as_deref().unwrap_or(preset);
+                    let claude = preset.split(':').next() == Some("claude");
+                    if let Some(settings) = settings.as_ref().filter(|_| launch && claude) { settings.verify()?; }
+                    if let Some(hooks) = project_hooks.as_ref().filter(|_| launch && !claude) {
                         let relative = hooks.path.strip_prefix(&config.repository)
                             .map_err(|_| Error::Refused("foreign native project hooks"))?;
                         LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
@@ -138,6 +141,8 @@ impl Exec {
             ("FARCOOLER_WORKFLOW_ITEM", effect.item.clone()),
             ("FARCOOLER_WORKSPACE", binding.workspace.clone()),
         ] { command.environment.insert(key.into(), value); }
+        // The model the run picked at Start (ov-966); a native harness launches it, a command one is told.
+        if let Some(model) = &effect.model { command.environment.insert("FARCOOLER_WORKFLOW_MODEL".into(), model.clone()); }
     }
     async fn run_coding(&self, binding: &Binding, command: CodingCommand,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<()> {

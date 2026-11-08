@@ -65,16 +65,17 @@ impl CodingConfigExt for CodingConfig {
                 // supplies the native launch command.
                 let mut policy = process.clone(); policy.argv = vec!["/bin/sh".into()]; policy.validate()?;
                 if let Some(settings) = settings { settings.verify()?; }
-                let harness = preset.split(':').next().unwrap_or("");
-                if harness == "claude" && settings.is_none() {
+                if preset.split(':').next() == Some("claude") && settings.is_none() {
                     return Err(Error::Refused("claude requires pinned existing hook settings"));
                 }
-                let relative = match harness { "codex" => Some(".codex/hooks.json"), "cursor" => Some(".cursor/hooks.json"), _ => None };
-                if let Some(relative) = relative {
-                    let hooks = project_hooks.as_ref().ok_or(Error::Refused("native project hooks must be pinned"))?;
-                    if hooks.path != self.repository.join(relative) { return Err(Error::Refused("foreign project hook path")); }
+                // Codex's or Cursor's, whichever the path says, so a run may pick either harness (ov-966).
+                if let Some(hooks) = project_hooks {
+                    if !["codex", "cursor"].iter().any(|h| project_hooks_path(h).is_some_and(|r| hooks.path == self.repository.join(r))) {
+                        return Err(Error::Refused("foreign project hook path"));
+                    }
                     hooks.verify()?;
                 }
+                if !launchable(self, preset) { return Err(Error::Refused("native project hooks must be pinned")); }
             }
         }
         if let Some(pr) = &self.pull_request {
@@ -229,6 +230,10 @@ impl Pinned for CodingConfig {
             }
         }
         if in_group { return Ok(()); }
+        // A model the runtime can't launch never reaches a run: a typo, or a harness whose hooks aren't pinned (ov-966).
+        if definition.models.values().flatten().any(|model| !launchable(self, model)) {
+            return Err(Error::Refused("a listed model's harness isn't set up on this runtime"));
+        }
         // Every group works on the one landing target, so they take turns for it.
         for name in definition.groups.keys() {
             let group = &definition.groups[name];
@@ -246,6 +251,21 @@ impl FileValidation for LaunchFile {
             return Err(Error::Refused("native settings changed"));
         }
         Ok(())
+    }
+}
+/// Where Codex and Cursor read a project's hooks, relative to the repository. `None` for Claude, whose hooks
+/// are its settings file.
+pub(super) fn project_hooks_path(harness: &str) -> Option<&'static str> {
+    match harness { "codex" => Some(".codex/hooks.json"), "cursor" => Some(".cursor/hooks.json"), _ => None }
+}
+/// Whether this configuration can launch `preset` (`harness` or `harness:model`): a harness Far Cooler runs
+/// and, for a native one, with that harness's hooks pinned, since its turn is read from them.
+pub(super) fn launchable(config: &CodingConfig, preset: &str) -> bool {
+    if crate::orchestrator::harness_of(preset).is_none() { return false; }
+    let CodingHarness::Native { settings, project_hooks, .. } = &config.harness else { return true };
+    match project_hooks_path(preset.split(':').next().unwrap_or("")) {
+        Some(relative) => project_hooks.as_ref().is_some_and(|h| h.path == config.repository.join(relative)),
+        None => settings.is_some(),
     }
 }
 pub(super) fn sha(value: &str) -> bool {

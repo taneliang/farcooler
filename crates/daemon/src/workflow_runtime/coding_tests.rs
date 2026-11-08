@@ -380,7 +380,7 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
     ok(&wire(&runtime, "orchestrator", Action::Start { mutation: m("start", state.revision, 2), item: "ov-7".into(),
-        run: item.run.clone(), pin: item.pin.clone(), start_pin: pin }));
+        run: item.run.clone(), pin: item.pin.clone(), start_pin: pin, models: Default::default() }));
     runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
     let binding = admitted(&runtime).await;
     // A command harness is told by the environment alone.
@@ -396,4 +396,90 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
     assert_eq!(command.environment["FARCOOLER_WORKSPACE"], "w");
     // A recovery rebuilds the same command.
     assert_eq!(runtime.coding_command(&binding).unwrap(), command);
+}
+
+/// ov-966: the orchestrator starts two tickets on one workflow with different models. Each run records its
+/// model, and each build launches with it: a command harness is told in its environment, a native one runs
+/// that harness with `--model`, so Claude and Codex runs mix on one board.
+#[tokio::test]
+async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_launches_its_own() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let published = runtime.coding.clone().unwrap();
+    let mut definition = published.definition().unwrap();
+    definition.models.insert("build".into(), vec!["claude:opus".into(), "codex:gpt-5.5".into()]);
+    let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
+    let wire = |runtime: &Runtime, principal, action| runtime.wire_command("w", principal, action).unwrap();
+    let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
+    let adapter = Some(Box::new(AdapterConfiguration::Coding(published.clone())));
+    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
+    ok(&wire(&runtime, "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
+    assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into()), ("w".into(), "ov-8".into(), "backlog".into())]).unwrap(), 2);
+    let start = |runtime: &Runtime, item: &str, models: &[(&str, &str)], sequence| {
+        let state = runtime.state("w").unwrap().unwrap(); let held = &state.items[item];
+        wire(runtime, "orchestrator", Action::Start { mutation: m(&format!("start-{item}-{sequence}"), state.revision, sequence), item: item.into(),
+            run: held.run.clone(), pin: held.pin.clone(), start_pin: pin.clone(),
+            models: models.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect() })
+    };
+    let refused = start(&runtime, "ov-7", &[("build", "codex:gpt-4")], 2);
+    assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");
+    ok(&start(&runtime, "ov-7", &[("build", "codex:gpt-5.5")], 3));
+    ok(&start(&runtime, "ov-8", &[], 4));
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items["ov-7"].models["build"], "codex:gpt-5.5");
+    assert_eq!(state.items["ov-8"].models["build"], "claude:opus", "no pick, the step's default");
+    runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
+    let mut builds = std::collections::BTreeMap::new();
+    for stored in runtime.store.workflow_outbox("w").unwrap().into_iter().filter(|s| s.active) {
+        let state = runtime.state("w").unwrap().unwrap();
+        let claim = runtime.store.workflow_claim_effect("w", &stored.effect.id, "test", state.revision, state.epoch, 10, 100).unwrap().unwrap();
+        let base = runtime.pin_base("w", &stored.effect).await.unwrap();
+        assert!(runtime.store.workflow_admit_effect(&claim, 10).unwrap());
+        builds.insert(stored.effect.item.clone(), Binding::new("w", &stored.effect, claim.resource_generation, 0, &base));
+    }
+    assert_eq!(builds.len(), 2, "both builds are ready");
+    assert_eq!(builds["ov-7"].effect.model.as_deref(), Some("codex:gpt-5.5"));
+    assert_eq!(runtime.coding_command(&builds["ov-7"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "codex:gpt-5.5");
+    assert_eq!(runtime.coding_command(&builds["ov-8"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "claude:opus");
+    // A native harness with Claude's settings and Codex's project hooks both pinned runs either. (A native
+    // publication needs live hooks; the launch is built from the same effect, so the harness is swapped after Start.)
+    let pinned = |path: &Path| { std::fs::write(path, b"{\"hooks\":{}}").unwrap();
+        LaunchFile { path: path.canonicalize().unwrap(), digest: digest(&std::fs::read(path).unwrap()) } };
+    std::fs::create_dir(published.repository.join(".codex")).unwrap();
+    let hooks = pinned(&published.repository.join(".codex/hooks.json"));
+    std::fs::create_dir(runtime.tree(&builds["ov-7"]).join(".codex")).unwrap();
+    std::fs::write(runtime.tree(&builds["ov-7"]).join(".codex/hooks.json"), b"{\"hooks\":{}}").unwrap();
+    let mut native = published.clone();
+    native.harness = CodingHarness::Native { preset: "claude:sonnet".into(), settings: Some(pinned(&dir.path().join("settings.json"))),
+        project_hooks: Some(hooks), plugin_dir: None, prompt: "implement the selected task".into(),
+        process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
+    runtime.coding = Some(native);
+    let codex = runtime.coding_command(&builds["ov-7"]).unwrap().argv[2].clone();
+    let claude = runtime.coding_command(&builds["ov-8"]).unwrap().argv[2].clone();
+    assert!(codex.contains("codex") && codex.contains("--model gpt-5.5") && !codex.contains("sonnet"), "{codex}");
+    assert!(claude.contains("claude") && claude.contains("--model opus") && !claude.contains("sonnet"), "{claude}");
+    assert_eq!(runtime.native_agent(&builds["ov-7"]).unwrap(), farcooler_agent_hooks::Agent::Codex, "its turn is read from Codex's hooks");
+}
+
+/// ov-966: a workflow can't list a model the runtime can't launch: an unknown harness, or one whose hooks
+/// aren't pinned, never reaches a run.
+#[tokio::test]
+async fn workflow_coding_publish_refuses_a_model_whose_harness_is_not_set_up() {
+    let (dir, runtime) = configured(false, "pass").await;
+    let mut config = runtime.coding.clone().unwrap();
+    let listing = |config: &CodingConfig, models: &[&str]| {
+        let mut definition = config.definition().unwrap();
+        definition.models.insert("build".into(), models.iter().map(|m| m.to_string()).collect());
+        config.validate_definition(&definition)
+    };
+    assert!(listing(&config, &["claude:opus", "codex:gpt-5.5"]).is_ok(), "a command harness takes the model as a variable");
+    assert!(listing(&config, &["gemini:pro"]).is_err(), "a harness Far Cooler can't launch");
+    let settings = dir.path().join("settings.json"); std::fs::write(&settings, b"{\"hooks\":{}}").unwrap();
+    config.harness = CodingHarness::Native { preset: "claude:sonnet".into(),
+        settings: Some(LaunchFile { path: settings.canonicalize().unwrap(), digest: digest(&std::fs::read(&settings).unwrap()) }),
+        project_hooks: None, plugin_dir: None, prompt: "p".into(),
+        process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
+    assert!(listing(&config, &["claude:opus", "claude"]).is_ok());
+    assert!(listing(&config, &["claude:opus", "codex:gpt-5.5"]).is_err(), "Codex's hooks aren't pinned");
+    assert!(listing(&config, &["cursor"]).is_err(), "nor Cursor's");
 }

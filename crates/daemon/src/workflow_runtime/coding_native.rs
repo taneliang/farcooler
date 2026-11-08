@@ -70,10 +70,12 @@ impl Exec {
     fn native_path(&self, binding: &Binding, suffix: &str) -> PathBuf {
         self.root.join("receipts").join(format!("{}.native-{suffix}.json", digest(&binding.effect)))
     }
-    fn native_agent(&self) -> Result<Agent> {
+    /// The agent a build runs: the model it picked at Start, or the configured preset (ov-966).
+    pub(super) fn native_agent(&self, binding: &Binding) -> Result<Agent> {
         let Some(CodingConfig { harness: CodingHarness::Native { preset, .. }, .. }) = &self.coding else {
             return Err(Error::Refused("not a native harness"));
         };
+        let preset = binding.effect.model.as_deref().unwrap_or(preset);
         preset.split(':').next().unwrap_or("").parse().map_err(|_| Error::Refused("unknown native agent"))
     }
     /// Pin the already-installed endpoint as well as its bytes. No hook writes.
@@ -90,15 +92,31 @@ impl Exec {
         }
         Ok(())
     }
-    fn native_hooks(&self) -> Result<()> {
+    /// The hooks of the agent this build runs, which its turn is read from.
+    fn native_hooks(&self, binding: &Binding) -> Result<()> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing native config"))?;
-        self.native_config_hooks(config)
+        self.native_agent_hooks(config, self.native_agent(binding)?)
     }
+    /// Every hooks file the configuration pins targets this host, and the configured preset's is one of them:
+    /// a run may pick any harness whose hooks are pinned (ov-966).
     fn native_config_hooks(&self, config: &CodingConfig) -> Result<()> {
         let CodingHarness::Native { preset, settings, project_hooks, .. } = &config.harness else { return Ok(()) };
         let agent: Agent = preset.split(':').next().unwrap_or("").parse().map_err(|_| Error::Refused("unknown native agent"))?;
-        let file = if agent == Agent::Claude { settings } else { project_hooks }
-            .as_ref().ok_or(Error::Refused("missing native hooks"))?;
+        self.native_agent_hooks(config, agent)?;
+        if settings.is_some() { self.native_agent_hooks(config, Agent::Claude)?; }
+        if let Some(hooks) = project_hooks {
+            let other = [Agent::Codex, Agent::Cursor].into_iter()
+                .find(|a| super::coding::project_hooks_path(a.as_str()).is_some_and(|r| hooks.path == config.repository.join(r)))
+                .ok_or(Error::Refused("foreign project hook path"))?;
+            self.native_agent_hooks(config, other)?;
+        }
+        Ok(())
+    }
+    fn native_agent_hooks(&self, config: &CodingConfig, agent: Agent) -> Result<()> {
+        let CodingHarness::Native { settings, project_hooks, .. } = &config.harness else { return Ok(()) };
+        let file = if agent == Agent::Claude { settings.as_ref() } else {
+            project_hooks.as_ref().filter(|h| super::coding::project_hooks_path(agent.as_str()).is_some_and(|r| h.path == config.repository.join(r)))
+        }.ok_or(Error::Refused("missing native hooks"))?;
         file.verify()?;
         let text = String::from_utf8(self.bytes(&file.path)?).map_err(|_| Error::Refused("invalid hook text"))?;
         let socket = self.root.join("h.sock");
@@ -160,7 +178,7 @@ impl Exec {
         Err(Error::Refused("native descendants not quiescent"))
     }
     async fn native_turn(&self, listener: &tokio::net::UnixListener, binding: &Binding) -> Result<(bool, Vec<HookLine>)> {
-        let agent = self.native_agent()?;
+        let agent = self.native_agent(binding)?;
         let mut assembler = MessageAssembler::new();
         let mut session = (agent == Agent::Claude).then(|| terminal(binding).to_string());
         let mut prompted = false;
@@ -203,7 +221,7 @@ impl Exec {
     }
     pub(super) async fn run_native(&self, binding: &Binding, command: &CodingCommand,
         mut cancel: tokio::sync::watch::Receiver<bool>) -> Result<Option<i32>> {
-        self.native_hooks()?;
+        self.native_hooks(binding)?;
         let socket = self.native_socket(binding);
         // No unlink-before-bind: a surviving owner is evidence, never a restart.
         let listener = tokio::net::UnixListener::bind(&socket)?;

@@ -81,7 +81,7 @@ async fn a_board_tracks_its_cards_once_it_has_a_published_workflow() {
     let started = Action::Start {
         mutation: mutation("start", state["state"]["revision"].as_u64().unwrap(), 2), item: after.key.clone(),
         run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into(),
-        start_pin: state["configuration"]["pin"].as_str().unwrap().into(),
+        start_pin: state["configuration"]["pin"].as_str().unwrap().into(), models: Default::default(),
     };
     let receipt = workflow(&mut client, &workspace, started).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");

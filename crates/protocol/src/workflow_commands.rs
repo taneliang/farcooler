@@ -34,8 +34,10 @@ pub enum Action {
     Track { mutation: Mutation, item: String, #[serde(default, skip_serializing_if = "Option::is_none")] column: Option<String> },
     /// Move a tracker-only ticket to a column (`backlog`, `todo`, `doing`, `review`, `decision`), or close it (`done`, `cancelled`).
     Move { mutation: Mutation, item: String, run: String, pin: String, to: String },
-    /// Start a run on a tracker-only ticket under the workspace's published definition `start_pin`.
-    Start { mutation: Mutation, item: String, run: String, pin: String, start_pin: String },
+    /// Start a run on a tracker-only ticket under the workspace's published definition `start_pin`. `models`
+    /// picks a build step's model, by step id, from the ones the definition lists; a step left out runs its default (ov-966).
+    Start { mutation: Mutation, item: String, run: String, pin: String, start_pin: String,
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")] models: std::collections::BTreeMap<String, String> },
 }
 impl Action {
     pub fn method(&self) -> &'static str {

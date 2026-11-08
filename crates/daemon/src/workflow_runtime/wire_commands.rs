@@ -124,14 +124,14 @@ impl Runtime {
                         self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                     }
                 }
-                Action::Start { item, run, pin, start_pin, .. } => {
+                Action::Start { item, run, pin, start_pin, models, .. } => {
                     let configuration = self.store.workflow_configuration(workspace)?.filter(|c| &c.pin == start_pin);
                     match configuration {
                         Some(configuration) if state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) => {
                             self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| start_pin.clone());
                             let input = input(Command::Start { item:item.clone(),definition:configuration.definition,
-                                policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:Default::default() },Grant::Controller);
+                                policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:models.clone() },Grant::Controller);
                             self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
                         }
                         _ => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
@@ -222,7 +222,7 @@ mod tests {
         let definition = coding_definition(false); let start_pin = definition.pin();
         ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None,adapter:None,mutation:m("publish",state.revision,3),expected_pin:None,definition }).unwrap());
         let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
-        let start = |id,pin:&str| Action::Start { mutation:m(id,state.revision,4),item:"a".into(),run:item.run.clone(),pin:item.pin.clone(),start_pin:pin.into() };
+        let start = |id,pin:&str| Action::Start { mutation:m(id,state.revision,4),item:"a".into(),run:item.run.clone(),pin:item.pin.clone(),start_pin:pin.into(),models:Default::default() };
         let stale = runtime.wire_command("ws","orchestrator",start("wrong","wf1:other")).unwrap();
         assert!(stale.to_string().contains("Stale"),"{stale}");
         ok(&runtime.wire_command("ws","orchestrator",start("start",&start_pin)).unwrap());
