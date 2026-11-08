@@ -17,6 +17,7 @@ struct ScratchConfigTests {
     /// own, and why that's safe.
     static let reads: [String: String] = [
         "AppControlTests.swift": "hands a dictionary to a pure function and starts nothing",
+        "RunnerUpgradeEndToEnd.swift": "reads the scratch home the harness set, which sets the config too, and runs only then",
         "RealWindowCaptures.swift": "reads the home the capture script set, which sets the config too",
         "RemoteConversationSshTests.swift": "passes on to its scratch sshd the home and config ScratchDaemon.isolate set",
         "SelectionSwapTimingTests+Workspaces.swift": "reads the home a script set, which sets the config too",

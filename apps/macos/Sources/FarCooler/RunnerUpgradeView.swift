@@ -116,7 +116,7 @@ struct RunnerUpgradeView: View {
                     }
                     .frame(width: 16, height: 16)
                     Text(step.title)
-                        .foregroundStyle(step.rawValue > current.rawValue ? .secondary : .primary)
+                        .foregroundStyle(step.rawValue > current.rawValue ? Color.quietInk : Color.primary)
                 }
                 .accessibilityElement(children: .combine)
             }
