@@ -138,6 +138,13 @@ impl Rpc {
     fn caller(&self) -> Result<crate::people::Person> {
         crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane)
     }
+
+    pub(crate) fn service(&self) -> &Arc<Service> { &self.service }
+    pub(crate) fn watcher(&self) -> &Arc<crate::watch::Watcher> { &self.watcher }
+    /// This connection's caller, admitted to `workspace` as the workflow commands admit them.
+    pub(crate) async fn admit(&self, workspace: Uuid) -> Result<crate::workflow_runtime::Admission> {
+        crate::workflow_runtime::Admission::capture(self.service.clone(), self.peer.clone(), self.session.clone(), self.caller_pid, self.caller_pane.clone(), workspace).await
+    }
 }
 
 /// One `Rpc` per request, over one shared `Service`, for one connection.
@@ -360,7 +367,7 @@ pub(crate) fn required_scope(method: &str) -> Option<Scope> {
 fn scope_of(method: Method) -> Scope {
     match method {
         Method::WorkflowCutover => Scope::HostAdmin,
-        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowReview => Scope::Control,
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowReview => Scope::Control,
         // Themes are what a client paints with. Read, not Control: naming a
         // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
@@ -768,7 +775,7 @@ impl Rpc {
         let scope = self.peer.scope;
 
         match req.method.as_str() {
-            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.retry" | "workflow.queue" | "workflow.leave" | "workflow.settle" | "workflow.track" | "workflow.move" | "workflow.start" | "workflow.review" => {
+            "workspace.set_workflow" | "workflow.enqueue" | "workflow.get" | "workflow.approve" | "workflow.cancel" | "workflow.retry" | "workflow.queue" | "workflow.leave" | "workflow.settle" | "workflow.track" | "workflow.move" | "workflow.start" | "workflow.propose" | "workflow.drafts" | "workflow.review" => {
                 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
                 let workspace = Self::target(&req)?;
                 svc.store.get_workspace(workspace)?;
@@ -785,6 +792,8 @@ impl Rpc {
                     self.caller_pane.clone(), workspace,
                 ).await?;
                 admission.permits(&action)?;
+                // A proposal is filed and asked of a person here; it never reaches the engine (ov-971).
+                if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }
                 let value = handle.wire_command(admission, action).await
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:value.to_string() }))
@@ -1956,8 +1965,11 @@ impl Rpc {
             //
             // The arms live in `rpc_board`; every route is named here.
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
-            | "task.set_status" | "task.note" | "task.block" | "task.set_wait" | "task.set_line"
+            | "task.set_status" | "task.block" | "task.set_wait" | "task.set_line"
             | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), req).await,
+
+            // A note is a board route; a person's answer on a workflow draft's card is also its approval (ov-971).
+            "task.note" => crate::workflow_drafts::note(self, crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.caller_pane), req).await?).await,
 
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.events" | "board_theme.create" | "board_theme.update" | "board_theme.move"

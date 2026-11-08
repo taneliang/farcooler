@@ -76,6 +76,32 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// Propose a workflow change. Drafts a landing template from your gates, files it, and asks a person on the
+    /// board to approve it. Nothing is published until they do. Say why, in the requirement's own words.
+    WorkflowDraft {
+        workspace: String,
+        /// batched-push, ticket-push, ticket-pr or batched-pr.
+        name: String,
+        /// What the person asked for, in their words. They read it above the summary.
+        #[arg(long)]
+        reason: String,
+        /// A command gate, run with `sh -c`. Repeat for several; this is the whole list.
+        #[arg(long = "gate", value_name = "COMMAND")]
+        gate: Vec<String>,
+        /// Most tickets in one batch (the batched templates), up to 8.
+        #[arg(long)]
+        batch: Option<u8>,
+        #[command(flatten)]
+        gates: crate::landing_templates::Gates,
+        #[command(flatten)]
+        routes: crate::landing_templates::Routes,
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// One workflow draft: what it does, and whether a person approved it.
+    WorkflowDraftShow { workspace: String, draft: String, #[arg(long)] repo: Option<String> },
+    /// Every workflow draft for a workspace, newest first, with where each stands.
+    WorkflowDraftStatus { workspace: String, #[arg(long)] repo: Option<String> },
     /// Draft a landing definition from the charter's Landing section, once. After it is published
     /// the definition is the source: change landing by publishing a new one, not by editing the charter.
     ImportLanding {
@@ -617,6 +643,27 @@ async fn workspace_via(
             let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
             let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, &routes, batch)?;
             crate::landing_templates::deliver(&bundle, &[], &held, uuid_of(&ws.id), &output)?;
+        }
+
+        WorkspaceCmd::WorkflowDraft { workspace, name, reason, gate, batch, gates, routes, repo } => {
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
+            let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, &routes, batch)?;
+            let action = crate::landing_templates::propose_action(&reason, bundle);
+            let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &action).await?;
+            crate::landing_templates::print_draft(&reply, json)?;
+        }
+
+        WorkspaceCmd::WorkflowDraftShow { workspace, draft, repo } => {
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &farcooler_protocol::workflow_commands::Action::Drafts { draft: Some(draft) }).await?;
+            crate::landing_templates::print_draft(&reply, json)?;
+        }
+
+        WorkspaceCmd::WorkflowDraftStatus { workspace, repo } => {
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &farcooler_protocol::workflow_commands::Action::Drafts { draft: None }).await?;
+            crate::landing_templates::print_drafts(&reply, json)?;
         }
 
         WorkspaceCmd::ImportLanding { workspace, gates, output, repo } => {

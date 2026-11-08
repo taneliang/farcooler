@@ -89,6 +89,46 @@ pub fn deliver(bundle: &Bundle, notes: &[String], held: &Held, workspace: Uuid, 
     Ok(())
 }
 
+/// The command that proposes `bundle` to a person, in the orchestrator's `reason`.
+pub fn propose_action(reason: &str, bundle: Bundle) -> farcooler_protocol::workflow_commands::Action {
+    farcooler_protocol::workflow_commands::Action::Propose { reason: reason.into(), definition: bundle.definition, adapter: Box::new(bundle.adapter) }
+}
+
+fn state_words(state: &str) -> &'static str {
+    match state {
+        "pending" => "Waiting for a person to approve it.",
+        "approved" => "Approved and published.",
+        "declined" => "Declined. The workflow is unchanged.",
+        "out_of_date" => "Not published: the workflow changed after this was drafted. Draft it again.",
+        "replaced" => "Replaced by a newer draft.",
+        "failed" => "Approved, but publishing was refused. Draft it again.",
+        _ => "In an unknown state.",
+    }
+}
+
+/// One draft: its id and where it stands, then what it does.
+pub fn print_draft(reply: &serde_json::Value, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if json { println!("{reply}"); return Ok(()); }
+    let d = reply.get("draft").ok_or("the runner sent no draft")?;
+    let text = |k: &str| d.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    println!("Draft {}: {}", text("id"), state_words(text("state")));
+    if text("state") == "pending" { println!("A card in Needs Decision asks for approval. Nothing is published until a person answers it."); }
+    println!("\n{}", text("summary"));
+    Ok(())
+}
+
+/// Every draft, one line each.
+pub fn print_drafts(reply: &serde_json::Value, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if json { println!("{reply}"); return Ok(()); }
+    let drafts = reply.get("drafts").and_then(|d| d.as_array()).ok_or("the runner sent no drafts")?;
+    if drafts.is_empty() { println!("No workflow drafts yet."); }
+    for d in drafts {
+        let text = |k: &str| d.get(k).and_then(|v| v.as_str()).unwrap_or("");
+        println!("{}  {}  {}", text("id"), text("source"), state_words(text("state")));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +182,18 @@ mod tests {
         assert!(bundle.definition.stages.iter().any(|s| s.kind == lt::StageKind::Route));
         let bad = Routes { route: vec!["site/**".into()], route_default: None };
         assert!(matches!(template("ticket-push", &held, &["make check".into()], &Gates::default(), &bad, None).unwrap_err(), lt::Error::BadRoute(_)));
+    }
+    #[test]
+    fn a_proposal_travels_as_a_proposal_and_every_draft_state_has_a_sentence() {
+        let held = held(&get(None)).unwrap();
+        let bundle = template("ticket-push", &held, &["make check".into()], &Gates::default(), &Routes::default(), None).unwrap();
+        let action = propose_action("Gate on make check.", bundle);
+        assert_eq!(action.method(), "workflow.propose");
+        let raw = serde_json::to_string(&action).unwrap();
+        assert_eq!(farcooler_protocol::workflow_commands::parse(&raw).unwrap(), action, "the daemon reads exactly what the CLI sends");
+        for state in ["pending", "approved", "declined", "out_of_date", "replaced", "failed"] {
+            assert!(state_words(state).ends_with('.') && !state_words(state).contains("unknown"), "{state}");
+        }
     }
     #[test]
     fn a_template_takes_gates_of_all_three_kinds_from_flags() {

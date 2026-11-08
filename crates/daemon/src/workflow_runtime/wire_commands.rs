@@ -20,6 +20,8 @@ impl Runtime {
     pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, action: Action, tree: Option<RunTree>) -> Result<serde_json::Value> {
         let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
+        // A proposal is filed and answered by the daemon before the engine is involved (`workflow_drafts`).
+        if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return Err(Error::Refused("a proposal is not an engine command")); }
         if matches!(action, Action::Get) {
             let deliveries=self.store.workflow_notice_deliveries(workspace)?;
             let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
@@ -33,7 +35,7 @@ impl Runtime {
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
             | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. } => mutation,
-            Action::Get => unreachable!(),
+            Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
         let id = format!("wire:{principal}:{}", mutation.id);
@@ -145,7 +147,7 @@ impl Runtime {
                         _ => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
                     }
                 }
-                Action::Get => unreachable!(),
+                Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
             }
         };
         // A board tracks its cards once it has a published workflow, so the cards already on it come under the engine now (ov-962).

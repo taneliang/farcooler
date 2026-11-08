@@ -42,6 +42,12 @@ pub enum Action {
     Start { mutation: Mutation, item: String, run: String, pin: String, start_pin: String,
         #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")] models: std::collections::BTreeMap<String, String>,
         #[serde(default, skip_serializing_if = "Option::is_none")] worktree: Option<NamedTree> },
+    /// The orchestrator's (or a person's) proposal of a workflow change (ov-971). It publishes nothing: the daemon
+    /// files it, renders its summary from the definition, and asks a person on the board. `reason` is the person's
+    /// requirement in the orchestrator's words.
+    Propose { reason: String, definition: Definition, adapter: Box<crate::workflow_config::AdapterConfiguration> },
+    /// Read the workspace's drafts, or one by id: pending, approved, declined, out of date, replaced.
+    Drafts { #[serde(default, skip_serializing_if = "Option::is_none")] draft: Option<String> },
 }
 /// A worktree the orchestrator names for a run: what the app calls it, and its new branch (ov-967).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,6 +69,8 @@ impl Action {
             Self::Track { .. } => "workflow.track",
             Self::Move { .. } => "workflow.move",
             Self::Start { .. } => "workflow.start",
+            Self::Propose { .. } => "workflow.propose",
+            Self::Drafts { .. } => "workflow.drafts",
         }
     }
 }

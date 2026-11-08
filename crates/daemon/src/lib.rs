@@ -122,6 +122,7 @@ pub mod pr_watch;
 pub mod landing;
 pub mod landing_templates;
 pub mod workflow_summary;
+pub mod workflow_drafts;
 pub mod path_routes;
 pub mod landing_job;
 pub(crate) mod landing_run;

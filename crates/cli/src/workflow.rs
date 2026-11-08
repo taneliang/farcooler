@@ -151,6 +151,13 @@ pub async fn send(link:&mut crate::Link, workspace:Uuid, action:Action, json:boo
     if value.pointer("/receipt/result/Err").is_some() { return Err("workflow command refused; receipt shown above".into()); }
     Ok(())
 }
+/// Any workflow command's reply, unprinted.
+pub async fn ask(link:&mut crate::Link, workspace:Uuid, action:&Action) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
+    let reply = link.call(request(workspace,action)?).await?;
+    let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
+    Ok(serde_json::from_str(&reply.json)?)
+}
 /// The runner's `workflow get` reply, unprinted, for the commands that draft from it.
 pub async fn get(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
