@@ -148,7 +148,10 @@ impl Session {
         let state: State = if raw["state"].is_null() { State::empty(workspace.to_string(), context.capabilities.epoch) }
             else { serde_json::from_value(raw["state"].clone()).map_err(|e| invalid(e.to_string()))? };
         if state.workspace != workspace.to_string() { return Err(invalid("wrong workflow workspace")); }
-        let presentation = project(&state, &context)?;
+        let mut presentation = project(&state, &context)?;
+        // A runner from before ov-979 sends no stops.
+        let stops = serde_json::from_value(raw["stops"].clone()).unwrap_or_default();
+        cards::add_stops(&mut presentation, &stops);
         let host = self.host().await?;
         let host = Uuid::from_slice(&host.id).map_err(|_| invalid("invalid workflow host identity"))?.to_string();
         Ok(WorkflowSnapshot { schema: 2, host, state, context, presentation, configuration: raw["configuration"].clone(), notices: raw["notices"].clone() })

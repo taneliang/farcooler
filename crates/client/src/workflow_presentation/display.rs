@@ -49,6 +49,7 @@ pub(super) fn reason_card(kind: Reason) -> ReasonCard {
         Reason::Failed => ("Failed", "This run has failed."),
         Reason::Cancelling => ("Cancelling", "The engine is waiting for the operation to stop."),
         Reason::Cancelled => ("Cancelled", "This run has been cancelled."),
+        Reason::WorktreeChanged => ("Worktree Has Changes", "The run stopped on changes in its worktree."),
     };
     ReasonCard { kind, label: label.into(), text: text.into() }
 }

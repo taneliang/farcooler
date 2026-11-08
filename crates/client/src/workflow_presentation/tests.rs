@@ -241,3 +241,19 @@ fn a_tracker_only_ticket_offers_a_person_no_action() {
         guard: digest(&(digest(&("workflow-presentation/v2", &state, &auth())), "item")) };
     assert!(action(&state, &auth(), "item", &forged).is_err());
 }
+
+/// ov-979: the runner's list of a named tree's changes reaches the run's card, and only for the run it stopped.
+#[test]
+fn a_stopped_run_shows_why() {
+    let state = fixtures().into_iter().find(|(name, _)| *name == "uncertain").unwrap().1;
+    let run = state.items["item"].run.clone();
+    let text = "The run stopped because its worktree has changes, and it left them as they are: mine.txt.";
+    let mut view = project(&state, &auth()).unwrap();
+    add_stops(&mut view, &[("item".to_string(), Stop { run: run.clone(), text: text.into() })].into());
+    let reason = view.runs[0].reasons.last().unwrap();
+    assert_eq!((&reason.kind, reason.label.as_str(), reason.text.as_str()), (&Reason::WorktreeChanged, "Worktree Has Changes", text));
+    let mut view = project(&state, &auth()).unwrap();
+    let before = view.runs[0].reasons.clone();
+    add_stops(&mut view, &[("item".to_string(), Stop { run: "an earlier run".into(), text: text.into() })].into());
+    assert_eq!(view.runs[0].reasons, before, "a stop for another run is not this one's");
+}

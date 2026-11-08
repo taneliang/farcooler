@@ -27,8 +27,17 @@ impl Runtime {
             let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
                 id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
             }).collect();
+            let state = self.state(workspace)?;
+            // Why a run's named tree stopped it, for the run it stopped (ov-979).
+            let mut stops = serde_json::Map::new();
+            for (item, live) in state.iter().flat_map(|s| &s.items) {
+                let Ok(bytes) = std::fs::read(self.tree_stop_path(workspace, item)) else { continue };
+                if let Ok(stop) = serde_json::from_slice::<named_tree::TreeStop>(&bytes) {
+                    if stop.run == live.run { stops.insert(item.clone(), serde_json::json!(stop)); }
+                }
+            }
             return Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
-                "state":self.state(workspace)?, "notices":notices,"notice_deliveries":deliveries}));
+                "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}));
         }
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }

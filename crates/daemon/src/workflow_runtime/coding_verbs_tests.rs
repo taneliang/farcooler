@@ -475,8 +475,8 @@ async fn a_gate_left_running_by_a_dead_daemon_is_ended_and_run_again() {
 }
 
 /// ov-979: a Run gate in a tree the app lists has what changes noted as it runs. A person works in the tree
-/// while the gate runs, then the daemon dies. On restart the run stops and lists every change, marks what the
-/// ledger saw (the person's file too: a look can't tell who wrote it) as likely leftovers, and removes nothing.
+/// while the gate runs, then the daemon dies. On restart the run stops and lists every change, names what the
+/// ledger saw (the person's file too: a look can't tell who wrote it) as changed while the gate ran, and removes nothing.
 /// Once the person has discarded them, the run goes on. Removing the call in `execute_coding` turns the
 /// private-tree test above red; this one runs the named branch.
 #[tokio::test]
@@ -510,14 +510,20 @@ async fn a_run_gate_restarting_in_a_named_tree_keeps_a_persons_changes() {
     assert!(crate::effect_runner::Owner::reap(&runtime.owner_path(&binding)).await.unwrap());
     assert!(ledger.exists());
     let error = runtime.settle_run_tree(&binding, &path).await.unwrap_err().to_string();
-    assert!(error.contains("half-built.out, mine.txt. Likely left by the stopped gate: half-built.out, mine.txt."), "{error}");
+    assert!(error.contains("has changes, and it left them as they are: half-built.out, mine.txt. Changed while its gate was running, and not since: half-built.out, mine.txt."), "{error}");
     assert_eq!(std::fs::read_to_string(path.join("mine.txt")).unwrap(), "a person's work", "the person's work stays");
     assert!(path.join("half-built.out").exists(), "and nothing is cleaned");
+    // The app reads why the run stopped, with the list, beside the run's state.
+    let stops = |runtime: &Runtime| runtime.wire_command("w", "p", farcooler_protocol::workflow_commands::Action::Get).unwrap()["stops"].clone();
+    let stop = &stops(&runtime)[&binding.effect.item];
+    assert_eq!(stop["run"], binding.effect.run.as_str());
+    assert!(stop["text"].as_str().is_some_and(|t| t.starts_with("The run stopped") && t.contains("half-built.out, mine.txt")), "{stop}");
     // The person discards both.
     std::fs::remove_file(path.join("mine.txt")).unwrap();
     std::fs::remove_file(path.join("half-built.out")).unwrap();
     runtime.settle_run_tree(&binding, &path).await.unwrap();
     assert!(!ledger.exists());
+    assert!(stops(&runtime).get(&binding.effect.item).is_none(), "a clean tree takes the stop away");
 }
 
 /// ov-979: a gate that ends, however it ends, takes its ledger with it, so a later gate never reads a stale one.

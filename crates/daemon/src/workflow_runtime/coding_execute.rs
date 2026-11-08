@@ -71,6 +71,10 @@ impl Exec {
     pub(super) fn gate_files_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.gate-files.json", digest(&(&binding.workspace, &binding.effect.item))))
     }
+    /// Why a named tree's Run gate last stopped the run (ov-979), until a clean tree lets it go on.
+    pub(super) fn tree_stop_path(&self, workspace: &str, item: &str) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.tree-stop.json", digest(&(workspace, item))))
+    }
     pub(super) fn process_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.output", digest(&binding.effect)))
     }
@@ -217,8 +221,17 @@ impl Exec {
     /// never removes or puts back a file there itself (ov-967, ov-979).
     pub(super) async fn settle_run_tree(&self, binding: &Binding, tree: &Path) -> Result<()> {
         if binding.effect.tree.is_some() {
-            named_tree::stop_on_changes(tree, &self.gate_files_path(binding), &binding.effect.run,
-                binding.effect.candidate.as_deref()).await
+            let stop = self.tree_stop_path(&binding.workspace, &binding.effect.item);
+            match named_tree::stop_on_changes(tree, &self.gate_files_path(binding), &binding.effect.run,
+                binding.effect.candidate.as_deref()).await {
+                // Kept for the app, which shows the person why the run stopped and what changed.
+                Err(Error::Kept(text)) => {
+                    durable(&stop, &serde_json::to_vec(&named_tree::TreeStop { run: binding.effect.run.clone(), text: text.clone() })?)?;
+                    Err(Error::Kept(text))
+                }
+                Ok(()) => named_tree::end_gate(&stop),
+                other => other,
+            }
         } else {
             self.git_recorded(binding, tree, &["reset", "--hard", "--quiet"]).await?;
             self.git_recorded(binding, tree, &["clean", "-fdq"]).await?;
@@ -232,7 +245,7 @@ impl Exec {
         // evidence to reconcile, never permission to append a new invocation.
         durable(&log, b"")?;
         // A named tree is one people edit in: what a Run gate changes there is noted as it runs, so a crash that
-        // stops the run can mark those files as its likely leftovers (ov-979). They are only marked, never cleared.
+        // stops the run can name what changed while the gate ran (ov-979). They are only named, never cleared.
         let ledger = (binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)))
             .then(|| self.gate_files_path(binding));
         let looking = match &ledger {

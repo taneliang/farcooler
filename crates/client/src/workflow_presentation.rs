@@ -21,6 +21,8 @@ pub struct Capabilities {
 pub enum Reason {
     Automatic, ApprovalRequired, ReviewRequired, DependenciesOrResource,
     EffectUncertain, Reworking, EvidenceInvalidated, Completed, Failed, Cancelling, Cancelled,
+    /// The runner stopped the run on changes in its worktree, and says which (ov-979).
+    WorktreeChanged,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionKind { InspectLatestEvidence, InspectUncertainty, Approve, AcceptReview, RequestRework, RejectReview, Cancel }
@@ -114,6 +116,19 @@ pub enum Intent {
     InspectUncertainty { effect: String, run: String, fence: u64 },
     /// Transport must reauthenticate, supply Input identity/revision/epoch, and run the reducer.
     Command(Command),
+}
+
+/// Why the runner stopped a run, sent beside the state in the `workflow.get` reply, by item (ov-979).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Stop { pub run: String, pub text: String }
+/// Show each run the reason its runner stopped it, when the stop is for the run the card shows.
+pub fn add_stops(view: &mut Presentation, stops: &std::collections::BTreeMap<String, Stop>) {
+    for card in &mut view.runs {
+        let Some(stop) = stops.get(&card.item).filter(|s| s.run == card.run) else { continue };
+        let mut reason = display::reason_card(Reason::WorktreeChanged);
+        reason.text = stop.text.clone();
+        card.reasons.push(reason);
+    }
 }
 
 pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error> {
