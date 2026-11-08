@@ -40,3 +40,14 @@ struct WorkflowChangeReviewTests {
         #expect(WorkflowChangeReview.parse(text.replacingOccurrences(of: "answer `decline`", with: "answer `no`")) == nil)
     }
 }
+
+/// Approve is drawn only for who the daemon would let approve (ov-991).
+struct WorkflowChangeApproveTests {
+    @Test func onlyTheOwnerWithWriteAccessIsShownApprove() {
+        #expect(WorkflowChangeReview.mayApprove(mayAct: true, viewer: ""), "the owner")
+        #expect(WorkflowChangeReview.mayApprove(mayAct: true, viewer: nil), "not told yet, as Keep")
+        #expect(!WorkflowChangeReview.mayApprove(mayAct: true, viewer: "bob"), "a member with write access")
+        #expect(!WorkflowChangeReview.mayApprove(mayAct: true, viewer: "(released)"), "a released device")
+        #expect(!WorkflowChangeReview.mayApprove(mayAct: false, viewer: ""), "an owner's Read grant")
+    }
+}

@@ -26,7 +26,16 @@ class WorkflowChangeReviewCaptureTest {
         val review = requireNotNull(WorkflowChangeReview.parse(real()))
         Capture.both("workflow-change-review-narrow") {
             FarCoolerTheme {
-                Surface { WorkflowChangeReviewBody(review, sending = false, refusal = null, onApprove = {}, onDecline = {}, onDismiss = {}) }
+                Surface { WorkflowChangeReviewBody(review, mayApprove = true, sending = false, refusal = null, onApprove = {}, onDecline = {}, onDismiss = {}) }
+            }
+        }
+    }
+
+    @Test fun `a member reads the change and is told who approves, narrow`() {
+        val review = requireNotNull(WorkflowChangeReview.parse(real()))
+        Capture.both("workflow-change-review-member-narrow") {
+            FarCoolerTheme {
+                Surface { WorkflowChangeReviewBody(review, mayApprove = false, sending = false, refusal = null, onApprove = {}, onDecline = {}, onDismiss = {}) }
             }
         }
     }

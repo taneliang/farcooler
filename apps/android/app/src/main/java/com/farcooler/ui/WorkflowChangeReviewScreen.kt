@@ -42,6 +42,7 @@ import com.farcooler.model.WorkflowChangeReview
 @Composable
 internal fun WorkflowChangeReviewDialog(
     review: WorkflowChangeReview,
+    mayApprove: Boolean,
     sending: Boolean,
     refusal: String?,
     onApprove: (String) -> Unit,
@@ -50,7 +51,7 @@ internal fun WorkflowChangeReviewDialog(
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize()) {
-            WorkflowChangeReviewBody(review, sending, refusal, onApprove, onDecline, onDismiss)
+            WorkflowChangeReviewBody(review, mayApprove, sending, refusal, onApprove, onDecline, onDismiss)
         }
     }
 }
@@ -59,6 +60,7 @@ internal fun WorkflowChangeReviewDialog(
 @Composable
 internal fun WorkflowChangeReviewBody(
     review: WorkflowChangeReview,
+    mayApprove: Boolean,
     sending: Boolean,
     refusal: String?,
     onApprove: (String) -> Unit,
@@ -90,15 +92,24 @@ internal fun WorkflowChangeReviewBody(
                         }
                     }
                 }
-                Text(
-                    "Approving publishes exactly what is listed above. Nothing changes until you do.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { onApprove(review.approval) }, enabled = !sending, modifier = Modifier.testTag("workflow-change-approve")) { Text("Approve") }
-                    OutlinedButton(onClick = { onDecline(WorkflowChangeReview.DECLINE) }, enabled = !sending, modifier = Modifier.testTag("workflow-change-decline")) { Text("Decline") }
-                    if (sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                if (mayApprove) {
+                    Text(
+                        "Approving publishes exactly what is listed above. Nothing changes until you do.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = { onApprove(review.approval) }, enabled = !sending, modifier = Modifier.testTag("workflow-change-approve")) { Text("Approve") }
+                        OutlinedButton(onClick = { onDecline(WorkflowChangeReview.DECLINE) }, enabled = !sending, modifier = Modifier.testTag("workflow-change-decline")) { Text("Decline") }
+                        if (sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                } else {
+                    Text(
+                        "You can read this change, but only the owner can approve it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("workflow-change-owner-only"),
+                    )
                 }
                 refusal?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }

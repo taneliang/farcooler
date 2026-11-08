@@ -23,7 +23,7 @@ final class AgentWatchCaptureTests: XCTestCase {
     func testCaptureTheReviewScreen() throws {
         let dir = try directory()
         let app = XCUIApplication.phoneHarness(["-push-task", "bil-7", "-phone-workflow-change"])
-        let approve = app.buttons["Approve"]
+        let approve = app.buttons["workflow-change-approve"]
         let review = app.descendants(matching: .any)["workflow-change-review"]
         XCTAssertTrue(review.waitForExistence(timeout: 30), "no Review view on the task")
         try save("review-top", in: dir)

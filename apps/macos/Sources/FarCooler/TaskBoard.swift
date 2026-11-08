@@ -1351,7 +1351,7 @@ struct TaskCard: View {
             if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
                 if let review = WorkflowChangeReview.parse(offer.question.body) {
                     // A workflow change: the whole change, then Approve at its end (ov-978).
-                    WorkflowChangeReviewCard(review: review, canAnswer: canAnswer, onAnswer: onAnswer)
+                    WorkflowChangeReviewCard(review: review, canAnswer: canAnswer, viewer: people?.you, onAnswer: onAnswer)
                         .id(offer.question.id)
                 } else {
                     QuestionAnswers(

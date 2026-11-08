@@ -30,6 +30,13 @@ public struct WorkflowChangeReview: Equatable, Sendable {
     static let headings = ["What runs as you:", "Checks that must pass:", "How code lands:", "Who approves:", "In full, exactly as it runs:"]
     public static let decline = "decline"
 
+    /// Whether a device is shown Approve and Decline: the grant isn't Read (`mayAct`) and the device is the
+    /// owner's. The daemon counts only the owner's answer, so a member's Approve is refused; they read the
+    /// change and are told who can approve it (ov-991). `viewer` is `RunnerPeople.you`; nil, not told yet.
+    public static func mayApprove(mayAct: Bool, viewer: String?) -> Bool {
+        mayAct && RulingActions.isOwner(viewer)
+    }
+
     /// What Approve sends.
     public var approval: String { "approve \(code)" }
 

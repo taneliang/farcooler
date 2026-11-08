@@ -27,6 +27,14 @@ class WorkflowChangeReview private constructor(
     val approval: String get() = "approve $code"
 
     companion object {
+        /**
+         * Whether a phone is shown Approve and Decline: the grant isn't Read ([mayAnswer]) and the phone is the
+         * owner's. The daemon counts only the owner's answer, so a member's Approve is refused; they read the
+         * change and are told who can approve it (ov-991). [viewer] is `member.list`'s `you`: empty for the
+         * owner, null until the runner has said.
+         */
+        fun mayApprove(mayAnswer: Boolean, viewer: String?): Boolean = mayAnswer && (viewer?.isEmpty() ?: true)
+
         const val DECLINE = "decline"
         private val HEADINGS = listOf(
             "What runs as you:", "Checks that must pass:", "How code lands:", "Who approves:",

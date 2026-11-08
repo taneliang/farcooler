@@ -2,6 +2,7 @@ package com.farcooler.model
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,5 +37,13 @@ class WorkflowChangeReviewTest {
         assertNull(WorkflowChangeReview.parse(text.replace("\n\nTo publish", "\n\nAnd also this.\n\nTo publish")))
         assertNull(WorkflowChangeReview.parse(text.replace("approve a1b2c3", "approve now")))
         assertNull(WorkflowChangeReview.parse(text.replace("answer `decline`", "answer `no`")))
+    }
+
+    @Test fun `only the owner with write access is shown Approve`() {
+        assertTrue("the owner", WorkflowChangeReview.mayApprove(true, ""))
+        assertTrue("not told yet, as Keep", WorkflowChangeReview.mayApprove(true, null))
+        assertFalse("a member with write access", WorkflowChangeReview.mayApprove(true, "bob"))
+        assertFalse("a released phone", WorkflowChangeReview.mayApprove(true, "(released)"))
+        assertFalse("a Read grant", WorkflowChangeReview.mayApprove(false, ""))
     }
 }

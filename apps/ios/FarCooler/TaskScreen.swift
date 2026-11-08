@@ -236,7 +236,8 @@ struct TaskScreen: View {
         if let review = WorkflowChangeReview.parse(question.body) {
             // A workflow change: the whole change, then Approve at its end (ov-978).
             WorkflowChangeReviewView(
-                review: review, mayAct: connection.daemon?.mayAct ?? true, sending: sending != nil, failure: failure,
+                review: review, mayApprove: WorkflowChangeReview.mayApprove(mayAct: connection.daemon?.mayAct ?? true, viewer: connection.talk.viewer),
+                sending: sending != nil, failure: failure,
                 approve: { answer($0) }, decline: { answer($0) })
                 .padding(.vertical, 2)
         } else {

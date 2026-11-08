@@ -8,13 +8,15 @@ import SwiftUI
 struct WorkflowChangeReviewCard: View {
     let review: WorkflowChangeReview
     let canAnswer: Bool
+    /// `RunnerPeople.you`: only the owner's Approve counts (ov-991).
+    var viewer: String?
     let onAnswer: (String) async -> Bool
     @State private var sending = false
     @State private var failure: String?
 
     var body: some View {
         WorkflowChangeReviewView(
-            review: review, mayAct: canAnswer, sending: sending, failure: failure,
+            review: review, mayApprove: WorkflowChangeReview.mayApprove(mayAct: canAnswer, viewer: viewer), sending: sending, failure: failure,
             approve: send, decline: send)
     }
 

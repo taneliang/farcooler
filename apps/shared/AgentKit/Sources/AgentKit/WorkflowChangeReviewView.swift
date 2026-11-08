@@ -9,15 +9,15 @@ import SwiftUI
 /// and nothing else; a row, a notification or a watch can't, because they never show these parts.
 public struct WorkflowChangeReviewView: View {
     let review: WorkflowChangeReview
-    let mayAct: Bool
+    let mayApprove: Bool
     let sending: Bool
     let failure: String?
     let approve: (String) -> Void
     let decline: (String) -> Void
 
-    public init(review: WorkflowChangeReview, mayAct: Bool, sending: Bool, failure: String?,
+    public init(review: WorkflowChangeReview, mayApprove: Bool, sending: Bool, failure: String?,
                 approve: @escaping (String) -> Void, decline: @escaping (String) -> Void) {
-        self.review = review; self.mayAct = mayAct; self.sending = sending; self.failure = failure
+        self.review = review; self.mayApprove = mayApprove; self.sending = sending; self.failure = failure
         self.approve = approve; self.decline = decline
     }
 
@@ -37,7 +37,7 @@ public struct WorkflowChangeReviewView: View {
                     }
                 }
             }
-            if mayAct {
+            if mayApprove {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Approving publishes exactly what is listed above. Nothing changes until you do.")
                         .font(.footnote).foregroundStyle(.quietInk).fixedSize(horizontal: false, vertical: true)
@@ -59,6 +59,9 @@ public struct WorkflowChangeReviewView: View {
             if let failure { Text(failure).font(.footnote).foregroundStyle(.quietInk) }
         }
         .frame(maxWidth: 680, alignment: .leading)
+        // Contain, so the buttons keep their own identifiers: a bare identifier on a container
+        // is the only one a UI test can find, and hides the children's (ov-991).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workflow-change-review")
     }
 

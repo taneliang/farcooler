@@ -355,7 +355,8 @@ internal fun NeedsYouItemRow(
     val mayAnswer = may?.answer ?: (daemon?.grantedScope != "read" && connection != null)
     // A thread's Reply posts as the owner (ov-712): asked who this phone is, a member isn't offered it.
     val viewer = connection?.viewer?.you?.collectAsStateWithLifecycle()?.value
-    val asksWho = item.kindValue == NeedsYouKind.PR_THREAD && daemon?.can(Capability.REPRESENTATIVES) == true
+    val review = remember(item.question) { com.farcooler.model.WorkflowChangeReview.parse(item.question) }
+    val asksWho = (item.kindValue == NeedsYouKind.PR_THREAD || review != null) && daemon?.can(Capability.REPRESENTATIVES) == true
     LaunchedEffect(asksWho) { if (asksWho) connection?.viewer?.ask() }
     val mayReply = may?.reply ?: (daemon?.mayActOnPullRequests(viewer) == true && connection != null)
     val buttons = NeedsYouAnswer.buttons(item, mayAnswer, mayReply)
@@ -365,7 +366,6 @@ internal fun NeedsYouItemRow(
     var refusal by remember(item.id) { mutableStateOf<String?>(null) }
     var writing by remember(item.id) { mutableStateOf(false) }
     var reviewing by remember(item.id) { mutableStateOf(false) }
-    val review = remember(item.question) { com.farcooler.model.WorkflowChangeReview.parse(item.question) }
     // An answer to someone else's item, held until the person confirms it (ov-737).
     var confirming by remember(item.id) { mutableStateOf<(() -> Unit)?>(null) }
     val agent = item.terminal?.label?.ifBlank { null } ?: "the agent"
@@ -557,7 +557,7 @@ internal fun NeedsYouItemRow(
 
     if (reviewing && review != null) {
         WorkflowChangeReviewDialog(
-            review = review, sending = sending != null, refusal = refusal,
+            review = review, mayApprove = com.farcooler.model.WorkflowChangeReview.mayApprove(mayAnswer, viewer), sending = sending != null, refusal = refusal,
             onApprove = { words -> confirmed { reviewing = false; answer(WRITTEN, words) } },
             onDecline = { words -> confirmed { reviewing = false; answer(WRITTEN, words) } },
             onDismiss = { reviewing = false },
