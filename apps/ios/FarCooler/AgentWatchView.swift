@@ -41,10 +41,19 @@ struct AgentWatchView: View {
         NavigationStack {
             Group {
                 if let screen = model.screen as? VTWatchScreen, let grid = screen.grid() {
-                    Canvas { context, size in
-                        TerminalRenderer(fontChoice: .iosevka, fontSize: 13).draw(grid: grid, into: context, size: size)
+                    // At the font's own size, never shrunk to fit: a pane wider than the phone scrolls sideways
+                    // (and a taller one up and down), so a 120-column pane stays readable.
+                    let renderer = TerminalRenderer(fontChoice: .iosevka, fontSize: 13)
+                    let size = WatchLayout.contentSize(
+                        columns: grid.columns, rows: grid.rows, cellWidth: renderer.cellSize.width,
+                        cellHeight: renderer.cellSize.height, padding: 6)
+                    ScrollView([.horizontal, .vertical]) {
+                        Canvas { context, canvasSize in
+                            renderer.draw(grid: grid, into: context, size: canvasSize)
+                        }
+                        .frame(width: size.width, height: size.height)
                     }
-                    .id(model.revision)
+                    .scrollBounceBehavior(.basedOnSize)
                     .accessibilityElement()
                     .accessibilityIdentifier("agent-watch-surface")
                     .accessibilityLabel("Agent terminal for \(item), read-only")

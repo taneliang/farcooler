@@ -40,6 +40,14 @@ enum WatchSizeMarker {
     }
 }
 
+/// The size a watched pane is drawn at: its grid at the font's own cell size, plus the canvas's padding.
+/// Never shrunk to the phone's width: a wider pane scrolls (ov-976).
+enum WatchLayout {
+    static func contentSize(columns: Int, rows: Int, cellWidth: Double, cellHeight: Double, padding: Double) -> (width: Double, height: Double) {
+        (Double(columns) * cellWidth + padding * 2, Double(rows) * cellHeight + padding * 2)
+    }
+}
+
 /// A running engine agent's terminal, to look at and nothing more (ov-976).
 @MainActor
 final class AgentWatchModel: ObservableObject {
