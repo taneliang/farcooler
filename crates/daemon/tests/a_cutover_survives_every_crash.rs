@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use farcooler_core::DomainError;
 use farcooler_daemon::{cutover_admin, service::Service};
@@ -339,38 +338,84 @@ async fn forward(runner: &Runner, source: Source, name: &str) {
     if source == Source::Legacy { main_serves_ordinarily(runner).await; }
 }
 
-/// `CUTOVER_ONLY` narrows a run for `reports/ov-963/mutants.py`. Each case stands
-/// alone, and each red one is named, so a mutant can be held to its boundary.
-async fn whole_matrix(source: Source) {
-    let only = std::env::var("CUTOVER_ONLY").ok();
-    let wanted = |name: &str| only.as_deref().is_none_or(|list| list.split(',').any(|n| n == name));
-    let room = Arc::new(tokio::sync::Semaphore::new(4));
-    let mut cases = Vec::new();
-    for &name in boundary::ALL {
-        if !wanted(name) || (source == Source::Raw60 && stage_of(name) == "hold") || name.starts_with("lift.") { continue; }
-        let room = room.clone();
-        cases.push((name, tokio::spawn(async move {
-            let _seat = room.acquire().await.unwrap();
-            let runner = crash(source, name).await;
-            check_row(&runner, name, source);
-            // `back` starts main itself on a runner that should be ordinary.
-            if !row(name, source).ordinary && !matches!(name, "finish.after-rename" | "recover.after-retire") { every_seam_is_held(&runner, name).await; }
-            back(&runner, source, name).await;
-            let runner = crash(source, name).await;
-            forward(&runner, source, name).await;
-        })));
-    }
-    assert!(!cases.is_empty());
-    let mut red = Vec::new();
-    for (name, case) in cases {
-        if case.await.is_err() { eprintln!("BOUNDARY-RED {name}"); red.push(name); }
-    }
-    assert!(red.is_empty(), "red at {red:?}");
+/// One boundary on one runner: the crash, what it left, every seam, the way
+/// back, then a second crash and the way on. Each is a test of its own, so
+/// nextest runs the boundaries side by side (ov-993); before, two tests ran
+/// them four at a time, and the slower took 137 s on CI.
+async fn one_boundary(source: Source, name: &'static str) {
+    let runner = crash(source, name).await;
+    check_row(&runner, name, source);
+    // `back` starts main itself on a runner that should be ordinary.
+    if !row(name, source).ordinary && !matches!(name, "finish.after-rename" | "recover.after-retire") { every_seam_is_held(&runner, name).await; }
+    back(&runner, source, name).await;
+    let runner = crash(source, name).await;
+    forward(&runner, source, name).await;
 }
-#[tokio::test(flavor = "multi_thread")]
-async fn a_raw_schema60_runner_survives_a_crash_at_every_boundary() { whole_matrix(Source::Raw60).await; }
-#[tokio::test(flavor = "multi_thread")]
-async fn a_current_runner_survives_a_crash_at_every_boundary() { whole_matrix(Source::Legacy).await; }
+
+/// A test per boundary, by name: `a_current_runner_survives_a_crash_at::commit_after_copy`.
+/// `HOLD` is a current runner's only, since a raw schema-60 runner has no hold
+/// stage; `BOTH` is both runners'; `LIFT` is a runner below 60's, from
+/// registries 28 and 57. `every_boundary_has_its_tests` holds the three lists
+/// to `boundary::ALL`, so a new boundary can't go untested.
+macro_rules! boundary_tests {
+    (hold: [$($h:ident = $hn:literal),* $(,)?], both: [$($b:ident = $bn:literal),* $(,)?], lift: [$($l:ident = $ln:literal),* $(,)?] $(,)?) => {
+        const HOLD: &[&str] = &[$($hn),*];
+        const BOTH: &[&str] = &[$($bn),*];
+        const LIFT: &[&str] = &[$($ln),*];
+        mod a_current_runner_survives_a_crash_at {
+            use super::*;
+            $(#[tokio::test(flavor = "multi_thread")] async fn $h() { one_boundary(Source::Legacy, $hn).await; })*
+            $(#[tokio::test(flavor = "multi_thread")] async fn $b() { one_boundary(Source::Legacy, $bn).await; })*
+        }
+        mod a_raw_schema60_runner_survives_a_crash_at {
+            use super::*;
+            $(#[tokio::test(flavor = "multi_thread")] async fn $b() { one_boundary(Source::Raw60, $bn).await; })*
+        }
+        mod a_runner_below_60_survives_a_crash_at {
+            mod registry_28 {
+                use super::super::*;
+                $(#[tokio::test(flavor = "multi_thread")] async fn $l() { lift_case(28, $ln).await; })*
+            }
+            mod registry_57 {
+                use super::super::*;
+                $(#[tokio::test(flavor = "multi_thread")] async fn $l() { lift_case(57, $ln).await; })*
+            }
+        }
+    };
+}
+boundary_tests! {
+    hold: [hold_before = "hold.before", hold_torn = "hold.torn", hold_after = "hold.after"],
+    both: [
+        begin_before_baseline_db = "begin.before-baseline-db", begin_after_baseline_db = "begin.after-baseline-db",
+        begin_torn_baseline = "begin.torn-baseline", begin_before_intent = "begin.before-intent", begin_torn_intent = "begin.torn-intent",
+        begin_after_intent = "begin.after-intent", begin_in_upgrade = "begin.in-upgrade", begin_after_upgrade = "begin.after-upgrade",
+        commit_before_copy = "commit.before-copy", commit_after_copy = "commit.after-copy", commit_torn_snapshot = "commit.torn-snapshot",
+        commit_after_snapshot = "commit.after-snapshot", commit_after_restore = "commit.after-restore", journal_torn = "journal.torn",
+        commit_after_permit = "commit.after-permit", commit_in_mapping = "commit.in-mapping", commit_after_mapping = "commit.after-mapping",
+        commit_after_journal = "commit.after-journal", verify_after = "verify.after", release_in_transaction = "release.in-transaction",
+        release_after = "release.after", finish_before_rename = "finish.before-rename", finish_after_rename = "finish.after-rename",
+        recover_before_rename = "recover.before-rename", recover_after_rename = "recover.after-rename", recover_after_retire = "recover.after-retire",
+    ],
+    lift: [
+        lift_before_copy = "lift.before-copy", lift_after_copy = "lift.after-copy", lift_torn_note = "lift.torn-note",
+        lift_after_note = "lift.after-note", lift_in_lift = "lift.in-lift", lift_after_lift = "lift.after-lift",
+    ],
+}
+/// The three lists are every boundary, each once, and each in the list its
+/// stage belongs to: the split dropped none and a new one fails here.
+#[test]
+fn every_boundary_has_its_tests() {
+    let listed: Vec<&str> = HOLD.iter().chain(BOTH).chain(LIFT).copied().collect();
+    let mut sorted = listed.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), listed.len(), "a boundary listed twice");
+    let mut all = boundary::ALL.to_vec();
+    all.sort();
+    assert_eq!(sorted, all, "the tests' boundaries are boundary::ALL");
+    assert!(HOLD.iter().all(|n| stage_of(n) == "hold") && LIFT.iter().all(|n| n.starts_with("lift.")));
+    assert!(BOTH.iter().all(|n| stage_of(n) != "hold" && !n.starts_with("lift.")));
+}
 
 /// One `workflow.cutover` over the real socket, from a process that really is a
 /// person to the recovery seat, and the reply.
@@ -515,21 +560,4 @@ async fn lift_case(registry: u32, name: &'static str) {
         .filter(|p| p.is_dir() && p.join("pre-lift.db").is_file() && std::fs::read(p.join("pre-lift.db")).unwrap() == runner.original).count();
     assert!(originals >= 1, "{name}: some kept directory still holds the original");
     main_serves_ordinarily(&runner).await;
-}
-#[tokio::test(flavor = "multi_thread")]
-async fn a_runner_below_60_survives_a_crash_at_every_lift_step() {
-    let only = std::env::var("CUTOVER_ONLY").ok();
-    let room = Arc::new(tokio::sync::Semaphore::new(3));
-    let mut cases = Vec::new();
-    for &name in boundary::ALL.iter().filter(|n| n.starts_with("lift.")) {
-        if only.as_deref().is_some_and(|list| !list.split(',').any(|n| n == name)) { continue; }
-        for registry in [28u32, 57] {
-            let room = room.clone();
-            cases.push((name, tokio::spawn(async move { let _seat = room.acquire().await.unwrap(); lift_case(registry, name).await; })));
-        }
-    }
-    assert!(!cases.is_empty());
-    let mut red = Vec::new();
-    for (name, case) in cases { if case.await.is_err() { eprintln!("BOUNDARY-RED {name}"); red.push(name); } }
-    assert!(red.is_empty(), "red at {red:?}");
 }
