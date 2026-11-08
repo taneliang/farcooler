@@ -86,6 +86,11 @@ pub struct Definition {
     /// Schema 2 only: batches that tickets reaching a `Join` step are queued into.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub groups: BTreeMap<String, GroupDef>,
+    /// The models a build step may run with, by step id (ov-966): `claude:opus`, `codex:gpt-5.5`. The first is
+    /// the step's default, and the orchestrator picks among them at Start. A step not listed runs the harness
+    /// the runtime is configured with, as before; an empty map leaves the pin as it was.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub models: BTreeMap<String, Vec<String>>,
 }
 impl Definition {
     pub fn validate(&self) -> Result<(), Refusal> { self.check(false) }
@@ -95,13 +100,14 @@ impl Definition {
     pub fn group_definition(&self, name: &str) -> Option<Definition> {
         let group = self.groups.get(name)?;
         Some(Definition { schema: 2, source: format!("group/{name}"), stages: group.steps.clone(),
-            max_reworks: 0, rework_target: None, groups: BTreeMap::new() })
+            max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new() })
     }
     fn check(&self, in_group: bool) -> Result<(), Refusal> {
         let mut ids = BTreeSet::new();
         if !matches!(self.schema, 1 | 2) || self.source.is_empty() || self.source.len() > 256
             || self.stages.is_empty() || self.stages.len() > 16 || self.max_reworks > 2
         { return Err(Refusal::Definition); }
+        self.validate_models()?;
         let mut candidate_available = matches!(self.stages[0].kind, StageKind::Tracker);
         let routed = self.schema == 2;
         for stage in &self.stages {
@@ -170,6 +176,23 @@ impl Definition {
             }
         }
         Ok(())
+    }
+    /// Each list names a build step, holds 1 to 8 distinct models, and each is a plain `harness[:model]`.
+    fn validate_models(&self) -> Result<(), Refusal> {
+        for (step, models) in &self.models {
+            let build = self.stages.iter().any(|s| &s.id == step && s.kind == StageKind::Build);
+            let distinct = models.iter().collect::<BTreeSet<_>>().len() == models.len();
+            if !build || models.is_empty() || models.len() > MAX_MODELS || !distinct || !models.iter().all(|m| valid_model(m)) {
+                return Err(Refusal::Definition);
+            }
+        }
+        Ok(())
+    }
+    /// The model each listed step runs with: the one picked at Start, or the step's default. `None` when a pick
+    /// names a step that lists no models, or a model the step doesn't list.
+    pub fn picked_models(&self, picks: &BTreeMap<String, String>) -> Option<BTreeMap<String, String>> {
+        if picks.iter().any(|(step, model)| !self.models.get(step).is_some_and(|list| list.contains(model))) { return None; }
+        Some(self.models.iter().map(|(step, list)| (step.clone(), picks.get(step).unwrap_or(&list[0]).clone())).collect())
     }
     /// Every join names a group, every group has a join, and each group's steps are sound.
     fn validate_groups(&self) -> Result<(), Refusal> {
@@ -329,7 +352,7 @@ impl Definition {
     pub fn coding() -> Self {
         let kinds = [StageKind::Provision, StageKind::Build, StageKind::Check,
             StageKind::Review(Reviewer::Dispatch), StageKind::Land, StageKind::Ci];
-        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(),
+        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(), models: BTreeMap::new(),
             stages: kinds.into_iter().enumerate().map(|(i, kind)| Stage {
                 id: format!("stage-{i}"), kind, progression: Progression::Automatic,
                 max_attempts: 2, routes: BTreeMap::new(), limit: 0,
@@ -348,7 +371,7 @@ impl Definition {
             progression: Progression::AwaitApproval { principal: "orchestrator".into() },
             max_attempts: 1, routes: BTreeMap::new(), limit: 0,
             operation: OperationSpec { adapter_version: "tracker/v1".into(), arguments: vec![], environment: BTreeMap::new() } };
-        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
+        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(),
             stages: TICKET_COLUMNS.iter().cycle().skip(start).take(TICKET_COLUMNS.len()).map(|id| stage(id)).collect() })
     }
     /// Whether this is the tracker-only template: a ticket with no run, moved by column.
@@ -356,7 +379,7 @@ impl Definition {
         self.source == TICKET_SOURCE && self.stages.iter().all(|s| s.kind == StageKind::Tracker)
     }
     pub fn tracker(principal: &str) -> Self {
-        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(),
+        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(),
             stages: vec![Stage { id: "checklist".into(), kind: StageKind::Tracker,
                 progression: Progression::AwaitApproval { principal: principal.into() },
                 max_attempts: 1, routes: BTreeMap::new(), limit: 0,
@@ -425,6 +448,13 @@ pub fn makes_candidate(kind: &StageKind) -> bool {
 }
 /// Entering these discards the old candidate, because they are about to make a new one.
 pub fn makes_candidate_anew(kind: &StageKind) -> bool { matches!(kind, StageKind::Build | StageKind::Action(_) | StageKind::AwaitBase) }
+/// Most models one step may list.
+pub const MAX_MODELS: usize = 8;
+/// `harness` or `harness:model`, each part plain: it ends up as `--model` in a shell command.
+pub fn valid_model(model: &str) -> bool {
+    let plain = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
+    model.len() <= 64 && match model.split_once(':') { Some((harness, name)) => plain(harness) && plain(name), None => plain(model) }
+}
 pub fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_:./".contains(&b))

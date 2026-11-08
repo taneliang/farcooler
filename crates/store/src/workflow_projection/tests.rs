@@ -185,7 +185,7 @@ fn a_started_ticket_follows_its_run_from_the_column_it_was_in() {
     command(&b, "doing", Command::Move { item: b.task.key.clone(), to: "doing".into() }).unwrap();
     let coding = Definition::coding();
     command(&b, "start", Command::Start { item: b.task.key.clone(), policy_pin: "policy-1".into(), resource: "repo".into(),
-        dependencies: BTreeSet::new(), initial_candidate: None, definition: coding }).unwrap();
+        dependencies: BTreeSet::new(), initial_candidate: None, definition: coding, models: Default::default() }).unwrap();
     assert_eq!(seen(&b), ("in_progress".into(), Some("building".into())));
     pass(&b, 1); pass(&b, 2); pass(&b, 3);
     assert_eq!(seen(&b), ("in_review".into(), Some("reviewing".into())));

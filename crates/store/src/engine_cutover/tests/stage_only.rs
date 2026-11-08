@@ -180,7 +180,7 @@ fn the_marker_follows_the_run() {
         assert_eq!(b.resting(), vec![b.ticket.id], "{phase:?}: a column move keeps it at rest");
         let tracker = Definition::tracker("owner");
         assert!(b.apply("start", Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
-            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker }).result.is_ok());
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker, models: Default::default() }).result.is_ok());
         assert!(b.resting().is_empty(), "{phase:?}: Start takes it off");
         assert!(b.store.put_on_line(b.ticket.id, &line(), Actor::User).is_err(), "{phase:?}: and its line is the run's again");
         // A ticket that closes is fenced like a run.
@@ -433,7 +433,7 @@ fn start_waits_for_a_tickets_subagents_and_blocks_to_settle() {
         let (s, t, user) = (&b.store, b.ticket.id, Actor::User);
         let tracker = Definition::tracker("owner");
         let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
-            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone() }).result.is_ok();
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default() }).result.is_ok();
         s.record_worker(t, &worker("a1"), user).unwrap();
         assert!(!start(&b, "start-1"), "{phase:?}: an open subagent holds Start back");
         assert_eq!(b.resting(), vec![t], "{phase:?}: and the ticket stays at rest");

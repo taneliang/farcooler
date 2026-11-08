@@ -62,6 +62,10 @@ pub struct Item {
     /// patience survives it and a wait that never answers still ends in `timeout`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_since: Option<i64>,
+    /// The model each build step runs with, by step id: the orchestrator's pick at Start, or the step's
+    /// default (ov-966). Empty when the definition lists none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub models: BTreeMap<String, String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Member { pub item: String, pub candidate: String }
@@ -142,8 +146,10 @@ pub enum Command {
     /// The orchestrator moves a tracker-only ticket to a column: one of its steps, or `done` or `cancelled`.
     Move { item: String, to: String },
     /// The orchestrator starts a run on a tracker-only ticket: the same item takes a real definition.
+    /// `models` picks a model for a build step, by step id, from the ones the definition lists (ov-966).
     Start { item: String, definition: Definition, policy_pin: String, resource: String,
-        dependencies: BTreeSet<String>, initial_candidate: Option<String> },
+        dependencies: BTreeSet<String>, initial_candidate: Option<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")] models: BTreeMap<String, String> },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,6 +180,9 @@ pub struct Effect {
     pub kind: EffectKind,
     pub operation: OperationSpec,
     pub created_ms: i64,
+    /// A build step's model, from the item's record (ov-966), so a launch reads it from the effect alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {
