@@ -122,12 +122,14 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
         let task: Option<Vec<u8>> = tx.query_row("SELECT task_id FROM workflow_owned_items WHERE workspace=?1 AND item=?2",
             params![workspace, name], |r| r.get(0)).optional()?.flatten();
         let Some(task) = task else { continue };
-        let (status, stage) = place(item);
+        // A ticket that follows a run sits where the run is, line and all (ov-970).
+        let lead = item.follows.as_ref().and_then(|l| state.items.get(l));
+        let (status, stage) = place(lead.unwrap_or(item));
         let have: Option<String> = tx.query_row("SELECT status FROM tasks WHERE id=?1", [&task], |r| r.get(0)).optional()?;
         let line: Option<String> = tx.query_row("SELECT stage FROM ticket_lines WHERE task_id=?1", [&task], |r| r.get(0)).optional()?;
         // A ticket with no run holds only its column. Its line, rank and hold are the board's own history, and
         // tracking a card must not rewrite them (ov-962); the run that Start makes projects the line.
-        let ticket = item.definition.is_ticket();
+        let ticket = item.definition.is_ticket() && lead.is_none();
         let differs = have.as_deref() != Some(status.as_str()) || (!ticket && line.as_deref() != Some(stage.as_str()));
         if differs { moves.push((task, status, stage, have, line, ticket)); }
     }

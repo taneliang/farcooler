@@ -282,21 +282,35 @@ fn starts(link: &Runner) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// A builder on tracked tickets is a Start on each, under the published pin and the item's own run and
-/// pin. No worktree is made and no pane is opened: the engine hands a ticket to a worker.
+/// A builder on tracked tickets is one Start, under the published pin and the first item's own run and pin, with
+/// the rest following it (ov-970): one agent, one branch, one pull request. No worktree is made and no pane is
+/// opened: the engine hands the tickets to a worker.
 #[tokio::test]
-async fn a_builder_on_tracked_tickets_goes_through_start() {
-    let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval"), ("ov-3", "ticket/v1", "WaitingApproval")]);
+async fn a_builder_on_tracked_tickets_goes_through_one_start() {
+    let held = [("ov-2", "ticket/v1", "WaitingApproval"), ("ov-3", "ticket/v1", "WaitingApproval")];
+    let mut link = with_engine(&held);
     let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3").await.unwrap();
     let sent = starts(&link);
-    assert_eq!(sent.len(), 2, "{:?}", link.methods());
+    assert_eq!(sent.len(), 1, "{:?}", link.methods());
     assert_eq!((sent[0]["item"].as_str(), sent[0]["run"].as_str(), sent[0]["pin"].as_str(), sent[0]["start_pin"].as_str()), (Some("ov-2"), Some("run-ov-2"), Some("pin-ov-2"), Some("wf1:published")));
     assert_eq!((sent[0]["mutation"]["revision"].as_u64(), sent[0]["mutation"]["epoch"].as_u64()), (Some(7), Some(1)));
-    assert_eq!(sent[1]["item"].as_str(), Some("ov-3"));
+    assert_eq!(sent[0]["with"], json!(["ov-3"]));
     for method in ["terminal.create", "worktree.create", "task.update", "task.set_status"] {
         assert!(!link.methods().contains(&method), "{method} was sent: {:?}", link.methods());
     }
-    assert!(said.starts_with("The engine is starting ov-2, then ov-3."), "{said}");
+    assert!(said.starts_with("The engine is starting ov-2 and ov-3 together, as one run."), "{said}");
+    // One ticket is a run of its own, and says nothing of followers.
+    let mut link = with_engine(&held[..1]);
+    say(&mut link, "--role builder --ticket ov-2").await.unwrap();
+    assert!(starts(&link)[0].get("with").is_none());
+    // A ticket already following a run isn't free to start, and a closed one is pointed at reopen (ov-968).
+    let mut link = with_engine(&held);
+    link.engine.as_mut().unwrap()["state"]["items"]["ov-3"]["follows"] = json!("ov-9");
+    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3").await.unwrap_err().to_string();
+    assert!(said.starts_with("ov-3 follows another ticket's run, so it can't be dispatched."), "{said}");
+    let mut link = with_engine(&[("ov-2", "ticket/v1", "Done")]);
+    let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
+    assert!(said.contains("Reopen it with `farcooler workflow reopen "), "{said}");
 }
 
 /// A board with no engine, or no tracked ticket, dispatches a pane exactly as before.
@@ -427,8 +441,8 @@ async fn harness_on_tracked_tickets_picks_the_build_steps_model() {
     let mut link = with_models(&held, json!({"build": ["claude:opus", "codex:gpt-5.5"]}));
     say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --harness codex:gpt-5.5").await.unwrap();
     let sent = starts(&link);
-    assert_eq!(sent.len(), 2);
-    assert!(sent.iter().all(|s| s["models"] == json!({"build": "codex:gpt-5.5"})), "{sent:?}");
+    assert_eq!(sent.len(), 1, "one run for both (ov-970)");
+    assert_eq!(sent[0]["models"], json!({"build": "codex:gpt-5.5"}), "{sent:?}");
     let mut link = with_models(&held, json!({"build": ["claude:opus", "codex:gpt-5.5"]}));
     say(&mut link, "--role builder --ticket ov-2").await.unwrap();
     assert!(starts(&link)[0].get("models").is_none(), "no pick, the default: {:?}", starts(&link));
@@ -464,15 +478,15 @@ async fn new_and_branch_on_a_tracked_ticket_name_its_runs_worktree() {
     for m in ["worktree.create", "terminal.create"] { assert!(!link.methods().contains(&m), "the run makes it: {:?}", link.methods()); }
 }
 
-/// Each run makes its own worktree, so one name can't cover several tickets; and a taken branch or name is
-/// said as itself, not as an engine that didn't answer.
+/// Several tickets are one run, so one name covers them all (ov-970); and a taken branch or name is said as
+/// itself, not as an engine that didn't answer.
 #[tokio::test]
-async fn a_named_worktree_is_one_per_ticket_and_a_taken_one_is_said() {
+async fn a_named_worktree_covers_the_run_and_a_taken_one_is_said() {
     let held = [("ov-2", "ticket/v1", "WaitingApproval"), ("ov-3", "ticket/v1", "WaitingApproval")];
     let mut link = with_engine(&held);
-    let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --new phones --branch b").await.unwrap_err().to_string();
-    assert_eq!(said, "Each run makes its own worktree, so --new and --branch name one ticket's. Dispatch them one at a time, each with its own.");
-    assert!(starts(&link).is_empty());
+    say(&mut link, "--role builder --ticket ov-2 --ticket ov-3 --new phones --branch b").await.unwrap();
+    let sent = starts(&link);
+    assert_eq!((sent.len(), &sent[0]["worktree"]["name"], &sent[0]["with"]), (1, &json!("phones"), &json!(["ov-3"])));
     for (code, words) in [
         (pb::ErrorCode::BranchExists, "ov-2 wasn't started: the branch b already exists. Name a new one with --branch."),
         (pb::ErrorCode::WorktreeExists, "ov-2 wasn't started: a worktree named phones already exists. Name another with --new."),

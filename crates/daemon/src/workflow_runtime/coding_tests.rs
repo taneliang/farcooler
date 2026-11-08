@@ -380,7 +380,7 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
     ok(&wire(&runtime, "orchestrator", Action::Start { mutation: m("start", state.revision, 2), item: "ov-7".into(),
-        run: item.run.clone(), pin: item.pin.clone(), start_pin: pin, models: Default::default(), worktree: None }));
+        run: item.run.clone(), pin: item.pin.clone(), start_pin: pin, models: Default::default(), worktree: None, with: vec![] }));
     runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
     let binding = admitted(&runtime).await;
     // A command harness is told by the environment alone.
@@ -419,7 +419,7 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
         let state = runtime.state("w").unwrap().unwrap(); let held = &state.items[item];
         wire(runtime, "orchestrator", Action::Start { mutation: m(&format!("start-{item}-{sequence}"), state.revision, sequence), item: item.into(),
             run: held.run.clone(), pin: held.pin.clone(), start_pin: pin.clone(),
-            models: models.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect(), worktree: None })
+            models: models.iter().map(|(s, m)| (s.to_string(), m.to_string())).collect(), worktree: None, with: vec![] })
     };
     let refused = start(&runtime, "ov-7", &[("build", "codex:gpt-4")], 2);
     assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");

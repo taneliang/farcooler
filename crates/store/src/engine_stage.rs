@@ -25,7 +25,9 @@ pub(crate) fn excludes(table: &str, suffix: &str, event: &str, at_rest: bool) ->
 
 /// The tracker-only tickets at rest in `state`: what `engine_stage_tickets` holds for its workspace.
 fn at_rest(state: &State) -> impl Iterator<Item = &str> {
-    state.items.iter().filter(|(_, i)| i.definition.is_ticket() && i.phase == Phase::WaitingApproval).map(|(name, _)| name.as_str())
+    // A ticket that follows a run is the run's, like the lead's own card (ov-970).
+    state.items.iter().filter(|(_, i)| i.definition.is_ticket() && i.phase == Phase::WaitingApproval && i.follows.is_none())
+        .map(|(name, _)| name.as_str())
 }
 
 /// Rewrite `workspace`'s cards at rest from the state just committed for it.

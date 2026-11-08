@@ -18,7 +18,7 @@ async fn started(runtime: &mut Runtime) {
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "todo".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
     ok(&runtime.wire_command("w", "orchestrator", Action::Start { mutation: m("start", state.revision, 2), item: "ov-7".into(),
-        run: item.run.clone(), pin: item.pin.clone(), start_pin: pin, models: Default::default(), worktree: None }).unwrap());
+        run: item.run.clone(), pin: item.pin.clone(), start_pin: pin, models: Default::default(), worktree: None, with: vec![] }).unwrap());
 }
 
 #[tokio::test]
@@ -78,4 +78,7 @@ fn workflow_send_back_brief_cuts_a_long_reason_on_a_character_and_names_an_adopt
     assert!(crate::service::shell_quote(&brief.replace('修', "'")).len() < crate::service::MAX_INLINE_LAUNCH_BYTES);
     effect.tree = Some(RunTree { name: "n".into(), branch: "e-liang/earlier".into(), path: "/t".into(), base: "a".repeat(40), adopted: true });
     assert!(Exec::briefed("go", &effect).contains("on the branch e-liang/earlier, which already has work on it"));
+    // One run on several tickets names them all (ov-970).
+    effect.with = vec!["ov-8".into(), "ov-9".into()];
+    assert!(Exec::briefed("go", &effect).starts_with("You are working on tickets ov-7, ov-8 and ov-9, together, in this one worktree and branch."));
 }

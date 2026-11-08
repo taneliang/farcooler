@@ -163,7 +163,15 @@ impl Exec {
     /// What the effect itself carries is said: an adopted branch's earlier work, and why the run was sent back (ov-968).
     pub(super) fn briefed(prompt: &str, effect: &farcooler_workflow::Effect) -> String {
         let item = &effect.item;
-        let mut brief = format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.");
+        let mut brief = if effect.with.is_empty() {
+            format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.")
+        } else {
+            // One run for several tickets (ov-970): one branch, and one pull request, for all of them.
+            let all: Vec<&str> = std::iter::once(item.as_str()).chain(effect.with.iter().map(String::as_str)).collect();
+            let (last, rest) = all.split_last().expect("at least two");
+            format!("You are working on tickets {} and {last}, together, in this one worktree and branch. Read each first with \
+                `farcooler task show <ticket>`, then do the work they describe.", rest.join(", "))
+        };
         if let Some(tree) = effect.tree.as_ref().filter(|t| t.adopted) {
             brief.push_str(&format!("\n\nThis worktree is on the branch {}, which already has work on it. Read it first with \
                 `git log --stat $FARCOOLER_BASE..HEAD`, carry on from it, and bring the branch onto $FARCOOLER_BASE (main as it was when \

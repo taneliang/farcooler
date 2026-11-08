@@ -438,7 +438,7 @@ async fn workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at
     let start=|id:&str,snapshot:&serde_json::Value,branch:&str| { let item=&snapshot["state"]["items"][&ticket.key];
         Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-            worktree:Some(NamedTree { name:"phones-plan".into(),branch:branch.into(),adopt:false }) } };
+            worktree:Some(NamedTree { name:"phones-plan".into(),branch:branch.into(),adopt:false }),with:vec![] } };
     let snapshot=get(&mut link,workspace).await;
     let refused=try_call(&mut link,workspace,start("taken",&snapshot,&existing)).await;
     assert!(refused.as_ref().is_err_and(|e| e.contains("already exists")),"{refused:?}");
@@ -481,7 +481,7 @@ async fn workflow_service_refuses_a_bad_or_taken_named_tree_at_start() {
     let start=|id:&str,key:&str,snapshot:&serde_json::Value,name:&str,branch:&str| { let item=&snapshot["state"]["items"][key];
         Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:key.into(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-            worktree:Some(NamedTree { name:name.into(),branch:branch.into(),adopt:false }) } };
+            worktree:Some(NamedTree { name:name.into(),branch:branch.into(),adopt:false }),with:vec![] } };
     // Names git refuses and the cheap check misses, and a branch that is the prefix of another.
     for (id,branch) in [("dot","e-liang/.hidden"),("lock","e-liang/x.lock/y"),("child","clash/child")] {
         let snapshot=get(&mut link,workspace).await;
@@ -524,7 +524,7 @@ async fn workflow_service_unmakes_a_named_tree_it_could_not_record() {
     let snapshot=get(&mut link,workspace).await; let item=&snapshot["state"]["items"][&ticket.key];
     accepted(&call(&mut link,workspace,Action::Start { mutation:mutation("start",snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
         run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-        worktree:Some(NamedTree { name:"unrecorded".into(),branch:"e-liang/unrecorded".into(),adopt:false }) }).await);
+        worktree:Some(NamedTree { name:"unrecorded".into(),branch:"e-liang/unrecorded".into(),adopt:false }),with:vec![] }).await);
     let tree=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap().items[&ticket.key].tree.clone().unwrap();
     // A row already holds that path, so the run's own row can't be written.
     host.service.store.create_worktree(repository,"blocker",&tree.path,false).unwrap();
@@ -569,7 +569,7 @@ async fn workflow_service_a_start_adopts_a_branch_with_work_and_a_closed_ticket_
     let start=|id:&str,snapshot:&serde_json::Value,branch:&str| { let item=&snapshot["state"]["items"][&ticket.key];
         Action::Start { mutation:mutation(id,snapshot["state"]["revision"].as_u64().unwrap(),2),item:ticket.key.clone(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
-            worktree:Some(NamedTree { name:"adopted".into(),branch:branch.into(),adopt:true }) } };
+            worktree:Some(NamedTree { name:"adopted".into(),branch:branch.into(),adopt:true }),with:vec![] } };
     let snapshot=get(&mut link,workspace).await;
     let refused=try_call(&mut link,workspace,start("missing",&snapshot,"e-liang/never-made")).await;
     assert!(refused.is_err(),"a branch that doesn't exist can't be adopted: {refused:?}");
@@ -598,5 +598,49 @@ async fn workflow_service_a_start_adopts_a_branch_with_work_and_a_closed_ticket_
     let item=&state.items[&ticket.key];
     assert_eq!((item.definition.stages[item.stage].id.as_str(),&item.phase),("doing",&Phase::WaitingApproval));
     assert_eq!(host.service.store.get_task(ticket.id).unwrap().status,farcooler_store::models::TaskStatus::InProgress);
+    drop(link);host.close().await;
+}
+
+/// ov-970: the orchestrator starts one run on three tickets. It makes one worktree on one branch, the run's
+/// followers' cards go where it goes while it runs, and all three land together.
+#[tokio::test]
+async fn workflow_service_one_run_carries_three_tickets_on_one_branch() {
+    if person_terminal("workflow_service_one_run_carries_three_tickets_on_one_branch").await { return; }
+    use farcooler_protocol::workflow_commands::NamedTree;
+    use farcooler_store::models::TaskStatus;
+    let (dir,config)=configured(false,"pass").await;
+    let host=Host::open(dir.path()).await; let workspace=host.workspace; let mut link=host.connect().await;
+    let definition=config.definition().unwrap();
+    let adapter=Some(AdapterConfiguration::Coding(config.clone()));
+    let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    let tickets:Vec<_>=["small fix one","small fix two","small fix three"].iter()
+        .map(|t| host.service.store.create_task(workspace,t,farcooler_store::models::Actor::User).unwrap()).collect();
+    for t in &tickets { host.service.track_tickets(Some(t.id)).await; }
+    let (lead,rest)=tickets.split_first().unwrap();
+    // Hold the repository lock so the run waits at its first step, where the cards can be read.
+    let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
+    let lock=host.service.repo_lock(repository);
+    let held=lock.lock().await;
+    let snapshot=get(&mut link,workspace).await; let item=&snapshot["state"]["items"][&lead.key];
+    accepted(&call(&mut link,workspace,Action::Start { mutation:mutation("start",snapshot["state"]["revision"].as_u64().unwrap(),2),item:lead.key.clone(),
+        run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),models:Default::default(),
+        worktree:Some(NamedTree { name:"small-fixes".into(),branch:"e-liang/small-fixes".into(),adopt:false }),
+        with:rest.iter().map(|t| t.key.clone()).collect() }).await);
+    let lead_status=host.service.store.get_task(lead.id).unwrap().status;
+    assert_ne!(lead_status,TaskStatus::Backlog,"the run moved the lead's card");
+    for t in rest { assert_eq!(host.service.store.get_task(t.id).unwrap().status,lead_status,"{} follows the run's column",t.key); }
+    drop(held);
+    tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
+        let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+        if state.items.get(&lead.key).is_some_and(|i| i.phase==Phase::Done) { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }}).await.unwrap();
+    for t in &tickets { assert_eq!(host.service.store.get_task(t.id).unwrap().status,TaskStatus::Done,"{} landed with the run",t.key); }
+    let listed=host.service.store.list_worktrees_for_repository(repository).unwrap();
+    assert_eq!(listed.iter().filter(|w| w.branch.starts_with("e-liang/")).count(),1,"one worktree, one branch");
+    let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
+    let build=effects.iter().find(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Build))).unwrap();
+    assert_eq!(build.effect.with,rest.iter().map(|t| t.key.clone()).collect::<Vec<_>>(),"one agent, told every ticket");
     drop(link);host.close().await;
 }

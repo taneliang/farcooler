@@ -27,7 +27,7 @@ impl Log {
     fn start(&mut self, item: &str, d: Definition, tree: Option<RunTree>) {
         self.try_run(Command::Start { item: item.into(), policy_pin: "policy-2".into(), resource: format!("run-{item}"),
             dependencies: BTreeSet::new(), initial_candidate: None, definition: d, models: Default::default(),
-            tree: tree.map(Box::new) }, Grant::Controller).unwrap();
+            tree: tree.map(Box::new), with: vec![] }, Grant::Controller).unwrap();
     }
     /// Answer the effect in flight for `item`.
     fn observe(&mut self, item: &str, outcome: Outcome) {

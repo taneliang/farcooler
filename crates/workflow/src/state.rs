@@ -76,6 +76,13 @@ pub struct Item {
     /// build effect carries it, so the agent is told (ov-968).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief: Option<String>,
+    /// A ticket that follows another's run (ov-970): its card sits where the lead's run is, and it closes when the
+    /// run does. It has no run of its own while it follows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub follows: Option<String>,
+    /// A run's other tickets, which follow it (ov-970). One agent, one branch, one pull request for all of them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub followers: Vec<String>,
 }
 /// One send-back: who asked (the input), when (the revision), from which step to which, on which run, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,7 +188,9 @@ pub enum Command {
         dependencies: BTreeSet<String>, initial_candidate: Option<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")] models: BTreeMap<String, String>,
         /// The worktree the run makes and works in (ov-967). `None` keeps the runtime's private tree.
-        #[serde(default, skip_serializing_if = "Option::is_none")] tree: Option<Box<RunTree>> },
+        #[serde(default, skip_serializing_if = "Option::is_none")] tree: Option<Box<RunTree>>,
+        /// Tickets at rest that follow this run instead of having runs of their own (ov-970).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")] with: Vec<String> },
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
     /// The orchestrator sends a run back to its last build step, with a reason the agent is told (ov-968).
     SendBack { item: String, reason: String },
@@ -226,6 +235,9 @@ pub struct Effect {
     /// A build step only: why the run was sent back to it (ov-968), so the launch says so from the effect alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brief: Option<String>,
+    /// The tickets that follow this item's run (ov-970), so the agent is told every ticket it works.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub with: Vec<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {

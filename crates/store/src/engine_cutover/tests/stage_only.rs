@@ -180,7 +180,7 @@ fn the_marker_follows_the_run() {
         assert_eq!(b.resting(), vec![b.ticket.id], "{phase:?}: a column move keeps it at rest");
         let tracker = Definition::tracker("owner");
         assert!(b.apply("start", Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
-            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker, models: Default::default(), tree: None }).result.is_ok());
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker, models: Default::default(), tree: None, with: vec![] }).result.is_ok());
         assert!(b.resting().is_empty(), "{phase:?}: Start takes it off");
         assert!(b.store.put_on_line(b.ticket.id, &line(), Actor::User).is_err(), "{phase:?}: and its line is the run's again");
         // A ticket that closes is fenced like a run.
@@ -433,7 +433,7 @@ fn start_waits_for_a_tickets_subagents_and_blocks_to_settle() {
         let (s, t, user) = (&b.store, b.ticket.id, Actor::User);
         let tracker = Definition::tracker("owner");
         let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
-            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None }).result.is_ok();
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None, with: vec![] }).result.is_ok();
         s.record_worker(t, &worker("a1"), user).unwrap();
         assert!(!start(&b, "start-1"), "{phase:?}: an open subagent holds Start back");
         assert_eq!(b.resting(), vec![t], "{phase:?}: and the ticket stays at rest");
@@ -443,5 +443,30 @@ fn start_waits_for_a_tickets_subagents_and_blocks_to_settle() {
         s.unblock(t, b.other).unwrap_or_else(|e| panic!("{phase:?}: so it can still clear: {e:?}"));
         assert!(start(&b, "start-3"), "{phase:?}: settled, Start goes through");
         assert!(s.record_worker(t, &worker("a2"), user).is_err(), "{phase:?}: and the run's records are fenced");
+    }
+}
+
+/// ov-970: a Start that takes other tickets as followers waits for their subagents as it does for its own, and a
+/// follower is the run's from then on: no longer at rest, so its records are fenced like the lead's.
+#[test]
+fn a_follower_is_fenced_with_the_run_it_follows() {
+    for phase in PHASES {
+        let b = board(phase);
+        let (s, user) = (&b.store, Actor::User);
+        let follower = s.create_task(b.ws, "follower", user).unwrap();
+        let definition = Definition::ticket();
+        let policy_pin = s.workflow_ticket_bundle(&definition).unwrap();
+        assert!(b.apply("follower", Command::Enqueue { item: follower.key.clone(), policy_pin, resource: "own-follower".into(),
+            dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition }).result.is_ok());
+        let tracker = Definition::tracker("owner");
+        let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None,
+            with: vec![follower.key.clone()] }).result.is_ok();
+        s.record_worker(follower.id, &worker("f1"), user).unwrap();
+        assert!(!start(&b, "start-1"), "{phase:?}: a follower's open subagent holds Start back");
+        s.end_worker(follower.id, "claude", Some("f1"), EndReason::Finished, user).unwrap();
+        assert!(start(&b, "start-2"), "{phase:?}: settled, Start goes through");
+        assert!(!b.resting().contains(&follower.id), "{phase:?}: a follower isn't at rest");
+        assert!(s.record_worker(follower.id, &worker("f2"), user).is_err(), "{phase:?}: and its records are the run's");
     }
 }

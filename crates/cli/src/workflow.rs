@@ -86,6 +86,9 @@ pub enum WorkflowCmd {
         /// Carry on from --branch, which exists with work on it: in the worktree that already has it checked out,
         /// or in a new one named --worktree. The agent is told the work is there.
         #[arg(long,requires="branch")] adopt:bool,
+        /// Another tracked ticket at rest that this run takes on as well: one agent, one branch and one pull request
+        /// for all of them, and its card goes where the run goes. Repeat for more.
+        #[arg(long="with",value_name="KEY")] with:Vec<String>,
         #[command(flatten)] identity:Identity },
     /// Send a run back to its build step, which starts again in the same worktree. The agent is told --reason.
     /// Taken while the run waits for a review, an approval or its landing group, or has failed.
@@ -125,8 +128,8 @@ impl WorkflowCmd {
             Self::Settle { workspace,item,run,pin,landed,identity } => (workspace,Action::Settle { mutation:identity.mutation(),item,run,pin,landed }),
             Self::Track { workspace,item,column,identity } => (workspace,Action::Track { mutation:identity.mutation(),item,column }),
             Self::Move { workspace,item,to,run,pin,identity } => (workspace,Action::Move { mutation:identity.mutation(),item,run,pin,to }),
-            Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,adopt,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,
-                worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch,adopt }) }),
+            Self::Start { workspace,item,start_pin,run,pin,models,worktree,branch,adopt,with,identity } => (workspace,Action::Start { mutation:identity.mutation(),item,run,pin,start_pin,models:picks(&models)?,
+                worktree:worktree.zip(branch).map(|(name,branch)| farcooler_protocol::workflow_commands::NamedTree { name,branch,adopt }),with }),
             Self::SendBack { workspace,item,run,pin,reason,identity } => {
                 if !farcooler_protocol::workflow_commands::valid_rework_reason(&reason) {
                     return Err("The reason must say something, in at most 4096 bytes, with no control characters but tabs and line breaks.".into());

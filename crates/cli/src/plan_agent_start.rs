@@ -29,6 +29,8 @@ enum Hold {
 
 /// Why a closed ticket can't be dispatched.
 const CLOSED: &str = "has closed under the engine";
+/// Why a ticket that follows another's run can't be dispatched (ov-970).
+const FOLLOWS: &str = "follows another ticket's run";
 
 /// The state and published pin one `workflow get` answered.
 struct Snapshot {
@@ -84,6 +86,8 @@ impl Snapshot {
             return if closed { Hold::Taken(CLOSED) } else { Hold::None };
         };
         let ticket = item.pointer("/definition/source").and_then(Value::as_str) == Some("ticket/v1");
+        // It goes where another ticket's run goes (ov-970), so it isn't free to start.
+        if item.get("follows").is_some_and(|f| !f.is_null()) { return Hold::Taken(FOLLOWS); }
         match (ticket, item.get("phase").and_then(Value::as_str)) {
             (true, Some("WaitingApproval")) => Hold::AtRest {
                 run: item.get("run").and_then(Value::as_str).unwrap_or_default().into(),
@@ -189,8 +193,11 @@ pub(super) async fn through_engine<L: DispatchLink>(
     if held.iter().all(|h| *h == Hold::None) { return pane(false); }
     if let Some((t, Hold::Taken(why))) = tickets.iter().zip(&held).find(|(_, h)| matches!(h, Hold::Taken(_))) {
         // A closed ticket comes back through the engine (ov-968); one with a run is sent back, not dispatched again.
-        let next = if *why == CLOSED { format!("Reopen it with `farcooler workflow reopen {workspace} {}`, then dispatch again", t.key) }
-            else { "Send it back to its build step with `farcooler workflow send-back`".into() };
+        let next = match *why {
+            CLOSED => format!("Reopen it with `farcooler workflow reopen {workspace} {}`, then dispatch again", t.key),
+            FOLLOWS => "Its card goes where that run goes; send the run back with `farcooler workflow send-back` if it needs more work".into(),
+            _ => "Send it back to its build step with `farcooler workflow send-back`".into(),
+        };
         return Err(format!("{} {why}, so it can't be dispatched. {next}.", t.key).into());
     }
     if let Some((t, _)) = tickets.iter().zip(&held).find(|(_, h)| **h == Hold::None) {
@@ -207,38 +214,37 @@ pub(super) async fn through_engine<L: DispatchLink>(
         return Err(format!("The engine starts a tracked ticket's agent itself, in a worktree of its own, so {flags} would be ignored. Leave {them} out and dispatch again.").into());
     }
     let models = picks(&seen, harness)?;
-    if worktree.is_some() && tickets.len() > 1 {
-        return Err("Each run makes its own worktree, so --new and --branch name one ticket's. Dispatch them one at a time, each with its own.".into());
+    // One builder on several tickets is one run (ov-970): the first leads, the rest follow it, so they share one
+    // agent, one worktree, one branch and one pull request. A start the board moved under is read and sent once more;
+    // a second miss is the person's to look at.
+    let (lead, rest) = tickets.split_first().expect("a ticket, checked above");
+    let with: Vec<String> = rest.iter().map(|t| t.key.clone()).collect();
+    let mut retried = false;
+    loop {
+        let now = if !retried { None } else { match snapshot(link, workspace).await { Seen::Held(s) => Some(s), _ => None } };
+        let seen = now.as_ref().unwrap_or(&seen);
+        let (Hold::AtRest { run, pin }, Some(start_pin)) = (seen.hold(&lead.key), seen.published.clone()) else {
+            return Err(format!("{} changed under the engine while it started. Look at the board and dispatch again.", lead.key).into());
+        };
+        let action = Action::Start {
+            mutation: Mutation { id: format!("dispatch-{}-{}", lead.key, seen.revision), revision: seen.revision, epoch: seen.epoch, sequence: now_millis() },
+            item: lead.key.clone(), run, pin, start_pin, models: models.clone(), worktree: worktree.cloned(), with: with.clone(),
+        };
+        let request = crate::workflow::request(workspace, &action).map_err(|_| unreadable())?;
+        let reply = link.call(request).await.map_err(|e| taken(&e, &lead.key, worktree)
+            .unwrap_or_else(|| Failed::from(format!("{} couldn't be started: the engine didn't answer.", lead.key))))?;
+        let Some(result::Value::WorkflowReply(reply)) = reply.value else { return Err(unreadable()) };
+        let value: Value = serde_json::from_str(&reply.json).map_err(|_| unreadable())?;
+        let Some(refusal) = value.pointer("/receipt/result/Err") else { break };
+        let said = refusal.as_str().map_or_else(|| refusal.to_string(), String::from);
+        if said == "Stale" && !retried { retried = true; continue; }
+        return Err(format!("The engine didn't start {}: {}.", lead.key, refusal_words(&said, &lead.key)).into());
     }
-    let mut started = Vec::new();
-    for ticket in tickets {
-        // Each start moves the revision, so every ticket reads the state again. A start the board moved
-        // under is read and sent once more; a second miss is the person's to look at.
-        let mut retried = false;
-        loop {
-            let now = if started.is_empty() && !retried { None } else { match snapshot(link, workspace).await { Seen::Held(s) => Some(s), _ => None } };
-            let seen = now.as_ref().unwrap_or(&seen);
-            let (Hold::AtRest { run, pin }, Some(start_pin)) = (seen.hold(&ticket.key), seen.published.clone()) else {
-                return Err(format!("{} changed under the engine while the others started. Look at the board and dispatch again.", ticket.key).into());
-            };
-            let action = Action::Start {
-                mutation: Mutation { id: format!("dispatch-{}-{}", ticket.key, seen.revision), revision: seen.revision, epoch: seen.epoch, sequence: now_millis() },
-                item: ticket.key.clone(), run, pin, start_pin, models: models.clone(), worktree: worktree.cloned(),
-            };
-            let request = crate::workflow::request(workspace, &action).map_err(|_| unreadable())?;
-            let reply = link.call(request).await.map_err(|e| taken(&e, &ticket.key, worktree)
-                .unwrap_or_else(|| Failed::from(format!("{} couldn't be started: the engine didn't answer.", ticket.key))))?;
-            let Some(result::Value::WorkflowReply(reply)) = reply.value else { return Err(unreadable()) };
-            let value: Value = serde_json::from_str(&reply.json).map_err(|_| unreadable())?;
-            let Some(refusal) = value.pointer("/receipt/result/Err") else { break };
-            let said = refusal.as_str().map_or_else(|| refusal.to_string(), String::from);
-            if said == "Stale" && !retried { retried = true; continue; }
-            let done = if started.is_empty() { String::new() } else { format!(" {} already started.", started.join(", ")) };
-            return Err(format!("The engine didn't start {}: {}.{done}", ticket.key, refusal_words(&said, &ticket.key)).into());
-        }
-        started.push(ticket.key.clone());
-    }
-    let list = started.join(", then ");
+    let started: Vec<String> = tickets.iter().map(|t| t.key.clone()).collect();
+    let list = match started.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last} together, as one run", rest.join(", ")),
+        _ => started.join(""),
+    };
     if let (Some(tree), false) = (worktree, json) {
         return Ok(Engine::Started(format!(
             "The engine is starting {list} in the worktree {}, on the branch {}. The run makes the worktree, which the app lists, from main as it is now, and starts its own agent under the board's published workflow, so no pane was opened here.\nWatch it with `farcooler workflow get {workspace}`.",
@@ -248,7 +254,7 @@ pub(super) async fn through_engine<L: DispatchLink>(
         return Ok(Engine::Started(json!({ "through": "engine", "role": "builder", "tickets": started }).to_string()));
     }
     Ok(Engine::Started(format!(
-        "The engine is starting {list}. Each run makes its own worktree and starts its own agent under the board's published workflow, so no pane was opened here.\nWatch it with `farcooler workflow get {workspace}`."
+        "The engine is starting {list}. The run makes its own worktree and starts its own agent under the board's published workflow, so no pane was opened here.\nWatch it with `farcooler workflow get {workspace}`."
     )))
 }
 

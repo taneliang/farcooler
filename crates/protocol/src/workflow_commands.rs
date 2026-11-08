@@ -41,7 +41,10 @@ pub enum Action {
     /// is at Start (ov-967). Left out, the run works in a private tree.
     Start { mutation: Mutation, item: String, run: String, pin: String, start_pin: String,
         #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")] models: std::collections::BTreeMap<String, String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")] worktree: Option<NamedTree> },
+        #[serde(default, skip_serializing_if = "Option::is_none")] worktree: Option<NamedTree>,
+        /// Other tickets at rest that follow this run instead of having runs of their own: one agent, one branch,
+        /// one pull request for all of them, and their cards go where the run goes (ov-970).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")] with: Vec<String> },
     /// The orchestrator's (or a person's) proposal of a workflow change (ov-971). It publishes nothing: the daemon
     /// files it, renders its summary from the definition, and asks a person on the board. `reason` is the person's
     /// requirement in the orchestrator's words.

@@ -49,7 +49,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
-                sent_back: Vec::new(), brief: None };
+                sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
@@ -74,7 +74,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 candidate: Some(definition.pin()), last_evidence: None, stopping: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
-                models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None };
+                models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
             if ready(&next, &record, input) { enter(&mut record, item, input, &mut effects)?; }
             next.items.insert(item.clone(), record);
         }
@@ -198,6 +198,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 }
                 Command::Cancel { .. } => {
                     controller(input)?;
+                    // A follower goes where its lead's run goes (ov-970).
+                    if item.follows.is_some() { return Err(Refusal::Phase); }
                     // A queued ticket can be cancelled only while its group still waits.
                     if item.phase == Phase::Joined { detach(&mut next, id, &mut item)?; }
                     // A failed run is closed by cancelling it: that is the controller's way off the needs-you list.
@@ -247,7 +249,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
-                                grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None });
+                                grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
                             gid
                         }
                     };
@@ -271,7 +273,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 }
                 Command::Move { to, .. } => {
                     controller(input)?;
-                    if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval { return Err(Refusal::Phase); }
+                    if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval || item.follows.is_some() { return Err(Refusal::Phase); }
                     let (stage, phase) = match to.as_str() {
                         "done" => (item.definition.stages.len(), Phase::Done),
                         "cancelled" => (item.stage, Phase::Cancelled),
@@ -284,9 +286,19 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     // Each column is a run of its own, so a decision made in the last one cannot be replayed in this one.
                     if item.phase == Phase::WaitingApproval { item.run = run_id(&item, id, input); }
                 }
-                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, models, tree, .. } => {
+                Command::Start { definition, policy_pin, resource, dependencies, initial_candidate, models, tree, with, .. } => {
                     controller(input)?;
-                    if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval { return Err(Refusal::Phase); }
+                    if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval || item.follows.is_some() { return Err(Refusal::Phase); }
+                    // The run's other tickets: each a ticket at rest of its own, named once (ov-970).
+                    if with.len() > usize::from(MAX_GROUP_MEMBERS) || with.iter().any(|f| f == id || !valid_id(f))
+                        || with.iter().collect::<BTreeSet<_>>().len() != with.len()
+                    { return Err(Refusal::Invalid); }
+                    for follower in with {
+                        let f = next.items.get(follower).ok_or(Refusal::Missing)?;
+                        if !f.definition.is_ticket() || f.phase != Phase::WaitingApproval || f.follows.is_some() || !f.followers.is_empty() {
+                            return Err(Refusal::Phase);
+                        }
+                    }
                     definition.validate()?;
                     if definition.is_ticket() { return Err(Refusal::Invalid); }
                     if !valid_id(resource) || !valid_id(policy_pin) || dependencies.len() > 128 { return Err(Refusal::Invalid); }
@@ -312,6 +324,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     item.stopping = None; item.rework_history = Vec::new(); item.back_edges = BTreeMap::new(); item.retries = 0;
                     item.models = picked; item.tree = tree.as_deref().cloned();
                     item.sent_back = Vec::new(); item.brief = None;
+                    item.followers = with.clone();
+                    for follower in with { next.items.get_mut(follower).ok_or(Refusal::Missing)?.follows = Some(id.clone()); }
                 }
                 Command::SendBack { reason, .. } => {
                     controller(input)?;
@@ -391,6 +405,15 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
             next.items.insert(member.item, ticket);
         }
+    }
+    // A run that ended takes the tickets that follow it to the same end (ov-970). A failed one keeps them.
+    let closing: Vec<(String, Phase)> = next.items.values().filter(|i| matches!(i.phase, Phase::Done | Phase::Cancelled))
+        .flat_map(|lead| lead.followers.iter().map(|f| (f.clone(), lead.phase.clone()))).collect();
+    for (follower, phase) in closing {
+        let Some(ticket) = next.items.get_mut(&follower).filter(|t| t.follows.is_some()) else { continue };
+        if phase == Phase::Done { ticket.stage = ticket.definition.stages.len(); }
+        ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
+        ticket.phase = phase; ticket.follows = None;
     }
     // Completion of a prerequisite can release blocked work without another controller command.
     let ready_ids: Vec<_> = next.items.iter().filter(|(_, i)| i.phase == Phase::Blocked && ready(&next, i, input))
@@ -496,7 +519,8 @@ fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mu
         candidate: item.candidate.clone(), members: item.members.clone(), kind,
         operation: item.definition.stages[item.stage].operation.clone(), created_ms,
         model: item.models.get(&item.definition.stages[item.stage].id).cloned(), tree: item.tree.clone(),
-        brief: item.brief.clone().filter(|_| item.definition.stages[item.stage].kind == StageKind::Build) });
+        brief: item.brief.clone().filter(|_| item.definition.stages[item.stage].kind == StageKind::Build),
+        with: item.followers.clone() });
 }
 fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     if !valid_id(&e.candidate) || !valid_id(&e.manifest) || !valid_id(&e.receipt)
@@ -664,6 +688,9 @@ fn valid_state(state: &State) -> bool {
                 && item.sent_back.len() <= usize::from(MAX_SEND_BACKS)
                 && item.sent_back.iter().all(|b| valid_id(&b.id) && valid_rework_reason(&b.reason))
                 && item.brief.as_deref().is_none_or(valid_rework_reason)
+                && item.followers.len() <= usize::from(MAX_GROUP_MEMBERS)
+                && item.follows.as_ref().is_none_or(|lead| item.definition.is_ticket() && item.phase == Phase::WaitingApproval
+                    && item.followers.is_empty() && state.items.get(lead).is_some_and(|l| l.followers.iter().any(|f| f == id)))
                 && if item.phase == Phase::Done { item.stage == item.definition.stages.len() }
                     else { item.stage < item.definition.stages.len() }
         })
