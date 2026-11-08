@@ -752,6 +752,19 @@ size_t farcooler_client_builtin_themes(uint8_t *out, size_t capacity);
  */
 bool farcooler_client_stream_start(void *handle, const char *terminal);
 
+/**
+ * Start watching a running engine agent's terminal, read-only.
+ *
+ * Chunks arrive through `farcooler_client_poll` like a terminal stream's, under the name
+ * `"watch:<workspace>/<item>"`, which is also what `farcooler_client_stream_stop` takes. The
+ * first bytes are the pane's size as a `farcooler-size` marker. `{"stream": ..., "ended": true}`
+ * means the agent's pane was reaped; with `"lost": true` the link dropped first. Nothing can be
+ * written to the agent through this stream.
+ *
+ * Returns false when the client has no ssh session to open a channel on.
+ */
+bool farcooler_client_watch_start(void *handle, const char *workspace, const char *item);
+
 /** Stop streaming. Safe when nothing is running for that terminal. */
 void farcooler_client_stream_stop(void *handle, const char *terminal);
 

@@ -70,6 +70,43 @@ impl Drop for AttachReader {
     }
 }
 
+/// A watch's reader: end of file when the agent's pane was reaped, an error when the link dropped.
+struct WatchReader {
+    inner: AttachReader,
+    lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AsyncRead for WatchReader {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let polled = std::pin::Pin::new(&mut self.inner).poll_read(cx, buf);
+        if let std::task::Poll::Ready(Ok(())) = polled {
+            if buf.filled().len() == before && self.lost.load(std::sync::atomic::Ordering::SeqCst) {
+                return std::task::Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionReset,
+                    "lost the connection to this agent",
+                )));
+            }
+        }
+        polled
+    }
+}
+
+/// The `workflow.watch` request: the item, and nothing a viewer could type or size.
+pub(crate) fn watch_request(workspace: Uuid, item: &str) -> farcooler_protocol::v1::Request {
+    let mut r = farcooler_transport::request("workflow.watch");
+    r.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
+    r.payload = Some(request::Payload::WorkflowCommand(farcooler_protocol::v1::WorkflowCommand {
+        schema: 1,
+        json: serde_json::json!({ "item": item }).to_string(),
+    }));
+    r
+}
+
 impl Session {
     /// Connect over SSH and start a daemon session on the far side.
     #[cfg(feature = "native")]
@@ -316,6 +353,84 @@ impl Session {
         Ok(Box::new(AttachReader { inner: mine, task }))
     }
 
+    /// A running engine agent's terminal, to look at and nothing more (ov-976).
+    ///
+    /// The phones' door onto `workflow.watch`, the method the Mac's `farcooler workflow watch`
+    /// speaks. A second `--stdio` session, one `workflow.watch` request addressed by workspace
+    /// and item (never a terminal id, so no `terminal.write` can name the pane), and the output
+    /// frames that follow. The reader starts with the pane's size as the runner's own marker, so
+    /// the emulator is built at the agent's columns and rows and never asks for a resize.
+    ///
+    /// Read-only by construction: this method sends exactly one request, and the channel's write
+    /// half belongs to the task that reads frames, which never writes again. It ends cleanly
+    /// (end of file) only when the runner says the pane was reaped, and with an error when the
+    /// link dropped, so a viewer can tell "Finished" from "Lost the connection".
+    pub async fn watch_stream(
+        &self,
+        workspace: Uuid,
+        item: &str,
+    ) -> Result<Box<dyn AsyncRead + Unpin + Send>, SessionError> {
+        use farcooler_protocol::capability::WORKFLOW_COMMANDS;
+        if !self.capabilities().iter().any(|c| c == WORKFLOW_COMMANDS) {
+            return Err(SessionError::Protocol("this runner can't show an agent's terminal".into()));
+        }
+        let streams = self.exec(&format!("~/.local/bin/{} --stdio", daemon_binary())).await?;
+        let mut client = Client::over(
+            Box::new(streams.reader) as Reader,
+            Box::new(streams.writer) as Writer,
+            self.client_name,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .await?;
+        let mut ask = watch_request(workspace, item);
+        ask.required_capabilities = vec![WORKFLOW_COMMANDS.to_string()];
+        let result = client.call(ask).await?;
+        let Some(result::Value::TerminalAttach(attached)) = result.value else {
+            return Err(SessionError::WrongResult {
+                expected: "TerminalAttachResult",
+                got: "something else",
+            });
+        };
+        let (mine, theirs) = tokio::io::duplex(64 * 1024);
+        let lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = lost.clone();
+        let task = farcooler_transport::rt::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let mut sink = theirs;
+            let marker = format!("\x1bP>farcooler-size;{};{}\x1b\\", attached.columns, attached.rows);
+            if sink.write_all(marker.as_bytes()).await.is_err() {
+                return;
+            }
+            loop {
+                // A dropped link ends the task without a word; the reader below sees the
+                // difference by whether `finished` was set.
+                let Ok(event) = client.next_event().await else { break };
+                let Some(farcooler_protocol::v1::event::Payload::TerminalFrame(frame)) = event.payload
+                else {
+                    continue;
+                };
+                match frame.kind {
+                    Some(farcooler_protocol::v1::terminal_frame::Kind::Output(output)) => {
+                        if sink.write_all(&output.payload).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(farcooler_protocol::v1::terminal_frame::Kind::Gap(gap))
+                        if gap.reason == farcooler_protocol::v1::GapReason::RuntimeLost as i32 =>
+                    {
+                        // The pane was reaped: a clean end.
+                        let _ = sink.shutdown().await;
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            // Dropped, not finished: say so before the far half closes.
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        Ok(Box::new(WatchReader { inner: AttachReader { inner: mine, task }, lost }))
+    }
+
     /// Receive fleet news on a channel of its own, for as long as this session
     /// lives.
     ///
@@ -440,3 +555,7 @@ impl Session {
         Ok(link.exec(command).await?)
     }
 }
+
+#[cfg(test)]
+#[path = "watch_tests.rs"]
+mod watch_tests;

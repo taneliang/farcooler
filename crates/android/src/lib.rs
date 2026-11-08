@@ -267,6 +267,23 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeStreamStart(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeWatchStart(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    workspace: JString,
+    item: JString,
+) -> jboolean {
+    guarded(0, || {
+        let Some(workspace) = c_string(&mut env, &workspace) else { return 0 };
+        let Some(item) = c_string(&mut env, &item) else { return 0 };
+        u8::from(unsafe {
+            client::farcooler_client_watch_start(handle_of(handle), workspace.as_ptr(), item.as_ptr())
+        })
+    })
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeStreamStop(
     mut env: JNIEnv,
     _class: JClass,
