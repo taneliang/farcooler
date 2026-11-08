@@ -99,6 +99,7 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
     lines
 }
 
+/// Who decides at each review gate, in the order the gates run, one plain line each.
 fn approvers(definition: &Definition) -> Vec<String> {
     let mut lines = Vec::new();
     for s in steps(definition) {
@@ -112,8 +113,34 @@ fn approvers(definition: &Definition) -> Vec<String> {
         }
     }
     lines.dedup();
-    if lines.is_empty() { lines.push("Nobody. Tickets land as soon as the checks pass.".into()); }
     lines
+}
+
+/// What changed about who decides, against the workflow in force: a gate that moves from you to an agent
+/// must not hide as one line quietly missing.
+fn decider_changes(draft: &Definition, current: Option<&Definition>) -> Vec<String> {
+    let Some(current) = current else { return Vec::new() };
+    let (before, after) = (approvers(current), approvers(draft));
+    let mut lines = Vec::new();
+    for gone in before.iter().filter(|l| !after.contains(l)) {
+        lines.push(match gone.as_str() {
+            "You approve each ticket before it lands." => "You no longer approve each ticket.".to_string(),
+            other => format!("No longer: {other}"),
+        });
+    }
+    for new in after.iter().filter(|l| !before.contains(l)) {
+        lines.push(match new.as_str() {
+            "An agent reviews each ticket, and it must give a verdict." => "An agent now reviews each ticket.".to_string(),
+            "The orchestrator reviews each ticket." => "The orchestrator now reviews each ticket.".to_string(),
+            other => format!("New: {other}"),
+        });
+    }
+    lines
+}
+
+/// The models a step may run with, by step, as the orchestrator picks among them at Start.
+fn models(definition: &Definition) -> Vec<String> {
+    definition.models.iter().map(|(step, list)| format!("{}: {}", code(step), list.iter().map(|m| code(m)).collect::<Vec<_>>().join(", "))).collect()
 }
 
 fn runs(config: &CodingConfig) -> Vec<String> {
@@ -173,7 +200,11 @@ pub fn headline(bundle: &Bundle) -> String {
     let n = checks(&bundle.definition, config).len();
     let checking = match n { 0 => "no checks".to_string(), 1 => "1 check must pass".into(), n => format!("{n} checks must pass") };
     let landing = if steps(&bundle.definition).any(|s| matches!(s.kind, StageKind::OpenPr)) { "each ticket opens a pull request" } else { "tickets push to the branch" };
-    let approval = if approvers(&bundle.definition).iter().any(|l| l.starts_with("You ")) { "you approve each ticket" } else { "nobody approves tickets" };
+    let who = approvers(&bundle.definition);
+    let approval = if who.iter().any(|l| l.starts_with("You ")) { "you approve each ticket" }
+        else if who.iter().any(|l| l.starts_with("An agent")) { "an agent reviews each ticket" }
+        else if who.iter().any(|l| l.starts_with("The orchestrator")) { "the orchestrator reviews each ticket" }
+        else if who.is_empty() { "nobody approves tickets" } else { "someone else approves tickets" };
     format!("Publish this workflow? {}, {landing}, {approval}.", capitalized(&checking))
 }
 fn capitalized(text: &str) -> String { let mut c = text.chars(); c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect()) }
@@ -191,8 +222,13 @@ pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition
     });
     let checks = checks(&bundle.definition, config);
     let gating = if checks.is_empty() { vec!["None. Nothing is checked before code lands.".to_string()] } else { checks };
-    out.push_str(&format!("What runs as you:\n{}\nChecks that must pass:\n{}\nHow code lands:\n{}\nWho approves:\n{}\nIn full, exactly as it runs:\n{}",
-        bullets(&runs(config)), bullets(&gating), bullets(&lands(&bundle.definition, config)), bullets(&approvers(&bundle.definition)), bullets(&in_full(config))));
+    let mut who = decider_changes(&bundle.definition, current);
+    let deciding = approvers(&bundle.definition);
+    who.extend(if deciding.is_empty() { vec!["Nobody. Tickets land as soon as the checks pass.".to_string()] } else { deciding });
+    let models = models(&bundle.definition);
+    let models = if models.is_empty() { String::new() } else { format!("Models a step may run with:\n{}\n", bullets(&models)) };
+    out.push_str(&format!("What runs as you:\n{}\nChecks that must pass:\n{}\nHow code lands:\n{}\nWho approves:\n{}\n{}In full, exactly as it runs:\n{}",
+        bullets(&runs(config)), bullets(&gating), bullets(&lands(&bundle.definition, config)), bullets(&who), models, bullets(&in_full(config))));
     out.trim_end().to_string()
 }
 
@@ -309,6 +345,38 @@ mod tests {
         let text = summarize("", &b, None);
         assert!(text.contains("- `/Users/x/tmp/sh` `-c` `make check`"), "{text}");
         assert!(!text.lines().any(|l| l == "- `make check`"), "{text}");
+    }
+    fn with_gate(mut b: Bundle, reviewer: Reviewer) -> Bundle {
+        for s in b.definition.stages.iter_mut().chain(b.definition.groups.values_mut().flat_map(|g| g.steps.iter_mut())) {
+            if matches!(s.kind, StageKind::Review(_)) { s.kind = StageKind::Review(reviewer.clone()); }
+        }
+        b
+    }
+    #[test]
+    fn a_gate_that_changes_hands_is_called_out_and_the_headline_never_says_nobody_when_someone_decides() {
+        let owner = bundle("ticket-push", &["make check"], &[Extra::Person("owner".into())], None);
+        let agent = with_gate(owner.clone(), Reviewer::Agent);
+        let text = summarize("", &agent, Some(&owner.definition));
+        assert!(text.contains("You no longer approve each ticket."), "{text}");
+        assert!(text.contains("An agent now reviews each ticket."), "{text}");
+        let h = headline(&agent);
+        assert!(!h.contains("nobody") && h.contains("an agent reviews each ticket"), "{h}");
+        let orch = bundle("ticket-push", &["make check"], &[Extra::Orchestrator], None);
+        let h = headline(&orch);
+        assert!(!h.contains("nobody") && h.contains("the orchestrator reviews each ticket"), "{h}");
+        // Unchanged deciders are not called out.
+        let same = summarize("", &owner, Some(&owner.definition));
+        assert!(!same.contains("no longer") && !same.contains(" now reviews"), "{same}");
+    }
+    #[test]
+    fn the_summary_shows_the_models_each_step_may_run_with() {
+        let mut b = with_gate(bundle("ticket-push", &["make check"], &[Extra::Person("owner".into())], None), Reviewer::Agent);
+        let step = steps(&b.definition).find(|s| matches!(s.kind, StageKind::Review(_))).unwrap().id.clone();
+        b.definition.models.insert(step.clone(), vec!["claude:opus".into(), "codex:gpt-5".into()]);
+        let text = summarize("", &b, None);
+        assert!(text.contains("Models a step may run with:") && text.contains(&format!("- {}: `claude:opus`, `codex:gpt-5`", code(&step))), "{text}");
+        let none = summarize("", &bundle("ticket-push", &["make check"], &[], None), None);
+        assert!(!none.contains("Models a step"), "{none}");
     }
     #[test]
     fn a_gate_cannot_draw_lines_or_end_its_code_span() {
