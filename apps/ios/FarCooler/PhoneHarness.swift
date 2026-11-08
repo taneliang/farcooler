@@ -22,6 +22,8 @@ import SwiftUI
 //   -phone-read-scope        this phone holds a Read grant: the runner sends
 //                            items without their answers, as the daemon does
 //   -deep-link <terminal>    as though a notification for it was tapped
+//   -phone-workflow-change   bil-7 asks a workflow change, the daemon's own question, whole (ov-978)
+//   -phone-agent-watch <s>   the watch screen on a recorded pane: running, finished, lost or not-running (ov-976)
 //   -phone-long-options      bil-7's question offers three options, two of them long
 //   -push-task <key>         as though a decision push for that task was
 //                            tapped
@@ -227,6 +229,12 @@ struct PhoneHarness: View {
         }
     }()
 
+    /// The watch screen's state, when `-phone-agent-watch` names one.
+    static var agentWatch: String? {
+        let arguments = CommandLine.arguments
+        return arguments.firstIndex(of: "-phone-agent-watch").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+    }
+
     private static func forgetOnce() { _ = forgotten }
 
     /// What a tapped agent notification or card names: a pane, on no runner
@@ -244,6 +252,9 @@ struct PhoneHarness: View {
         Group {
             if Self.onboarding {
                 HostOnboardingView(hosts: hosts)
+            } else if let state = Self.agentWatch {
+                // `-phone-agent-watch <running|finished|lost|not-running>`: the watch screen on a recorded pane (ov-976).
+                AgentWatchView(workspace: "harness", item: "ov-976", transport: HarnessReplayWatch(state: state))
             } else {
                 PhoneRoot(fleet: fleet, hosts: hosts, pendingDestination: $pendingDestination)
                     .modifier(PadCompactWindow())
@@ -1187,8 +1198,8 @@ final class HarnessRunner {
         [
             "id": "note-q", "kind": "question", "actor": "manager",
             "at": Int64(Date().timeIntervalSince1970 * 1000) - 600_000,
-            "body": "Which PDF library?",
-            "extra": ["options": Self.questionOptions],
+            "body": CommandLine.arguments.contains("-phone-workflow-change") ? HarnessWorkflowFixtures.changeQuestion : "Which PDF library?",
+            "extra": ["options": CommandLine.arguments.contains("-phone-workflow-change") ? [] : Self.questionOptions],
         ]
     }
 

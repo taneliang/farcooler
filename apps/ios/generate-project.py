@@ -25,6 +25,8 @@ SOURCES = [
     "ClientCore.swift",
     "Connection.swift",
     "ConnectionWorkflow.swift",
+    # Real fixtures for the workflow-change and agent-watch captures (ov-976, ov-978). DEBUG only.
+    "HarnessWorkflowFixtures.swift",
     # The phone's read-only view of an engine agent's terminal (ov-976).
     "AgentWatchView.swift",
     # Terminal and worktree calls, out of `Connection.swift` for its size budget (ov-818).
@@ -1217,6 +1219,8 @@ UI_TEST_SOURCES = [
     # task under it, and a decision answered from Needs You. Needs no runner,
     # for the same reason.
     "TaskScreenTests.swift",
+    # Opt-in captures of the Review and watch screens over recorded fixtures (ov-976, ov-978).
+    "AgentWatchCaptureTests.swift",
     # A task's Usage section over the canned runner: its spend, an older
     # runner, a failed read (ov-195). Needs no runner, for the same reason.
     "TaskUsageUITests.swift",
