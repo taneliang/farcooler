@@ -49,6 +49,10 @@ class AgentWatchSession(
         data object Finished : Phase
         /** The link dropped while the agent was still running. */
         data object Lost : Phase
+        /** The runner refused this person: only the owner may watch. */
+        data object Denied : Phase
+        /** The link dropped before any picture arrived. */
+        data object Unreachable : Phase
         /** The agent isn't running (a review, a merge, one that already ended), or can't be reached. */
         data class Unavailable(val gotPicture: Boolean) : Phase
     }
@@ -105,7 +109,9 @@ class AgentWatchSession(
     private fun ended(why: String?) {
         val saw = screen != null
         _phase.value = when {
-            why == AgentWatchTransport.LOST && saw -> Phase.Lost
+            why == AgentWatchTransport.DENIED -> Phase.Denied
+            why == AgentWatchTransport.LOST && !saw -> Phase.Unreachable
+            why == AgentWatchTransport.LOST -> Phase.Lost
             why == null && saw -> Phase.Finished
             else -> Phase.Unavailable(saw)
         }
@@ -124,6 +130,8 @@ class AgentWatchSession(
             Phase.Connecting, Phase.Live -> null
             Phase.Finished -> "Finished"
             Phase.Lost -> "Lost the connection to this agent."
+            Phase.Denied -> "Only the owner can watch an agent."
+            Phase.Unreachable -> "Couldn’t reach this agent."
             is Phase.Unavailable -> if (phase.gotPicture) "Lost the connection to this agent." else "This agent isn’t running right now."
         }
     }

@@ -21,5 +21,8 @@ interface AgentWatchTransport {
 
     companion object {
         const val LOST = "lost"
+
+        /** The runner refused this person: only the owner may watch. */
+        const val DENIED = "denied"
     }
 }

@@ -460,7 +460,7 @@ actor ClientCore {
         // Anything that is not a chunk ends the stream: the pane finished, or
         // it could not be opened at all.
         streams[terminal] = nil
-        stream.onEnd((line["lost"] as? Bool) == true ? "lost" : line["error"] as? String)
+        stream.onEnd((line["lost"] as? Bool) == true ? "lost" : (line["denied"] as? Bool) == true ? "denied" : line["error"] as? String)
     }
 }
 

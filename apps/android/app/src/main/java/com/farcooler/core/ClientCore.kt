@@ -415,6 +415,7 @@ class ClientCore : TerminalTransport, AgentWatchTransport {
         streams.remove(terminal)
         stream.onEnd(
             if (line["lost"]?.jsonPrimitive?.booleanOrNull == true) AgentWatchTransport.LOST
+            else if (line["denied"]?.jsonPrimitive?.booleanOrNull == true) AgentWatchTransport.DENIED
             else line["error"]?.jsonPrimitive?.contentOrNull,
         )
     }

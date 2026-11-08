@@ -67,6 +67,20 @@ class AgentWatchSessionTest {
         assertNull(AgentWatchSession.status(AgentWatchSession.Phase.Live))
     }
 
+    @Test fun `a refused member and a drop before any picture are not 'not running'`() = runTest {
+        suspend fun run(end: String?): AgentWatchSession.Phase {
+            val rec = Recorder()
+            val s = AgentWatchSession("w", "i", rec, StandardTestDispatcher(testScheduler)) { c, r -> FakeScreen(c, r) }
+            s.start(); advanceUntilIdle()
+            rec.end!!(end); advanceUntilIdle()
+            return s.phase.value
+        }
+        assertEquals(AgentWatchSession.Phase.Denied, run(AgentWatchTransport.DENIED))
+        assertEquals(AgentWatchSession.Phase.Unreachable, run(AgentWatchTransport.LOST))
+        assertEquals("Only the owner can watch an agent.", AgentWatchSession.status(AgentWatchSession.Phase.Denied))
+        assertEquals("Couldn’t reach this agent.", AgentWatchSession.status(AgentWatchSession.Phase.Unreachable))
+    }
+
     @Test fun `no input reaches the agent - the only calls are start and stop`() = runTest {
         val rec = Recorder()
         val s = AgentWatchSession("w", "ov-9", rec, StandardTestDispatcher(testScheduler)) { c, r -> FakeScreen(c, r) }

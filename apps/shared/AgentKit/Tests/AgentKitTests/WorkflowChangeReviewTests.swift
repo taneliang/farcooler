@@ -22,6 +22,13 @@ struct WorkflowChangeReviewTests {
         #expect(review.parts.flatMap(\.items) == bullets.map { String($0.dropFirst(2)) })
     }
 
+    @Test func theRecordSaysTheHeadlineOnceTheReviewShowsTheRest() throws {
+        let line = try #require(WorkflowChangeReview.recordLine(of: try real()))
+        #expect(line.hasPrefix("Publish this workflow? 4 checks must pass"))
+        #expect(!line.contains("What runs as you") && line.count < 200)
+        #expect(WorkflowChangeReview.recordLine(of: "Which branch?") == nil)
+    }
+
     @Test func aQuestionThatIsNotAChangeIsNeverGivenAnApproveButton() throws {
         let text = try real()
         #expect(WorkflowChangeReview.parse("Which branch should I use?") == nil)

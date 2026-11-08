@@ -33,6 +33,12 @@ public struct WorkflowChangeReview: Equatable, Sendable {
     /// What Approve sends.
     public var approval: String { "approve \(code)" }
 
+    /// What the record says of this question while the Review above it shows the change whole: the
+    /// headline and where the rest is, so the change isn't drawn twice. Nil if it isn't a change.
+    public static func recordLine(of question: String) -> String? {
+        parse(question).map { "\($0.headline) The whole change is in the question above." }
+    }
+
     public static func parse(_ question: String) -> WorkflowChangeReview? {
         let paragraphs = question.components(separatedBy: "\n\n")
         guard paragraphs.count >= 3, let headline = paragraphs.first, headline.hasPrefix("Publish this workflow?"),

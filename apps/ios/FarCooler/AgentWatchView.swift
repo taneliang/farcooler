@@ -66,12 +66,9 @@ struct AgentWatchView: View {
             .background(TerminalPalette.background)
             .navigationTitle("Watching \(item)")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationSubtitle(["Read-only", model.screen == nil ? nil : AgentWatchModel.status(model.phase)].compactMap { $0 }.joined(separator: " · "))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
-                ToolbarItem(placement: .primaryAction) {
-                    Text(["Read-only", model.screen == nil ? nil : AgentWatchModel.status(model.phase)].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
             }
         }
         .onAppear { model.start() }

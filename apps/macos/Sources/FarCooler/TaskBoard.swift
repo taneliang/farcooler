@@ -1493,7 +1493,9 @@ struct TaskCard: View {
                 ForEach(feed.notes) { note in
                     TaskNoteView(
                         note: note, people: people, pairedWithQuestion: paired.contains(note.id),
-                        tint: TaskNoteStyle.tint(of: note, in: feed.notes, status: row.status))
+                        tint: TaskNoteStyle.tint(of: note, in: feed.notes, status: row.status),
+                        // The open question is on the card above, whole: the record keeps its headline only.
+                        showsReviewAbove: canAnswer && row.status == .needsDecision && question?.id == note.id)
                 }
                 // Never silently: an entry this build cannot name is still an
                 // entry, and the record's claim is that nothing in it is lost.
@@ -1549,6 +1551,8 @@ private struct TaskNoteView: View {
     /// The label's color: secondary, or the accent for a question still
     /// waiting on the person (`TaskNoteStyle.tint(of:in:status:)`).
     var tint: TaskNoteStyle.Tint = .secondary
+    /// This is the open question and the card above shows it as a Review: don't draw the change twice.
+    var showsReviewAbove = false
     @Environment(\.taskKeyLinker) private var linker
 
     private var style: TaskNoteStyle { .of(note.kind) }
@@ -1579,7 +1583,9 @@ private struct TaskNoteView: View {
     private var standard: some View {
         VStack(alignment: .leading, spacing: TaskTypography.noteLineGap) {
             line
-            MarkdownText(text: note.displayBody, spacing: .document)
+            MarkdownText(
+                text: (showsReviewAbove && note.kind == .question ? WorkflowChangeReview.recordLine(of: note.displayBody) : nil) ?? note.displayBody,
+                spacing: .document)
         }
         .padding(.leading, pairedWithQuestion ? 2 * ColumnGrid.rhythm : 0)
         .overlay(alignment: .leading) {

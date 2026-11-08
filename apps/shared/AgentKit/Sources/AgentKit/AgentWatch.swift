@@ -57,6 +57,10 @@ final class AgentWatchModel: ObservableObject {
         case finished
         /// The link dropped while the agent was still running.
         case lost
+        /// The runner refused this person: only the owner may watch.
+        case denied
+        /// The link dropped before any picture arrived.
+        case unreachable
         /// The agent isn't running (a review, a merge, one that already ended), or can't be reached.
         case unavailable(gotPicture: Bool)
     }
@@ -124,6 +128,8 @@ final class AgentWatchModel: ObservableObject {
         guard started else { return }
         let saw = screen != nil
         phase = switch (why, saw) {
+        case ("denied", _): .denied
+        case ("lost", false): .unreachable
         case ("lost", true): .lost
         case (nil, true): .finished
         default: .unavailable(gotPicture: saw)
@@ -136,6 +142,8 @@ final class AgentWatchModel: ObservableObject {
         case .connecting, .live: nil
         case .finished: "Finished"
         case .lost: "Lost the connection to this agent."
+        case .denied: "Only the owner can watch an agent."
+        case .unreachable: "Couldn’t reach this agent."
         case .unavailable(let saw): saw ? "Lost the connection to this agent." : "This agent isn’t running right now."
         }
     }

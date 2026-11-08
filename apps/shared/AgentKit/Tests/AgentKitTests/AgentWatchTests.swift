@@ -56,6 +56,20 @@ struct AgentWatchTests {
         #expect(AgentWatchModel.status(.live) == nil)
     }
 
+    @Test func aRefusedMemberAndADropBeforeAnyPictureAreNotNotRunning() async {
+        func run(_ why: String?) async -> AgentWatchModel.Phase {
+            let rec = Recorder()
+            let model = AgentWatchModel(workspace: "w", item: "i", transport: rec) { Screen($0, $1) }
+            model.start(); await settle()
+            rec.end!(why); await settle()
+            return model.phase
+        }
+        #expect(await run("denied") == .denied)
+        #expect(await run("lost") == .unreachable)
+        #expect(AgentWatchModel.status(.denied) == "Only the owner can watch an agent.")
+        #expect(AgentWatchModel.status(.unreachable) == "Couldn’t reach this agent.")
+    }
+
     @Test func noInputReachesTheAgent() async {
         let rec = Recorder()
         let model = AgentWatchModel(workspace: "w", item: "ov-9", transport: rec) { Screen($0, $1) }
