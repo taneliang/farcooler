@@ -135,6 +135,12 @@ impl Revival {
     }
 }
 
+/// Whether tmux confirms the pane is gone or dead. A failed question is "not over", so a viewer is
+/// never told an agent finished on a guess.
+pub(crate) async fn pane_is_over(runtime: &Runtime, pane: &TaggedPane) -> bool {
+    matches!(runtime.tmux.pane_life(&pane.pane_id, pane.terminal_id).await, Ok(PaneLife::Gone | PaneLife::Dead))
+}
+
 /// Resolves when stdin says the far end of `Runtime::stream` has gone.
 pub(crate) async fn stdin_hangup() {
     use tokio::io::AsyncReadExt;
