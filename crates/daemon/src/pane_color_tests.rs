@@ -17,8 +17,8 @@ fn a_line_run_with_no_colorterm_still_has_it() {
             .expect("run");
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
-    let plain = with_pane_env(Uuid::now_v7(), "shell", None, None, "printenv COLORTERM".into());
-    let won = with_pane_env(Uuid::now_v7(), "claude", None, Some(&recipe), "printenv COLORTERM".into());
+    let plain = with_pane_env(Uuid::now_v7(), None, "shell", None, None, "printenv COLORTERM".into());
+    let won = with_pane_env(Uuid::now_v7(), None, "claude", None, Some(&recipe), "printenv COLORTERM".into());
     assert_eq!(run(&plain), "truecolor");
     assert_eq!(run(&won), "24bit");
 }
@@ -40,8 +40,8 @@ async fn a_pane_has_true_color_when_the_runner_has_none() {
     };
     let workspace = PaneWorkspace { id: Uuid::now_v7(), charter: None, env: Vec::new() };
     let recipe = PaneWorkspace { env: vec![("COLORTERM".into(), "24bit".into())], ..workspace.clone() };
-    let plain = with_pane_env(Uuid::now_v7(), "shell", None, None, "printenv COLORTERM".into());
-    let won = with_pane_env(Uuid::now_v7(), "claude", None, Some(&recipe), "printenv COLORTERM".into());
+    let plain = with_pane_env(Uuid::now_v7(), None, "shell", None, None, "printenv COLORTERM".into());
+    let won = with_pane_env(Uuid::now_v7(), None, "claude", None, Some(&recipe), "printenv COLORTERM".into());
     let mut seen = Vec::new();
     for (i, line) in [&plain, &won].into_iter().enumerate() {
         let sock = format!("fc-truecolor-{}-{i}", std::process::id());

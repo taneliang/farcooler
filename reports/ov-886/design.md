@@ -31,18 +31,13 @@ This is the same pane's previous run, not another pane's conversation. That make
 
 ## Where the current launch is recorded
 
-A new table, owned by a new store module `pane_launches.rs`:
+Rows in the existing `meta` table, keyed `pane_launch/<terminal id>`, owned by a new store module `pane_launches.rs`.
 
-```sql
-CREATE TABLE pane_launches (
-  terminal_id BLOB PRIMARY KEY REFERENCES terminals(id) ON DELETE CASCADE,
-  launch      TEXT NOT NULL UNIQUE
-);
-```
-
+- **No migration, on purpose.** A new table would move the schema to 69, and `engine_cutover::preflight` (`store/src/engine_cutover.rs:217`) accepts exactly 60 or 65–68, with pinned catalog hashes. Any runner that hasn't cut over yet would be refused. `meta` already holds per-device rows (`device_added_by.rs`), and the cutover conserves its rows like any other table's.
 - **Durable.** A daemon restart reads it straight back; there is no in-memory epoch to lose.
-- **One row per pane**, replaced on each launch. The previous launch is retired the moment it is replaced, and nothing remembers retired launches: a launch id that no row holds is retired by definition, so no tombstone list grows and none needs collecting.
-- **A table, not a column on `terminals`**, so the `Terminal` model, its wire shape and every `SELECT` of it stay as they are. An older build never touches it (`Older::Welcome`): it launches without exporting a launch id, its frames are untagged, and the row it leaves behind names a launch that nothing carries.
+- **One row per pane**, replaced on each launch. The previous launch is retired the moment it's replaced, and nothing remembers retired launches: a launch id that no row holds is retired by definition, so no tombstone list grows and none needs collecting.
+- **No cascade from `terminals`.** `delete_terminal` removes the pane's row. A pane deleted by cascade (its worktree or workspace going) leaves its row behind, and every lookup checks the pane still exists, so that row routes nothing. The leftover is one short row per such pane.
+- **An older build never reads these keys.** It launches without exporting a launch id, so its frames are untagged, and the row left behind names a launch that nothing carries.
 
 Store operations, each a single transaction:
 
@@ -54,11 +49,10 @@ Store operations, each a single transaction:
 
 Every launch of an agent into a pane (`create_terminal`, `split_terminal`, `relaunch_held`) does:
 
-1. **Pre-spawn checks first** (`refuse_a_real_agent`, `still_on_its_login`, orchestrator seat). A refusal here writes nothing, so there's nothing to roll back.
-2. **`begin_launch`**, then build the command with `FARCOOLER_LAUNCH=<new>` beside `FARCOOLER_ACTOR`. From this instant the old launch is retired: its hooks reach nothing.
-3. **Forget the pane's in-memory hook state** (`HookIngress::forget`, which already exists for deleted terminals): the assembler, held asks (settled as unanswered), the transcript tail, the session projector and subagent rows. This is the cancel half of "cancel or drain" for anything the old launch had in flight.
-4. **Spawn.**
-5. **If the spawn fails**, `roll_back_launch(attempted, prior)`. The old launch is current again only if no newer launch replaced this one. This is safe even when `respawn-pane -k` killed the old process before failing: restoring `prior` only lets the old process's own late hooks back into its own pane, which is where things stood before the restart was asked for. It can never overwrite a newer launch.
+1. **`begin_launch`**, then build the command with `FARCOOLER_LAUNCH=<new>` beside `FARCOOLER_ACTOR`. From this instant the old launch is retired: its hooks reach nothing. (The orchestrator seat is taken before this, as it already was.)
+2. **Cancel the pane's in-flight hook state** (`HookIngress::relaunched`): the held ask (settled as unanswered), the half-assembled message and the transcript tail. This is the cancel half of "cancel or drain" for anything the old launch had in flight. It's narrower than `forget`, which is for a deleted pane: the pane's conversation projection and subagent rows carry on into the new launch.
+3. **Pre-spawn checks** (`refuse_a_real_agent`, `still_on_its_login`), which need the finished command, **then spawn.**
+4. **If either fails**, `roll_back_launch(attempted, prior)`. The old launch is current again only if no newer launch replaced this one. This is safe even when `respawn-pane -k` killed the old process before failing: restoring `prior` only lets the old process's own late hooks back into its own pane, which is where things stood before the restart was asked for. It never overwrites a newer launch.
 
 Only agent presets get a launch id. A shell, a changes pane or a web pane has no hooks to fence.
 
@@ -101,7 +95,7 @@ What stays outside the gate, on purpose:
 - **A restart and a create**: different terminals, different rows; launch ids are unique.
 - **Daemon restart**: the table is durable; a frame from a launch the table doesn't hold is dropped whether the daemon was restarted or not. A restart interrupted between `begin_launch` and the spawn leaves the new launch current with nothing running it. The pane's hooks are fenced until its next restart, and the old process, if it survived, is fenced too. Never a wrong attachment.
 - **Two rows claiming one session**: unchanged for untagged frames (refused). A tagged frame names one row by launch, so it can't be ambiguous.
-- **Pane deleted**: the launch row goes with it (cascade), so its hooks reach nothing.
+- **Pane deleted**: `delete_terminal` removes its launch row; a row left by a cascade delete names a pane that no longer exists, and lookups refuse it. Either way its hooks reach nothing.
 
 ## What this doesn't do
 

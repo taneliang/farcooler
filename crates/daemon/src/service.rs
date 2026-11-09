@@ -938,6 +938,11 @@ fn preset_runs_an_agent(preset: &str) -> bool {
 /// rather than `agent:<id>`, and nothing is exported twice. Its values are
 /// `shell_quote`d unless they're plain.
 ///
+/// **`FARCOOLER_LAUNCH` beside `ACTOR`** (ov-886): the launch `begin_launch`
+/// just made current for this pane. The hook CLI copies it into every frame,
+/// and ingress routes a frame only while its launch is the pane's, so a hook
+/// from the process a restart killed reaches nothing. A uuid, so unquoted.
+///
 /// **`COLORTERM=truecolor` on every pane** (R-42), first on the line. A pane
 /// inherits the runner's environment, and a runner started by launchd or over
 /// ssh has no `COLORTERM`, which makes agents fall back to 256 colors. tmux
@@ -946,6 +951,7 @@ fn preset_runs_an_agent(preset: &str) -> bool {
 /// and win, since a name already on the line takes the recipe's value.
 fn with_pane_env(
     terminal: Uuid,
+    launch: Option<Uuid>,
     preset: &str,
     task_key: Option<&str>,
     workspace: Option<&PaneWorkspace>,
@@ -955,6 +961,9 @@ fn with_pane_env(
     let mut vars: Vec<(String, String)> = vec![("COLORTERM".to_string(), "truecolor".to_string())];
     if preset_runs_an_agent(preset) {
         vars.push((pane_env::ACTOR.to_string(), format!("agent:{terminal}")));
+        if let Some(launch) = launch {
+            vars.push((pane_env::LAUNCH.to_string(), launch.to_string()));
+        }
         if let Some(key) = task_key.filter(|k| is_safe_model(k)) {
             vars.push((pane_env::TASK.to_string(), key.to_string()));
         }
@@ -1227,6 +1236,7 @@ fn validate_launch_prompt(prompt: &str) -> Result<()> {
 fn launch_command_with_prompt(
     runtime_dir: &Path,
     terminal: Uuid,
+    launch: Option<Uuid>,
     preset: &str,
     session_id: Option<&str>,
     mut extras: LaunchExtras,
@@ -1236,7 +1246,7 @@ fn launch_command_with_prompt(
 ) -> String {
     let build = |extras: &LaunchExtras| {
         let command = preset_command_with_hooks(preset, session_id, extras);
-        with_pane_env(terminal, preset, task_key, workspace, command)
+        with_pane_env(terminal, launch, preset, task_key, workspace, command)
     };
     // Trimmed first, the way the Mac trims its draft, and only THEN guarded:
     // "update" and nine kilobytes of newlines has whitespace in it, so
@@ -3687,9 +3697,20 @@ impl Service {
                 return Err(e);
             }
         };
+        let term_id = term.id;
+        let (term, launch) = match self.begin_launch(term) {
+            Ok(begun) => begun,
+            Err(e) => {
+                if let Ok(now) = self.store.get_terminal(term_id) {
+                    let _ = self.delete_terminal_record(term_id, now.resource_version);
+                }
+                return Err(e);
+            }
+        };
         let command = launch_command_with_prompt(
             &self.root,
             term.id,
+            launch.as_ref().map(|l| l.id),
             command_preset,
             declared.as_deref(),
             extras,
@@ -3703,6 +3724,7 @@ impl Service {
         };
 
         if let Err(e) = created {
+            self.roll_back_launch(term.id, launch.as_ref());
             // No pane will ever read a prompt file for this terminal, nor work a lane.
             remove_prompt_file(&self.root, term.id);
             let _ = self.store.end_pane_agent(term.id);
@@ -4118,9 +4140,24 @@ impl Service {
         // are made, so most claude panes reported nothing at all.
         let mut extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
         extras.claude_dir = launch.dir;
+        let term_id = term.id;
+        let (term, launch) = match self.begin_launch(term) {
+            Ok(begun) => begun,
+            Err(e) => {
+                if let Ok(now) = self.store.get_terminal(term_id) {
+                    let _ = self.store.update_terminal(
+                        term_id,
+                        now.resource_version,
+                        terminal_update(&now, |u| u.intent = TerminalIntent::Failed),
+                    );
+                }
+                return Err(e);
+            }
+        };
         let command = launch_command_with_prompt(
             &self.root,
             term.id,
+            launch.as_ref().map(|l| l.id),
             command_preset,
             term.agent_session_id.as_deref(),
             extras,
@@ -4136,6 +4173,7 @@ impl Service {
         let pane_id = match created {
             Ok(id) => id,
             Err(e) => {
+                self.roll_back_launch(term.id, launch.as_ref());
                 remove_prompt_file(&self.root, term.id);
                 let _ = self.store.update_terminal(
                     term.id,
@@ -4187,6 +4225,36 @@ impl Service {
             // Left unconfirmed, it holds the seat until it's restarted again
             // or replaced (`seat_of`).
             tracing::warn!(terminal = %term.id, error = %undo, "a restart that failed kept its orchestrator's seat");
+        }
+    }
+
+    /// Make a fresh launch current for `term`, if it runs an agent, and cancel
+    /// what its previous launch left in flight (ov-886, `pane_launches`).
+    ///
+    /// Before the spawn, so the new process's first hooks find their launch
+    /// already current. A version check: of two launches of one pane racing,
+    /// the loser stops here, before it has started anything. Hands `term`
+    /// back at the version the launch moved it to.
+    fn begin_launch(&self, term: models::Terminal) -> Result<(models::Terminal, Option<farcooler_store::Launch>)> {
+        if !preset_runs_an_agent(&term.command_preset) {
+            return Ok((term, None));
+        }
+        let (term, launch) = self.store.begin_launch(term.id, term.resource_version)?;
+        self.hooks.relaunched(term.id);
+        Ok((term, Some(launch)))
+    }
+
+    /// Put back the launch a failed spawn replaced, unless a newer launch has
+    /// replaced it since (`Store::roll_back_launch`).
+    ///
+    /// Safe even if `respawn-pane -k` killed the old process before failing:
+    /// the old launch then only lets that process's own late hooks back into
+    /// its own pane, which is how things stood before the restart was asked
+    /// for. It never overwrites a launch that came after.
+    fn roll_back_launch(&self, terminal: Uuid, launch: Option<&farcooler_store::Launch>) {
+        let Some(launch) = launch else { return };
+        if let Err(e) = self.store.roll_back_launch(terminal, launch) {
+            tracing::warn!(terminal = %terminal, error = %e, "could not put back the launch a failed spawn replaced; the pane's hooks reach nothing until it's restarted");
         }
     }
 
@@ -4361,8 +4429,19 @@ impl Service {
                 return Err(e);
             }
         };
+        // A fresh launch, current from here on: the process this replaces
+        // can't reach the pane any more, even when the new one resumes the
+        // same session (ov-886). `term` comes back at the version it bumped.
+        let (term, launch) = match self.begin_launch(term.clone()) {
+            Ok(begun) => begun,
+            Err(e) => {
+                self.give_back_seat(&term, seated.as_ref());
+                return Err(e);
+            }
+        };
         let command = with_pane_env(
             id,
+            launch.as_ref().map(|l| l.id),
             &term.command_preset,
             self.pane_task_key(&term).as_deref(),
             self.pane_workspace(&term).as_ref(),
@@ -4403,6 +4482,7 @@ impl Service {
             }
         };
         if let Err(e) = respawned {
+            self.roll_back_launch(id, launch.as_ref());
             self.give_back_seat(&term, seated.as_ref());
             return Err(e);
         }
@@ -6515,7 +6595,7 @@ mod orchestrator_launch_tests {
         let l = launch();
         let workspace =
             PaneWorkspace { id: l.workspace, charter: Some(l.charter.clone()), env: extra_env(Harness::Claude, &l) };
-        let line = with_pane_env(terminal, "claude", None, Some(&workspace), "claude".into());
+        let line = with_pane_env(terminal, None, "claude", None, Some(&workspace), "claude".into());
         assert!(line.contains(&format!("{}=manager ", pane_env::ACTOR)), "{line}");
         assert!(!line.contains(&format!("agent:{terminal}")), "{line}");
         assert!(line.contains("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 "), "{line}");
@@ -6526,7 +6606,7 @@ mod orchestrator_launch_tests {
         }
         // And every variable reaches the program through a real shell.
         let out = std::process::Command::new("/bin/sh")
-            .args(["-c", &with_pane_env(terminal, "claude", None, Some(&workspace), "printenv".into())])
+            .args(["-c", &with_pane_env(terminal, None, "claude", None, Some(&workspace), "printenv".into())])
             .output()
             .unwrap();
         let printed = String::from_utf8(out.stdout).unwrap();
@@ -11031,7 +11111,7 @@ mod launch_prompt_tests {
         let shells = shells();
         for (preset, program, flags) in &cases {
             let command = launch_command_with_prompt(
-                dir.path(), Uuid::now_v7(), preset, None, LaunchExtras::NONE, Some(&opening), Some("fc-1"), None);
+                dir.path(), Uuid::now_v7(), None, preset, None, LaunchExtras::NONE, Some(&opening), Some("fc-1"), None);
             assert!(command.starts_with("env "), "{command}");
             assert!(command.contains(" FARCOOLER_TASK=fc-1 "), "{command}");
             for outer in &shells {
@@ -11057,7 +11137,7 @@ mod launch_prompt_tests {
         assert!(opening.contains("farcooler task note --kind decision"), "{opening}");
         assert!(opening.contains("farcooler task ask --body"), "{opening}");
         // And the export it relies on is there for such a key.
-        let command = with_pane_env(Uuid::now_v7(), "claude", Some("-1"), None, "claude".into());
+        let command = with_pane_env(Uuid::now_v7(), None, "claude", Some("-1"), None, "claude".into());
         assert!(command.contains(" FARCOOLER_TASK=-1 "), "{command}");
         // An ordinary key is still written out.
         assert!(opening_prompt("farcooler", "fc-1").contains("farcooler task show fc-1."));
@@ -11103,11 +11183,11 @@ mod launch_prompt_tests {
     fn a_pane_says_its_workspace_whether_or_not_an_agent_runs_in_it() {
         let (terminal, ws) = (Uuid::now_v7(), Uuid::now_v7());
         let workspace = PaneWorkspace { id: ws, charter: None, env: Vec::new() };
-        let agent = with_pane_env(terminal, "claude", Some("ov-3"), Some(&workspace), "claude".into());
+        let agent = with_pane_env(terminal, None, "claude", Some("ov-3"), Some(&workspace), "claude".into());
         assert_eq!(agent, format!("env COLORTERM=truecolor FARCOOLER_ACTOR=agent:{terminal} FARCOOLER_TASK=ov-3 FARCOOLER_WORKSPACE={ws} claude"));
-        let shell = with_pane_env(terminal, "shell", None, Some(&workspace), "zsh -il".into());
+        let shell = with_pane_env(terminal, None, "shell", None, Some(&workspace), "zsh -il".into());
         assert_eq!(shell, format!("env COLORTERM=truecolor FARCOOLER_WORKSPACE={ws} zsh -il"));
-        assert_eq!(with_pane_env(terminal, "shell", None, None, "zsh -il".into()), "env COLORTERM=truecolor zsh -il");
+        assert_eq!(with_pane_env(terminal, None, "shell", None, None, "zsh -il".into()), "env COLORTERM=truecolor zsh -il");
     }
 
     /// The charter's path reaches the orchestrator as one value under every
@@ -11117,7 +11197,7 @@ mod launch_prompt_tests {
         let charter = PathBuf::from("/tmp/My Runner/it's/workspaces/x/charter.md");
         let workspace = PaneWorkspace { id: Uuid::now_v7(), charter: Some(charter.clone()), env: Vec::new() };
         let command =
-            with_pane_env(Uuid::now_v7(), "claude", None, Some(&workspace), "printenv FARCOOLER_CHARTER".into());
+            with_pane_env(Uuid::now_v7(), None, "claude", None, Some(&workspace), "printenv FARCOOLER_CHARTER".into());
         for shell in shells() {
             let out = std::process::Command::new(&shell).arg("-c").arg(&command).output().expect("run");
             assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), charter.to_string_lossy(), "{shell}: {command}");
@@ -11128,7 +11208,7 @@ mod launch_prompt_tests {
     /// which is not quoted.
     #[test]
     fn a_key_that_is_not_a_plain_identifier_is_not_exported() {
-        let command = with_pane_env(Uuid::now_v7(), "claude", Some("fc-1; rm -rf ~"), None, "claude".into());
+        let command = with_pane_env(Uuid::now_v7(), None, "claude", Some("fc-1; rm -rf ~"), None, "claude".into());
         assert!(!command.contains("FARCOOLER_TASK"), "{command}");
     }
 
@@ -11199,7 +11279,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         for padded in [format!("update{}", "\n".repeat(9 * 1024)), "\n\t update \n".to_string()] {
             let command = launch_command_with_prompt(
-                dir.path(), Uuid::now_v7(), "claude", None, LaunchExtras::NONE, Some(&padded), None, None);
+                dir.path(), Uuid::now_v7(), None, "claude", None, LaunchExtras::NONE, Some(&padded), None, None);
             let bare = command.split_once(" /").map(|(_, rest)| format!("/{rest}")).unwrap();
             assert_eq!(argv_through(&bare, "claude", "/bin/sh", "/bin/sh"), ", update");
         }
@@ -11210,7 +11290,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::now_v7();
         let word = "u".repeat(20_000);
-        launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&word), None, None);
+        launch_command_with_prompt(dir.path(), id, None, "claude", None, LaunchExtras::NONE, Some(&word), None, None);
         assert_eq!(std::fs::read_to_string(prompt_file(dir.path(), id)).unwrap(), format!(" {word}"));
     }
 
@@ -11372,7 +11452,7 @@ mod launch_prompt_tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::now_v7();
         let command =
-            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(AWKWARD), None, None);
+            launch_command_with_prompt(dir.path(), id, None, "claude", None, LaunchExtras::NONE, Some(AWKWARD), None, None);
         assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES);
         assert!(!dir.path().join(format!("prompt-{id}")).exists(), "no file for a prompt that fits");
     }
@@ -11394,7 +11474,7 @@ mod launch_prompt_tests {
         let id = Uuid::now_v7();
         let prompt = long_prompt();
         let command =
-            launch_command_with_prompt(dir.path(), id, "claude", None, LaunchExtras::NONE, Some(&prompt), None, None);
+            launch_command_with_prompt(dir.path(), id, None, "claude", None, LaunchExtras::NONE, Some(&prompt), None, None);
         assert!(command.len() <= MAX_INLINE_LAUNCH_BYTES, "{} bytes", command.len());
 
         let file = dir.path().join(format!("prompt-{id}"));
@@ -11431,6 +11511,7 @@ mod launch_prompt_tests {
 
         let inline = with_pane_env(
             Uuid::now_v7(),
+            None,
             "claude",
             None,
             None,
@@ -11445,7 +11526,7 @@ mod launch_prompt_tests {
 
         let id = Uuid::now_v7();
         let command =
-            launch_command_with_prompt(&svc.root, id, "claude", None, LaunchExtras::NONE, Some(&prompt), None, None);
+            launch_command_with_prompt(&svc.root, id, None, "claude", None, LaunchExtras::NONE, Some(&prompt), None, None);
         svc.tmux
             .create_terminal_window(ws.id, id, "file", &ws.worktree_path, &super::test_agent::unstubbed(&command).replacen("claude", &printf, 1))
             .await
@@ -11503,3 +11584,7 @@ mod runtime_selection_tests;
 
 #[path = "runtime_selection.rs"]
 mod runtime_selection;
+
+#[cfg(test)]
+#[path = "service_launch_tests.rs"]
+mod launch_tests;
