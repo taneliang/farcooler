@@ -27,11 +27,11 @@ struct JumpBarGlyphTests {
     /// worktree, the main checkout and a page. The filter is All, as the jump
     /// bar's outline is (`pathTree`), the sidebar's own two lists (ov-512).
     static func tree() throws -> (tree: SidebarOutline, tasks: [OneTreeTask]) {
-        struct Seeded: Decodable { var plan: PlanModel }
+        // Through `PlanModel.decode`, which keeps the wire the Rust view is built from (ov-1016):
+        // a plan decoded any other way has no tickets in its sidebar.
         let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/plan-seeded.json"))
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let plan = try decoder.decode(Seeded.self, from: data).plan
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(object["plan"])))
         let statuses = TaskStatus.allCases
         var seen = Set<String>()
         let cards = plan.themes.flatMap(\.cards).map(\.task).filter { seen.insert($0).inserted }
