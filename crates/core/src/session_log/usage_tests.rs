@@ -185,7 +185,7 @@ fn a_real_codex_turn_prices_without_counting_cached_input_twice() {
     let turns = codex(&fixture("codex-complete-turn.jsonl"));
     let (_, tokens) = &turns[0].models[0];
     assert_eq!(crate::usage::estimate(Some("gpt-5.6-sol"), tokens), Some(28_641));
-    assert_eq!(crate::usage::estimate(Some("gpt-5.5"), tokens), None, "an unlisted model stays unpriced");
+    assert_eq!(crate::usage::estimate(Some("gpt-5.5"), tokens), None, "a model not modeled stays unpriced");
 }
 
 /// A codex turn that wrote no `token_count` reported nothing.

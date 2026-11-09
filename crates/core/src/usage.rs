@@ -159,7 +159,10 @@ const TABLE: &[(&str, Rates)] = &[
 /// $15 out). Codex's rollout names neither a service tier nor a request's
 /// size, and its context window (258,400 in the log) stays under 272,000, so
 /// every turn is priced short-context, standard. A model the page does not
-/// list is unpriced. `scripts/claude-prices.py` does not check this table.
+/// list is not modeled, so it is unpriced.
+///
+/// GPT-5.6 Sol's rates are promotional on the page until 2026-11-30; after
+/// that the row will need the page's new rate. `scripts/claude-prices.py` does not check this table.
 const OPENAI: &[(&str, Rates)] = &[
     ("gpt-6.1-sol", openai(2.0, 0.1, 10.0)),
     ("gpt-6.1-terra", openai(1.0, 0.05, 5.0)),
@@ -359,5 +362,12 @@ mod tests {
         assert_eq!(estimate(Some("gpt-5.6-terra"), &sol), Some(14_200_000));
         assert_eq!(estimate(Some("gpt-5.6-luna"), &sol), Some(1_420_000));
         assert_eq!(estimate(Some("gpt-6-sol"), &sol), Some(12_200_000));
+    }
+
+    #[test]
+    fn a_dated_or_tagged_gpt_id_finds_its_rates() {
+        let tokens = TokenCounts { input: 1_000_000, ..Default::default() };
+        assert_eq!(estimate(Some("gpt-6-luna-20261109"), &tokens), Some(100_000));
+        assert_eq!(estimate(Some("gpt-6-luna[1m]"), &tokens), Some(100_000));
     }
 }
