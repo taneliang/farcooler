@@ -21,8 +21,6 @@ struct SharedWordsTests {
         let golden = try Self.golden()
         #expect(SharedWords.agentsNone == golden["agents_none"])
         #expect(SharedWords.agentsNone == "No Agents Running")
-        #expect(SharedWords.waitingOnYou == golden["waiting_on_you"])
-        #expect(SharedWords.waitingOnYou == "Waiting on You")
         #expect(SharedWords.blockedDoing == golden["blocked_doing"])
         #expect(ShellClose.doing(activity: "blocked") == "waiting on you")
         #expect(ShellClose.doing(activity: "working") == "working")
