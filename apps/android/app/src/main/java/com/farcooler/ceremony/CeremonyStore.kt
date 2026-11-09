@@ -841,6 +841,9 @@ class CeremonyStore(
     internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
 
     private val _phase = MutableStateFlow<Phase>(Phase.Idle)
+
+    /** A confirmation is under way ([confirm], [confirmTeammate]). */
+    private var confirmingNow = false
     val phase: StateFlow<Phase> = _phase.asStateFlow()
 
     /**
@@ -1183,6 +1186,21 @@ class CeremonyStore(
         gate: suspend (title: String, subtitle: String) -> ConfirmingTap.Outcome,
         enroller: Enroller,
     ) {
+        // One confirmation at a time, and only from the confirmation: a second
+        // tap while the prompt is up would build and post a second reply.
+        if (_phase.value != Phase.Confirming || confirmingNow) return
+        confirmingNow = true
+        try {
+            confirmOnce(gate, enroller)
+        } finally {
+            confirmingNow = false
+        }
+    }
+
+    private suspend fun confirmOnce(
+        gate: suspend (title: String, subtitle: String) -> ConfirmingTap.Outcome,
+        enroller: Enroller,
+    ) {
         val asking = _offer.value
         if (asking == null || scannedCode.isEmpty()) {
             _phase.value = Phase.Refused(Refusal.Unknown)
@@ -1293,6 +1311,20 @@ class CeremonyStore(
      * never this phone's to vouch for, so nothing is certified.
      */
     suspend fun confirmTeammate(
+        gate: suspend (title: String, subtitle: String) -> ConfirmingTap.Outcome,
+        enroller: TeammateEnroller,
+    ) {
+        // As [confirm]: one at a time, and only from the confirmation.
+        if (_phase.value != Phase.Confirming || confirmingNow) return
+        confirmingNow = true
+        try {
+            confirmTeammateOnce(gate, enroller)
+        } finally {
+            confirmingNow = false
+        }
+    }
+
+    private suspend fun confirmTeammateOnce(
         gate: suspend (title: String, subtitle: String) -> ConfirmingTap.Outcome,
         enroller: TeammateEnroller,
     ) {

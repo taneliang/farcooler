@@ -72,6 +72,24 @@ class SealedReplyTest {
         assertEquals(SealedReply.State.SENT, store.sealedReply.state.value)
     }
 
+    /**
+     * The same reply sent again within the window: the relay keeps the first
+     * (409), and the browser holds the first, so the phone shows the first's
+     * code rather than "couldn't send" (ov-778 review L1).
+     */
+    @Test
+    fun aSecondSendTheRelayAlreadyHoldsShowsTheFirstCode() = runTest {
+        val core = Core(offer(replyKey), manifest, sealedAnswer)
+        val (store, posts) = confirmed(core)
+        assertEquals("ABC234", store.sealedReply.code.value)
+        val again = Core(offer(replyKey), manifest, CeremonyCore.Answer.Payload("""{"sealed":"c2Vjb25k","code":"XYZ789"}"""))
+        store.sealedReply.post = { _, _, _ -> SealedReplyPost.Outcome.ALREADY_POSTED }
+        store.sealedReply.send(again, offer(replyKey), manifest, 0)
+        assertEquals("ABC234", store.sealedReply.code.value)
+        assertEquals(SealedReply.State.SENT, store.sealedReply.state.value)
+        assertEquals(1, posts.size)
+    }
+
     @Test
     fun anOfferWithoutAReplyKeySealsAndPostsNothing() = runTest {
         val core = Core(offer(null), manifest, sealedAnswer)

@@ -202,6 +202,40 @@ class TeammateAddFlowTest {
         assertEquals(SealedReply.State.SENT, store.sealedReply.state.value)
     }
 
+    /** Add Teammate tapped twice while the prompt is up adds and posts once (ov-778 review L1). */
+    @Test
+    fun aDoubleTapOnAddTeammateAddsAndPostsOnce() = runTest {
+        val core = Core()
+        val browser = """{"v":2,"key_a":"$keyA","name":"Chrome on Mac","account":"user_bob","channel":"stable","ceremony":"c-1","node_key":"","reply_key":"YwbAvkATmjREjY8yCsUr87XR8t4kv8l2bK516AhoEWQ"}"""
+        core.scanTeammateAnswer = CeremonyCore.Answer.Payload(
+            """{"offer":${kotlinx.serialization.json.JsonPrimitive(browser)},"teammate":{"account":"user_bob","email":"bob.smith@example.com","team":"Platform"},"held":[]}""",
+        )
+        val posts = mutableListOf<String>()
+        val store = scanned(core)
+        store.sealedReply.post = { ceremony, _, _ ->
+            posts += ceremony
+            SealedReplyPost.Outcome.POSTED
+        }
+        store.toggle(buildBox.id)
+        val prompt = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var prompts = 0
+        val slowGate: suspend (String, String) -> ConfirmingTap.Outcome = { _, _ ->
+            prompts += 1
+            prompt.await()
+            ConfirmingTap.Outcome.CONFIRMED
+        }
+        val recorder = Recorder()
+        val first = launch(UnconfinedTestDispatcher(testScheduler)) { store.confirmTeammate(slowGate, recorder.enroller) }
+        val second = launch(UnconfinedTestDispatcher(testScheduler)) { store.confirmTeammate(slowGate, recorder.enroller) }
+        prompt.complete(Unit)
+        first.join()
+        second.join()
+        assertEquals(1, prompts)
+        assertEquals(1, recorder.asked.size)
+        assertEquals(listOf("c-1"), posts)
+        assertEquals(SealedReply.State.SENT, store.sealedReply.state.value)
+    }
+
     @Test
     fun aTeammatesPhoneOfferPostsNothing() = runTest {
         val core = Core()

@@ -87,6 +87,13 @@ final class SealedReply: ObservableObject {
     /// The post started by the last reply, for a test to wait on.
     private(set) var sending: Task<Void, Never>?
 
+    /// The code of each reply the relay stored, by ceremony, kept across
+    /// `reset`. A second send for the same ceremony (Add again within the
+    /// window) seals afresh, so its code differs, and the relay keeps the
+    /// first (409). The browser holds the first, so its code is the one to
+    /// show, never "couldn't send" (ov-778 review L1).
+    private var delivered: [String: String] = [:]
+
     /// Seal and post `reply`, when `offer` asked for that.
     ///
     /// `offer` is the scan's answer, checked by the core a moment ago; its
@@ -111,8 +118,10 @@ final class SealedReply: ObservableObject {
         sending = Task {
             let outcome = await post(asked.ceremony, asked.account, sealed.sealed)
             guard !Task.isCancelled else { return }
-            code = outcome.showsCode ? sealed.code : nil
-            state = outcome == .posted ? .sent : .notSent
+            if outcome == .posted { delivered[asked.ceremony] = sealed.code }
+            let first = outcome == .alreadyPosted ? delivered[asked.ceremony] : nil
+            code = outcome.showsCode ? sealed.code : first
+            state = outcome == .posted || first != nil ? .sent : .notSent
         }
     }
 

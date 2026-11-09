@@ -555,6 +555,8 @@ final class CeremonyStore: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .idle
+    /// A confirmation is under way (`confirm`, `confirmTeammate`).
+    private var confirmingNow = false
     /// The runners on offer, and which are ticked. Published beside `phase`
     /// rather than carried inside `.confirming` so a tick is one row changing
     /// rather than the whole screen's state being replaced.
@@ -926,6 +928,11 @@ final class CeremonyStore: ObservableObject {
 
     /// Confirm the grant: the gate, then the freshness check, then the reply.
     func confirm() async {
+        // One confirmation at a time, and only from the confirmation: a
+        // second tap while Face ID is up would build and post a second reply.
+        guard phase == .confirming, !confirmingNow else { return }
+        confirmingNow = true
+        defer { confirmingNow = false }
         guard let offer, !scannedCode.isEmpty else {
             phase = .refused(.unknown)
             return
@@ -1069,6 +1076,10 @@ final class CeremonyStore: ObservableObject {
     /// `pending` is a fact. A teammate's device is never this phone's to vouch
     /// for, so nothing is certified.
     func confirmTeammate() async {
+        // As `confirm`: one at a time, and only from the confirmation.
+        guard phase == .confirming, !confirmingNow else { return }
+        confirmingNow = true
+        defer { confirmingNow = false }
         guard let offer, let teammate, !scannedCode.isEmpty else {
             phase = .refused(.unknown)
             return
@@ -1147,7 +1158,8 @@ final class CeremonyStore: ObservableObject {
         case .payload(let data):
             code = String(decoding: data, as: UTF8.self)
             addressOnlyNote = Self.addressOnlyNote(granting: granting, reply: data)
-            phase = .showingManifest            // A teammate's browser can't scan the reply (ov-778): its offer
+            phase = .showingManifest
+            // A teammate's browser can't scan the reply (ov-778): its offer
             // names a reply key, so the reply is sealed to it and posted once,
             // for the teammate's account, as for one's own browser (ov-770).
             sealedReply.send(offer: rescanned, reply: data, heldFor: scannedAt.map { Date().timeIntervalSince($0) } ?? .infinity)

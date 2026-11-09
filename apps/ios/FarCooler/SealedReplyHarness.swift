@@ -15,6 +15,9 @@ import SwiftUI
 ///   -sealed-reply-none         it names none: the QR-only ceremony
 ///   -sealed-reply-malformed    it names one that isn't a key
 ///   -sealed-reply-refused      the relay refuses the post: no code is shown
+///   -sealed-reply-double       Confirm is tapped twice while Face ID is up
+///   -sealed-reply-again        the reply is sent a second time, and the relay
+///                              keeps the first (409)
 struct SealedReplyHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-sealed-reply") }
 
@@ -82,18 +85,36 @@ struct SealedReplyHarness: View {
 
     private func run() async {
         guard let offer = Self.offer() else { return }
-        store.confirmTap = { _ in .confirmed }
+        let arguments = CommandLine.arguments
+        store.confirmTap = { _ in
+            // Face ID up for a moment, long enough for a second tap to land.
+            if arguments.contains("-sealed-reply-double") { try? await Task.sleep(for: .milliseconds(300)) }
+            return .confirmed
+        }
         store.certify = { _, _ in }
         store.enroller = { _, _, _, _, runners in
             Dictionary(uniqueKeysWithValues: runners.map { ($0.id, Connection.Enrollment.written(tunnel: "")) })
         }
         store.sealedReply.post = { ceremony, account, sealed in
             posts.append((ceremony, account, sealed))
-            return CommandLine.arguments.contains("-sealed-reply-refused") ? .alreadyPosted : .posted
+            if arguments.contains("-sealed-reply-refused") { return .alreadyPosted }
+            return posts.count > 1 && arguments.contains("-sealed-reply-again") ? .alreadyPosted : .posted
         }
         store.read(offer, runners: [Self.cosmo], grantingFrom: Self.cosmo)
-        if case .confirming = store.phase { await store.confirm() }
+        if case .confirming = store.phase {
+            if arguments.contains("-sealed-reply-double") {
+                async let first: Void = store.confirm()
+                async let second: Void = store.confirm()
+                _ = await (first, second)
+            } else {
+                await store.confirm()
+            }
+        }
         await store.sealedReply.sending?.value
+        if arguments.contains("-sealed-reply-again") {
+            store.sealedReply.send(offer: Data(offer.utf8), reply: Data(store.code.utf8), heldFor: 0)
+            await store.sealedReply.sending?.value
+        }
         if let posted = posts.first {
             opened = open(posted, expecting: offer)
         } else {

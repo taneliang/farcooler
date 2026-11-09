@@ -44,6 +44,26 @@ final class SealedReplyUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["sealed-reply-code"].exists)
     }
 
+    /// Confirm tapped twice while Face ID is up builds and posts one reply
+    /// (ov-778 review L1).
+    func testADoubleTapOnConfirmPostsOnce() {
+        let app = launch(["-sealed-reply-double"])
+        XCTAssertEqual(label(app, "sealed-posts"), "1")
+        XCTAssertEqual(label(app, "sealed-reply-status"), "Sent to Chrome on Mac. Check that it shows this code:")
+    }
+
+    /// The same reply sent again within the window: the relay keeps the first
+    /// (409), and the browser holds the first, so the phone shows the first's
+    /// code rather than "couldn't send" (ov-778 review L1).
+    func testASecondSendTheRelayAlreadyHoldsShowsTheFirstCode() {
+        let app = launch(["-sealed-reply-again"])
+        XCTAssertEqual(label(app, "sealed-posts"), "2")
+        XCTAssertEqual(label(app, "sealed-reply-status"), "Sent to Chrome on Mac. Check that it shows this code:")
+        let opened = label(app, "sealed-opened-code")
+        XCTAssertEqual(opened.count, 6, opened)
+        XCTAssertEqual(label(app, "sealed-reply-code"), opened, "the code shown is the one the browser holds")
+    }
+
     func testAnOfferWithoutAReplyKeyIsTheQrOnlyCeremony() {
         let app = launch(["-sealed-reply-none"])
         XCTAssertEqual(label(app, "sealed-posts"), "0")

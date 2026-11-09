@@ -88,9 +88,20 @@ class SealedReply {
         _state.value = State.SENDING
         val outcome = post(asked.ceremony, asked.account, sealed.first)
         val posted = outcome == SealedReplyPost.Outcome.POSTED
-        _code.value = if (posted) sealed.second else null
-        _state.value = if (posted) State.SENT else State.NOT_SENT
+        if (posted) delivered[asked.ceremony] = sealed.second
+        val first = if (outcome == SealedReplyPost.Outcome.ALREADY_POSTED) delivered[asked.ceremony] else null
+        _code.value = if (posted) sealed.second else first
+        _state.value = if (posted || first != null) State.SENT else State.NOT_SENT
     }
+
+    /**
+     * The code of each reply the relay stored, by ceremony, kept across [reset].
+     * A second send for the same ceremony (Add again within the window) seals
+     * afresh, so its code differs, and the relay keeps the first (409). The
+     * browser holds the first, so its code is the one to show, never "couldn't
+     * send" (ov-778 review L1).
+     */
+    private val delivered = mutableMapOf<String, String>()
 
     fun reset() {
         _state.value = State.NONE

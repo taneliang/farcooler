@@ -83,6 +83,20 @@ final class TeammateAddUITests: XCTestCase {
             "access=member handle=bob-smith name=Bob Smith account=user_bob runners=build-box")
     }
 
+    /// A teammate's phone scans the reply, so its offer names no reply key and
+    /// nothing is sealed or posted (ov-778 review L2).
+    func testATeammatesPhoneOfferPostsNothing() {
+        let app = launch()
+        _ = confirmation(app)
+        element(app, "teammate-runner-build-box").tap()
+        element(app, "teammate-add").tap()
+        XCTAssertTrue(
+            app.staticTexts["Scan this code with Bob’s iPhone"].waitForExistence(timeout: 30),
+            "no reply: \(app.debugDescription)")
+        XCTAssertEqual(element(app, "teammate-sealed").value as? String, "none")
+        XCTAssertFalse(app.descendants(matching: .any)["sealed-reply-status"].exists)
+    }
+
     /// A teammate's browser can't scan the reply (ov-778): its offer names a
     /// reply key, so Add Teammate seals the reply and posts it once, for the
     /// teammate's account, and the code to match goes up beside the QR code.
