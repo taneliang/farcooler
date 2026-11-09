@@ -170,6 +170,39 @@ final class PhoneTreeUITests: XCTestCase {
             "Back showed the tree held while covered, without bil-77: \(app.debugDescription)")
     }
 
+    /// The plan list isn't drawn again while a screen is over it (ov-791),
+    /// so it must draw once it's back on top: a task added meanwhile is
+    /// counted in it after Back, with nothing more from the runner.
+    func testThePlanListShowsWhatMovedWhileItWasCovered() {
+        let app = XCUIApplication.phoneHarness(["-phone-empty-inbox"])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        // In Progress counts No Theme's tasks in progress, as bil-77 will be.
+        let chip = app.buttons["plan-filter-inProgress"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 10), "no In Progress filter")
+        chip.tap()
+        defer { if chip.exists { chip.tap() } }  // filters are remembered: leave none for the next test
+        let group = app.buttons["tree-row-No Theme"]
+        XCTAssertTrue(app.reveal(group) || group.waitForExistence(timeout: 10), "no No Theme under In Progress")
+        let before = group.label
+        XCTAssertFalse(app.buttons["tree-row-bil-77"].exists, "bil-77 is on the board before it was added")
+        guard let counted = Int(before.split(separator: " ").last ?? "") else { return XCTFail("No Theme isn't counted: \(before)") }
+        group.tap()
+        XCTAssertTrue(app.buttons["tree-row-bil-9"].waitForExistence(timeout: 10), "No Theme's level didn't open")
+        // The board grows while No Theme's level covers the plan list.
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName("com.farcooler.harness.board-grows" as CFString),
+            nil, nil, true)
+        Thread.sleep(forTimeInterval: 3)
+        app.tapBack()
+        XCTAssertTrue(group.waitForExistence(timeout: 10), "Back didn't return to the plan list")
+        let grown = NSPredicate(format: "label == %@", "No Theme, \(counted + 1)")
+        XCTAssertTrue(
+            XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: grown, object: group)], timeout: 10) == .completed,
+            "Back showed the plan list as it was while covered: \(group.label), was \(before)")
+    }
+
     // MARK: Captures
 
     /// The strip, the peek and the full sheet, light and dark. Opt-in, as `PlanUITests.testCaptures` is: it flips the

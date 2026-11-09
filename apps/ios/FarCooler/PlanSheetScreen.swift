@@ -95,10 +95,10 @@ struct PhonePlanList<Top: View>: View {
     @State private var narrow: PlanFilter?
     @State private var making = false
     @State private var moveFailure: ActionFailure?
-    /// The tree it last drew (ov-791): under a pushed screen it keeps that
-    /// tree rather than building it again on every board move, a dropped
-    /// frame each in the screen on top. On a phone only: in columns what's
-    /// beside the top screen is in view.
+    /// The tree and the pass it last drew (ov-791): under a pushed screen
+    /// it keeps both rather than drawing again on every board move, a
+    /// dropped frame each in the screen on top. On a phone only: in columns
+    /// what's beside the top screen is in view.
     @State private var held = HeldTree()
     @State private var moves = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -124,8 +124,51 @@ struct PhonePlanList<Top: View>: View {
             // The plan as the Mac's plan column draws it (ov-874).
             PhonePlanColumn(connection: connection, summary: summary, place: place, inSheet: inSheet, top: top)
         } else {
-            treeList
+            PhonePlanTreeList(
+                connection: connection, summary: summary, place: place, inSheet: inSheet, compactBand: compactBand,
+                top: top, narrow: $narrow, making: $making, moveFailure: $moveFailure, held: held, pass: pass
+            )
+            .equatable()
+            // Drawn again when the stack moves, so it draws once it's on
+            // top again.
+            .onReceive(navigator?.objectWillChange.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in moves &+= 1 }
         }
+    }
+
+    /// The list's pass: a new one each time it's drawn on top, so it's drawn
+    /// as everything it reads changes, and the last one while a screen is
+    /// over it, so nothing under the screen is built again: not its tree,
+    /// nor Unread's summary, nor History's counts, each a walk of the board.
+    private var pass: Int {
+        _ = moves
+        if sizeClass == .compact, navigator?.isOnTop(inSheet ? nil : .workspace(place)) == false { return held.pass }
+        held.pass &+= 1
+        return held.pass
+    }
+}
+
+/// `PhonePlanList`'s list: drawn only when its `pass` moves (ov-791). It
+/// reads the connection but doesn't observe it; the list above does, and
+/// moves the pass.
+private struct PhonePlanTreeList<Top: View>: View, Equatable {
+    let connection: Connection
+    let summary: WorkspaceSummary
+    let place: PhoneWorkspace
+    let inSheet: Bool
+    let compactBand: Bool
+    let top: () -> Top
+    @Binding var narrow: PlanFilter?
+    @Binding var making: Bool
+    @Binding var moveFailure: ActionFailure?
+    let held: HeldTree
+    let pass: Int
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.phoneNavigator) private var navigator
+
+    nonisolated static func == (a: Self, b: Self) -> Bool { a.pass == b.pass }
+
+    var body: some View {
+        treeList
     }
 
     private var treeList: some View {
@@ -181,9 +224,6 @@ struct PhonePlanList<Top: View>: View {
             PlanFilter.remember(chosen, runner: place.runner, workspace: place.workspace)
         }
         .task { await connection.readTree(summary) }
-        // Drawn again when the stack moves, so it builds its tree once it's
-        // on top again.
-        .onReceive(navigator?.objectWillChange.eraseToAnyPublisher() ?? Empty<Void, Never>().eraseToAnyPublisher()) { _ in moves &+= 1 }
         .refreshable {
             _ = await connection.readBoard(summary)
             if connection.keepsPages { await connection.readPages(summary) }
@@ -197,7 +237,6 @@ struct PhonePlanList<Top: View>: View {
     /// The tree under its filter: the one last drawn while a screen is over
     /// it, else built from what's read.
     private var tree: (work: [OneTreeNode], below: [OneTreeNode]) {
-        _ = moves
         let covered = sizeClass == .compact && navigator?.isOnTop(inSheet ? nil : .workspace(place)) == false
         if covered, let kept = held.root { return kept }
         let made = PhoneTree.root(connection.oneTree(summary, filter: .open, narrow: narrow))
@@ -326,4 +365,6 @@ struct ChipFlow: Layout {
 /// read while it's covered, and never a reason to draw again.
 final class HeldTree {
     var root: (work: [OneTreeNode], below: [OneTreeNode])?
+    /// The pass it was last drawn in (`PhonePlanList.pass`).
+    var pass = 0
 }
