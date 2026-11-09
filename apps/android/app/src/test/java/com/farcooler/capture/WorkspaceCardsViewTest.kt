@@ -60,7 +60,7 @@ import android.view.ViewGroup
 class WorkspaceCardsViewTest {
     private val plan = Plan.decode(Json.parseToJsonElement(repositoryFile("test/fixtures/plan-seeded.json")).jsonObject["plan"]!!.jsonObject)
     private val strip = PlanStrip.of(plan, 2, Terminal(id = "o", state = "running", activity = "working", role = "orchestrator"))
-    private val quiet = PlanStrip.of(Plan(), 0, Terminal(id = "o", state = "running", activity = "idle", role = "orchestrator"))
+    private val quiet = PlanStrip.of(Plan.decode(kotlinx.serialization.json.JsonObject(emptyMap())), 0, Terminal(id = "o", state = "running", activity = "idle", role = "orchestrator"))
     private val busy = AgentsFixtures.running()
 
     @org.junit.Before fun words() = com.farcooler.model.CorePhrasesFixture.install()
