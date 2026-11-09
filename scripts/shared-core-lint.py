@@ -141,7 +141,7 @@ def folded(literal: str) -> str:
 
 def rule_rust_copy(rust: set[str], native: dict[str, str]) -> set[str]:
     """`rust` is compared in any case, so Apple's title case finds Rust's sentence case."""
-    wanted = {folded(r): r for r in rust}
+    wanted = {folded(r) for r in rust}
     out = set()
     for path, text in native.items():
         for line in text.splitlines():
@@ -149,7 +149,9 @@ def rule_rust_copy(rust: set[str], native: dict[str, str]) -> set[str]:
                 continue
             for literal in literals(line):
                 if folded(literal) in wanted:
-                    out.add(f"{path}::{wanted[folded(literal)]}")
+                    # Keyed by the folded form: Rust holds "Mark ready" and "Mark Ready" both, and which one
+                    # a set yields differs between runs.
+                    out.add(f"{path}::{folded(literal)}")
     return out
 
 
