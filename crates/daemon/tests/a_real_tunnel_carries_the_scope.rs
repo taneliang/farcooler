@@ -1035,6 +1035,15 @@ impl Runner {
         let authorized_keys = home.join(".ssh").join("authorized_keys");
         write_fence(&authorized_keys, devices);
         scaffold(&authorized_keys, &home, &runtime, &bin, devices);
+        // And the daemon reads the file sshd does, as a real runner's does.
+        // The forced command runs it with `FARCOOLER_HOME` set, and a daemon
+        // with one reads `$FARCOOLER_HOME/ssh/authorized_keys` (ov-937), then
+        // refuses a session naming a device it has no line for (ov-980,
+        // `sessions::is_known_device`). A symlink, not a copy, so a revoke that
+        // rewrites sshd's file is what the daemon reads too (ov-1055).
+        std::fs::create_dir_all(runtime.join("ssh")).expect("the daemon's ssh directory");
+        std::os::unix::fs::symlink(&authorized_keys, runtime.join("ssh").join("authorized_keys"))
+            .expect("the daemon's fence is sshd's");
 
         let ssh_port = free_port();
         let sshd = start_sshd(sshd_binary, &root, &authorized_keys, ssh_port).await;
