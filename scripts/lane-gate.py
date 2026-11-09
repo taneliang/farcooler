@@ -1058,10 +1058,10 @@ def _self_test():
     expect("site", reaches("services/site/src/index.ts"), always | {"site"})
     expect("common reaches web and site", reaches("services/common/session.ts"), always | {"web", "site"})
     expect("web", reaches("services/web/src/a.ts"), always | {"web", "site"})
-    expect("android", reaches("apps/android/app/src/A.kt"), always | {"android"})
+    expect("android", reaches("apps/android/app/src/A.kt"), always | {"android", "relay"})
     expect("ios", reaches("apps/ios/FarCooler/App.swift"), always | {"ios"})
     expect("macos", reaches("apps/macos/Sources/x.swift"), always | {"swift", "swift-tests"})
-    expect("agentkit reaches the iOS app too", reaches("apps/shared/AgentKit/Sources/a.swift"), always | {"swift", "swift-tests", "ios"})
+    expect("agentkit reaches the iOS app and the Android tests that read it", reaches("apps/shared/AgentKit/Sources/a.swift"), always | {"swift", "swift-tests", "ios", "android"})
     expect("tailcat reaches the tunnel", "tunnel" in reaches("crates/tailcat/go/a.go"), True)
     expect("a daemon change reaches every family (ci-changes.py) but not the tunnel or iOS",
            reaches("crates/daemon/src/git.rs"), always | {"rust", "swift", "swift-tests", "android", "web", "relay"})
