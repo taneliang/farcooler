@@ -15,6 +15,10 @@ export interface Reports {
   csp: string[]
   /// Registrations the stub relay accepted.
   registered?: number
+  /// The sealed copies the stub relay keeps, by credential id (ov-779), and
+  /// how many saves it took.
+  vaults?: Map<string, { credential: string; uv: boolean; sealed: string }>
+  vaultSaves?: number
 }
 
 export interface ShellOptions {
@@ -76,6 +80,20 @@ export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pic
       return withHeaders(JSON.stringify(ok ? {} : { error: 'refused' }), ok ? 200 : 400, { 'content-type': 'application/json' })
     }
     if (path === '/api/relay/ceremony/reply') return withHeaders('{}', 404, { 'content-type': 'application/json' })
+    // A browser's sealed copies (ov-779), kept as the relay keeps them: by
+    // credential id, a save replacing the one before. Ciphertext only, so the
+    // walk can check nothing in the clear reached it.
+    if (path === '/api/relay/web/vault') {
+      return withHeaders(JSON.stringify({ vaults: [...(reports.vaults?.values() ?? [])] }), 200, { 'content-type': 'application/json' })
+    }
+    if (path === '/api/relay/web/vault/save') {
+      const sent = (await request.json().catch(() => null)) as { credential?: unknown; uv?: unknown; sealed?: unknown } | null
+      if (typeof sent?.credential !== 'string' || typeof sent.uv !== 'boolean' || typeof sent.sealed !== 'string') return withHeaders('{"error":"body"}', 400, { 'content-type': 'application/json' })
+      reports.vaults ??= new Map()
+      reports.vaults.set(sent.credential, { credential: sent.credential, uv: sent.uv, sealed: sent.sealed })
+      reports.vaultSaves = (reports.vaultSaves ?? 0) + 1
+      return withHeaders('{"ok":true}', 200, { 'content-type': 'application/json' })
+    }
     if (path === '/') {
       const shell = dist('/index.html')
       return withHeaders(shell, 200, {

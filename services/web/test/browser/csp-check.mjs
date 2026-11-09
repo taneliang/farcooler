@@ -38,6 +38,13 @@
 //   decision is answered and a note is added; an agent's pane switches between
 //   its conversation and its terminal; images attached, pasted and dropped
 //   reach the agent as one compose, and one past the limit is refused;
+// - on an authenticator with PRF (ov-779): the node key is derived from the
+//   passkey and a sealed copy reaches the relay; after the site's storage is
+//   cleared, Use Passkey brings the runners back at one touch and no
+//   ceremony, with the enrolled node key; a second browser profile holding
+//   the same passkey derives that node key too. Every step before it runs on
+//   an authenticator without PRF, which is the browser that keeps working as
+//   before;
 // - the passkey can't be used from the parent domain's other child
 //   (canary.farcooler.com for canary): Chromium refuses it (ov-767
 //   acceptance 2);
@@ -236,12 +243,14 @@ let credential = null
 let touches = 0
 
 /// A virtual authenticator on `page`: platform, resident keys, presence
-/// simulated (a touch), holding `credential` if there is one.
-async function authenticator(context, page) {
+/// simulated (a touch), holding `credential` if there is one. With `prf` it
+/// answers the WebAuthn PRF extension, as a passkey manager does (ov-779);
+/// without it, as a browser or authenticator with none.
+async function authenticator(context, page, prf = false) {
   const cdp = await context.newCDPSession(page)
   await cdp.send('WebAuthn.enable', { enableUI: false })
   const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
-    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+    options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true, ...(prf ? { hasPrf: true } : {}) },
   })
   if (credential) await cdp.send('WebAuthn.addCredential', { authenticatorId, credential })
   cdp.on('WebAuthn.credentialAsserted', () => touches++)
@@ -258,11 +267,13 @@ async function authenticator(context, page) {
 }
 
 /// One launch of Chromium on one profile, so IndexedDB (the device) survives
-/// from launch to launch, with `video` as the fake camera when given.
-async function launch(video, secret) {
+/// from launch to launch, with `video` as the fake camera when given. `prf`
+/// and `dir` are the eviction walk's: an authenticator with PRF, and another
+/// profile for a second browser.
+async function launch(video, secret, { prf = false, dir = profile } = {}) {
   const args = ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream']
   if (video) args.push(`--use-file-for-fake-video-capture=${video}`)
-  const context = await chromium.launchPersistentContext(profile, { args, permissions: ['camera'], viewport: { width: 1280, height: 800 } })
+  const context = await chromium.launchPersistentContext(dir, { args, permissions: ['camera'], viewport: { width: 1280, height: 800 } })
   await context.route(`${origin}/**`, serve)
   await context.route(`https://${SIBLING}/**`, serve)
   if (runner) {
@@ -294,7 +305,7 @@ async function launch(video, secret) {
   const page = context.pages()[0] ?? (await context.newPage())
   if (throttle > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: throttle })
   watch(page)
-  const passkeys = await authenticator(context, page)
+  const passkeys = await authenticator(context, page, prf)
   return { context, page, passkeys }
 }
 
@@ -356,6 +367,102 @@ function refusable() {
     globalThis.__fcRefuseOnce = false
     return Promise.reject(new DOMException('refused without a click', 'NotAllowedError'))
   }
+}
+
+/// Clear everything this origin keeps in `page`'s browser, as the person's
+/// "clear site data" or Safari's seven-day rule does.
+async function clearSite(context, page) {
+  const cdp = await context.newCDPSession(page)
+  await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' })
+  await cdp.detach()
+}
+
+/// ov-779: the node key survives storage eviction. On an authenticator with
+/// PRF, a fresh browser derives its node key from the passkey and the sealed
+/// copy reaches the relay; once the site's storage is cleared, Use Passkey is
+/// one touch and Connect the usual one, with no new passkey and no code. Then
+/// a second browser, a profile of its own whose authenticator holds the same
+/// passkey (a synced one), comes back with the node key the first enrolled.
+/// Returns the launch it ends on.
+async function evictionWalk(session) {
+  credential = null
+  await session.context.close()
+  session = await launch(null, null, { prf: true })
+  let page = session.page
+  await page.goto(`${origin}/version.json`)
+  await clearSite(session.context, page)
+  reports.vaults?.clear()
+  await page.goto(origin)
+  await makePasskey(page)
+  const fresh = await device(page)
+  const offer = JSON.parse(fresh.offer)
+  if (!fresh.nodeDerived) failures.push('a passkey with PRF did not derive the node key')
+  if (offer.node_key !== fresh.nodePub) failures.push('the offer names a node key other than the derived one')
+  runner.enroll(offer.key_a)
+  const id = fresh.passkey.id
+  await session.passkeys.held(id)
+  const secret = await replySecret(page)
+  await session.context.close()
+  session = await launch(replyVideo(offer, null, 'prf'), secret, { prf: true })
+  page = session.page
+  await page.goto(origin)
+  await enrolling(page)
+  await page.click('#scan')
+  await connect(page)
+  const enrolled = await device(page)
+  const copy = reports.vaults?.get(id.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', ''))
+  if (!copy) failures.push('no sealed copy reached the relay')
+  else {
+    const clear = Buffer.from(copy.sealed, 'base64url').toString('latin1')
+    if (['studio', runner.hostKey, '"runners"', enrolled.nodePriv].some(s => clear.includes(s))) failures.push('the sealed copy holds a runner, host key or node key in the clear')
+  }
+  console.log(`csp-check: a passkey with PRF derived the node key the offer named, and its sealed copy reached the relay (${reports.vaultSaves} saves)`)
+
+  // The site's storage is cleared: one touch brings the runners back.
+  const registrations = reports.registered
+  await clearSite(session.context, page)
+  if (await device(page)) failures.push('clearing the site left the device behind')
+  await page.reload()
+  await statusSays(page, 'Reconnect with your passkey')
+  await shoot(page, 'restore')
+  const at = touches
+  await page.click('#status-action')
+  await statusSays(page, 'Connect to studio')
+  const restoring = touches - at
+  const restored = await device(page)
+  if (restoring !== 1) failures.push(`restoring cost ${restoring} touches, not 1`)
+  if (restored.offer || reports.registered !== registrations || !(await page.isHidden('#enroll'))) failures.push('restoring went through a ceremony')
+  if (restored.nodePriv !== enrolled.nodePriv || restored.nodePub !== enrolled.nodePub || !restored.nodeDerived) failures.push('the restored node key is not the enrolled one')
+  if (restored.passkey?.id !== id || !restored.registered) failures.push('the restored device has another passkey, or is not registered')
+  await connect(page)
+  console.log(`csp-check: after the site's storage was cleared, Use Passkey cost ${restoring} touch and no ceremony, the node key was the enrolled one, and Connect opened the terminal at ${touches - at - restoring} more`)
+
+  // A second browser sharing the passkey derives the same node key.
+  await session.passkeys.held(id)
+  await session.context.close()
+  const otherProfile = mkdtempSync(join(tmpdir(), 'fc-csp-profile2-'))
+  try {
+    const other = await launch(null, null, { prf: true, dir: otherProfile })
+    const page2 = other.page
+    await page2.goto(origin)
+    await statusSays(page2, 'Reconnect with your passkey')
+    await page2.click('#status-action')
+    const reached = await statusSays(page2, 'Connect to studio', 30_000).then(
+      () => true,
+      () => false,
+    )
+    const second = await device(page2)
+    if (!reached) failures.push(`a second browser sharing the passkey didn't come back: ${JSON.stringify(await page2.textContent('#status'))}`)
+    else if (second.nodePub !== enrolled.nodePub || second.nodePriv !== enrolled.nodePriv) failures.push('a second browser sharing the passkey derived another node key')
+    else {
+      await connect(page2)
+      console.log('csp-check: a second browser sharing the passkey derived the enrolled node key and connected')
+    }
+    await other.context.close()
+  } finally {
+    rmSync(otherProfile, { recursive: true, force: true })
+  }
+  return await launch(null, null, { prf: true })
 }
 
 /// The stored device, or an edit to it, through the page's own IndexedDB.
@@ -1155,6 +1262,9 @@ try {
       await detailWalk(page)
       await imageWalk(page)
       await switchWalk(page)
+      session = await evictionWalk(session)
+      page = session.page
+      await page.goto(origin)
     }
 
     // ov-767 acceptance 2: the passkey, made for the app host, can't be used

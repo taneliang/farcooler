@@ -157,6 +157,8 @@ export async function userHandle(account: string): Promise<Uint8Array> {
 /// - `userVerification: 'discouraged'`: one touch, no PIN or face (R-89). sshd
 ///   checks presence, which every assertion carries, not verification.
 /// - ES256 only: the one algorithm OpenSSH's sk keys have.
+/// - `prf`, so the passkey can give the keys back after this site's storage
+///   is cleared (vault.ts, ov-779).
 export async function makePasskey(rpId: string, user: Uint8Array, email: string): Promise<Passkey> {
   let credential: PublicKeyCredential
   try {
@@ -169,6 +171,9 @@ export async function makePasskey(rpId: string, user: Uint8Array, email: string)
         authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'discouraged' },
         attestation: 'none',
         timeout: 120_000,
+        // A security key answers PRF only for a credential made with it
+        // (CTAP2 hmac-secret); a passkey manager ignores or grants it.
+        extensions: { prf: {} } as AuthenticationExtensionsClientInputs,
       },
     })) as PublicKeyCredential
   } catch (e) {
