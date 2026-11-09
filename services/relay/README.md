@@ -222,6 +222,25 @@ teammates. What stops it is the browser's comparison code (web slice 8): the
 person matches six characters computed over the reply against the granting
 phone's screen before the browser keeps anything.
 
+## Browsers' sealed copies
+
+A browser keeps its runner list in site storage, which Safari wipes after
+seven days without a visit. So the page also keeps a copy here, one per
+passkey (`src/web-vault.ts`, migration 0032, ov-779). It is AES-GCM under a key
+the page derives from the passkey's PRF output, which the relay never sees.
+
+- `POST /v1/web/vault` takes `{credential, uv, sealed}` and replaces the
+  account's copy for that passkey. `sealed` is at most 12 KB of base64url, and
+  a body that looks unsealed gets 400. An account keeps at most 8 passkeys'
+  copies; a ninth gets 409 `full`.
+- `GET /v1/web/vault` answers `{vaults}`, every copy the signed-in account
+  keeps, and nobody else's.
+- Both spend `CEREMONY_REPLY_LIMIT`.
+
+The relay can't read or forge a copy. It could withhold one, which costs the
+person a new enrollment, or hand back an older one, which lists the runners as
+they were then.
+
 ## Live Activities
 
 A `/v1/notify` that carries a `status` also drives the lock-screen card, on top

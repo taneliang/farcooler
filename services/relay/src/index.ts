@@ -16,6 +16,7 @@ import { record, type Metrics } from './analytics'
 import { withinRate } from './auth-limit'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 import { ceremonyReply, sweepCeremonyReplies } from './ceremony-reply'
+import { webVault } from './web-vault'
 import { directory, DIRECTORY_PREFIX } from './directory'
 import { forgetInstall } from './directory/notices'
 import { takeInventory } from './directory/inventory'
@@ -106,6 +107,9 @@ export default {
       // The sealed ceremony reply (ov-769) takes a GET, so it goes first.
       const reply = await ceremonyReply(request, env, url.pathname)
       if (reply) return reply
+      // So does a browser's sealed copy (ov-779).
+      const vault = await webVault(request, env, url.pathname)
+      if (vault) return vault
       if (request.method !== 'POST') return json({ error: 'method' }, 405)
       // The unauthenticated routes, throttled before they do any work.
       //
