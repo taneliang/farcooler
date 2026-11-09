@@ -3,8 +3,7 @@ import Foundation
 /// The conversation view of a terminal-mode claude or codex pane on a phone
 /// (ov-373, ov-416):
 /// the rules a phone decides by, here so `swift test` reads them back. The
-/// Mac's native view (ov-372) keeps its own copies in `NativePaneModel` and
-/// `NativeCopy`, with the same words; a later card moves it onto these.
+/// Mac's native view (ov-372) reads the same words.
 extension AgentConversation {
     /// Whether a runner serves the view: rows to read and a way to send. A
     /// runner with rows from before `terminal.compose` gets the terminal, not
@@ -313,7 +312,6 @@ extension AgentConversation {
     /// "0:04", "1:12", "2:03:09": the format a running timer counts in, so
     /// a finished time reads like the running one did.
 
-
     /// What a subagent row says of its work: "1 tool", "14 tools", or nothing
     /// while the count is unknown. 0 is how an agent with no transcript read
     /// (its notification may carry no count either) looks, and "0 tools" would
@@ -352,6 +350,7 @@ extension AgentConversation {
         case .other?: return say("ended", [:])
         }
     }
+
     /// `viewer` is who this device is on the runner (`RunnerPeople.you`: ""
     /// for the owner, a member's handle, nil if not told). On a runner with
     /// members, an answered ask says who answered (`Ask.answeredSentence`);
@@ -412,13 +411,14 @@ extension AgentConversation {
         let answer = ConversationWords.table(agent)?.answer
         return (timedOut ? answer?["timed_out"] : answer?[what ?? ""]) ?? answer?[""] ?? ""
     }
+
     /// A Queued row's label. `Sent` is a message claude took into the turn
     /// it was running; one sent as a turn of its own is that turn, and its
     /// row is gone (ov-452). `InBox` is a message in claude's box that the
     /// runner sends when the turn ends (ov-827).
     public static func queuedLabel(_ state: String) -> String {
         ConversationWords.phrase("queued", by: state)
-    }}
+    }
 
 /// Where a held ask's answer goes (ov-370): the runner's
 /// `terminal.agent_answer`, which writes it to the hook claude is waiting on.
@@ -457,7 +457,6 @@ extension AgentRowStore {
         AgentConversation.suggestion(newestTurn: newestTurn, draft: draft, stale: isStale)
     }
 }
-
 
 /// An agent conversation's words, from the Rust core's `conversation_words`
 /// (ov-1049, R-112) through the plan view's bridge: one table per agent, asked once.

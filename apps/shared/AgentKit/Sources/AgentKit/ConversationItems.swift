@@ -86,6 +86,7 @@ extension AgentConversation {
         let line = tools.contains { $0.status == .running } ? group.running : group.done
         return line.replacingOccurrences(of: "{n}", with: "\(tools.count)")
     }
+
     /// What a group's calls were for, from their own summaries: a command's
     /// description, a file's name. Each said once, in order, joined by
     /// commas; a view cuts it to fit.
@@ -136,6 +137,7 @@ extension AgentConversation {
     public static func originNote(_ turn: AgentRow.Turn) -> String? {
         turn.origin == "Queued" ? ConversationWords.phrase("origin_queued") : nil
     }
+
     /// A scheduled task's firing (`CronCreate`, `/loop`): drawn as one, with
     /// its prompt folded, never as the person's message.
     public static func isScheduled(_ turn: AgentRow.Turn) -> Bool {
@@ -156,6 +158,7 @@ extension AgentConversation {
     public static func harnessTitle(_ harness: AgentRow.Harness) -> String {
         harness.kind == "Status" ? harness.title : ConversationWords.phrase("harness", by: harness.kind, ["name": agentName(harness)])
     }
+
     /// What the agent is called: its launch's description, else "agent" and
     /// the first characters of its id, else "a subagent".
     public static func agentName(_ harness: AgentRow.Harness) -> String {
@@ -163,6 +166,7 @@ extension AgentConversation {
         guard let id = harness.agentId, !id.isEmpty else { return ConversationWords.phrase("harness_a_subagent") }
         return ConversationWords.phrase("harness_agent", ["id": String(id.prefix(6))])
     }
+
     /// The report's agent, when its transcript can be opened: its row's id
     /// and its `agentId`, as `nativeOpenAgent` takes them.
     public static func harnessAgent(_ harness: AgentRow.Harness) -> (row: String, agentId: String)? {
@@ -183,7 +187,8 @@ extension AgentConversation {
         let done = tasks.items.filter { $0.status == "Completed" }.count
         return ConversationWords.phrase("tasks_progress", ["done": "\(done)", "n": "\(tasks.items.count)"])
     }
+
     /// A task's state, as VoiceOver says it.
     public static func taskState(_ item: AgentRow.TaskItem) -> String {
         ConversationWords.phrase("task", by: item.status)
-    }}
+    }
