@@ -4,14 +4,17 @@
 //! real ssh would. Nothing here reaches the network.
 use super::*;
 use super::coding_verbs_tests::{at_join, batched_push, command, lander, outbox, phase_of, until};
+use super::coding_tests::admitted;
 
 struct Remote { _dir: tempfile::TempDir, runtime: Runtime, bare: PathBuf, calls: PathBuf }
 
-/// The stand-in ssh: it logs what it was asked to run, refuses a push when `REFUSE` exists, and otherwise runs
-/// the remote's command (the last argument) with nothing of the caller's environment.
+/// The stand-in ssh: it logs what it was asked to run, refuses a push when `REFUSE` exists and every call when
+/// `REFUSE_ALL` does, and otherwise runs the remote's command (the last argument) with nothing of the caller's
+/// environment.
 const SSH: &str = r#"#!/bin/sh
 for a; do last="$a"; done
 printf '%s\n' "$last" >> "$CALLS_FILE"
+if [ -e "$REFUSE_FILE-all" ]; then echo 'git@farcooler-test: Permission denied (publickey).' >&2; exit 255; fi
 case "$last" in git-receive-pack*) if [ -e "$REFUSE_FILE" ]; then echo 'git@farcooler-test: Permission denied (publickey).' >&2; exit 255; fi;; esac
 exec /usr/bin/env -i PATH=/usr/bin:/bin /bin/sh -c "$last"
 "#;
@@ -43,9 +46,11 @@ fn plain_git(dir: &Path, args: &[&str]) {
 async fn head(bare: &Path) -> String { adapters::git(bare, &["rev-parse", "refs/heads/main"]).await.unwrap() }
 fn calls(remote: &Remote) -> String { std::fs::read_to_string(&remote.calls).unwrap_or_default() }
 /// The push step's settlement: its label and why.
-fn push_fact(runtime: &Runtime) -> serde_json::Value {
+fn push_fact(runtime: &Runtime) -> serde_json::Value { fact(runtime, StageKind::Push) }
+/// The last settlement of a `kind` step: its label and why.
+fn fact(runtime: &Runtime, kind: StageKind) -> serde_json::Value {
     let push = runtime.store.workflow_outbox("w").unwrap().into_iter().rev()
-        .find(|s| s.effect.kind == EffectKind::Execute(StageKind::Push)).expect("a push ran");
+        .find(|s| s.effect.kind == EffectKind::Execute(kind.clone())).expect("the step ran");
     let path = runtime.root.join("receipts").join(format!("{}.verb.json", digest(&push.effect)));
     serde_json::from_slice(&std::fs::read(path).expect("the push settled")).unwrap()
 }
@@ -73,6 +78,9 @@ async fn a_ticket_lands_on_an_ssh_remote_through_the_users_own_ssh_and_nothing_e
     let config: Vec<&str> = process["environment"].as_object().unwrap().iter()
         .filter(|(k, _)| k.starts_with("GIT_CONFIG_KEY_")).filter_map(|(_, v)| v.as_str()).collect();
     assert!(config.contains(&"protocol.ssh.allow") && !config.iter().any(|k| k.starts_with("protocol.https") || k.starts_with("credential.")), "{config:?}");
+    // A plain fast-forward: no force, no lease, no `+`. The remote refuses anything else on its own.
+    let argv: Vec<&str> = process["argv"].as_array().unwrap().iter().filter_map(|a| a.as_str()).collect();
+    assert!(!argv.iter().any(|a| a.starts_with("--force") || a.starts_with('+') || *a == "-f"), "{argv:?}");
 }
 
 #[tokio::test]
@@ -199,4 +207,111 @@ async fn a_hook_named_in_the_shared_config_after_the_guard_listing_runs_on_neith
     // Into the private one: the shared repository only serves objects.
     r.runtime.stage(&head, "refs/farcooler/push/raced").await.unwrap();
     assert!(!marker.exists(), "a hook the guard listing never saw ran");
+}
+
+#[tokio::test]
+async fn a_sign_in_the_remote_turns_down_on_every_call_ends_the_wait_with_a_sentence_not_a_timeout() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 3000);
+    let first = head(&r.bare).await;
+    at_join(&mut r.runtime, "one", &definition).await;
+    std::fs::write(r._dir.path().join("refuse-all"), b"").unwrap();
+    command(&r.runtime, Command::Queue { item: "one".into() });
+    until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    assert_eq!(head(&r.bare).await, first);
+    let fact = fact(&r.runtime, StageKind::AwaitBase);
+    assert_eq!(fact["label"], "rejected", "{fact}");
+    assert_eq!(fact["detail"]["polls"], 1, "it didn't wait out its patience");
+    assert_eq!(fact["detail"]["why"], "The landing remote turned down this runner's sign-in, so nothing was sent. Check its git and ssh credentials.");
+    assert_eq!(outbox(&r.runtime, StageKind::Push), 0);
+}
+
+/// The push of a group whose candidate an agent swapped after the gate for `forged`: a commit with the gated tree
+/// that doesn't build on the target's head. With `graft`, the shared repository is told it does. Returns the
+/// binding the push runs with, and the target's head.
+async fn forged(runtime: &mut Runtime, graft: bool) -> (Binding, String) {
+    let definition = batched_push(runtime, "any", 5000);
+    at_join(runtime, "one", &definition).await;
+    command(runtime, Command::Queue { item: "one".into() });
+    for time in 2..5 { runtime.pump(time).await.unwrap(); }
+    let mut binding = admitted(runtime).await;
+    assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Push));
+    let base = binding.base.clone();
+    let gated = binding.effect.candidate.clone().unwrap();
+    let shared = runtime.repository();
+    let forged = adapters::git(&shared, &["-c", "user.name=Agent", "-c", "user.email=agent@localhost", "commit-tree",
+        &format!("{gated}^{{tree}}"), "-m", "forged"]).await.unwrap();
+    if graft { plain_git(&shared, &["replace", "--graft", &forged, &base]); }
+    let tree = runtime.tree(&binding);
+    let branch = adapters::git(&tree, &["symbolic-ref", "--short", "HEAD"]).await.unwrap();
+    plain_git(&tree, &["checkout", "--quiet", "-B", &branch, &forged]);
+    std::fs::write(runtime.fold_index(&binding, &forged), serde_json::to_vec(&serde_json::json!({
+        "item": binding.effect.item, "base": base, "folded": forged })).unwrap()).unwrap();
+    binding.effect.candidate = Some(forged);
+    (binding, base)
+}
+async fn refuses_a_forged_candidate(runtime: &mut Runtime, bare: &Path, graft: bool) {
+    let (binding, base) = forged(runtime, graft).await;
+    let shared = runtime.repository();
+    if graft {
+        let forged = binding.effect.candidate.as_deref().unwrap();
+        assert!(crate::git::git(&shared, &["merge-base", "--is-ancestor", &base, forged]).await.unwrap().ok, "the shared repository believes the graft");
+    }
+    let (_hold, cancel) = tokio::sync::watch::channel(false);
+    let _ = runtime.execute_verb(&binding, &StageKind::Push, cancel).await;
+    assert_eq!(head(bare).await, base, "main lost nothing");
+    assert!(!runtime.root.join("receipts").join(format!("{}.push-process.json", digest(&binding.effect))).exists(), "nothing was sent");
+    let fact: serde_json::Value = serde_json::from_slice(&std::fs::read(runtime.verb_path(&binding)).unwrap()).unwrap();
+    assert_eq!(fact["label"], "rejected");
+    assert_eq!(fact["detail"]["why"], "The landing candidate doesn't build on the target's head, so nothing was sent.");
+}
+
+#[tokio::test]
+async fn a_candidate_off_the_target_is_refused_before_the_push_even_when_the_shared_repository_is_grafted_to_say_otherwise() {
+    for graft in [true, false] {
+        let mut r = remote("pass").await;
+        refuses_a_forged_candidate(&mut r.runtime, &r.bare.clone(), graft).await;
+        assert!(!calls(&r).contains("git-receive-pack"), "graft {graft}: no push reached the remote");
+        let (dir, mut runtime) = lander("pass").await;
+        refuses_a_forged_candidate(&mut runtime, &dir.path().join("private-remote.git"), graft).await;
+    }
+}
+
+#[tokio::test]
+async fn whether_a_commit_landed_is_read_in_the_private_repository_not_the_grafted_shared_one() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    at_join(&mut r.runtime, "one", &definition).await;
+    command(&r.runtime, Command::Queue { item: "one".into() });
+    until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    let landed = head(&r.bare).await;
+    let shared = r.runtime.repository();
+    let never = adapters::git(&shared, &["-c", "user.name=Agent", "-c", "user.email=agent@localhost", "commit-tree",
+        &format!("{landed}^{{tree}}"), "-m", "never pushed"]).await.unwrap();
+    // The shared repository now says the remote's head is built on a commit that was never pushed.
+    let parent = adapters::git(&shared, &["rev-parse", &format!("{landed}^")]).await.unwrap();
+    plain_git(&shared, &["replace", "--graft", &landed, &parent, &never]);
+    assert!(crate::git::git(&shared, &["merge-base", "--is-ancestor", &never, &landed]).await.unwrap().ok);
+    let identity = r.runtime.coding.as_ref().unwrap().landing.clone().unwrap();
+    let log = r._dir.path().join("on-target.output");
+    assert!(r.runtime.on_target(&identity, &landed, &log).await.unwrap());
+    assert!(!r.runtime.on_target(&identity, &never, &log).await.unwrap(), "a graft in the shared repository is not a landing");
+}
+
+#[tokio::test]
+async fn an_alternate_refs_command_in_the_shared_config_runs_on_no_fetch_into_it() {
+    let (dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    // A local landing fetches the target into the shared repository; with an alternates file there, git asks
+    // this program for the alternate's refs. An agent can write both.
+    let shared = runtime.repository();
+    let decoy = dir.path().join("decoy.git");
+    plain_git(&shared, &["init", "--bare", "--quiet", decoy.to_str().unwrap()]);
+    std::fs::write(shared.join(".git/objects/info/alternates"), format!("{}\n", decoy.join("objects").display())).unwrap();
+    let marker = dir.path().join("ran");
+    plain_git(&shared, &["config", "--local", "core.alternateRefsCommand", &format!("touch {}", marker.display())]);
+    command(&runtime, Command::Queue { item: "one".into() });
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert!(!marker.exists(), "the shared config's alternate refs command ran");
 }

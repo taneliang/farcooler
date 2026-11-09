@@ -199,13 +199,26 @@ impl Exec {
         }
         Ok(())
     }
-    /// Push `candidate` onto the network target, leased on `base`, from the private landing repository.
-    pub(super) async fn push_remote(&self, url: &str, identity: &CodingLanding, candidate: &str, base: &str,
+    /// Whether `candidate` builds on `base`, read in the private landing repository. The shared repository's
+    /// replace refs, grafts and branches are an agent's to write, and there one `git replace --graft` makes any
+    /// commit look like a descendant (ov-1026 review). Either commit missing here is brought over from the shared
+    /// repository by its hash first, which carries its real parents.
+    pub(super) async fn builds_on(&self, base: &str, candidate: &str) -> Result<bool> {
+        for commit in [base, candidate] {
+            if !super::coding::sha(commit) { return Ok(false); }
+            if self.landing_git(&["cat-file", "-e", &format!("{commit}^{{commit}}")]).await?.is_none() {
+                self.stage(commit, &format!("refs/farcooler/check/{}", &commit[..16])).await?;
+            }
+        }
+        Ok(self.landing_git(&["merge-base", "--is-ancestor", base, candidate]).await?.is_some())
+    }
+    /// Push `candidate` onto the network target from the private landing repository. A plain refspec, never a
+    /// force or a lease: the remote itself refuses anything that isn't a fast-forward of what it holds.
+    pub(super) async fn push_remote(&self, url: &str, identity: &CodingLanding, candidate: &str,
         log: &Path, cancel: tokio::sync::watch::Receiver<bool>) -> Result<(Vec<String>, std::collections::BTreeMap<String, String>, Option<i32>)>
     {
         self.remote_git(url, &["push".into(), "--porcelain".into(), "--no-follow-tags".into(), "--recurse-submodules=no".into(),
-            "--signed=false".into(), format!("--force-with-lease={}:{base}", identity.target), url.into(),
-            push_target(candidate, &identity.target)], log, Duration::from_secs(120), cancel).await
+            "--signed=false".into(), url.into(), push_target(candidate, &identity.target)], log, Duration::from_secs(120), cancel).await
     }
     /// The runner user's home, where git and ssh find their own configuration: the daemon's `HOME`, else the
     /// account's home directory.
@@ -281,7 +294,9 @@ impl Exec {
         if url.is_none() && adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
             return Err(Error::Refused("landing transport is not bare"));
         }
-        self.git_recorded(binding, &self.tree(binding), &["merge-base", "--is-ancestor", &binding.base, candidate]).await?;
+        if !self.builds_on(&binding.base, candidate).await? {
+            return Err(Error::Refused("the landing candidate does not build on the target"));
+        }
         // Disable global/system configuration and refuse URL rewriting/includes
         // in the selected local repository. No named-remote or provider lookup.
         let config = self.git_recorded(binding, &self.repository(), &["config", "--list"]).await?;
@@ -291,7 +306,7 @@ impl Exec {
         let log = self.remote_log(binding);
         let (argv, environment, exit) = if let Some(url) = url {
             self.stage_candidate(binding, candidate).await?;
-            self.push_remote(url, identity, candidate, &binding.base, &log, cancelled).await?
+            self.push_remote(url, identity, candidate, &log, cancelled).await?
         } else {
             let (program, environment) = self.git_environment().await?;
             let target = push_target(candidate, &identity.target);
@@ -299,7 +314,6 @@ impl Exec {
                 // Local push policy must not expand this one-ref operation to tags,
                 // submodule remotes or signing machinery outside its pinned identity.
                 "--no-follow-tags".into(), "--recurse-submodules=no".into(), "--signed=false".into(),
-                format!("--force-with-lease={}:{}", identity.target, binding.base),
                 identity.repository.to_string_lossy().into_owned(), target];
             durable(&log, b"")?;
             let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, &log,
