@@ -71,6 +71,12 @@ final class TranscriptLayout {
     private var before: [String: (measured: (height: CGFloat, width: CGFloat)?, by: CGRect)] = [:]
     /// The frames changed since they were last put in order.
     private var framesChanged = false
+    /// The row a resize keeps the reader on, from when it began until the
+    /// reader scrolls: the order check keeps it (`order()`). The scroller
+    /// sets it, as only it knows the reader's row apart from a pass's.
+    var reader: String? {
+        didSet { if reader != oldValue { framesChanged = true } }
+    }
     /// The transcript's width the frames were reported at. When it changes
     /// they are all let go, and only rows laid out again at the new width
     /// report: a row the stack keeps but doesn't lay out again would stay
@@ -224,11 +230,14 @@ final class TranscriptLayout {
     /// to 420 pt, rows above the reader 847 pt lower (the clip's anchoring
     /// move), one 877 pt tall over the reader's row (471 laid out). Read as
     /// placed, the reader was on that row, or its height threw the knob
-    /// 2.3% (ov-906). So the longest run of frames in order is the stack's
-    /// layout, and a frame out of it is set aside, with the height the row
-    /// had before it, until a report puts it back in order: one read
-    /// between two rows' reports of the same pass finds them out of order
-    /// for that read only.
+    /// 2.3% (ov-906). So the longest run of frames in order that keeps the
+    /// reader's row is the stack's layout: the stack anchors the clip to
+    /// that row and doesn't misplace it, where the misplaced rows can be as
+    /// many as the true ones (six each way in a gate's step to 1,260 pt).
+    /// Without the reader's row built, the longest run is. A frame out of
+    /// the run is set aside, with the height the row had before it, until
+    /// a report puts it back in order: one read between two rows' reports
+    /// of the same pass finds them out of order for that read only.
     private func ordered() -> [String: CGRect] {
         order()
         return outOfOrder.isEmpty ? frames : frames.filter { !outOfOrder.contains($0.key) }
@@ -241,12 +250,14 @@ final class TranscriptLayout {
         func inOrder(_ a: CGRect, _ b: CGRect) -> Bool { a.maxY <= b.minY + 1 }
         var out = Set<String>()
         if zip(rows, rows.dropFirst()).contains(where: { !inOrder($0.frame, $1.frame) }) {
-            // The longest run in order, and each row's place before it in that run.
-            var longest = [Int](repeating: 1, count: rows.count)
+            // The longest run in order, the reader's row worth more than all
+            // the others, and each row's place before it in that run.
+            let worth = rows.map { $0.id == reader ? rows.count : 1 }
+            var longest = worth
             var previous = [Int](repeating: -1, count: rows.count)
             for k in rows.indices {
-                for j in 0..<k where inOrder(rows[j].frame, rows[k].frame) && longest[j] + 1 > longest[k] {
-                    longest[k] = longest[j] + 1
+                for j in 0..<k where inOrder(rows[j].frame, rows[k].frame) && longest[j] + worth[k] > longest[k] {
+                    longest[k] = longest[j] + worth[k]
                     previous[k] = j
                 }
             }
@@ -766,6 +777,7 @@ final class TranscriptScroller: NSObject {
                     let knob = layout.knob(scroll)
                     let atEnd = knob.map { $0.value <= 0.0005 || $0.value >= 0.9995 } ?? true
                     resizedFrom = atEnd ? nil : layout.reading(scroll)
+                    layout.reader = resizedFrom?.id
                 }
                 widthLeft = Self.widthFrames
                 tick()
@@ -957,6 +969,7 @@ final class TranscriptScroller: NSObject {
     /// the clip right each frame until it agrees.
     func aim(_ value: Double, _ scroll: NSScrollView) {
         resizedFrom = nil
+        layout?.reader = nil
         carry = 0
         beginLive(scroll)
         aimed = value
@@ -1005,6 +1018,7 @@ final class TranscriptScroller: NSObject {
     private func readerScrolled(appKitLive: Bool) {
         guard !posting else { return }
         resizedFrom = nil
+        layout?.reader = nil
         carry = 0
         guard aimed != nil else { return }
         aimed = nil
@@ -1093,6 +1107,7 @@ final class TranscriptScroller: NSObject {
     /// window's height less the context the scroll view keeps.
     func page(_ direction: CGFloat, _ scroll: NSScrollView) {
         resizedFrom = nil
+        layout?.reader = nil
         carry = 0
         aimed = nil
         beginLive(scroll)

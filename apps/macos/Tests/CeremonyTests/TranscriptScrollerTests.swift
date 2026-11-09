@@ -281,6 +281,75 @@ extension NativeSelectionTests {
             #expect(abs(after.place - kept.place) < 1, "the clip's place moved \(after.place - kept.place) pt for rows reported where the stack never kept them")
         }
 
+        /// The stack's second pass can put the rows above the reader lower
+        /// by the clip's move while the reader's row keeps its place: in a
+        /// gate's step to 1,260 pt, six rows 781 pt down, as many in order
+        /// with the rows below the reader as the true ones. Taking the
+        /// wrong run set the reader's own row aside, and the resize
+        /// restored to a row above (real:198 to real:189, ov-906). The
+        /// reader's row is kept. Driven by hand with that pass's frames.
+        @Test("Misplaced rows as many as the true ones don't set the reader's row aside")
+        func theReadersRowWinsATie() async throws {
+            let store = AgentRowStore(key: "scroller-\(UUID())", cache: nil)
+            store.apply(try await store.ledger.page(T.page(RealSession.rows(200, of: 200))))
+            try #require(store.items.count >= 120, "the session has \(store.items.count) items")
+            let pad = TranscriptLayout.padding
+            let width: CGFloat = 1_228
+            let ids = (100..<114).map { store.items[$0].id }
+            // Each row's true top and height, from the gate's trace; the
+            // reader is in the seventh.
+            let truth: [(y: CGFloat, h: CGFloat)] = [
+                (20_595, 16), (20_623, 81), (20_716, 15), (20_743, 347), (21_102, 114), (21_228, 53),
+                (21_293, 237),
+                (21_542, 16), (21_570, 173), (21_755, 15), (21_782, 299), (22_093, 114), (22_219, 13), (22_244, 237),
+            ]
+            let reader = ids[6]
+
+            /// The reader's row and the clip's place in our heights, with
+            /// the rows reported at their true places, the window then
+            /// narrowed 20 pt, and, with `misplaced`, the six rows above
+            /// the reader then reported 781 pt down.
+            func read(misplaced: Bool) throws -> (top: String?, place: CGFloat) {
+                let window = NSWindow(contentRect: NSRect(x: -9000, y: -9000, width: width + 20, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: width + 20, height: 900))
+                scroll.hasVerticalScroller = true
+                scroll.automaticallyAdjustsContentInsets = false
+                let doc = FlippedView(frame: NSRect(x: 0, y: 0, width: width, height: 45_000))
+                scroll.documentView = doc
+                window.contentView = scroll
+                TestWindow.show(window)
+                defer { window.close() }
+                let layout = TranscriptLayout(store: store, spacing: Spacing.inset)
+                let driver = TranscriptScroller(layout: layout)
+                layout.scroller = driver
+                driver.attach(scroll)
+                defer { driver.detach() }
+
+                for (id, row) in zip(ids, truth) {
+                    layout.place(id, CGRect(x: pad, y: row.y, width: width - pad * 2, height: row.h), in: width)
+                }
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: 21_364))
+                driver.apply()
+                scroll.setFrameSize(NSSize(width: width, height: 900))
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: 21_364))
+                driver.apply()
+                if misplaced {
+                    for k in 0..<6 {
+                        let row = truth[k]
+                        layout.place(ids[k], CGRect(x: pad, y: row.y + 781, width: width - pad * 2, height: row.h), in: width)
+                    }
+                    driver.apply()
+                }
+                return (layout.top(scroll)?.id, try #require(layout.knob(scroll), "no knob").place)
+            }
+            let kept = try read(misplaced: false)
+            try #require(kept.top == reader)
+            let after = try read(misplaced: true)
+            #expect(after.top == reader, "the reader's row was read as \(after.top ?? "none"), not \(reader)")
+            #expect(abs(after.place - kept.place) < 1, "the clip's place moved \(after.place - kept.place) pt for rows reported where the stack never kept them")
+        }
+
         /// A row laid out in a transient pass of a resize can be several
         /// times its real height. Let go at that height, it threw the knob
         /// off for good: 0.4794 for a true 0.4998. It goes back to the last
