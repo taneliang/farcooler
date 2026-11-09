@@ -32,7 +32,7 @@ public struct PlanGlanceSentence: Equatable, Sendable {
 
     /// The band for the Plan's view as the Rust core built it: the sentence is
     /// still put together here (ov-1015 phase 2), from the view's sections.
-    public init(view: PlanView) {
+    public init(view: WirePlanView) {
         var parts: [String] = []
         if let lead = view.landings.first {
             parts.append("\(lead.label) \(lead.phaseSentence)")

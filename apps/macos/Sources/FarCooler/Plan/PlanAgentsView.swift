@@ -7,10 +7,10 @@ import SwiftUI
 // ticket"), its state and age, then its tokens and, second, the
 // API-equivalent dollars, in columns that line up down the section. A working
 // agent has a filled dot; an idle one, a ring. The rows, their order and every
-// word are the Rust core's (`PlanView.Agents`, ov-1016).
+// word are the Rust core's (`WireAgents`, ov-1016).
 
 struct PlanAgentsView: View {
-    let agents: PlanView.Agents
+    let agents: WireAgents
     /// The ticket each agent's row opens, by agent id: its first.
     let opens: [String: String]
     let onOpen: (PlanPage) -> Void
@@ -35,7 +35,7 @@ struct PlanAgentsView: View {
 }
 
 struct PlanAgentRow: View {
-    let agent: PlanView.AgentRow
+    let agent: WireAgentRow
     /// The task its row opens, or nil for an agent on no ticket.
     let opens: String?
     let onOpen: (PlanPage) -> Void

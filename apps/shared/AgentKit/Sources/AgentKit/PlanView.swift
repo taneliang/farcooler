@@ -16,38 +16,14 @@ import Foundation
 /// The view model: `{schema, view}`'s view. The types are generated from the Rust
 /// ones (`WireTypes.swift`, ov-1035); this file names them the way the apps do and adds
 /// what only a screen needs.
-public typealias PlanView = WirePlanView
 
 extension WirePlanView {
-    public typealias SectionKind = WireSectionKind
-    public typealias Section = WireSection
-    public typealias Mark = WireMark
-    public typealias NoteKind = WireNoteKind
-    public typealias Note = WireNote
-    public typealias AgentRef = WireAgentRef
-    public typealias Gate = WireGate
-    public typealias RunStep = WireRunStep
-    public typealias TicketCard = WireTicketCard
-    public typealias WaitingKind = WireWaitingKind
-    public typealias WaitingGroup = WireWaitingGroup
-    public typealias LadderStep = WireLadderStep
-    public typealias Ladder = WireLadder
-    public typealias LandingCard = WireLandingCard
-    public typealias AgentRow = WireAgentRow
-    public typealias Agents = WireAgents
-    public typealias Glyph = WireGlyph
-    public typealias TileCard = WireTileCard
-    public typealias ThemeTile = WireThemeTile
-    public typealias DetailStage = WireDetailStage
-    public typealias TicketDetail = WireTicketDetail
-    public typealias TicketDetails = WireTicketDetails
-    public typealias Themes = WireThemes
 
     /// The section of `kind`, when it's drawn.
-    public func section(_ kind: SectionKind) -> Section? { sections.first { $0.kind == kind } }
+    public func section(_ kind: WireSectionKind) -> WireSection? { sections.first { $0.kind == kind } }
 
     /// The cards in a Waiting group, or none.
-    public func waiting(_ kind: WaitingKind) -> [TicketCard] { waiting.first { $0.kind == kind }?.cards ?? [] }
+    public func waiting(_ kind: WireWaitingKind) -> [WireTicketCard] { waiting.first { $0.kind == kind }?.cards ?? [] }
 
     /// Every card in Waiting, in its groups' order.
     public var waitingCount: Int { waiting.reduce(0) { $0 + $1.cards.count } }
@@ -56,9 +32,9 @@ extension WirePlanView {
     public var namesWaitingGroups: Bool { waiting.count > 1 }
 
     /// Decode `{schema, view, error}` as the bridge answers; nil for an error.
-    public static func decode(answer: Data) -> PlanView? {
+    public static func decode(answer: Data) -> WirePlanView? {
         struct Answer: Decodable {
-            var view: PlanView?
+            var view: WirePlanView?
         }
         return (try? JSONDecoder().decode(Answer.self, from: answer))?.view
     }
@@ -147,12 +123,12 @@ public struct PlanViewContext: Equatable, Sendable {
     }
 }
 
-extension PlanView {
+extension WirePlanView {
     /// The view of `plan` as read from the runner, or nil when it has no wire
     /// form (a plan made in code) or no presenter answers.
     /// - Parameter workflow: `workflow.snapshot`'s presentation, as JSON, when
     ///   the workspace has a published workflow.
-    public static func build(plan: PlanModel, context: PlanViewContext = PlanViewContext(), workflow: Data? = nil) -> PlanView? {
+    public static func build(plan: PlanModel, context: PlanViewContext = PlanViewContext(), workflow: Data? = nil) -> WirePlanView? {
         guard let wire = plan.wire else { return nil }
         return PlanViewPresenter.view(wire: wire, context: context, workflow: workflow)
     }
@@ -161,7 +137,7 @@ extension PlanView {
     public static func build(
         plan: PlanModel, needsYou: Int, statuses: [String: TaskStatus] = [:], activity: [String: Int64] = [:],
         agentsSupported: Bool = true
-    ) -> PlanView? {
+    ) -> WirePlanView? {
         build(
             plan: plan,
             context: PlanViewContext(needsYou: needsYou, statuses: statuses, activity: activity, agentsSupported: agentsSupported))
@@ -178,7 +154,7 @@ public enum PlanViewPresenter {
         var present: Present?
         /// The last few answers, so a view body that asks again doesn't cross
         /// the bridge for the same plan.
-        var recent: [(key: Key, view: PlanView?)] = []
+        var recent: [(key: Key, view: WirePlanView?)] = []
     }
 
     struct Key: Equatable {
@@ -206,7 +182,7 @@ public enum PlanViewPresenter {
         return present?(request)
     }
 
-    static func view(wire: Data, context: PlanViewContext, workflow: Data?) -> PlanView? {
+    static func view(wire: Data, context: PlanViewContext, workflow: Data?) -> WirePlanView? {
         let key = Key(wire: wire, context: context, workflow: workflow)
         state.lock.lock()
         if let hit = state.recent.firstIndex(where: { $0.key == key }) {
@@ -228,7 +204,7 @@ public enum PlanViewPresenter {
         }
         request.append(Data("}".utf8))
         let answer = present?(String(decoding: request, as: UTF8.self))
-        let view = answer.flatMap { PlanView.decode(answer: Data($0.utf8)) }
+        let view = answer.flatMap { WirePlanView.decode(answer: Data($0.utf8)) }
 
         state.lock.lock()
         state.recent.insert((key, view), at: 0)
@@ -267,7 +243,7 @@ public enum PlanViewPresenter {
     }()
 }
 
-extension PlanView.Mark {
+extension WireMark {
     /// The ticket stage a mark stands for, for a glyph: a fix round is a build.
     public var stage: TicketStage {
         switch self {

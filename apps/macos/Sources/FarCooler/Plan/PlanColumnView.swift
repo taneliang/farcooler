@@ -4,7 +4,7 @@ import SwiftUI
 
 // The plan column (ov-867, C10f): the facts line, Needs You, Initiatives,
 // the pipeline and the footer, on the window's plane beside the
-// orchestrator. The words and rules are the Rust core's (`PlanColumn`,
+// orchestrator. The words and rules are the Rust core's (`WireColumn`,
 // ov-1016); this only lays them out, natively: text styles that follow the
 // system's size, the system's hover wash, and no rules. Type, space and the
 // soft fill of each agent's card do the grouping.
@@ -17,15 +17,15 @@ struct PlanColumnActions {
     /// Put a reference to a Needs You row in the orchestrator's input.
     var quote: (String) -> Void = { _ in }
     /// Open an agent's chat (its pane), else its ticket's page.
-    var openAgent: (PlanColumn.Agent) -> Void = { _ in }
+    var openAgent: (WireColumnAgent) -> Void = { _ in }
     /// Open a ticket.
     var openTicket: (String) -> Void = { _ in }
     /// The same, from under an agent's card, which the page's breadcrumb names
     /// (ov-873). Falls back to `openTicket`.
-    var openTicketUnder: ((PlanColumn.Agent, String) -> Void)?
+    var openTicketUnder: ((WireColumnAgent, String) -> Void)?
 
     /// A ticket on an agent's card opened.
-    func open(ticket: String, under agent: PlanColumn.Agent) {
+    func open(ticket: String, under agent: WireColumnAgent) {
         if let openTicketUnder { openTicketUnder(agent, ticket) } else { openTicket(ticket) }
     }
     /// Open the board's list for a status.
@@ -107,7 +107,7 @@ struct PlanColumnView: View {
                 ForEach(asks) { theme in
                     PlanNeedsYouLine(
                         title: theme.name, detail: theme.ownerAsk, since: nil,
-                        quote: { actions.quote(PlanColumn.quote(key: nil, title: "\(theme.name): \(theme.ownerAsk)")) })
+                        quote: { actions.quote(WireColumn.quote(key: nil, title: "\(theme.name): \(theme.ownerAsk)")) })
                     .identified("plan-needs-theme-\(theme.name)")
                 }
                 ForEach(needsYou.items) { item in
@@ -115,7 +115,7 @@ struct PlanColumnView: View {
                     let detail = item.task == nil ? NeedsYouRowModel.subject(item) : item.question
                     PlanNeedsYouLine(
                         title: title, detail: detail, since: item.since,
-                        quote: { actions.quote(PlanColumn.quote(key: item.task?.key, title: title)) })
+                        quote: { actions.quote(WireColumn.quote(key: item.task?.key, title: title)) })
                     .identified("plan-needs-\(item.key)")
                 }
             }
@@ -172,7 +172,7 @@ struct PlanColumnHeading: View {
 
 /// "2 need you   1 stuck, 47 min   Next landing: 6 tickets, 14 min   282 of 317 done".
 struct PlanFactsLine: View {
-    let facts: [PlanColumn.Fact]
+    let facts: [WireFact]
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -233,7 +233,7 @@ struct PlanNeedsYouLine: View {
 
 /// Initiatives: the larger goals, each with its goal, progress and next.
 struct PlanInitiativesSection: View {
-    let column: PlanColumn
+    let column: WireColumn
     let onOpen: (PlanPage) -> Void
 
     var body: some View {
@@ -259,7 +259,7 @@ struct PlanInitiativesSection: View {
 }
 
 struct PlanInitiativeRow: View {
-    let initiative: PlanColumn.Initiative
+    let initiative: WireInitiative
     let open: () -> Void
     @State private var hovering = false
     @Environment(\.colorScheme) private var scheme
@@ -313,7 +313,7 @@ struct PlanInitiativeRow: View {
 /// The pipeline: Stuck, Building, Reviewing, Landing, each a stack of agent
 /// cards with their tickets under them.
 struct PlanPipelineSection: View {
-    let column: PlanColumn
+    let column: WireColumn
     let actions: PlanColumnActions
     /// Where a stage's "N more" line opens its tickets.
     var onOpen: (PlanPage) -> Void = { _ in }
@@ -354,8 +354,8 @@ struct PlanPipelineSection: View {
 /// One agent: its role, name, what it does now and for how long, then its
 /// tickets, on a soft fill. The header opens its chat; a ticket opens itself.
 struct PlanAgentCard: View {
-    let agent: PlanColumn.Agent
-    let stage: PlanColumn.Stage
+    let agent: WireColumnAgent
+    let stage: WirePipeStage
     /// "12 more waiting for review", under the last card of a stage.
     var moreWords: String?
     let actions: PlanColumnActions
@@ -424,7 +424,7 @@ struct PlanAgentCard: View {
 /// there to name.
 struct PlanUnattendedCard: View {
     let words: String
-    let group: PlanColumn.Group
+    let group: WireGroup
     let actions: PlanColumnActions
     let openAll: () -> Void
 
@@ -477,7 +477,7 @@ struct PlanMoreButton: View {
 
 /// A ticket under its agent: a quiet dot, its title, its initiative.
 struct PlanTicketRow: View {
-    let ticket: PlanColumn.Ticket
+    let ticket: WireColumnTicket
     let open: () -> Void
     @State private var hovering = false
     /// Room for "ov-0000" at the callout size, which follows the system's text size.
@@ -526,7 +526,7 @@ struct PlanTicketRow: View {
 /// "10 tickets waiting for a builder, 22 not started, 796 done": each opens
 /// its list.
 struct PlanFooterLine: View {
-    let counts: [PlanColumn.Count]
+    let counts: [WireCount]
     let open: (TaskStatus) -> Void
 
     var body: some View {

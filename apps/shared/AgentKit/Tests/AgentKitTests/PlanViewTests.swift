@@ -16,8 +16,8 @@ struct PlanViewTests {
         return (request, try JSONSerialization.data(withJSONObject: try #require(object["answer"])))
     }
 
-    static func view() throws -> PlanView {
-        try #require(PlanView.decode(answer: try golden().answer))
+    static func view() throws -> WirePlanView {
+        try #require(WirePlanView.decode(answer: try golden().answer))
     }
 
     @Test("the golden decodes into every slot: sections, cards, notes, runs, landings, agents and tiles")
@@ -62,7 +62,7 @@ struct PlanViewTests {
         let context = try #require(request["context"] as? [String: Any])
         let statuses = (context["statuses"] as? [String: String] ?? [:]).compactMapValues { TaskStatus(rawValue: $0) }
         let workflow = try JSONSerialization.data(withJSONObject: try #require(request["workflow"]))
-        let built = PlanView.build(
+        let built = WirePlanView.build(
             plan: plan, context: PlanViewContext(needsYou: context["needs_you"] as? Int ?? 0, statuses: statuses, utcOffset: 0),
             workflow: workflow)
         #expect(built == (try Self.view()))
@@ -70,9 +70,9 @@ struct PlanViewTests {
 
     @Test("a plan made in code has no wire form, so no view; the same plan read from the runner has one")
     func aPlanInCodeHasNoView() throws {
-        #expect(PlanView.build(plan: PlanModel(nowMs: 1)) == nil)
+        #expect(WirePlanView.build(plan: PlanModel(nowMs: 1)) == nil)
         let read = try PlanModel.decode(Data(#"{"now_ms": 1, "themes": [], "lines": [], "cards": []}"#.utf8))
-        let view = try #require(PlanView.build(plan: read))
+        let view = try #require(WirePlanView.build(plan: read))
         #expect(view.section(.landing)?.empty == "Nothing is landing right now.")
         #expect(view.section(.waiting)?.empty == "Nothing is waiting.")
     }

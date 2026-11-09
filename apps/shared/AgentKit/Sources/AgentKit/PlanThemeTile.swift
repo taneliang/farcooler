@@ -2,7 +2,7 @@ import Foundation
 
 // A card's mark on a theme tile and in the sidebar: the site's three. Which
 // cards a tile shows, which themes lead and which are finished are the Rust
-// core's (`PlanView.Themes`, ov-1016); the sidebar's theme tree still reads
+// core's (`WireThemes`, ov-1016); the sidebar's theme tree still reads
 // the mark from the board's status here (ov-1015 phase 3).
 
 /// A card's mark on a tile and in the sidebar: the site's three.
@@ -22,7 +22,7 @@ public enum PlanCardGlyph: String, Sendable {
 
 extension PlanCardGlyph {
     /// The view's mark for a tile's card.
-    public init(_ glyph: PlanView.Glyph) {
+    public init(_ glyph: WireGlyph) {
         switch glyph {
         case .done: self = .done
         case .inProgress: self = .inProgress

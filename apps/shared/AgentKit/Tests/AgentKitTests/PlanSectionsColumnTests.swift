@@ -84,9 +84,9 @@ struct PlanSectionsColumnTests {
     @Test("a footer count's snake-case kind decodes into the name the apps route and identify it by")
     func footerKinds() throws {
         let data = Data(#"{"kind": "not_started", "count": 22, "status": "backlog", "words": "22 not started"}"#.utf8)
-        let count = try JSONDecoder().decode(PlanColumn.Count.self, from: data)
+        let count = try JSONDecoder().decode(WireCount.self, from: data)
         #expect(count.kind == .notStarted && count.kind.name == "notStarted" && count.taskStatus == .backlog)
-        let fact = try JSONDecoder().decode(PlanColumn.Fact.Kind.self, from: Data(#""next_landing""#.utf8))
+        let fact = try JSONDecoder().decode(WireFactKind.self, from: Data(#""next_landing""#.utf8))
         #expect(fact == .nextLanding)
     }
 
@@ -95,7 +95,7 @@ struct PlanSectionsColumnTests {
         let plan = try Self.plan(
             lines: [PlanModelTests.line("t1", "needs_you")],
             agents: [Self.agent("a", "builder", tickets: ["t1"], doing: "Waiting on a decision", started: 4)])
-        let column = try #require(PlanColumn.of(plan))
+        let column = try #require(WireColumn.of(plan))
         #expect(column.pipeline.map(\.stage) == [.stuck])
         #expect(column.pipeline[0].agents[0].doing == "Waiting on a decision" && !column.pipeline[0].agents[0].doingIsTrouble)
     }
@@ -105,14 +105,14 @@ struct PlanSectionsColumnTests {
         let plan = try Self.plan(
             lines: [PlanModelTests.line("t1", "landed", landing: 9), PlanModelTests.line("t2", "building")],
             landings: [PlanModelTests.landing(9, "gating", tickets: ["t1"], phase: "gating_locally", since: Self.now - 20 * Self.minute)])
-        let column = try #require(PlanColumn.of(plan))
+        let column = try #require(WireColumn.of(plan))
         #expect(!column.facts.contains { $0.kind == .nextLanding }, "not \"Next landing: 0 tickets, 20 min\"")
     }
 
     @Test("the runner's own plan.json reads as a column, with nothing invented")
     func fixture() throws {
         let plan = try PlanModelTests.fixture()
-        let column = try #require(PlanColumn.of(plan))
+        let column = try #require(WireColumn.of(plan))
         for group in column.pipeline {
             for agent in group.agents {
                 #expect(!agent.doing.isEmpty && !agent.name.isEmpty)
@@ -124,7 +124,7 @@ struct PlanSectionsColumnTests {
 
     @Test("clicking a Needs You row quotes it: a task by key and title, else the words")
     func quote() {
-        #expect(PlanColumn.quote(key: "ov-1", title: "Site copy") == "About ov-1 (\u{201C}Site copy\u{201D}): ")
-        #expect(PlanColumn.quote(key: nil, title: "Allow\nBash?") == "About \u{201C}Allow Bash?\u{201D}: ")
+        #expect(WireColumn.quote(key: "ov-1", title: "Site copy") == "About ov-1 (\u{201C}Site copy\u{201D}): ")
+        #expect(WireColumn.quote(key: nil, title: "Allow\nBash?") == "About \u{201C}Allow Bash?\u{201D}: ")
     }
 }

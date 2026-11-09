@@ -19,18 +19,8 @@ import Foundation
 
 /// The plan column as the Rust core sends it; the types are generated from
 /// `column.rs` (`WireTypes.swift`, ov-1035) and this names them the way the apps do.
-public typealias PlanColumn = WireColumn
 
 extension WireColumn {
-    public typealias Fact = WireFact
-    public typealias Initiative = WireInitiative
-    public typealias Stage = WirePipeStage
-    public typealias Role = WireRole
-    public typealias Ticket = WireColumnTicket
-    public typealias Agent = WireColumnAgent
-    public typealias Group = WireGroup
-    public typealias Waiting = WireWaitingTicket
-    public typealias Count = WireCount
 
     /// The column of `plan` as read from the runner, or nil when it has no
     /// view (a plan made in code, or no bridge).
@@ -41,8 +31,8 @@ extension WireColumn {
     ///     doesn't carry.
     public static func of(
         _ plan: PlanModel, needsYou: Int = 0, statuses: [String: TaskStatus] = [:], titles: [String: String] = [:]
-    ) -> PlanColumn? {
-        PlanView.build(plan: plan, context: PlanViewContext(needsYou: needsYou, statuses: statuses, titles: titles))?.column
+    ) -> WireColumn? {
+        WirePlanView.build(plan: plan, context: PlanViewContext(needsYou: needsYou, statuses: statuses, titles: titles))?.column
     }
 
     /// What a Needs You row puts in the orchestrator's input when clicked:
@@ -65,8 +55,6 @@ extension WireFactKind {
 }
 
 extension WireFact: Identifiable {
-    public typealias Kind = WireFactKind
-    public typealias Run = WireRun
     public var id: String { kind.name }
 }
 
@@ -80,7 +68,6 @@ extension WireCountKind {
 }
 
 extension WireCount: Identifiable {
-    public typealias Kind = WireCountKind
     public var id: String { kind.name }
     /// The board's list it opens.
     public var taskStatus: TaskStatus { TaskStatus(rawValue: status) ?? .todo }

@@ -43,8 +43,8 @@ struct PlanSectionsCasesTests {
         }
 
         /// The Rust core's view of the case, through the bridge the apps call.
-        var view: PlanView? {
-            PlanView.build(plan: plan, needsYou: needsYou, statuses: statuses)
+        var view: WirePlanView? {
+            WirePlanView.build(plan: plan, needsYou: needsYou, statuses: statuses)
         }
     }
 

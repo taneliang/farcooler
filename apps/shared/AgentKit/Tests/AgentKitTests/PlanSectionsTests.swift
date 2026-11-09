@@ -14,7 +14,7 @@ struct PlanSectionsTests {
 
     /// The first landing's phase as the view says it, and since when.
     static func phase(_ plan: PlanModel) -> (phase: String?, since: Int64?) {
-        let card = PlanView.build(plan: plan)?.landings.first
+        let card = WirePlanView.build(plan: plan)?.landings.first
         return (card?.phase.rawValue, card?.since)
     }
 
@@ -35,7 +35,7 @@ struct PlanSectionsTests {
         var landing = PlanModelTests.landing(9, "open", phase: "waiting_for_tickets", since: 5, phaseSince: 9)
         landing["held_by"] = [["ticket": "l1", "name": "slow"]]
         let plan = try PlanModelTests.plan(themes: [], lines: [], landings: [landing])
-        let card = try #require(PlanView.build(plan: plan)?.landings.first)
+        let card = try #require(WirePlanView.build(plan: plan)?.landings.first)
         #expect(card.phase == .waitingForTickets)
         #expect(card.spoken(ci: nil, now: plan.nowMs).contains("slow") == false, "nothing is said of a hold")
     }
@@ -93,7 +93,7 @@ struct PlanSectionsTests {
             ])
         #expect(plan.landings[0].subtitle == "The agents table and the themes grid on the phones", "the runner's \"Landing 89 \u{00B7}\" is not said twice")
         #expect(plan.landings[0].label == "Landing 89")
-        let view = try #require(PlanView.build(plan: plan))
+        let view = try #require(WirePlanView.build(plan: plan))
         let now = try #require(PlanGlanceSentence(view: view).now)
         #expect(now == "Landing 89 checking on CI \u{00B7} 1 more landing")
         #expect(!now.contains("agents table"))
@@ -128,7 +128,7 @@ struct PlanSectionsTests {
     func theRunnersAgents() throws {
         let plan = try PlanModelTests.fixture()
         #expect(plan.agents.map(\.role) == [.orchestrator, .reviewer, .builder])
-        let view = try #require(PlanView.build(plan: plan))
+        let view = try #require(WirePlanView.build(plan: plan))
         let rows = view.agents.rows
         #expect(rows.map(\.who) == ["Orchestrator \u{00B7} opus", "Reviewer \u{00B7} sonnet", "Builder \u{00B7} gpt-5.6"])
         #expect(rows.map(\.worksFor) == ["Plan", "ov-1", "ov-4"])

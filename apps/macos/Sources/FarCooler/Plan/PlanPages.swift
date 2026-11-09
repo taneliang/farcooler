@@ -329,7 +329,7 @@ struct PlanThemePage: View {
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
     let plan: PlanModel
-    let details: PlanView.TicketDetails?
+    let details: WireTicketDetails?
     let action: () -> Void
     @State private var hovering = false
 
@@ -492,7 +492,7 @@ struct PlanTicketRecordPage: View {
     }
 
     /// The stage, and the pull request it reads from, to open on GitHub.
-    @ViewBuilder private func stageLine(_ stage: PlanPrStage, _ shown: PlanView.DetailStage, stacked: Bool) -> some View {
+    @ViewBuilder private func stageLine(_ stage: PlanPrStage, _ shown: WireDetailStage, stacked: Bool) -> some View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.tight)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.tight))
         layout {
             PlanStageText(stage: shown, words: shown.words)
@@ -620,7 +620,7 @@ struct PlanTaskLineView: View {
 /// the tooltip says it all: the full words, then the pull request's number and
 /// open threads.
 struct PlanStageText: View {
-    let stage: PlanView.DetailStage
+    let stage: WireDetailStage
     let words: String
     @Environment(\.colorScheme) private var scheme
 

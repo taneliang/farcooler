@@ -5,7 +5,7 @@ import SwiftUI
 // name, how much is done, a meter, up to three cards and, in amber, what waits
 // on the owner. A tap opens the theme's page, where the story now lives. The
 // rules (which cards, which themes lead, which are finished) and the words are
-// the Rust core's (`PlanView.Themes`, ov-1016); one column on a phone, two in
+// the Rust core's (`WireThemes`, ov-1016); one column on a phone, two in
 // an iPad's plan column.
 
 /// Places its subviews in `columns` equal columns, every tile in a row as tall
@@ -52,7 +52,7 @@ struct PlanTileLayout: Layout {
 }
 
 struct PlanThemeGridView: View {
-    let grid: PlanView.Themes
+    let grid: WireThemes
     let plan: PlanModel
     let columns: Int
     let onOpen: (String) -> Void
@@ -122,7 +122,7 @@ private struct TileSurface: ViewModifier {
 }
 
 struct PlanThemeTileView: View {
-    let tile: PlanView.ThemeTile
+    let tile: WireThemeTile
     let columns: Int
     /// "Over budget: 6.1M of 5M tokens", or nil: amber, with its words.
     var budget: String?

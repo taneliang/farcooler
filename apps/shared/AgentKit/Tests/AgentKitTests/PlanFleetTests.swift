@@ -4,7 +4,7 @@ import Testing
 @testable import AgentKit
 
 // What the runner says the agents spent (ov-518). The Agents rows and their
-// header are the Rust core's (`PlanView.Agents`, ov-1016), pinned by its tests.
+// header are the Rust core's (`WireAgents`, ov-1016), pinned by its tests.
 @Suite("The Plan's agents list")
 struct PlanFleetTests {
     @Test("agents_spend decodes, and a runner without it leaves nil")

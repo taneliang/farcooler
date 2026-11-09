@@ -3,15 +3,6 @@ import Combine
 
 // Display-only schema 2. The runs are the Rust core's presentation, generated
 // as `WireTypes.swift` (ov-1035); these names are the apps' own for them.
-public typealias WorkflowAction = WireAction
-public typealias WorkflowStage = WireStageCard
-public typealias WorkflowGate = WireGateCard
-public typealias WorkflowReason = WireReasonCard
-public typealias WorkflowEvidence = WireEvidence
-public typealias WorkflowForm = WireActionForm
-public typealias WorkflowRework = WireReworkDecision
-public typealias WorkflowRun = WireRunCard
-public typealias WorkflowPresentation = WirePresentation
 
 extension WireAction {
     public var guardValue: String { `guard` }
@@ -64,7 +55,7 @@ public struct WorkflowPort: Sendable {
 public final class WorkflowRunsModel: ObservableObject {
     public let host: String
     public let workspace: String
-    @Published public private(set) var presentation: WorkflowPresentation?
+    @Published public private(set) var presentation: WirePresentation?
     @Published public private(set) var retained: [RetainedWorkflow] = []
     @Published public private(set) var ready = false
     @Published public private(set) var busy = false
@@ -90,7 +81,7 @@ public final class WorkflowRunsModel: ObservableObject {
             let json = try await port.read(host, workspace)
             let pending = try await port.pending(host, workspace)
             guard ticket == generation else { return nil }
-            let next = try WorkflowPresentation.decode(json, workspace: workspace)
+            let next = try WirePresentation.decode(json, workspace: workspace)
             if presentation?.runs.contains(where: { old in
                 !next.runs.contains(where: { $0.item == old.item && $0.run == old.run })
             }) == true { clearInspection() }
@@ -103,7 +94,7 @@ public final class WorkflowRunsModel: ObservableObject {
         }
         return ticket == generation ? ticket : nil
     }
-    public func perform(item: String, action: WorkflowAction, port: WorkflowPort?, reason: String? = nil) async {
+    public func perform(item: String, action: WireAction, port: WorkflowPort?, reason: String? = nil) async {
         guard ready, !busy, let port,
             let card = presentation?.runs.first(where: { $0.item == item }),
             card.actions.contains(action) else { return }

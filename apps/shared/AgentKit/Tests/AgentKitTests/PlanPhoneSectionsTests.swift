@@ -44,7 +44,7 @@ struct PlanPhoneSectionsTests {
     func theLadderAndTheLandingWaitingForMain() throws {
         let view = try F.view()
         let now = view.now
-        func card(_ number: Int) throws -> PlanView.LandingCard { try #require(view.landings.first { $0.number == number }) }
+        func card(_ number: Int) throws -> WireLandingCard { try #require(view.landings.first { $0.number == number }) }
         let ready = try card(86).spoken(ci: nil, now: now)
         #expect(ready.hasPrefix("Landing 86, Teams on a shared runner"), "\(ready)")
         #expect(ready.contains("Checking on CI \u{00B7} step 2 of 3"), "\(ready)")

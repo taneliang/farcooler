@@ -36,7 +36,7 @@ public final class WorkflowSessionAdapter {
         var attempts = 0
         var result: String?
     }
-    private struct Snapshot: Decodable { let host: String; let presentation: WorkflowPresentation }
+    private struct Snapshot: Decodable { let host: String; let presentation: WirePresentation }
     private let root: URL
     private let current: @MainActor (String) -> Current?
     private var observations: [String: Observation] = [:]
@@ -113,7 +113,7 @@ public final class WorkflowSessionAdapter {
             observations[try key([scope, run.item, WorkflowActionJSON.canonical(action.json())])] = Observation(revision: UInt64(view.revision), epoch: UInt64(view.epoch), run: run.run)
         }}
         // Encode the typed display DTO directly: UInt64 never goes through Double.
-        // WorkflowPresentation is display-only Decodable; extract the subtree
+        // WirePresentation is display-only Decodable; extract the subtree
         // with Foundation, whose integer NSNumber preserves UInt64.
         let object = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as! [String: Any]
         return String(decoding: try JSONSerialization.data(withJSONObject: object["presentation"]!), as: UTF8.self)
@@ -144,7 +144,7 @@ public final class WorkflowSessionAdapter {
         }
         guard let observed = observations[try key([scope, item, descriptorJSON])] else { throw WorkflowDisplayError.pending }
         entries.append(Entry(retained: RetainedWorkflow(id: UUID().uuidString, item: item, run: observed.run,
-            label: try JSONDecoder().decode(WorkflowAction.self, from: Data(descriptorJSON.utf8)).label), action: canonical))
+            label: try JSONDecoder().decode(WireAction.self, from: Data(descriptorJSON.utf8)).label), action: canonical))
         let index = entries.count - 1
         try save(scope, entries) // preparing marker survives loss of prepare reply
         var args = "{\"workspace\":\(try json(workspace)),\"style\":\(try json(Self.style)),\"item\":\(try json(item)),\"action\":\(descriptorJSON),\"revision\":\(try json(String(observed.revision))),\"epoch\":\(try json(String(observed.epoch)))}"

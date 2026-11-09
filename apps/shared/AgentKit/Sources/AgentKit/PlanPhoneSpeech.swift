@@ -5,12 +5,12 @@ import Foundation
 // the sentence VoiceOver reads for a landing, a theme tile and the band,
 // which rulings and buttons show, and what keeping a ruling does to the plan
 // on screen. Which tickets are where, and their words, are the Rust core's
-// (`PlanView`, ov-1016). The iOS target has no
+// (`WirePlanView`, ov-1016). The iOS target has no
 // unit tests, so they are here, and the views only draw what these answer.
 
 // MARK: Landings
 
-extension PlanView.LandingCard {
+extension WireLandingCard {
     /// What VoiceOver reads for a landing row, and what the UI tests read as its
     /// label: "Landing 86, Teams on a shared runner, …, Checking on CI · step 2
     /// of 3, 3f78754f · … · Lander · Opus".
@@ -40,7 +40,7 @@ extension PlanCardGlyph {
     }
 }
 
-extension PlanView.ThemeTile {
+extension WireThemeTile {
     /// What VoiceOver reads for a tile: its name and progress, each card with
     /// its mark, the budget when it is over, and what waits on the owner.
     /// `budget` is `PlanWords.budgetLine` of an overspent theme, or nil.

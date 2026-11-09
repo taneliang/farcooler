@@ -22,7 +22,7 @@ struct PhonePlanHeading: View {
 
 /// "2 need you  1 stuck, 47 min  Next landing: 4 tickets, 14 min  282 of 339 done".
 struct PhonePlanFacts: View {
-    let facts: [PlanColumn.Fact]
+    let facts: [WireFact]
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -84,7 +84,7 @@ struct PhoneNeedsYouLine: View {
 /// Initiatives: each a soft card, name and progress on line 1, Next on line 2.
 /// Those not moving fold into one quiet line.
 struct PhonePlanInitiatives: View {
-    let column: PlanColumn
+    let column: WireColumn
     let open: (String) -> Void
     @Environment(\.colorScheme) private var scheme
 
@@ -113,7 +113,7 @@ struct PhonePlanInitiatives: View {
         }
     }
 
-    private func row(_ initiative: PlanColumn.Initiative) -> some View {
+    private func row(_ initiative: WireInitiative) -> some View {
         Button { open(initiative.id) } label: {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.inset) {
@@ -146,13 +146,13 @@ struct PhonePlanInitiatives: View {
 /// status names the stage.
 enum PlanStageRoute {
     static let prefix = "stage-"
-    static func status(_ stage: PlanColumn.Stage) -> String { prefix + stage.rawValue }
+    static func status(_ stage: WirePipeStage) -> String { prefix + stage.rawValue }
 }
 
 /// The pipeline: Stuck, Building, Reviewing, Landing, each stage its agents'
 /// cards with their tickets under them.
 struct PhonePlanPipeline: View {
-    let column: PlanColumn
+    let column: WireColumn
     let actions: PhonePlanActions
 
     var body: some View {
@@ -217,7 +217,7 @@ struct PhoneMoreButton: View {
 /// One agent: its glyph (which shows it is working), its name and what it does
 /// now, then its tickets indented under it, all on one soft card.
 struct PhoneAgentCard: View {
-    let agent: PlanColumn.Agent
+    let agent: WireColumnAgent
     var moreWords: String?
     let actions: PhonePlanActions
     var openMore: () -> Void = {}
@@ -269,7 +269,7 @@ struct PhoneTicketRow: View {
     /// Past the role glyph, so the ticket reads as the agent's.
     static let indent: CGFloat = 30
 
-    let ticket: PlanColumn.Ticket
+    let ticket: WireColumnTicket
     let open: (String) -> Void
     #if DEBUG
         /// How wide its key is drawn, which a test reads off `plan-ticket-key-<key>`
@@ -333,8 +333,8 @@ struct PhoneTicketRow: View {
 /// "10 tickets waiting for a builder, 22 not started, 796 done". Each count opens
 /// the list of its tickets.
 struct PhonePlanFooter: View {
-    let counts: [PlanColumn.Count]
-    let open: (PlanColumn.Count) -> Void
+    let counts: [WireCount]
+    let open: (WireCount) -> Void
 
     var body: some View {
         if !counts.isEmpty {

@@ -14,7 +14,7 @@ struct WorkflowRunsTests {
             let response = fixture["response"] as! [String: Any]
             let card = response["card"] as! [String: Any]
             let json = String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self)
-            let presentation = try WorkflowPresentation.decode(json, workspace: "workspace")
+            let presentation = try WirePresentation.decode(json, workspace: "workspace")
             #expect(!presentation.runs[0].label.isEmpty)
             let model = WorkflowRunsModel(host: "runner", workspace: "workspace")
             var forwarded: [String: String]?
@@ -42,7 +42,7 @@ struct WorkflowRunsTests {
         }
     }
     @Test func rejectsWrongWorkspaceAndSchema() throws {
-        #expect(throws: (any Error).self) { try WorkflowPresentation.decode("{\"schema\":1}", workspace: "other") }
+        #expect(throws: (any Error).self) { try WirePresentation.decode("{\"schema\":1}", workspace: "other") }
     }
     @Test @MainActor func pendingPortDoesNotEnableActions() async {
         let model = WorkflowRunsModel(host: "runner", workspace: "workspace")

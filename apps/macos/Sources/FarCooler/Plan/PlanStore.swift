@@ -24,7 +24,7 @@ enum PlanPage: Hashable {
     /// The workspace's Needs You, answered in place (ov-321): where the one
     /// tree's Needs You row opens.
     case needsYou
-    /// A pipeline stage's tickets nobody is on (ov-874), by `PlanColumn.Stage`
+    /// A pipeline stage's tickets nobody is on (ov-874), by `WirePipeStage`
     /// raw value: where the column's "N more" line opens.
     case stage(String)
 
@@ -349,7 +349,7 @@ final class PlanStore: ObservableObject {
         case .ticket(let id): ticket(id)?.heading
         case .page(let slot): self.page(slot)?.title
         case .needsYou: OneTreeWords.needsYou
-        case .stage(let raw): PlanColumn.Stage(rawValue: raw)?.title
+        case .stage(let raw): WirePipeStage(rawValue: raw)?.title
         }
     }
 }

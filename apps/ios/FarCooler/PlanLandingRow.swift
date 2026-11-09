@@ -8,11 +8,11 @@ import SwiftUI
 // only for CI that failed or a landing that stalled, each with its words. The arrow at the trailing edge opens the CI run in the browser, the
 // one place it goes; a long press never does.
 //
-// The words and the ladder are the Rust core's (`PlanView.LandingCard`,
+// The words and the ladder are the Rust core's (`WireLandingCard`,
 // ov-1016), the CI read the app's; this draws them.
 
 struct PlanLandingRow: View {
-    let card: PlanView.LandingCard
+    let card: WireLandingCard
     /// What a landing is, said first on a long press: the Landing section's help.
     let explanation: String?
     let ci: PlanCIRead?
@@ -128,7 +128,7 @@ private struct LandingRowSpeech: ViewModifier {
 /// Where a landing stands, as three short segments: the ones climbed are
 /// filled, the one it is on is dark, or amber when it needs attention.
 struct PlanLadderBar: View {
-    let ladder: PlanView.Ladder
+    let ladder: WireLadder
     let attention: Bool
     @Environment(\.colorScheme) private var scheme
 

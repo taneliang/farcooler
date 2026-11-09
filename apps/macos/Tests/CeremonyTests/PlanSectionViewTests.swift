@@ -8,7 +8,7 @@ import Testing
 /// The Plan's sections on the Mac (ov-503, phase 5): each section drawn, what
 /// it says empty, the two columns from 960 pt and the one column below, no
 /// 680-pt cap, a landing's tickets inside its card, and the folded stranded section. The
-/// rules and the words are the Rust core's view (`PlanView`, ov-1016), pinned
+/// rules and the words are the Rust core's view (`WirePlanView`, ov-1016), pinned
 /// by its tests; this holds the real views to it over `PlanScenario`'s plans,
 /// through the bridge the app calls.
 @MainActor
@@ -23,7 +23,7 @@ struct PlanSectionViewTests {
     }
 
     /// The Rust core's view of the store's plan.
-    static func view(_ store: TaskBoardStore, needsYou: Int = 0, statuses: [String: TaskStatus] = [:]) throws -> PlanView {
+    static func view(_ store: TaskBoardStore, needsYou: Int = 0, statuses: [String: TaskStatus] = [:]) throws -> WirePlanView {
         try #require(store.plan.view(needsYou: needsYou, statuses: statuses, activity: [:]), "the bridge built no view")
     }
 
@@ -111,7 +111,7 @@ struct PlanSectionViewTests {
         #expect(view.landings.first?.number == 88, "furthest along first")
     }
 
-    static func ladder(_ card: PlanView.LandingCard) -> PlanLadderView {
+    static func ladder(_ card: WireLandingCard) -> PlanLadderView {
         PlanLadderView(ladder: card.ladder, word: card.phaseWord, explanation: card.explanation, attention: card.attention)
     }
 

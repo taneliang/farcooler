@@ -310,7 +310,7 @@ struct PlanThemePage: View {
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
     let plan: PlanModel
-    let details: PlanView.TicketDetails?
+    let details: WireTicketDetails?
     let action: () -> Void
 
     var body: some View {
@@ -351,7 +351,7 @@ private struct PlanCardRows: View {
     let refs: [PlanCardRef]
     let plan: PlanModel
     /// The plan's pages, asked once by the page that lists the cards.
-    var details: PlanView.TicketDetails?
+    var details: WireTicketDetails?
     let context: PlanPageContext
     /// Whether each card says where its own pull request stands (ov-317): on a
     /// live ticket's page, where its card has a pull request of its own.
@@ -378,11 +378,11 @@ private struct PlanCardRows: View {
         }
     }
 
-    private func stage(of ref: PlanCardRef) -> PlanView.DetailStage? {
+    private func stage(of ref: PlanCardRef) -> WireDetailStage? {
         showsStage ? (details ?? plan.ticketDetails())?.ticket(ref.task)?.stage : nil
     }
 
-    private func card(key: String, title: String, status: String, stage: PlanView.DetailStage? = nil) -> some View {
+    private func card(key: String, title: String, status: String, stage: WireDetailStage? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(key).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             Text(title).font(.subheadline).lineLimit(3)
@@ -520,7 +520,7 @@ struct PlanTicketStageBlock: View {
     let line: PlanTicketLine
     let stage: PlanPrStage
     /// The stage as the core words it.
-    let shown: PlanView.DetailStage
+    let shown: WireDetailStage
     /// Nil where this phone may not act on pull requests.
     let markReady: ((PlanTicketLine, PlanPrStage) async -> String?)?
     @Environment(\.colorScheme) private var scheme

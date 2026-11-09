@@ -6,7 +6,7 @@ import SwiftUI
 // a meter, up to three cards and, in amber, what waits on the owner. A click
 // opens the theme's page, where the story now lives. The rules (which cards,
 // which themes lead, which are finished) and the words are the Rust core's
-// (`PlanView.Themes`, ov-1016).
+// (`WireThemes`, ov-1016).
 
 /// Places its subviews in as many equal columns as fit at least `minimum` wide,
 /// every tile in a row as tall as the tallest, which a lazy grid can't do.
@@ -52,7 +52,7 @@ struct PlanTileLayout: Layout {
 }
 
 struct PlanThemeGridView: View {
-    let grid: PlanView.Themes
+    let grid: WireThemes
     let model: PlanModel
     let selected: PlanPage?
     let keyed: Bool
@@ -120,7 +120,7 @@ struct PlanMeter: View {
 }
 
 struct PlanThemeTileView: View {
-    let tile: PlanView.ThemeTile
+    let tile: WireThemeTile
     /// "Over budget: 6.1M of 5M tokens", or nil: amber, with its words.
     var budget: String?
     @Environment(\.colorScheme) private var scheme

@@ -122,7 +122,7 @@ public struct WorkflowRunsView: View {
             }
         }
     }
-    private func card(_ run: WorkflowRun) -> some View {
+    private func card(_ run: WireRunCard) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(run.label).font(.title2).accessibilityAddTraits(.isHeader)
             Text(run.phaseLabel)
@@ -165,7 +165,7 @@ public struct WorkflowRunsView: View {
     }
 }
 private struct WorkflowReasonForm: View {
-    let form: WorkflowForm
+    let form: WireActionForm
     let enabled: Bool
     let submit: (String) -> Void
     @State private var draft = ""

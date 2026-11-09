@@ -12,17 +12,17 @@ struct BoardHistoryScreen: View {
     /// The plan footer's list this is (ov-874): "waiting for a builder" or
     /// "not started", whose tickets are the plan's, not one board column.
     /// Nil for a finished status's History.
-    var footer: PlanColumn.Count.Kind?
+    var footer: WireCountKind?
     /// A pipeline stage's tickets nobody is on (ov-874): what the stage's
     /// "N more" line opens. Nil for the other lists.
-    var stage: PlanColumn.Stage?
+    var stage: WirePipeStage?
 
     @State private var query = ""
     @State private var area: String?
     @Environment(\.phoneNavigator) private var navigator
 
     /// The plan, as the plan column reads it; its lists are this screen's.
-    private var column: PlanColumn? {
+    private var column: WireColumn? {
         guard case .loaded(let plan)? = connection.plans.state(place.workspace) else { return nil }
         let board = connection.boards[place.workspace]?.rows ?? []
         return PlanViewBridge.column(

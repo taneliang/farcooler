@@ -6,7 +6,7 @@ import Foundation
 // or exited is not: the runner leaves it out, and its spend stays in the day's
 // total. An agent has a role (builder, reviewer, lander, or the
 // orchestrator), the tickets it works now, and what it is doing now. The
-// Plan's Agents rows and their header are the Rust core's (`PlanView.Agents`,
+// Plan's Agents rows and their header are the Rust core's (`WireAgents`,
 // ov-1016); the sidebar's ticket tree still names each agent from here.
 
 /// What an agent is for.

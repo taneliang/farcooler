@@ -17,7 +17,7 @@ struct PlanPrStageTests {
     static func line(_ plan: PlanModel, _ n: Int) -> PlanTicketLine { plan.lines[n - 1] }
 
     /// What the core says of ticket `n`'s pull request stage.
-    static func stage(_ plan: PlanModel, _ n: Int) -> PlanView.DetailStage? {
+    static func stage(_ plan: PlanModel, _ n: Int) -> WireDetailStage? {
         plan.ticketDetails()?.ticket(line(plan, n).task)?.stage
     }
 

@@ -30,7 +30,7 @@ struct PlanPhoneBoardTests {
     @Test("each Next Up ticket names its theme and reason, and each theme tile reads on its own")
     func ticketsAndTiles() throws {
         let plan = try F.plan("plan-seeded.json")
-        let view = try #require(PlanView.build(plan: plan))
+        let view = try #require(WirePlanView.build(plan: plan))
         let next = try #require(view.waiting(.next).first { $0.key == "ov-274" })
         #expect(next.theme == "Plan layer", "the ticket doesn't name its theme")
         #expect(next.second.contains("Unblocked once the store"))
@@ -48,7 +48,7 @@ struct PlanPhoneBoardTests {
     @Test("work reads by what it does: the landing as Landing 9 with what it carries and its place, its tickets by title with no branch")
     func landingNamesTheLanding() throws {
         let plan = try F.plan("plan-seeded.json")
-        let view = try #require(PlanView.build(plan: plan))
+        let view = try #require(WirePlanView.build(plan: plan))
         let card = try #require(view.landings.first { $0.number == 9 })
         let said = card.spoken(ci: nil, now: view.now)
         #expect(said.contains("Landing 9"), "\(said)")

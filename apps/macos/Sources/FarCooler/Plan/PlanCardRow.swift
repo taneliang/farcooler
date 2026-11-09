@@ -2,7 +2,7 @@ import AgentKit
 import SwiftUI
 
 // A ticket's row in In Review, Building, Waiting and Waiting for the Next
-// Landing (ov-503, design 2), drawn from the Rust core's card (`PlanView.
+// Landing (ov-503, design 2), drawn from the Rust core's card (`WirePlanView.
 // TicketCard`, ov-1016): its title and the theme it serves, the second line
 // (Next Up's reason, else its stage, key, agent, tokens and age), then its
 // notes, one a line: the pull request's stage, the engine's step and gate,
@@ -14,7 +14,7 @@ import SwiftUI
 //      Prepare Workspace · Approval Required
 
 struct PlanCardRow: View {
-    let card: PlanView.TicketCard
+    let card: WireTicketCard
     let selected: Bool
     let keyed: Bool
     let action: () -> Void
@@ -103,7 +103,7 @@ struct PlanCardRow: View {
 /// a person. A stage or a run note keeps to one line, elided in the middle (a
 /// reviewer's login may be long, ov-316), and says every word on hover.
 struct PlanNoteLine: View {
-    let note: PlanView.Note
+    let note: WireNote
     let probe: String
     @Environment(\.colorScheme) private var scheme
 
@@ -141,7 +141,7 @@ enum PlanGlyph {
     }
 
     /// A card's mark, as the view names it.
-    static func name(_ mark: PlanView.Mark) -> String {
+    static func name(_ mark: WireMark) -> String {
         mark == .fixing ? "wrench.and.screwdriver" : name(mark.stage)
     }
 }

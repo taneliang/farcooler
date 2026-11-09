@@ -34,9 +34,9 @@ enum PlanPhoneFixtures {
     static let decision = "0198f2c0-0000-7000-8000-00000000e007"
 
     /// The Rust core's view of it, through the bridge the apps call.
-    static func view(agents: Bool = true) throws -> PlanView {
+    static func view(agents: Bool = true) throws -> WirePlanView {
         try #require(
-            PlanView.build(
+            WirePlanView.build(
                 plan: try plan("plan-phones-ov503.json"), needsYou: 1, statuses: [decision: .needsDecision],
                 agentsSupported: agents))
     }

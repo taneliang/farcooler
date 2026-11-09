@@ -15,7 +15,7 @@ struct PlanLandingFactsTests {
         let plan = try PlanModelTests.plan(
             themes: [], lines: [], landings: [PlanModelTests.landing(9, "pushed", sha: "3f78754fabc", since: 6_480_000, lander: "lander-1")],
             agents: [lander])
-        let card = try #require(PlanView.build(plan: plan)?.landings.first)
+        let card = try #require(WirePlanView.build(plan: plan)?.landings.first)
         #expect(card.facts(ci: nil, now: 7_200_000) == "3f78754f \u{00B7} CI not read yet \u{00B7} 12 min \u{00B7} Lander \u{00B7} opus \u{00B7} 1.4M")
         #expect(card.factsUnbroken(ci: nil, now: 7_200_000).contains("12\u{00A0}min"))
     }

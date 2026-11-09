@@ -2,7 +2,7 @@ import AgentKit
 import SwiftUI
 
 // The Plan's sections, drawn (ov-503, design 2). The Rust core's view
-// (`PlanView`, ov-1016) decides what is where, every word, and what each says
+// (`WirePlanView`, ov-1016) decides what is where, every word, and what each says
 // empty; this lays it out. Wide, the work in motion
 // (Landing, In Review, Building) fills the left column and what is queued and
 // what it costs (Waiting, Waiting for the Next Landing, Agents) the right, the themes
@@ -49,7 +49,7 @@ struct PlanColumnsLayout: Layout {
 }
 
 struct PlanSectionsView: View {
-    let view: PlanView
+    let view: WirePlanView
     let model: PlanModel
     let statuses: [String: TaskStatus]
     @ObservedObject var plan: PlanStore
@@ -58,8 +58,8 @@ struct PlanSectionsView: View {
     let defaults: UserDefaults
     let onOpen: (PlanPage) -> Void
     /// The left column's sections: the work in motion.
-    private static let left: [PlanView.SectionKind] = [.landing, .inReview, .building]
-    private static let right: [PlanView.SectionKind] = [.waiting, .onLandedLanding, .agents]
+    private static let left: [WireSectionKind] = [.landing, .inReview, .building]
+    private static let right: [WireSectionKind] = [.waiting, .onLandedLanding, .agents]
 
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
@@ -72,7 +72,7 @@ struct PlanSectionsView: View {
         .identified("plan-sections")
     }
 
-    private func column(_ kinds: [PlanView.SectionKind]) -> some View {
+    private func column(_ kinds: [WireSectionKind]) -> some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
             ForEach(view.sections.filter { kinds.contains($0.kind) }) { section($0) }
         }
@@ -81,7 +81,7 @@ struct PlanSectionsView: View {
 
     private func key(_ section: String) -> String { "board.plan.section.\(section).\(plan.host).\(plan.workspace.id)" }
 
-    @ViewBuilder private func section(_ section: PlanView.Section) -> some View {
+    @ViewBuilder private func section(_ section: WireSection) -> some View {
         switch section.kind {
         case .landing: landing(section)
         case .inReview: chrome(section, id: "plan-in-review") { cardRows(view.inReview) }
@@ -96,7 +96,7 @@ struct PlanSectionsView: View {
     /// A section's rows, or what it says empty. Its help is said on hover
     /// over its title only, never its rows; a folded one starts closed.
     private func chrome<Content: View>(
-        _ section: PlanView.Section, id: String, @ViewBuilder content: @escaping () -> Content
+        _ section: WireSection, id: String, @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         CollapsibleSection(
             id: "plan.\(id)", style: .navigator, key: key(id), defaults: defaults, expandedByDefault: !section.folded,
@@ -121,7 +121,7 @@ struct PlanSectionsView: View {
         .identified(id)
     }
 
-    private func landing(_ section: PlanView.Section) -> some View {
+    private func landing(_ section: WireSection) -> some View {
         chrome(section, id: "plan-landing") {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 ForEach(view.landings) { card in
@@ -146,11 +146,11 @@ struct PlanSectionsView: View {
     }
 
     /// The CI read of a landing's pushed commit, the app's own.
-    private func ci(_ card: PlanView.LandingCard) -> PlanCIRead? {
+    private func ci(_ card: WireLandingCard) -> PlanCIRead? {
         model.landings.first { $0.id == card.id }.flatMap { model.ci(of: $0) }
     }
 
-    private func cardRows(_ cards: [PlanView.TicketCard]) -> some View {
+    private func cardRows(_ cards: [WireTicketCard]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(cards) { card in
                 PlanCardRow(card: card, selected: selected == .ticket(card.id), keyed: keyed) { onOpen(.ticket(card.id)) }
@@ -161,14 +161,14 @@ struct PlanSectionsView: View {
     }
 
     /// The plan's lines of `cards`, in their order, for what changed since the last read.
-    private func lines(_ cards: [PlanView.TicketCard]) -> [PlanTicketLine] {
+    private func lines(_ cards: [WireTicketCard]) -> [PlanTicketLine] {
         let byTask = Dictionary(model.lines.map { ($0.task, $0) }, uniquingKeysWith: { first, _ in first })
         return cards.compactMap { byTask[$0.id] }
     }
 
     /// Next Up ranked, then Not Ranked, then Waiting on You, each named only
     /// when something else shares the section.
-    private func waiting(_ section: PlanView.Section) -> some View {
+    private func waiting(_ section: WireSection) -> some View {
         chrome(section, id: "plan-waiting") {
             VStack(alignment: .leading, spacing: NavigatorRhythm.group) {
                 ForEach(view.waiting) { group in
@@ -186,7 +186,7 @@ struct PlanSectionsView: View {
         }
     }
 
-    private func agents(_ section: PlanView.Section) -> some View {
+    private func agents(_ section: WireSection) -> some View {
         chrome(section, id: "plan-agents") {
             PlanAgentsView(
                 agents: view.agents,
@@ -196,7 +196,7 @@ struct PlanSectionsView: View {
     }
 
     /// Themes: the grid, with the work outside any theme as a footer.
-    private func themes(_ section: PlanView.Section) -> some View {
+    private func themes(_ section: WireSection) -> some View {
         CollapsibleSection(
             section.title, id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults, count: Int(section.count)
         ) {

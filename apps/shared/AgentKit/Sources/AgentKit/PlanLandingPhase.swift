@@ -44,7 +44,7 @@ extension PlanWords {
     }
 }
 
-extension PlanView.LandingCard {
+extension WireLandingCard {
     /// "3f78754f · 2 of 5 jobs done · 12 min · Lander · Opus · 1.4M": the
     /// commit, how CI stands, how long the landing has been in this phase and
     /// who lands it. Empty when none of it is known. The CI read is the app's

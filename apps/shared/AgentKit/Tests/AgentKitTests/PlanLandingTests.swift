@@ -12,7 +12,7 @@ import Testing
 // sections themselves are the Rust core's (ov-1016) and its tests' to pin;
 // these are what still reads them here: the band, the sidebar and the words.
 struct PlanLandingTests {
-    private static func view(_ name: String) throws -> PlanView {
+    private static func view(_ name: String) throws -> WirePlanView {
         let all = try PlanSectionsCasesTests.cases()
         let found = try #require(all.first { $0["name"] as? String == name })
         return try #require(try PlanSectionsCasesTests.Case(found).view)

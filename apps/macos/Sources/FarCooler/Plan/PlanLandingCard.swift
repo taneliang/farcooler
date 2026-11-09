@@ -7,7 +7,7 @@ import SwiftUI
 // ticket aboard says nothing; it speaks only once landed or when it waits on
 // the owner. Amber only for CI that failed, a landing that stalled, and a
 // ticket waiting on the owner, each with words. Every word, the ladder and the
-// tickets' standing are the Rust core's (`PlanView.LandingCard`, ov-1016); the
+// tickets' standing are the Rust core's (`WireLandingCard`, ov-1016); the
 // CI read beside the commit is the app's (ov-1015 phase 2).
 //
 //   Landing 86
@@ -19,7 +19,7 @@ import SwiftUI
 //   ios-overwrite                                   Needs you
 
 struct PlanLandingCard: View {
-    let card: PlanView.LandingCard
+    let card: WireLandingCard
     /// What a landing is, said on hover over its heading: the Landing section's help.
     let explanation: String?
     let ci: PlanCIRead?
@@ -114,7 +114,7 @@ struct PlanLandingCard: View {
     }
 
     /// The facts line's words (AgentKit's), apart so a test reads them.
-    static func facts(_ card: PlanView.LandingCard, ci: PlanCIRead?, now: Int64) -> String { card.facts(ci: ci, now: now) }
+    static func facts(_ card: WireLandingCard, ci: PlanCIRead?, now: Int64) -> String { card.facts(ci: ci, now: now) }
 
     private var accessibility: String {
         [card.label, card.subtitle, card.carries, card.ladder.compact].compactMap { $0 }.joined(separator: ", ")
@@ -125,7 +125,7 @@ struct PlanLandingCard: View {
 /// explained on hover. Roomy, the three steps are named; narrow, the phase
 /// alone is.
 struct PlanLadderView: View {
-    let ladder: PlanView.Ladder
+    let ladder: WireLadder
     /// The phase alone, for the compact form.
     let word: String
     let explanation: String
@@ -189,7 +189,7 @@ struct PlanLadderView: View {
 
 /// One ticket inside a landing: its title and how it stands, and its key.
 struct PlanLandingTicketRow: View {
-    let ticket: PlanView.TicketCard
+    let ticket: WireTicketCard
     let selected: Bool
     let keyed: Bool
     let onOpen: () -> Void
@@ -198,7 +198,7 @@ struct PlanLandingTicketRow: View {
 
     /// Under its title: its notes, less the "Needs you" it leads with while it
     /// waits on the owner, which is drawn beside the title.
-    private var warnings: ArraySlice<PlanView.Note> { ticket.notes.dropFirst(ticket.waitsOnOwner ? 1 : 0) }
+    private var warnings: ArraySlice<WireNote> { ticket.notes.dropFirst(ticket.waitsOnOwner ? 1 : 0) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

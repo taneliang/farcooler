@@ -258,7 +258,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// `agents` included; nil from a runner before ov-518.
     public var agentsSpend: PlanSpend?
     /// The answer as the runner sent it, which the Rust core reads to build the
-    /// Plan's view (`PlanView`, ov-1016); nil for a plan made in code.
+    /// Plan's view (`WirePlanView`, ov-1016); nil for a plan made in code.
     public internal(set) var wire: Data?
 
     public init(
@@ -421,13 +421,13 @@ extension PlanModel {
 
     /// What the core says of every ticket's detail and every theme's track: nil for a plan with no
     /// wire form, or with no core to ask.
-    public func ticketDetails(activity: [String: Int64] = [:]) -> PlanView.TicketDetails? {
-        PlanView.build(plan: self, needsYou: 0, activity: activity)?.details
+    public func ticketDetails(activity: [String: Int64] = [:]) -> WireTicketDetails? {
+        WirePlanView.build(plan: self, needsYou: 0, activity: activity)?.details
     }
 
     /// A ticket's status line ("Fixing · round 1", "Landed · ac840108"), in the core's words; its
     /// stage's own word when the core can't be asked. A list of rows asks once (`ticketDetails()`) and hands each row the answer.
-    public func status(of line: PlanTicketLine, stage: Bool = true, details: PlanView.TicketDetails? = nil) -> String {
+    public func status(of line: PlanTicketLine, stage: Bool = true, details: WireTicketDetails? = nil) -> String {
         guard let page = (details ?? self.ticketDetails())?.ticket(line.task) else { return line.stage.word }
         return stage ? page.status : page.statusBesideStage
     }
@@ -468,10 +468,10 @@ public struct PlanTaskLine: Equatable, Sendable {
     public var theme: PlanTheme?
     /// What the core says of the ticket's page: its status beside the stage and the card's own
     /// pull request stage, while its ticket is live (ov-316).
-    public var page: PlanView.TicketDetail?
+    public var page: WireTicketDetail?
 
     /// The card's own pull request stage.
-    public var stage: PlanView.DetailStage? { page?.stage }
+    public var stage: WireDetailStage? { page?.stage }
 
     /// The ticket's half: "Building", "Waiting · 2nd", "Landed · ac840108"; nil
     /// without a ticket on the line.

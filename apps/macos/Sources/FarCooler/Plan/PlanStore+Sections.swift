@@ -13,15 +13,15 @@ extension PlanStore {
     /// The Plan's view for the plan as read, `needsYou` being the workspace's
     /// own count (the title bar's number); nil only when the bridge answers
     /// nothing, which a plan the runner sent never meets.
-    func view(needsYou: Int, statuses: [String: TaskStatus], activity: [String: Int64]) -> PlanView? {
+    func view(needsYou: Int, statuses: [String: TaskStatus], activity: [String: Int64]) -> WirePlanView? {
         PlanViewBridge.install()
-        return PlanView.build(plan: plan, needsYou: needsYou, statuses: statuses, activity: activity, agentsSupported: listsAgents)
+        return WirePlanView.build(plan: plan, needsYou: needsYou, statuses: statuses, activity: activity, agentsSupported: listsAgents)
     }
 
     /// The plan column for the plan as read (ov-867), from the same view.
-    func column(needsYou: Int = 0, statuses: [String: TaskStatus] = [:], titles: [String: String] = [:]) -> PlanColumn? {
+    func column(needsYou: Int = 0, statuses: [String: TaskStatus] = [:], titles: [String: String] = [:]) -> WireColumn? {
         PlanViewBridge.install()
-        return PlanColumn.of(plan, needsYou: needsYou, statuses: statuses, titles: titles)
+        return WireColumn.of(plan, needsYou: needsYou, statuses: statuses, titles: titles)
     }
 }
 

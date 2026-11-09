@@ -3,19 +3,19 @@ import SwiftUI
 // The Plan's sections on a phone and in the iPad's plan column (ov-503,
 // design 2 and 7; ov-522): Landing, In Review, Building, Waiting, Waiting for the Next Landing
 // (folded), Agents, then Themes as a grid and, on a phone, Themes and Tickets
-// as two rows that push lists. The Rust core's view (`PlanView`, ov-1016)
+// as two rows that push lists. The Rust core's view (`WirePlanView`, ov-1016)
 // decides what is where, every word and what each says empty; this lays it
 // out as an inset list's sections, one column.
 
 struct PlanSectionsList: View {
-    let view: PlanView
+    let view: WirePlanView
     let plan: PlanModel
     let hook: PlanBoardHook
 
     @State private var landedOpen: Bool
     @Environment(\.colorScheme) private var scheme
 
-    init(view: PlanView, plan: PlanModel, hook: PlanBoardHook) {
+    init(view: WirePlanView, plan: PlanModel, hook: PlanBoardHook) {
         self.view = view
         self.plan = plan
         self.hook = hook
@@ -42,7 +42,7 @@ struct PlanSectionsList: View {
 
     // MARK: Rows
 
-    private func cardRow(_ card: PlanView.TicketCard) -> some View {
+    private func cardRow(_ card: WireTicketCard) -> some View {
         PlanCardRow(card: card) { hook.onOpen(.ticket(card.id)) }
     }
 
@@ -55,13 +55,13 @@ struct PlanSectionsList: View {
     }
 
     /// A section's title and count: none drawn for none.
-    private func header(_ section: PlanView.Section) -> PlanHeader {
+    private func header(_ section: WireSection) -> PlanHeader {
         PlanHeader(title: section.title, count: section.count == 0 ? nil : Int(section.count))
     }
 
     // MARK: Landing
 
-    private func landing(_ section: PlanView.Section) -> some View {
+    private func landing(_ section: WireSection) -> some View {
         Section {
             if let words = section.empty {
                 empty(words, id: "plan-landing")
@@ -82,13 +82,13 @@ struct PlanSectionsList: View {
     }
 
     /// The CI read of a landing's pushed commit, the app's own.
-    private func ci(_ card: PlanView.LandingCard) -> PlanCIRead? {
+    private func ci(_ card: WireLandingCard) -> PlanCIRead? {
         plan.landings.first { $0.id == card.id }.flatMap { plan.ci(of: $0) }
     }
 
     // MARK: In Review and Building
 
-    private func cardSection(_ section: PlanView.Section, id: String, cards: [PlanView.TicketCard]) -> some View {
+    private func cardSection(_ section: WireSection, id: String, cards: [WireTicketCard]) -> some View {
         Section {
             if let words = section.empty {
                 empty(words, id: id)
@@ -102,7 +102,7 @@ struct PlanSectionsList: View {
 
     // MARK: Waiting
 
-    private func waiting(_ section: PlanView.Section) -> some View {
+    private func waiting(_ section: WireSection) -> some View {
         Section {
             if let words = section.empty {
                 empty(words, id: "plan-waiting")
@@ -118,7 +118,7 @@ struct PlanSectionsList: View {
         }
     }
 
-    private func groupTitle(_ group: PlanView.WaitingGroup) -> some View {
+    private func groupTitle(_ group: WireWaitingGroup) -> some View {
         HStack(spacing: 6) {
             if group.attention {
                 Circle().fill(GlancePalette.amber(scheme)).frame(width: 6, height: 6).accessibilityHidden(true)
@@ -138,7 +138,7 @@ struct PlanSectionsList: View {
 
     // MARK: Waiting for the Next Landing
 
-    private func landedLanding(_ section: PlanView.Section) -> some View {
+    private func landedLanding(_ section: WireSection) -> some View {
         Section {
             if landedOpen { ForEach(view.onLandedLanding) { cardRow($0) } }
         } header: {
@@ -155,7 +155,7 @@ struct PlanSectionsList: View {
 
     // MARK: Agents
 
-    private func agents(_ section: PlanView.Section) -> some View {
+    private func agents(_ section: WireSection) -> some View {
         let agents = view.agents
         let opens = Dictionary(plan.agents.compactMap { a in a.tickets.first.map { (a.id, $0.task) } }, uniquingKeysWith: { first, _ in first })
         return Section {
@@ -178,7 +178,7 @@ struct PlanSectionsList: View {
 
     // MARK: Themes
 
-    private func themes(_ section: PlanView.Section) -> some View {
+    private func themes(_ section: WireSection) -> some View {
         Section {
             PlanThemeGridView(grid: view.themes, plan: plan, columns: hook.tileColumns) { hook.onOpen(.theme($0)) }
                 .listRowInsets(EdgeInsets())
@@ -220,7 +220,7 @@ struct PlanSectionsList: View {
 /// its state, and its tokens. A working agent has a filled dot, an idle one a
 /// ring; a tap opens its first ticket.
 struct PlanAgentRow: View {
-    let agent: PlanView.AgentRow
+    let agent: WireAgentRow
     /// The task its row opens, or nil for an agent on no ticket.
     let opens: String?
     let onOpen: (String) -> Void
@@ -294,7 +294,7 @@ struct PlanAgentRow: View {
 /// sits in the glyph column; elsewhere its stage's mark, amber when a note
 /// needs a person. A ticket on a landing draws the same row.
 struct PlanCardRow: View {
-    let card: PlanView.TicketCard
+    let card: WireTicketCard
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
     /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
@@ -369,7 +369,7 @@ struct PlanCardRow: View {
     /// A note: gray, or amber for what needs a person. A pull request's stage
     /// or the engine's step keeps to one line, cut in the middle (a login may
     /// be long, ov-316).
-    @ViewBuilder private func noteLine(_ note: PlanView.Note) -> some View {
+    @ViewBuilder private func noteLine(_ note: WireNote) -> some View {
         let oneLine = note.kind == .stage || note.kind == .run
         Text(note.text)
             .font(.footnote.weight(note.attention ? .medium : .regular))
@@ -395,5 +395,5 @@ struct PlanCardRow: View {
 
 extension PlanGlyph {
     /// A card's mark, as the view names it.
-    static func name(_ mark: PlanView.Mark) -> String { name(mark.stage, fixing: mark == .fixing) }
+    static func name(_ mark: WireMark) -> String { name(mark.stage, fixing: mark == .fixing) }
 }

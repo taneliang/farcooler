@@ -6,7 +6,7 @@ import SwiftUI
 // (Stuck, Building, Reviewing, Landing, each agent a soft card with its tickets
 // indented under it) and the footer counts.
 //
-// Every rule is AgentKit's `PlanColumn`; this draws it in iOS's idiom, a
+// Every rule is AgentKit's `WireColumn`; this draws it in iOS's idiom, a
 // native inset-grouped list. Nothing here acts on an agent: no Stop, Assign,
 // cost or rules. Stopping, assigning and answering are said to the
 // orchestrator, and a Needs You row leaves its words in the orchestrator's
@@ -218,7 +218,7 @@ struct PhonePlanColumn<Top: View>: View {
                 ForEach(asks) { theme in
                     PhoneNeedsYouLine(
                         title: theme.name, detail: theme.ownerAsk, since: nil,
-                        quote: { quote(PlanColumn.quote(key: nil, title: "\(theme.name): \(theme.ownerAsk)")) }
+                        quote: { quote(WireColumn.quote(key: nil, title: "\(theme.name): \(theme.ownerAsk)")) }
                     )
                     .accessibilityIdentifier("plan-needs-theme-\(theme.name)")
                 }
@@ -226,7 +226,7 @@ struct PhonePlanColumn<Top: View>: View {
                     let title = item.task?.title ?? item.question
                     PhoneNeedsYouLine(
                         title: title, detail: item.task == nil ? (item.distinctDetail ?? "") : item.question, since: item.since,
-                        quote: { quote(PlanColumn.quote(key: item.task?.key, title: title)) }
+                        quote: { quote(WireColumn.quote(key: item.task?.key, title: title)) }
                     )
                     .accessibilityIdentifier("plan-needs-\(item.key)")
                 }
@@ -276,8 +276,8 @@ extension Connection {
 
 /// What the plan's rows do on the phone.
 struct PhonePlanActions {
-    var openAgent: (PlanColumn.Agent) -> Void = { _ in }
+    var openAgent: (WireColumnAgent) -> Void = { _ in }
     var openTicket: (String) -> Void = { _ in }
     /// The list of a stage's tickets nobody is on.
-    var openStage: (PlanColumn.Stage) -> Void = { _ in }
+    var openStage: (WirePipeStage) -> Void = { _ in }
 }

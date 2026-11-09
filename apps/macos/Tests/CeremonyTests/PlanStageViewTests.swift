@@ -87,7 +87,7 @@ struct PlanStageViewTests {
     }
 
     /// Every ticket's card in the view the Rust core built, by key.
-    static func cards(_ store: TaskBoardStore) throws -> [String: PlanView.TicketCard] {
+    static func cards(_ store: TaskBoardStore) throws -> [String: WireTicketCard] {
         let view = try #require(store.plan.view(needsYou: 0, statuses: [:], activity: [:]))
         let all = view.inReview + view.building + view.waiting.flatMap(\.cards) + view.onLandedLanding + view.landedToday
             + view.landings.flatMap(\.tickets)
@@ -107,7 +107,7 @@ struct PlanStageViewTests {
         // Amber exactly when the stage says it needs a person, read from the
         // stage and not from a list of tickets.
         let details = try #require(store.plan.plan.ticketDetails())
-        func shown(_ line: PlanTicketLine) -> PlanView.DetailStage? { details.ticket(line.task)?.stage }
+        func shown(_ line: PlanTicketLine) -> WireDetailStage? { details.ticket(line.task)?.stage }
         for n in 1...15 {
             let line = lines[n - 1]
             let drawn = try await row(n)

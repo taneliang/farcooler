@@ -55,7 +55,7 @@ struct PlanBoardHook {
     var showsBand = true
     /// The sections drawn, nil for all of them. The iPhone's Plan sheet,
     /// whose tree lists every theme and card, leaves Themes out (ov-616).
-    var kinds: Set<PlanView.SectionKind>?
+    var kinds: Set<WireSectionKind>?
 }
 
 /// What the Plan's sections are decided from besides the plan itself: the
@@ -75,9 +75,9 @@ enum PlanViewBridge {
 
     static func install() { _ = installed }
 
-    static func view(plan: PlanModel, facts: PlanFacts, statuses: [String: TaskStatus]) -> PlanView? {
+    static func view(plan: PlanModel, facts: PlanFacts, statuses: [String: TaskStatus]) -> WirePlanView? {
         install()
-        return PlanView.build(
+        return WirePlanView.build(
             plan: plan, needsYou: facts.needsYou, statuses: statuses, activity: facts.activity,
             agentsSupported: facts.listsAgents)
     }
@@ -85,9 +85,9 @@ enum PlanViewBridge {
     /// The plan column (ov-874), from the same view.
     static func column(
         plan: PlanModel, needsYou: Int = 0, statuses: [String: TaskStatus], titles: [String: String]
-    ) -> PlanColumn? {
+    ) -> WireColumn? {
         install()
-        return PlanColumn.of(plan, needsYou: needsYou, statuses: statuses, titles: titles)
+        return WireColumn.of(plan, needsYou: needsYou, statuses: statuses, titles: titles)
     }
 }
 

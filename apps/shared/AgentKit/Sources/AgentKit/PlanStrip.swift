@@ -128,7 +128,7 @@ public struct PlanStrip: Equatable, Sendable {
         let working = plan.working
         // One reading of the plan for the band and for Next, so a ticket
         // waiting on a decision is in neither: the Rust core's (ov-1016).
-        let view = PlanView.build(plan: plan, needsYou: needsYou, statuses: statuses)
+        let view = WirePlanView.build(plan: plan, needsYou: needsYou, statuses: statuses)
         self.init(
             orchestrator: orchestrator, line: line, needsYou: needsYou,
             now: working.prefix(Self.nowShown).map { Ticket(name: PlanWords.short($0.heading), stage: $0.stage) },

@@ -157,13 +157,13 @@ public struct TicketTree: Equatable, Sendable {
     /// the folded Waiting; a group with no tickets isn't listed.
     public var groups: [Group]
 
-    /// The groups of the Plan's view (`PlanView`, the Rust core's sections):
+    /// The groups of the Plan's view (`WirePlanView`, the Rust core's sections):
     /// `view` when the caller has it, else the view of `plan` with nothing
     /// beside it. Each ticket's agents are still the plan's, all of them,
     /// working first (ov-1015 phase 3).
-    public init(plan: PlanModel, view: PlanView? = nil, locale: Locale = .current) {
+    public init(plan: PlanModel, view: WirePlanView? = nil, locale: Locale = .current) {
         let lines = Dictionary(plan.lines.map { ($0.task, $0) }, uniquingKeysWith: { first, _ in first })
-        guard let view = view ?? PlanView.build(plan: plan) else {
+        guard let view = view ?? WirePlanView.build(plan: plan) else {
             groups = []
             return
         }
@@ -178,7 +178,7 @@ public struct TicketTree: Equatable, Sendable {
                 id: id, key: key, heading: heading, state: state, agents: agents(id),
                 cards: [lines[id]?.card ?? PlanCardRef(task: id, key: key)])
         }
-        func rows(_ cards: [PlanView.TicketCard]) -> [TicketNode] {
+        func rows(_ cards: [WireTicketCard]) -> [TicketNode] {
             cards.map { ticketNode(id: $0.id, key: $0.key, heading: $0.heading, state: $0.status) }
         }
 
@@ -197,7 +197,7 @@ public struct TicketTree: Equatable, Sendable {
         }
         let waiting = view.waiting(.onYou) + view.waiting(.next) + view.waiting(.notRanked)
         for (kind, section, list, folded) in [
-            (Kind.inReview, PlanView.SectionKind.inReview, view.inReview, false), (.building, .building, view.building, false),
+            (Kind.inReview, WireSectionKind.inReview, view.inReview, false), (.building, .building, view.building, false),
             (.waiting, .waiting, waiting, true), (.onLandedLanding, .onLandedLanding, view.onLandedLanding, true),
         ] where !list.isEmpty {
             groups.append(

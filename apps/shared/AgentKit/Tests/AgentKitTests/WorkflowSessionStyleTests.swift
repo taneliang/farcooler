@@ -26,7 +26,7 @@ struct WorkflowSessionStyleTests {
         })
         let port = try #require(adapter.port(host: "runner"))
         let workspace = card["workspace"] as! String
-        let shown = try WorkflowPresentation.decode(try await port.read("runner", workspace), workspace: workspace)
+        let shown = try WirePresentation.decode(try await port.read("runner", workspace), workspace: workspace)
         let run = try #require(shown.runs.first { !$0.actions.isEmpty })
         _ = try? await port.dispatch("runner", workspace, run.item, run.actions[0].json())
         #expect(calls.map(\.method) == ["workflow.snapshot", "workflow.prepare_selection"])

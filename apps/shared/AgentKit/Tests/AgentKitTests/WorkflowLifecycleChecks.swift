@@ -12,7 +12,7 @@ private func workflowRequire(_ condition: Bool) throws {
 // Shared with the bounded standalone harness so execution and XCTest use the
 // same regressions without building the full application.
 @MainActor func workflowLifecycleChecks(json: String) async throws {
-    let card = try WorkflowPresentation.decode(json, workspace: "workspace").runs[0]
+    let card = try WirePresentation.decode(json, workspace: "workspace").runs[0]
     for returnToOriginal in [false, true] {
         let model = WorkflowRunsModel(host: "runner", workspace: "workspace")
         var reply: CheckedContinuation<String, Never>?
