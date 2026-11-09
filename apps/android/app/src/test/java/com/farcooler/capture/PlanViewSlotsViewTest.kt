@@ -11,6 +11,11 @@ import com.farcooler.ui.FarCoolerTheme
 import com.farcooler.ui.PlanFolds
 import com.farcooler.ui.planItems
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -96,8 +101,26 @@ class PlanViewSlotsViewTest {
     }
 
     @Test fun `Waiting for the next landing is drawn folded, and opens`() {
-        val view = """{"schema":1,"view":{"now":1,"needs_you":0,"sections":[{"kind":"on_landed_landing","title":"Waiting for the next landing","count":1,"folded":true}],
-            "on_landed_landing":[{"id":"t-a","key":"ov-9","heading":"Parked ticket","stage":"waiting","status":"Waiting","second":"Waiting · ov-9","mark":"waiting","accessibility":"Parked ticket"}]}}"""
+        // The golden view with its sections cut to this one and one parked ticket: every field the generated PlanView
+        // requires is there, in the camelCase the core writes.
+        val answer = golden.getValue("answer").jsonObject
+        val base = answer.getValue("view").jsonObject
+        val parked = JsonObject(
+            base.getValue("inReview").jsonArray.first().jsonObject + mapOf(
+                "id" to JsonPrimitive("t-a"), "key" to JsonPrimitive("ov-9"), "heading" to JsonPrimitive("Parked ticket"),
+                "stage" to JsonPrimitive("waiting"), "status" to JsonPrimitive("Waiting"), "second" to JsonPrimitive("Waiting · ov-9"),
+                "mark" to JsonPrimitive("waiting"), "accessibility" to JsonPrimitive("Parked ticket"),
+            ),
+        )
+        val section = JsonObject(
+            mapOf(
+                "kind" to JsonPrimitive("on_landed_landing"), "title" to JsonPrimitive("Waiting for the next landing"),
+                "count" to JsonPrimitive(1), "folded" to JsonPrimitive(true), "empty" to JsonNull, "help" to JsonNull,
+            ),
+        )
+        val view = JsonObject(
+            answer + ("view" to JsonObject(base + mapOf("sections" to JsonArray(listOf(section)), "onLandedLanding" to JsonArray(listOf(parked))))),
+        ).toString()
         val closed = drawn(view)
         assertTrue("plan-on-landed-landing" in closed)
         assertFalse("its rows wait behind the fold", "plan-ticket-ov-9" in closed)
