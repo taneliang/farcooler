@@ -36,11 +36,13 @@ impl CommandHandle {
 impl Runtime {
     #[cfg(test)]
     pub(super) fn wire_command(&self, workspace: &str, principal: &str, action: Action) -> Result<serde_json::Value> {
-        self.wire_command_with(workspace, principal, None, action, None)
+        self.wire_command_with(workspace, principal, &[principal.to_string()], None, action, None)
     }
     /// `tree` is what `prepare_start` resolved for a Start that names a worktree (ov-967). `actor` is who sent
-    /// it, as admission read them, written into the receipt (ov-1001).
-    pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, actor: Option<&WorkflowActor>, action: Action,
+    /// it, as admission read them, written into the receipt (ov-1001). `deciders` are the decider names the caller
+    /// holds (`Admission::deciders`): a decision is made as the one its gate waits on, if the caller holds it, and
+    /// otherwise as `principal`, which the reducer then refuses (ov-1002).
+    pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, deciders: &[String], actor: Option<&WorkflowActor>, action: Action,
         tree: Option<RunTree>) -> Result<serde_json::Value>
     {
         let payload = serde_json::to_string(&(principal, &action))?;
@@ -117,14 +119,16 @@ impl Runtime {
                     }
                 }
                 Action::Approve { item, run, pin, candidate, .. } => {
-                    let input = input(Command::Approve { item:item.clone(),run:run.clone(),pin:pin.clone(),candidate:candidate.clone() },Grant::Decision { principal:session.principal.clone() });
+                    let decider = crate::workflow_deciders::decide_as(crate::workflow_deciders::waiting_on(&state, item), deciders, &session.principal);
+                    let input = input(Command::Approve { item:item.clone(),run:run.clone(),pin:pin.clone(),candidate:candidate.clone() },Grant::Decision { principal:decider.into() });
                     self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                 }
                 Action::Review { item, run, pin, evidence, passed, reason, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin && i.last_evidence.as_ref() == Some(evidence)) {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
-                        let input = input(Command::Review { item:item.clone(),run:run.clone(),evidence:evidence.clone(),passed:*passed,reason:reason.clone() },Grant::Decision { principal:session.principal.clone() });
+                        let decider = crate::workflow_deciders::decide_as(crate::workflow_deciders::waiting_on(&state, item), deciders, &session.principal);
+                        let input = input(Command::Review { item:item.clone(),run:run.clone(),evidence:evidence.clone(),passed:*passed,reason:reason.clone() },Grant::Decision { principal:decider.into() });
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }

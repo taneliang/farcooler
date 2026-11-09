@@ -663,11 +663,12 @@ impl Runtime {
                     // No await separates final retained authority recheck from receipt/transaction.
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
+                    let deciders = admission.deciders().map_err(|_| Error::Refused("workflow caller authority changed"))?;
                     let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
                     } else {
-                        self.wire_command_with(&admission.workspace(), &admission.principal(), Some(&admission.actor()), *action, tree)?
+                        self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, tree)?
                     };
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);

@@ -65,6 +65,12 @@ pub enum Ruling {
     /// lead's orchestrator's (ov-999). Admission asks again when the engine
     /// uses the command (`Admission::permits`). A rep never does (`rep_may`).
     Engine,
+    /// Deciding a gate (approve, or a review's verdict): every member's to
+    /// send, and the engine's to take only from whoever holds the name the
+    /// gate waits on (ov-1002): `owner`, `member:<handle>` or
+    /// `role:maintainer`, picked by admission from the caller, never the wire
+    /// (`workflow_deciders`). A rep never does (`rep_may`).
+    Decision,
     /// The owner's alone, refused `not_yours`, for the reason given.
     Owners(Why),
 }
@@ -92,7 +98,8 @@ pub fn member_ruling(method: M) -> Ruling {
     use Ruling::*;
     match method {
         M::WorkspaceSetWorkflow | M::WorkflowSettle | M::WorkflowCutover => Owners(Why::Reshapes),
-        M::WorkflowEnqueue | M::WorkflowApprove | M::WorkflowReview | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue
+        M::WorkflowApprove | M::WorkflowReview => Decision,
+        M::WorkflowEnqueue | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue
         | M::WorkflowLeave | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowSendBack | M::WorkflowReopen
         | M::WorkflowPropose | M::WorkflowDrafts => Engine,
         M::HostGet

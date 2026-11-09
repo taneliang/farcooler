@@ -16,7 +16,8 @@ pub struct Gates {
     /// Add a gate the orchestrator decides: the ticket waits for its word, however it chooses to review.
     #[arg(long)]
     pub orchestrator_gate: bool,
-    /// Add a gate a person decides: the ticket waits for their word. Only `owner` can decide. Repeat for several.
+    /// Add a gate a person decides: the ticket waits for their word. Name `owner`, a member as `member:<handle>`, or
+    /// `role:maintainer` for any Maintainer. Repeat for several.
     #[arg(long, value_name = "PERSON")]
     pub person_gate: Vec<String>,
     /// A setting every command gate runs with, as NAME=value. Repeat for several. A gate gets PATH and HOME

@@ -101,6 +101,15 @@ impl Admission {
     }
     /// Whether the person behind this caller is the owner, whatever seat they call from.
     pub(super) fn is_owner(&self) -> bool { self.person == Person::Owner }
+    /// The decider names this caller holds, read from the store now (ov-1002): the owner holds `owner`, and
+    /// `role:maintainer` as every Maintainer does; a member in person `member:<handle>`, and the role while they
+    /// hold it; an orchestrator pane only `orchestrator`, whoever leads it.
+    pub(super) fn deciders(&self) -> Result<Vec<String>> {
+        let maintains = crate::people::maintains(&self.service.store, &self.person)?;
+        let mut names = vec![self.principal()];
+        if self.seat == Seat::Person && maintains { names.push(crate::workflow_deciders::MAINTAINER.into()); }
+        Ok(names)
+    }
     /// A member in person, rather than the owner or an orchestrator pane: they read runs, and act on them where
     /// they lead or as a Maintainer (R-107, ov-1000).
     fn member_in_person(&self) -> bool { self.seat == Seat::Person && matches!(self.person, Person::Member(_)) }
@@ -140,6 +149,9 @@ impl Admission {
             let store = &self.service.store;
             return match action {
                 Action::Get => Ok(()),
+                // A gate decides who decides it: the reducer takes the decision only from the name it waits on,
+                // which `deciders` holds only for whoever it names (ov-1002).
+                Action::Approve { .. } | Action::Review { .. } => Ok(()),
                 // Settling a push stays the owner's.
                 Action::Settle { .. } => Err(DomainError::NotYours { what: "not_yours" }),
                 // Only through a draft a Maintainer approved (`workflow_drafts`): `workspace.set_workflow` is

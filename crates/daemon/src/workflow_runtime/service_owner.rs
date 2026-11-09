@@ -29,6 +29,12 @@ impl Runtime {
     pub(super) async fn validate_wire_publication(&self, workspace: &str, principal: &str,
         action: &farcooler_protocol::workflow_commands::Action) -> Result<()> {
         use farcooler_protocol::workflow_commands::Action;
+        // A gate names a decider who exists, whatever else the publication carries (ov-1002).
+        if let Action::Publish { definition, .. } = action
+            && crate::workflow_deciders::refuse_unknown(&self.store, definition).is_err()
+        {
+            return Err(Error::Refused("a gate names a decider who isn't on this runner"));
+        }
         let Action::Publish { mutation, definition, adapter: Some(adapter), .. } = action else { return Ok(()) };
         // A configuration read back from `workflow.get` carries the marker in place of each value it hides; published
         // as it is, the marker would become the value (R-111, L11), as `propose` refuses too.

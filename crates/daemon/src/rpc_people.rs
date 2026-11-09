@@ -160,6 +160,8 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // enrolled after the revokes above is revoked here, and one after
             // this is refused (`record_member_enrolled`, review F3).
             let late = svc.store.remove_member_with_enrolled(handle)?;
+            // A run waiting on them keeps waiting; its card says so, and that the owner can reassign it (ov-1002).
+            crate::workflow_deciders::member_gone(svc, watcher, handle);
             // They're gone now, so a failure is logged and the rest still go.
             if let Some(err) = revoke_all(svc, &late).await {
                 tracing::error!(?err, "a device a removed member enrolled may still have a line");

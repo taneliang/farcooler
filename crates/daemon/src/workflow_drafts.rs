@@ -191,6 +191,8 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
     definition.validate().map_err(|_| DomainError::InvalidArgument { what: "definition" })?;
     let AdapterConfiguration::Coding(config) = &adapter;
     crate::workflow_runtime::CodingConfigExt::validate_definition(config, &definition).map_err(|_| DomainError::InvalidArgument { what: "definition" })?;
+    // A gate can only wait on someone who could answer it (ov-1002).
+    crate::workflow_deciders::refuse_unknown(&svc.store, &definition).map_err(|_| DomainError::InvalidArgument { what: "decider" })?;
     let current = svc.store.workflow_configuration(&workspace.to_string()).map_err(|_| DomainError::OperationFailed)?;
     let bundle = crate::landing_templates::Bundle { definition, adapter };
     let summary = workflow_summary::summarize(reason, &bundle, current.as_ref().map(|c| &c.definition), current.as_ref().and_then(|c| c.adapter.as_ref()));

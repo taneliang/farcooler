@@ -60,7 +60,7 @@ pub enum Error {
     NoSuggestion(String),
     /// A `--gate-env` that isn't `NAME=value`.
     BadEnvironment(String),
-    /// A person gate can only name someone who can decide.
+    /// A person gate can only name someone who can decide: `owner`, `member:<handle>` or `role:maintainer`.
     NotADecider(String),
     /// An agent gate needs the reviewer the runner is set up with.
     NoReviewer,
@@ -83,7 +83,7 @@ impl std::fmt::Display for Error {
             Self::NoAdapter => f.write_str("This workspace has no adapter settings yet, so there is nothing to pin a definition to."),
             Self::NoSuggestion(why) => write!(f, "This workspace has no workflow yet, and the runner can’t suggest settings for a first one. {why}"),
             Self::BadEnvironment(text) => write!(f, "`{text}` isn't a gate setting. Write it as NAME=value."),
-            Self::NotADecider(who) => write!(f, "{who} can't decide a gate. Only the owner can, so name owner."),
+            Self::NotADecider(who) => write!(f, "{who} can't decide a gate. Name owner, a member as member:<handle>, or role:maintainer for any Maintainer."),
             Self::NoReviewer => f.write_str("An agent gate needs an agent to start or a reviewer to run, and this runner isn't set up with either."),
             Self::BadRoute(text) => write!(f, "`{text}` isn't a route. Write it as PATTERN=push or PATTERN=ask."),
             Self::MixedRoutes => f.write_str("This charter sends some paths by pull request and others another way, and a definition can't say that yet. Make them all one route, or wait for the pull request steps."),
@@ -136,8 +136,10 @@ fn extra_gate(config: &CodingConfig, extra: &Extra) -> Result<Gate, Error> {
         Extra::Person(p) => person(p)?,
     })
 }
+/// A person gate names `owner`, a member as `member:<handle>`, or `role:maintainer` (ov-1002). Whether the
+/// member exists is the store's to say, when the draft is proposed or published (`workflow_deciders`).
 fn person(principal: &str) -> Result<Gate, Error> {
-    if principal != "owner" { return Err(Error::NotADecider(principal.into())); }
+    if !crate::workflow_deciders::well_formed(principal) { return Err(Error::NotADecider(principal.into())); }
     Ok(Gate::Person { principal: principal.into() })
 }
 

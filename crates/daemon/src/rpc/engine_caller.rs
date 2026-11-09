@@ -4,7 +4,8 @@ use super::*;
 impl Rpc {
     /// Who may send `workspace`'s engine `method` at all (ruling R-107):
     /// - the owner;
-    /// - any member, to read its runs (`workflow.get`);
+    /// - any member, to read its runs (`workflow.get`), and to decide a gate
+    ///   that names them or a role they hold (ov-1002), which the engine judges;
     /// - the member who leads `workspace`, from their own device or shell or
     ///   their orchestrator pane (ov-999), and a Maintainer on any workspace,
     ///   to act on its runs (`people::acts_on_runs`, ov-1000).
@@ -19,6 +20,8 @@ impl Rpc {
         match &person {
             Person::Owner => Ok(()),
             Person::Member(_) if method == "workflow.get" => Ok(()),
+            // The engine takes a decision only from whoever holds the name its gate waits on (ov-1002).
+            Person::Member(_) if matches!(method, "workflow.approve" | "workflow.review") => Ok(()),
             Person::Member(_) if !owners && crate::people::acts_on_runs(&self.service.store, &person, workspace)? => Ok(()),
             _ => Err(DomainError::ScopeDenied { needed: "owner" }),
         }

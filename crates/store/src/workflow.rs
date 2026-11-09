@@ -113,6 +113,13 @@ impl Store {
         ).optional()?;
         raw.map(|s| serde_json::from_str(&s)).transpose().map_err(Into::into)
     }
+    /// The card a run's item is, if it is one (a standalone item has none).
+    pub fn workflow_item_task(&self, workspace: &str, item: &str) -> Result<Option<uuid::Uuid>> {
+        let raw: Option<Option<Vec<u8>>> = self.conn().query_row(
+            "SELECT task_id FROM workflow_owned_items WHERE workspace = ?1 AND item = ?2", [workspace, item], |r| r.get(0),
+        ).optional()?;
+        Ok(raw.flatten().and_then(|b| uuid::Uuid::from_slice(&b).ok()))
+    }
     pub fn workflow_events(&self, workspace: &str) -> Result<Vec<Input>> {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT payload FROM workflow_events WHERE workspace = ?1 ORDER BY revision")?;
