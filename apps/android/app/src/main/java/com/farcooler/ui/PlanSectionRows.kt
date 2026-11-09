@@ -30,6 +30,9 @@ import com.farcooler.model.PlanView
 import com.farcooler.model.PlanViewKind
 import com.farcooler.model.PlanViewTicket
 import com.farcooler.model.ciOf
+import com.farcooler.model.section
+import com.farcooler.model.waiting
+import com.farcooler.model.waitingCount
 
 // The Plan's sections, drawn for the phone and the tablet (ov-503, design 7). The shared core's `PlanView` decides what is in
 // each, in what order, and every word they say (ov-1016); these lay it out. Nothing here re-derives a rule.
@@ -79,14 +82,14 @@ fun LazyListScope.planSections(
     val now = view.now
     for (section in view.sections) {
         val id = "plan/${section.kind.name.lowercase()}"
-        val count = section.count.takeIf { it > 0 }
+        val count = section.count.takeIf { it > 0 }?.toInt()
         val empty = section.empty.takeIf { count == null }
         when (section.kind) {
-            PlanViewKind.NEEDS_YOU -> {
-                item(key = "$id/header") { PlanHeader(section.title, section.count, Modifier.testTag("plan-needs-you")) }
-                item(key = "$id/row") { PlanNeedsYouRow(section.count, onNeedsYou) }
+            PlanViewKind.NeedsYou -> {
+                item(key = "$id/header") { PlanHeader(section.title, section.count.toInt(), Modifier.testTag("plan-needs-you")) }
+                item(key = "$id/row") { PlanNeedsYouRow(section.count.toInt(), onNeedsYou) }
             }
-            PlanViewKind.LANDING -> {
+            PlanViewKind.Landing -> {
                 item(key = "$id/header") {
                     // A long press says what a landing is, where landings first appear.
                     ExplainedOnLongPress(listOfNotNull(section.help)) { PlanHeader(section.title, count, Modifier.testTag("plan-landing")) }
@@ -96,13 +99,13 @@ fun LazyListScope.planSections(
                     PlanLandingCard(card, plan.landings.firstOrNull { it.id == card.id }?.let(plan::ciOf), now, onOpenTicket = { onOpen(PlanPage.Ticket(it)) }, help = section.help)
                 }
             }
-            PlanViewKind.IN_REVIEW, PlanViewKind.BUILDING -> {
-                val tag = if (section.kind == PlanViewKind.IN_REVIEW) "plan-in-review" else "plan-building"
+            PlanViewKind.InReview, PlanViewKind.Building -> {
+                val tag = if (section.kind == PlanViewKind.InReview) "plan-in-review" else "plan-building"
                 item(key = "$id/header") { PlanHeader(section.title, count, Modifier.testTag(tag)) }
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("$tag-empty")) }
-                ticketRows(if (section.kind == PlanViewKind.IN_REVIEW) view.inReview else view.building, id, onOpen)
+                ticketRows(if (section.kind == PlanViewKind.InReview) view.inReview else view.building, id, onOpen)
             }
-            PlanViewKind.WAITING -> {
+            PlanViewKind.Waiting -> {
                 item(key = "$id/header") { PlanHeader(section.title, count, Modifier.testTag("plan-waiting")) }
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-waiting-empty")) }
                 // Each group is named only when another shares the section.
@@ -112,14 +115,14 @@ fun LazyListScope.planSections(
                     ticketRows(group.cards, "$id/$tag", onOpen)
                 }
             }
-            PlanViewKind.ON_LANDED_LANDING -> {
+            PlanViewKind.OnLandedLanding -> {
                 val open = folds.isOpen(PlanFold.ON_LANDED_LANDING, default = !section.folded)
                 item(key = "$id/header") {
                     PlanHeader(section.title, count, Modifier.testTag("plan-on-landed-landing"), open = open) { folds.toggle(PlanFold.ON_LANDED_LANDING) }
                 }
                 if (open) ticketRows(view.onLandedLanding, id, onOpen)
             }
-            PlanViewKind.AGENTS -> {
+            PlanViewKind.Agents -> {
                 item(key = "$id/header") { PlanHeader(section.title, count, Modifier.testTag("plan-agents")) }
                 if (view.agents.rows.isEmpty()) {
                     item(key = "$id/empty") { PlanEmptyLine(view.agents.header, Modifier.testTag("plan-agents-empty")) }
@@ -135,8 +138,8 @@ fun LazyListScope.planSections(
                     }
                 }
             }
-            PlanViewKind.THEMES -> {
-                item(key = "$id/header") { PlanHeader(section.title, section.count, Modifier.testTag("plan-themes")) }
+            PlanViewKind.Themes -> {
+                item(key = "$id/header") { PlanHeader(section.title, section.count.toInt(), Modifier.testTag("plan-themes")) }
                 themeGrid(
                     view.themes, themeColumns,
                     budget = { themeId -> plan.themes.firstOrNull { it.id == themeId }?.let(PlanCostWords::overBudget)?.let { PlanCostWords.budgetLine(it) } },
@@ -144,7 +147,7 @@ fun LazyListScope.planSections(
                 )
             }
             // Drawn last, after Cost and Pages (`PlanScreens`).
-            PlanViewKind.LANDED_TODAY -> {}
+            PlanViewKind.LandedToday -> {}
         }
     }
 }

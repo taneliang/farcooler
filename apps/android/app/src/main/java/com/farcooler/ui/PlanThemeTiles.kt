@@ -71,15 +71,15 @@ fun LazyListScope.themeGrid(grid: PlanViewThemes, columns: Int, budget: (String)
 }
 
 private fun glyph(glyph: PlanCardGlyph): ImageVector = when (glyph) {
-    PlanCardGlyph.DONE -> Icons.Outlined.CheckCircleOutline
-    PlanCardGlyph.IN_PROGRESS -> Icons.Outlined.Contrast
-    PlanCardGlyph.NOT_STARTED -> Icons.Outlined.RadioButtonUnchecked
+    PlanCardGlyph.Done -> Icons.Outlined.CheckCircleOutline
+    PlanCardGlyph.InProgress -> Icons.Outlined.Contrast
+    PlanCardGlyph.NotStarted -> Icons.Outlined.RadioButtonUnchecked
 }
 
 private fun word(glyph: PlanCardGlyph): String = when (glyph) {
-    PlanCardGlyph.DONE -> "Done"
-    PlanCardGlyph.IN_PROGRESS -> "In progress"
-    PlanCardGlyph.NOT_STARTED -> "Not started"
+    PlanCardGlyph.Done -> "Done"
+    PlanCardGlyph.InProgress -> "In progress"
+    PlanCardGlyph.NotStarted -> "Not started"
 }
 
 @Composable
@@ -109,12 +109,12 @@ fun PlanThemeTileCard(tile: PlanViewTile, budget: String?, onClick: () -> Unit) 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         glyph(card.glyph), contentDescription = null, modifier = Modifier.size(16.dp),
-                        tint = if (card.glyph == PlanCardGlyph.NOT_STARTED) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (card.glyph == PlanCardGlyph.NotStarted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         card.title.ifEmpty { card.key }, style = MaterialTheme.typography.bodySmall,
-                        color = if (card.glyph == PlanCardGlyph.DONE) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        color = if (card.glyph == PlanCardGlyph.Done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }

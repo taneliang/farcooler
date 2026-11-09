@@ -174,7 +174,7 @@ console.log(`${count} workflow fixture/controller/DOM tests passed; simulated DO
 await test('Feature B finite form retains draft/caret/focus and renders borrowed text safely', async () => {
   const shared = JSON.parse(fs.readFileSync('crates/client/src/testdata/workflow-rework.json','utf8'))
   const p = clone(fixtures[0].response.card), run=p.runs[0]
-  run.actions=[{kind:'RequestRework',label:shared.form.submit_label,guard:'b'}];run.forms=[shared.form]
+  run.actions=[{kind:'RequestRework',label:shared.form.submitLabel,guard:'b'}];run.forms=[shared.form]
   run.rework_history=[{principal:'owner',iteration:0,reason:shared.reason}]
   const sent=[];let view;const root=new Element('div')
   // Extend only native textarea mechanics in this DOM fixture.

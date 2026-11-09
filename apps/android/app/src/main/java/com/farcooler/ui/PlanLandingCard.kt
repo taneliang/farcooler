@@ -144,7 +144,7 @@ private fun landingFacts(card: PlanViewLanding, ci: PlanCiRead?, now: Long): Str
 /** Three segments, the steps behind filled, the one it's on in ink (amber when it needs you), and the phase in words under them. */
 @Composable
 private fun PlanLadderBar(card: PlanViewLanding, attention: Boolean) {
-    val current = card.ladder.at
+    val current = card.ladder.at.toInt()
     val scheme = MaterialTheme.colorScheme
     val amber = glanceColor(GlancePalette.amber)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("plan-ladder")) {

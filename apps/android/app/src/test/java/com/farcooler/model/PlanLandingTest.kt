@@ -46,7 +46,7 @@ class PlanLandingTest {
     @Test
     fun `the Next line counts the tickets that wait while none is ranked, and says nothing queued only when none waits`() {
         val waiting = view("next-empty")
-        assertTrue(waiting.waiting(PlanViewWaitingKind.NEXT).isEmpty())
+        assertTrue(waiting.waiting(PlanViewWaitingKind.Next).isEmpty())
         assertEquals(3, waiting.waitingCount)
         val said = PlanGlanceSentence.of(waiting)
         assertEquals("3 waiting, none ranked", said.nextLine)

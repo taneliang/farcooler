@@ -92,13 +92,13 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
         }
         if (run != null) {
             WorkflowRunCard(run, view.ready && !view.busy && port != null,
-                onWatch = if (watcher != null && run.text("pending_effect") != null) ({ watching = run.item }) else null,
+                onWatch = if (watcher != null && run.pendingEffect != null) ({ watching = run.item }) else null,
                 performReason = { action, reason ->
                 scope.launch { model.perform(run.item, action, port, reason) }
             }) { action -> scope.launch { model.perform(run.item, action, port) } }
         } else {
             view.presentation?.runs?.forEach { card ->
-                TextButton(onClick = { select(card.item) }) { Text("${card.text("label")} · ${card.item} · ${card.text("phase_label")}") }
+                TextButton(onClick = { select(card.item) }) { Text("${card.label} · ${card.item} · ${card.phaseLabel}") }
             }
             if (view.ready && view.presentation?.runs?.isEmpty() == true) Text("No workflow runs.")
             if (view.ready && selected != null) Text("This run is no longer available.")
@@ -108,47 +108,43 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
 }
 @Composable
 fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? = null, performReason: (WorkflowAction, String) -> Unit = { _, _ -> }, perform: (WorkflowAction) -> Unit) {
-    // Finite identity slots. Values remain lossless JsonPrimitive strings,
-    // including u64 fence values, and content wraps without ellipsis.
+    // Finite identity slots, content wrapping without ellipsis.
     SelectionContainer {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(requireNotNull(run.text("label")), style = MaterialTheme.typography.titleLarge)
-            Text(requireNotNull(run.text("phase_label")))
-            listOf("item", "run", "definition_pin", "policy_pin", "candidate", "pending_effect", "iteration", "attempt", "fence", "reworks_remaining").forEach { key ->
-                run.text(key)?.let { Text("$key: $it") }
-            }
+            Text(run.label, style = MaterialTheme.typography.titleLarge)
+            Text(run.phaseLabel)
+            listOf(
+                "item" to run.item, "run" to run.run, "definition_pin" to run.definitionPin, "policy_pin" to run.policyPin,
+                "candidate" to run.candidate, "pending_effect" to run.pendingEffect, "iteration" to run.iteration.toString(),
+                "attempt" to run.attempt.toString(), "fence" to run.fence.toString(), "reworks_remaining" to run.reworksRemaining.toString(),
+            ).forEach { (key, value) -> value?.let { Text("$key: $it") } }
             if (onWatch != null) Button(onClick = onWatch) { Text("Watch agent") }
-            run.value["latest_evidence"]?.takeUnless { it == JsonNull }?.jsonObject?.forEach { (key, value) -> Text("Evidence $key: ${value.jsonPrimitive.content}") }
-            listOf("stage", "gate").forEach { key ->
-                run.value[key]?.takeUnless { it == JsonNull }?.jsonObject?.let { value ->
-                    listOf("label", "text", "progression_label", "principal").forEach { slot -> value[slot]?.let { Text(it.jsonPrimitive.content) } }
-                }
+            run.latestEvidence?.let { e ->
+                listOf("candidate" to e.candidate, "manifest" to e.manifest, "receipt" to e.receipt, "policy_pin" to e.policy_pin)
+                    .forEach { (key, value) -> Text("Evidence $key: $value") }
             }
-            (run.value["stages"] as JsonArray).forEach { stage ->
-                val value = stage.jsonObject
-                Text(listOf("id", "label", "progression_label").joinToString(" · ") { value.getValue(it).jsonPrimitive.content })
-            }
-            (run.value["reasons"] as JsonArray).forEach { reason ->
-                Text(reason.jsonObject.getValue("label").jsonPrimitive.content, style = MaterialTheme.typography.titleMedium)
-                Text(reason.jsonObject.getValue("text").jsonPrimitive.content)
+            run.stage?.let { listOf(it.label, it.progressionLabel).forEach { slot -> Text(slot) } }
+            run.gate?.let { listOf(it.label, it.text, it.principal).forEach { slot -> Text(slot) } }
+            run.stages.forEach { stage -> Text(listOf(stage.id, stage.label, stage.progressionLabel).joinToString(" · ")) }
+            run.reasons.forEach { reason ->
+                Text(reason.label, style = MaterialTheme.typography.titleMedium)
+                Text(reason.text)
             }
         }
     }
-    (run.value["rework_history"] as? JsonArray)?.forEach { history ->
-        Text(history.jsonObject.getValue("principal").jsonPrimitive.content)
-        SelectionContainer { Text(history.jsonObject.getValue("reason").jsonPrimitive.content) }
+    run.reworkHistory?.forEach { history ->
+        Text(history.principal)
+        SelectionContainer { Text(history.reason) }
     }
     run.actions.forEach { action ->
-        val form = (run.value["forms"] as? JsonArray)?.firstOrNull {
-            it.jsonObject.getValue("action") == action.descriptor.getValue("kind")
-        }?.jsonObject
+        val form = run.forms?.firstOrNull { it.action == action.kind }
         if (form == null) Button(onClick = { perform(action) }, enabled = enabled) { Text(action.label) }
         else {
-            var draft by rememberSaveable(run.item, run.text("run"), action.descriptor.getValue("guard").jsonPrimitive.content) { mutableStateOf("") }
+            var draft by rememberSaveable(run.item, run.run, action.guard) { mutableStateOf("") }
             OutlinedTextField(value = draft, onValueChange = { draft = it }, enabled = enabled,
-                label = { Text(form.getValue("label").jsonPrimitive.content) })
-            Text(form.getValue("help").jsonPrimitive.content)
-            Button(onClick = { performReason(action, draft) }, enabled = enabled) { Text(form.getValue("submit_label").jsonPrimitive.content) }
+                label = { Text(form.label) })
+            Text(form.help)
+            Button(onClick = { performReason(action, draft) }, enabled = enabled) { Text(form.submitLabel) }
         }
     }
 }

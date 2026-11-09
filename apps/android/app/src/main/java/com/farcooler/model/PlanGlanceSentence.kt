@@ -54,7 +54,7 @@ data class PlanGlanceSentence(
             if (view.building.isNotEmpty()) parts += "${view.building.size} building"
             if (view.inReview.isNotEmpty()) parts += "${view.inReview.size} in review"
 
-            val ranked = view.waiting(PlanViewWaitingKind.NEXT)
+            val ranked = view.waiting(PlanViewWaitingKind.Next)
             val next = ranked.firstOrNull()?.let { first ->
                 // Titles only, each said once and cut at a word: the key is in the title often enough, and never twice.
                 var said = title(first.heading)

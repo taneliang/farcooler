@@ -97,7 +97,7 @@ console.log('PASS explicit preparing-only reinspection, no implicit prepare/subm
 
 // Feature B shares Rust's finite form/text fixture; semantic validation remains Rust-owned.
 const rework = JSON.parse(fs.readFileSync('crates/client/src/testdata/workflow-rework.json','utf8'))
-const b = structuredClone(fixture), action = {kind:'RequestRework',label:rework.form.submit_label,guard:'reasoned-guard'}
+const b = structuredClone(fixture), action = {kind:'RequestRework',label:rework.form.submitLabel,guard:'reasoned-guard'}
 b.runs[0].actions = [action]; b.runs[0].forms = [rework.form]
 const bdata = new Map(), bstorage = {getItem:k=>bdata.get(k)??null,setItem:(k,v)=>bdata.set(k,v)}
 let bp = 0, bs = 0, validation = true, lost = true

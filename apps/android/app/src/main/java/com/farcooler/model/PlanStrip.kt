@@ -84,7 +84,7 @@ data class PlanStrip(
             return PlanStrip(
                 orchestrator = state, line = line(orchestrator, state), needsYou = maxOf(0, needsYou),
                 now = working.take(NOW_SHOWN).map { PlanWords.short(it.heading) to it.stage },
-                moreNow = maxOf(0, working.size - NOW_SHOWN), next = view?.waiting(PlanViewWaitingKind.NEXT)?.firstOrNull()?.let { PlanWords.short(it.heading) },
+                moreNow = maxOf(0, working.size - NOW_SHOWN), next = view?.waiting(PlanViewWaitingKind.Next)?.firstOrNull()?.let { PlanWords.short(it.heading) },
                 band = view?.let(PlanGlanceSentence::of),
             )
         }

@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.Plan
+import com.farcooler.model.section
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanCounts
 import com.farcooler.model.PlanGlanceSentence
@@ -182,7 +183,7 @@ private fun LazyListScope.loaded(
     if (view == null) {
         item(key = "plan/unreadable") { PlanNotice(PlanWords.COULDNT_READ, null, Modifier.testTag("plan-unreadable")) }
     } else {
-        if (band != BandShown.NONE) item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(view), view.needsYou, onNeedsYou = onNeedsYou, pill = false, shown = band) }
+        if (band != BandShown.NONE) item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(view), view.needsYou.toInt(), onNeedsYou = onNeedsYou, pill = false, shown = band) }
         planSections(plan, view, folds, themeColumns, onOpen, onNeedsYou)
     }
     // Behind `board_cost`: a runner without it sends no cost (ov-307).
@@ -193,10 +194,10 @@ private fun LazyListScope.loaded(
     // After Themes, as on the Mac and the iPhone (design 6.1): pages of their
     // own, and anchored ones whose theme is gone.
     pages?.let { pageItems(it, plan, onOpen) }
-    view?.section(PlanViewKind.LANDED_TODAY)?.let { landed ->
+    view?.section(PlanViewKind.LandedToday)?.let { landed ->
         val open = folds.isOpen(PlanFold.LANDED_TODAY, default = !landed.folded)
         item(key = "plan/landed") {
-            PlanHeader(landed.title, landed.count, Modifier.testTag("plan-landed-header"), open = open) { folds.toggle(PlanFold.LANDED_TODAY) }
+            PlanHeader(landed.title, landed.count.toInt(), Modifier.testTag("plan-landed-header"), open = open) { folds.toggle(PlanFold.LANDED_TODAY) }
         }
         if (open) ticketRows(view.landedToday, "plan/landed", onOpen)
     }
@@ -279,14 +280,14 @@ fun planGlyph(stage: TicketStage): ImageVector = when (stage) {
 
 /** A card's mark: its place in Next Up in numerals, else a glyph per stage. */
 private fun markGlyph(mark: PlanViewMark): ImageVector = when (mark) {
-    PlanViewMark.WAITING -> Icons.Outlined.Schedule
-    PlanViewMark.BUILDING, PlanViewMark.FIXING -> Icons.Outlined.Build
-    PlanViewMark.REVIEWING -> Icons.Outlined.Visibility
-    PlanViewMark.NEEDS_YOU -> Icons.Outlined.ErrorOutline
-    PlanViewMark.LANDING -> Icons.Outlined.VerticalAlignBottom
-    PlanViewMark.LANDED -> Icons.Outlined.CheckCircleOutline
-    PlanViewMark.DROPPED -> Icons.Outlined.Close
-    PlanViewMark.RANK, PlanViewMark.UNKNOWN -> Icons.Outlined.QuestionMark
+    PlanViewMark.Waiting -> Icons.Outlined.Schedule
+    PlanViewMark.Building, PlanViewMark.Fixing -> Icons.Outlined.Build
+    PlanViewMark.Reviewing -> Icons.Outlined.Visibility
+    PlanViewMark.NeedsYou -> Icons.Outlined.ErrorOutline
+    PlanViewMark.Landing -> Icons.Outlined.VerticalAlignBottom
+    PlanViewMark.Landed -> Icons.Outlined.CheckCircleOutline
+    PlanViewMark.Dropped -> Icons.Outlined.Close
+    PlanViewMark.Rank, PlanViewMark.Unknown -> Icons.Outlined.QuestionMark
 }
 
 /**
@@ -341,12 +342,12 @@ private fun PlanCardNote(key: String, note: PlanViewNote) {
     val line: @Composable () -> Unit = {
         when (note.kind) {
             // Where its pull request stands (ov-317): gray, or amber for what needs a person, which leads with the problem.
-            PlanViewNoteKind.STAGE -> Text(
+            PlanViewNoteKind.Stage -> Text(
                 note.text, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, style = MaterialTheme.typography.bodyMedium,
                 color = if (note.attention) amber else LocalContentColor.current,
                 modifier = Modifier.testTag("plan-ticket-$key-stage${if (note.attention) "-attention" else ""}"),
             )
-            PlanViewNoteKind.RUN -> Text(
+            PlanViewNoteKind.Run -> Text(
                 note.text, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
                 color = if (note.attention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("plan-ticket-$key-run"),

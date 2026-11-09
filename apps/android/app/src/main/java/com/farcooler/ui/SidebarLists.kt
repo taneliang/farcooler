@@ -152,9 +152,9 @@ private fun ThemeRow(theme: ThemeTree.ThemeNode, open: Boolean, onToggle: () -> 
 @Composable
 private fun CardRow(card: ThemeTree.CardNode, chosen: Boolean, lit: Boolean, onClick: () -> Unit) {
     val glyph = when (card.glyph) {
-        PlanCardGlyph.DONE -> Icons.Outlined.CheckCircleOutline
-        PlanCardGlyph.IN_PROGRESS -> Icons.Outlined.Contrast
-        PlanCardGlyph.NOT_STARTED -> Icons.Outlined.RadioButtonUnchecked
+        PlanCardGlyph.Done -> Icons.Outlined.CheckCircleOutline
+        PlanCardGlyph.InProgress -> Icons.Outlined.Contrast
+        PlanCardGlyph.NotStarted -> Icons.Outlined.RadioButtonUnchecked
     }
     val second = listOfNotNull(card.key.ifEmpty { null }, card.ticket).joinToString(" · ")
     Row(
@@ -164,12 +164,12 @@ private fun CardRow(card: ThemeTree.CardNode, chosen: Boolean, lit: Boolean, onC
             .testTag("card-row-${card.key.ifEmpty { card.task }}")
             .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(card.title.ifEmpty { null }, second.ifEmpty { null }, if (lit) "On the ticket you chose" else null).joinToString(", ") },
     ) {
-        Icon(glyph, null, Modifier.size(18.dp), tint = if (card.glyph == PlanCardGlyph.NOT_STARTED) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(glyph, null, Modifier.size(18.dp), tint = if (card.glyph == PlanCardGlyph.NotStarted) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 card.title.ifEmpty { card.key }, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                color = if (card.glyph == PlanCardGlyph.DONE) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                color = if (card.glyph == PlanCardGlyph.Done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             )
             if (second.isNotEmpty()) Text(second, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

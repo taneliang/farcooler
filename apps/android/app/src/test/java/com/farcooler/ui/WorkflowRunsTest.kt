@@ -19,7 +19,7 @@ class WorkflowRunsTest {
     }
     @Test fun sharedGoldenAndExactDescriptors() = runBlocking {
         for (json in cards()) {
-            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val card = WorkflowPresentations.decode(json, "workspace").runs.single()
             val model = WorkflowRunsModel("runner", "workspace")
             var forwarded: String? = null
             val port = object : WorkflowPort {
@@ -32,10 +32,10 @@ class WorkflowRunsTest {
             }
             model.refresh(port)
             assertTrue(model.view.value.ready)
-            assertTrue(card.text("label")!!.isNotEmpty())
+            assertTrue(card.label.isNotEmpty())
             for (action in card.actions) {
                 model.perform(card.item, action, port)
-                assertEquals(action.descriptor, Json.parseToJsonElement(forwarded!!))
+                assertEquals(action.json(), Json.parseToJsonElement(forwarded!!))
             }
             model.disconnect(); assertFalse(model.view.value.ready)
             forwarded = null
@@ -55,24 +55,24 @@ class WorkflowRunsTest {
         result.complete(cards().first()); reading.await()
         assertFalse(model.view.value.ready); assertNull(model.view.value.presentation)
         model.refresh(null); assertFalse(model.view.value.ready); assertTrue(model.view.value.notice.contains("not connected"))
-        try { WorkflowPresentation.decode(cards().first(), "other"); fail("wrong workspace") } catch (_: IllegalArgumentException) { }
+        try { WorkflowPresentations.decode(cards().first(), "other"); fail("wrong workspace") } catch (_: IllegalArgumentException) { }
     }
-    @Test fun losslessFenceAndLongSharedCopy() {
-        val json = cards().first().replace("\"fence\":1", "\"fence\":18446744073709551615")
-        // JSON formatting is compact in cards(); no Double conversion is used.
-        val run = WorkflowPresentation.decode(json, "workspace").runs.single()
-        assertEquals("18446744073709551615", run.text("fence"))
-        val raw = "{\"kind\":\"FutureAction\",\"guard\":\"exact\",\"label\":\"" + "Long shared label ".repeat(100) + "\"}"
-        val action = WorkflowAction(Json.parseToJsonElement(raw).jsonObject)
+    @Test fun fenceAndLongSharedCopyRoundTrip() {
+        // A fence is a counter far below 2^53, the bound the generated wire types hold (I54).
+        val json = cards().first().replace("\"fence\":1", "\"fence\":9007199254740991")
+        val run = WorkflowPresentations.decode(json, "workspace").runs.single()
+        assertEquals(9007199254740991L, run.fence)
+        val raw = "{\"kind\":\"Approve\",\"guard\":\"exact\",\"label\":\"" + "Long shared label ".repeat(100) + "\"}"
+        val action = Json.decodeFromString(WorkflowAction.serializer(), raw)
         assertEquals("Long shared label ".repeat(100), action.label)
-        assertEquals(Json.parseToJsonElement(raw), action.descriptor)
+        assertEquals(Json.parseToJsonElement(raw), action.json())
     }
 
     @Test fun selectionFencesReplyWithoutStrandingBusyOrRefresh() = runBlocking {
         for (backToOriginal in listOf(false, true)) {
             val json = cards().first()
             val model = WorkflowRunsModel("runner", "workspace")
-            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val card = WorkflowPresentations.decode(json, "workspace").runs.single()
             val result = CompletableDeferred<String>(); val started = CompletableDeferred<Unit>()
             var reads = 0
             val port = object : WorkflowPort {
@@ -94,8 +94,8 @@ class WorkflowRunsTest {
         for (replaceDuringAction in listOf(false, true)) {
             var json = cards().first()
             val model = WorkflowRunsModel("runner", "workspace")
-            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
-            val replacement = json.replace("\"run\":\"${card.text("run")}\"", "\"run\":\"replacement\"")
+            val card = WorkflowPresentations.decode(json, "workspace").runs.single()
+            val replacement = json.replace("\"run\":\"${card.run}\"", "\"run\":\"replacement\"")
             assertNotEquals(json, replacement)
             val port = object : WorkflowPort {
                 override suspend fun read(host: String, workspace: String): String = json
@@ -112,7 +112,7 @@ class WorkflowRunsTest {
     @Test fun failedActionReadCannotOverwriteDisconnectOrReconnect() = runBlocking {
         for (reconnect in listOf(false, true)) {
             val json = cards().first(); val model = WorkflowRunsModel("runner", "workspace")
-            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val card = WorkflowPresentations.decode(json, "workspace").runs.single()
             val read = CompletableDeferred<String>(); val started = CompletableDeferred<Unit>(); var reads = 0
             val old = object : WorkflowPort {
                 override suspend fun read(host: String, workspace: String): String {
@@ -136,7 +136,7 @@ class WorkflowRunsTest {
     @Test fun disconnectFencesDelayedActionReply() = runBlocking {
         for (reconnect in listOf(false, true)) {
             val json = cards().first(); val model = WorkflowRunsModel("runner", "workspace")
-            val card = WorkflowPresentation.decode(json, "workspace").runs.single()
+            val card = WorkflowPresentations.decode(json, "workspace").runs.single()
             val reply = CompletableDeferred<String>(); val started = CompletableDeferred<Unit>()
             val port = object : WorkflowPort {
                 override suspend fun read(host: String, workspace: String): String = json

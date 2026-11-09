@@ -66,10 +66,11 @@ class WorkflowSessionPort(
         val reply = c.call("workflow.snapshot", buildJsonObject { put("workspace", workspace); put("style", STYLE) })
         check(scope(host, workspace).second == scope)
         check(reply.getValue("host").jsonPrimitive.content == c.host)
-        val view = WorkflowPresentation.decode(reply.getValue("presentation").toString(), workspace)
-        for (run in view.runs) for (action in run.actions) observed[key(scope, run.item, action.descriptor.toString())] =
-            Observation(view.value.getValue("revision").jsonPrimitive.content, view.value.getValue("epoch").jsonPrimitive.content, requireNotNull(run.text("run")))
-        return view.value.toString()
+        val presentation = reply.getValue("presentation").toString()
+        val view = WorkflowPresentations.decode(presentation, workspace)
+        for (run in view.runs) for (action in run.actions) observed[key(scope, run.item, action.json().toString())] =
+            Observation(view.revision.toString(), view.epoch.toString(), run.run)
+        return presentation
     }
     override suspend fun pending(host: String, workspace: String): List<RetainedWorkflow> = mutex.withLock {
         load(scope(host, workspace).second).filter { it["phase"]?.jsonPrimitive?.content in listOf("prepared", "preparing") }

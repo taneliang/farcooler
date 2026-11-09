@@ -18,7 +18,7 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
         val ticket: String?,
         val ticketId: String?,
     ) {
-        val glyph: PlanCardGlyph get() = PlanCardGlyph.of(status)
+        val glyph: PlanCardGlyph get() = planCardGlyphOf(status)
     }
 
     data class ThemeNode(val id: String, val name: String, val done: Int, val total: Int, val cards: List<CardNode>) {
@@ -145,7 +145,7 @@ data class TicketTree(
             val groups = mutableListOf<Group>()
             if (view.landings.isNotEmpty()) {
                 groups += Group(
-                    Kind.Landing, view.section(PlanViewKind.LANDING)?.title ?: "Landing", null, false, emptyList(),
+                    Kind.Landing, view.section(PlanViewKind.Landing)?.title ?: "Landing", null, false, emptyList(),
                     view.landings.map { card ->
                         LandingNode(
                             card.id, card.label, card.subtitle, card.phaseWord,
@@ -154,11 +154,11 @@ data class TicketTree(
                     },
                 )
             }
-            val waiting = view.waiting(PlanViewWaitingKind.ON_YOU) + view.waiting(PlanViewWaitingKind.NEXT) + view.waiting(PlanViewWaitingKind.NOT_RANKED)
+            val waiting = view.waiting(PlanViewWaitingKind.OnYou) + view.waiting(PlanViewWaitingKind.Next) + view.waiting(PlanViewWaitingKind.NotRanked)
             for ((kind, section, list, folded) in listOf(
-                Quad(Kind.InReview, PlanViewKind.IN_REVIEW, view.inReview, false),
-                Quad(Kind.Building, PlanViewKind.BUILDING, view.building, false),
-                Quad(Kind.Waiting, PlanViewKind.WAITING, waiting, true),
+                Quad(Kind.InReview, PlanViewKind.InReview, view.inReview, false),
+                Quad(Kind.Building, PlanViewKind.Building, view.building, false),
+                Quad(Kind.Waiting, PlanViewKind.Waiting, waiting, true),
             )) {
                 if (list.isNotEmpty()) groups += Group(kind, view.section(section)?.title ?: "", if (folded) "${list.size}" else null, folded, rows(list))
             }

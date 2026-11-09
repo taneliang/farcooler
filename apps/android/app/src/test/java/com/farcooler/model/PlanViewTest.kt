@@ -28,15 +28,15 @@ class PlanViewTest {
 
     @Test
     fun `the golden answer decodes into every slot the phone draws`() {
-        val view = PlanView.decode(golden.getValue("answer").toString())!!
+        val view = PlanViews.decode(golden.getValue("answer").toString())!!
         assertEquals(
             listOf(
-                PlanViewKind.NEEDS_YOU, PlanViewKind.LANDING, PlanViewKind.IN_REVIEW, PlanViewKind.BUILDING,
-                PlanViewKind.WAITING, PlanViewKind.AGENTS, PlanViewKind.THEMES, PlanViewKind.LANDED_TODAY,
+                PlanViewKind.NeedsYou, PlanViewKind.Landing, PlanViewKind.InReview, PlanViewKind.Building,
+                PlanViewKind.Waiting, PlanViewKind.Agents, PlanViewKind.Themes, PlanViewKind.LandedToday,
             ),
             view.sections.map { it.kind },
         )
-        assertEquals("Reviewed tickets land on main together, after one round of checks.", view.section(PlanViewKind.LANDING)?.help)
+        assertEquals("Reviewed tickets land on main together, after one round of checks.", view.section(PlanViewKind.Landing)?.help)
         assertEquals(listOf("Landing 86", "Landing 89", "Landing 84"), view.landings.map { it.label })
         val stalled = view.landings.last()
         assertTrue(stalled.attention)
@@ -44,15 +44,15 @@ class PlanViewTest {
         assertEquals(3, stalled.ladder.steps.size)
         assertEquals("Lander · opus · 1.4M", view.landings.first().landerWords)
         val fixing = view.inReview.first { it.key == "ov-312" }
-        assertEquals(PlanViewMark.FIXING, fixing.mark)
+        assertEquals(PlanViewMark.Fixing, fixing.mark)
         assertEquals("Fixing · round 2", fixing.status)
         val stale = view.inReview.first { it.key == "ov-482" }
-        assertEquals(listOf(PlanViewNoteKind.WARNING), stale.notes.map { it.kind })
+        assertEquals(listOf(PlanViewNoteKind.Warning), stale.notes.map { it.kind })
         assertTrue(stale.notes.single().attention && stale.markAttention)
         val running = view.building.first { it.key == "ov-310" }
         assertEquals("Builder · sonnet", running.agent?.who)
-        assertEquals("Prepare workspace · Approval required", running.notes.single { it.kind == PlanViewNoteKind.RUN }.text)
-        assertEquals(listOf(PlanViewWaitingKind.NOT_RANKED), view.waiting.map { it.kind })
+        assertEquals("Prepare workspace · Approval required", running.notes.single { it.kind == PlanViewNoteKind.Run }.text)
+        assertEquals(listOf(PlanViewWaitingKind.NotRanked), view.waiting.map { it.kind })
         assertEquals(2, view.waitingCount)
         assertTrue(view.agents.header.startsWith("3 agents, including the orchestrator"))
         assertEquals("Orchestrator · opus", view.agents.rows.first().who)
@@ -63,9 +63,9 @@ class PlanViewTest {
 
     @Test
     fun `a reply that is not a view decodes to none`() {
-        assertNull(PlanView.decode(null))
-        assertNull(PlanView.decode("""{"schema":1,"view":null,"error":"invalid"}"""))
-        assertNull(PlanView.decode("not json"))
+        assertNull(PlanViews.decode(null))
+        assertNull(PlanViews.decode("""{"schema":1,"view":null,"error":"invalid"}"""))
+        assertNull(PlanViews.decode("not json"))
     }
 
     @Test
