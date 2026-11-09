@@ -26,11 +26,6 @@ pub fn sha_subject(sha: &str) -> String {
     format!("sha:{}", sha.to_ascii_lowercase())
 }
 
-/// The subject a run is read under.
-pub fn run_subject(run: u64) -> String {
-    format!("run:{run}")
-}
-
 /// The default branch's subject.
 pub const MAIN_SUBJECT: &str = "main";
 

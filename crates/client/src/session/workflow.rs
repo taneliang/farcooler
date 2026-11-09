@@ -106,11 +106,6 @@ fn prepare(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: A
 // Only the authenticated server context supplies the caller. This matches
 // daemon workflow_runtime/wire_commands.rs's `wire:{principal}` source key;
 // socket tests assert the allocated source against actual server consumption.
-fn prepare_selection(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
-    revision: u64, epoch: u64) -> Result<PreparedWorkflowResult, SessionError>
-{
-    prepare_selection_with_reason(snapshot, workspace, item, selected, revision, epoch, None)
-}
 fn prepare_selection_with_reason(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
     revision: u64, epoch: u64, reason: Option<&str>) -> Result<PreparedWorkflowResult, SessionError>
 {
@@ -163,12 +158,6 @@ impl Session {
         identity: WorkflowCommandIdentity) -> Result<PreparedWorkflowResult, SessionError>
     {
         prepare(&self.workflow_snapshot(workspace, style).await?, workspace, item, selected, identity)
-    }
-    /// Prepare the exact displayed selection with shared sequence/identity allocation.
-    pub async fn workflow_prepare_selection(&self, workspace: Uuid, style: Style, item: &str, selected: Action,
-        revision: u64, epoch: u64) -> Result<PreparedWorkflowResult, SessionError>
-    {
-        prepare_selection(&self.workflow_snapshot(workspace, style).await?, workspace, item, selected, revision, epoch)
     }
     /// Send retained canonical mutation bytes; reconnect retries must reuse this envelope.
     pub async fn workflow_submit_action(&self, prepared: &PreparedWorkflowAction) -> Result<serde_json::Value, SessionError> {

@@ -176,24 +176,6 @@ impl Store {
             .optional()
             .map_err(map_err)
     }
-
-    pub fn set_stack_parent(
-        &self,
-        repository_id: Uuid,
-        branch: &str,
-        parent_branch: &str,
-    ) -> Result<()> {
-        self.conn()
-            .execute(
-                "INSERT INTO review_stack_parents (repository_id, branch, parent_branch)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(repository_id, branch)
-                 DO UPDATE SET parent_branch = excluded.parent_branch",
-                params![uuid_blob(repository_id), branch, parent_branch],
-            )
-            .map_err(map_err)?;
-        Ok(())
-    }
 }
 
 /// Where `reader`'s review marks live: the owner's where they always have.

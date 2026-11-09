@@ -602,8 +602,8 @@ pub mod capability {
     /// `board_rulings`.
     pub const BOARD_RULING_ACTIONS: &str = "board_ruling_actions";
     /// The line, agents and landings (ov-872): `line.set`, `line.order`,
-    /// `agent.record`, `agent.work`, `agent.end`, `landing.start` and
-    /// `landing.set`, `TerminalCreate.agent`, and `Plan.lines`,
+    /// `agent.record`, `agent.work`, `agent.end`,
+    /// `TerminalCreate.agent`, and `Plan.lines`,
     /// `Plan.landings`, `Plan.agents` and `Plan.agents_spend` on `plan.get`.
     ///
     /// Replaces lanes, trains, a train's phase and the derived agents list
@@ -640,8 +640,9 @@ pub mod capability {
     /// the draft to the clipboard instead, as it always did.
     pub const DRAFT_HOLD: &str = "draft_hold";
     /// `settings.set_projector` (ov-372): turned the runner's projector, and
-    /// so `agent_rows`, on or off. From ov-830 there is no setting: the method
-    /// is kept, and changes nothing, for apps from before that still send it.
+    /// so `agent_rows`, on or off. From ov-830 there is no setting, and the
+    /// method is gone; the word stays so an app's offer test still recognizes
+    /// a runner that serves rows to whoever views a pane.
     pub const PROJECTOR_SETTING: &str = "projector_setting";
     /// `terminal.compose` (ov-372): the native view's send. Its own word, so
     /// a runner that serves rows from before compose isn't offered a view
@@ -989,7 +990,6 @@ pub mod method {
         WorktreeUnhide = "worktree.unhide" => WORKTREES,
         WorktreeRemove = "worktree.remove" => WORKTREES,
         BranchList = "branch.list" => WORKTREES,
-        WorktreeDiscover = "worktree.discover" => WORKTREES,
         WorktreeFileSearch = "worktree.file_search" => WORKTREES,
         TerminalList = "terminal.list" => TERMINALS,
         TerminalCreate = "terminal.create" => TERMINALS,
@@ -1018,7 +1018,6 @@ pub mod method {
         ChangesMarkRead = "changes.mark_read" => CHANGES,
         ChangesInbox = "changes.inbox" => CHANGES,
         StackGet = "stack.get" => STACK,
-        StackSetParent = "stack.set_parent" => STACK,
         PrRefresh = "pr.refresh" => STACK,
         LayoutList = "layout.list" => LAYOUT,
         LayoutSplit = "layout.split" => LAYOUT,
@@ -1056,7 +1055,6 @@ pub mod method {
         ThemeUpsert = "theme.upsert" => THEMES,
         ThemeDelete = "theme.delete" => THEMES,
         SettingsSetBranchPrefix = "settings.set_branch_prefix" => THEMES,
-        SettingsSetProjector = "settings.set_projector" => PROJECTOR_SETTING,
         ClientList = "client.list" => ENROLLMENT,
         ClientEnroll = "client.enroll" => ENROLLMENT,
         ClientRevoke = "client.revoke" => ENROLLMENT,
@@ -1120,8 +1118,6 @@ pub mod method {
         RulingAdd = "ruling.add" => BOARD_RULINGS,
         RulingSet = "ruling.set" => BOARD_RULINGS,
         RulingKeepAll = "ruling.keep_all" => BOARD_RULING_ACTIONS,
-        LandingStart = "landing.start" => BOARD_LINE,
-        LandingSet = "landing.set" => BOARD_LINE,
         RepositoryLanding = "repository.landing" => LANDING,
         AgentRows = "agent.rows" => AGENT_ROWS,
         AgentRowsFollow = "agent.rows_follow" => AGENT_ROWS,

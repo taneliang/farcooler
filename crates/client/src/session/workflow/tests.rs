@@ -16,6 +16,11 @@ fn snapshot() -> WorkflowSnapshot {
     WorkflowSnapshot { schema:2,host:Uuid::nil().to_string(),presentation:project(&state,&context,Style::Apple).unwrap(),state,context,style:Style::Apple,
         configuration:serde_json::Value::Null,notices:serde_json::json!([]) }
 }
+fn prepare_selection(snapshot: &WorkflowSnapshot, workspace: Uuid, item: &str, selected: Action,
+    revision: u64, epoch: u64) -> Result<PreparedWorkflowResult, SessionError>
+{
+    prepare_selection_with_reason(snapshot, workspace, item, selected, revision, epoch, None)
+}
 fn identity(s: &WorkflowSnapshot) -> WorkflowCommandIdentity {
     WorkflowCommandIdentity { id:"approve".into(),sequence:2,revision:s.state.revision,epoch:s.state.epoch }
 }

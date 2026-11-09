@@ -2861,19 +2861,6 @@ impl Service {
         git::list_branches(&self.repository_worktree(&repo)).await
     }
 
-    /// Every worktree git reports for a repository.
-    ///
-    /// A diagnostic view for `worktree.discover`, a host-admin surface — not a
-    /// list of candidates for a client to act on. Task 4's reconciler adopts
-    /// every worktree it sees automatically, main checkout included, so
-    /// "not yet registered" stopped being a meaningful filter: everything git
-    /// reports either already has a worktree row or will on the next tick.
-    pub async fn discover_worktrees(&self, repository_id: Uuid) -> Result<Vec<git::WorktreeInfo>> {
-        let repo = self.store.get_repository(repository_id)?;
-        let repo_path = self.repository_worktree(&repo);
-        git::list_worktrees(&repo_path).await
-    }
-
     /// Create a worktree on a branch that already exists.
     ///
     /// The other half of `create_worktree`. Work arrives on a branch as often

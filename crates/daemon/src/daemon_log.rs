@@ -45,10 +45,6 @@ pub const KEEP: usize = 3;
 /// inside that home, so nothing outside it is written. On a Mac it is the
 /// folder Console and `open ~/Library/Logs` already show, named for the
 /// channel's bundle id; elsewhere a `logs` folder in the runtime directory.
-pub fn log_dir() -> Option<PathBuf> {
-    log_dir_for(crate::paths::selection().ok()?)
-}
-
 pub fn log_dir_for(selected: &crate::paths::RuntimeSelection) -> Option<PathBuf> {
     if selected.is_explicit() { return Some(selected.root().join("logs")); }
     let runtime = selected.root();

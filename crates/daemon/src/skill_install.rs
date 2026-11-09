@@ -135,25 +135,18 @@ pub const CHARTER_SECTIONS: &[&str] = &[
     "## Anything else",
 ];
 
-/// Whether anything can wake a manager that has ended its turn. Something
-/// can (ov-455): the runner types its agents' messages, its own notice that
-/// an agent stopped without reporting, and the owner's answers (ov-90) into the
-/// orchestrator's pane (`watch::answer_wake`). See `WAIT_STEP`.
-///
-/// What wakes it is a line, not a prompt that restates the skill, so
-/// `WAIT_STEP` itself tells it to re-read `$FARCOOLER_CHARTER` first when
-/// something comes in (the spec's "every wake-up prompt tells it to re-read"
-/// the charter): the owner edits the charter between turns, and a compacted
-/// conversation remembers it wrong.
-pub const WAKE_LOOP_EXISTS: bool = true;
-
 /// Step 6 of the skill: wait to be woken (the spec's step 4), and say so
 /// honestly.
 ///
-/// The runner delivers to this pane when there's something for the manager
-/// (`WAKE_LOOP_EXISTS`), typed into it or, where the agent takes one, handed
-/// over as its next turn (`watch::answer_wake::deliver`), so the manager ends
-/// its turn rather than polling or sleeping. What it still can't do is reach the owner: nothing it does
+/// The runner wakes a manager that has ended its turn (ov-455): it types the
+/// agents' messages, its own notice that an agent stopped without reporting,
+/// and the owner's answers (ov-90) into this pane, or, where the agent takes
+/// one, hands them over as its next turn (`watch::answer_wake::deliver`), so
+/// the manager ends its turn rather than polling or sleeping. What wakes it is
+/// a line, not a prompt that restates the skill, so this step itself tells it
+/// to re-read `$FARCOOLER_CHARTER` first when something comes in: the owner
+/// edits the charter between turns, and a compacted conversation remembers it
+/// wrong. What it still can't do is reach the owner: nothing it does
 /// sends a phone a notification, so the step forbids promising one.
 ///
 /// `the_skill_says_what_wakes_it_and_promises_the_owner_nothing` holds it
@@ -822,7 +815,6 @@ mod tests {
     /// it promises the owner nothing.
     #[test]
     fn the_skill_says_what_wakes_it_and_promises_the_owner_nothing() {
-        const { assert!(WAKE_LOOP_EXISTS) };
         for h in ALL {
             let body = skill_body(h).to_lowercase();
             for promise in [

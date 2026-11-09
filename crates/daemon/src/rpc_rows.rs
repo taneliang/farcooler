@@ -36,9 +36,6 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
     // A follow's wait counts from here, so a first follow that rebuilds a
     // transcript still answers inside the client's 30 s deadline.
     let arrived = tokio::time::Instant::now();
-    if req.method == "settings.set_projector" {
-        return set_projector(req);
-    }
     match (req.method.as_str(), req.payload) {
         ("agent.rows", Some(request::Payload::AgentRowsPage(p))) => {
             let terminal = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
@@ -152,17 +149,6 @@ impl RecentImages {
 }
 
 static RECENT: std::sync::Mutex<RecentImages> = std::sync::Mutex::new(RecentImages(Vec::new()));
-
-/// `settings.set_projector` (ov-372), kept for apps from before ov-830:
-/// there is no setting any more, so it changes nothing and answers as a
-/// write did. An older app turns its view on through it, and a refusal
-/// would leave that app's view off on a runner that serves it.
-fn set_projector(req: Request) -> Result<result::Value> {
-    let Some(request::Payload::HostSettings(_)) = req.payload else {
-        return Err(DomainError::InvalidArgument { what: "payload" });
-    };
-    Ok(result::Value::Empty(pb::Empty {}))
-}
 
 /// A follow's answer. Its wait is counted from `arrived`, before `open`
 /// (which may rebuild a whole transcript) has run, so the call is answered

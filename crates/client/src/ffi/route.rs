@@ -114,8 +114,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         Method::HostGet => None,
         // The Mac app owns the local daemon's lifecycle, through the CLI.
         Method::DaemonShutdown => None,
-        // Discovery is the Mac's: paths sit behind `host_admin`.
-        Method::WorktreeDiscover => None,
         // The title bar's message to a terminal orchestrator (ov-214): a phone
         // has no title bar. Ask the Orchestrator's paste (ov-184,
         // `terminal.draft_prompt`) is routed above, for the phones' task screen
@@ -124,9 +122,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Agents and their orchestrator, through the CLI (ov-455): the apps
         // read messages as the card's notes.
         Method::MessageSend => None,
-        // The projector's setting, gone (ov-830): a runner serves rows to
-        // whoever views a pane. Kept on the runner for apps from before.
-        Method::SettingsSetProjector => None,
         // Who's on a runner and whose Claude account it runs on (ov-508), for
         // the phones' runner settings. A member's Talk starts their own rep
         // (ov-526), which the runner refuses for anyone else's. Adding and
@@ -194,8 +189,7 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // The workspaces' writes and the stack's, and two board reads: the
         // Mac and the CLI make them, and no phone screen offers them yet.
         // `workspace.list` is read inside `worktree.create`.
-        Method::StackSetParent
-        | Method::TaskGetByKey
+        Method::TaskGetByKey
         | Method::TaskSearch
         | Method::WorkspaceList
         | Method::WorkspaceCreate
@@ -235,8 +229,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::RulingAdd
         // Landings (ov-309, ov-872) are read in `plan.get`'s answer too, and
         // only the orchestrator writes them.
-        | Method::LandingStart
-        | Method::LandingSet
         // Landing detection (ov-313) is the CLI's, run with the owner's `gh`.
         | Method::RepositoryLanding => None,
         // The CLI reads it today; the Summary page (ov-188 phase 3) will

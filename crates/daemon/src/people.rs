@@ -256,8 +256,6 @@ macro_rules! actor_field {
             P::RulingSet(p) => &$($m)* p.actor,
             P::RulingKeepAll(p) => &$($m)* p.actor,
             P::MessageSend(p) => &$($m)* p.actor,
-            P::LandingStart(p) => &$($m)* p.actor,
-            P::LandingSet(p) => &$($m)* p.actor,
             P::PageSet(p) => &$($m)* p.actor,
             P::PageRemove(p) => &$($m)* p.actor,
             _ => return None,
@@ -580,7 +578,7 @@ fn seats_an_orchestrator(store: &Store, req: &Request) -> Option<Uuid> {
 /// waiting, dropped, building, in review or needing you until it reaches
 /// landing (`moves_a_landing_ticket`).
 fn records_the_orchestrators(req: &Request) -> bool {
-    use farcooler_protocol::v1::{LandingState, TicketStage};
+    use farcooler_protocol::v1::TicketStage;
     use request::Payload as P;
     match req.payload.as_ref() {
         Some(P::LineSet(p)) => {
@@ -593,26 +591,6 @@ fn records_the_orchestrators(req: &Request) -> bool {
                 || p.pr_number.is_some()
         }
         Some(P::AgentRecord(_) | P::AgentWork(_) | P::AgentEnd(_)) => true,
-        Some(P::LandingStart(_)) => true,
-        Some(P::LandingSet(p)) => {
-            let farcooler_protocol::v1::LandingSet {
-                landing_id: _,
-                state,
-                base,
-                sha,
-                add_task_ids,
-                remove_task_ids,
-                title: _,
-                lander_id,
-                actor: _,
-            } = p;
-            *state != LandingState::Unspecified as i32
-                || base.is_some()
-                || sha.is_some()
-                || !add_task_ids.is_empty()
-                || !remove_task_ids.is_empty()
-                || lander_id.is_some()
-        }
         Some(P::RulingSet(p)) => p.sha.is_some(),
         _ => false,
     }

@@ -150,7 +150,6 @@ async fn a_member_reshapes_no_workspace_or_runner_setting() {
         "repository_root.add",
         "repository_root.remove",
         "settings.set_branch_prefix",
-        "settings.set_projector",
         "theme.upsert",
         "theme.delete",
     ];

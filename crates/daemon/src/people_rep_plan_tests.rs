@@ -61,8 +61,6 @@ refused! {
     a_rep_marks_no_reversal_done: ruling_set(BoardRulingState::Reversed, Some("abc123"));
     a_rep_sets_no_ruling_standing: ruling_set(BoardRulingState::Standing, None);
     a_rep_keeps_no_rulings_at_once: req("ruling.keep_all", request::Payload::RulingKeepAll(pb::RulingKeepAll::default()));
-    a_rep_starts_no_landing: req("landing.start", request::Payload::LandingStart(pb::LandingStart::default()));
-    a_rep_sets_no_landing: req("landing.set", request::Payload::LandingSet(pb::LandingSet::default()));
     a_rep_sets_no_page: req("page.set", request::Payload::PageSet(pb::PageSet::default()));
     a_rep_removes_no_page: req("page.remove", request::Payload::PageRemove(pb::PageRemove::default()));
     a_rep_records_no_agent: req("agent.record", request::Payload::AgentRecord(pb::AgentRecord::default()));

@@ -3,22 +3,15 @@
 //! converts `Plan.landings` and `Plan.ci` for `plan.get`.
 //!
 //! The old writes, `landing.start` and `landing.set`, are gone (ov-960): the
-//! workflow engine lands, so both are refused with `engine_lands`, which an
-//! old client turns into a sentence that says so.
+//! workflow engine lands.
 
-use farcooler_core::{DomainError, Result};
-use farcooler_protocol::v1::{self as pb, result};
+use farcooler_protocol::v1 as pb;
 use farcooler_store::board_ci::{CiRead, CiStatus};
 use farcooler_store::landing_phase::LandingPhase;
 use farcooler_store::landings::{Landing, LandingState, Route, landing_title};
 use farcooler_store::plan_read::LandingView;
 
 use crate::wire::id_bytes;
-
-/// `landing.start` and `landing.set`: the engine lands now (ov-960).
-pub(crate) fn refuse() -> Result<result::Value> {
-    Err(DomainError::InvalidArgument { what: "engine_lands" })
-}
 
 fn pb_route(r: Route) -> pb::LandingRoute {
     match r {
@@ -118,16 +111,5 @@ pub(crate) fn pb_ci(r: &CiRead) -> pb::BoardCiRead {
         fetched_at: r.fetched_at,
         changed_at: r.changed_at,
         asked_at: r.asked_at,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// ov-960: both old landing writes are refused, whatever they carry.
-    #[test]
-    fn the_old_landing_writes_say_the_engine_lands() {
-        assert!(matches!(refuse(), Err(DomainError::InvalidArgument { what: "engine_lands" })));
     }
 }

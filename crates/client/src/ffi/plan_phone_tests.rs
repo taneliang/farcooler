@@ -89,8 +89,6 @@ async fn a_phone_reads_the_plan_and_never_writes_it() {
         Method::AgentRecord,
         Method::AgentWork,
         Method::AgentEnd,
-        Method::LandingStart,
-        Method::LandingSet,
     ] {
         assert_eq!(route(method), None, "{} has a phone route", method.name());
         let answer = dispatch(&session, method.name(), &json!({})).await;

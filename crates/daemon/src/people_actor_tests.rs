@@ -90,8 +90,6 @@ fn every_write(actor: &str) -> Vec<Request> {
         call("ruling.set", P::RulingSet(pb::RulingSet { actor: a(), ..Default::default() })),
         call("ruling.keep_all", P::RulingKeepAll(pb::RulingKeepAll { actor: a(), ..Default::default() })),
         call("message.send", P::MessageSend(pb::MessageSend { actor: a(), ..Default::default() })),
-        call("landing.start", P::LandingStart(pb::LandingStart { actor: a(), ..Default::default() })),
-        call("landing.set", P::LandingSet(pb::LandingSet { actor: a(), ..Default::default() })),
         call("page.set", P::PageSet(pb::PageSet { actor: a(), ..Default::default() })),
         call("page.remove", P::PageRemove(pb::PageRemove { actor: a(), ..Default::default() })),
     ]

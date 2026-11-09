@@ -378,7 +378,6 @@ fn scope_of(method: Method) -> Scope {
         Method::LayoutList => Scope::Read,
         // Discovery reveals paths, which live behind the same gate as every
         // other path in this protocol.
-        Method::WorktreeDiscover => Scope::HostAdmin,
         Method::RepositoryRegister
         | Method::WorktreeCreate
         | Method::WorktreeHide
@@ -429,7 +428,7 @@ fn scope_of(method: Method) -> Scope {
         // the same conversation, just structured — so it sits at the same
         // scope rather than behind `host_admin`. Search returns
         // worktree-relative paths only, never a runner path, so it belongs here
-        // too rather than beside `worktree.discover`.
+        // too rather than beside the host-admin paths.
         Method::TerminalAgentSubscribe
         // Types into a TUI pane like `terminal.write`, but never Enter, and
         // only past the answer wake's gate (`Watcher::draft_into`).
@@ -459,7 +458,6 @@ fn scope_of(method: Method) -> Scope {
         | Method::ChangesFileDiff
         | Method::ChangesSetBase
         | Method::ChangesMarkRead
-        | Method::StackSetParent
         | Method::PrRefresh | Method::PrReady | Method::PrThreadReply
         | Method::RepositoryLanding
         // The survey names files and reviewers, and spends the owner's gh;
@@ -525,9 +523,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::AgentEnd | Method::AgentStop
         | Method::RulingAdd
         | Method::RulingSet
-        | Method::RulingKeepAll
-        | Method::LandingStart
-        | Method::LandingSet => Scope::Control,
+        | Method::RulingKeepAll => Scope::Control,
         // Orchestrator pages (ov-269): free text the runner can't redact, so
         // everyone who can read the board reads them, as with a task note. The
         // orchestrator writes its own pages, and they touch no git data.
@@ -643,7 +639,6 @@ fn scope_of(method: Method) -> Scope {
         Method::ClientSetNodeKey => Scope::Read,
         Method::ClientRekey => Scope::Read, // its own line only, as `set_node_key`
         Method::SettingsSetBranchPrefix
-        | Method::SettingsSetProjector
         | Method::ThemeUpsert
         | Method::ThemeDelete => Scope::HostAdmin,
     }
@@ -1143,31 +1138,6 @@ impl Rpc {
                     })
                     .collect();
                 Ok(result::Value::BranchList(farcooler_protocol::v1::BranchList { items }))
-            }
-
-            "worktree.discover" => {
-                let repository = Self::target(&req)?;
-                let items = svc
-                    .discover_worktrees(repository)
-                    .await?
-                    .into_iter()
-                    .map(|w| {
-                        let name = std::path::Path::new(&w.path)
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| w.head.clone());
-                        farcooler_protocol::v1::DiscoveredWorktree {
-                            path: w.path.clone(),
-                            branch: w.branch,
-                            head: w.head,
-                            suggested_name: name,
-                            locked: w.locked,
-                        }
-                    })
-                    .collect();
-                Ok(result::Value::DiscoveredWorktreeList(farcooler_protocol::v1::DiscoveredWorktreeList {
-                    items,
-                }))
             }
 
             "worktree.create" => {
@@ -1936,15 +1906,6 @@ impl Rpc {
                 Ok(result::Value::StackLinkList(list))
             }
 
-            "stack.set_parent" => {
-                let Some(request::Payload::StackSetParent(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                Ok(result::Value::StackLinkList(
-                    crate::review_ops::stack_set_parent(svc, &p).await?,
-                ))
-            }
-
             "pr.refresh" => {
                 let Some(request::Payload::PrRefresh(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -1980,7 +1941,6 @@ impl Rpc {
             | "ruling.add" | "ruling.set" | "ruling.keep_all" => {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
-            "landing.start" | "landing.set" => crate::rpc_landings::refuse(), // the engine lands (ov-960)
             "agent.stop" => crate::rpc_agent_stop::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-872: a pane by `terminal.stop`'s path and gate
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
             "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "member.set_role" | "member.events" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" | "member.set_access" | "client.set_cap" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, self.stepped.get(), req).await, // ov-494, ov-584
@@ -1998,7 +1958,7 @@ impl Rpc {
             "workspace.charter" => crate::charter_read::handle(svc, &req), // ov-755
             "workspace.set_charter" => crate::charter_write::handle(svc, &self.peer, self.caller_pid, req).await, // ov-757
             "crash.report" => crate::crash_reports::handle(svc, &self.watcher, req), // ov-797
-            "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
+            "agent.rows" | "agent.rows_follow" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
             "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
 
             // ---- workspaces ----
@@ -2421,11 +2381,6 @@ impl Rpc {
         );
         message
     }
-}
-
-/// A request with no payload, for the read methods.
-pub fn empty_payload() -> Option<request::Payload> {
-    Some(request::Payload::Empty(Empty {}))
 }
 
 #[cfg(test)]

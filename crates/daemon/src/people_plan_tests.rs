@@ -153,20 +153,8 @@ async fn write_the_plan(r: &Runner) -> Written {
     written(r, "ruling.keep_all", |actor| P::RulingKeepAll(pb::RulingKeepAll { workspace_id: ws(), actor: actor.into() }), BOB).await;
     written(r, "ruling.add", add("Keep the paper invoice for a release"), LOCAL).await;
 
-    // The engine lands now (ov-960): landing.start and landing.set are refused
-    // from every seat, and the plan reads an old landing as history.
-    let landing = farcooler_store::testing::old_landing(&r.svc.store, r.workspace, 1, "gating", None, &[], farcooler_store::testing::now_millis());
-    for by in [RELEASED, BOB, OWNERS_PHONE, LOCAL] {
-        let actor = if by == LOCAL { "manager" } else { "user" };
-        let start = P::LandingStart(pb::LandingStart { workspace_id: ws(), route: pb::LandingRoute::Push as i32, base: "origin/main".into(), actor: actor.into(), ..Default::default() });
-        let set = P::LandingSet(pb::LandingSet { landing_id: id_bytes(landing), state: pb::LandingState::Gating as i32, actor: actor.into(), ..Default::default() });
-        for (method, payload) in [("landing.start", start), ("landing.set", set)] {
-            let refused = call(&factory(&r.svc, by, Scope::Control), method, payload).await;
-            // A released phone and a member are stopped at the seat, as before; the owner's are told the engine lands.
-            let want = if by == RELEASED || by == BOB { NOT_YOURS } else { "invalid-argument:engine_lands" };
-            assert_eq!(refused.err().as_deref(), Some(want), "{by:?} on {method}");
-        }
-    }
+    // An old landing (before the engine, ov-960) is read as history.
+    farcooler_store::testing::old_landing(&r.svc.store, r.workspace, 1, "gating", None, &[], farcooler_store::testing::now_millis());
 
     // The orchestrator's pages are the plan's too.
     let page = |actor: &str| {
@@ -252,7 +240,7 @@ fn every_plan_write_is_covered() {
     writes.sort_unstable();
     let mut made = vec![
         "board_theme.create", "board_theme.update", "board_theme.cards", "line.set", "line.order", "agent.record",
-        "agent.work", "agent.end", "ruling.add", "ruling.set", "ruling.keep_all", "landing.start", "landing.set",
+        "agent.work", "agent.end", "ruling.add", "ruling.set", "ruling.keep_all",
         "page.set", "page.remove",
     ];
     made.sort_unstable();
@@ -356,31 +344,20 @@ async fn a_member_posts_nothing_as_the_owner() {
 /// The plan's record of the work stays the orchestrator's and the owner's
 /// (ov-736, review M2; ov-872): Bob's phone moving a ticket to landing or
 /// landed, giving it a landed commit, a branch, a checkout or a stack;
-/// recording an agent, setting one to work or ending one; starting a
-/// landing, changing its state, commit, base, tickets or lander; or marking a
+/// recording an agent, setting one to work or ending one; or marking a
 /// reversal done with its commit, is refused `not_yours`; the owner's phone
 /// and the local socket pass the gate. Bob still moves a ticket to waiting,
-/// dropped, building, reviewing or needs you, gives it a reason, asks for a
-/// reversal, and renames a landing, which only say what the plan is.
+/// dropped, building, reviewing or needs you, gives it a reason, and asks for a
+/// reversal, which only say what the plan is.
 #[tokio::test]
 async fn a_member_writes_none_of_the_orchestrators_record() {
-    use pb::{LandingState, TicketStage};
+    use pb::TicketStage;
     use request::Payload as P;
     let r = runner().await;
     let ticket = |edit: &dyn Fn(&mut pb::TicketLineSet)| {
         let mut p = pb::TicketLineSet { task_id: id_bytes(Uuid::now_v7()), actor: "user".into(), ..Default::default() };
         edit(&mut p);
         Request { method: "line.set".into(), payload: Some(P::LineSet(p)), ..Default::default() }
-    };
-    let landing = |state: LandingState, sha: Option<&str>| Request {
-        method: "landing.set".into(),
-        payload: Some(P::LandingSet(pb::LandingSet { state: state as i32, sha: sha.map(str::to_string), actor: "user".into(), ..Default::default() })),
-        ..Default::default()
-    };
-    let landing_with = |edit: &dyn Fn(&mut pb::LandingSet)| {
-        let mut p = pb::LandingSet { actor: "user".into(), ..Default::default() };
-        edit(&mut p);
-        Request { method: "landing.set".into(), payload: Some(P::LandingSet(p)), ..Default::default() }
     };
     let records = [
         ("landing", ticket(&|p| p.stage = Some(TicketStage::Landing as i32))),
@@ -406,22 +383,6 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
             payload: Some(P::AgentEnd(pb::AgentEnd { verdict: "finished".into(), actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
-        ("a landing green", landing(LandingState::Green, None)),
-        ("a landing landed", landing(LandingState::Landed, None)),
-        ("a landing pushed", landing(LandingState::Pushed, None)),
-        ("a landing gating", landing(LandingState::Gating, None)),
-        ("a landing's commit", landing(LandingState::Unspecified, Some("abc123"))),
-        // Integration itself (fix round 2): a landing started, its tickets,
-        // base or lander, and a reversal marked done.
-        ("a landing started", Request {
-            method: "landing.start".into(),
-            payload: Some(P::LandingStart(pb::LandingStart { title: "Exports".into(), actor: "user".into(), ..Default::default() })),
-            ..Default::default()
-        }),
-        ("a landing's base", landing_with(&|p| p.base = Some("origin/release".into()))),
-        ("a ticket put on a landing", landing_with(&|p| p.add_task_ids = vec![id_bytes(Uuid::now_v7())])),
-        ("a ticket taken off a landing", landing_with(&|p| p.remove_task_ids = vec![id_bytes(Uuid::now_v7())])),
-        ("a landing's lander", landing_with(&|p| p.lander_id = Some(id_bytes(Uuid::now_v7())))),
         ("a reversal marked done", Request {
             method: "ruling.set".into(),
             payload: Some(P::RulingSet(pb::RulingSet {
@@ -453,7 +414,6 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
             payload: Some(P::RulingSet(pb::RulingSet { state: pb::BoardRulingState::Reversed as i32, actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
-        ("a landing renamed", landing_with(&|p| p.title = Some("Exports".into()))),
     ];
     for (what, req) in &plans {
         let passed = gate(&r.svc, &peer(BOB), None, req);

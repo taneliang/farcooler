@@ -380,32 +380,6 @@ impl DispatchLink for Runner {
                     let agent = plan.agents.into_iter().find(|a| a.id == p.agent_id).unwrap_or_default();
                     result::Value::Agent(pb::Agent { stop_asked_at: Some(NOW), ..agent })
                 }
-                ("landing.start", Some(request::Payload::LandingStart(p))) => result::Value::Landing(pb::Landing {
-                    id: tid(0x6002),
-                    number: 10,
-                    route: p.route,
-                    base: p.base,
-                    title: p.title,
-                    lander_id: p.lander_id,
-                    task_ids: p.task_ids,
-                    state: pb::LandingState::Open as i32,
-                    state_since: NOW,
-                    ..Default::default()
-                }),
-                ("landing.set", Some(request::Payload::LandingSet(p))) => {
-                    let mut set = plan.landings.into_iter().find(|l| l.id == p.landing_id).unwrap();
-                    if let Some(sha) = p.sha {
-                        set.ci_subject = format!("sha:{sha}");
-                        set.pushed_sha = Some(sha);
-                        set.state = pb::LandingState::Pushed as i32;
-                    }
-                    if p.state != 0 {
-                        set.state = p.state;
-                    }
-                    set.task_ids.retain(|t| !p.remove_task_ids.contains(t));
-                    set.task_ids.extend(p.add_task_ids);
-                    result::Value::Landing(set)
-                }
                 ("terminal.list", _) => result::Value::TerminalList(pb::TerminalList {
                     items: vec![pb::Terminal { id: tid(0xd00d), ..Default::default() }],
                     ..Default::default()

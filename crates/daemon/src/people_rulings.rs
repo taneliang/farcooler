@@ -145,7 +145,6 @@ pub fn member_ruling(method: M) -> Ruling {
 
         // Reads above Read scope: paths, screens, files and diffs.
         M::RepositoryRootList
-        | M::WorktreeDiscover
         | M::WorktreeFileSearch
         | M::WorktreeListDir
         | M::WorktreeReadFile
@@ -194,7 +193,6 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::AgentStop
         // Shared records of review and tiling, which change no one's work.
         | M::ChangesSetBase
-        | M::StackSetParent
         | M::LayoutSplit
         | M::LayoutMove
         | M::LayoutResize
@@ -251,8 +249,6 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::RulingAdd
         | M::RulingSet
         | M::RulingKeepAll
-        | M::LandingStart
-        | M::LandingSet
         | M::PageSet
         | M::PageRemove => Plan,
 
@@ -276,7 +272,6 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::RepositoryRootRemove
         | M::RepositoryRegister
         | M::SettingsSetBranchPrefix
-        | M::SettingsSetProjector
         | M::ThemeUpsert
         | M::ThemeDelete
         | M::DaemonShutdown => Owners(Why::Reshapes),

@@ -84,11 +84,6 @@ impl Caller {
         }
     }
 
-    /// Whether this caller has stepped up for exactly `method`.
-    pub fn stepped_up_for(&self, method: &str) -> bool {
-        self.stepped_up.as_ref().is_some_and(|s| s.method == method)
-    }
-
     /// Refuse `access_changed` when who the caller is, or their generation,
     /// is no longer what it was when the request was decided. Asked inside the
     /// fence lock, where the write is. A caller with no authority recorded

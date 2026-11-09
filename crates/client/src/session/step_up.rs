@@ -190,13 +190,6 @@ impl Session {
         Pending { answer, method }.value().await
     }
 
-    /// `client.approve_step_up` without a signature: what a device with no
-    /// trusted key of its own sends, while the transition lasts. A runner that
-    /// wants one answers `step_up_needed`, and the app then signs.
-    pub async fn approve_step_up_plain(&self, args: &serde_json::Value) -> Result<result::Value, SessionError> {
-        self.admin_plain("client.approve_step_up", args).await
-    }
-
     /// An admin action without a signature, in the one spelling a signed one
     /// uses: what a device with no trusted key sends while the transition
     /// lasts, and what a runner that wants a signature refuses.

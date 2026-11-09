@@ -211,7 +211,6 @@ async fn a_member_changes_the_shared_views() {
     let r = runner().await;
     let views = [
         M::ChangesSetBase,
-        M::StackSetParent,
         M::LayoutSplit,
         M::LayoutMove,
         M::LayoutResize,
@@ -306,7 +305,6 @@ async fn a_rep_keeps_nothing_and_starts_no_landing() {
     let calls = [
         ("ruling.keep_all", request::Payload::RulingKeepAll(pb::RulingKeepAll { workspace_id: ws(), actor: own.clone() })),
         ("ruling.set", request::Payload::RulingSet(pb::RulingSet { ruling_id: id_bytes(ruling), state: pb::BoardRulingState::Confirmed as i32, actor: own.clone(), ..Default::default() })),
-        ("landing.start", request::Payload::LandingStart(pb::LandingStart { workspace_id: ws(), route: pb::LandingRoute::Push as i32, base: "origin/main".into(), actor: own.clone(), ..Default::default() })),
     ];
     for (method, payload) in calls {
         let said = call(&in_rep, Request { method: method.into(), payload: Some(payload), ..Default::default() }).await;

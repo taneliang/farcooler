@@ -167,7 +167,6 @@ message Request {
     ChangesSetBase changes_set_base = 52;
     ChangesMarkRead changes_mark_read = 59;
     StackGet stack_get = 62;
-    StackSetParent stack_set_parent = 63;
     PrRefresh pr_refresh = 64;
     ChangesInboxRequest changes_inbox = 65;
     ClientEnroll client_enroll = 66;
@@ -339,8 +338,6 @@ message Request {
     AgentRecord agent_record = 602;
     AgentWork agent_work = 603;
     AgentEnd agent_end = 604;
-    LandingStart landing_start = 605;
-    LandingSet landing_set = 606;
     // `agent.stop` (ov-872), behind `agent_stop`. 610-619 are its block, the
     // rest held by `reserved` below.
     AgentStop agent_stop = 610;
@@ -349,9 +346,10 @@ message Request {
     CheckInHoldResolve check_in_hold_resolve = 621;
   }
   // Chat mode's payloads (ov-377).
-  reserved 33, 37, 40 to 45;
+  reserved 33, 37, 40 to 45, 63;
   reserved "set_pane_mode", "agent_set_mode", "agent_set_model", "agent_set_config",
-      "agent_edit_queued", "agent_cancel_queued", "agent_steer_queued", "adapter";
+      "agent_edit_queued", "agent_cancel_queued", "agent_steer_queued", "adapter", "stack_set_parent",
+      "landing_start", "landing_set";
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
   // The rest of trains' block.
@@ -398,7 +396,7 @@ message Request {
   reserved 593 to 599;
   // `lane.*` and `plan.set` (ov-268) and `train.*` (ov-309), retired by ov-872.
   reserved 164 to 168, 190, 191;
-  reserved 607 to 609;
+  reserved 605, 606, 607 to 609;
   // The rest of `agent.stop`'s block (ov-872).
   reserved 611 to 619;
 }
@@ -1267,8 +1265,7 @@ message HostSettings {
   // Whether this runner serves `agent.rows` (ov-372). Always true from
   // ov-830, which removed the setting: a runner serves rows to whoever
   // views a pane, and `agent_rows` in the hello is the answer to "are rows
-  // served". Kept for apps from before, which read it as their switch;
-  // `settings.set_projector`, kept for them too, changes nothing.
+  // served". Kept for apps from before, which read it as their switch.
   bool projector = 2;
 }
 

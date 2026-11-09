@@ -324,27 +324,3 @@ async fn an_answer_from_a_members_own_pane_is_theirs() {
     assert_eq!(said["person"], serde_json::json!({ "handle": "", "name": "" }), "the owner, from the runner's login: {said}");
     assert_eq!(said["for"]["handle"], "bob", "for Bob: {said}");
 }
-
-/// The old landing job's approval is gone with the job (ov-960): the engine
-/// lands, so `landing.start --land` is refused the same way from an agent and
-/// from a person's own shell, before any seat is weighed.
-#[tokio::test]
-async fn landing_start_says_the_engine_lands_from_every_seat() {
-    let mut s = seats().await;
-    let agent = s.under_claude_outside();
-    let (_, person) = s.shell_pane().await;
-    let req = |actor: &str| Request {
-        method: "landing.start".into(),
-        payload: Some(request::Payload::LandingStart(farcooler_protocol::v1::LandingStart {
-            workspace_id: crate::wire::id_bytes(Uuid::now_v7()),
-            run: true, land: true, actor: actor.into(), ..Default::default()
-        })),
-        ..Default::default()
-    };
-    for caller in [agent, NOBODY, crate::caller_seat::UNKNOWN_PID, person] {
-        for actor in ["user", ""] {
-            let got = refusal(&from(&s.svc, Some(caller)), req(actor)).await;
-            assert_eq!(got.map(|(_, what)| what).as_deref(), Some("engine_lands"), "caller {caller}, actor {actor:?}");
-        }
-    }
-}

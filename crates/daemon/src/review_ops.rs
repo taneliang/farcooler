@@ -655,16 +655,6 @@ pub async fn stack_get(svc: &Service, req: &pb::StackGet) -> Result<pb::StackLin
     build_stack(svc, repository_id, &req.branch, false).await
 }
 
-pub async fn stack_set_parent(
-    svc: &Service,
-    req: &pb::StackSetParent,
-) -> Result<pb::StackLinkList> {
-    let repository_id =
-        Uuid::from_slice(&req.repository_id).map_err(|_| DomainError::NotFound)?;
-    svc.store.set_stack_parent(repository_id, &req.branch, &req.parent_branch)?;
-    build_stack(svc, repository_id, &req.branch, false).await
-}
-
 pub async fn pr_refresh(svc: &Service, req: &pb::PrRefresh) -> Result<pb::StackLinkList> {
     let repository_id =
         Uuid::from_slice(&req.repository_id).map_err(|_| DomainError::NotFound)?;

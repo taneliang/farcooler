@@ -608,11 +608,6 @@ impl Store {
     pub fn task_of_subagent(&self, harness: &str, agent: &str) -> Result<Option<Uuid>> {
         Ok(self.workers_of_agent(harness, agent)?.first().map(|w| w.task_id))
     }
-
-    /// Every open subagent on the runner, oldest first.
-    pub fn open_workers(&self) -> Result<Vec<TaskWorker>> {
-        workers_where(&self.conn(), "w.ended_at IS NULL", "w.started_at, a.id", [])
-    }
 }
 
 #[cfg(test)]

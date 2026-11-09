@@ -20,8 +20,7 @@ fn number(m: &str, f: &str) -> i32 {
         .number()
 }
 
-const LINE_METHODS: [&str; 7] =
-    ["line.set", "line.order", "agent.record", "agent.work", "agent.end", "landing.start", "landing.set"];
+const LINE_METHODS: [&str; 5] = ["line.set", "line.order", "agent.record", "agent.work", "agent.end"];
 
 /// The plan's new fields, and the requests and results, hold their tags: a
 /// block of their own from 600, past every lane and train tag, which stay
@@ -31,7 +30,7 @@ fn the_line_holds_its_tags() {
     for (i, name) in ["lines", "landings", "agents", "agents_spend", "suggested_reviewers"].iter().enumerate() {
         assert_eq!(number("Plan", name), 16 + i as i32, "{name}");
     }
-    let requests = ["line_set", "line_order", "agent_record", "agent_work", "agent_end", "landing_start", "landing_set"];
+    let requests = ["line_set", "line_order", "agent_record", "agent_work", "agent_end"];
     for (i, name) in requests.iter().enumerate() {
         assert_eq!(number("Request", name), 600 + i as i32, "{name}");
     }

@@ -817,16 +817,6 @@ pub async fn guess_base(repo: &Path) -> Option<String> {
     None
 }
 
-/// The branch currently checked out, or `None` on a detached HEAD.
-pub async fn current_branch(repo: &Path) -> Option<String> {
-    let r = git(repo, &["symbolic-ref", "--short", "--quiet", "HEAD"]).await.ok()?;
-    if !r.ok {
-        return None;
-    }
-    let b = r.stdout.trim().to_string();
-    if b.is_empty() { None } else { Some(b) }
-}
-
 /// Just the three numbers, for a sidebar row.
 ///
 /// `--shortstat` rather than the full change set: a fleet-wide glance needs

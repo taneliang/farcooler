@@ -9,7 +9,7 @@
 use rusqlite::{OptionalExtension, params};
 use uuid::Uuid;
 
-use farcooler_core::{DomainError, Result};
+use farcooler_core::Result;
 
 use crate::agents::{Agent, AgentPlace, AgentRole, NewAgent};
 use crate::error::map_err;
@@ -113,12 +113,6 @@ impl Store {
             Some(agent) => self.end_agent(agent.id, Verdict::Stopped).map(|_| ()),
             None => Ok(()),
         }
-    }
-
-    /// The board an agent of pane `terminal` is on, refused as `NotFound` when
-    /// the pane has none.
-    pub fn board_of_pane_agent(&self, terminal: Uuid) -> Result<Uuid> {
-        self.pane_agent(terminal)?.map(|a| a.workspace_id).ok_or(DomainError::NotFound)
     }
 }
 

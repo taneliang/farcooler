@@ -124,12 +124,6 @@ pub fn drop_pages(store: &crate::Store) {
     store.conn().execute_batch("DROP TABLE page_events; DROP TABLE board_pages;").unwrap();
 }
 
-/// Put a ticket in the landing stage with nothing else written, as a build
-/// from before the collecting landing left it: on no landing, no event.
-pub fn strand_in_landing(store: &crate::Store, task: uuid::Uuid) {
-    store.conn().execute("UPDATE ticket_lines SET stage = 'landing' WHERE task_id = ?1", [task.as_bytes().to_vec()]).unwrap();
-}
-
 /// Forget every pane's recorded Claude login, as a pane from before they
 /// were recorded (ov-583).
 pub fn forget_terminal_logins(store: &crate::Store) {

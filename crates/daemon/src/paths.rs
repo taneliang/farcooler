@@ -139,10 +139,6 @@ pub fn socket_path() -> Result<PathBuf> {
     Ok(ensure_runtime_dir()?.join("farcoolerd.sock"))
 }
 
-pub fn install_id_path() -> Result<PathBuf> {
-    Ok(ensure_runtime_dir()?.join("install-id"))
-}
-
 /// Where managed worktrees are created, one directory per worktree.
 pub fn worktrees_dir() -> Result<PathBuf> {
     let d = ensure_runtime_dir()?.join("worktrees");
@@ -177,11 +173,6 @@ pub fn pastes_incoming_dir_in(root: &std::path::Path) -> Result<PathBuf> {
 }
 
 /// Stable per-install id, generated once.
-pub fn load_or_create_install_id() -> Result<String> {
-    load_or_create_install_id_in(&ensure_runtime_dir()?)
-}
-
-/// Explicit-directory form.
 ///
 /// The environment is read only at the edge, so tests exercise this without
 /// mutating a process-global variable that parallel tests would race on.

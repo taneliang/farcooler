@@ -97,11 +97,11 @@ async fn a_read_scoped_forced_command_yields_a_read_session() {
     // And the dispatcher refuses, which is the half the hello cannot see: a
     // hello only REPORTS a scope, and a scope that is reported and not enforced
     // is a settings screen telling somebody a comforting thing.
-    match within(&runner, "client call", client.call(request("worktree.discover"))).await {
+    match within(&runner, "client call", client.call(request("worktree.remove"))).await {
         Err(ClientError::Daemon { code, .. }) => {
             assert_eq!(code, ErrorCode::ScopeDenied as i32, "a read session reached host paths");
         }
-        other => panic!("a read session through sshd must not discover worktrees: {other:?}"),
+        other => panic!("a read session through sshd must not remove worktrees: {other:?}"),
     }
 }
 
@@ -131,7 +131,7 @@ async fn the_client_cannot_upgrade_its_own_scope() {
         Scope::Read as i32,
         "a client talked past the forced command and chose its own scope"
     );
-    match within(&runner, "client call", client.call(request("worktree.discover"))).await {
+    match within(&runner, "client call", client.call(request("worktree.remove"))).await {
         Err(ClientError::Daemon { code, .. }) => {
             let denied = ErrorCode::ScopeDenied as i32;
             assert_eq!(code, denied, "a session that asked for more reached host paths");
