@@ -192,7 +192,9 @@ jobs:
       # so a pull request cannot make a new violation pass by writing it down.
       - name: Baseline did not grow
         run: |
-          git fetch --no-tags --depth=1 origin main
+          # No `--depth`: in a worktree the git dir is shared, and a depth makes every
+          # lane's repository shallow (lane-gate refuses a step that does).
+          git fetch --no-tags origin main
           ./scripts/shared-core-lint.py --baseline-not-grown FETCH_HEAD
       # The capability names the apps ask a runner for are generated from
       # `farcooler_protocol::capability` (ov-154), and `can` takes the

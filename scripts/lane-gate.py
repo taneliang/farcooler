@@ -558,6 +558,13 @@ DISK_FULL = "the disk is full (no space left on device); free some space and run
 NO_SPACE = re.compile(r"No space left on device|os error 28\b|ENOSPC")
 
 
+def is_shallow(repo):
+    """True when `repo`'s git dir is shallow. A worktree shares its git dir with every other
+    worktree, so a step's `git fetch --depth=1` makes them all shallow (ov-1018)."""
+    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "--is-shallow-repository"], capture_output=True, text=True)
+    return out.returncode == 0 and out.stdout.strip() == "true"
+
+
 def run_step_safely(step, repo, env, logdir, tmp):
     """(result, seconds, counts, ok, log, output) for one step; never raises.
 
@@ -567,11 +574,16 @@ def run_step_safely(step, repo, env, logdir, tmp):
     reason = blocker(step, repo, {**env, **step.env})
     if reason:
         return f"FAIL: {reason}", 0.0, "", False, None, reason
+    was_shallow = is_shallow(repo)
     try:
         code, secs, output, log = run_step(step, repo, env, logdir, tmp)
     except Exception as e:  # noqa: BLE001 -- any crash is this step's failure
         reason = DISK_FULL if hl.disk_full(e) else f"lane-gate could not run it: {type(e).__name__}: {e}"
         return f"FAIL: {reason}", 0.0, "", False, None, reason
+    if not was_shallow and is_shallow(repo):
+        # Never leave the shared repository shallow: it breaks every other worktree and lane.
+        return (f"FAIL: this step made the shared git repository shallow (a `git fetch --depth` or `--shallow-since`); "
+                f"repair with `git fetch --unshallow`, and fetch without a depth", secs, count_tests(output), False, log, output)
     result = "pass" if code == 0 else f"FAIL (exit {code})"
     gap = "" if code == 0 else env_gap(step, output)
     if gap:
@@ -1151,6 +1163,20 @@ def _self_test():
         expect("... and not in a self-test's", "leak note" in run_step_safely(Step("x", "n", noisy + "# --self-test\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)[0], False)
         row = run_step_safely(Step("x", "bad", "exit 3\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
         expect("a step that fails says its exit code", row[0], "FAIL (exit 3)")
+        # A step that makes the shared repository shallow goes red (ov-1018), in a scratch clone.
+        origin = t / "origin"
+        clone = t / "clone"
+        for args in (["init", "-q", str(origin)],
+                     ["-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one"],
+                     ["-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two"],
+                     ["clone", "-q", f"file://{origin}", str(clone)]):
+            subprocess.run(["git", *args], check=True, capture_output=True)
+        sh_env = {"PATH": os.environ["PATH"]}
+        row = run_step_safely(Step("x", "deep", "git fetch --no-tags --depth=1 origin\n"), clone, sh_env, logs, t)
+        expect("a --depth=1 fetch step goes red, naming the cause", (row[3], "shallow" in row[0]), (False, True))
+        subprocess.run(["git", "-C", str(clone), "fetch", "-q", "--unshallow"], check=True, capture_output=True)
+        row = run_step_safely(Step("x", "full", "git fetch --no-tags origin\n"), clone, sh_env, logs, t)
+        expect("a plain fetch step stays green", row[3], True)
         global run_step
         real_run_step = run_step
         run_step = lambda *a: (_ for _ in ()).throw(OSError("boom"))
