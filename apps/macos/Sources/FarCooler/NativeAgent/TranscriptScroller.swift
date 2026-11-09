@@ -61,19 +61,23 @@ final class TranscriptLayout {
     /// running sums (`Sums`), so a row measured updates its own entry.
     private var sums = Sums()
     private var built = false
+    /// How many times every height was summed again, for a test.
+    private(set) var rebuilt = 0
     /// The items built now, where the stack put them.
     private var frames: [String: CGRect] = [:]
     /// Built items whose frames are out of order with the rest: reported
     /// where the stack doesn't keep them (`ordered()`, ov-906).
     private var outOfOrder: Set<String> = []
-    /// An item's height before the report that last changed it, and that
-    /// report's frame: its height while that frame is out of order.
-    private var before: [String: (measured: (height: CGFloat, width: CGFloat)?, by: CGRect)] = [:]
+    /// An item's height and settled height before the report that last
+    /// changed them, and that report's frame: its heights while that frame
+    /// is out of order, and when it's let go out of order.
+    private var before: [String: (measured: (height: CGFloat, width: CGFloat)?, steady: (height: CGFloat, width: CGFloat)?, by: CGRect)] = [:]
     /// The frames changed since they were last put in order.
     private var framesChanged = false
     /// The row a resize keeps the reader on, from when it began until the
-    /// reader scrolls: the order check keeps it (`order()`). The scroller
-    /// sets it, as only it knows the reader's row apart from a pass's.
+    /// reader scrolls with a gesture, pages or drags the knob: the order
+    /// check keeps it (`order()`). The scroller sets it, as only it knows
+    /// the reader's row apart from a pass's.
     var reader: String? {
         didSet { if reader != oldValue { framesChanged = true } }
     }
@@ -82,6 +86,10 @@ final class TranscriptLayout {
     /// report: a row the stack keeps but doesn't lay out again would stay
     /// where the old width put it, a wrong place to read the reader from.
     private var framesWidth: CGFloat = 0
+    /// Where the reader was by the last frames let go for a new width, if
+    /// they were in order, and the clip's width then: a resize's first read
+    /// when the frames at the new width aren't (`reading(resizing:from:)`).
+    private var lastWidth: (reading: Reading, clip: CGFloat)?
     private var head: CGFloat?
     /// Below the last item: the queued lines, a handoff row, the padding.
     private var tail: CGFloat = Spacing.section
@@ -146,6 +154,7 @@ final class TranscriptLayout {
         guard !built else { return }
         sums = Sums(items.indices.map { height($0) + spacing })
         built = true
+        rebuilt += 1
         cached = nil
     }
 
@@ -162,6 +171,10 @@ final class TranscriptLayout {
     func place(_ id: String, _ frame: CGRect, in space: CGFloat? = nil) {
         let width = space.map { $0 - Self.padding * 2 }.flatMap { $0 > 0 ? $0 : nil } ?? contentWidth() ?? self.width
         if abs(width - framesWidth) > 0.5 {
+            lastWidth = nil
+            if let scroll, let reading = reading(scroll), outOfOrder.isEmpty || reader != nil {
+                lastWidth = (reading, scroll.contentView.bounds.width)
+            }
             frames = [:]
             framesWidth = width
         }
@@ -169,7 +182,7 @@ final class TranscriptLayout {
         framesChanged = true
         cached = nil
         if measured[id].map({ abs($0.height - frame.height) > 0.25 || abs($0.width - width) > 0.5 }) ?? true {
-            if !outOfOrder.contains(id) { before[id] = (measured[id], frame) } else { before[id]?.by = frame }
+            if !outOfOrder.contains(id) { before[id] = (measured[id], steady[id], frame) } else { before[id]?.by = frame }
             measured[id] = (frame.height, width)
             if let clip = contentWidth(), abs(clip - width) <= 0.5 { steady[id] = (frame.height, width) }
             // Its own entry, if the sums are at this width; otherwise they
@@ -192,8 +205,17 @@ final class TranscriptLayout {
     /// mid-resize, at a width the clip never held (a row laid out in a
     /// transient pass can be several times its real height): then the last
     /// height taken at a settled width comes back, or, with none, the
-    /// estimate (ov-842).
+    /// estimate (ov-842). One let go while set aside (`order()`) has the
+    /// heights it had before that frame back (ov-906).
     func drop(_ id: String) {
+        sync()
+        order()
+        if outOfOrder.contains(id), let set = before[id], set.by == frames[id] {
+            measured[id] = set.measured
+            steady[id] = set.steady
+            before[id] = nil
+            built = false
+        }
         frames[id] = nil
         framesChanged = true
         if let m = measured[id], let clip = contentWidth(), abs(m.width - clip) > 0.5, steady[id].map({ $0.width != m.width }) ?? true {
@@ -269,8 +291,17 @@ final class TranscriptLayout {
             }
             out = Set(rows.indices.filter { !kept.contains($0) }.map { rows[$0].id })
         }
-        if out != outOfOrder || !out.isEmpty { built = false }
+        // A row set aside, or put back, takes its height from elsewhere:
+        // its own entry changes, not every row's.
+        let changed = out.union(outOfOrder)
         outOfOrder = out
+        if built, abs((contentWidth() ?? width) - width) <= 0.5 {
+            for id in changed {
+                if let i = index[id] { sums.set(i, height(i) + spacing) }
+            }
+        } else if !changed.isEmpty {
+            built = false
+        }
         cached = nil
     }
 
@@ -361,6 +392,17 @@ final class TranscriptLayout {
     func reading(_ scroll: NSScrollView) -> Reading? {
         guard let top = top(scroll), let frame = ordered()[top.id], frame.height > 0 else { return nil }
         return Reading(id: top.id, share: top.into / frame.height)
+    }
+
+    /// Where the reader is as the clip's width begins to change from
+    /// `clip`. The rows can report at the new width before the clip takes
+    /// it, and those frames out of order, with no row yet kept as the
+    /// reader's: the run kept can be the misplaced one (ov-906). Then the
+    /// reader is where the old width's frames, in order, had them.
+    func reading(resizing scroll: NSScrollView, from clip: CGFloat) -> Reading? {
+        let now = reading(scroll)
+        guard !outOfOrder.isEmpty, reader == nil, let was = lastWidth, abs(was.clip - clip) <= 0.5 else { return now }
+        return was.reading
     }
 
     /// Whether `id`'s row is built.
@@ -776,7 +818,7 @@ final class TranscriptScroller: NSObject {
                 if widthLeft == 0, aimed == nil {
                     let knob = layout.knob(scroll)
                     let atEnd = knob.map { $0.value <= 0.0005 || $0.value >= 0.9995 } ?? true
-                    resizedFrom = atEnd ? nil : layout.reading(scroll)
+                    resizedFrom = atEnd ? nil : layout.reading(resizing: scroll, from: width)
                     layout.reader = resizedFrom?.id
                 }
                 widthLeft = Self.widthFrames
