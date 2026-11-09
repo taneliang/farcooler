@@ -61,7 +61,7 @@ import com.farcooler.model.PlanTheme
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanWords
 import com.farcooler.model.mayActOnPullRequests
-import com.farcooler.model.shownStage
+import com.farcooler.model.PlanViews
 import com.farcooler.model.TaskRow
 import com.farcooler.model.TaskUsageFormat
 import com.farcooler.net.Connection
@@ -301,7 +301,7 @@ fun PlanThemePage(
             item { PlanSectionTitle("Tickets") }
             tickets.forEach { ticket ->
                 item(key = "ticket/${ticket.task}") {
-                    PageTicketRow(ticket) { onOpenPage(PlanPage.Ticket(ticket.task)) }
+                    PageTicketRow(ticket, plan) { onOpenPage(PlanPage.Ticket(ticket.task)) }
                 }
             }
         }
@@ -317,13 +317,13 @@ private fun SectionTitleInline(title: String) {
 
 /** A ticket on a theme's page: its title, its stage, and its key. */
 @Composable
-private fun PageTicketRow(ticket: PlanTicket, onClick: () -> Unit) {
+private fun PageTicketRow(ticket: PlanTicket, plan: Plan, onClick: () -> Unit) {
     ListItem(
         leadingContent = { Icon(planGlyph(ticket.stage), contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent = { Text(ticket.heading, style = MaterialTheme.typography.titleSmall) },
         supportingContent = {
             Column {
-                Text(PlanWords.status(ticket))
+                Text(PlanViews.status(plan, ticket))
                 // TalkBack hears the key's title (ov-299).
                 val linker = LocalTaskKeyLinker.current
                 val spoken = linker.card(ticket.key)?.accessibilityLabel ?: ticket.key
@@ -360,12 +360,12 @@ private fun LazyListScope.cardRows(
                 supportingContent = {
                     Column {
                         Text(status)
-                        val stage = ref.stage?.takeIf { showsStage && it.shown != null }
-                        stage?.rowWords?.let { words ->
+                        val stage = if (showsStage) PlanViews.page(plan, ref.task)?.stage else null
+                        stage?.let {
                             Text(
-                                words,
+                                it.row,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (stage.needsAttention) glanceColor(GlancePalette.amber) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (stage.attention) glanceColor(GlancePalette.amber) else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                                 modifier = Modifier.testTag("plan-card-${row?.key ?: ref.key}-stage"),
                             )
@@ -399,6 +399,7 @@ fun PlanTicketPage(
     markReady: (suspend (PlanTicket, com.farcooler.model.PlanPrStage) -> String?)? = null,
 ) {
     val theme = plan.themeOf(ticket)
+    val page = PlanViews.page(plan, ticket.task)
     val place = listOf(
         ticket.worktreePath, ticket.branch.takeIf { it != ticket.worktreePath }.orEmpty(),
         ticket.landing?.let { "in ${com.farcooler.model.PlanLanding.label(it)}" }.orEmpty(),
@@ -408,12 +409,12 @@ fun PlanTicketPage(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(ticket.heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    Text(PlanWords.status(ticket, stage = ticket.shownStage == null), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(page?.statusBesideStage ?: PlanWords.state(ticket), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                ticket.shownStage?.let { PlanTicketStage(ticket, it, markReady) }
+                page?.stage?.let { shown -> ticket.prStage?.let { PlanTicketStage(ticket, it, shown, markReady) } }
                 if (ticket.reason.isNotEmpty()) Text(ticket.reason, style = MaterialTheme.typography.bodyLarge)
                 if (place.isNotEmpty()) Text(place, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                PlanWords.stale(ticket, plan.nowMs)?.let {
+                page?.stale?.let {
                     Text(it, style = MaterialTheme.typography.labelLarge, color = glanceColor(GlancePalette.amber))
                 }
                 if (theme != null) {

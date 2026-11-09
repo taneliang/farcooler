@@ -61,6 +61,8 @@ pub struct Theme {
     pub cards: Vec<CardRef>,
     pub counts: Counts,
     pub last_moved_at: Option<i64>,
+    pub spend: Spend,
+    pub budget_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

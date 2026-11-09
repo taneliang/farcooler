@@ -150,7 +150,7 @@ data class PageWorld(
                 )
             } ?: plain
             is PageTarget.Ticket -> ticketOf(t)?.let {
-                PageResolved(label ?: it.key, PlanWords.status(it), destination = PageDestination.Ticket(it.task))
+                PageResolved(label ?: it.key, PlanViews.status(plan, it), destination = PageDestination.Ticket(it.task))
             } ?: plain
             is PageTarget.Theme -> plan?.themes?.firstOrNull { it.name == t.name }?.let {
                 PageResolved(label ?: it.name, PlanWords.progress(it.counts), destination = PageDestination.Theme(it.id))
@@ -205,7 +205,7 @@ data class PageWorld(
             } ?: StatShown(resolved.name, stat.detail, stat.tone)
             is PageTarget.Cards -> StatShown(resolved.status ?: resolved.name, stat.detail, stat.tone)
             is PageTarget.Ticket -> StatShown(
-                ticketOf(ref)?.let { if (stat.show == PageShow.SPEND) PageWords.tokens(it.spend) else PlanWords.status(it) } ?: resolved.name,
+                ticketOf(ref)?.let { if (stat.show == PageShow.SPEND) PageWords.tokens(it.spend) else PlanViews.status(plan, it) } ?: resolved.name,
                 stat.detail, stat.tone,
             )
             is PageTarget.Theme -> StatShown(
@@ -224,7 +224,7 @@ data class PageWorld(
         return when (cell.show) {
             // Live data draws its value (ov-306): CI's status, a count.
             PageShow.NAME -> resolve(ref).let { if (ref.target is PageTarget.Ci || ref.target is PageTarget.Cards) it.status ?: it.name else it.name }
-            PageShow.STATE -> ticket?.let(PlanWords::status) ?: resolve(ref).name
+            PageShow.STATE -> ticket?.let { PlanViews.status(plan, it) } ?: resolve(ref).name
             PageShow.SPEND -> themeOf(ref)?.let { PageWords.tokens(it.spend ?: PlanSpend()) }
                 ?: ticket?.let { PageWords.tokens(it.spend) } ?: resolve(ref).name
         }

@@ -118,15 +118,10 @@ class PlanTest {
     @Test
     fun `a ticket's status says its round, its place, its commit and its landing`() {
         val plan = Plan.decode(fixture)
-        assertEquals("Waiting · 1st", PlanWords.status(plan.tickets[0]))
-        assertEquals("In review", PlanWords.status(plan.tickets[1]))
-        assertEquals("Landing · in Landing 9", PlanWords.status(plan.tickets[2]))
-        assertEquals("Landed · 4d3c8cb1", PlanWords.status(plan.tickets[3]))
-        val fixing = plan.tickets[1].copy(
-            stage = TicketStage.BUILDING, fixRounds = 2, landing = null,
-            work = listOf(PlanWork("a", WorkRole.FIX, now - hour, null)),
-        )
-        assertEquals("Fixing · round 2", PlanWords.status(fixing))
+        assertEquals("Waiting · 1st", PlanViews.status(plan, plan.tickets[0]))
+        assertEquals("In review", PlanViews.status(plan, plan.tickets[1]))
+        assertEquals("Landing · in Landing 9", PlanViews.status(plan, plan.tickets[2]))
+        assertEquals("Landed · 4d3c8cb1", PlanViews.status(plan, plan.tickets[3]))
         assertEquals(listOf("1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st"), listOf(1, 2, 3, 4, 11, 12, 13, 21).map(PlanWords::ordinal))
     }
 
@@ -141,8 +136,6 @@ class PlanTest {
     fun `only a stale ticket or one waiting on the owner is a warning`() {
         val plan = Plan.decode(fixture)
         val review = plan.tickets[1]
-        assertNull(PlanWords.stale(review, now))
-        assertEquals("No move in 3 h", PlanWords.stale(review.copy(stale = true, stageSince = now - 3 * hour), now))
         val statuses = mapOf(review.task to TaskStatus.NEEDS_DECISION)
         assertTrue(plan.waitsOnOwner(review, statuses))
         assertTrue(plan.waitsOnOwner(review.copy(stage = TicketStage.NEEDS_YOU), emptyMap()))

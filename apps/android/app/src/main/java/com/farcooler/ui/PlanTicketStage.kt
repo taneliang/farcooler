@@ -23,6 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PlanTicket
+import com.farcooler.model.PlanViewPageStage
 import com.farcooler.model.PlanPrStage
 import com.farcooler.model.PrActions
 import kotlinx.coroutines.launch
@@ -37,6 +38,8 @@ import kotlinx.coroutines.launch
 fun PlanTicketStage(
     ticket: PlanTicket,
     stage: PlanPrStage,
+    /** The stage as the core words it. */
+    shown: PlanViewPageStage,
     markReady: (suspend (PlanTicket, PlanPrStage) -> String?)?,
     modifier: Modifier = Modifier,
 ) {
@@ -47,17 +50,15 @@ fun PlanTicketStage(
     var sending by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        stage.words?.let {
-            Text(
-                it,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (stage.needsAttention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis,
-                modifier = Modifier.testTag(if (stage.needsAttention) "plan-ticket-stage-attention" else "plan-ticket-stage"),
-            )
-        }
-        stage.detail?.let {
+        Text(
+            shown.words,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (shown.attention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.MiddleEllipsis,
+            modifier = Modifier.testTag(if (shown.attention) "plan-ticket-stage-attention" else "plan-ticket-stage"),
+        )
+        shown.detail?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("plan-ticket-stage-detail"))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {

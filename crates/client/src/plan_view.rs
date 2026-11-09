@@ -26,7 +26,7 @@ pub mod column;
 pub mod input;
 pub mod words;
 
-pub use build::LandingPhase;
+pub use build::{LandingPhase, PageStage, Pages, ThemeTrack, TicketPage, TrackKind};
 pub use words::Style;
 
 pub const SCHEMA: u32 = 1;
@@ -341,6 +341,8 @@ pub struct PlanView {
     /// The plan column beside the conversation: facts, initiatives, the
     /// pipeline of agents and the footer counts (ov-867).
     pub column: column::Column,
+    /// What ticket pages and theme tracks say (ov-1038).
+    pub pages: Pages,
 }
 
 impl PlanView {
@@ -442,3 +444,7 @@ mod tests;
 #[cfg(test)]
 #[path = "plan_view/column_tests.rs"]
 mod column_tests;
+
+#[cfg(test)]
+#[path = "plan_view/pages_tests.rs"]
+mod pages_tests;

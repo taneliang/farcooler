@@ -34,8 +34,6 @@ import java.util.TimeZone
 data class PlanCardRef(
     val task: String,
     val key: String,
-    /** Where this card's own pull request stands (ov-317); null for a card that has none to say. */
-    val stage: PlanPrStage? = null,
 )
 
 /** How many of a theme's cards are in each of the board's statuses. */
@@ -163,11 +161,11 @@ data class PlanTicket(
     val spend: PlanSpend = PlanSpend(),
     /** Its token budget (ov-307); null when it has none. */
     val budgetTokens: Long? = null,
-    /** Where its pull request stands (ov-317); null with nothing to say. Read it through [shownStage]. */
+    /** Where its pull request stands (ov-317); null with nothing to say. */
     val prStage: PlanPrStage? = null,
 ) {
-    /** The card it is, with its pull request's stage. */
-    val card: PlanCardRef get() = PlanCardRef(task, key, prStage)
+    /** The card it is. */
+    val card: PlanCardRef get() = PlanCardRef(task, key)
 
     /** What every surface shows first: the card's title, else its key. */
     val heading: String get() = title.ifEmpty { key }
@@ -561,29 +559,6 @@ object PlanWords {
     /** A ticket's stage, "Fixing" while a fixer builds it again after a review. */
     fun state(ticket: PlanTicket): String = if (ticket.isFixing) "Fixing" else state(ticket.stage)
 
-    /**
-     * A ticket's stage with what it needs said beside it: "Fixing · round 1", "Landing · in Landing 8", "Waiting · 2nd".
-     * A pull request's stage says more than "In review" or "Landing", so it takes the stage's place (ov-317); one the
-     * runner could not read is added, for it says less than the stage does. With [stage] false a row that draws the
-     * pull request's stage on its own line keeps only what that stage leaves to the ticket ("Approved" beside "Checks failing").
-     */
-    fun status(ticket: PlanTicket, stage: Boolean = true): String {
-        val parts = mutableListOf(state(ticket))
-        ticket.shownStage?.let { shown ->
-            val words = shown.fullWords
-            if (words != null) {
-                if (!stage) shown.stateWords?.let { parts[0] = it }
-                else if (shown.kind == PlanPrStageKind.UNKNOWN) parts += words
-                else parts[0] = words
-            }
-        }
-        if (ticket.isFixing && ticket.fixRounds > 0) parts += "round ${ticket.fixRounds}"
-        ticket.planRank?.let { if (ticket.stage == TicketStage.WAITING) parts += ordinal(it) }
-        ticket.landedSha?.let { if (ticket.stage == TicketStage.LANDED && it.isNotEmpty()) parts += it.take(8) }
-        ticket.landing?.let { if (ticket.stage.isLive) parts += "in ${PlanLanding.label(it)}" }
-        return parts.joinToString(" · ")
-    }
-
     /** [text] cut at a word to [max] characters, with an ellipsis: a title in the strip's one line. */
     fun short(text: String, max: Int = 24): String {
         if (text.length <= max) return text
@@ -676,13 +651,6 @@ object PlanWords {
             minutes < 1440 -> "${minutes / 60} h ago"
             else -> "${minutes / 1440} d ago"
         }
-    }
-
-    /** A stale ticket's warning, in words beside its mark: "No move in an hour". */
-    fun stale(ticket: PlanTicket, now: Long): String? {
-        if (!ticket.stale) return null
-        val minutes = maxOf(0, now - ticket.stageSince) / 60_000
-        return if (minutes < 120) "No move in an hour" else "No move in ${minutes / 60} h"
     }
 }
 

@@ -53,7 +53,7 @@ class PlanLandingsTest {
         val landing = plan.landings.single { !it.state.isSettled }
         assertEquals(listOf("ov-4"), landing.tickets.map { it.key })
         assertTrue(LandingWords.needsAttention(landing, null))
-        assertEquals("Landing · in Landing 9", PlanWords.status(plan.tickets[2]))
+        assertEquals("Landing · in Landing 9", PlanViews.status(plan, plan.tickets[2]))
     }
 
     @Test

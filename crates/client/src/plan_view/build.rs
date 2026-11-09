@@ -22,6 +22,9 @@ use super::input::{Agent, Landing, Line, Plan, PrStage, Theme};
 use super::words::{self, DOT, Style};
 use super::*;
 
+mod pages;
+pub use pages::{PageStage, Pages, ThemeTrack, TicketPage, TrackKind};
+
 /// A ticket's stage, from the wire's word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -241,7 +244,7 @@ impl<'a> Reader<'a> {
     }
 
     /// A builder has it again, for a fix round: the work open on it is a fix.
-    fn is_fixing(&self, line: &Line) -> bool {
+    pub(super) fn is_fixing(&self, line: &Line) -> bool {
         self.stage(line) == Stage::Building
             && line.work.iter().rev().find(|w| w.ended_at.is_none()).is_some_and(|w| w.role == "fix")
     }
@@ -398,6 +401,12 @@ fn pr_state_words(s: &PrStage, style: Style) -> Option<String> {
 fn pr_full_words(s: &PrStage, style: Style) -> Option<String> {
     let words = pr_words(s, style)?;
     Some(match pr_state_words(s, style) {
+        // Sentence case reads "Approved, checks failing": the problem follows the state mid-phrase.
+        Some(state) if style == Style::Material => {
+            let mut chars = words.chars();
+            let lowered = chars.next().map(|c| c.to_lowercase().chain(chars).collect::<String>()).unwrap_or_default();
+            format!("{state}, {lowered}")
+        }
         Some(state) => format!("{state}, {words}"),
         None => words,
     })
@@ -998,6 +1007,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         .collect();
 
     let column = super::column::column(&r);
+    let pages = pages::pages(&r);
     PlanView {
         schema: SCHEMA,
         now: plan.now_ms,
@@ -1012,5 +1022,6 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         agents,
         themes,
         column,
+        pages,
     }
 }

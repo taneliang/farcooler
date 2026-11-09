@@ -9,9 +9,7 @@ import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanRecord
 import com.farcooler.model.TaskStatus
-import com.farcooler.model.track
 import com.farcooler.ui.PlanPageBody
-import com.farcooler.ui.PlanThemeRow
 import com.farcooler.ui.PlanSwitch
 import com.farcooler.ui.planItems
 import java.io.File
@@ -44,13 +42,6 @@ class PlanCaptureTest {
         LazyColumn(Modifier.fillMaxSize()) {
             item { PlanSwitch(showsPlan = true, onChange = {}) }
             planItems(PlanReadState.Loaded(plan), statuses, onOpen = {}, onRetry = {})
-        }
-    }
-
-    @Test fun themes() = Capture.both("plan-themes") {
-        LazyColumn(Modifier.fillMaxSize()) {
-            // The themes alone, with the plan's tickets in place so each track line reads what is moving (ov-331).
-            items(plan.shownThemes.size) { PlanThemeRow(plan.shownThemes[it], plan.track(plan.shownThemes[it]), plan.nowMs) {} }
         }
     }
 

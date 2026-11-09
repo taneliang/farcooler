@@ -34,42 +34,8 @@ class PlanPrStageTest {
     private fun ticket(n: Int) = stages.tickets[n - 1]
 
     @Test
-    fun `every stage kind the runner sends decodes and has words`() {
-        assertEquals(
-            listOf(
-                "Building", "Agent review", "Fixing", "Waiting on alice and 2 others",
-                "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg", "Changes requested",
-                "Approved, checks running", "Checks failing", "Merge conflicts", "Approved",
-                "Queued, position 2", "Merged", "Closed", "PR state unknown",
-            ),
-            (1..14).map { ticket(it).prStage?.words },
-        )
-        assertEquals("all thirteen kinds, none lost", 13, (1..14).mapNotNull { ticket(it).prStage?.kind }.toSet().size)
-    }
-
-    @Test
-    fun `an attention stage leads with the problem and Approved stays in the state line`() {
-        for ((n, problem) in listOf(8 to "Checks failing", 9 to "Merge conflicts")) {
-            val stage = ticket(n).prStage!!
-            assertEquals(problem, stage.words)
-            assertEquals("Approved", stage.stateWords)
-            assertEquals("Approved, ${problem.replaceFirstChar { it.lowercase() }}", stage.fullWords)
-            assertEquals(problem, stage.rowWords)
-            assertEquals("the gray line", "Approved", PlanWords.status(ticket(n), stage = false))
-            assertEquals("a line with room for one phrase", "Approved, ${problem.replaceFirstChar { it.lowercase() }}", PlanWords.status(ticket(n)))
-        }
-        assertNull("changes requested is its own state", ticket(6).prStage?.stateWords)
-        assertEquals("Changes requested", ticket(6).prStage?.rowWords)
-        assertEquals("Waiting on alice and 2 others", ticket(4).prStage?.rowWords)
-    }
-
-    @Test
-    fun `only changes requested, failing checks and conflicts need a person`() {
-        assertEquals(listOf(6, 8, 9), (1..14).filter { ticket(it).prStage?.needsAttention == true })
-    }
-
-    @Test
     fun `the facts under the words come through`() {
+        assertEquals("all thirteen kinds, none lost", 13, (1..14).mapNotNull { ticket(it).prStage?.kind }.toSet().size)
         val stage = ticket(4).prStage!!
         assertEquals(listOf("alice", "bob", "org/web"), stage.reviewers)
         assertEquals(31, stage.prNumber)
@@ -81,44 +47,11 @@ class PlanPrStageTest {
     }
 
     @Test
-    fun `unknown is added to the state and never replaces it, and building says nothing twice`() {
-        assertEquals("In review · PR state unknown", PlanWords.status(ticket(14)))
-        assertEquals("In review", PlanWords.status(ticket(1)))
-        assertNull(ticket(1).shownStage)
-        assertEquals("Waiting on alice and 2 others", PlanWords.status(ticket(4)))
-        assertEquals("Changes requested", PlanWords.status(ticket(6)))
-        assertEquals("In review", PlanWords.status(ticket(6), stage = false))
-        assertEquals("Queued, position 2", PlanWords.status(ticket(11)))
-    }
-
-    @Test
-    fun `a ticket told nothing reads as it always did, and a finished ticket ignores a stale stage`() {
-        val silent = stages.tickets.last()
-        assertNull(silent.prStage)
-        assertNull(silent.card.stage)
-        assertEquals("In review", PlanWords.status(silent))
-        val landed = ticket(4).copy(stage = TicketStage.LANDED)
-        assertNull(landed.shownStage)
-        assertEquals("Landed", PlanWords.status(landed))
-    }
-
-    @Test
-    fun `a kind this build does not know falls back to the runner's words, or says nothing`() {
+    fun `a kind this build does not know decodes as unspecified, and a runner before the stage sends none`() {
         val newer = PlanPrStage.decode(Json.parseToJsonElement("""{"kind":"needs_a_dance","label":"Awaiting the council"}"""))!!
         assertEquals(PlanPrStageKind.UNSPECIFIED, newer.kind)
-        assertEquals("Awaiting the council", newer.words)
-        val silent = PlanPrStage.decode(Json.parseToJsonElement("""{"kind":"needs_a_dance"}"""))!!
-        assertNull(silent.words)
-        assertNull(silent.shown)
+        assertEquals("Awaiting the council", newer.label)
         assertNull("a runner before the stage", PlanPrStage.decode(null))
-    }
-
-    @Test
-    fun `waiting on names the login, a couple, or a count`() {
-        assertEquals("Waiting on a reviewer", PlanPrStage.waiting(emptyList()))
-        assertEquals("Waiting on alice", PlanPrStage.waiting(listOf("alice")))
-        assertEquals("Waiting on alice and bob", PlanPrStage.waiting(listOf("alice", "bob")))
-        assertEquals("Waiting on alice and 2 others", PlanPrStage.waiting(listOf("alice", "bob", "carol")))
     }
 
     @Test
@@ -132,8 +65,6 @@ class PlanPrStageTest {
             listOf(PlanPrStageKind.AGENT_REVIEW, PlanPrStageKind.FIXING),
             PlanPrStageKind.entries.filter { PlanPrStage(it, prNumber = 7).isDraft },
         )
-        // Each ticket's card carries its own stage, which the ticket's page draws.
-        assertEquals("Agent review", phones.tickets.first { it.key == "ov-2" }.card.stage?.words)
     }
 
     @Test

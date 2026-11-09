@@ -52,7 +52,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.LocalContentColor
-import com.farcooler.model.shownStage
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
@@ -73,14 +72,7 @@ import com.farcooler.model.ciOf
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanSegment
-import com.farcooler.model.PLAN_STORY_LINES
 import com.farcooler.model.PlanTheme
-import com.farcooler.model.PlanTrack
-import com.farcooler.model.storyAge
-import com.farcooler.model.themeGroups
-import com.farcooler.model.track
-import com.farcooler.model.trackSpoken
-import com.farcooler.model.trackSummary
 import com.farcooler.model.PlanWords
 import com.farcooler.model.TaskStatus
 
@@ -363,112 +355,6 @@ private fun PlanCardNote(key: String, note: PlanViewNote) {
         }
     }
     if (note.help.isNullOrEmpty()) line() else ExplainedOnLongPress(listOf(note.help)) { line() }
-}
-
-/**
- * A theme in the overview: its name and outcome, its progress, what's next
- * and, in amber, what needs you. Each theme reads on its own (the owner's
- * goal, ov-273).
- */
-@Composable
-fun PlanThemeRow(theme: PlanTheme, track: PlanTrack, now: Long, onClick: () -> Unit) {
-    val spoken = listOfNotNull(
-        theme.name, theme.outcome.ifEmpty { null }, PlanWords.progress(theme.counts), PlanWords.trackSpoken(track, now),
-        theme.story.ifEmpty { null }, PlanWords.storyAge(theme, now),
-        theme.next.ifEmpty { null }?.let { "Next: $it" }, theme.ownerAsk.ifEmpty { null }?.let { "Needs you: $it" },
-    ).joinToString(". ")
-    Row(
-        verticalAlignment = Alignment.Top,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .testTag("plan-theme-${theme.name}")
-            .semantics(mergeDescendants = true) { contentDescription = spoken },
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(theme.name, style = MaterialTheme.typography.titleMedium, maxLines = 2)
-                if (theme.state != "active") {
-                    Spacer(Modifier.width(8.dp))
-                    Text(theme.state.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            if (theme.outcome.isNotEmpty()) {
-                Text(
-                    theme.outcome,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = PlanWords.OUTCOME_LINES,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("plan-theme-outcome-${theme.name}"),
-                )
-            }
-            PlanProgressBar(theme.counts, Modifier.padding(top = 4.dp))
-            Text(
-                PlanWords.progress(theme.counts),
-                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // Moving or quiet, in words; amber only past a token budget (ov-307, ov-331), which says so here.
-            PlanTrackLine(track, now)
-            // Where it stands, three lines, and how old that account is.
-            if (theme.story.isNotEmpty()) {
-                Text(
-                    theme.story,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = PLAN_STORY_LINES,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp).testTag("plan-theme-story-${theme.name}"),
-                )
-                PlanWords.storyAge(theme, now)?.let {
-                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
-                }
-            }
-            if (theme.next.isNotEmpty()) {
-                Text("Next: ${theme.next}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            if (theme.ownerAsk.isNotEmpty()) PlanAsk(theme.ownerAsk, maxLines = 2)
-        }
-        Icon(
-            Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(start = 8.dp, top = 2.dp),
-        )
-    }
-}
-
-/** "Mac UX is in review", "Queued, 1st up", "No ticket · quiet for 3 days": neutral, and amber only for a budget gone over. */
-@Composable
-fun PlanTrackLine(track: PlanTrack, now: Long, modifier: Modifier = Modifier) {
-    val amber = glanceColor(GlancePalette.amber)
-    val attention = track.needsAttention
-    val color = if (attention) amber else MaterialTheme.colorScheme.onSurfaceVariant
-    Row(
-        modifier.semantics(mergeDescendants = true) { contentDescription = PlanWords.trackSpoken(track, now) }
-            .testTag(if (attention) "plan-budget-over" else "plan-theme-track"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(trackIcon(track), contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            PlanWords.track(track, now),
-            style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (attention) FontWeight.Medium else FontWeight.Normal),
-            color = color,
-        )
-    }
-}
-
-/** A glyph per state, so the state never rests on color alone. */
-private fun trackIcon(track: PlanTrack): ImageVector = when (track) {
-    is PlanTrack.OverBudget, is PlanTrack.Stuck -> Icons.Outlined.ErrorOutline
-    is PlanTrack.Moving -> Icons.Outlined.Sync
-    is PlanTrack.Queued -> Icons.Outlined.Schedule
-    is PlanTrack.Quiet -> Icons.Outlined.Bedtime
-    PlanTrack.Idle -> Icons.Outlined.Circle
-    PlanTrack.AllDone, PlanTrack.Done -> Icons.Outlined.CheckCircleOutline
-    PlanTrack.Paused -> Icons.Outlined.PauseCircleOutline
 }
 
 /** "● Needs you: …": the one colored mark a theme has, with words. */

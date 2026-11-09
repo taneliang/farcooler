@@ -51,44 +51,6 @@ data class PlanPrStage(
     val unresolvedThreads: Int? = null,
     val checks: String = "unknown",
 ) {
-    /** The stage in the Plan view's words: sentence case for a state, and a reviewer as GitHub spells the login. Null for a kind this build cannot word and the runner gave no words for. */
-    val words: String?
-        get() = when (kind) {
-            PlanPrStageKind.BUILDING -> "Building"
-            PlanPrStageKind.AGENT_REVIEW -> "Agent review"
-            PlanPrStageKind.FIXING -> "Fixing"
-            PlanPrStageKind.WAITING_ON_REVIEWER -> waiting(reviewers)
-            PlanPrStageKind.CHANGES_REQUESTED -> "Changes requested"
-            PlanPrStageKind.APPROVED_CHECKS_RUNNING -> "Approved, checks running"
-            PlanPrStageKind.APPROVED_CHECKS_FAILING -> "Checks failing"
-            PlanPrStageKind.APPROVED -> "Approved"
-            PlanPrStageKind.APPROVED_CONFLICTS -> "Merge conflicts"
-            PlanPrStageKind.QUEUED -> if (queuePosition > 0) "Queued, position $queuePosition" else "Queued"
-            PlanPrStageKind.MERGED -> "Merged"
-            PlanPrStageKind.CLOSED -> "Closed"
-            PlanPrStageKind.UNKNOWN -> "PR state unknown"
-            PlanPrStageKind.UNSPECIFIED -> label.ifEmpty { null }
-        }
-
-    /** What stays in the gray state line when [words] leads with the problem: it is approved, and the checks or the merge need a person. */
-    val stateWords: String?
-        get() = if (kind == PlanPrStageKind.APPROVED_CHECKS_FAILING || kind == PlanPrStageKind.APPROVED_CONFLICTS) "Approved" else null
-
-    /** The stage alone in one phrase, state first, for a line with no room for two ("Approved, Checks Failing"). */
-    val fullWords: String?
-        get() = words?.let { w -> stateWords?.let { "$it, ${w.replaceFirstChar { c -> c.lowercase() }}" } ?: w }
-
-    /** Changes requested, checks failing, conflicts: the stages that need a person, and so the only ones drawn in color. */
-    val needsAttention: Boolean
-        get() = kind == PlanPrStageKind.CHANGES_REQUESTED || kind == PlanPrStageKind.APPROVED_CHECKS_FAILING ||
-            kind == PlanPrStageKind.APPROVED_CONFLICTS
-
-    /** What a row draws for the stage: the problem alone when a person has to act, else one phrase. */
-    val rowWords: String? get() = if (needsAttention) words else fullWords ?: words
-
-    /** What a row says, or null when the ticket's own stage word already says it ("Building" under a building ticket) or this build cannot word it. */
-    val shown: String? get() = if (kind == PlanPrStageKind.BUILDING) null else words
-
     /** Whether the pull request is a draft: the runner derives Agent Review and Fixing from a draft and from nothing else. */
     val isDraft: Boolean get() = kind == PlanPrStageKind.AGENT_REVIEW || kind == PlanPrStageKind.FIXING
 
@@ -108,14 +70,6 @@ data class PlanPrStage(
     val link: String? get() = GitHubLink.url(prUrl)
 
     companion object {
-        /** "Waiting on alice", "Waiting on alice and bob", "Waiting on alice and 2 others", and "Waiting on a reviewer" when no one was asked by name. */
-        fun waiting(reviewers: List<String>): String = when (reviewers.size) {
-            0 -> "Waiting on a reviewer"
-            1 -> "Waiting on ${reviewers[0]}"
-            2 -> "Waiting on ${reviewers[0]} and ${reviewers[1]}"
-            else -> "Waiting on ${reviewers[0]} and ${reviewers.size - 1} others"
-        }
-
         /** A stage off the plan's JSON, or null when the runner sent none. */
         fun decode(element: JsonElement?): PlanPrStage? {
             val o = element as? JsonObject ?: return null
@@ -151,7 +105,3 @@ object GitHubLink {
         return link.takeIf { authority.lowercase() == HOST }
     }
 }
-
-/** A ticket's pull request stage, while it is live and the stage has something to add to the stage word. */
-val PlanTicket.shownStage: PlanPrStage?
-    get() = prStage?.takeIf { stage.isLive && it.shown != null }
