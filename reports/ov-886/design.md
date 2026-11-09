@@ -79,10 +79,11 @@ Routed exactly as today. That covers CLIs that predate the field, harnesses whos
 
 The routing check and the effects it permits must not be separated by a restart. A frame could otherwise be admitted while its launch is current and act after step 3 has cleared the pane.
 
-- `HookIngress` gets a **launch gate**: one `std::sync::Mutex<()>`.
-- A tagged frame's **synchronous effects** run inside the gate, after re-reading the pane's launch inside it: taking a queued followup, holding an ask, starting a transcript tail, observing `cwd`, folding the frame into events and handing those to the sink. If the launch moved, they don't run.
-- `begin_launch` commits before the gate is taken for step 3. So either a frame's whole effect block finished before step 3, and step 3 cancels what it left (tail, ask, assembler), or the block starts after the commit and sees the new launch.
-- Store reads inside the gate are SQLite reads. The gate is never held across an `.await`.
+- `HookIngress` gets a **launch gate**: 64 `std::sync::Mutex<()>` stripes, picked by pane, so a slow hook on one pane holds up no other pane's.
+- A tagged frame's **synchronous effects** run inside its pane's stripe, after re-reading the pane's launch inside it: taking a queued followup, holding an ask, starting a transcript tail, folding the frame into events and handing those to the sink, and each transcript-tail delivery. If the launch moved, they don't run.
+- `begin_launch` commits before the stripe is taken for step 2. So either a frame's whole effect block finished before step 2, and step 2 cancels what it left (tail, ask, assembler), or the block starts after the commit and sees the new launch.
+- **Untagged frames take no gate.** They're routed as on main, and a hook that predates launches mustn't start waiting on one.
+- **Nothing slow runs under it.** Its store reads are single SQLite reads; it's never held across an `.await`. `observe_cwd` can wait on the claims ledger, so it runs after the stripe is released. A stale frame that passed the gate just before a relaunch can therefore still report the worktree it was working in, for its own pane's workspace; that's a claim, not an event or an ask, and the same report the process would have made a moment earlier.
 
 What stays outside the gate, on purpose:
 
