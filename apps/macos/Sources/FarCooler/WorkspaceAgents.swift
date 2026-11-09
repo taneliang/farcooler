@@ -88,7 +88,10 @@ enum MacAgents {
 /// What the agents panel says.
 enum AgentsWords {
     static let title = "Agents"
-    static var noneTitle: String { CorePhrases.agentsNone }
+    static var noneTitle: String {
+        PlanViewBridge.install()
+        return SharedWords.agentsNone
+    }
     static let noneBody = "Agents the orchestrator starts, and the subagents they start, show up here while they work."
     static let orchestratorSection = "Orchestrator’s Subagents"
     static let panesSection = "Agents"
