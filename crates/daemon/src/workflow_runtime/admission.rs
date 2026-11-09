@@ -83,6 +83,20 @@ impl Admission {
             _ => unreachable!(),
         }
     }
+    /// Who sent this, for the receipt (ov-1001): the caller's person as captured (and rechecked since), the
+    /// device they called from, and the pane: the orchestrator's, or the shell the caller was walked to.
+    pub(super) fn actor(&self) -> farcooler_store::workflow::WorkflowActor {
+        farcooler_store::workflow::WorkflowActor {
+            person: match &self.person {
+                Person::Owner => "owner".into(),
+                Person::Member(handle) => format!("member:{handle}"),
+                Person::Released => "released".into(), // `admits` refuses one before anything is written
+            },
+            device: self.peer.client_id.clone(),
+            pane: self.orchestrator().map(|term| term.id).or_else(|| self.caller_pane.get().copied()),
+            orchestrator: self.orchestrator().is_some(),
+        }
+    }
     /// A member in person, rather than the owner or an orchestrator pane: they read runs, and act on them where
     /// they lead or as a Maintainer (R-107, ov-1000).
     fn member_in_person(&self) -> bool { self.seat == Seat::Person && matches!(self.person, Person::Member(_)) }

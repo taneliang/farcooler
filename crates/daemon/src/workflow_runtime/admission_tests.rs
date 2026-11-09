@@ -255,6 +255,8 @@ async fn workflow_a_member_led_orchestrator_drives_its_own_workspace() {
     let rpc = factory(&svc, &runtime, peer.clone(), Some(pid));
     let (reply, _) = sent(&mut runtime, &rpc, workspace, &Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() }).await;
     ok(&reply);
+    // The receipt names Alice, and the pane it came from (ov-1001).
+    assert_eq!(receipt(&reply).pointer("/receipt/actor"), Some(&serde_json::json!({"person": "member:alice", "pane": _pane, "orchestrator": true})));
     for time in 1..15 {
         runtime.pump(time).await.unwrap();
         if runtime.state(&w).unwrap().unwrap().items["a"].phase == Phase::WaitingReview { break; }

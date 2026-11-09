@@ -1,7 +1,7 @@
 //! Only the RPC admission seam supplies principal; the wire vocabulary has none.
 use super::*;
 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
-use farcooler_store::workflow_publication::Write;
+use farcooler_store::{workflow::WorkflowActor, workflow_publication::Write};
 
 impl CommandHandle {
     pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {
@@ -14,10 +14,13 @@ impl CommandHandle {
 impl Runtime {
     #[cfg(test)]
     pub(super) fn wire_command(&self, workspace: &str, principal: &str, action: Action) -> Result<serde_json::Value> {
-        self.wire_command_with(workspace, principal, action, None)
+        self.wire_command_with(workspace, principal, None, action, None)
     }
-    /// `tree` is what `prepare_start` resolved for a Start that names a worktree (ov-967).
-    pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, action: Action, tree: Option<RunTree>) -> Result<serde_json::Value> {
+    /// `tree` is what `prepare_start` resolved for a Start that names a worktree (ov-967). `actor` is who sent
+    /// it, as admission read them, written into the receipt (ov-1001).
+    pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, actor: Option<&WorkflowActor>, action: Action,
+        tree: Option<RunTree>) -> Result<serde_json::Value>
+    {
         let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         // A proposal is filed and answered by the daemon before the engine is involved (`workflow_drafts`).
@@ -62,83 +65,83 @@ impl Runtime {
             expected_revision:mutation.revision,epoch:mutation.epoch,source:format!("wire:{principal}"),
             source_sequence:mutation.sequence,now_ms:now(),grant,command,busy_resources:BTreeSet::new() };
         let receipt = if stale {
-            self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+            self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
         } else {
             match &action {
                 Action::Publish { expected_pin, definition, adapter, notifications, .. } => {
                     // A valid pure definition can still name an unsupported fixture adapter.
                     self.validate_publication(definition, adapter.as_deref())?;
-                    self.store.workflow_wire_write(workspace,&id,&payload,Write::Publish {
+                    self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Publish {
                         expected_pin:expected_pin.as_deref(),definition,adapter:adapter.as_deref(),notifications:notifications.as_ref(),revision:state.revision })?
                 }
                 Action::Enqueue { item, pin, .. } => {
                     let configuration = self.store.workflow_configuration(workspace)?;
                     match configuration.filter(|c| &c.pin == pin) {
-                        None => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
+                        None => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?,
                         Some(configuration) => {
                             self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| pin.clone());
                             let input = input(Command::Enqueue { item:item.clone(),definition:configuration.definition,
                                 policy_pin:pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate },Grant::Controller);
-                            self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                            self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                         }
                     }
                 }
                 Action::Approve { item, run, pin, candidate, .. } => {
                     let input = input(Command::Approve { item:item.clone(),run:run.clone(),pin:pin.clone(),candidate:candidate.clone() },Grant::Decision { principal:session.principal.clone() });
-                    self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                    self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                 }
                 Action::Review { item, run, pin, evidence, passed, reason, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin && i.last_evidence.as_ref() == Some(evidence)) {
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::Review { item:item.clone(),run:run.clone(),evidence:evidence.clone(),passed:*passed,reason:reason.clone() },Grant::Decision { principal:session.principal.clone() });
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }
                 Action::Cancel { item, run, pin, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::Cancel { item:item.clone() },Grant::Controller);
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }
                 Action::Retry { item, run, pin, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::Retry { item:item.clone() },Grant::Controller);
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }
                 Action::Queue { item, run, pin, .. } | Action::Leave { item, run, pin, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
                         let command = if matches!(action, Action::Queue { .. }) { Command::Queue { item:item.clone() } }
                             else { Command::Leave { item:item.clone() } };
                         let input = input(command,Grant::Controller);
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }
                 Action::Settle { .. } => unreachable!("settling reads the remote, so it is answered before this"),
                 Action::Track { item, column, .. } => {
                     let Some(definition) = Definition::ticket_at(column.as_deref().unwrap_or("backlog")) else {
-                        return Ok(serde_json::json!({"schema":1,"receipt":self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Invalid))?}));
+                        return Ok(serde_json::json!({"schema":1,"receipt":self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Invalid))?}));
                     };
                     self.validate_publication(&definition, None)?;
                     let policy_pin = self.store.workflow_ticket_bundle(&definition)?;
                     let input = input(Command::Enqueue { item:item.clone(),initial_candidate:Some(definition.pin()),definition,
                         policy_pin,resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new() },Grant::Controller);
-                    self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                    self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                 }
                 Action::Move { item, run, pin, to, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::Move { item:item.clone(),to:to.clone() },Grant::Controller);
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }
                 Action::Start { item, run, pin, start_pin, models, worktree, with, .. } => {
@@ -152,27 +155,27 @@ impl Runtime {
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| start_pin.clone());
                             let input = input(Command::Start { item:item.clone(),definition:configuration.definition,
                                 policy_pin:start_pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate,models:models.clone(),tree:tree.clone().map(Box::new),with:with.clone() },Grant::Controller);
-                            self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                            self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                         }
-                        _ => self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?,
+                        _ => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?,
                     }
                 }
                 Action::SendBack { item, run, pin, reason, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Stale))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::SendBack { item:item.clone(),reason:reason.clone() },Grant::Controller);
-                        self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }
                 Action::Reopen { item, column, .. } => {
                     let Some(definition) = Definition::ticket_at(column.as_deref().unwrap_or("todo")) else {
-                        return Ok(serde_json::json!({"schema":1,"receipt":self.store.workflow_wire_write(workspace,&id,&payload,Write::Refuse(Refusal::Invalid))?}));
+                        return Ok(serde_json::json!({"schema":1,"receipt":self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Invalid))?}));
                     };
                     self.validate_publication(&definition, None)?;
                     let policy_pin = self.store.workflow_ticket_bundle(&definition)?;
                     let input = input(Command::Reopen { item:item.clone(),definition,policy_pin,resource:Exec::item_resource(workspace, item) },Grant::Controller);
-                    self.store.workflow_wire_write(workspace,&id,&payload,Write::Apply(&input))?
+                    self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                 }
                 Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
             }

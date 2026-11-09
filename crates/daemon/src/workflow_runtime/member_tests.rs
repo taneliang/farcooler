@@ -6,7 +6,7 @@ use super::admission_tests::{factory, held, mutation, ok, receipt, refused, sent
 use super::coding_tests::configured;
 use std::sync::Arc;
 use crate::service::Service;
-use farcooler_protocol::{v1::Scope, workflow_commands::Action, workflow_config::AdapterConfiguration};
+use farcooler_protocol::{v1::{self as pb, Scope}, workflow_commands::Action, workflow_config::AdapterConfiguration};
 use farcooler_store::member_roles::Role;
 use farcooler_transport::Peer;
 
@@ -179,4 +179,36 @@ async fn workflow_a_maintainer_does_not_set_a_workflow_outright() {
     assert_eq!(refused(&reply), "scope-denied");
     assert!(!reached);
     assert_eq!(snapshot(&runtime, workspace), before);
+}
+
+/// ov-1001: every wire receipt names who sent it, as admission read them: the person and the device, never
+/// anything the command says. A retry is answered from the receipt already written, naming the same sender.
+#[tokio::test]
+async fn workflow_receipts_name_who_sent_them() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let alices = alices_phone(&svc);
+    svc.store.set_member_role("alice", Role::Maintainer, "user").unwrap();
+    svc.store.bind_owner_device("phone-o", None).unwrap();
+    let owners = Peer { client_id: Some("phone-o".into()), scope: Scope::Control };
+    let (_run, mut runtime) = a_failed_run(workspace).await;
+    let actor = |reply: &pb::Response| receipt(reply).pointer("/receipt/actor").cloned();
+    // A stale command is refused, and its receipt still says who sent it.
+    let rpc = factory(&svc, &runtime, owners, None);
+    let mut stale = cancel(&runtime, workspace, "o", 1);
+    if let Action::Cancel { mutation, .. } = &mut stale { mutation.revision += 1; }
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &stale).await;
+    assert_eq!(receipt(&reply).pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Stale"));
+    assert_eq!(actor(&reply), Some(serde_json::json!({"person": "owner", "device": "phone-o"})));
+    let rpc = factory(&svc, &runtime, alices, None);
+    let action = send_back(&runtime, workspace, "b", 1);
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &action).await;
+    ok(&reply);
+    assert_eq!(actor(&reply), Some(serde_json::json!({"person": "member:alice", "device": "phone-a"})));
+    let (again, _) = sent(&mut runtime, &rpc, workspace, &action).await;
+    assert_eq!(receipt(&again), receipt(&reply), "a retry gets the receipt already written");
+    // Written down, not just answered: the stored row says so too.
+    let stored = runtime.store.workflow_wire_receipt(&workspace.to_string(), "wire:member:alice:b",
+        &serde_json::to_string(&("member:alice", &action)).unwrap()).unwrap().unwrap();
+    assert_eq!(stored.actor.map(|a| (a.person, a.device, a.pane)), Some(("member:alice".into(), Some("phone-a".into()), None)));
 }

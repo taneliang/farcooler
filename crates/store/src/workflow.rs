@@ -28,6 +28,40 @@ pub struct Receipt {
     pub id: String,
     pub result: std::result::Result<u64, Refusal>,
     pub effects: Vec<String>,
+    /// Who sent the wire command this answers (ov-1001). Absent on the engine's own receipts, and on a wire
+    /// receipt written before anyone was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<WorkflowActor>,
+}
+/// Who sent a wire command (ov-1001): the person, and the device or pane it came from. The daemon reads it from
+/// the caller's admission; nothing a client sends names it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowActor {
+    /// `owner`, or `member:<handle>`: whose the caller is, an orchestrator pane being its login's person.
+    pub person: String,
+    /// The device id the command came from, if it came from a device rather than the local socket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    /// The pane it came from: the orchestrator's, or the person's own shell. Absent for the local socket outside
+    /// any pane (the Mac app, the owner's own terminal) and for a device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<uuid::Uuid>,
+    /// Whether `pane` is the workspace's orchestrator, which the board writes as `manager`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub orchestrator: bool,
+}
+impl WorkflowActor {
+    /// Who the board's history says moved a card this command moved (ruling R-108): the orchestrator as
+    /// `manager`, the owner as `user`, a member as themself. Anything else is the runner's, as before.
+    pub fn board_actor(&self) -> crate::models::Actor {
+        use crate::models::{Actor, Handle};
+        if self.orchestrator { return Actor::Manager; }
+        match self.person.strip_prefix("member:").map(Handle::new) {
+            _ if self.person == "owner" => Actor::User,
+            Some(Some(handle)) => Actor::Member { handle },
+            _ => Actor::Runner,
+        }
+    }
 }
 /// Stable delivery identity; reading or withholding this is never execution authority.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,7 +91,7 @@ impl Store {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
         let mut moved = Vec::new();
-        let receipt = apply_in(&tx, input, &payload, &mut moved)?;
+        let receipt = apply_in(&tx, input, &payload, None, &mut moved)?;
         tx.commit()?;
         drop(conn);
         self.announce_board_moves(&moved);
@@ -155,7 +189,9 @@ pub(crate) fn migration_workflow(tx: &Transaction<'_>) -> rusqlite::Result<()> {
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved: &mut Vec<crate::workflow_projection::BoardMove>) -> Result<Receipt> {
+/// `by` is who the board says moved a card this input moves: a wire command's sender (ov-1001), else the runner.
+pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: Option<&crate::models::Actor>,
+    moved: &mut Vec<crate::workflow_projection::BoardMove>) -> Result<Receipt> {
         let previous: Option<(String, String)> = tx.query_row(
             "SELECT payload, receipt FROM workflow_receipts WHERE workspace = ?1 AND id = ?2",
             params![input.workspace, input.id], |r| Ok((r.get(0)?, r.get(1)?)),
@@ -232,7 +268,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
             }
         }
         let receipt = match result {
-            Err(reason) => Receipt { id: input.id.clone(), result: Err(reason), effects: vec![] },
+            Err(reason) => Receipt { id: input.id.clone(), result: Err(reason), effects: vec![], actor: None },
             Ok(transition) => {
                 crate::workflow_ownership::reserve(tx, input)?;
                 let revision = transition.state.revision;
@@ -250,7 +286,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
                 )?;
                 crate::engine_stage::sync(tx, &input.workspace, &transition.state)?;
                 crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
-                moved.extend(crate::workflow_projection::project(tx, &input.workspace, &transition.state)?);
+                moved.extend(crate::workflow_projection::project(tx, &input.workspace, &transition.state, by)?);
                 crate::workflow_effects::reserve(tx, &transition.state)?;
                 // Never erase operation history. Cancellation/rework makes old intents inert.
                 tx.execute("UPDATE workflow_outbox SET active = 0 WHERE workspace = ?1", [&input.workspace])?;
@@ -290,7 +326,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, moved
                     [&input.workspace],
                 )?;
                 Receipt { id: input.id.clone(), result: Ok(revision),
-                    effects: transition.effects.iter().map(|e| e.id.clone()).collect() }
+                    effects: transition.effects.iter().map(|e| e.id.clone()).collect(), actor: None }
             }
         };
         tx.execute(

@@ -654,7 +654,7 @@ impl Runtime {
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
                     } else {
-                        self.wire_command_with(&admission.workspace(), &admission.principal(), *action, tree)?
+                        self.wire_command_with(&admission.workspace(), &admission.principal(), Some(&admission.actor()), *action, tree)?
                     };
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);

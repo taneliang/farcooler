@@ -115,7 +115,8 @@ const GUARDS: [&str; 6] = ["engine_task_execution_fence", "engine_task_wait_fenc
 /// nothing.
 ///
 /// Returns the cards it moved, for the announce after the commit.
-pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> Result<Vec<BoardMove>> {
+/// `by` is who the card history says moved what this moves (ruling R-108); the runner when nobody sent it.
+pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State, by: Option<&Actor>) -> Result<Vec<BoardMove>> {
     let mut moves = Vec::new();
     // Tickets let go this step by a run that ended: landed with it, or handed back at rest. Their lines were the
     // run's, so the projection writes where they end; the run is archived next step, and nothing else would.
@@ -144,7 +145,7 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State) -> R
         statement.query_map([serde_json::to_string(&GUARDS)?], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
     };
     for name in GUARDS { tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}"))?; }
-    let written = write(tx, moves);
+    let written = write(tx, moves, by.copied().unwrap_or(Actor::Runner));
     for sql in &saved { tx.execute_batch(sql)?; }
     written?;
     Ok(moved)
@@ -156,13 +157,13 @@ pub type BoardListener = std::sync::Arc<dyn Fn(&[BoardMove]) + Send + Sync>;
 pub struct BoardMove { pub task: uuid::Uuid, pub from: Option<TaskStatus>, pub to: TaskStatus }
 /// A card to move: its id, where the run puts it, and what the board has now.
 type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>, bool);
-fn write(tx: &Transaction<'_>, moves: Vec<Move>) -> Result<()> {
+fn write(tx: &Transaction<'_>, moves: Vec<Move>, by: Actor) -> Result<()> {
     let now = crate::tasks::now_millis();
     let board = |e: DomainError| WorkflowError::Board(e.to_string());
     for (task, status, stage, have, line, ticket) in moves {
         let id = uuid::Uuid::from_slice(&task).map_err(|e| WorkflowError::Board(e.to_string()))?;
         if let Some(from) = have.as_deref().and_then(TaskStatus::parse).filter(|from| *from != status) {
-            crate::tasks::move_in(tx, id, from, status, Actor::Runner, now).map_err(board)?;
+            crate::tasks::move_in(tx, id, from, status, by, now).map_err(board)?;
         }
         if ticket || line.as_deref() == Some(stage.as_str()) { continue; }
         if line.is_none() {
@@ -174,7 +175,7 @@ fn write(tx: &Transaction<'_>, moves: Vec<Move>) -> Result<()> {
         }
         let said = stage.said();
         let extra = serde_json::json!({ "from": line, "to": stage.as_str() });
-        crate::ticket_lines::line_event(tx, LineSubject::Ticket(id), "stage", Actor::Runner, said, extra).map_err(board)?;
+        crate::ticket_lines::line_event(tx, LineSubject::Ticket(id), "stage", by, said, extra).map_err(board)?;
     }
     Ok(())
 }

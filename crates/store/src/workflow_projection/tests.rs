@@ -291,3 +291,29 @@ fn ending_an_agent_on_a_tracked_ticket_closes_its_work() {
     let open: i64 = b.store.conn().query_row("SELECT count(*) FROM ticket_work WHERE task_id=?1 AND ended_at IS NULL", [b.task.id.as_bytes().as_slice()], |r| r.get(0)).unwrap();
     assert_eq!(open, 0);
 }
+
+/// Ruling R-108 (ov-1001): a card a person's wire command moves says, in its history, who moved it: Alice by
+/// name, the orchestrator as `manager`; a move nobody sent stays the runner's.
+#[test]
+fn a_card_a_persons_command_moves_names_them() {
+    use crate::workflow::WorkflowActor;
+    use crate::workflow_publication::Write;
+    let status_changes = |b: &Board| b.store.notes_for(b.task.id, Some(crate::models::NoteKind::StatusChange)).unwrap();
+    for (actor, said) in [
+        (WorkflowActor { person: "member:alice".into(), device: Some("phone-a".into()), pane: None, orchestrator: false },
+            Actor::Member { handle: crate::models::Handle::new("alice").unwrap() }),
+        (WorkflowActor { person: "owner".into(), device: None, pane: Some(uuid::Uuid::now_v7()), orchestrator: true }, Actor::Manager),
+        (WorkflowActor { person: "owner".into(), device: Some("phone-o".into()), pane: None, orchestrator: false }, Actor::User),
+    ] {
+        let b = board();
+        enqueue(&b, Definition::tracker("owner"));
+        assert!(status_changes(&b).iter().all(|n| n.actor == Actor::Runner), "the run's own moves are the runner's");
+        let cancel = input(&b, "wire:x:cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() });
+        let receipt = b.store.workflow_wire_write_by(&b.ws.to_string(), "wire:x:cancel", "cancel", Some(&actor), Write::Apply(&cancel)).unwrap();
+        assert!(receipt.result.is_ok());
+        assert_eq!(receipt.actor.as_ref(), Some(&actor));
+        assert_eq!(seen(&b), ("cancelled".into(), Some("dropped".into())));
+        let last = status_changes(&b).pop().unwrap();
+        assert_eq!(last.actor, said, "{actor:?}");
+    }
+}

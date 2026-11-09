@@ -1,5 +1,5 @@
 //! Publication and authenticated wire receipts share the workflow transaction.
-use crate::{Store, workflow::{Receipt, Result, WorkflowError, apply_in}};
+use crate::{Store, workflow::{Receipt, Result, WorkflowActor, WorkflowError, apply_in}};
 use farcooler_protocol::workflow_config::{AdapterConfiguration, NotificationPolicy};
 use farcooler_workflow::{Definition, Input, Refusal};
 use rusqlite::{OptionalExtension, Transaction, TransactionBehavior, params};
@@ -58,15 +58,20 @@ impl Store {
         cached(&self.conn(), workspace, id, payload)
     }
     pub fn workflow_wire_write(&self, workspace: &str, id: &str, payload: &str, write: Write<'_>) -> Result<Receipt> {
+        self.workflow_wire_write_by(workspace, id, payload, None, write)
+    }
+    /// `workflow_wire_write`, the receipt naming `actor`, who sent it (ov-1001). A retry answered from the
+    /// receipt already written keeps the first sender's name: the receipt is immutable.
+    pub fn workflow_wire_write_by(&self, workspace: &str, id: &str, payload: &str, actor: Option<&WorkflowActor>, write: Write<'_>) -> Result<Receipt> {
         if payload.len() > 65536 { return Err(WorkflowError::Oversized); }
         let mut conn = self.conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
         if let Some(receipt) = cached(&tx, workspace, id, payload)? { return Ok(receipt); }
         let mut moved = Vec::new();
-        let receipt = match write {
-            Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?, &mut moved)?,
-            Write::Refuse(reason) => Receipt { id: id.into(), result: Err(reason), effects: vec![] },
+        let mut receipt = match write {
+            Write::Apply(input) => apply_in(&tx, input, &serde_json::to_string(input)?, actor.map(WorkflowActor::board_actor).as_ref(), &mut moved)?,
+            Write::Refuse(reason) => Receipt { id: id.into(), result: Err(reason), effects: vec![], actor: None },
             Write::Publish { notifications, expected_pin, definition, adapter, revision } => {
                 let current: Option<String> = tx.query_row("SELECT pin FROM workflow_bundle_selections WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?;
                 let result = if current.as_deref() != expected_pin { Err(Refusal::Stale) }
@@ -81,9 +86,10 @@ impl Store {
                     }
                     tx.execute("INSERT INTO workflow_bundle_selections(workspace,pin) VALUES(?1,?2) ON CONFLICT(workspace) DO UPDATE SET pin=excluded.pin", params![workspace,pin])?;
                 }
-                Receipt { id: id.into(), result, effects: vec![] }
+                Receipt { id: id.into(), result, effects: vec![], actor: None }
             }
         };
+        receipt.actor = actor.cloned();
         tx.execute("INSERT INTO workflow_wire_receipts(workspace,id,payload,receipt) VALUES(?1,?2,?3,?4)", params![workspace,id,payload,serde_json::to_string(&receipt)?])?;
         tx.commit()?;
         drop(conn);
@@ -158,7 +164,7 @@ mod tests {
             expected_pin:None,definition:definition.clone(),adapter:None })).unwrap();
         assert_eq!(old,current,"None must preserve original producer bytes, not add adapter:null");
         assert!(serde_json::from_str::<serde_json::Value>(&old).unwrap()[1].get("adapter").is_none());
-        let receipt = Receipt { id:"wire:owner:original".into(),result:Ok(0),effects:vec![] };
+        let receipt = Receipt { id:"wire:owner:original".into(),result:Ok(0),effects:vec![],actor:None };
         let raw_receipt = serde_json::to_string(&receipt).unwrap();
         let mut conn = rusqlite::Connection::open_in_memory().unwrap();
         let tx = conn.transaction().unwrap(); migration_publication(&tx).unwrap();
