@@ -135,6 +135,9 @@ async fn a_draft_publishes_only_when_a_person_answers_approve() {
     assert_eq!(task.status, TaskStatus::NeedsDecision);
     let (ask, words) = asked(&host, card);
     assert!(ask.extra.get("options").is_none(), "{:?}", ask.extra);
+    // R-111, M2: every member reads a card, so no environment value is on it; the names are.
+    assert!(ask.body.contains("`PATH=(hidden)`") && !ask.body.contains("/usr/bin:/bin"), "{}", ask.body);
+    assert!(reply["draft"]["summary"].as_str().unwrap().contains("`PATH=(hidden)`") && !reply["draft"]["summary"].as_str().unwrap().contains("/usr/bin:/bin"), "{reply}");
     assert!(ask.body.contains("What runs as you:") && ask.body.contains("In full, exactly as it runs:"), "{}", ask.body);
     assert!(ask.body.rfind(&words).unwrap() > ask.body.find("In full").unwrap(), "the approving words follow the change");
     assert!(!ask.body.lines().take(3).any(|l| l.contains(&words)), "a two- or three-line row never shows them");
@@ -366,6 +369,30 @@ async fn a_maintainers_answer_publishes_and_a_plain_members_does_not() {
     answer(words).await;
     settles(&host, card, TaskStatus::Done).await;
     assert_eq!(host.service.store.workflow_configuration(&ws.to_string()).unwrap().expect("published").definition.source, "landing/ticket-push");
+    drop(link);
+    host.close().await;
+}
+
+/// R-111, L9: a member-led orchestrator reads `workflow.get` with every value hidden, so a proposal that hands the
+/// marker back would publish it as a value. It is refused, and no card is filed.
+#[tokio::test]
+async fn a_proposal_that_carries_the_hidden_marker_is_refused() {
+    if as_a_person("a_proposal_that_carries_the_hidden_marker_is_refused").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    let b = lt::template("ticket-push", &config, &["make check".to_string()], &[], &Options { environment: vec!["TOKEN=(hidden)".into()], ..Options::default() }).unwrap();
+    let action = Action::Propose { reason: "Echoing what I read.".into(), definition: b.definition, adapter: Box::new(b.adapter) };
+    let mut req = farcooler_transport::request(action.method());
+    req.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
+    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(&action).unwrap() }));
+    let outcome = link.call(req).await;
+    assert!(matches!(&outcome, Err(e) if !e.to_string().contains("known caller")), "refused for its content, not for the caller: {:?}", outcome.map(|_| ()));
+    // The same bundle with a real value is fine, so the refusal above is the marker's.
+    let ok = lt::template("ticket-push", &config, &["make check".to_string()], &[], &Options { environment: vec!["TOKEN=real".into()], ..Options::default() }).unwrap();
+    assert!(propose(&mut link, ws, ok, "A real value.").await["draft"]["id"].is_string());
+    let listed = call(&mut link, ws, Action::Drafts { draft: None }).await;
+    assert!(listed["drafts"].as_array().unwrap().iter().all(|d| d["reason"] == "A real value."), "only the real value was filed: {listed}");
     drop(link);
     host.close().await;
 }

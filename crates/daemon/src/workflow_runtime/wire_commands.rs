@@ -23,7 +23,7 @@ pub(super) fn hide_environment(reply: &mut serde_json::Value) {
     if let Some(adapter) = reply.pointer_mut("/configuration/adapter") { walk(adapter); }
 }
 /// What a hidden environment value reads as.
-pub(super) const HIDDEN: &str = "(hidden)";
+pub(super) use crate::workflow_summary::HIDDEN;
 
 impl CommandHandle {
     pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {

@@ -12,10 +12,10 @@ What runs as you:
 - `swift test --package-path apps/shared/AgentKit`
 
 Checks that must pass:
-- `make check` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
-- `scripts/copy-lint.py --all` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
-- `cargo test -p farcooler-daemon --lib -- --test-threads=1` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
-- `swift test --package-path apps/shared/AgentKit` (with `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`)
+- `make check` (with `HOME=(hidden)`, `PATH=(hidden)`)
+- `scripts/copy-lint.py --all` (with `HOME=(hidden)`, `PATH=(hidden)`)
+- `cargo test -p farcooler-daemon --lib -- --test-threads=1` (with `HOME=(hidden)`, `PATH=(hidden)`)
+- `swift test --package-path apps/shared/AgentKit` (with `HOME=(hidden)`, `PATH=(hidden)`)
 
 How code lands:
 - Each ticket opens a pull request against `main`. A person merges it.
@@ -26,10 +26,10 @@ Who approves:
 
 In full, exactly as it runs:
 - The agent runs `/usr/bin/claude`, with no environment variables, for up to 1 s.
-- Check 1 runs `/bin/sh` `-c` `make check`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
-- Check 2 runs `/bin/sh` `-c` `scripts/copy-lint.py --all`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
-- Check 3 runs `/bin/sh` `-c` `cargo test -p farcooler-daemon --lib -- --test-threads=1`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
-- Check 4 runs `/bin/sh` `-c` `swift test --package-path apps/shared/AgentKit`, with environment `HOME=/home/tester`, `PATH=/usr/bin:/bin:/home/tester/.cargo/bin`, for up to 3 h.
+- Check 1 runs `/bin/sh` `-c` `make check`, with environment `HOME=(hidden)`, `PATH=(hidden)`, for up to 3 h.
+- Check 2 runs `/bin/sh` `-c` `scripts/copy-lint.py --all`, with environment `HOME=(hidden)`, `PATH=(hidden)`, for up to 3 h.
+- Check 3 runs `/bin/sh` `-c` `cargo test -p farcooler-daemon --lib -- --test-threads=1`, with environment `HOME=(hidden)`, `PATH=(hidden)`, for up to 3 h.
+- Check 4 runs `/bin/sh` `-c` `swift test --package-path apps/shared/AgentKit`, with environment `HOME=(hidden)`, `PATH=(hidden)`, for up to 3 h.
 - No reviewer command.
 - CI is the `ci` workflow on `push` in `o/r` on GitHub, read by running `/bin/sh` `-c` `true`, with no environment variables, for up to 1 s.
 - Pull requests open in `far-cooler/overnight` on GitHub, against `main`. Their branches are pushed to `ssh://git@example.com/far-cooler/overnight.git`. They're opened by running `/bin/sh` `-c` `gh pr create --fill`, with no environment variables, for up to 1 s.

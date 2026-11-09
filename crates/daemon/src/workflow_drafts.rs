@@ -182,6 +182,9 @@ pub fn refuse_on_card(svc: &Service, card: Uuid, kind: Option<NoteKind>, extra: 
 
 /// File a proposal and ask a person. Returns the draft, already pending on its card.
 pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, reason: &str, definition: Definition, adapter: AdapterConfiguration) -> Result<Draft> {
+    // A member-led orchestrator reads `workflow.get` with every environment value hidden; proposing that back would
+    // publish the literal marker as the value (R-111, L9). It is refused, never kept or filled in.
+    if hides_a_value(&adapter) { return Err(DomainError::InvalidArgument { what: "adapter" }); }
     let reason = reason.trim();
     if reason.is_empty() || reason.chars().count() > MAX_REASON { return Err(DomainError::InvalidArgument { what: "reason" }); }
     // A draft that couldn't publish is refused now, not when someone taps Approve.
@@ -232,6 +235,21 @@ fn close_card(svc: &Service, watcher: &crate::watch::Watcher, card: Uuid, status
         watcher.announce_task_changed(&task, None, Actor::Manager);
     }
     watcher.announce_needs_you();
+}
+
+/// Whether any command in the adapter is given the marker `workflow.get` shows in place of a value.
+fn hides_a_value(adapter: &AdapterConfiguration) -> bool {
+    fn walk(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(map) => map.iter().any(|(k, v)| match (k.as_str(), v) {
+                ("environment", serde_json::Value::Object(environment)) => environment.values().any(|v| v == workflow_summary::HIDDEN),
+                _ => walk(v),
+            }),
+            serde_json::Value::Array(items) => items.iter().any(walk),
+            _ => false,
+        }
+    }
+    serde_json::to_value(adapter).is_ok_and(|v| walk(&v))
 }
 
 /// The wire's answer to `Propose` and `Drafts`.
@@ -343,6 +361,23 @@ async fn publish(rpc: &crate::rpc::Rpc, draft: &Draft) -> std::result::Result<()
 fn card_title(source: &str) -> String {
     let name = source.rsplit('/').next().filter(|n| !n.is_empty()).map_or_else(|| "a change".to_string(), workflow_summary::code);
     format!("Workflow: approve {}", name.trim_start_matches('`').trim_end_matches('`'))
+}
+
+#[cfg(test)]
+mod hidden_tests {
+    use farcooler_protocol::workflow_config::{AdapterConfiguration, CodingCi, CodingCommand, CodingConfig, CodingHarness};
+    fn adapter(value: &str) -> AdapterConfiguration {
+        let cmd = |env: &[(&str, &str)]| CodingCommand { argv: vec!["/bin/true".into()], timeout_ms: 1000,
+            environment: env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
+        AdapterConfiguration::Coding(CodingConfig { repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None,
+            pull_request: None, harness: CodingHarness::Command(cmd(&[])), checks: vec![cmd(&[("TOKEN", value)])], reviewer: None,
+            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd(&[]) } })
+    }
+    #[test]
+    fn a_proposal_carrying_the_hidden_marker_is_recognized_and_a_real_value_is_not() {
+        assert!(super::hides_a_value(&adapter("(hidden)")));
+        assert!(!super::hides_a_value(&adapter("secret")));
+    }
 }
 
 #[cfg(test)]

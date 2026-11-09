@@ -41,12 +41,19 @@ fn spoken(command: &CodingCommand) -> String {
     }
 }
 
-/// A command in full: every argument, every environment variable, and how long it may run.
+/// What a hidden environment value reads as, here and in `workflow.get` (R-111): a draft's card is read by
+/// every member, and a value can be a secret. The names stay, so a person sees what a command is given.
+pub const HIDDEN: &str = "(hidden)";
+fn variables(environment: &std::collections::BTreeMap<String, String>) -> String {
+    environment.keys().map(|k| code(&format!("{k}={HIDDEN}"))).collect::<Vec<_>>().join(", ")
+}
+
+/// A command in full: every argument, every environment variable by name, and how long it may run.
 fn exactly(command: &CodingCommand) -> String {
     let CodingCommand { argv, environment, timeout_ms } = command;
     let argv = argv.iter().map(|a| code(a)).collect::<Vec<_>>().join(" ");
     let environment = if environment.is_empty() { "no environment variables".to_string() }
-        else { format!("environment {}", environment.iter().map(|(k, v)| code(&format!("{k}={v}"))).collect::<Vec<_>>().join(", ")) };
+        else { format!("environment {}", variables(environment)) };
     format!("{argv}, with {environment}, for up to {}", duration(*timeout_ms))
 }
 fn duration(ms: u64) -> String {
@@ -73,7 +80,7 @@ fn gate_environment_note(command: &CodingCommand) -> Option<String> {
     let usual = crate::landing_templates::gate_environment(&[]).unwrap_or_default();
     if command.environment == usual { return None; }
     if command.environment.is_empty() { return Some("(with no environment variables)".into()); }
-    Some(format!("(with {})", command.environment.iter().map(|(k, v)| code(&format!("{k}={v}"))).collect::<Vec<_>>().join(", ")))
+    Some(format!("(with {})", variables(&command.environment)))
 }
 
 fn steps(definition: &Definition) -> impl Iterator<Item = &farcooler_workflow::Stage> {
@@ -317,6 +324,8 @@ mod tests {
     /// here until the summary shows it; so does a number other than a timeout, or any flag.
     fn leaves(value: &serde_json::Value, key: &str, out: &mut Vec<String>) {
         match value {
+            // A variable's name must show; its value must not (R-111, M2), so the name stands for it here.
+            serde_json::Value::Object(map) if key == "environment" => out.extend(map.keys().cloned()),
             serde_json::Value::Object(map) => for (k, v) in map { leaves(v, k, out) },
             serde_json::Value::Array(items) => for v in items { leaves(v, key, out) },
             serde_json::Value::String(s) => out.push(s.clone()),
@@ -347,8 +356,10 @@ mod tests {
             let mut values = Vec::new();
             leaves(&serde_json::to_value(&config).unwrap(), "", &mut values);
             for v in values { assert!(text.contains(code(&v).trim_matches('`')), "the summary leaves out {v:?}:\n{text}"); }
-            // Each variable is shown with its name, not just its value.
-            assert!(text.contains("`GH_VAR=gh-value`") && text.contains("`CI_VAR=ci-value`"), "{text}");
+            // Each variable is shown with its name, and its value is not (R-111, M2): a card is read by every member.
+            assert!(text.contains("`GH_VAR=(hidden)`") && text.contains("`CI_VAR=(hidden)`"), "{text}");
+            assert!(!text.contains("-value"), "no environment value reaches the summary:\n{text}");
+            assert!(!text.contains("tester"), "{text}");
         }
     }
     #[test]
@@ -357,7 +368,8 @@ mod tests {
         let AdapterConfiguration::Coding(config) = &mut b.adapter;
         config.checks[0].environment.insert("PATH".into(), "/Users/x/.cache/evil:/usr/bin".into());
         let text = summarize("", &b, None);
-        assert!(text.lines().any(|l| l.starts_with("- `make check` (with ") && l.contains("`PATH=/Users/x/.cache/evil:/usr/bin`")), "{text}");
+        assert!(text.lines().any(|l| l.starts_with("- `make check` (with ") && l.contains("`PATH=(hidden)`")), "{text}");
+        assert!(!text.contains("evil"), "the planted value stays off the card; that it differs is what shows:\n{text}");
         let AdapterConfiguration::Coding(config) = &mut b.adapter;
         config.checks[0] = CodingCommand { argv: vec!["/Users/x/tmp/sh".into(), "-c".into(), "make check".into()], ..config.checks[0].clone() };
         let text = summarize("", &b, None);
