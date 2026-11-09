@@ -143,7 +143,7 @@ async function signed(session: Session, signing: Promise<Signed>): Promise<Signe
 async function notePrf(session: Session, answer: Signed): Promise<void> {
   const prf = answer.prf
   const { device } = session
-  const use = prfUse(device, prf)
+  const use = prfUse(device, prf ?? null)
   if (!prf || !use.use) return
   const keys = await deriveKeys(prf.output)
   if (use.deriveNode) {
