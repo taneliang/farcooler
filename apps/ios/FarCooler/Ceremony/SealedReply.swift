@@ -117,8 +117,10 @@ final class SealedReply: ObservableObject {
         let post = self.post
         sending = Task {
             let outcome = await post(asked.ceremony, asked.account, sealed.sealed)
-            guard !Task.isCancelled else { return }
+            // A delivery is a delivery even when the screen has moved on, so a
+            // later send for this ceremony can show its code (ov-778 F3).
             if outcome == .posted { delivered[asked.ceremony] = sealed.code }
+            guard !Task.isCancelled else { return }
             let first = outcome == .alreadyPosted ? delivered[asked.ceremony] : nil
             code = outcome.showsCode ? sealed.code : first
             state = outcome == .posted || first != nil ? .sent : .notSent

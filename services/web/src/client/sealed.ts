@@ -40,7 +40,7 @@ export interface PollDeps {
   read: (ceremony: string) => Promise<Answer>
   /// crates/web `openReply`, given the relay's answer as JSON. Throws an Error
   /// whose message is the ceremony's word.
-  open: (relayAnswer: string) => Opened
+  open: (relayAnswer: string) => Opened[]
   now: () => number
   sleep: (ms: number) => Promise<void>
   /// The offer on screen was retired or replaced: stop.
@@ -50,7 +50,7 @@ export interface PollDeps {
   refused: (word: string) => void
 }
 
-export type Waited = { kind: 'opened'; opened: Opened } | { kind: 'ended'; word: 'stale' | 'already_taken' } | { kind: 'timeout' } | { kind: 'cancelled' }
+export type Waited = { kind: 'opened'; opened: Opened; others: Opened[] } | { kind: 'ended'; word: 'stale' | 'already_taken' } | { kind: 'timeout' } | { kind: 'cancelled' }
 
 /// Ask the relay for the reply to `ceremony` every two seconds, for up to
 /// 120 s, and open the one it hands over that the owner's account posted, or
@@ -71,7 +71,8 @@ export async function waitForReply(deps: PollDeps, ceremony: string): Promise<Wa
     if (deps.cancelled()) return { kind: 'cancelled' }
     if (answer?.status === 200) {
       try {
-        return { kind: 'opened', opened: deps.open(JSON.stringify(answer.body)) }
+        const [opened, ...others] = deps.open(JSON.stringify(answer.body))
+        return { kind: 'opened', opened, others }
       } catch (e) {
         const word = (e as Error).message
         if (word === 'stale' || word === 'already_taken') return { kind: 'ended', word }

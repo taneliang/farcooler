@@ -425,7 +425,7 @@ function waitForSealedReply(session: Session, note: HTMLElement): void {
   void waitForReply(
     {
       read: id => relayRaw('ceremony/reply', { ceremony: id }),
-      open: answer => JSON.parse(openReply(answer, device.offer ?? '', loadSecret() ?? '', !device.offer, device.offerShownAt ?? 0)) as Opened,
+      open: answer => JSON.parse(openReply(answer, device.offer ?? '', loadSecret() ?? '', !device.offer, device.offerShownAt ?? 0)) as Opened[],
       now: () => Date.now(),
       sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
       cancelled: () => mine !== polling,
@@ -436,7 +436,7 @@ function waitForSealedReply(session: Session, note: HTMLElement): void {
     },
     ceremony,
   ).then(async waited => {
-    if (waited.kind === 'opened') compare(session, waited.opened)
+    if (waited.kind === 'opened') compare(session, waited.opened, waited.others)
     else if (waited.kind === 'ended' && mine === polling) {
       // Too late for this code, and so for any reply to it: a new one.
       dropSecret()
@@ -449,7 +449,7 @@ function waitForSealedReply(session: Session, note: HTMLElement): void {
 }
 
 /// The reply's own code, to match against the phone's before it is kept.
-function compare(session: Session, opened: Opened): void {
+function compare(session: Session, opened: Opened, others: Opened[] = []): void {
   stopPolling()
   clearTimeout(retiring)
   const words = compareWords(opened.granted_by)
@@ -459,7 +459,10 @@ function compare(session: Session, opened: Opened): void {
   show('compare')
   // Nothing was kept on a mismatch and the code is still unanswered: the QR
   // reply and a later sealed one still work.
-  const buttons = comparisonButtons(opened, taken => keep(session, taken), () => void enroll(session, MISMATCH))
+  // Another reply from the same read may be the real one (ov-778 R-113): show
+  // it before starting over.
+  const next = () => (others.length ? compare(session, others[0], others.slice(1)) : void enroll(session, MISMATCH))
+  const buttons = comparisonButtons(opened, taken => keep(session, taken), next)
   const yes = $<HTMLButtonElement>('compare-yes')
   const no = $<HTMLButtonElement>('compare-no')
   yes.disabled = false

@@ -99,13 +99,33 @@ pub fn open_earliest(
     shown_at_ms: f64,
     now_ms: f64,
 ) -> Result<Opened, CeremonyError> {
+    Ok(open_all(relay_answer, offer, reply_secret, already_taken, shown_at_ms, now_ms)?.remove(0))
+}
+
+/// Every reply from one read that may be offered to the person, best first
+/// (ov-778 R-113 F2). The account's own reply is alone. Otherwise each
+/// teammate's reply that opens and names its own poster, in posting order.
+///
+/// More than one can pass: a teammate who posts a reply naming themselves
+/// passes too, and the read has already deleted the real one. The person's
+/// "No" on the first must show the next, not start over with nothing left.
+/// Never empty on `Ok`.
+pub fn open_all(
+    relay_answer: &str,
+    offer: &Offer,
+    reply_secret: &str,
+    already_taken: bool,
+    shown_at_ms: f64,
+    now_ms: f64,
+) -> Result<Vec<Opened>, CeremonyError> {
     let answer: Replies = serde_json::from_str(relay_answer).map_err(|_| CeremonyError::Unopened)?;
     if answer.replies.iter().any(|r| r.posted_by == offer.account) {
         let sealed = earliest(relay_answer, &offer.account)?;
         let (manifest, code) = open(&sealed, offer, reply_secret, already_taken, shown_at_ms, now_ms)?;
-        return Ok(Opened { code, taken: taken(&manifest) });
+        return Ok(vec![Opened { code, taken: taken(&manifest) }]);
     }
     let mut refused = None;
+    let mut passed = Vec::new();
     for reply in &answer.replies {
         match open(&reply.sealed, offer, reply_secret, already_taken, shown_at_ms, now_ms) {
             Err(e @ (CeremonyError::Stale | CeremonyError::AlreadyTaken)) => return Err(e),
@@ -115,13 +135,17 @@ pub fn open_earliest(
             Ok((manifest, code)) => {
                 let taken = taken(&manifest);
                 if granted_by_poster(taken.granted_by.as_deref(), reply.posted_by_email.as_deref()) {
-                    return Ok(Opened { code, taken });
+                    passed.push(Opened { code, taken });
+                } else {
+                    refused.get_or_insert(CeremonyError::WrongAccount);
                 }
-                refused.get_or_insert(CeremonyError::WrongAccount);
             }
         }
     }
-    Err(refused.unwrap_or(CeremonyError::Unopened))
+    if passed.is_empty() {
+        return Err(refused.unwrap_or(CeremonyError::Unopened));
+    }
+    Ok(passed)
 }
 
 /// Whether a teammate's reply names, as the person granting it, the account
@@ -471,6 +495,25 @@ mod tests {
         // The relay's email and the phone's may differ in case and spaces.
         let shouted = relay_says_from(&[(&honest, "alice", Some(" Alice@Example.com "))]);
         assert_eq!(open_earliest(&shouted, &o, &secret, false, SHOWN, SHOWN).unwrap().code, honest_code);
+    }
+
+    /// F2: a forgery that names its own poster passes the check, so it opens
+    /// first; the real reply behind it must still be offered after a No.
+    #[test]
+    fn every_reply_that_passes_is_offered_in_posting_order() {
+        let secret = new_reply_secret();
+        let o = offer("Chrome on Mac", "bob", KEY, NODE, &secret).unwrap();
+        let (forged, forged_code) = sealed_by(&o, FORGED, Some("carol@example.com"));
+        let (honest, honest_code) = sealed_by(&o, HOST, Some("alice@example.com"));
+        let (liar, _) = sealed_by(&o, FORGED, Some("alice@example.com"));
+        let answer = relay_says_from(&[
+            (&forged, "carol", Some("carol@example.com")),
+            (&liar, "dave", Some("dave@example.com")),
+            (&honest, "alice", Some("alice@example.com")),
+        ]);
+        let all = open_all(&answer, &o, &secret, false, SHOWN, SHOWN).unwrap();
+        let codes: Vec<_> = all.iter().map(|a| a.code.as_str()).collect();
+        assert_eq!(codes, [forged_code.as_str(), honest_code.as_str()]);
     }
 
     /// Junk a teammate posts first doesn't hide the real reply either, and the

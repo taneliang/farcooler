@@ -148,7 +148,9 @@ describe('the sealed ceremony reply', () => {
 
   it('names each poster by the email the relay has for them, so the browser can hold a reply to its granted_by (ov-778 R-113)', async () => {
     await team('team_1', [['carol', 'admin'], [ALICE, 'member']])
-    await env.DB.prepare(`UPDATE accounts SET email = 'carol@example.com' WHERE id = 'carol'`).run()
+    await env.DB.prepare(`UPDATE accounts SET email = 'carol@example.com', verified_email = 'carol@example.com' WHERE id = 'carol'`).run()
+    // An unverified email on file is not a poster's name (ov-778 F1).
+    await env.DB.prepare(`UPDATE accounts SET email = 'alice@example.com', verified_email = NULL WHERE id = ?`).bind(ALICE).run()
     expect((await post('carol')).status).toBe(200)
     expect((await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed: junk(2) })).status).toBe(200)
     const { replies } = (await take(ALICE)).body as { replies: Record<string, unknown>[] }

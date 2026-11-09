@@ -11,7 +11,7 @@ const CEREMONY = '0123456789abcdef0123456789abcdef'
 const GOOD: Opened = { code: 'K7M2QX', granted_by: null, runners: [{ id: 'r1', label: 'studio', user: 'owner', host_key: 'SHA256:real', token: 't', why: '' }] }
 const FORGED: Opened = { code: 'ZZ99AB', granted_by: null, runners: [{ ...GOOD.runners[0], host_key: 'SHA256:forged' }] }
 
-function poller(answers: (Answer | 'throws')[], opens: (Opened | Error)[] = [GOOD]) {
+function poller(answers: (Answer | 'throws')[], opens: (Opened[] | Error)[] = [[GOOD]]) {
   let clock = 0
   const log: string[] = []
   const refused: string[] = []
@@ -45,10 +45,15 @@ describe('waiting for the sealed reply', () => {
   it('asks every two seconds and opens the relay answer as it came', async () => {
     const t = poller([none, none, replies('AAAA', 'BBBB')])
     const waited = await waitForReply(t.deps, CEREMONY)
-    expect(waited).toEqual({ kind: 'opened', opened: GOOD })
+    expect(waited).toEqual({ kind: 'opened', opened: GOOD, others: [] })
     expect(t.log.filter(l => l.startsWith('read'))).toEqual([`read ${CEREMONY} at 0`, `read ${CEREMONY} at ${POLL_MS}`, `read ${CEREMONY} at ${2 * POLL_MS}`])
     // Both replies go to wasm in the relay's order: wasm picks the owner's, or the earliest teammate's.
     expect(t.log.at(-1)).toBe(`open ${JSON.stringify({ replies: [{ sealed: 'AAAA', posted_by: 'user_OWNER' }, { sealed: 'BBBB', posted_by: 'user_OWNER' }] })}`)
+  })
+
+  it('hands over every reply that passed, best first, so a No can show the next (ov-778 F2)', async () => {
+    const t = poller([replies('AAAA', 'BBBB')], [[FORGED, GOOD]])
+    expect(await waitForReply(t.deps, CEREMONY)).toEqual({ kind: 'opened', opened: FORGED, others: [GOOD] })
   })
 
   it('gives up after the 120 s window', async () => {
@@ -59,8 +64,8 @@ describe('waiting for the sealed reply', () => {
   })
 
   it('goes on after a dropped request or a reply that did not open, and says why', async () => {
-    const t = poller(['throws', replies('JUNK'), replies('REAL')], [new Error('unopened'), GOOD])
-    expect(await waitForReply(t.deps, CEREMONY)).toEqual({ kind: 'opened', opened: GOOD })
+    const t = poller(['throws', replies('JUNK'), replies('REAL')], [new Error('unopened'), [GOOD]])
+    expect(await waitForReply(t.deps, CEREMONY)).toEqual({ kind: 'opened', opened: GOOD, others: [] })
     expect(t.refused).toEqual(['unopened'])
   })
 

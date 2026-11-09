@@ -157,7 +157,8 @@ pub fn make_offer(name: &str, account: &str, key_a: &str, node_key: &str, reply_
 /// Open the offer's own account's reply in the relay's answer to a read
 /// (`{replies:[{sealed, posted_by}]}`), or the earliest teammate's when there is
 /// none, with this ceremony's key, and judge it
-/// as every device does. Answers `{code, granted_by, runners}` as JSON, or
+/// as every device does. Answers a JSON list of `{code, granted_by, runners}`,
+/// best first (the account's own reply alone, else every teammate's that passes), or
 /// refuses with the ceremony's word (`unopened` for a reply that doesn't open
 /// with this key, `stale` past the window).
 ///
@@ -173,7 +174,7 @@ pub fn open_reply(
     shown_at_ms: f64,
 ) -> Result<String, JsValue> {
     let offer = farcooler_ceremony::decode_offer(offer).map_err(|e| failure(e.code(), &e.to_string()))?;
-    let opened = enroll::open_earliest(relay_answer, &offer, reply_secret, already_taken, shown_at_ms, js_sys::Date::now())
+    let opened = enroll::open_all(relay_answer, &offer, reply_secret, already_taken, shown_at_ms, js_sys::Date::now())
         .map_err(|e| failure(e.code(), &e.to_string()))?;
     serde_json::to_string(&opened).map_err(|e| failure("malformed", &e.to_string()))
 }

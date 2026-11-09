@@ -17,7 +17,7 @@
 ///   nobody's junk post can take the slot from the account's own phone.
 /// - `GET /v1/ceremony/reply/<ceremony>`. Only the offer's account may read,
 ///   and it gets every reply for it, each with who posted it (`posted_by`, and
-///   `posted_by_email` as this relay has it, or null), and the read
+///   `posted_by_email`, the verified one,, or null), and the read
 ///   deletes them all. After `REPLY_TTL_MS` a reply is gone. Every refusal is
 ///   the same 404, so a reader learns nothing about a ceremony that isn't
 ///   theirs. The five-minute cron deletes what nobody read.
@@ -166,9 +166,10 @@ async function takeReplies(request: Request, env: Env, ceremony: string): Promis
   if (replies.length === 0) return gone
   // Each poster's email, as this relay has it: a teammate's reply names who
   // granted it, and the browser refuses one whose name isn't its poster's
-  // (ov-778 R-113). None on file is null, never a guess.
+  // (ov-778 R-113). Only `verified_email`: sign-in stores `email` unverified,
+  // so a forger could set it to a teammate's. None on file is null, never a guess.
   const posters = [...new Set(replies.map(row => row.posted_by))]
-  const emails = await env.DB.prepare(`SELECT id, email FROM accounts WHERE id IN (${posters.map(() => '?').join(', ')})`)
+  const emails = await env.DB.prepare(`SELECT id, verified_email AS email FROM accounts WHERE id IN (${posters.map(() => '?').join(', ')})`)
     .bind(...posters)
     .all<{ id: string; email: string | null }>()
   const emailOf = new Map(emails.results.map(row => [row.id, row.email]))
