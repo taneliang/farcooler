@@ -15,6 +15,7 @@ const FFI: &str = concat!(
     include_str!("../src/ffi/sealed_reply.rs"),
     include_str!("../src/ffi/watch.rs"),
     include_str!("../src/workflow_presentation/ffi.rs"),
+    include_str!("../src/plan_view/ffi.rs"),
 );
 
 fn declared() -> Vec<String> {
