@@ -192,6 +192,9 @@ pub struct Runtime {
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     instance: Uuid,
     last_occupancy: Option<String>,
+    /// Runs on a deleted board whose cancel the engine refused, so the sweep asks once and not on every pass: each
+    /// refusal is a permanent receipt (ov-1047 review).
+    cancel_refused: std::collections::BTreeSet<(String, String)>,
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
     next_lease: Option<i64>,
@@ -220,6 +223,13 @@ impl Drop for Runtime {
             let _ = rustix::fs::flock(file, rustix::fs::FlockOperation::Unlock);
         }
     }
+}
+/// Whether the sweep should ask the engine to cancel a run on a deleted board. A follower ends with the run it
+/// follows, and a group whose push is in flight or landed cannot be called back: the engine refuses both, and every
+/// refusal is a receipt that stays, so the sweep never asks.
+pub(crate) fn cancellable_on_deleted_board(i: &Item) -> bool {
+    !matches!(i.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling) && i.follows.is_none()
+        && !(!i.members.is_empty() && (i.pushed.is_some() || matches!(i.definition.stages[i.stage].kind, StageKind::Push)))
 }
 impl Runtime {
     /// Only creates a fresh private fixture; cannot point at an existing repository/DB.
@@ -304,7 +314,7 @@ impl Runtime {
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 #[cfg(test)] user_home: None },
-            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
+            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, cancel_refused: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -435,12 +445,23 @@ impl Runtime {
         }
         // Nobody can decide a run on a board that was deleted, so it stops, with the reason on the run (ov-1047).
         for workspace in &workspaces {
-            if !self.store.workflow_board_deleted(workspace)? { continue; }
+            match self.store.workflow_board_deleted(workspace) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(error) => { tracing::warn!(%workspace, %error, "could not tell whether a board was deleted"); continue; }
+            }
             let Some(state) = self.state(workspace)? else { continue };
-            for (id, item) in state.items.iter().filter(|(_, i)| !matches!(i.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)) {
+            let asks: Vec<(String, Phase)> = state.items.iter().filter(|(id, i)| cancellable_on_deleted_board(i) && !self.cancel_refused.contains(&(workspace.clone(), (*id).clone())))
+                .map(|(id, i)| (id.clone(), i.phase.clone())).collect();
+            for (id, phase) in asks {
                 let reason = Some("The board this ran on was deleted.".to_string());
-                if let Err(error) = self.internal(workspace, Command::Cancel { item: id.clone(), reason }, Grant::Controller, now_ms) {
-                    tracing::warn!(%workspace, item = %id, phase = ?item.phase, %error, "a run on a deleted board could not be cancelled");
+                match self.internal(workspace, Command::Cancel { item: id.clone(), reason }, Grant::Controller, now_ms) {
+                    Ok(Receipt { result: Err(refusal), .. }) => {
+                        tracing::warn!(%workspace, item = %id, phase = ?phase, ?refusal, "the engine refused to cancel a run on a deleted board");
+                        self.cancel_refused.insert((workspace.clone(), id));
+                    }
+                    Ok(_) => {}
+                    Err(error) => tracing::warn!(%workspace, item = %id, phase = ?phase, %error, "a run on a deleted board could not be cancelled"),
                 }
             }
         }

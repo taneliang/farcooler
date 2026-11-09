@@ -541,18 +541,45 @@ async fn workflow_runtime_cancels_runs_on_a_deleted_board_with_a_reason() {
     let host = Uuid::now_v7();
     let root = runtime.store.create_repository_root(host, "/repos/ov-1047", 0).unwrap();
     let repo = runtime.store.create_repository(host, root.id, "r", "/repos/ov-1047/.git", "").unwrap();
-    runtime.store.ensure_main_workspace(repo.id).unwrap();
+    let live = runtime.store.ensure_main_workspace(repo.id).unwrap().id.to_string();
     let gone = Uuid::now_v7().to_string();
     enqueue(&mut runtime, &gone, "coding", coding_definition(true));
+    // A run on a board that still exists: its key is a real board id, so only the row lookup keeps it.
     let controller = runtime.controller();
-    let request = Request { id: "enqueue-kept".into(), workspace: "w".into(), expected_revision: 0, sequence: 1,
+    let request = Request { id: "enqueue-kept".into(), workspace: live.clone(), expected_revision: 0, sequence: 1,
         command: Command::Enqueue { item: "coding".into(), definition: coding_definition(true), policy_pin: "policy/v1".into(),
-            resource: Exec::item_resource("w", "coding"), dependencies: BTreeSet::new(), initial_candidate: None } };
+            resource: Exec::item_resource(&live, "coding"), dependencies: BTreeSet::new(), initial_candidate: None } };
     assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
     runtime.pump(2).await.unwrap();
     let item = runtime.state(&gone).unwrap().unwrap().items["coding"].clone();
     assert!(matches!(item.phase, Phase::Cancelled | Phase::Cancelling), "{:?}", item.phase);
     assert_eq!(item.cancel_reason.as_deref(), Some("The board this ran on was deleted."));
-    let kept = runtime.state("w").unwrap().unwrap().items["coding"].clone();
+    let kept = runtime.state(&live).unwrap().unwrap().items["coding"].clone();
     assert!(kept.cancel_reason.is_none() && !matches!(kept.phase, Phase::Cancelled | Phase::Cancelling), "{:?}", kept.phase);
+    // A person reads the run through the workflow read, which carries the reason.
+    let read = runtime.wire_command(&gone, "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    assert_eq!(read["state"]["items"]["coding"]["cancel_reason"], "The board this ran on was deleted.", "{read}");
+    assert!(read["state"]["items"]["coding"].get("cancel_reason").is_some());
+    let live_read = runtime.wire_command(&live, "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    assert!(live_read["state"]["items"]["coding"].get("cancel_reason").is_none(), "{live_read}");
+}
+
+/// ov-1047 review: the engine always refuses a follower, and a group whose push landed, and each refusal is a
+/// permanent receipt, so the sweep must not ask for them.
+#[tokio::test]
+async fn the_sweep_never_asks_to_cancel_what_the_engine_always_refuses() {
+    let (_dir, mut runtime) = fixture().await;
+    enqueue(&mut runtime, "w", "coding", coding_definition(true));
+    let plain = runtime.state("w").unwrap().unwrap().items["coding"].clone();
+    assert!(super::cancellable_on_deleted_board(&plain));
+    let mut follower = plain.clone();
+    follower.follows = Some("lead".into());
+    assert!(!super::cancellable_on_deleted_board(&follower));
+    let mut done = plain.clone();
+    done.phase = Phase::Cancelled;
+    assert!(!super::cancellable_on_deleted_board(&done));
+    let mut pushed = plain;
+    pushed.members = vec![Member { item: "t".into(), candidate: "c".into() }];
+    pushed.pushed = Some("abc".into());
+    assert!(!super::cancellable_on_deleted_board(&pushed));
 }

@@ -396,3 +396,17 @@ fn workflow_cross_workspace_dependents_cannot_block_completion_and_replay() {
     drop(store);
     std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
 }
+
+/// ov-1047 review: only a board id with no row, in a store that has boards, reads as deleted.
+#[test]
+fn a_board_is_deleted_only_when_the_store_has_boards_and_not_this_one() {
+    let store = Store::open_in_memory().unwrap();
+    let unknown = uuid::Uuid::now_v7().to_string();
+    // No boards at all: a runtime opened alone, so nothing is deleted.
+    assert!(!store.workflow_board_deleted(&unknown).unwrap());
+    let repo = store.register_repository_for_test("overnight");
+    let main = store.ensure_main_workspace(repo).unwrap().id;
+    assert!(!store.workflow_board_deleted(&main.to_string()).unwrap(), "a board that exists");
+    assert!(store.workflow_board_deleted(&unknown).unwrap(), "a board id with no row");
+    assert!(!store.workflow_board_deleted("w").unwrap(), "a fixture's key");
+}

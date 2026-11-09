@@ -77,7 +77,7 @@ impl Runtime {
             #[cfg(test)] user_home:None },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
-            last_occupancy:None,inbox,send,next_lease:None,effect_cap:DEFAULT_EFFECT_CAP,continuous:false,
+            last_occupancy:None,cancel_refused:Default::default(),inbox,send,next_lease:None,effect_cap:DEFAULT_EFFECT_CAP,continuous:false,
             #[cfg(test)] sweeps:0, #[cfg(test)] fail_observe:Default::default(), #[cfg(test)] drained:0,
             _writer:writer,_repository_writer:None,_landing_writer:None })
     }
