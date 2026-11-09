@@ -6,6 +6,3 @@ default_decorators = ["Equatable", "Sendable"]
 
 [kotlin]
 package = "com.farcooler.core.wire"
-
-[swift.type_mappings]
-I54 = "Int"
