@@ -90,7 +90,7 @@ struct PlanSectionViewTests {
     func waitingForMain() async throws {
         let store = try await Self.store(.ladder)
         let card = try #require(try Self.view(store).landings.first { $0.number == 94 })
-        #expect(card.phase == "waiting_for_main")
+        #expect(card.phase.rawValue == "waiting_for_main")
         #expect(card.phaseWord == "Waiting for Main's Checks to Pass")
         let drawn = try await Self.drawn(.ladder, width: 600)
         #expect(drawn["plan-landing-94"] != nil && drawn["plan-ladder-step-0"] != nil, "\(drawn.keys.sorted())")
@@ -106,7 +106,7 @@ struct PlanSectionViewTests {
         let landing = try #require(store.plan.plan.landings.first { $0.id == card.id })
         let words = PlanLandingCard.facts(card, ci: store.plan.plan.ci(of: landing), now: view.now)
         #expect(words.hasPrefix("3f78754f \u{00B7} Failed \u{00B7} 1 of 3 jobs failed"), "\(words)")
-        #expect(card.phase == "ci_failed" && card.attention)
+        #expect(card.phase == .ciFailed && card.attention)
         #expect(card.ladder.at == 1 && card.ladder.steps.map(\.label) == ["Checking Here", "CI Failed", "Landed"])
         #expect(view.landings.first?.number == 88, "furthest along first")
     }
