@@ -135,11 +135,23 @@ fn checks(definition: &Definition, config: &CodingConfig, live: Option<&CodingCo
     lines
 }
 
-/// The command each gate runs, in the order the gates run.
-fn gate_argvs<'a>(definition: &Definition, config: &'a CodingConfig) -> Vec<&'a Vec<String>> {
-    steps(definition).filter(|s| matches!(s.kind, StageKind::Check | StageKind::Run))
-        .filter_map(|s| s.operation.arguments.get(1).and_then(|a| a.parse::<usize>().ok()))
-        .filter_map(|i| config.checks.get(i).map(|c| &c.argv)).collect()
+/// The command each gate runs, in the order the gates run, with where it runs: the ticket's own steps or a
+/// group's, and how many landing steps (land, join, push, pull request) come before it there. A gate that
+/// slips past one still lists the same, yet no longer stops what it did.
+fn gate_argvs<'a>(definition: &Definition, config: &'a CodingConfig) -> Vec<(&'a Vec<String>, String)> {
+    let sequences = std::iter::once(("ticket", &definition.stages)).chain(definition.groups.iter().map(|(n, g)| (n.as_str(), &g.steps)));
+    let mut gates = Vec::new();
+    for (name, sequence) in sequences {
+        let mut landings = 0;
+        for s in sequence {
+            if matches!(s.kind, StageKind::Land | StageKind::Join { .. } | StageKind::Push | StageKind::PushBranch | StageKind::OpenPr | StageKind::AwaitPr) { landings += 1; }
+            if !matches!(s.kind, StageKind::Check | StageKind::Run) { continue; }
+            if let Some(c) = s.operation.arguments.get(1).and_then(|a| a.parse::<usize>().ok()).and_then(|i| config.checks.get(i)) {
+                gates.push((&c.argv, format!("{name}:{landings}")));
+            }
+        }
+    }
+    gates
 }
 
 /// What became of each gate's command against the workflow in force (R-118): `new` when the live workflow has no
@@ -151,8 +163,8 @@ fn gate_changes(draft: (&Definition, &CodingConfig), live: Option<(&Definition, 
     let Some(live) = live else { return (vec![None; argvs.len()], Vec::new()) };
     let was = gate_argvs(live.0, live.1);
     let mut taken = vec![false; was.len()];
-    let paired: Vec<Option<usize>> = argvs.iter().map(|a| {
-        let i = (0..was.len()).find(|i| !taken[*i] && was[*i] == *a)?;
+    let paired: Vec<Option<usize>> = argvs.iter().map(|(a, _)| {
+        let i = (0..was.len()).find(|i| !taken[*i] && was[*i].0 == *a)?;
         taken[i] = true;
         Some(i)
     }).collect();
@@ -162,10 +174,10 @@ fn gate_changes(draft: (&Definition, &CodingConfig), live: Option<(&Definition, 
         Some(l) => {
             let before_in_draft = rank(d, &mut paired.iter().enumerate().filter(|(_, p)| p.is_some()).map(|(j, _)| j));
             let before_in_live = rank(*l, &mut paired.iter().flatten().copied());
-            (before_in_draft != before_in_live).then_some("moved")
+            (before_in_draft != before_in_live || argvs[d].1 != was[*l].1).then_some("moved")
         }
     }).collect();
-    let dropped = was.iter().enumerate().filter(|(i, _)| !taken[*i]).map(|(_, a)| spoken_argv(a)).collect();
+    let dropped = was.iter().enumerate().filter(|(i, _)| !taken[*i]).map(|(_, (a, _))| spoken_argv(a)).collect();
     (marks, dropped)
 }
 
@@ -561,6 +573,22 @@ mod tests {
         // No workflow in force: nothing to compare with.
         let first = summarize("", &live, None, None);
         assert!(!first.contains("(new)") && !first.contains("(moved)"), "{first}");
+    }
+    /// ov-1046 review: the same commands in the same order, but a gate slid past landing, no longer stops anything.
+    #[test]
+    fn a_draft_marks_a_gate_that_moves_past_landing() {
+        let live = bundle("ticket-push", &["make check"], &[], None);
+        let mark = |draft: &Bundle| summarize("", draft, Some(&live.definition), Some(&live.adapter));
+        let mut late = live.clone();
+        let stages = &mut late.definition.groups.values_mut().next().expect("a group").steps;
+        let land = stages.iter().position(|s| matches!(s.kind, StageKind::Push)).expect("a push step");
+        let check = stages.iter().position(|s| matches!(s.kind, StageKind::Run)).expect("a gate step");
+        assert!(check < land, "the template gates before it pushes");
+        let moved = stages.remove(check);
+        stages.insert(land, moved);
+        let text = mark(&late);
+        assert!(text.lines().filter(|l| l.starts_with("- `make check`") && l.ends_with("(moved)")).count() == 1, "{text}");
+        assert!(!mark(&live).contains("(moved)"));
     }
     fn with_gate(mut b: Bundle, reviewer: Reviewer) -> Bundle {
         for s in b.definition.stages.iter_mut().chain(b.definition.groups.values_mut().flat_map(|g| g.steps.iter_mut())) {
