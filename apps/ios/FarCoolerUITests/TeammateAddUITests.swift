@@ -83,6 +83,22 @@ final class TeammateAddUITests: XCTestCase {
             "access=member handle=bob-smith name=Bob Smith account=user_bob runners=build-box")
     }
 
+    /// A teammate's browser can't scan the reply (ov-778): its offer names a
+    /// reply key, so Add Teammate seals the reply and posts it once, for the
+    /// teammate's account, and the code to match goes up beside the QR code.
+    func testATeammatesBrowserGetsTheReplySealedAndPostedOnce() {
+        let app = launch(["-teammate-add-browser"])
+        _ = confirmation(app)
+        element(app, "teammate-runner-build-box").tap()
+        element(app, "teammate-add").tap()
+        let status = element(app, "sealed-reply-status")
+        XCTAssertTrue(status.waitForExistence(timeout: 30), "no sealed reply: \(app.debugDescription)")
+        XCTAssertEqual(status.label, "Sent to Chrome on Mac. Check that it shows this code:")
+        XCTAssertEqual(element(app, "sealed-reply-code").label.count, 6, app.debugDescription)
+        XCTAssertEqual(element(app, "teammate-sealed").value as? String, "1 post for user_bob")
+        keep(app, "teammate-add-browser-iphone", expecting: .reads(status, "Sent to Chrome on Mac. Check that it shows this code:"))
+    }
+
     func testViewerIsWhatIsSentWhenViewerIsChosen() {
         let app = launch()
         _ = confirmation(app)

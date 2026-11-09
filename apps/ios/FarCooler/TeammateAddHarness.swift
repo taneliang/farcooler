@@ -20,6 +20,9 @@ import SwiftUI
 ///   -teammate-add-refused    build-box's Far Cooler is too old to bind
 ///   -teammate-add-admin      the phone is an Admin on build-box, not the Owner
 ///   -teammate-add-existing   build-box already has Bob under this account
+///   -teammate-add-browser    Bob's code is from Chrome on Mac, whose offer
+///                            names a reply key (ov-778): the relay is canned
+///                            too, and records each sealed post
 ///
 /// The phone is the Owner on build-box and only a Member on gpu-workstation,
 /// where adding people is refused up front.
@@ -48,6 +51,8 @@ struct TeammateAddHarness: View {
     @StateObject private var runners = RunnerStore()
     /// What the enroller was asked, in one line, for the suite to read.
     @State private var asked = ""
+    /// The sealed replies posted, for the suite to read.
+    @State private var sealedPosts: [String] = []
 
     var body: some View {
         NavigationStack {
@@ -61,16 +66,32 @@ struct TeammateAddHarness: View {
                 .accessibilityIdentifier("teammate-asked")
                 .accessibilityValue(asked)
         }
+        .overlay(alignment: .top) {
+            Color.clear
+                // style-exempt: an invisible test probe, not a rule
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("teammate-sealed")
+                .accessibilityValue(
+                    sealedPosts.isEmpty ? "none" : "\(sealedPosts.count) post\(sealedPosts.count == 1 ? "" : "s") for \(Set(sealedPosts).sorted().joined(separator: ","))")
+        }
         .task { await prepare() }
     }
 
     private func prepare() async {
         let offerer = Self.has("-teammate-add-stranger") ? "user_carol" : "user_bob"
+        let device =
+            Self.has("-teammate-add-long")
+            ? "Bartholomew’s Work iPhone (the one with the cracked screen)"
+            : Self.has("-teammate-add-browser") ? "Chrome on Mac" : "Bob’s iPhone"
         guard
-            case .payload(let offer) = CeremonyCore.offer(
-                name: Self.has("-teammate-add-long") ? "Bartholomew’s Work iPhone (the one with the cracked screen)" : "Bob’s iPhone",
-                account: offerer, keyA: Self.key, nodeKey: nil)
+            case .payload(let made) = CeremonyCore.offer(name: device, account: offerer, keyA: Self.key, nodeKey: nil),
+            let offer = Self.has("-teammate-add-browser") ? Self.withReplyKey(made) : made
         else { return }
+        store.sealedReply.post = { _, account, _ in
+            sealedPosts.append(account)
+            return .posted
+        }
         store.teamDirectory = { Self.has("-teammate-add-offline") ? nil : Self.directory }
         store.confirmTap = { _ in .confirmed }
         store.teammateFacts = { runner, _ in
@@ -91,6 +112,14 @@ struct TeammateAddHarness: View {
         }
         let runnersOnPhone = Self.has("-teammate-add-long") ? [Self.platform, Self.gpu] : [Self.buildBox, Self.gpu]
         store.read(String(decoding: offer, as: UTF8.self), runners: runnersOnPhone, grantingFrom: nil)
+    }
+
+    /// A browser's offer: the same code with a reply key written in, the relay
+    /// fixture's throwaway (`SealedReplyHarness.replyKey`).
+    private static func withReplyKey(_ offer: Data) -> Data? {
+        guard var object = (try? JSONSerialization.jsonObject(with: offer)) as? [String: Any] else { return nil }
+        object["reply_key"] = SealedReplyHarness.replyKey
+        return try? JSONSerialization.data(withJSONObject: object)
     }
 
     /// The relay's answers: Alice is an admin of Platform, and Bob is in it
