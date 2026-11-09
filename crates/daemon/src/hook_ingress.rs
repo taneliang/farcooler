@@ -142,6 +142,10 @@ pub struct HookIngress {
     stopping: Arc<stopping::Stopping>,
     /// Admission for connection tasks and transcript tails (cutover join).
     gate: Option<Arc<crate::writer_gate::WriterGate>>,
+    /// Held while a frame that names a launch acts on its pane, and while a
+    /// relaunch cancels what the pane's previous launch left (ov-886). See
+    /// `held_for`.
+    launch_gate: Arc<Mutex<()>>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -185,6 +189,7 @@ impl HookIngress {
             followups: Arc::default(),
             stopping: Arc::default(),
             gate: None,
+            launch_gate: Arc::default(),
         }
     }
 
@@ -280,6 +285,108 @@ impl HookIngress {
             }
         }
         self.announced_terminal(f, agent)
+    }
+
+    /// The terminal a frame goes to: by its launch when it names one, and by
+    /// `terminal_for` when it doesn't (ov-886).
+    pub fn route(&self, f: &Facts, agent: Agent, launch: Option<Uuid>) -> Option<Uuid> {
+        match launch {
+            None => self.terminal_for(f, agent),
+            Some(launch) => self.launched_terminal(f, agent, launch),
+        }
+    }
+
+    /// The pane whose current launch is `launch`, if this frame belongs there.
+    ///
+    /// A frame that names its launch is judged on that alone, and never falls
+    /// back to the session or the worktree: those are exactly what can't tell
+    /// a restarted pane's killed process from its replacement, which may have
+    /// resumed the very same session. A launch no pane holds is one a restart
+    /// retired, and its frame reaches nothing.
+    ///
+    /// The launch id is inherited by everything the agent starts, so the pane
+    /// must also be running this agent, and the frame must be its own:
+    ///
+    /// - Claude: the session the row names, or one Claude's registry places in
+    ///   this pane (`/clear`, or a restart that had nothing to resume and so
+    ///   began a new session). A `claude` someone runs by hand inside the pane
+    ///   is neither, and isn't pulled in.
+    /// - Codex and Cursor report their launch directory, which must be the
+    ///   pane's worktree.
+    fn launched_terminal(&self, f: &Facts, agent: Agent, launch: Uuid) -> Option<Uuid> {
+        let session = f.session_id.as_deref()?;
+        let terminal = match self.store.terminal_for_launch(launch) {
+            Ok(Some(terminal)) => terminal,
+            Ok(None) => {
+                tracing::debug!(%launch, "a hook from a launch no pane holds any more; it reaches nothing");
+                return None;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, %launch, "could not read which pane holds this launch; the hook is dropped");
+                return None;
+            }
+        };
+        let row = self.store.get_terminal(terminal).ok()?;
+        if is_a_chat(&row) || preset_agent(&row.command_preset) != Some(agent) {
+            tracing::debug!(terminal = %terminal, agent = agent.as_str(), "a hook carrying a pane's launch from an agent that pane isn't running");
+            return None;
+        }
+        let own = match agent {
+            Agent::Claude => {
+                row.agent_session_id.as_deref() == Some(session) || {
+                    let snapshot = self.inventory.snapshot();
+                    crate::registry_binding::bind_pane(self.claude_registry(), &self.store, &snapshot, session)
+                        == Some(terminal)
+                }
+            }
+            Agent::Codex | Agent::Cursor => {
+                let Some(cwd) = f.cwd.as_deref() else { return None };
+                let Ok(worktree) = self.store.get_worktree(row.worktree_id) else { return None };
+                canonical(cwd) == canonical(Path::new(&worktree.worktree_path))
+            }
+        };
+        if !own {
+            tracing::debug!(terminal = %terminal, session, "a hook carrying a pane's launch from a session that isn't the pane's");
+        }
+        own.then_some(terminal)
+    }
+
+    /// Whether `launch` is any pane's current launch.
+    fn launch_is_current(&self, launch: Uuid) -> bool {
+        matches!(self.store.terminal_for_launch(launch), Ok(Some(_)))
+    }
+
+    /// The launch gate, held, if a frame from `launch` may still act on
+    /// `terminal`: `launch` is still its current one, or the frame names none.
+    ///
+    /// Every effect a frame has on its pane happens while this is held, and
+    /// the check is made again inside it, so a restart can't land between the
+    /// check and the effect. `relaunched` takes the same gate after the new
+    /// launch is committed: either a frame's effects finished first and
+    /// `relaunched` cancels what they left, or they start after and see the
+    /// new launch. Never held across an `.await`.
+    pub(crate) fn held_for(&self, terminal: Uuid, launch: Option<Uuid>) -> Option<std::sync::MutexGuard<'_, ()>> {
+        let held = self.launch_gate.lock().unwrap_or_else(|e| e.into_inner());
+        match launch {
+            None => Some(held),
+            Some(launch) => (self.store.current_launch(terminal).ok().flatten() == Some(launch)).then_some(held),
+        }
+    }
+
+    /// Cancel what pane `terminal`'s previous launch left in flight, once a
+    /// new launch is current (ov-886): its held ask, settled unanswered so a
+    /// process still alive defers to its keyboard; its half-assembled message;
+    /// and its transcript tail. Under the launch gate, for `held_for`'s reason.
+    ///
+    /// Narrower than `forget`, which is for a pane that's gone: the pane's
+    /// conversation and its subagents' rows carry on into the new launch.
+    pub fn relaunched(&self, terminal: Uuid) {
+        let _held = self.launch_gate.lock().unwrap_or_else(|e| e.into_inner());
+        self.asks.forget(terminal);
+        self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+        if let Some(alive) = self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
+            alive.store(false, Ordering::Relaxed);
+        }
     }
 
     /// The terminal an agent that announces itself is sitting in.
@@ -616,12 +723,16 @@ impl HookIngress {
         // did get running: a slot freed while a loop still holds `alive` true
         // is a tail nothing can stop, and the next payload starts another.
         let stop = alive.clone();
+        let launch_gate = self.launch_gate.clone();
         tokio::spawn(async move {
             let started = tokio::task::spawn_blocking(move || {
                 TranscriptTail::new().follow(
                     path,
                     from,
                     move |text| {
+                        // Under the launch gate, so `relaunched` can't stop
+                        // this between the check and the delivery.
+                        let _held = launch_gate.lock().unwrap_or_else(|e| e.into_inner());
                         if !alive.load(Ordering::Relaxed) {
                             return;
                         }
@@ -802,6 +913,25 @@ impl HookIngress {
                 payload.remove(HELD_ASK);
             }
             let f = facts(hook.agent, &hook.payload);
+            // A frame that names a launch no pane holds any more came from a
+            // process a restart replaced (ov-886). It reaches nothing: no
+            // fence mark, no ask, no followup, no event. One that waits is
+            // told no decision at once rather than left to its 400 ms. A
+            // launch that isn't a uuid was never one this runner made.
+            let launch = match hook.launch.as_deref().map(Uuid::parse_str) {
+                None => None,
+                Some(Ok(launch)) if self.launch_is_current(launch) => Some(launch),
+                Some(_) => {
+                    tracing::debug!(event = %hook.event, "a hook from a retired launch; it reaches nothing");
+                    let waits = is_fence(hook.agent, &hook.event)
+                        || is_gate(hook.agent, &hook.event)
+                        || (is_followup(hook.agent, &hook.event) && hook.takes_followup());
+                    if waits {
+                        write_reply(&mut write, &Reply::verdict(None)).await?;
+                    }
+                    continue;
+                }
+            };
             // The fence (`hook_asks`): marked and answered before claude can
             // draw a dialog for this call; the call's end, or a turn's, ends
             // the mark.
@@ -818,10 +948,13 @@ impl HookIngress {
                 fence::ended(&self.asks, session, &hook.event, &hook.payload);
             }
             self.stopped_ended(hook.agent, &hook.event, &hook.payload);
-            let terminal = self.terminal_for(&f, hook.agent);
+            let terminal = self.route(&f, hook.agent, launch);
             // Cursor's `stop` waits for this line, on every path (`followup`).
             if is_followup(hook.agent, &hook.event) && hook.takes_followup() {
-                let taken = terminal.and_then(|t| self.followup_for(t));
+                let taken = terminal.and_then(|t| {
+                    let _held = self.held_for(t, launch)?;
+                    self.followup_for(t)
+                });
                 let reply = match &taken {
                     Some(taken) => Reply::Followup { followup_message: taken.text.clone() },
                     None => Reply::verdict(None),
@@ -850,10 +983,16 @@ impl HookIngress {
                     write_reply(&mut write, &Reply::verdict(None)).await?;
                     continue;
                 }
-                return self.hold_ask(terminal, hook, f, reader, write).await;
+                return self.hold_ask(terminal, launch, hook, f, reader, write).await;
             }
             let Some(terminal) = terminal else {
                 tracing::debug!(session = ?f.session_id, "a hook from a session no terminal claims");
+                continue;
+            };
+            // Everything from here acts on the pane, so it's done while the
+            // pane's launch is still this frame's (`held_for`).
+            let Some(held) = self.held_for(terminal, launch) else {
+                tracing::debug!(terminal = %terminal, "the pane was relaunched under this hook; it reaches nothing");
                 continue;
             };
             // A turn cannot end or begin with claude's dialog up, so whatever
@@ -878,6 +1017,7 @@ impl HookIngress {
             if !events.is_empty() {
                 on_events(terminal, events);
             }
+            drop(held);
         }
     }
 
@@ -897,6 +1037,7 @@ impl HookIngress {
     async fn hold_ask(
         &self,
         terminal: Uuid,
+        launch: Option<Uuid>,
         hook: HookLine,
         f: Facts,
         mut reader: BufReader<OwnedReadHalf>,
@@ -907,7 +1048,15 @@ impl HookIngress {
         let tool = hook.payload["tool_name"].as_str();
         let shape = AskShape::of(tool, &hook.payload["tool_input"]);
         let permission = shape.is_permission();
-        let (id, mut settled) = self.asks.hold_shaped(terminal, tool, shape, self.hold);
+        // Held while the pane's launch is still this frame's, under the launch
+        // gate, so a relaunch either finds it to settle or comes first.
+        let held = {
+            let Some(_held) = self.held_for(terminal, launch) else {
+                return write_reply(&mut write, &Reply::verdict(None)).await;
+            };
+            self.asks.hold_shaped(terminal, tool, shape, self.hold)
+        };
+        let (id, mut settled) = held;
         if let Err(e) = write_reply(&mut write, &Reply::hold(self.hold)).await {
             // The hook missed its deadline and has gone. Nobody was offered
             // this ask, so it ends with nothing to take back.
@@ -928,6 +1077,7 @@ impl HookIngress {
         payload[HELD_ASK] = serde_json::Value::String(id.clone());
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
+            let Some(_held) = this.held_for(terminal, launch) else { return };
             this.start_transcript_tail(terminal, hook.agent, &f);
             this.observe_cwd(terminal, hook.agent, &f);
             let events = this.accept(terminal, hook.agent, &hook.event, &payload, f.session_id.as_deref());
@@ -1786,3 +1936,7 @@ mod hook_fence_tests;
 #[cfg(test)]
 #[path = "hook_ingress_held_tests.rs"]
 mod held_tests;
+
+#[cfg(test)]
+#[path = "hook_ingress_launch_tests.rs"]
+mod launch_tests;

@@ -1421,3 +1421,7 @@ async fn a_failed_turn_ends_failed() {
 /// view to answer (ov-370).
 #[path = "a_hook_reaches_the_daemon/held_dialogs.rs"]
 mod held_dialogs;
+
+/// A restarted pane's old process can't reach it (ov-886).
+#[path = "a_hook_reaches_the_daemon/launches.rs"]
+mod launches;
