@@ -185,6 +185,7 @@ data class PlanViewLanding(
     /** "Lander · Opus · 1.4M". */
     @SerialName("lander_words") val landerWords: String? = null,
     @SerialName("pushed_sha") val pushedSha: String? = null,
+    @SerialName("ci_unread") val ciUnread: String? = null,
     val tickets: List<PlanViewTicket> = emptyList(),
 )
 

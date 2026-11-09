@@ -902,6 +902,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
                     parts.join(DOT)
                 }),
                 pushed_sha: landing.pushed_sha.clone(),
+                ci_unread: landing.pushed_sha.as_ref().map(|_| "CI not read yet".to_string()),
                 tickets: mine.into_iter().map(|line| r.landing_ticket(line)).collect(),
             }
         })

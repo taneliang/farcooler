@@ -13,7 +13,7 @@ const plan = parsePlan(JSON.stringify(golden.request.plan))!
 const none = () => {}
 renderPlan(
   document.getElementById('plan') as HTMLElement,
-  { state: 'ready', plan, raw: golden.request.plan, workflow: null, workspaces: [], workspace: null, editing: null, busy: new Set(), notices: new Map(), banner: '' },
+  { state: 'ready', plan, raw: golden.request.plan, runner: 'Mac mini', workspaces: [], workspace: null, editing: null, busy: new Set(), notices: new Map(), banner: '' },
   golden.answer.view.now,
   { detail: none, quote: () => true, openAgent: () => true, openList: none, edit: none, type: none, save: none, cancel: none, keep: none, keepAll: none },
   '',

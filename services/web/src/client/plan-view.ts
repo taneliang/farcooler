@@ -10,6 +10,7 @@
 /// `textContent` and never markup (the CSP's Trusted Types refuse an HTML
 /// string sink).
 
+import { planFailure } from './copy'
 import { age } from './needs'
 import { type CountKind, type NeedsItem, type NeedsRow, needsRows } from './plan-column'
 import { type ColumnAgent, type ColumnTicket, type Column, type Count, type Fact, type Initiative, type PlanPresenter, presentPlan, type PlanViewModel, type Role } from './plan-present'
@@ -61,6 +62,7 @@ function notice(text: string | undefined): HTMLElement | null {
   return p
 }
 
+const BANNER = 'note plan-banner'
 const SVG = 'http://www.w3.org/2000/svg'
 
 /// The glyphs of the roles, as the Mac's SF Symbols: a hammer, an eye, an
@@ -356,7 +358,7 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
   const typing = view.editing !== null
   const children: HTMLElement[] = []
   if (view.banner) {
-    const banner = make('p', 'note plan-banner', view.banner)
+    const banner = make('p', BANNER, view.banner)
     banner.setAttribute('role', 'status')
     children.push(banner)
   }
@@ -369,7 +371,7 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
     let needs = needsRows(model, view.plan, items)
     if (model && needs.length !== items.length) model = presentPlan(present, view.raw, { needsYou: needs.length })
     if (model) children.push(...draw(view.plan, model, needs, view, now, on))
-    else children.push(make('p', 'note plan-banner', 'The plan couldn’t be read. Try again in a moment.'))
+    else children.push(make('p', BANNER, planFailure('protocol', view.runner)))
   } else if (view.state === 'ready') children.push(make('h2', 'plan-clear', WORDS.nothingPlanned))
   root.replaceChildren(...children)
   if (open) root.querySelector('details.plan-fold')?.setAttribute('open', '')

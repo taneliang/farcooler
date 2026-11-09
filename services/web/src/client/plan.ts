@@ -248,6 +248,8 @@ export interface PlanBoardView {
   /// Said above the plan: a read that failed after a good one, or a runner that
   /// can't show this.
   banner: string
+  /// The runner's name, for a sentence that says whose plan it is.
+  runner: string
 }
 
 /// How a rejection reaches here from wasm: the word as the message, and for a
@@ -441,6 +443,7 @@ export class PlanBoard {
       busy: new Set(this.busy),
       notices: new Map(this.notices),
       banner: this.banner,
+      runner: this.deps.runner,
     })
   }
 }

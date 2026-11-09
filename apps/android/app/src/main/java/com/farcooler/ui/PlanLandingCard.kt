@@ -133,8 +133,8 @@ private fun landingFacts(card: PlanViewLanding, ci: PlanCiRead?, now: Long): Str
     if (ci != null) {
         parts += LandingWords.ciSummary(ci)
         LandingWords.ciStale(ci, now)?.let { parts += it }
-    } else if (card.pushedSha != null) {
-        parts += "CI not read yet"
+    } else {
+        card.ciUnread?.let { parts += it }
     }
     if (card.since > 0) parts += PlanWords.span(now - card.since)
     card.landerWords?.let { parts += it }

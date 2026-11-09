@@ -240,6 +240,8 @@ pub struct LandingCard {
     /// "Lander · Opus · 1.4M".
     pub lander_words: Option<String>,
     pub pushed_sha: Option<String>,
+    /// What stands in for CI's line when a commit is pushed and the app has no CI read of it yet.
+    pub ci_unread: Option<String>,
     pub tickets: Vec<TicketCard>,
 }
 

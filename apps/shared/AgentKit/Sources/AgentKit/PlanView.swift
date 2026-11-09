@@ -196,6 +196,8 @@ public struct PlanView: Decodable, Equatable, Sendable {
         /// "Lander · Opus · 1.4M".
         public var landerWords: String?
         public var pushedSha: String?
+        /// Stands in for CI's line while a pushed commit has no CI read of it yet.
+        public var ciUnread: String?
         public var tickets: [TicketCard]
     }
 

@@ -55,8 +55,8 @@ extension PlanView.LandingCard {
         if let ci {
             parts.append(PlanWords.ciSummary(ci))
             if let stale = PlanWords.ciStale(ci, now: now) { parts.append(stale) }
-        } else if pushedSha != nil {
-            parts.append("CI not read yet")
+        } else if let ciUnread {
+            parts.append(ciUnread)
         }
         if since > 0 { parts.append(PlanWords.span(now - since)) }
         if let landerWords { parts.append(landerWords) }

@@ -485,6 +485,7 @@
         {
           "attention": false,
           "carries": null,
+          "ci_unread": null,
           "explanation": "Some of its tickets aren't ready to land yet.",
           "id": "tr-86",
           "label": "Landing 86",
@@ -582,6 +583,7 @@
         {
           "attention": false,
           "carries": null,
+          "ci_unread": null,
           "explanation": "Some of its tickets aren't ready to land yet.",
           "id": "tr-89",
           "label": "Landing 89",
@@ -638,6 +640,7 @@
         {
           "attention": true,
           "carries": null,
+          "ci_unread": null,
           "explanation": "Nothing here has moved for a while.",
           "id": "tr-84",
           "label": "Landing 84",
