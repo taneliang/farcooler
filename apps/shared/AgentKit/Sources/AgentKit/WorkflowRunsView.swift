@@ -79,7 +79,7 @@ public struct WorkflowRunsView: View {
                         ForEach(model.presentation?.runs ?? []) { run in
                             Button { model.clearInspection(); selected = run.item } label: {
                                 VStack(alignment: .leading) {
-                                    Text(run.label); Text(run.item); Text(run.phase_label)
+                                    Text(run.label); Text(run.item); Text(run.phaseLabel)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -125,28 +125,28 @@ public struct WorkflowRunsView: View {
     private func card(_ run: WorkflowRun) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(run.label).font(.title2).accessibilityAddTraits(.isHeader)
-            Text(run.phase_label)
+            Text(run.phaseLabel)
             field("Item", run.item); field("Run", run.run)
-            field("Definition", run.definition_pin); field("Policy", run.policy_pin)
-            field("Candidate", run.candidate); field("Pending Effect", run.pending_effect)
-            if run.pending_effect != nil, watch != nil {
+            field("Definition", run.definitionPin); field("Policy", run.policyPin)
+            field("Candidate", run.candidate); field("Pending Effect", run.pendingEffect)
+            if run.pendingEffect != nil, watch != nil {
                 Button("Watch Agent") { watching = run.item }
             }
             field("Iteration", String(run.iteration)); field("Attempt", String(run.attempt))
-            field("Fence", String(run.fence)); field("Reworks Remaining", String(run.reworks_remaining))
-            if let evidence = run.latest_evidence {
+            field("Fence", String(run.fence)); field("Reworks Remaining", String(run.reworksRemaining))
+            if let evidence = run.latestEvidence {
                 field("Evidence Candidate", evidence.candidate); field("Evidence Manifest", evidence.manifest)
                 field("Evidence Receipt", evidence.receipt); field("Evidence Policy", evidence.policy_pin)
             }
-            if let stage = run.stage { Text(stage.label).font(.headline); Text(stage.progression_label) }
+            if let stage = run.stage { Text(stage.label).font(.headline); Text(stage.progressionLabel) }
             if let gate = run.gate { Text(gate.label).font(.headline); Text(gate.text); field("Principal", gate.principal) }
             ForEach(Array(run.stages.enumerated()), id: \.offset) { _, stage in
-                Text("\(stage.id) · \(stage.label) · \(stage.progression_label)")
+                Text("\(stage.id) · \(stage.label) · \(stage.progressionLabel)")
             }
             ForEach(Array(run.reasons.enumerated()), id: \.offset) { _, reason in
                 Text(reason.label).font(.headline); Text(reason.text)
             }
-            ForEach(Array((run.rework_history ?? []).enumerated()), id: \.offset) { _, history in
+            ForEach(Array((run.reworkHistory ?? []).enumerated()), id: \.offset) { _, history in
                 Text("\(history.principal) · \(history.iteration)")
                 Text(history.reason).textSelection(.enabled)
             }
@@ -174,7 +174,7 @@ private struct WorkflowReasonForm: View {
             Text(form.label).font(.headline)
             TextEditor(text: $draft).frame(minHeight: 100).accessibilityLabel(form.label).disabled(!enabled)
             Text(form.help)
-            Button(form.submit_label) { submit(draft) }.disabled(!enabled)
+            Button(form.submitLabel) { submit(draft) }.disabled(!enabled)
         }
     }
 }

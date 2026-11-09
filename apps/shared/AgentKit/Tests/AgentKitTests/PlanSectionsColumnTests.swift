@@ -70,13 +70,13 @@ struct PlanSectionsColumnTests {
         #expect(builder.doing == "Working" && !builder.doingIsTrouble && builder.working)
         #expect(builder.elapsed == 1_320_000 && builder.time == "22 min" && builder.more == 1 && builder.ticket == "t-ov-310")
         let ticket = try #require(builder.tickets.first)
-        #expect(ticket.title == "The themes grid" && ticket.initiative == "Trustworthy agent view" && ticket.initiativeID == "th-3")
+        #expect(ticket.title == "The themes grid" && ticket.initiative == "Trustworthy agent view" && ticket.initiativeId == "th-3")
         #expect(ticket.stage == .building && ticket.since == 1_799_996_400_000 && ticket.id == "t-ov-310")
         #expect(building.preview.isEmpty && building.hidden == 1 && building.unattendedWords == "1 more with no builder running")
 
         #expect(column.agentWords == "2 agents")
         let waiting = try #require(column.footer.first)
-        #expect(waiting.kind == .waiting && waiting.id == "waiting" && waiting.status == .todo && waiting.count == 5)
+        #expect(waiting.kind == .waiting && waiting.id == "waiting" && waiting.taskStatus == .todo && waiting.count == 5)
         #expect(waiting.words == "5 tickets waiting for a builder")
         #expect(column.waiting.count == 5)
     }
@@ -84,9 +84,9 @@ struct PlanSectionsColumnTests {
     @Test("a footer count's snake-case kind decodes into the name the apps route and identify it by")
     func footerKinds() throws {
         let data = Data(#"{"kind": "not_started", "count": 22, "status": "backlog", "words": "22 not started"}"#.utf8)
-        let count = try PlanJSON.decoder.decode(PlanColumn.Count.self, from: data)
-        #expect(count.kind == .notStarted && count.kind.rawValue == "notStarted" && count.status == .backlog)
-        let fact = try PlanJSON.decoder.decode(PlanColumn.Fact.Kind.self, from: Data(#""next_landing""#.utf8))
+        let count = try JSONDecoder().decode(PlanColumn.Count.self, from: data)
+        #expect(count.kind == .notStarted && count.kind.name == "notStarted" && count.taskStatus == .backlog)
+        let fact = try JSONDecoder().decode(PlanColumn.Fact.Kind.self, from: Data(#""next_landing""#.utf8))
         #expect(fact == .nextLanding)
     }
 

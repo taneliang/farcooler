@@ -19,7 +19,7 @@ struct PlanPhoneSectionsTests {
     func theBand() throws {
         let view = try F.view()
         let band = PlanGlanceSentence(view: view)
-        let spoken = band.spoken(needsYou: view.needsYou)
+        let spoken = band.spoken(needsYou: Int(view.needsYou))
         #expect(spoken.contains("Landing 86 checking on CI"), "\(spoken)")
         #expect(spoken.contains(" building") && spoken.contains(" in review"), "\(spoken)")
         #expect(spoken.contains("Next: A real window capture on the front page, then Onboarding"), "\(spoken)")

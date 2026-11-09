@@ -15,7 +15,7 @@ struct PlanSectionsTests {
     /// The first landing's phase as the view says it, and since when.
     static func phase(_ plan: PlanModel) -> (phase: String?, since: Int64?) {
         let card = PlanView.build(plan: plan)?.landings.first
-        return (card?.phase, card?.since)
+        return (card?.phase.rawValue, card?.since)
     }
 
     @Test("an answer with no phase, landings or agents reads, and a landing falls back to its state")
@@ -36,7 +36,7 @@ struct PlanSectionsTests {
         landing["held_by"] = [["ticket": "l1", "name": "slow"]]
         let plan = try PlanModelTests.plan(themes: [], lines: [], landings: [landing])
         let card = try #require(PlanView.build(plan: plan)?.landings.first)
-        #expect(card.phase == "waiting_for_tickets")
+        #expect(card.phase == .waitingForTickets)
         #expect(card.spoken(ci: nil, now: plan.nowMs).contains("slow") == false, "nothing is said of a hold")
     }
 

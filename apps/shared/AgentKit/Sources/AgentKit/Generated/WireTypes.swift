@@ -18,10 +18,10 @@ public enum WireActionKind: String, Codable, Equatable, Sendable {
 }
 
 public struct WireAction: Codable, Equatable, Sendable {
-	public let kind: WireActionKind
-	public let label: String
+	public var kind: WireActionKind
+	public var label: String
 	/// Binds the entire snapshot and capability context; not a secret or an authorization token.
-	public let `guard`: String
+	public var `guard`: String
 
 	public init(kind: WireActionKind, label: String, guard: String) {
 		self.kind = kind
@@ -31,11 +31,11 @@ public struct WireAction: Codable, Equatable, Sendable {
 }
 
 public struct WireActionForm: Codable, Equatable, Sendable {
-	public let action: WireActionKind
-	public let label: String
-	public let help: String
-	public let submitLabel: String
-	public let maxBytes: Int64
+	public var action: WireActionKind
+	public var label: String
+	public var help: String
+	public var submitLabel: String
+	public var maxBytes: Int64
 
 	public init(action: WireActionKind, label: String, help: String, submitLabel: String, maxBytes: Int64) {
 		self.action = action
@@ -48,19 +48,19 @@ public struct WireActionForm: Codable, Equatable, Sendable {
 
 /// The agent working a ticket.
 public struct WireAgentRef: Codable, Equatable, Sendable {
-	public let id: String
+	public var id: String
 	/// "Builder · Sonnet".
-	public let who: String
+	public var who: String
 	/// "380K"; nil when no turn stated any.
-	public let tokens: String?
+	public var tokens: String?
 	/// Who it is and what it has spent, as its own line under a card's
 	/// second line on Android ("Builder · sonnet · 380K").
-	public let line: String
+	public var line: String
 	/// The pane, to open it.
-	public let terminal: String?
+	public var terminal: String?
 	/// The model as recorded ("claude-opus-4-1"), which a screen reader says
 	/// when `who` shortens it; "" when none is known.
-	public let model: String?
+	public var model: String?
 
 	public init(id: String, who: String, tokens: String?, line: String, terminal: String?, model: String?) {
 		self.id = id
@@ -73,21 +73,21 @@ public struct WireAgentRef: Codable, Equatable, Sendable {
 }
 
 public struct WireAgentRow: Codable, Equatable, Sendable {
-	public let id: String
-	public let who: String
-	public let working: Bool
+	public var id: String
+	public var who: String
+	public var working: Bool
 	/// The plan, its tickets by key, else "Not on a ticket".
-	public let worksFor: String
+	public var worksFor: String
 	/// "Working · 22 min", "Idle · active 1 h ago".
-	public let state: String
+	public var state: String
 	/// "“Design ov-503” · ov-503 · Working · 22 min".
-	public let second: String
-	public let doingNow: String
-	public let tokens: String?
+	public var second: String
+	public var doingNow: String
+	public var tokens: String?
 	/// "≈$1.10".
-	public let cost: String?
-	public let terminal: String?
-	public let accessibility: String
+	public var cost: String?
+	public var terminal: String?
+	public var accessibility: String
 
 	public init(id: String, who: String, working: Bool, worksFor: String, state: String, second: String, doingNow: String, tokens: String?, cost: String?, terminal: String?, accessibility: String) {
 		self.id = id
@@ -107,9 +107,9 @@ public struct WireAgentRow: Codable, Equatable, Sendable {
 public struct WireAgents: Codable, Equatable, Sendable {
 	/// "5 agents, including the orchestrator · 4 working · 3.9M tokens in the
 	/// last 24 hours · ≈$26", or "No agents running."
-	public let header: String
+	public var header: String
 	/// Working first, then by spend.
-	public let rows: [WireAgentRow]
+	public var rows: [WireAgentRow]
 
 	public init(header: String, rows: [WireAgentRow]) {
 		self.header = header
@@ -126,8 +126,8 @@ public enum WireFactKind: String, Codable, Equatable, Sendable {
 
 /// One run of a fact's text: the number is strong.
 public struct WireRun: Codable, Equatable, Sendable {
-	public let text: String
-	public let strong: Bool
+	public var text: String
+	public var strong: Bool
 
 	public init(text: String, strong: Bool) {
 		self.text = text
@@ -136,12 +136,12 @@ public struct WireRun: Codable, Equatable, Sendable {
 }
 
 public struct WireFact: Codable, Equatable, Sendable {
-	public let kind: WireFactKind
-	public let runs: [WireRun]
+	public var kind: WireFactKind
+	public var runs: [WireRun]
 	/// Drawn in amber: it needs the owner, or something is stuck.
-	public let attention: Bool
+	public var attention: Bool
 	/// The runs as one string, for a label.
-	public let text: String
+	public var text: String
 
 	public init(kind: WireFactKind, runs: [WireRun], attention: Bool, text: String) {
 		self.kind = kind
@@ -153,20 +153,20 @@ public struct WireFact: Codable, Equatable, Sendable {
 
 public struct WireInitiative: Codable, Equatable, Sendable {
 	/// The theme's id: an initiative is today's theme.
-	public let id: String
-	public let name: String
+	public var id: String
+	public var name: String
 	/// The outcome the theme was written for; empty when it has none.
-	public let goal: String
-	public let done: Int64
-	public let total: Int64
+	public var goal: String
+	public var done: Int64
+	public var total: Int64
 	/// "20 of 29".
-	public let progress: String
+	public var progress: String
 	/// How full its meter is, 0 to 1.
-	public let fraction: Double
+	public var fraction: Double
 	/// "Next: …", or "Waiting on you: …" (`asks_owner`).
-	public let next: String?
+	public var next: String?
 	/// `next` is the owner's to act on: drawn in amber.
-	public let asksOwner: Bool
+	public var asksOwner: Bool
 
 	public init(id: String, name: String, goal: String, done: Int64, total: Int64, progress: String, fraction: Double, next: String?, asksOwner: Bool) {
 		self.id = id
@@ -198,16 +198,16 @@ public enum WireRole: String, Codable, Equatable, Sendable {
 }
 
 public struct WireColumnTicket: Codable, Equatable, Sendable {
-	public let task: String
-	public let key: String
+	public var task: String
+	public var key: String
 	/// Its title, else the board's, else its key.
-	public let title: String
+	public var title: String
 	/// The initiative it is for: the ticket's own.
-	public let initiative: String?
-	public let initiativeId: String?
-	public let stage: WirePipeStage
+	public var initiative: String?
+	public var initiativeId: String?
+	public var stage: WirePipeStage
 	/// When it entered its stage, in ms; 0 when nothing says.
-	public let since: Int64
+	public var since: Int64
 
 	public init(task: String, key: String, title: String, initiative: String?, initiativeId: String?, stage: WirePipeStage, since: Int64) {
 		self.task = task
@@ -221,26 +221,26 @@ public struct WireColumnTicket: Codable, Equatable, Sendable {
 }
 
 public struct WireColumnAgent: Codable, Equatable, Sendable {
-	public let id: String
-	public let role: WireRole
+	public var id: String
+	public var role: WireRole
 	/// "Builder 2": its role, numbered when there are several.
-	public let name: String
+	public var name: String
 	/// What it does now, in its own words; the problem when it is stuck.
-	public let doing: String
+	public var doing: String
 	/// `doing` says why it's stuck: drawn in amber.
-	public let doingIsTrouble: Bool
+	public var doingIsTrouble: Bool
 	/// How long it has been at it, in ms.
-	public let elapsed: Int64?
+	public var elapsed: Int64?
 	/// "47 min".
-	public let time: String?
+	public var time: String?
 	/// Its pane, to open its chat.
-	public let terminal: String?
+	public var terminal: String?
 	/// The first ticket it works, for its page when there's no pane to open.
-	public let ticket: String?
-	public let tickets: [WireColumnTicket]
-	public let working: Bool
+	public var ticket: String?
+	public var tickets: [WireColumnTicket]
+	public var working: Bool
 	/// Tickets in this stage nobody is on, said under the last card.
-	public let more: Int64
+	public var more: Int64
 
 	public init(id: String, role: WireRole, name: String, doing: String, doingIsTrouble: Bool, elapsed: Int64?, time: String?, terminal: String?, ticket: String?, tickets: [WireColumnTicket], working: Bool, more: Int64) {
 		self.id = id
@@ -259,20 +259,20 @@ public struct WireColumnAgent: Codable, Equatable, Sendable {
 }
 
 public struct WireGroup: Codable, Equatable, Sendable {
-	public let stage: WirePipeStage
-	public let title: String
-	public let agents: [WireColumnAgent]
+	public var stage: WirePipeStage
+	public var title: String
+	public var agents: [WireColumnAgent]
 	/// Tickets in this stage with no agent on them.
-	public let unattended: [WireColumnTicket]
+	public var unattended: [WireColumnTicket]
 	/// The tickets in this stage, each once.
-	public let count: Int64
+	public var count: Int64
 	/// The unattended tickets drawn in place: the first few in a stage with no
 	/// agent; none in a stage with agents, whose "more" line opens them all.
-	public let preview: [WireColumnTicket]
+	public var preview: [WireColumnTicket]
 	/// The unattended tickets only the list shows.
-	public let hidden: Int64
+	public var hidden: Int64
 	/// "12 more waiting for review".
-	public let unattendedWords: String?
+	public var unattendedWords: String?
 
 	public init(stage: WirePipeStage, title: String, agents: [WireColumnAgent], unattended: [WireColumnTicket], count: Int64, preview: [WireColumnTicket], hidden: Int64, unattendedWords: String?) {
 		self.stage = stage
@@ -293,12 +293,12 @@ public enum WireCountKind: String, Codable, Equatable, Sendable {
 }
 
 public struct WireCount: Codable, Equatable, Sendable {
-	public let kind: WireCountKind
-	public let count: Int64
+	public var kind: WireCountKind
+	public var count: Int64
 	/// The board's list it opens, as the store spells a status.
-	public let status: String
+	public var status: String
 	/// "10 tickets waiting for a builder", "22 not started", "796 done".
-	public let words: String
+	public var words: String
 
 	public init(kind: WireCountKind, count: Int64, status: String, words: String) {
 		self.kind = kind
@@ -310,10 +310,10 @@ public struct WireCount: Codable, Equatable, Sendable {
 
 /// A ticket waiting for a builder, as the footer's list draws it.
 public struct WireWaitingTicket: Codable, Equatable, Sendable {
-	public let task: String
-	public let key: String
-	public let title: String
-	public let since: Int64
+	public var task: String
+	public var key: String
+	public var title: String
+	public var since: Int64
 
 	public init(task: String, key: String, title: String, since: Int64) {
 		self.task = task
@@ -324,21 +324,21 @@ public struct WireWaitingTicket: Codable, Equatable, Sendable {
 }
 
 public struct WireColumn: Codable, Equatable, Sendable {
-	public let facts: [WireFact]
+	public var facts: [WireFact]
 	/// In motion or waiting on the owner, in the board's order.
-	public let initiatives: [WireInitiative]
+	public var initiatives: [WireInitiative]
 	/// The rest that are open, said on one quiet line.
-	public let quietInitiatives: [WireInitiative]
+	public var quietInitiatives: [WireInitiative]
 	/// "Nothing moving: Mac look and feel, 33 of 34; Marketing, 6 of 8".
-	public let quietLine: String?
-	public let initiativeCount: Int64
+	public var quietLine: String?
+	public var initiativeCount: Int64
 	/// The stages with anything in them, in order.
-	public let pipeline: [WireGroup]
+	public var pipeline: [WireGroup]
 	/// "10 agents".
-	public let agentWords: String
-	public let footer: [WireCount]
+	public var agentWords: String
+	public var footer: [WireCount]
 	/// The tickets waiting for a builder, each once, in the plan's order.
-	public let waiting: [WireWaitingTicket]
+	public var waiting: [WireWaitingTicket]
 
 	public init(facts: [WireFact], initiatives: [WireInitiative], quietInitiatives: [WireInitiative], quietLine: String?, initiativeCount: Int64, pipeline: [WireGroup], agentWords: String, footer: [WireCount], waiting: [WireWaitingTicket]) {
 		self.facts = facts
@@ -356,17 +356,17 @@ public struct WireColumn: Codable, Equatable, Sendable {
 /// A pull request's stage on a ticket's page.
 public struct WireDetailStage: Codable, Equatable, Sendable {
 	/// The stage in the Plan's words, leading with the problem when a person has to act.
-	public let words: String
+	public var words: String
 	/// The stage alone in one phrase, state first ("Approved, Checks Failing"), for a line with no
 	/// room for two.
-	public let full: String
+	public var full: String
 	/// What a card row under the detail draws: the problem alone when a person has to act, else the
 	/// stage in one phrase, state first.
-	public let row: String
+	public var row: String
 	/// "PR 31 · 2 threads open", when the ticket has a pull request.
-	public let detail: String?
+	public var detail: String?
 	/// Changes requested, checks failing or conflicts: drawn in color.
-	public let attention: Bool
+	public var attention: Bool
 
 	public init(words: String, full: String, row: String, detail: String?, attention: Bool) {
 		self.words = words
@@ -378,10 +378,10 @@ public struct WireDetailStage: Codable, Equatable, Sendable {
 }
 
 public struct WireEvidence: Codable, Equatable, Sendable {
-	public let candidate: String
-	public let manifest: String
-	public let receipt: String
-	public let policy_pin: String
+	public var candidate: String
+	public var manifest: String
+	public var receipt: String
+	public var policy_pin: String
 
 	public init(candidate: String, manifest: String, receipt: String, policy_pin: String) {
 		self.candidate = candidate
@@ -392,9 +392,9 @@ public struct WireEvidence: Codable, Equatable, Sendable {
 }
 
 public struct WireGate: Codable, Equatable, Sendable {
-	public let label: String
-	public let text: String
-	public let principal: String
+	public var label: String
+	public var text: String
+	public var principal: String
 
 	public init(label: String, text: String, principal: String) {
 		self.label = label
@@ -409,10 +409,10 @@ public enum WireGateKind: String, Codable, Equatable, Sendable {
 }
 
 public struct WireGateCard: Codable, Equatable, Sendable {
-	public let kind: WireGateKind
-	public let principal: String
-	public let label: String
-	public let text: String
+	public var kind: WireGateKind
+	public var principal: String
+	public var label: String
+	public var text: String
 
 	public init(kind: WireGateKind, principal: String, label: String, text: String) {
 		self.kind = kind
@@ -423,8 +423,8 @@ public struct WireGateCard: Codable, Equatable, Sendable {
 }
 
 public struct WireLadderStep: Codable, Equatable, Sendable {
-	public let label: String
-	public let explanation: String
+	public var label: String
+	public var explanation: String
 
 	public init(label: String, explanation: String) {
 		self.label = label
@@ -434,11 +434,11 @@ public struct WireLadderStep: Codable, Equatable, Sendable {
 
 /// The ladder a landing climbs: three steps, and the one it stands on.
 public struct WireLadder: Codable, Equatable, Sendable {
-	public let steps: [WireLadderStep]
+	public var steps: [WireLadderStep]
 	/// 0 to 2, or 3 once everything is done.
-	public let at: Int64
+	public var at: Int64
 	/// "Checking on CI · step 2 of 3".
-	public let compact: String
+	public var compact: String
 
 	public init(steps: [WireLadderStep], at: Int64, compact: String) {
 		self.steps = steps
@@ -489,12 +489,12 @@ public enum WireNoteKind: String, Codable, Equatable, Sendable {
 
 /// A line under a ticket's second line.
 public struct WireNote: Codable, Equatable, Sendable {
-	public let kind: WireNoteKind
-	public let text: String
+	public var kind: WireNoteKind
+	public var text: String
 	/// Drawn in amber.
-	public let attention: Bool
+	public var attention: Bool
 	/// Every word of it, for a hover or a long press.
-	public let help: String?
+	public var help: String?
 
 	public init(kind: WireNoteKind, text: String, attention: Bool, help: String?) {
 		self.kind = kind
@@ -523,14 +523,14 @@ public enum WirePhase: String, Codable, Equatable, Sendable {
 /// The engine's run of a ticket, from the workspace's workflow presentation:
 /// the step it is on, the gate it waits at, and the phase.
 public struct WireRunStep: Codable, Equatable, Sendable {
-	public let run: String
-	public let phase: WirePhase
-	public let phaseLabel: String
+	public var run: String
+	public var phase: WirePhase
+	public var phaseLabel: String
 	/// The step it is on; nil past the last.
-	public let step: String?
-	public let gate: WireGate?
+	public var step: String?
+	public var gate: WireGate?
 	/// It waits on a person, failed, or its outcome is uncertain.
-	public let attention: Bool
+	public var attention: Bool
 
 	public init(run: String, phase: WirePhase, phaseLabel: String, step: String?, gate: WireGate?, attention: Bool) {
 		self.run = run
@@ -546,37 +546,37 @@ public struct WireRunStep: Codable, Equatable, Sendable {
 /// Landing.
 public struct WireTicketCard: Codable, Equatable, Sendable {
 	/// The card's task id.
-	public let id: String
-	public let key: String
+	public var id: String
+	public var key: String
 	/// Its title, else its key.
-	public let heading: String
+	public var heading: String
 	/// The theme it serves.
-	public let theme: String?
+	public var theme: String?
 	/// The stage, as the plan's wire spells it.
-	public let stage: String
+	public var stage: String
 	/// "Fixing · round 1", "Waiting · 2nd", "In Review · in Landing 8".
-	public let status: String
+	public var status: String
 	/// The line under the title: Next Up's reason, else the stage, key, agent,
 	/// tokens and how long it has been in this stage.
-	public let second: String
+	public var second: String
 	/// Its place in Next Up, from 1.
-	public let rank: Int64?
-	public let mark: WireMark
+	public var rank: Int64?
+	public var mark: WireMark
 	/// The mark is drawn in amber.
-	public let markAttention: Bool
-	public let notes: [WireNote]
-	public let waitsOnOwner: Bool
+	public var markAttention: Bool
+	public var notes: [WireNote]
+	public var waitsOnOwner: Bool
 	/// The landing that landed which it still names.
-	public let landedLanding: String?
-	public let agent: WireAgentRef?
-	public let run: WireRunStep?
-	public let branch: String
+	public var landedLanding: String?
+	public var agent: WireAgentRef?
+	public var run: WireRunStep?
+	public var branch: String
 	/// On a landing, the word drawn beside the title: "Needs you" while it
 	/// waits on the owner (which `notes` then leads with), "Landed · ac840108"
 	/// once it has; nil when it is simply aboard.
-	public let note: String?
+	public var note: String?
 	/// What a screen reader says for the row.
-	public let accessibility: String
+	public var accessibility: String
 
 	public init(id: String, key: String, heading: String, theme: String?, stage: String, status: String, second: String, rank: Int64?, mark: WireMark, markAttention: Bool, notes: [WireNote], waitsOnOwner: Bool, landedLanding: String?, agent: WireAgentRef?, run: WireRunStep?, branch: String, note: String?, accessibility: String) {
 		self.id = id
@@ -601,33 +601,33 @@ public struct WireTicketCard: Codable, Equatable, Sendable {
 }
 
 public struct WireLandingCard: Codable, Equatable, Sendable {
-	public let id: String
-	public let number: Int64
+	public var id: String
+	public var number: Int64
 	/// "Landing 86".
-	public let label: String
+	public var label: String
 	/// The title without the label in front, or nil.
-	public let subtitle: String?
+	public var subtitle: String?
 	/// Its tickets' titles on one line.
-	public let carries: String?
+	public var carries: String?
 	/// The phase, spelled as the plan's wire spells it.
-	public let phase: WireLandingPhase
+	public var phase: WireLandingPhase
 	/// "Checking on CI".
-	public let phaseWord: String
+	public var phaseWord: String
 	/// "checking on CI", inside a sentence.
-	public let phaseSentence: String
-	public let explanation: String
+	public var phaseSentence: String
+	public var explanation: String
 	/// CI failed, or nothing has moved.
-	public let attention: Bool
+	public var attention: Bool
 	/// When it entered this phase, in ms.
-	public let since: Int64
-	public let ladder: WireLadder
-	public let lander: WireAgentRef?
+	public var since: Int64
+	public var ladder: WireLadder
+	public var lander: WireAgentRef?
 	/// "Lander · Opus · 1.4M".
-	public let landerWords: String?
-	public let pushedSha: String?
+	public var landerWords: String?
+	public var pushedSha: String?
 	/// What stands in for CI's line when a commit is pushed and the app has no CI read of it yet.
-	public let ciUnread: String?
-	public let tickets: [WireTicketCard]
+	public var ciUnread: String?
+	public var tickets: [WireTicketCard]
 
 	public init(id: String, number: Int64, label: String, subtitle: String?, carries: String?, phase: WireLandingPhase, phaseWord: String, phaseSentence: String, explanation: String, attention: Bool, since: Int64, ladder: WireLadder, lander: WireAgentRef?, landerWords: String?, pushedSha: String?, ciUnread: String?, tickets: [WireTicketCard]) {
 		self.id = id
@@ -665,16 +665,16 @@ public enum WireSectionKind: String, Codable, Equatable, Sendable {
 
 /// A section to draw, in the order drawn.
 public struct WireSection: Codable, Equatable, Sendable {
-	public let kind: WireSectionKind
-	public let title: String
+	public var kind: WireSectionKind
+	public var title: String
 	/// Its rows; 0 draws no count.
-	public let count: Int64
+	public var count: Int64
 	/// What it says with nothing in it; nil when it has rows or says nothing.
-	public let empty: String?
+	public var empty: String?
 	/// Drawn folded until opened.
-	public let folded: Bool
+	public var folded: Bool
 	/// Said on hover over (or a long press of) the title, never its rows.
-	public let help: String?
+	public var help: String?
 
 	public init(kind: WireSectionKind, title: String, count: Int64, empty: String?, folded: Bool, help: String?) {
 		self.kind = kind
@@ -694,12 +694,12 @@ public enum WireWaitingKind: String, Codable, Equatable, Sendable {
 
 /// One of Waiting's groups; only groups with cards are sent.
 public struct WireWaitingGroup: Codable, Equatable, Sendable {
-	public let kind: WireWaitingKind
+	public var kind: WireWaitingKind
 	/// Drawn only when another group shares the section.
-	public let title: String
+	public var title: String
 	/// The title is drawn in amber.
-	public let attention: Bool
-	public let cards: [WireTicketCard]
+	public var attention: Bool
+	public var cards: [WireTicketCard]
 
 	public init(kind: WireWaitingKind, title: String, attention: Bool, cards: [WireTicketCard]) {
 		self.kind = kind
@@ -716,10 +716,10 @@ public enum WireGlyph: String, Codable, Equatable, Sendable {
 }
 
 public struct WireTileCard: Codable, Equatable, Sendable {
-	public let id: String
-	public let key: String
-	public let title: String
-	public let glyph: WireGlyph
+	public var id: String
+	public var key: String
+	public var title: String
+	public var glyph: WireGlyph
 
 	public init(id: String, key: String, title: String, glyph: WireGlyph) {
 		self.id = id
@@ -730,21 +730,21 @@ public struct WireTileCard: Codable, Equatable, Sendable {
 }
 
 public struct WireThemeTile: Codable, Equatable, Sendable {
-	public let id: String
-	public let name: String
-	public let done: Int64
-	public let total: Int64
+	public var id: String
+	public var name: String
+	public var done: Int64
+	public var total: Int64
 	/// "6 of 10 done".
-	public let progress: String
+	public var progress: String
 	/// How full the meter is, 0 to 1.
-	public let fraction: Double
+	public var fraction: Double
 	/// Up to three: in progress first, then the most recent done, then the
 	/// next not started.
-	public let cards: [WireTileCard]
+	public var cards: [WireTileCard]
 	/// What waits on the owner, the one amber line.
-	public let ownerAsk: String?
+	public var ownerAsk: String?
 	/// A ticket of it is landing, in review or building.
-	public let moving: Bool
+	public var moving: Bool
 
 	public init(id: String, name: String, done: Int64, total: Int64, progress: String, fraction: Double, cards: [WireTileCard], ownerAsk: String?, moving: Bool) {
 		self.id = id
@@ -761,12 +761,12 @@ public struct WireThemeTile: Codable, Equatable, Sendable {
 
 public struct WireThemes: Codable, Equatable, Sendable {
 	/// Themes in motion first, then the rest by last move.
-	public let tiles: [WireThemeTile]
+	public var tiles: [WireThemeTile]
 	/// Done themes, folded into one tile.
-	public let finished: [WireThemeTile]
-	public let finishedTitle: String?
+	public var finished: [WireThemeTile]
+	public var finishedTitle: String?
 	/// "7 themes".
-	public let finishedWords: String?
+	public var finishedWords: String?
 
 	public init(tiles: [WireThemeTile], finished: [WireThemeTile], finishedTitle: String?, finishedWords: String?) {
 		self.tiles = tiles
@@ -779,14 +779,14 @@ public struct WireThemes: Codable, Equatable, Sendable {
 /// What a ticket's page says that its card does not.
 public struct WireTicketDetail: Codable, Equatable, Sendable {
 	/// The ticket's task id.
-	public let id: String
+	public var id: String
 	/// "Fixing · round 1", "Landed · ac840108": its stage with what it needs said beside it.
-	public let status: String
+	public var status: String
 	/// `status` when the stage is drawn on a line of its own: only what that stage leaves to the ticket.
-	public let statusBesideStage: String
-	public let stage: WireDetailStage?
+	public var statusBesideStage: String
+	public var stage: WireDetailStage?
 	/// "No move in 2 h", for a stale ticket.
-	public let stale: String?
+	public var stale: String?
 
 	public init(id: String, status: String, statusBesideStage: String, stage: WireDetailStage?, stale: String?) {
 		self.id = id
@@ -800,9 +800,9 @@ public struct WireTicketDetail: Codable, Equatable, Sendable {
 /// The ticket details of a plan, and the one line the Themes section says when it is folded.
 public struct WireTicketDetails: Codable, Equatable, Sendable {
 	/// One per ticket the plan lists, a dropped line only where its task has no other.
-	public let tickets: [WireTicketDetail]
+	public var tickets: [WireTicketDetail]
 	/// "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded.
-	public let trackSummary: String?
+	public var trackSummary: String?
 
 	public init(tickets: [WireTicketDetail], trackSummary: String?) {
 		self.tickets = tickets
@@ -811,28 +811,28 @@ public struct WireTicketDetails: Codable, Equatable, Sendable {
 }
 
 public struct WirePlanView: Codable, Equatable, Sendable {
-	public let schema: UInt32
+	public var schema: UInt32
 	/// The runner's clock.
-	public let now: Int64
+	public var now: Int64
 	/// The sections to draw, in order.
-	public let sections: [WireSection]
-	public let needsYou: Int64
+	public var sections: [WireSection]
+	public var needsYou: Int64
 	/// Live landings, furthest along first.
-	public let landings: [WireLandingCard]
-	public let inReview: [WireTicketCard]
-	public let building: [WireTicketCard]
+	public var landings: [WireLandingCard]
+	public var inReview: [WireTicketCard]
+	public var building: [WireTicketCard]
 	/// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
-	public let waiting: [WireWaitingGroup]
-	public let onLandedLanding: [WireTicketCard]
+	public var waiting: [WireWaitingGroup]
+	public var onLandedLanding: [WireTicketCard]
 	/// Landed on the viewer's day, newest first.
-	public let landedToday: [WireTicketCard]
-	public let agents: WireAgents
-	public let themes: WireThemes
+	public var landedToday: [WireTicketCard]
+	public var agents: WireAgents
+	public var themes: WireThemes
 	/// The plan column beside the conversation: facts, initiatives, the
 	/// pipeline of agents and the footer counts (ov-867).
-	public let column: WireColumn
+	public var column: WireColumn
 	/// What ticket details and theme tracks say (ov-1038).
-	public let details: WireTicketDetails
+	public var details: WireTicketDetails
 
 	public init(schema: UInt32, now: Int64, sections: [WireSection], needsYou: Int64, landings: [WireLandingCard], inReview: [WireTicketCard], building: [WireTicketCard], waiting: [WireWaitingGroup], onLandedLanding: [WireTicketCard], landedToday: [WireTicketCard], agents: WireAgents, themes: WireThemes, column: WireColumn, details: WireTicketDetails) {
 		self.schema = schema
@@ -853,9 +853,9 @@ public struct WirePlanView: Codable, Equatable, Sendable {
 }
 
 public struct WireStageCard: Codable, Equatable, Sendable {
-	public let id: String
-	public let label: String
-	public let progressionLabel: String
+	public var id: String
+	public var label: String
+	public var progressionLabel: String
 
 	public init(id: String, label: String, progressionLabel: String) {
 		self.id = id
@@ -881,9 +881,9 @@ public enum WireReason: String, Codable, Equatable, Sendable {
 }
 
 public struct WireReasonCard: Codable, Equatable, Sendable {
-	public let kind: WireReason
-	public let label: String
-	public let text: String
+	public var kind: WireReason
+	public var label: String
+	public var text: String
 
 	public init(kind: WireReason, label: String, text: String) {
 		self.kind = kind
@@ -894,14 +894,14 @@ public struct WireReasonCard: Codable, Equatable, Sendable {
 
 /// Accepted borrowed text and the exact authenticated observation it describes.
 public struct WireReworkDecision: Codable, Equatable, Sendable {
-	public let id: String
-	public let principal: String
-	public let revision: Int64
-	public let run: String
-	public let definition_pin: String
-	public let evidence: WireEvidence
-	public let iteration: UInt8
-	public let reason: String
+	public var id: String
+	public var principal: String
+	public var revision: Int64
+	public var run: String
+	public var definition_pin: String
+	public var evidence: WireEvidence
+	public var iteration: UInt8
+	public var reason: String
 
 	public init(id: String, principal: String, revision: Int64, run: String, definition_pin: String, evidence: WireEvidence, iteration: UInt8, reason: String) {
 		self.id = id
@@ -916,28 +916,28 @@ public struct WireReworkDecision: Codable, Equatable, Sendable {
 }
 
 public struct WireRunCard: Codable, Equatable, Sendable {
-	public let label: String
-	public let phaseLabel: String
-	public let item: String
-	public let run: String
-	public let definitionPin: String
-	public let policyPin: String
-	public let phase: WirePhase
-	public let stages: [WireStageCard]
+	public var label: String
+	public var phaseLabel: String
+	public var item: String
+	public var run: String
+	public var definitionPin: String
+	public var policyPin: String
+	public var phase: WirePhase
+	public var stages: [WireStageCard]
 	/// None after the last stage. The definition's approval policies remain visible.
-	public let stage: WireStageCard?
-	public let gate: WireGateCard?
-	public let candidate: String?
-	public let latestEvidence: WireEvidence?
-	public let pendingEffect: String?
-	public let iteration: UInt8
-	public let reworksRemaining: UInt8
-	public let attempt: UInt8
-	public let fence: Int64
-	public let reasons: [WireReasonCard]
-	public let actions: [WireAction]
-	public let forms: [WireActionForm]?
-	public let reworkHistory: [WireReworkDecision]?
+	public var stage: WireStageCard?
+	public var gate: WireGateCard?
+	public var candidate: String?
+	public var latestEvidence: WireEvidence?
+	public var pendingEffect: String?
+	public var iteration: UInt8
+	public var reworksRemaining: UInt8
+	public var attempt: UInt8
+	public var fence: Int64
+	public var reasons: [WireReasonCard]
+	public var actions: [WireAction]
+	public var forms: [WireActionForm]?
+	public var reworkHistory: [WireReworkDecision]?
 
 	public init(label: String, phaseLabel: String, item: String, run: String, definitionPin: String, policyPin: String, phase: WirePhase, stages: [WireStageCard], stage: WireStageCard?, gate: WireGateCard?, candidate: String?, latestEvidence: WireEvidence?, pendingEffect: String?, iteration: UInt8, reworksRemaining: UInt8, attempt: UInt8, fence: Int64, reasons: [WireReasonCard], actions: [WireAction], forms: [WireActionForm]?, reworkHistory: [WireReworkDecision]?) {
 		self.label = label
@@ -965,11 +965,11 @@ public struct WireRunCard: Codable, Equatable, Sendable {
 }
 
 public struct WirePresentation: Codable, Equatable, Sendable {
-	public let schema: UInt32
-	public let workspace: String
-	public let epoch: Int64
-	public let revision: Int64
-	public let runs: [WireRunCard]
+	public var schema: UInt32
+	public var workspace: String
+	public var epoch: Int64
+	public var revision: Int64
+	public var runs: [WireRunCard]
 
 	public init(schema: UInt32, workspace: String, epoch: Int64, revision: Int64, runs: [WireRunCard]) {
 		self.schema = schema

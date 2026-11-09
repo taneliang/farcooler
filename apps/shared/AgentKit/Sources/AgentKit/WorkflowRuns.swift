@@ -1,93 +1,38 @@
 import Foundation
 import Combine
 
-// Display-only schema 2. Semantic IDs are strings, never native policy enums.
-public struct WorkflowAction: Codable, Equatable, Sendable {
-    private let descriptor: [String: String]
-    public var kind: String { descriptor["kind"]! }
-    public var label: String { descriptor["label"]! }
-    public var guardValue: String { descriptor["guard"]! }
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let value = try container.decode([String: String].self)
-        guard value["kind"] != nil, value["label"] != nil, value["guard"] != nil else {
-            throw WorkflowDisplayError.invalid
-        }
-        descriptor = value
-    }
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(descriptor)
-    }
+// Display-only schema 2. The runs are the Rust core's presentation, generated
+// as `WireTypes.swift` (ov-1035); these names are the apps' own for them.
+public typealias WorkflowAction = WireAction
+public typealias WorkflowStage = WireStageCard
+public typealias WorkflowGate = WireGateCard
+public typealias WorkflowReason = WireReasonCard
+public typealias WorkflowEvidence = WireEvidence
+public typealias WorkflowForm = WireActionForm
+public typealias WorkflowRework = WireReworkDecision
+public typealias WorkflowRun = WireRunCard
+public typealias WorkflowPresentation = WirePresentation
+
+extension WireAction {
+    public var guardValue: String { `guard` }
     public func selectionJSON(reason: String?) throws -> String {
         guard let reason else { return try json() }
-        let object: [String: Any] = ["action": descriptor, "reason": reason]
-        return String(decoding: try JSONSerialization.data(withJSONObject: object, options: .sortedKeys), as: UTF8.self)
+        struct Selection: Encodable {
+            var action: WireAction
+            var reason: String
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return String(decoding: try encoder.encode(Selection(action: self, reason: reason)), as: UTF8.self)
     }
     public func json() throws -> String { String(decoding: try JSONEncoder().encode(self), as: UTF8.self) }
 }
-public struct WorkflowStage: Decodable, Sendable {
-    public let id: String
-    public let label: String
-    public let progression_label: String
-}
-public struct WorkflowGate: Decodable, Sendable {
-    public let label: String
-    public let text: String
-    public let principal: String
-}
-public struct WorkflowReason: Decodable, Sendable {
-    public let kind: String
-    public let label: String
-    public let text: String
-}
-public struct WorkflowEvidence: Decodable, Sendable {
-    public let candidate: String
-    public let manifest: String
-    public let receipt: String
-    public let policy_pin: String
-}
-public struct WorkflowForm: Decodable, Sendable {
-    public let action: String
-    public let label: String
-    public let help: String
-    public let submit_label: String
-    public let max_bytes: Int
-}
-public struct WorkflowRework: Decodable, Sendable {
-    public let principal: String
-    public let iteration: UInt8
-    public let reason: String
-}
-public struct WorkflowRun: Decodable, Identifiable, Sendable {
+
+extension WireRunCard: Identifiable {
     public var id: String { item }
-    public let label: String
-    public let phase_label: String
-    public let item: String
-    public let run: String
-    public let definition_pin: String
-    public let policy_pin: String
-    public let candidate: String?
-    public let latest_evidence: WorkflowEvidence?
-    public let pending_effect: String?
-    public let iteration: UInt8
-    public let attempt: UInt8
-    public let fence: UInt64
-    public let reworks_remaining: UInt8
-    public let stages: [WorkflowStage]
-    public let stage: WorkflowStage?
-    public let gate: WorkflowGate?
-    public let reasons: [WorkflowReason]
-    public let actions: [WorkflowAction]
-    public let forms: [WorkflowForm]?
-    public let rework_history: [WorkflowRework]?
 }
-public struct WorkflowPresentation: Decodable, Sendable {
-    public let schema: UInt32
-    public let workspace: String
-    public let epoch: UInt64
-    public let revision: UInt64
-    public let runs: [WorkflowRun]
+
+extension WirePresentation {
     public static func decode(_ json: String, workspace: String) throws -> Self {
         let value = try JSONDecoder().decode(Self.self, from: Data(json.utf8))
         guard value.schema == 2, value.workspace == workspace else { throw WorkflowDisplayError.invalid }

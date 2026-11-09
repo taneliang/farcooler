@@ -13,309 +13,35 @@ import Foundation
 // the symbol up in the running image (`dlsym`), which is how AgentKit's own
 // tests reach the library their target links.
 
-/// The view model: `{schema, view}`'s view.
-public struct PlanView: Decodable, Equatable, Sendable {
-    public enum SectionKind: String, Decodable, Sendable {
-        case needsYou = "needs_you", landing, inReview = "in_review", building, waiting
-        case onLandedLanding = "on_landed_landing", agents, themes, landedToday = "landed_today"
-    }
+/// The view model: `{schema, view}`'s view. The types are generated from the Rust
+/// ones (`WireTypes.swift`, ov-1035); this file names them the way the apps do and adds
+/// what only a screen needs.
+public typealias PlanView = WirePlanView
 
-    /// A section to draw, in the order drawn.
-    public struct Section: Decodable, Equatable, Identifiable, Sendable {
-        public var kind: SectionKind
-        public var title: String
-        /// Its rows; 0 draws no count.
-        public var count: Int
-        /// What it says with nothing in it; nil when it has rows or says nothing.
-        public var empty: String?
-        /// Drawn folded until opened.
-        public var folded: Bool
-        /// Said on hover over (or a long press of) the title, never its rows.
-        public var help: String?
-        public var id: SectionKind { kind }
-    }
-
-    /// What a ticket's mark shows: its stage, a fix round, or its place in Next Up.
-    public enum Mark: String, Decodable, Sendable {
-        case rank, waiting, building, fixing, reviewing, needsYou = "needs_you", landing, landed, dropped, unknown
-    }
-
-    public enum NoteKind: String, Decodable, Sendable {
-        /// The pull request's stage.
-        case stage
-        /// The engine run's step and gate.
-        case run
-        /// Waits on the owner, or hasn't moved.
-        case warning
-        case overBudget = "over_budget"
-    }
-
-    /// A line under a ticket's second line.
-    public struct Note: Decodable, Equatable, Sendable {
-        public var kind: NoteKind
-        public var text: String
-        /// Drawn in amber.
-        public var attention: Bool
-        /// Every word of it, for a hover or a long press.
-        public var help: String?
-
-        /// The id a view and the UI tests know it by: the stage's (amber or not),
-        /// the run's, the warning's and the budget's.
-        public func probe(key: String) -> String {
-            switch kind {
-            case .stage: attention ? "plan-ticket-\(key)-stage-attention" : "plan-ticket-\(key)-stage"
-            case .run: "plan-ticket-\(key)-run"
-            case .warning: "plan-ticket-\(key)-warning"
-            case .overBudget: "plan-ticket-\(key)-over-budget"
-            }
-        }
-    }
-
-    /// The agent working a ticket, or landing a landing.
-    public struct AgentRef: Decodable, Equatable, Sendable {
-        public var id: String
-        /// "Builder · Sonnet".
-        public var who: String
-        /// "380K"; nil when no turn stated any.
-        public var tokens: String?
-        /// The pane, to open it.
-        public var terminal: String?
-        /// The model as recorded, for the screen reader; "" when unknown.
-        public var model: String?
-    }
-
-    public struct Gate: Decodable, Equatable, Sendable {
-        public var label: String
-        public var text: String
-        public var principal: String
-    }
-
-    /// The engine's run of a ticket: the step it is on and the gate it waits at.
-    public struct RunStep: Decodable, Equatable, Sendable {
-        public var run: String
-        public var phase: String
-        public var phaseLabel: String
-        public var step: String?
-        public var gate: Gate?
-        public var attention: Bool
-    }
-
-    /// A ticket's row: in In Review, Building, Waiting or Waiting for the Next Landing.
-    public struct TicketCard: Decodable, Equatable, Identifiable, Sendable {
-        /// The card's task id.
-        public var id: String
-        public var key: String
-        /// Its title, else its key.
-        public var heading: String
-        /// The theme it serves.
-        public var theme: String?
-        /// The stage, as the plan's wire spells it.
-        public var stage: String
-        /// "Fixing · round 1", "Waiting · 2nd", "In Review · in Landing 8".
-        public var status: String
-        /// The line under the title.
-        public var second: String
-        /// Its place in Next Up, from 1.
-        public var rank: Int?
-        public var mark: Mark
-        /// The mark is drawn in amber.
-        public var markAttention: Bool
-        public var notes: [Note]
-        public var waitsOnOwner: Bool
-        /// The landing that landed which it still names.
-        public var landedLanding: String?
-        public var agent: AgentRef?
-        public var run: RunStep?
-        public var branch: String
-        /// On a landing, the word beside the title: "Needs you" while it waits
-        /// on the owner (which `notes` then leads with), "Landed · ac840108"
-        /// once it has; nil when it is simply aboard.
-        public var note: String?
-        /// What a screen reader says for the row.
-        public var accessibility: String
-    }
-
-    public enum WaitingKind: String, Decodable, Sendable {
-        case next, notRanked = "not_ranked", onYou = "on_you"
-    }
-
-    /// One of Waiting's groups; only groups with cards are sent.
-    public struct WaitingGroup: Decodable, Equatable, Identifiable, Sendable {
-        public var kind: WaitingKind
-        /// Drawn only when another group shares the section.
-        public var title: String
-        /// The title is drawn in amber.
-        public var attention: Bool
-        public var cards: [TicketCard]
-
-        /// The probe id the views and the UI tests use.
-        public var id: String {
-            switch kind {
-            case .next: "plan-next-up"
-            case .notRanked: "plan-not-ranked"
-            case .onYou: "plan-waiting-on-you"
-            }
-        }
-    }
-
-    public struct LadderStep: Decodable, Equatable, Sendable {
-        public var label: String
-        public var explanation: String
-    }
-
-    /// The ladder a landing climbs: three steps, and the one it stands on.
-    public struct Ladder: Decodable, Equatable, Sendable {
-        public var steps: [LadderStep]
-        /// 0 to 2, or 3 once everything is done.
-        public var at: Int
-        /// "Checking on CI · step 2 of 3".
-        public var compact: String
-    }
-
-    public struct LandingCard: Decodable, Equatable, Identifiable, Sendable {
-        public var id: String
-        public var number: Int
-        /// "Landing 86".
-        public var label: String
-        public var subtitle: String?
-        /// Its tickets' titles on one line.
-        public var carries: String?
-        /// The phase as the plan's wire spells it.
-        public var phase: String
-        /// "Checking on CI".
-        public var phaseWord: String
-        /// "checking on CI", inside a sentence.
-        public var phaseSentence: String
-        public var explanation: String
-        /// CI failed, or nothing has moved.
-        public var attention: Bool
-        /// When it entered this phase, in ms.
-        public var since: Int64
-        public var ladder: Ladder
-        public var lander: AgentRef?
-        /// "Lander · Opus · 1.4M".
-        public var landerWords: String?
-        public var pushedSha: String?
-        /// Stands in for CI's line while a pushed commit has no CI read of it yet.
-        public var ciUnread: String?
-        public var tickets: [TicketCard]
-    }
-
-    public struct AgentRow: Decodable, Equatable, Identifiable, Sendable {
-        public var id: String
-        public var who: String
-        public var working: Bool
-        public var worksFor: String
-        /// "Working · 22 min", "Idle · active 1 h ago".
-        public var state: String
-        public var second: String
-        public var doingNow: String
-        public var tokens: String?
-        /// "≈$1.10".
-        public var cost: String?
-        public var terminal: String?
-        public var accessibility: String
-    }
-
-    public struct Agents: Decodable, Equatable, Sendable {
-        /// "5 agents, including the orchestrator · 4 working · …", or "No agents running."
-        public var header: String
-        /// Working first, then by spend.
-        public var rows: [AgentRow]
-    }
-
-    public enum Glyph: String, Decodable, Sendable {
-        case done, inProgress = "in_progress", notStarted = "not_started"
-    }
-
-    public struct TileCard: Decodable, Equatable, Identifiable, Sendable {
-        public var id: String
-        public var key: String
-        public var title: String
-        public var glyph: Glyph
-    }
-
-    public struct ThemeTile: Decodable, Equatable, Identifiable, Sendable {
-        public var id: String
-        public var name: String
-        public var done: Int
-        public var total: Int
-        /// "6 of 10 done".
-        public var progress: String
-        /// How full the meter is, 0 to 1.
-        public var fraction: Double
-        /// Up to three cards.
-        public var cards: [TileCard]
-        /// What waits on the owner, the one amber line.
-        public var ownerAsk: String?
-        /// A ticket of it is landing, in review or building.
-        public var moving: Bool
-    }
-
-    /// A pull request's stage on a ticket's page, in the core's words.
-    public struct DetailStage: Decodable, Equatable, Sendable {
-        /// The stage, leading with the problem when a person has to act.
-        public var words: String
-        /// The stage alone in one phrase, state first ("Approved, Checks Failing").
-        public var full: String
-        /// What a card row under the page draws.
-        public var row: String
-        /// "PR 31 · 2 threads open".
-        public var detail: String?
-        public var attention: Bool
-    }
-
-    /// What a ticket's page says that its card does not (ov-1038).
-    public struct TicketDetail: Decodable, Equatable, Sendable {
-        /// The ticket's task id.
-        public var id: String
-        /// "Fixing · round 1", "Landed · ac840108".
-        public var status: String
-        /// `status` when the stage is drawn on a line of its own.
-        public var statusBesideStage: String
-        public var stage: DetailStage?
-        /// "No move in 2 h".
-        public var stale: String?
-    }
-
-    public struct TicketDetails: Decodable, Equatable, Sendable {
-        public var tickets: [TicketDetail]
-        /// "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded.
-        public var trackSummary: String?
-
-        public func ticket(_ task: String) -> TicketDetail? { tickets.first { $0.id == task } }
-    }
-
-    public struct Themes: Decodable, Equatable, Sendable {
-        public var tiles: [ThemeTile]
-        /// Done themes, folded into one tile.
-        public var finished: [ThemeTile]
-        public var finishedTitle: String?
-        /// "7 themes".
-        public var finishedWords: String?
-    }
-
-    public var schema: Int
-    /// The runner's clock.
-    public var now: Int64
-    /// The sections to draw, in order.
-    public var sections: [Section]
-    public var needsYou: Int
-    /// Live landings, furthest along first.
-    public var landings: [LandingCard]
-    public var inReview: [TicketCard]
-    public var building: [TicketCard]
-    /// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
-    public var waiting: [WaitingGroup]
-    public var onLandedLanding: [TicketCard]
-    /// Landed on the viewer's day, newest first.
-    public var landedToday: [TicketCard]
-    public var agents: Agents
-    public var themes: Themes
-    /// The plan column beside the conversation (ov-867), from the same read.
-    public var column: PlanColumn
-    /// What ticket details and the Themes summary say (ov-1038).
-    public var details: TicketDetails
+extension WirePlanView {
+    public typealias SectionKind = WireSectionKind
+    public typealias Section = WireSection
+    public typealias Mark = WireMark
+    public typealias NoteKind = WireNoteKind
+    public typealias Note = WireNote
+    public typealias AgentRef = WireAgentRef
+    public typealias Gate = WireGate
+    public typealias RunStep = WireRunStep
+    public typealias TicketCard = WireTicketCard
+    public typealias WaitingKind = WireWaitingKind
+    public typealias WaitingGroup = WireWaitingGroup
+    public typealias LadderStep = WireLadderStep
+    public typealias Ladder = WireLadder
+    public typealias LandingCard = WireLandingCard
+    public typealias AgentRow = WireAgentRow
+    public typealias Agents = WireAgents
+    public typealias Glyph = WireGlyph
+    public typealias TileCard = WireTileCard
+    public typealias ThemeTile = WireThemeTile
+    public typealias DetailStage = WireDetailStage
+    public typealias TicketDetail = WireTicketDetail
+    public typealias TicketDetails = WireTicketDetails
+    public typealias Themes = WireThemes
 
     /// The section of `kind`, when it's drawn.
     public func section(_ kind: SectionKind) -> Section? { sections.first { $0.kind == kind } }
@@ -334,7 +60,45 @@ public struct PlanView: Decodable, Equatable, Sendable {
         struct Answer: Decodable {
             var view: PlanView?
         }
-        return (try? PlanJSON.decoder.decode(Answer.self, from: answer))?.view
+        return (try? JSONDecoder().decode(Answer.self, from: answer))?.view
+    }
+}
+
+extension WireSection: Identifiable {
+    public var id: WireSectionKind { kind }
+}
+
+extension WireTicketCard: Identifiable {}
+extension WireLandingCard: Identifiable {}
+extension WireAgentRow: Identifiable {}
+extension WireTileCard: Identifiable {}
+extension WireThemeTile: Identifiable {}
+
+extension WireWaitingGroup: Identifiable {
+    /// The probe id the views and the UI tests use.
+    public var id: String {
+        switch kind {
+        case .next: "plan-next-up"
+        case .notRanked: "plan-not-ranked"
+        case .onYou: "plan-waiting-on-you"
+        }
+    }
+}
+
+extension WireTicketDetails {
+    public func ticket(_ task: String) -> WireTicketDetail? { tickets.first { $0.id == task } }
+}
+
+extension WireNote {
+    /// The id a view and the UI tests know it by: the stage's (amber or not),
+    /// the run's, the warning's and the budget's.
+    public func probe(key: String) -> String {
+        switch kind {
+        case .stage: attention ? "plan-ticket-\(key)-stage-attention" : "plan-ticket-\(key)-stage"
+        case .run: "plan-ticket-\(key)-run"
+        case .warning: "plan-ticket-\(key)-warning"
+        case .overBudget: "plan-ticket-\(key)-over-budget"
+        }
     }
 }
 

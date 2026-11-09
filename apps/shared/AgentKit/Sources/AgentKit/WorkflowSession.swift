@@ -110,7 +110,7 @@ public final class WorkflowSessionAdapter {
         let view = snapshot.presentation
         guard view.workspace == workspace, view.schema == 2 else { throw WorkflowDisplayError.invalid }
         for run in view.runs { for action in run.actions {
-            observations[try key([scope, run.item, WorkflowActionJSON.canonical(action.json())])] = Observation(revision: view.revision, epoch: view.epoch, run: run.run)
+            observations[try key([scope, run.item, WorkflowActionJSON.canonical(action.json())])] = Observation(revision: UInt64(view.revision), epoch: UInt64(view.epoch), run: run.run)
         }}
         // Encode the typed display DTO directly: UInt64 never goes through Double.
         // WorkflowPresentation is display-only Decodable; extract the subtree

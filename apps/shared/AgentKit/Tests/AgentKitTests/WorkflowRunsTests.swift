@@ -30,7 +30,7 @@ struct WorkflowRunsTests {
                 await model.perform(item: presentation.runs[0].item, action: action, port: port)
                 #expect(forwarded?["guard"] == action.guardValue)
                 #expect(forwarded?["label"] == action.label)
-                #expect(forwarded?["kind"] == action.kind)
+                #expect(forwarded?["kind"] == action.kind.rawValue)
             }
             model.disconnect(); #expect(!model.ready)
             forwarded = nil
