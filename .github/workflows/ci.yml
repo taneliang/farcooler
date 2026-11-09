@@ -109,7 +109,7 @@ jobs:
   wire:
     name: Wire compatibility
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       # The lint's own tests first. Before the first release there is no
@@ -287,6 +287,24 @@ jobs:
       # unique across both files.
       - run: ./scripts/migration-lint.py --self-test
       - run: ./scripts/migration-lint.py
+      # The app decoders are generated from the Rust view models (ov-1035): the CLI is pinned and
+      # cached by version (the cargo install is skipped when it is already there), the script
+      # rewrites the Swift, Kotlin and TypeScript wire types, and a difference from what is
+      # checked in (or a generated file that is not checked in at all) fails the run.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/typeshare
+          key: typeshare-1.13.4-${{ runner.os }}
+      - name: Install typeshare 1.13.4
+        run: |
+          if [ "$(typeshare --version 2>/dev/null)" != "typeshare 1.13.4" ]; then
+            cargo install typeshare-cli --version 1.13.4 --locked
+          fi
+      - name: The generated wire types are current
+        run: |
+          ./scripts/gen-wire-types.sh
+          git diff --exit-code -- apps/shared/AgentKit/Sources/AgentKit/WireTypes.swift apps/android/app/src/main/java/com/farcooler/core/wire services/web/src/client/generated
+          test -z "$(git status --porcelain -- apps/shared/AgentKit/Sources/AgentKit/WireTypes.swift apps/android/app/src/main/java/com/farcooler/core/wire services/web/src/client/generated)"
 
   # The tunnel itself, which is Go, and which nothing in this workflow ran until
   # now.
