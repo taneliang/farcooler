@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::{workflow_runtime::{Result, Error}, watch::answer_wake::{self, codex_turn}, claude_registry::{Kernel, Processes}};
 
 const DISCOVERY_MS:u64=15_000;
-const QUEUE_MS:u64=5_000;
+pub(crate) const QUEUE_MS:u64=5_000;
 const MAX_BYTES:usize=16*1024;
 // Dropping the last owner closes the channel without changing its last bool.
 // Closure is shutdown too; it must never authorize another native attempt.
@@ -108,11 +108,21 @@ impl OwnedQueue {
 async fn queue_exited(pid:u32)->std::io::Result<()> {
     crate::effect_runner::exited(pid).await
 }
+// A fixture queue that exits 0 must read as a handoff however long a stalled
+// runner takes to schedule it; a 5 s CI stall turned one into "unknown"
+// (ov-1036). Only the timeout test holds a fixture to the real bound.
+fn queue_bound()->Duration {
+    #[cfg(test)]
+    let ms=TEST_QUEUE_MS.try_with(|ms|*ms).unwrap_or(TEST_QUEUE_DEFAULT_MS);
+    #[cfg(not(test))]
+    let ms=QUEUE_MS;
+    Duration::from_millis(ms)
+}
 async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str) {
     let pid=queue.pid;
     let exited=tokio::select! {
         result=queue_exited(pid)=>result.is_ok(),
-        _=tokio::time::sleep(Duration::from_millis(QUEUE_MS))=>false,
+        _=tokio::time::sleep(queue_bound())=>false,
         _=async {if !stopping(stop){let _=stop.changed().await;}}=>false,
     };
     // Signal while the unreaped leader still pins this owned group, then never
@@ -183,3 +193,7 @@ tokio::task_local! { pub(crate) static TEST_LOST_REPLY: bool; }
 
 #[cfg(test)]
 tokio::task_local! { pub(crate) static TEST_IDLE: Arc<Notify>; }
+#[cfg(test)]
+tokio::task_local! { pub(crate) static TEST_QUEUE_MS: u64; }
+#[cfg(test)]
+pub(crate) const TEST_QUEUE_DEFAULT_MS:u64=60_000;

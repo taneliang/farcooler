@@ -84,7 +84,8 @@ async fn workflow_notice_native_backlog_equal_events_stale_epoch_and_restored_de
         for (_,d) in &pending {
             let fresh=endpoint(&b,&d.notice).await;
             notices::invoke(&b.svc.store,&b.svc.inventory,&d.notice,fresh,&mut stop).await.unwrap();
-            assert_eq!(b.svc.store.workflow_notice_delivery(&d.notice.id).unwrap().unwrap().state,"handed_off");
+            let delivery=b.svc.store.workflow_notice_delivery(&d.notice.id).unwrap().unwrap();
+            assert_eq!(delivery.state,"handed_off","evidence: {:?}",delivery.evidence);
         }
         let rows=std::fs::read_to_string(&log).unwrap();println!("actual private native argv bytes: {rows}");let rows:Vec<serde_json::Value>=rows.lines().map(|s|serde_json::from_str(s).unwrap()).collect();assert_eq!(rows.len(),2);
         let messages:Vec<serde_json::Value>=rows.iter().map(|r|{
@@ -191,14 +192,16 @@ async fn owned_descendant(mode: &str) {
     let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
     let id=notice.id.clone();
     let (panic_send,panic_recv)=tokio::sync::oneshot::channel::<()>();
-    let owner=tokio::spawn(async move {
+    // Only the timeout mode waits out the real bound; the rest run under the test default.
+    let bound=if mode=="timeout" {notices::QUEUE_MS} else {notices::TEST_QUEUE_DEFAULT_MS};
+    let owner=tokio::spawn(notices::TEST_QUEUE_MS.scope(bound,async move {
         let invocation=notices::invoke(&store,&inventory,&notice,proof,&mut signal);
         tokio::pin!(invocation);
         tokio::select! {
             result=&mut invocation=>result,
             _=panic_recv=>panic!("private queue supervision unwind"),
         }
-    });
+    }));
     let ids=group_receipt(&receipt).await;
     println!("live private receipt mode={mode}: {ids:?} external_pid={backend_pid}");
     assert_ne!(backend_pid,ids[1]);
