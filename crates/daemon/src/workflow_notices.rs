@@ -1,5 +1,5 @@
 //! One owned finite workflow-notice drain, independent of the engine's inbox.
-//! Codex queue exit0 is LOCAL HANDOFF only. Unknown is never retried.
+//! Codex queue exit0 is LOCAL HANDOFF only. Unknown is never retried; a queue slower than the bound is retried once first.
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use farcooler_store::{Store, workflow_notices::{Notice, NativeTarget}};
 use farcooler_tmux::LiveInventory;
@@ -67,21 +67,31 @@ pub(crate) async fn invoke(store:&Store,inventory:&LiveInventory, notice:&Notice
     if !store.workflow_prepare_notice(notice,&attempt,&endpoint.identity)? {return Ok(())}
     // The attempt is durably prepared BEFORE process creation. Final durable
     // authority is checked under SQLite's writer lock through synchronous spawn.
-    let spawned=store.workflow_with_native_notice_admission(notice,&attempt,&endpoint.identity,&endpoint.proof,|| {
-        if stopping(stop) || crate::claude_registry::process_incarnation(endpoint.pid)!=Some(endpoint.incarnation)
-            || pane(inventory,endpoint.terminal)!=Some((endpoint.pane.clone(),endpoint.tty.clone()))
-            || Kernel.tty(endpoint.pid)!=Some(endpoint.tty_device)
-            || std::fs::metadata(&endpoint.tty).ok().map(|m|m.rdev())!=Some(endpoint.tty_device) {
-            return None;
-        }
-        Some(queue_command(&endpoint.program,&endpoint.thread,&endpoint.home,&message).spawn().map(OwnedQueue::new))
-    })?;
-    let child=match spawned {
-        Some(Some(Ok(child)))=>child,
-        // No child was created; native side effects conclusively did not start.
-        _=>{store.workflow_finish_notice(&notice.id,&attempt,&endpoint.identity,"pending","refused_before_native_spawn")?;return Ok(())}
+    // A queue that outlives the bound and is proven gone is retried once under
+    // the same attempt: the notice is informational and carries its id, so a
+    // duplicate costs a repeated line, while settling unknown costs the notice (ov-1044).
+    let mut tries=0;
+    let (state,evidence)=loop {
+        let spawned=store.workflow_with_native_notice_admission(notice,&attempt,&endpoint.identity,&endpoint.proof,|| {
+            if stopping(stop) || crate::claude_registry::process_incarnation(endpoint.pid)!=Some(endpoint.incarnation)
+                || pane(inventory,endpoint.terminal)!=Some((endpoint.pane.clone(),endpoint.tty.clone()))
+                || Kernel.tty(endpoint.pid)!=Some(endpoint.tty_device)
+                || std::fs::metadata(&endpoint.tty).ok().map(|m|m.rdev())!=Some(endpoint.tty_device) {
+                return None;
+            }
+            Some(queue_command(&endpoint.program,&endpoint.thread,&endpoint.home,&message).spawn().map(OwnedQueue::new))
+        })?;
+        let child=match spawned {
+            Some(Some(Ok(child)))=>child,
+            // No child was created; native side effects conclusively did not start.
+            _ if tries==0=>{store.workflow_finish_notice(&notice.id,&attempt,&endpoint.identity,"pending","refused_before_native_spawn")?;return Ok(())}
+            // The first try may have been accepted, so it cannot go back to pending.
+            _=>break ("unknown","native_retry_refused_after_possible_acceptance"),
+        };
+        let (state,evidence,timed_out)=own_queue(child,stop).await;
+        tries+=1;
+        if !(timed_out && tries<2 && !stopping(stop)) {break (state,evidence)}
     };
-    let (state,evidence)=own_queue(child,stop).await;
     #[cfg(test)]
     if TEST_LOST_REPLY.try_with(|lost|*lost).unwrap_or(false) { return Ok(()); }
     store.workflow_finish_notice(&notice.id,&attempt,&endpoint.identity,state,evidence)?;
@@ -118,11 +128,13 @@ fn queue_bound()->Duration {
     let ms=QUEUE_MS;
     Duration::from_millis(ms)
 }
-async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str) {
+// The flag is true only when the bound expired and the group was then proved gone.
+async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str,bool) {
     let pid=queue.pid;
+    let mut timed_out=false;
     let exited=tokio::select! {
         result=queue_exited(pid)=>result.is_ok(),
-        _=tokio::time::sleep(queue_bound())=>false,
+        _=tokio::time::sleep(queue_bound())=>{timed_out=true;false},
         _=async {if !stopping(stop){let _=stop.changed().await;}}=>false,
     };
     // Signal while the unreaped leader still pins this owned group, then never
@@ -131,12 +143,12 @@ async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'sta
     // disappearance even after a signal error; the error itself proves nothing.
     let signal_error=queue.group.kill().err();
     let reaped=tokio::time::timeout(Duration::from_secs(1),queue.child.wait()).await;
-    let Ok(Ok(status))=reaped else {return ("unknown","native_owned_leader_reap_unproved")};
+    let Ok(Ok(status))=reaped else {return ("unknown","native_owned_leader_reap_unproved",false)};
     for _ in 0..100 {
         match crate::effect_runner::Group::gone(pid) {
             Ok(true)=>return if exited && status.success() {
-                ("handed_off","codex_queue_exit0_local_handoff_only")
-            } else {("unknown","native_spawn_possible_acceptance_without_conclusive_receipt")},
+                ("handed_off","codex_queue_exit0_local_handoff_only",false)
+            } else {("unknown","native_spawn_possible_acceptance_without_conclusive_receipt",timed_out)},
             // macOS can report EPERM for a group containing only zombies.
             // It is not disappearance; allow reaping within the same bound.
             Ok(false)|Err(_)=>tokio::time::sleep(Duration::from_millis(10)).await,
@@ -144,8 +156,8 @@ async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'sta
     }
     if let Some(error)=signal_error {
         tracing::warn!(pid,%error,"native queue group signal failed and cleanup remains unproved");
-        ("unknown","native_owned_group_signal_and_cleanup_unproved")
-    } else {("unknown","native_owned_group_cleanup_unproved")}
+        ("unknown","native_owned_group_signal_and_cleanup_unproved",false)
+    } else {("unknown","native_owned_group_cleanup_unproved",false)}
 }
 
 pub(crate) async fn run(store:Arc<Store>,inventory:LiveInventory,wake:Arc<Notify>,mut stop:watch::Receiver<bool>)->Result<()> {

@@ -180,6 +180,30 @@ async fn assert_group_gone(ids:[i32;4]) {
     }
     println!("owned cleanup receipt: leader={} pgid={} descendant={} descendant_pgid={}: all ESRCH",ids[0],ids[1],ids[2],ids[3]);
 }
+const SHORT_BOUND_MS:u64=1500;
+/// A queue that stalls past the bound on its first run only (ov-1044).
+fn slow_first_queue(b:&Board,always:bool)->(PathBuf,PathBuf) {
+    let (program,log)=queue(b,0);
+    let source=std::fs::read_to_string(&program).unwrap().replace("sys.exit(0)",&format!(
+        "import time\nif {} or sum(1 for _ in open({:?}))<2: time.sleep(30)\nsys.exit(0)",if always {"True"} else {"False"},log.to_string_lossy()));
+    std::fs::write(&program,source).unwrap();(program,log)
+}
+async fn deliver_slow(always:bool)->(String,usize) {
+    let b=board().await;enqueue(&b,1);target(&b).await;
+    let (program,log)=slow_first_queue(&b,always);
+    let notice=b.svc.store.workflow_pending_notices(0).unwrap()[0].1.notice.clone();
+    let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
+    let (_keep,mut stop)=tokio::sync::watch::channel(false);
+    notices::TEST_QUEUE_MS.scope(SHORT_BOUND_MS,notices::invoke(&b.svc.store,&b.svc.inventory,&notice,proof,&mut stop)).await.unwrap();
+    let d=b.svc.store.workflow_notice_delivery(&notice.id).unwrap().unwrap();let state=d.state;
+    (state,std::fs::read_to_string(&log).unwrap().lines().count())
+}
+#[tokio::test] async fn a_queue_slower_than_the_bound_is_retried_once_and_hands_off() {
+    assert_eq!(deliver_slow(false).await,("handed_off".to_string(),2));
+}
+#[tokio::test] async fn a_queue_slow_twice_settles_unknown_after_exactly_one_retry() {
+    assert_eq!(deliver_slow(true).await,("unknown".to_string(),2));
+}
 /// One way a native queue's owner ends, with an owned descendant alive.
 async fn owned_descendant(mode: &str) {
     let b=board().await;enqueue(&b,1);target(&b).await;
@@ -192,8 +216,8 @@ async fn owned_descendant(mode: &str) {
     let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
     let id=notice.id.clone();
     let (panic_send,panic_recv)=tokio::sync::oneshot::channel::<()>();
-    // Only the timeout mode waits out the real bound; the rest run under the test default.
-    let bound=if mode=="timeout" {notices::QUEUE_MS} else {notices::TEST_QUEUE_DEFAULT_MS};
+    // The timeout mode stalls through the retry too, so it runs a short bound; the rest use the test default.
+    let bound=if mode=="timeout" {SHORT_BOUND_MS} else {notices::TEST_QUEUE_DEFAULT_MS};
     let owner=tokio::spawn(notices::TEST_QUEUE_MS.scope(bound,async move {
         let invocation=notices::invoke(&store,&inventory,&notice,proof,&mut signal);
         tokio::pin!(invocation);
@@ -230,7 +254,9 @@ async fn owned_descendant(mode: &str) {
     let proof=TEST_PROGRAM.scope(b.dir.path().join("native-queue-0"),endpoint(&b,&settled.notice)).await;
     let (_retry_owner,mut retry_stop)=tokio::sync::watch::channel(false);
     notices::invoke(&b.svc.store,&b.svc.inventory,&settled.notice,proof,&mut retry_stop).await.unwrap();
-    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1,"settled original identity never resends");
+    // The timeout mode ran its one retry before settling; nothing runs after settling.
+    let runs=if mode=="timeout" {2} else {1};
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),runs,"settled original identity never resends");
     println!("private native mode={mode} state={} original_attempt={:?} target={:?} external_pid={backend_pid} survived",settled.state,settled.attempt_id,settled.target);
 }
 /// A test per way it ends (ov-993): five boards in one test took 12 s.
