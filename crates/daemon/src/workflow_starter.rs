@@ -5,6 +5,10 @@
 //! branch it lands on, its own Claude hook settings, and the GitHub repository CI runs in. It says them here,
 //! in `workflow get`'s reply, and suggests only: nothing is written. The orchestrator drafts on top of them and
 //! the owner reads every setting on the draft's card before anything publishes (`workflow_drafts`).
+//!
+//! **It refuses rather than suggest settings that can't publish.** Every template lands through a group, and a group
+//! holds a landing transport: a local bare repository, never a network remote. A workspace whose origin is GitHub
+//! has none to suggest, so until the engine can push to a remote (ov-1026) the suggestion says that instead.
 use crate::landing_templates::GATE_PATH;
 use crate::service::Service;
 use crate::workflow_runtime::{CodingCi, CodingCommand, CodingConfig, CodingHarness, LaunchFile, MAX_COMMAND_MS};
@@ -29,8 +33,30 @@ const CI_LOOK: &str = r#"out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs?h
 [ -n "$out" ] || exit 1
 printf '%s\n' "$out" > "$FARCOOLER_RECEIPT""#;
 
-/// Settings for `workspace` on this runner, or why there are none to suggest, in a sentence a person reads.
+/// `workflow get`'s reply, for a workspace that has never published: the settings this runner suggests for its first
+/// draft as `suggested_adapter`, or why it can't as `suggested_adapter_refused`. Only a `get` reply carries a
+/// `configuration`, and a published workspace's isn't null, so every other reply is left alone.
+pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_json::Value) -> serde_json::Value {
+    if value.get("configuration").is_none_or(|c| !c.is_null()) { return value; }
+    let said = match suggest(svc, workspace).await {
+        Ok(config) => ("suggested_adapter", serde_json::json!(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))),
+        Err(why) => ("suggested_adapter_refused", why.into()),
+    };
+    if let Some(reply) = value.as_object_mut() { reply.insert(said.0.into(), said.1); }
+    value
+}
+
+/// Settings a first draft can publish on, or why there are none, in a sentence a person reads.
 pub async fn suggest(svc: &Service, workspace: Uuid) -> Result<CodingConfig, String> {
+    let config = settings(svc, workspace).await?;
+    if config.landing.is_none() {
+        return Err("Every workflow lands through a local bare repository, and this workspace’s origin is on GitHub, which Far Cooler can’t land on yet. Nothing can be drafted here until it can.".into());
+    }
+    Ok(config)
+}
+
+/// Everything a first draft pins to except the landing transport, which no workspace on GitHub has yet.
+pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, String> {
     let gone = |_| "Far Cooler couldn’t read this workspace.".to_string();
     let ws = svc.store.get_workspace(workspace).map_err(gone)?;
     let repo = svc.store.get_repository(ws.repository_id).map_err(gone)?;
@@ -44,7 +70,7 @@ pub async fn suggest(svc: &Service, workspace: Uuid) -> Result<CodingConfig, Str
     let origin = run(&git, &repository, &["remote", "get-url", "origin"]).await.unwrap_or_default();
     let ci_repository = github_repository(&origin).ok_or("Its origin isn’t on GitHub, so there’s no CI for a draft to wait on. Write the settings yourself and publish them with `workspace set-workflow`.")?;
     let gh = farcooler_core::programs::find("gh").ok_or("This runner has no gh, which the CI step looks at GitHub with.")?;
-    let settings = crate::service::write_claude_hook_settings(svc.root_dir()).ok_or("Far Cooler couldn’t write its Claude hook settings on this runner.")?;
+    let settings = engine_hook_settings(svc).ok_or("Far Cooler couldn’t write the engine’s Claude hook settings on this runner.")?;
     let settings = LaunchFile { digest: farcooler_workflow::digest(&std::fs::read(&settings).map_err(|_| "Far Cooler couldn’t read its Claude hook settings.")?),
         path: settings.canonicalize().map_err(|_| "Far Cooler couldn’t read its Claude hook settings.")? };
     let environment = crate::landing_templates::gate_environment(&[]).map_err(|e| e.to_string())?;
@@ -59,6 +85,17 @@ pub async fn suggest(svc: &Service, workspace: Uuid) -> Result<CodingConfig, Str
         checks: Vec::new(), reviewer: None,
         ci: CodingCi { repository: ci_repository, workflow: CI_WORKFLOW.into(), event: "push".into(),
             command: CodingCommand { argv: vec!["/bin/sh".into(), "-c".into(), CI_LOOK.into()], environment: look, timeout_ms: 120_000 } } })
+}
+
+/// Claude's hook settings for the agents the engine starts: they report to the engine's own socket, which publishing
+/// checks (`native_agent_hooks`), not to the one the runner's terminals use. Written once and left as it is after, so
+/// the digest a published workflow pins stays true.
+fn engine_hook_settings(svc: &Service) -> Option<PathBuf> {
+    let engine = svc.root_dir().join("workflow").canonicalize().ok()?;
+    let text = serde_json::to_string_pretty(&crate::hook_install::claude_settings(&engine.join("h.sock"))).ok()?;
+    let path = svc.root_dir().join("workflow-claude-hooks.json");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) { std::fs::write(&path, text).ok()?; }
+    path.canonicalize().ok()
 }
 
 /// The checkout a `.git` directory belongs to, when it is a main checkout's own directory.

@@ -127,7 +127,8 @@ async fn settles(host: &Host, card: Uuid, to: TaskStatus) {
         if host.service.store.get_task(card).unwrap().status == to { return; }
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
-    panic!("the card never reached {to:?}; it is {:?}", host.service.store.get_task(card).unwrap().status);
+    let said: Vec<_> = host.service.store.notes_for(card, Some(NoteKind::Finding)).unwrap().into_iter().map(|n| n.body).collect();
+    panic!("the card never reached {to:?}; it is {:?}: {said:?}", host.service.store.get_task(card).unwrap().status);
 }
 
 #[tokio::test]
@@ -278,6 +279,65 @@ async fn mains_draft_landing_on_a_remote_publishes_on_a_scratch_copy() {
     let refused = link.call(req).await;
     assert!(refused.is_err() || !format!("{:?}", refused).contains("\"Ok\""), "{refused:?}");
     assert_eq!(pin(&host).as_deref(), Some(published.pin.as_str()), "the leaky URL published nothing");
+    drop(link);
+    host.close().await;
+}
+
+/// ov-1010: a workspace that has never published a workflow drafts its first one on settings the runner works out,
+/// and the owner's approval publishes them. On GitHub there is no landing transport yet (ov-1026), so `get` refuses to
+/// suggest and says why; the settings themselves, given the transport ov-1026 adds, draft and publish.
+#[tokio::test]
+async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion() {
+    if as_a_person("a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion").await { return; }
+    if farcooler_core::programs::find("gh").is_none() { eprintln!("skipped: this host has no gh, which the suggested CI step needs"); return; }
+    let (dir, configured) = configured().await;
+    let repo = dir.path().join("selected");
+    git(&repo, &["update-ref", "refs/heads/main", "HEAD"]).await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+
+    // With no GitHub origin there's no CI to wait on, and the runner says so instead of guessing.
+    let got = call(&mut link, ws, Action::Get).await;
+    assert!(got["configuration"].is_null() && got.get("suggested_adapter").is_none(), "{got}");
+    assert!(got["suggested_adapter_refused"].as_str().unwrap().contains("origin isn’t on GitHub"), "{got}");
+
+    // On GitHub there is CI, but nothing to land through yet: it refuses rather than suggest what can't publish.
+    git(&repo, &["remote", "add", "origin", "git@github.com:example/first-workflow.git"]).await;
+    let got = call(&mut link, ws, Action::Get).await;
+    assert!(got.get("suggested_adapter").is_none(), "{got}");
+    assert!(got["suggested_adapter_refused"].as_str().unwrap().contains("can’t land on yet"), "{got}");
+
+    let mut suggested = farcooler_daemon::workflow_starter::settings(&host.service, ws).await.unwrap();
+    assert_eq!(suggested.repository, repo.canonicalize().unwrap());
+    assert_eq!((suggested.landing_ref.as_str(), suggested.base.clone()), ("refs/heads/main", git(&repo, &["rev-parse", "HEAD"]).await));
+    assert_eq!((suggested.ci.repository.as_str(), suggested.ci.workflow.as_str()), ("example/first-workflow", "CI"));
+    assert!(matches!(&suggested.harness, CodingHarness::Native { preset, settings: Some(_), .. } if preset == "claude"), "{:?}", suggested.harness);
+    // Without a transport no template is sound, which is why the suggestion refuses.
+    let none = lt::template("batched-push", &suggested, &["make check".into()], &[lt::Extra::Agent], &Options { batch: Some(4), ..Default::default() }).unwrap();
+    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(pinned) = &none.adapter;
+    assert!(farcooler_daemon::workflow_runtime::CodingConfigExt::validate_definition(pinned, &none.definition).is_err());
+
+    // Given the transport, the settings draft, the owner approves, and they publish with each step's models.
+    suggested.landing = configured.landing.clone();
+    git(&repo, &["update-ref", "refs/heads/main", &suggested.base]).await;
+    let b = lt::template("batched-push", &suggested, &["make check".into()], &[lt::Extra::Agent], &Options { batch: Some(4), ..Default::default() }).unwrap();
+    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(pinned) = &b.adapter;
+    farcooler_daemon::workflow_runtime::CodingConfigExt::validate_definition(pinned, &b.definition).expect("the settings and their draft are sound");
+    let reply = propose(&mut link, ws, b, "Run Main through the engine.").await;
+    let card = card_of(&reply);
+    assert_eq!(reply["draft"]["state"], "pending", "{reply}");
+    assert!(reply["draft"]["drafted_against"].is_null());
+    let (ask, words) = asked(&host, card);
+    assert!(ask.body.contains("claude:sonnet") && ask.body.contains("claude:opus"), "the card names the models: {}", ask.body);
+    assert_eq!(pin(&host), None, "a proposal publishes nothing");
+
+    say(&mut link, card, pb::TaskNoteKind::Answer, "user", &words).await;
+    settles(&host, card, TaskStatus::Done).await;
+    let published = host.service.store.workflow_configuration(&ws.to_string()).unwrap().expect("published");
+    assert_eq!(published.definition.source, "landing/batched-push");
+    assert_eq!(published.definition.models.get("build").map(|m| m[0].as_str()), Some("claude:sonnet"));
+    let got = call(&mut link, ws, Action::Get).await;
+    assert!(got["configuration"].is_object() && got.get("suggested_adapter").is_none() && got.get("suggested_adapter_refused").is_none(), "{got}");
     drop(link);
     host.close().await;
 }

@@ -787,17 +787,9 @@ impl Rpc {
                 let admission = self.admit(workspace).await?;
                 admission.permits(&action)?;
                 if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)
-                let get = matches!(action, Action::Get);
-                let mut value = handle.wire_command(admission, action).await
+                let value = handle.wire_command(admission, action).await
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
-                // A workspace that has never published gets the settings this runner suggests for its first draft (ov-1010).
-                if get && value.get("configuration").is_none_or(serde_json::Value::is_null) && let Some(reply) = value.as_object_mut() {
-                    match crate::workflow_starter::suggest(svc, workspace).await {
-                        Ok(config) => { reply.insert("suggested_adapter".into(), serde_json::json!(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))); }
-                        Err(why) => { reply.insert("suggested_adapter_refused".into(), why.into()); }
-                    }
-                }
-                Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:value.to_string() }))
+                Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:crate::workflow_starter::add_to_get(svc, workspace, value).await.to_string() }))
             }
             // Watch a running engine agent's terminal, read-only (ov-972). Addressed by workspace and
             // item, never by terminal id: the engine's pane is in a tmux server the daemon's inventory
