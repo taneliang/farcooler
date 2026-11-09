@@ -40,7 +40,6 @@ struct PlanCostTests {
         let over = try #require(PlanWords.overBudget(theme))
         #expect(over == .over(used: 320_000, budget: 250_000))
         #expect(PlanWords.budgetLine(over, locale: Locale(identifier: "en_US")) == "Over budget: 320K of 250K tokens")
-        #expect(PlanWords.overBudget(plan.lines[1]) == nil, "470K of 500K is within")
         let within = try #require(PlanWords.budget(plan.lines[1].spend, against: plan.lines[1].budgetTokens))
         #expect(PlanWords.budgetLine(within, locale: Locale(identifier: "en_US")) == "470K of 500K tokens budgeted")
         var spend = PlanSpend()

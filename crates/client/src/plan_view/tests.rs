@@ -222,7 +222,7 @@ fn presentation(item: &str, approval: bool) -> crate::workflow_presentation::Pre
         controller: true,
         decision_principal: Some("owner".into()),
     };
-    crate::workflow_presentation::project(&state, &auth).unwrap()
+    crate::workflow_presentation::project(&state, &auth, crate::workflow_presentation::Style::Apple).unwrap()
 }
 
 #[test]
