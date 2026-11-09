@@ -188,6 +188,12 @@ jobs:
       # so only a new duplicate string, wire-word switch, twin file or growth fails.
       - run: ./scripts/shared-core-lint.py --self-test
       - run: ./scripts/shared-core-lint.py
+      # The baseline only shrinks: one that records more than main's is refused,
+      # so a pull request cannot make a new violation pass by writing it down.
+      - name: Baseline did not grow
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          ./scripts/shared-core-lint.py --baseline-not-grown FETCH_HEAD
       # The capability names the apps ask a runner for are generated from
       # `farcooler_protocol::capability` (ov-154), and `can` takes the
       # generated type, so a misspelling does not compile. A generated file

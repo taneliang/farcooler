@@ -261,19 +261,69 @@ fn a_stopped_run_shows_why() {
     assert_eq!(view.runs[0].reasons, before, "a stop for another run is not this one's");
 }
 
-fn labels(style: Style) -> Vec<String> {
-    let phases = [Phase::Blocked, Phase::WaitingApproval, Phase::WaitingReview, Phase::Running, Phase::Uncertain,
-        Phase::Cancelling, Phase::Done, Phase::Failed, Phase::Cancelled, Phase::WaitingJoin, Phase::Joined];
-    let kinds = [StageKind::Provision, StageKind::Build, StageKind::Check, StageKind::Review(Reviewer::Dispatch),
+/// Each list below must hold one of every variant of its enum, and cannot go stale quietly: `slot` is an
+/// exhaustive `match`, so a new variant does not compile until it has a slot, and a slot no entry fills
+/// fails `every_variant_is_listed`. A label a new variant produces is then in the golden file that
+/// `scripts/copy-lint.py` and `scripts/shared-core-lint.py` read, instead of being linted by nobody.
+fn phases() -> Vec<Phase> {
+    vec![Phase::Blocked, Phase::WaitingApproval, Phase::WaitingReview, Phase::Running, Phase::Uncertain,
+        Phase::Cancelling, Phase::Done, Phase::Failed, Phase::Cancelled, Phase::WaitingJoin, Phase::Joined]
+}
+fn kinds() -> Vec<StageKind> {
+    vec![StageKind::Provision, StageKind::Build, StageKind::Check, StageKind::Review(Reviewer::Dispatch),
         StageKind::Land, StageKind::Ci, StageKind::Tracker, StageKind::Action("x".into()), StageKind::Evaluate("x".into()),
         StageKind::Join { group: "x".into(), adopt: false }, StageKind::AwaitBase, StageKind::Fold, StageKind::Run,
         StageKind::Push, StageKind::AwaitCi, StageKind::Route, StageKind::PushBranch, StageKind::OpenPr,
-        StageKind::PrReady, StageKind::AwaitPr];
-    let reasons = [Reason::Automatic, Reason::ApprovalRequired, Reason::ReviewRequired, Reason::DependenciesOrResource,
+        StageKind::PrReady, StageKind::AwaitPr]
+}
+fn reasons() -> Vec<Reason> {
+    vec![Reason::Automatic, Reason::ApprovalRequired, Reason::ReviewRequired, Reason::DependenciesOrResource,
         Reason::EffectUncertain, Reason::Reworking, Reason::EvidenceInvalidated, Reason::Completed, Reason::Failed,
-        Reason::Cancelling, Reason::Cancelled, Reason::WorktreeChanged];
-    let actions = [ActionKind::InspectLatestEvidence, ActionKind::InspectUncertainty, ActionKind::Approve,
-        ActionKind::AcceptReview, ActionKind::RequestRework, ActionKind::RejectReview, ActionKind::Cancel];
+        Reason::Cancelling, Reason::Cancelled, Reason::WorktreeChanged]
+}
+fn actions() -> Vec<ActionKind> {
+    vec![ActionKind::InspectLatestEvidence, ActionKind::InspectUncertainty, ActionKind::Approve,
+        ActionKind::AcceptReview, ActionKind::RequestRework, ActionKind::RejectReview, ActionKind::Cancel]
+}
+fn phase_slot(p: &Phase) -> usize {
+    match p { Phase::Blocked => 0, Phase::WaitingApproval => 1, Phase::WaitingReview => 2, Phase::Running => 3,
+        Phase::Uncertain => 4, Phase::Cancelling => 5, Phase::Done => 6, Phase::Failed => 7, Phase::Cancelled => 8,
+        Phase::WaitingJoin => 9, Phase::Joined => 10 }
+}
+fn kind_slot(k: &StageKind) -> usize {
+    match k { StageKind::Provision => 0, StageKind::Build => 1, StageKind::Check => 2, StageKind::Review(_) => 3,
+        StageKind::Land => 4, StageKind::Ci => 5, StageKind::Tracker => 6, StageKind::Action(_) => 7,
+        StageKind::Evaluate(_) => 8, StageKind::Join { .. } => 9, StageKind::AwaitBase => 10, StageKind::Fold => 11,
+        StageKind::Run => 12, StageKind::Push => 13, StageKind::AwaitCi => 14, StageKind::Route => 15,
+        StageKind::PushBranch => 16, StageKind::OpenPr => 17, StageKind::PrReady => 18, StageKind::AwaitPr => 19 }
+}
+fn reason_slot(r: &Reason) -> usize {
+    match r { Reason::Automatic => 0, Reason::ApprovalRequired => 1, Reason::ReviewRequired => 2,
+        Reason::DependenciesOrResource => 3, Reason::EffectUncertain => 4, Reason::Reworking => 5,
+        Reason::EvidenceInvalidated => 6, Reason::Completed => 7, Reason::Failed => 8, Reason::Cancelling => 9,
+        Reason::Cancelled => 10, Reason::WorktreeChanged => 11 }
+}
+fn action_slot(a: &ActionKind) -> usize {
+    match a { ActionKind::InspectLatestEvidence => 0, ActionKind::InspectUncertainty => 1, ActionKind::Approve => 2,
+        ActionKind::AcceptReview => 3, ActionKind::RequestRework => 4, ActionKind::RejectReview => 5,
+        ActionKind::Cancel => 6 }
+}
+
+#[test]
+fn every_variant_is_listed() {
+    fn filled<T>(list: &[T], slot: fn(&T) -> usize, of: usize, what: &str) {
+        let mut slots: Vec<usize> = list.iter().map(slot).collect();
+        slots.sort();
+        assert_eq!(slots, (0..of).collect::<Vec<_>>(), "the {what} list in `labels` misses a variant, or lists one twice");
+    }
+    filled(&phases(), phase_slot, 11, "Phase");
+    filled(&kinds(), kind_slot, 20, "StageKind");
+    filled(&reasons(), reason_slot, 12, "Reason");
+    filled(&actions(), action_slot, 7, "ActionKind");
+}
+
+fn labels(style: Style) -> Vec<String> {
+    let (phases, kinds, reasons, actions) = (phases(), kinds(), reasons(), actions());
     let mut out = vec![display::run_label(style)];
     out.extend(phases.iter().map(|p| display::phase_label(p, style)));
     out.extend(kinds.iter().map(|k| style.label(display::stage_label(k))));

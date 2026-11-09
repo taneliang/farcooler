@@ -9,32 +9,41 @@ screen's logic. Four rules, each run against the user-facing sources of the Mac 
 (services/web/src/client):
 
   1. rust-copy    A string the Rust client or the shared usage words produce (three words or
-                  more) is written again in an app. The app should show what Rust sends.
+                  more), or any label of two words or more in Rust's per-platform label list
+                  (crates/client/src/testdata/workflow-labels.json), is written again in an app,
+                  in any case: `Queued in a Batch` is `Queued in a batch`. The app should show
+                  what Rust sends.
   2. wire-word    An app switches on a word a Rust `*_word` function returns (`case "running"`,
                   `"running" ->`, `=== 'running'`). The apps map wire words to copy no more:
                   ov-924 removed those maps for workflow runs.
   3. twin         A new file in Android's model/ or notify/ folder or in the web client shares
                   its base name with a logic file in AgentKit, or says in its header that it is a
                   twin, port, mirror or transcription of AgentKit.
-  4. ratchet      The count of user-facing strings in a logic file (AgentKit files that import no
-                  UI framework, Android model/ and notify/, the web client minus its views) may
-                  fall but not rise. A new file starts at zero.
+  4. ratchet      The count of user-facing strings in any native file, views included (SwiftUI,
+                  Android ui/, macos, ios, the web client), may fall but not rise. A new file
+                  starts at zero.
 
 Today's violations are recorded in scripts/shared-core-baseline.json, so only new ones fail.
 The baseline may shrink: run `--update-baseline` after removing duplication, and review the
-diff; a run that would grow it is refused unless `--allow-growth` says it is deliberate.
+diff; a run that would grow it is refused unless `--allow-growth` says it is deliberate. CI
+never grows it: `--baseline-not-grown <ref>` fails when the baseline in the tree records more
+than the one at <ref> (the base branch).
 
 A line that is copy about the platform itself, not about runner data, says
 `platform copy: <reason>` in a comment on the line; a bare `platform copy` does not exempt.
+Exemptions are counted per file and recorded in the baseline under `exempt`, so adding one
+shows as a baseline diff in the pull request, and every scan prints the total.
 
   ./scripts/shared-core-lint.py                    scan the tree; exit 1 on any new violation
   ./scripts/shared-core-lint.py --self-test        plant each violation and watch it go red
   ./scripts/shared-core-lint.py --update-baseline  record today's violations (shrinking only)
+  ./scripts/shared-core-lint.py --baseline-not-grown origin/main   CI: the baseline did not grow
 """
 
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -43,6 +52,7 @@ BASELINE = ROOT / "scripts" / "shared-core-baseline.json"
 RUST_COPY_DIRS = ["crates/client/src"]
 RUST_COPY_FILES = ["crates/core/src/usage_words.rs", "crates/core/src/phrase.rs"]
 RUST_WORD_DIRS = ["crates/client/src"]
+RUST_LABELS = "crates/client/src/testdata/workflow-labels.json"
 NATIVE_ROOTS = ["apps/shared/AgentKit/Sources", "apps/macos/Sources", "apps/ios",
                 "apps/android/app/src/main", "services/web/src/client"]
 NATIVE_SUFFIXES = {".swift", ".kt", ".ts"}
@@ -50,8 +60,9 @@ SKIP_PARTS = {"Tests", "FarCoolerUITests", "test", "androidTest", ".build", "bui
 UI_IMPORTS = re.compile(r"^\s*import\s+(SwiftUI|AppKit|UIKit)\b|^\s*import\s+androidx\.compose|^\s*import\s+android\.(view|widget)", re.M)
 WEB_VIEW = re.compile(r"-(view|column|list|tab)\.ts$")
 
-_PLATFORM_OK = re.compile(r"platform copy:\s*\S")
-_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"' + r"|'((?:[^'\\\n]|\\.)*)'")
+_PLATFORM_OK = re.compile(r"platform copy:\s*\S[^\n]{3,}")
+_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"' + r"|'((?:[^'\\\n]|\\.)*)'" + r"|`((?:[^`\\\n]|\\.)*)`")
+_CONCAT = re.compile(r'(["\'`])\s*\+\s*\1')
 _RUST_LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 _TWIN_HEADER = re.compile(r"\b(twin|port|mirror|mirrors|transcription|transcribes|transcribed)\b[^\n]{0,60}\bAgentKit\b"
                           r"|\bAgentKit\b[^\n]{0,60}\b(twin|port|mirror|mirrors|transcription|transcribes)\b", re.I)
@@ -105,7 +116,9 @@ def rust_wire_words(text: str) -> set[str]:
 # ---- what the apps say -----------------------------------------------------------------------
 
 def literals(line: str) -> list[str]:
-    return [m.group(1) if m.group(1) is not None else m.group(2) for m in _LITERAL.finditer(line)]
+    """The strings on a line, with `"a" + "b"` joined so a split sentence is still one."""
+    line = _CONCAT.sub("", line)
+    return [next(g for g in m.groups() if g is not None) for m in _LITERAL.finditer(line)]
 
 
 def user_facing(literal: str) -> bool:
@@ -117,15 +130,26 @@ def user_facing(literal: str) -> bool:
         and bool(re.search(r"[a-z]{2}", literal))
 
 
+def rust_labels(text: str) -> set[str]:
+    """Every label Rust can produce, on any platform, of two words or more (one word is too common)."""
+    return {label for labels in json.loads(text).values() for label in labels if len(words(label)) >= 2}
+
+
+def folded(literal: str) -> str:
+    return " ".join(literal.lower().split())
+
+
 def rule_rust_copy(rust: set[str], native: dict[str, str]) -> set[str]:
+    """`rust` is compared in any case, so Apple's title case finds Rust's sentence case."""
+    wanted = {folded(r): r for r in rust}
     out = set()
     for path, text in native.items():
         for line in text.splitlines():
             if is_comment(line) or _PLATFORM_OK.search(line):
                 continue
             for literal in literals(line):
-                if literal in rust:
-                    out.add(f"{path}::{literal}")
+                if folded(literal) in wanted:
+                    out.add(f"{path}::{wanted[folded(literal)]}")
     return out
 
 
@@ -183,17 +207,24 @@ def rule_twin(native: dict[str, str]) -> set[str]:
     return out
 
 
-def counts(native: dict[str, str]) -> dict[str, int]:
-    out = {}
-    for path, text in logic_files(native).items():
-        n = 0
+def counts(native: dict[str, str]) -> tuple[dict[str, int], dict[str, int]]:
+    """User-facing strings per file, views included, and the `platform copy: <reason>` lines per file."""
+    strings, exempt = {}, {}
+    for path, text in native.items():
+        n = e = 0
         for line in text.splitlines():
-            if is_comment(line) or _PLATFORM_OK.search(line):
+            if is_comment(line):
                 continue
-            n += sum(1 for literal in literals(line) if user_facing(literal))
+            found = sum(1 for literal in literals(line) if user_facing(literal))
+            if _PLATFORM_OK.search(line):
+                e += 1 if found else 0
+            else:
+                n += found
         if n:
-            out[path] = n
-    return out
+            strings[path] = n
+        if e:
+            exempt[path] = e
+    return strings, exempt
 
 
 # ---- the tree --------------------------------------------------------------------------------
@@ -221,20 +252,22 @@ def read_rust(dirs, files=()) -> dict[str, str]:
     return out
 
 
-def measure(rust: dict[str, str], native: dict[str, str]) -> dict:
-    lits, wset = set(), set()
+def measure(rust: dict[str, str], native: dict[str, str], labels: str = "{}") -> dict:
+    lits, wset = rust_labels(labels), set()
     for text in rust.values():
         lits |= rust_literals(text)
         wset |= rust_wire_words(text)
+    strings, exempt = counts(native)
     return {
         "rust-copy": sorted(rule_rust_copy(lits, native)),
         "wire-word": sorted(rule_wire_word(wset, native)),
         "twin": sorted(rule_twin(native)),
-        "ratchet": dict(sorted(counts(native).items())),
+        "ratchet": dict(sorted(strings.items())),
+        "exempt": dict(sorted(exempt.items())),
     }
 
 
-def compare(now: dict, baseline: dict) -> list[str]:
+def compare(now: dict, baseline: dict, with_exempt: bool = True) -> list[str]:
     """Each way `now` is worse than the baseline."""
     out = []
     for rule in ("rust-copy", "wire-word", "twin"):
@@ -244,6 +277,11 @@ def compare(now: dict, baseline: dict) -> list[str]:
         was = baseline.get("ratchet", {}).get(path, 0)
         if n > was:
             out.append(f"ratchet: {path} has {n} user-facing strings, the baseline allows {was}")
+    for path, n in (now.get("exempt", {}).items() if with_exempt else ()):
+        was = baseline.get("exempt", {}).get(path, 0)
+        if n > was:
+            out.append(f"exempt: {path} has {n} `platform copy:` lines, the baseline records {was}. "
+                       "Record the new one with --update-baseline so the pull request shows it for review")
     return out
 
 
@@ -255,8 +293,13 @@ HELP = {
 }
 
 
+def measure_tree() -> dict:
+    return measure(read_rust(RUST_COPY_DIRS, RUST_COPY_FILES) | read_rust(RUST_WORD_DIRS), read_native(),
+                   (ROOT / RUST_LABELS).read_text(encoding="utf-8"))
+
+
 def scan() -> int:
-    now = measure(read_rust(RUST_COPY_DIRS, RUST_COPY_FILES) | read_rust(RUST_WORD_DIRS), read_native())
+    now = measure_tree()
     baseline = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {}
     if not baseline:
         print(f"{BASELINE.relative_to(ROOT)} is missing: record today's violations with --update-baseline")
@@ -271,21 +314,43 @@ def scan() -> int:
         return 1
     fewer = sum(len(set(baseline.get(r, [])) - set(now[r])) for r in ("rust-copy", "wire-word", "twin")) \
         + sum(1 for p, n in baseline.get("ratchet", {}).items() if now["ratchet"].get(p, 0) < n)
-    print("shared-core-lint: nothing new" + (f" ({fewer} baseline entries can shrink: --update-baseline)" if fewer else ""))
+    exempt = sum(now["exempt"].values())
+    print("shared-core-lint: nothing new" + (f" ({fewer} baseline entries can shrink: --update-baseline)" if fewer else "")
+          + f"; {exempt} `platform copy:` exemption{'' if exempt == 1 else 's'}")
+    return 0
+
+
+def baseline_not_grown(ref: str) -> int:
+    """CI: the baseline in the tree records no more than the one at `ref`. Exemptions are the exception:
+    they show in the diff and are reviewed there."""
+    shown = subprocess.run(["git", "show", f"{ref}:scripts/shared-core-baseline.json"], cwd=ROOT,
+                           capture_output=True, text=True)
+    if shown.returncode != 0:
+        if "exists on disk, but not in" in shown.stderr or "does not exist" in shown.stderr:
+            print(f"shared-core-lint: {ref} has no baseline yet; nothing to hold this one to")
+            return 0
+        print(f"shared-core-lint: cannot read the baseline at {ref}: {shown.stderr.strip()}")
+        return 1
+    grew = compare(json.loads(BASELINE.read_text(encoding="utf-8")), json.loads(shown.stdout), with_exempt=False)
+    if grew:
+        print(f"the baseline records more than {ref} does. A baseline only shrinks; fix the new duplication instead:")
+        print("\n".join(grew))
+        return 1
+    print(f"shared-core-lint: the baseline did not grow against {ref}")
     return 0
 
 
 def update_baseline(allow_growth: bool) -> int:
-    now = measure(read_rust(RUST_COPY_DIRS, RUST_COPY_FILES) | read_rust(RUST_WORD_DIRS), read_native())
+    now = measure_tree()
     if BASELINE.exists() and not allow_growth:
-        grew = compare(now, json.loads(BASELINE.read_text(encoding="utf-8")))
+        grew = compare(now, json.loads(BASELINE.read_text(encoding="utf-8")), with_exempt=False)
         if grew:
             print("refusing to record new violations in the baseline (pass --allow-growth if that is deliberate):")
             print("\n".join(grew))
             return 1
     BASELINE.write_text(json.dumps(now, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"recorded {len(now['rust-copy'])} rust-copy, {len(now['wire-word'])} wire-word, "
-          f"{len(now['twin'])} twin, {len(now['ratchet'])} ratchet files")
+          f"{len(now['twin'])} twin, {len(now['ratchet'])} ratchet files, {sum(now['exempt'].values())} exemptions")
     return 0
 
 
@@ -295,6 +360,12 @@ def self_test() -> int:
         'pub fn status_word(raw: i32) -> &\'static str { match raw { 1 => "awaiting_review", _ => "idle" } }\n'
         'fn copy() -> &\'static str { "Nothing needs you right now" }\n'
         '#[cfg(test)]\nmod tests { fn t() { let _ = "Only a test says this"; } }\n')}
+    labels = json.dumps({"apple": ["Queued in a Batch", "Awaiting Approval", "Cancel Run", "Approve"],
+                         "material": ["Queued in a batch", "Awaiting approval", "Cancel run", "Approve"]})
+
+    def m(rust, tree):
+        return measure(rust, tree, labels)
+
     clean = {
         "apps/shared/AgentKit/Sources/AgentKit/Card.swift": 'import Foundation\nlet title = "Open a ticket"  // one string\n',
         "apps/android/app/src/main/java/com/farcooler/ui/Screen.kt": 'import androidx.compose.ui.Modifier\nfun f() = "Nothing needs you right now"  // platform copy: the sample in the preview\n',
@@ -311,12 +382,30 @@ def self_test() -> int:
         "ratchet-android": ("apps/android/app/src/main/java/com/farcooler/model/Words.kt", 'val a = "Something went wrong here"\n'),
         "ratchet-web": ("services/web/src/client/words.ts", "export const a = 'Something went wrong here'\n"),
         "ratchet-agentkit": ("apps/shared/AgentKit/Sources/AgentKit/Words.swift", 'let a = "Something went wrong here"\n'),
+        # Apple's title case is Rust's sentence case written again.
+        "case-swiftui": ("apps/macos/Sources/Farcooler/Badge.swift", 'import SwiftUI\nlet v = Text("Queued in a Batch")\n'),
+        # A two-word label is below the three-word floor but it is in Rust's label list.
+        "case-android-title": ("apps/android/app/src/main/java/com/farcooler/ui/Pill.kt", 'import androidx.compose.ui.Modifier\nfun f() = "Awaiting Approval"\n'),
+        "case-swift-sentence": ("apps/ios/Farcooler/Pill.swift", 'import SwiftUI\nlet t = Text("Cancel run")\n'),
+        "case-swift-sentence-rust": ("apps/ios/Farcooler/Empty.swift", 'import SwiftUI\nlet t = Text("Nothing Needs You Right Now")\n'),
+        "short-android-ui": ("apps/android/app/src/main/java/com/farcooler/ui/Chip.kt", 'import androidx.compose.ui.Modifier\nfun f() = "Awaiting approval"\n'),
+        "short-title-case": ("apps/ios/Farcooler/Row.swift", 'import SwiftUI\nlet b = Button("Cancel Run") {}\n'),
+        "template-literal": ("services/web/src/client/run-view.ts", "export const t = `Awaiting approval`\n"),
+        "concatenated": ("services/web/src/client/run-view.ts", "export const t = 'Nothing needs ' + 'you right now'\n"),
+        # Views are in the ratchet: a new sentence in a SwiftUI file, an Android ui file, a web view.
+        "ratchet-swiftui": ("apps/ios/Farcooler/Banner.swift", 'import SwiftUI\nlet t = Text("Something went wrong here")\n'),
+        "ratchet-android-ui": ("apps/android/app/src/main/java/com/farcooler/ui/Banner.kt", 'import androidx.compose.ui.Modifier\nval t = "Something went wrong here"\n'),
+        "ratchet-web-view": ("services/web/src/client/banner-view.ts", "export const t = 'Something went wrong here'\n"),
+        "exempt-grows": ("apps/ios/Farcooler/Plat.swift", 'import SwiftUI\nlet t = Text("Allow notifications please")  // platform copy: the system prompt\n'),
     }
     expect = {"rust-copy": "rust-copy", "wire-word-swift": "wire-word", "wire-word-kotlin": "wire-word", "wire-word-ts": "wire-word",
               "twin-name": "twin", "twin-header": "twin", "ratchet-android": "ratchet", "ratchet-web": "ratchet",
-              "ratchet-agentkit": "ratchet"}
+              "ratchet-agentkit": "ratchet",
+              "case-swiftui": "rust-copy", "case-swift-sentence-rust": "rust-copy", "case-android-title": "rust-copy", "case-swift-sentence": "rust-copy", "short-android-ui": "rust-copy", "short-title-case": "rust-copy",
+              "template-literal": "rust-copy", "concatenated": "rust-copy", "ratchet-swiftui": "ratchet",
+              "ratchet-android-ui": "ratchet", "ratchet-web-view": "ratchet", "exempt-grows": "exempt"}
     failed = 0
-    base_state = measure(rust, clean)
+    base_state = m(rust, clean)
     if compare(base_state, base_state):
         print("self-test: the clean tree is not clean against itself")
         failed += 1
@@ -326,29 +415,49 @@ def self_test() -> int:
         failed += 1
     for name, (path, text) in planted.items():
         tree = dict(clean); tree[path] = text
-        hit = compare(measure(rust, tree), base_state)
+        hit = compare(m(rust, tree), base_state)
         if not any(h.startswith(expect[name] + ":") for h in hit):
             print(f"self-test: missed {name}: {hit}")
             failed += 1
     # A bare `platform copy` does not exempt; one with a reason does (already used in the clean tree).
     bare = dict(clean); bare["apps/android/app/src/main/java/com/farcooler/ui/Screen.kt"] = \
         'fun f() = "Nothing needs you right now"  // platform copy\n'
-    if not compare(measure(rust, bare), base_state):
+    if not compare(m(rust, bare), base_state):
         print("self-test: a bare `platform copy` exempted a line")
         failed += 1
     # A string only a Rust test says, and a word no `*_word` function returns, are not violations.
     quiet = dict(clean)
-    quiet["apps/macos/Sources/Farcooler/Q.swift"] = 'let a = "Only a test says this"\nswitch s { case "idle_not_returned": break\ndefault: break }\n'
-    if compare(measure(rust, quiet), base_state):
-        print(f"self-test: a non-violation was caught: {compare(measure(rust, quiet), base_state)}")
+    quiet["apps/macos/Sources/Farcooler/Q.swift"] = 'let a = "Quiet"\nswitch s { case "idle_not_returned": break\ndefault: break }\n'
+    if compare(m(rust, quiet), base_state):
+        print(f"self-test: a non-violation was caught: {compare(m(rust, quiet), base_state)}")
+        failed += 1
+    # An exemption needs a reason of its own words, and a one-word label is not a violation.
+    reasonless = dict(clean); reasonless["apps/ios/Farcooler/Plat.swift"] = \
+        'import SwiftUI\nlet t = Text("Allow notifications please")  // platform copy: x\n'
+    if "ratchet" not in " ".join(compare(m(rust, reasonless), base_state)):
+        print("self-test: a one-letter reason exempted a line")
+        failed += 1
+    single = dict(clean); single["apps/ios/Farcooler/One.swift"] = 'import SwiftUI\nlet t = Button("Approve") {}\n'
+    if any(h.startswith("rust-copy:") for h in compare(m(rust, single), base_state)):
+        print("self-test: a one-word label was caught")
+        failed += 1
+    # A baseline that records more than the base branch's is refused, an exemption alone is not.
+    older = m(rust, clean)
+    newer = m(rust, {**clean, planted["ratchet-swiftui"][0]: planted["ratchet-swiftui"][1]})
+    if not compare(newer, older, with_exempt=False):
+        print("self-test: a grown baseline was not seen against the older one")
+        failed += 1
+    exempted = m(rust, {**clean, planted["exempt-grows"][0]: planted["exempt-grows"][1]})
+    if [h for h in compare(exempted, older, with_exempt=False) if h.startswith(("exempt:", "rust-copy:", "wire-word:", "twin:"))]:
+        print("self-test: an exemption alone counted as growth of the baseline")
         failed += 1
     # The ratchet lets a count fall and holds it where it is.
     grown = dict(clean); grown[planted["ratchet-web"][0]] = planted["ratchet-web"][1]
-    recorded = measure(rust, grown)
+    recorded = m(rust, grown)
     if compare(recorded, recorded):
         print("self-test: the ratchet failed at its own baseline")
         failed += 1
-    if compare(measure(rust, clean), recorded):
+    if compare(m(rust, clean), recorded):
         print("self-test: the ratchet failed on a count that fell")
         failed += 1
     print("shared-core-lint self-test: " + ("ok" if not failed else f"{failed} failed"))
@@ -358,6 +467,8 @@ def self_test() -> int:
 if __name__ == "__main__":
     if "--self-test" in sys.argv[1:]:
         sys.exit(self_test())
+    if "--baseline-not-grown" in sys.argv[1:]:
+        sys.exit(baseline_not_grown(sys.argv[sys.argv.index("--baseline-not-grown") + 1]))
     if "--update-baseline" in sys.argv[1:]:
         sys.exit(update_baseline("--allow-growth" in sys.argv[1:]))
     sys.exit(scan())
