@@ -29,22 +29,24 @@ impl Runtime {
     pub(super) async fn validate_wire_publication(&self, workspace: &str, principal: &str,
         action: &farcooler_protocol::workflow_commands::Action) -> Result<()> {
         use farcooler_protocol::workflow_commands::Action;
-        // A gate names a decider who exists, whatever else the publication carries (ov-1002).
-        if let Action::Publish { definition, .. } = action
-            && crate::workflow_deciders::refuse_unknown(&self.store, definition).is_err()
-        {
-            return Err(Error::Refused("a gate names a decider who isn't on this runner"));
-        }
-        let Action::Publish { mutation, definition, adapter: Some(adapter), .. } = action else { return Ok(()) };
+        let Action::Publish { mutation, definition, adapter, .. } = action else { return Ok(()) };
         // A configuration read back from `workflow.get` carries the marker in place of each value it hides; published
         // as it is, the marker would become the value (R-111, L11), as `propose` refuses too.
-        if crate::workflow_drafts::hides_a_value(adapter) {
+        if let Some(adapter) = adapter
+            && crate::workflow_drafts::hides_a_value(adapter)
+        {
             return Err(Error::Domain(farcooler_core::error::DomainError::InvalidArgument { what: "adapter" }));
         }
-        let AdapterConfiguration::Coding(config) = adapter.as_ref();
         let payload = serde_json::to_string(&(principal, action))?;
         let id = format!("wire:{principal}:{}", mutation.id);
+        // A retry replays its receipt, whatever has changed since.
         if self.store.workflow_wire_receipt(workspace, &id, &payload)?.is_some() { return Ok(()); }
+        // A gate names a decider who exists, whatever else the publication carries (ov-1002).
+        if crate::workflow_deciders::refuse_unknown(&self.store, definition).is_err() {
+            return Err(Error::Refused("a gate names a decider who isn't on this runner"));
+        }
+        let Some(adapter) = adapter else { return Ok(()) };
+        let AdapterConfiguration::Coding(config) = adapter.as_ref();
         let state = self.state(workspace)?.unwrap_or_else(|| State::empty(workspace.into(), 1));
         if state.epoch != mutation.epoch || state.revision != mutation.revision { return Ok(()); }
         self.validate_workspace_repository(workspace, config)?;

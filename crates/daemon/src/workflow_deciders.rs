@@ -26,12 +26,14 @@ pub(crate) fn well_formed(name: &str) -> bool {
 
 /// The person deciders `definition` names, in step order, each once.
 pub(crate) fn named(definition: &Definition) -> Vec<&str> {
-    let mut names = Vec::new();
+    let mut names: Vec<&str> = Vec::new();
     for stage in &definition.stages {
-        if let Progression::AwaitApproval { principal } = &stage.progression { names.push(principal.as_str()); }
-        if let StageKind::Review(Reviewer::Person(p)) = &stage.kind { names.push(p.as_str()); }
+        let approval = match &stage.progression { Progression::AwaitApproval { principal } => Some(principal.as_str()), _ => None };
+        let person = match &stage.kind { StageKind::Review(Reviewer::Person(p)) => Some(p.as_str()), _ => None };
+        for name in approval.into_iter().chain(person) {
+            if !names.contains(&name) { names.push(name); }
+        }
     }
-    names.dedup();
     names
 }
 

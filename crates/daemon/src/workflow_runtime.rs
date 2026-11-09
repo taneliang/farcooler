@@ -33,6 +33,8 @@ mod admission_tests;
 mod member_tests;
 #[cfg(test)]
 mod review_tests;
+#[cfg(test)]
+mod decider_tests;
 use adapters::{Binding, Journal};
 pub use adapters::coding_definition;
 

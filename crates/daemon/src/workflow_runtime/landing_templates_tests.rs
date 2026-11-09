@@ -352,8 +352,12 @@ async fn a_draft_refuses_what_it_cannot_publish_or_what_nobody_can_decide() {
     let (_dir, runtime) = lander("pass").await;
     let config = runtime.coding.clone().unwrap();
     let gates = ["make check".to_string()];
-    for who in ["alice", "orchestrator"] {
+    for who in ["alice", "orchestrator", "member:", "member:Alice Smith", "role:admin", "role:"] {
         assert_eq!(lt::template("ticket-push", &config, &gates, &[Extra::Person(who.into())], &lt::Options::default()).unwrap_err(), lt::Error::NotADecider(who.into()));
+    }
+    // A member or a role by its shape (ov-1002); whether the member exists is asked when it's drafted or published.
+    for who in ["owner", "member:alice", "role:maintainer"] {
+        assert!(lt::template("ticket-push", &config, &gates, &[Extra::Person(who.into())], &lt::Options::default()).is_ok(), "{who}");
     }
     assert_eq!(lt::template("batched-push", &config, &gates, &[], &lt::Options { batch: Some(16), ..Default::default() }).unwrap_err(), lt::Error::BatchTooLarge);
     assert!(lt::template("batched-push", &config, &gates, &[], &lt::Options { batch: Some(8), ..Default::default() }).is_ok());
