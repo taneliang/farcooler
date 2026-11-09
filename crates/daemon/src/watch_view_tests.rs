@@ -20,10 +20,11 @@ fn this_module_has_no_way_to_type_or_resize() {
     let rpc = include_str!("rpc.rs");
     let start = rpc.find("\"workflow.watch\" =>").unwrap();
     let end = rpc[start..].find("\"workflow.cutover\" =>").unwrap();
-    let handler = &rpc[start..start + end];
+    // The dispatch arm, and the handler it calls (R-111 moved it out of `rpc.rs`).
+    let handler = format!("{}\n{}", &rpc[start..start + end], include_str!("rpc/watch.rs"));
     let code = source.split("#[cfg(test)]").next().unwrap();
     let strip = |text: &str| text.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
-    let (code, handler) = (strip(code), strip(handler));
+    let (code, handler) = (strip(code), strip(&handler));
     for verb in ["send_keys", "send_literal", "send_bytes_hex", "send_bytes", "resize", "set_pane_size", "input_from", "mark_input", "paste", "send_input", "input_channel", ".tell(", "interrupt", "send-keys", "resize_terminal", ".tmux"] {
         assert!(!code.contains(verb) && !handler.contains(verb), "the watch path mentions {verb}");
     }
@@ -119,11 +120,11 @@ async fn a_member_watches_a_run_and_a_released_device_does_not() {
     let (push, mut rx) = farcooler_transport::push_queue(64);
     let workspace = Uuid::now_v7();
     let ask = payload(r#"{"item":"ov-9"}"#);
-    let released = start(push.clone(), Person::Released, workspace, &ask);
+    let released = start(push.clone(), Person::Released, workspace, &ask, || true);
     assert!(matches!(released, Err(farcooler_core::DomainError::ScopeDenied { needed: "owner" })), "a released device got past the check");
     // Let through the check: with nothing running for the item the answer is "not found", not a refusal.
     for person in [Person::Owner, Person::Member("alice".into())] {
-        assert!(matches!(start(push.clone(), person.clone(), workspace, &ask), Err(farcooler_core::DomainError::NotFound)), "{person:?}");
+        assert!(matches!(start(push.clone(), person.clone(), workspace, &ask, || true), Err(farcooler_core::DomainError::NotFound)), "{person:?}");
     }
     let dir = farcooler_core::scratch::dir("watch-member");
     let server = farcooler_tmux::TmuxServer::in_dir(&format!("test-{}", Uuid::now_v7().simple()), Uuid::now_v7(), &dir);
@@ -131,7 +132,7 @@ async fn a_member_watches_a_run_and_a_released_device_does_not() {
     let pane = server.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
     let terminal = pane.terminal_id;
     let _listed = publish(&workspace.to_string(), "ov-9", server.clone(), pane);
-    let (task, _reply) = start(push, Person::Member("alice".into()), workspace, &ask).expect("a member watches");
+    let (task, _reply) = start(push, Person::Member("alice".into()), workspace, &ask, || true).expect("a member watches");
     let mut seen = String::new();
     while !seen.contains("member can see this") {
         let event = tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.expect("a frame in time").expect("a frame");
@@ -157,4 +158,42 @@ async fn a_failed_attach_while_the_agent_runs_says_so() {
     // And the watch task sends it: the attach's end is not silence while the pane lives.
     let source = include_str!("watch_view.rs").split("#[cfg(test)]").next().unwrap();
     assert!(source.contains("ending.watch_failed()"), "a failed attach is never reported");
+}
+
+/// R-111, L2: a running watch ends once its watcher may no longer watch (removed, or their device released),
+/// while the agent still runs, and the watcher is told it ended.
+#[tokio::test]
+async fn a_watch_ends_when_its_watcher_is_turned_away() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (push, mut rx) = farcooler_transport::push_queue(64);
+    let workspace = Uuid::now_v7();
+    let dir = farcooler_core::scratch::dir("watch-ends");
+    let server = farcooler_tmux::TmuxServer::in_dir(&format!("test-{}", Uuid::now_v7().simple()), Uuid::now_v7(), &dir);
+    let window = server.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", dir.to_str().unwrap(), "sh -c 'echo watched; sleep 60'").await.unwrap();
+    let pane = server.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
+    let _listed = publish(&workspace.to_string(), "ov-9", server.clone(), pane);
+    let allowed = Arc::new(AtomicBool::new(true));
+    let still = { let allowed = allowed.clone(); move || allowed.load(Ordering::SeqCst) };
+    let (task, _reply) = start(push, crate::people::Person::Member("alice".into()), workspace, &payload(r#"{"item":"ov-9"}"#), still)
+        .expect("a member watches");
+    let mut seen = String::new();
+    while !seen.contains("watched") {
+        let event = tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.expect("a frame in time").expect("a frame");
+        if let Some(farcooler_protocol::v1::event::Payload::TerminalFrame(frame)) = event.payload
+            && let Some(farcooler_protocol::v1::terminal_frame::Kind::Output(output)) = frame.kind
+        {
+            seen.push_str(&String::from_utf8_lossy(&output.payload));
+        }
+    }
+    assert!(!task.is_finished(), "watching while allowed");
+    allowed.store(false, Ordering::SeqCst);
+    tokio::time::timeout(RECHECK * 5, task).await.expect("the watch ends once its watcher is turned away").unwrap();
+    let mut told = false;
+    while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+        if let Some(farcooler_protocol::v1::event::Payload::TerminalFrame(frame)) = event.payload
+            && matches!(frame.kind, Some(farcooler_protocol::v1::terminal_frame::Kind::Gap(_)))
+        { told = true; }
+    }
+    assert!(told, "the watcher is told the watch ended");
+    farcooler_tmux::reap_server(server.socket());
 }

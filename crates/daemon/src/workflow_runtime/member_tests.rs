@@ -11,7 +11,7 @@ use farcooler_store::member_roles::Role;
 use farcooler_transport::Peer;
 
 /// Alice, a member, on her phone at Control scope.
-fn alices_phone(svc: &Arc<Service>) -> Peer {
+pub(super) fn alices_phone(svc: &Arc<Service>) -> Peer {
     svc.store.bind_owner_device("phone-a", None).unwrap();
     svc.store.set_member("alice", "Alice", &["phone-a".into()]).unwrap();
     Peer { client_id: Some("phone-a".into()), scope: Scope::Control }
@@ -19,7 +19,7 @@ fn alices_phone(svc: &Arc<Service>) -> Peer {
 
 /// The coding workflow published on `workspace`, `ov-7` started under it as the owner's orchestrator would, and
 /// its check failed: a run a Maintainer could send back or cancel.
-async fn a_failed_run(workspace: Uuid) -> (tempfile::TempDir, Runtime) {
+pub(super) async fn a_failed_run(workspace: Uuid) -> (tempfile::TempDir, Runtime) {
     let w = workspace.to_string();
     let (dir, mut runtime) = configured(false, "check-fail").await;
     let published = runtime.coding.clone().unwrap();
@@ -35,12 +35,12 @@ async fn a_failed_run(workspace: Uuid) -> (tempfile::TempDir, Runtime) {
     assert_eq!(super::tests::finish(&mut runtime, &w).await.items["ov-7"].phase, Phase::Failed);
     (dir, runtime)
 }
-fn send_back(runtime: &Runtime, workspace: Uuid, id: &str, sequence: u64) -> Action {
+pub(super) fn send_back(runtime: &Runtime, workspace: Uuid, id: &str, sequence: u64) -> Action {
     let state = runtime.state(&workspace.to_string()).unwrap().unwrap(); let item = &state.items["ov-7"];
     Action::SendBack { mutation: mutation(id, state.revision, sequence), item: "ov-7".into(), run: item.run.clone(),
         pin: item.pin.clone(), reason: "result.txt must say what changed".into() }
 }
-fn cancel(runtime: &Runtime, workspace: Uuid, id: &str, sequence: u64) -> Action {
+pub(super) fn cancel(runtime: &Runtime, workspace: Uuid, id: &str, sequence: u64) -> Action {
     let state = runtime.state(&workspace.to_string()).unwrap().unwrap(); let item = &state.items["ov-7"];
     Action::Cancel { mutation: mutation(id, state.revision, sequence), item: "ov-7".into(), run: item.run.clone(), pin: item.pin.clone() }
 }

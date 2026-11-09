@@ -83,7 +83,9 @@ pub struct StoredEffect {
 impl Store {
     /// All new workflow mutations pass through this transaction. An accepted input
     /// cannot leave state without its event/outbox/receipt, even if a later SQL write fails.
-    pub fn workflow_apply(&self, input: &Input) -> Result<Receipt> {
+    pub fn workflow_apply(&self, input: &Input) -> Result<Receipt> { self.workflow_apply_by(input, None) }
+    /// `workflow_apply`, with the card history naming `by` for any card the command moves (R-108, R-111 L4).
+    pub fn workflow_apply_by(&self, input: &Input, by: Option<&crate::models::Actor>) -> Result<Receipt> {
         let payload = serde_json::to_string(input)?;
         if payload.len() > 65536 { return Err(WorkflowError::Oversized); }
 
@@ -91,7 +93,7 @@ impl Store {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
         let mut moved = Vec::new();
-        let receipt = apply_in(&tx, input, &payload, None, &mut moved)?;
+        let receipt = apply_in(&tx, input, &payload, by, &mut moved)?;
         tx.commit()?;
         drop(conn);
         self.announce_board_moves(&moved);

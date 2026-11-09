@@ -79,7 +79,9 @@ impl Admission {
         match (self.seat, &self.person) {
             (Seat::Agent(Some(_)), _) => "orchestrator".into(),
             (Seat::Person, Person::Member(handle)) => format!("member:{handle}"),
-            (Seat::Person, _) => "owner".into(),
+            (Seat::Person, Person::Owner) => "owner".into(),
+            // `admits` refuses a released person first; were that order to change, no gate names this (R-111, L7).
+            (Seat::Person, Person::Released) => "released".into(),
             _ => unreachable!(),
         }
     }
@@ -97,6 +99,8 @@ impl Admission {
             orchestrator: self.orchestrator().is_some(),
         }
     }
+    /// Whether the person behind this caller is the owner, whatever seat they call from.
+    pub(super) fn is_owner(&self) -> bool { self.person == Person::Owner }
     /// A member in person, rather than the owner or an orchestrator pane: they read runs, and act on them where
     /// they lead or as a Maintainer (R-107, ov-1000).
     fn member_in_person(&self) -> bool { self.seat == Seat::Person && matches!(self.person, Person::Member(_)) }
@@ -126,6 +130,8 @@ impl Admission {
     /// The orchestrator pane this admitted, if it admitted one rather than a person.
     pub(crate) fn orchestrator(&self) -> Option<&Terminal> { self.terminal.as_ref().map(|(term, _, _)| term) }
     pub(crate) fn permits(&self, action: &Action) -> Result<()> {
+        // Refused here too, not only by `admits`, so nothing below fails open (R-111, L7).
+        if self.person == Person::Released { return Err(DomainError::NotYours { what: "not_yours" }); }
         if person_only(action) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });
         }
@@ -149,7 +155,7 @@ impl Admission {
     }
     /// Whether this caller acts on runs, for the apps' `controller` (informational only).
     fn acts(&self) -> bool {
-        !self.member_in_person() || crate::people::acts_on_runs(&self.service.store, &self.person, self.workspace).unwrap_or(false)
+        self.person != Person::Released && (!self.member_in_person() || crate::people::acts_on_runs(&self.service.store, &self.person, self.workspace).unwrap_or(false))
     }
 
     /// Whether `person`, whose this caller is, may reach this workspace's

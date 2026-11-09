@@ -39,6 +39,24 @@ fn admit(svc: &Service, seat: crate::caller_seat::Seat, person: &crate::people::
     Err(DomainError::ScopeDenied { needed: "workspace orchestrator" })
 }
 
+/// Who `admit` let move `card`, and a recheck the engine runs when it takes the move: the pane's role, workspace
+/// and ticket, its recorded login, and the workspace's lead, all as `admit` read them. A lead handed over, or the
+/// pane recast, while the move waited refuses it (R-111, L8). The card's history names the orchestrator as the
+/// manager, and a worker as its pane (R-108, R-111 L4).
+fn mover(svc: &Service, seat: crate::caller_seat::Seat, card: &farcooler_store::models::Task) -> Result<crate::workflow_runtime::MoveBy> {
+    use farcooler_store::models::{Actor, TerminalRole};
+    let crate::caller_seat::Seat::Agent(Some(pane)) = seat else { return Err(DomainError::ScopeDenied { needed: "workspace orchestrator" }) };
+    let (store, workspace) = (svc.store.clone(), card.workspace_id);
+    let read = move |store: &farcooler_store::Store| -> Result<_> {
+        let term = store.get_terminal(pane)?;
+        let login = store.terminal_login(pane)?.map(|l| (l.handle, l.login_id));
+        Ok((term.role, term.workspace_id, term.task_id, login, store.workspace_lead(workspace)?))
+    };
+    let admitted = read(&store)?;
+    let actor = if admitted.0 == TerminalRole::Orchestrator && admitted.1 == Some(workspace) { Actor::Manager } else { Actor::Agent { terminal: pane } };
+    Ok(crate::workflow_runtime::MoveBy { actor, still: Box::new(move || read(&store).is_ok_and(|now| now == admitted)) })
+}
+
 /// Moves `task` through the engine. `None` when the engine does not hold it as a ticket at rest (a run owns
 /// it, or the engine is off), and the caller carries on as before. A tracked card is refused to a caller
 /// `admit` turns away, whatever the engine would say.
@@ -50,7 +68,7 @@ pub(crate) async fn move_through_engine(svc: &Service, seat: crate::caller_seat:
     if !svc.store.task_is_tracked_ticket(task)? { return Ok(None); }
     let card = svc.store.get_task(task)?;
     admit(svc, seat, person, &card, status)?;
-    let moved = handle.move_ticket(&card.workspace_id.to_string(), &card.key, column(status)).await
+    let moved = handle.move_ticket(&card.workspace_id.to_string(), &card.key, column(status), mover(svc, seat, &card)?).await
         .map_err(|_| DomainError::OperationFailed)?;
     if !moved { return Ok(None); }
     Ok(Some(crate::task_starts::pb_one(svc, &svc.store.get_task(task)?)?))
@@ -233,5 +251,59 @@ mod tests {
         assert!(admit(&svc, lead, &Person::Owner, &card, TaskStatus::Todo).is_ok());
         let r = admit(&svc, lead, &Person::Owner, &foreign, TaskStatus::Todo);
         assert!(matches!(r, Err(DomainError::ScopeDenied { .. })), "{r:?}");
+    }
+
+    /// R-111, L4 (R-108): a card the orchestrator moves says so in its history, as the manager's move, not the
+    /// runner's.
+    #[tokio::test]
+    async fn the_orchestrators_move_is_the_managers_in_the_cards_history() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let board = svc.store.ensure_main_workspace(repo).unwrap();
+        let card = svc.store.create_task(board.id, "moved", Actor::User).unwrap();
+        let elsewhere = svc.store.create_task(board.id, "elsewhere", Actor::User).unwrap();
+        let (orchestrator, _) = panes(&svc, repo, board.id, elsewhere.id);
+        crate::test_support::publish_for_test(&svc, board.id);
+        svc.start_workflows().unwrap();
+        svc.track_tickets(None).await;
+        move_through_engine(&svc, Seat::Agent(Some(orchestrator)), &Person::Owner, card.id, &set(card.id, TaskStatus::InProgress))
+            .await.unwrap().expect("the engine holds it");
+        let last = svc.store.notes_for(card.id, Some(farcooler_store::models::NoteKind::StatusChange)).unwrap().pop().unwrap();
+        assert_eq!(last.actor, Actor::Manager);
+        svc.stop_workflows().await.unwrap();
+    }
+
+    /// R-111, L8: a move is asked again when the engine takes it. The lead handed over, or the pane recast, after
+    /// `admit` and before the engine: refused, and the card stays where it was.
+    #[tokio::test]
+    async fn a_move_is_refused_when_its_mover_changes_before_the_engine_takes_it() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let board = svc.store.ensure_main_workspace(repo).unwrap();
+        let card = svc.store.create_task(board.id, "moved", Actor::User).unwrap();
+        let elsewhere = svc.store.create_task(board.id, "elsewhere", Actor::User).unwrap();
+        let (orchestrator, _) = panes(&svc, repo, board.id, elsewhere.id);
+        let seat = Seat::Agent(Some(orchestrator));
+        let unchanged = mover(&svc, seat, &card).unwrap();
+        assert_eq!(unchanged.actor, Actor::Manager);
+        assert!((unchanged.still)(), "nothing changed");
+        let lead_moved = mover(&svc, seat, &card).unwrap();
+        let recast = mover(&svc, seat, &card).unwrap();
+        svc.store.set_member("bob", "Bob", &[]).unwrap();
+        svc.store.set_workspace_lead(board.id, Some("bob")).unwrap();
+        assert!(!(lead_moved.still)(), "the lead was handed over");
+        svc.store.set_workspace_lead(board.id, None).unwrap();
+        svc.store.set_terminal_role(orchestrator, TerminalRole::Agent).unwrap();
+        assert!(!(recast.still)(), "the pane is no longer the orchestrator");
+        // And the engine takes no move whose mover may no longer make it.
+        svc.store.set_terminal_role(orchestrator, TerminalRole::Orchestrator).unwrap();
+        crate::test_support::publish_for_test(&svc, board.id);
+        svc.start_workflows().unwrap();
+        svc.track_tickets(None).await;
+        assert!(svc.store.task_is_tracked_ticket(card.id).unwrap(), "the engine holds it, so only the recheck refuses");
+        let before = svc.store.get_task(card.id).unwrap().status;
+        let refused = svc.workflow_handle().unwrap().move_ticket(&board.id.to_string(), &card.key, "doing",
+            crate::workflow_runtime::MoveBy { actor: Actor::Manager, still: Box::new(|| false) }).await;
+        assert!(refused.is_err(), "{refused:?}");
+        assert_eq!(svc.store.get_task(card.id).unwrap().status, before);
+        svc.stop_workflows().await.unwrap();
     }
 }

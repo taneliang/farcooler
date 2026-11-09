@@ -31,6 +31,8 @@ pub(crate) use admission::Admission;
 mod admission_tests;
 #[cfg(test)]
 mod member_tests;
+#[cfg(test)]
+mod review_tests;
 use adapters::{Binding, Journal};
 pub use adapters::coding_definition;
 
@@ -79,9 +81,16 @@ enum Inbox {
     Wire(Box<Admission>, Box<farcooler_protocol::workflow_commands::Action>, oneshot::Sender<Result<serde_json::Value>>),
     /// Bring cards under the engine with no run: (workspace, item, column).
     Track(Vec<(String, String, String)>, oneshot::Sender<Result<usize>>),
-    /// Move a tracker-only ticket to a column: (workspace, item, column).
-    MoveTicket(String, String, String, oneshot::Sender<Result<bool>>),
+    /// Move a tracker-only ticket to a column: (workspace, item, column), as `MoveBy` says.
+    MoveTicket(String, String, String, MoveBy, oneshot::Sender<Result<bool>>),
     Reconcile,
+}
+/// Who moves a ticket, for its card's history, and whether they still may when the engine takes the move: asked
+/// in the inbox, with no await before the write (R-111, L8). A move the daemon makes for itself always may.
+pub struct MoveBy { pub actor: farcooler_store::models::Actor, pub still: Box<dyn FnOnce() -> bool + Send> }
+impl MoveBy {
+    /// The daemon's own move (a draft's card closed): the runner's, with nobody to recheck.
+    pub fn runner() -> Self { Self { actor: farcooler_store::models::Actor::Runner, still: Box::new(|| true) } }
 }
 impl CommandHandle {
     pub(crate) fn is_closed(&self) -> bool { self.send.is_closed() }
@@ -105,9 +114,9 @@ impl CommandHandle {
     }
     /// Move a tracker-only ticket to `column` on the orchestrator's say. False when the item is not a ticket
     /// at rest (a run owns it), so the caller can say so.
-    pub async fn move_ticket(&self, workspace: &str, item: &str, column: &str) -> Result<bool> {
+    pub async fn move_ticket(&self, workspace: &str, item: &str, column: &str, by: MoveBy) -> Result<bool> {
         let (send, receive) = oneshot::channel();
-        self.send.send(Inbox::MoveTicket(workspace.into(), item.into(), column.into(), send)).await
+        self.send.send(Inbox::MoveTicket(workspace.into(), item.into(), column.into(), by, send)).await
             .map_err(|_| Error::Refused("runtime inbox closed"))?;
         receive.await.map_err(|_| Error::Refused("runtime reply closed"))?
     }
@@ -346,11 +355,15 @@ impl Runtime {
             Grant::Decision { principal: session.principal.clone() }, now_ms)
     }
     fn apply(&self, request: Request, source: &str, grant: Grant, now_ms: i64) -> Result<Receipt> {
+        self.apply_by(request, source, grant, now_ms, None)
+    }
+    /// `apply`, with the card history naming `by` for any card the command moves (R-108).
+    fn apply_by(&self, request: Request, source: &str, grant: Grant, now_ms: i64, by: Option<&farcooler_store::models::Actor>) -> Result<Receipt> {
         let epoch = self.state(&request.workspace)?.map_or(1, |s| s.epoch);
-        let receipt = self.store.workflow_apply(&Input { schema: 1, id: request.id, workspace: request.workspace,
+        let receipt = self.store.workflow_apply_by(&Input { schema: 1, id: request.id, workspace: request.workspace,
             expected_revision: request.expected_revision, epoch, source: source.into(),
             source_sequence: request.sequence, now_ms, grant, command: request.command,
-            busy_resources: BTreeSet::new() })?;
+            busy_resources: BTreeSet::new() }, by)?;
         if let Some(wake) = &self.notice_wake { wake.notify_one(); }
         Ok(receipt)
     }
@@ -659,20 +672,29 @@ impl Runtime {
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);
                         result["context"] = admission.context(epoch);
+                        // A gate's settings can carry secrets the owner set (`--gate-env`): theirs alone (R-111, M1).
+                        if !admission.is_owner() { wire_commands::hide_environment(&mut result); }
                     }
                     Ok(result)
                 }.await;
                 let _ = reply.send(result);
             }
             Inbox::Track(tickets, reply) => { let _ = reply.send(self.track_tickets(&tickets)); }
-            Inbox::MoveTicket(workspace, item, column, reply) => { let _ = reply.send(self.move_ticket_now(&workspace, &item, &column)); }
+            Inbox::MoveTicket(workspace, item, column, MoveBy { actor, still }, reply) => {
+                let result = if still() { self.move_ticket_now(&workspace, &item, &column, actor) }
+                    else { Err(Error::Refused("ticket mover authority changed")) };
+                let _ = reply.send(result);
+            }
             Inbox::Reconcile => {}
         }
     }
-    fn move_ticket_now(&self, workspace: &str, item: &str, column: &str) -> Result<bool> {
+    fn move_ticket_now(&self, workspace: &str, item: &str, column: &str, by: farcooler_store::models::Actor) -> Result<bool> {
         let Some(state) = self.state(workspace)? else { return Ok(false) };
         if !state.items.get(item).is_some_and(|i| i.definition.is_ticket()) { return Ok(false); }
-        let receipt = self.internal(workspace, Command::Move { item: item.into(), to: column.into() }, Grant::Controller, now())?;
+        let sequence = state.source_sequences.get("runtime").copied().unwrap_or(0) + 1;
+        let receipt = self.apply_by(Request { id: format!("runtime:{}", Uuid::now_v7()), workspace: workspace.into(),
+            expected_revision: state.revision, sequence, command: Command::Move { item: item.into(), to: column.into() } },
+            "runtime", Grant::Controller, now(), Some(&by))?;
         // Moving a card to the column it is in changes nothing, and that is not a failure.
         Ok(receipt.result.is_ok() || receipt.result == Err(Refusal::Invalid))
     }

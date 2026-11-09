@@ -3,6 +3,28 @@ use super::*;
 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
 use farcooler_store::{workflow::WorkflowActor, workflow_publication::Write};
 
+/// `workflow.get` for anyone but the owner (R-111, M1): every value in the adapter's command environments is
+/// replaced by `HIDDEN`, and the names stay, so a member sees what a gate is given without what it is given.
+/// The definitions are left whole: their pins are checked by the apps, and they carry no environment values.
+pub(super) fn hide_environment(reply: &mut serde_json::Value) {
+    fn walk(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(fields) => for (name, field) in fields.iter_mut() {
+                match (name.as_str(), field) {
+                    ("environment", serde_json::Value::Object(environment)) =>
+                        for v in environment.values_mut() { *v = HIDDEN.into(); },
+                    (_, field) => walk(field),
+                }
+            },
+            serde_json::Value::Array(items) => items.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+    if let Some(adapter) = reply.pointer_mut("/configuration/adapter") { walk(adapter); }
+}
+/// What a hidden environment value reads as.
+pub(super) const HIDDEN: &str = "(hidden)";
+
 impl CommandHandle {
     pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {
         let (send, receive) = oneshot::channel();
@@ -53,7 +75,14 @@ impl Runtime {
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
         let id = format!("wire:{principal}:{}", mutation.id);
         // Durable lookup precedes revision, epoch, run and configuration checks.
-        if let Some(receipt) = self.store.workflow_wire_receipt(workspace, &id, &payload)? {
+        if let Some(mut receipt) = self.store.workflow_wire_receipt(workspace, &id, &payload)? {
+            // The id is the principal's, not the person's: `orchestrator` outlives a lead change, and a handle can
+            // be issued again. Someone else replaying it learns who sent it, never their device or pane (R-111, L3).
+            if let (Some(sender), Some(asker)) = (receipt.actor.as_mut(), actor)
+                && (sender.person != asker.person || sender.device != asker.device || sender.pane != asker.pane)
+            {
+                (sender.device, sender.pane) = (None, None);
+            }
             return Ok(serde_json::json!({"schema":1,"receipt":receipt}));
         }
         let state = self.state(workspace)?.unwrap_or_else(|| State::empty(workspace.into(), 1));

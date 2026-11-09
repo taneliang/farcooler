@@ -226,7 +226,7 @@ fn close_card(svc: &Service, watcher: &crate::watch::Watcher, card: Uuid, status
         if let (Some(handle), Ok(task)) = (svc.workflow_handle(), svc.store.get_task(card)) {
             let column = crate::ticket_moves::column(status);
             let (workspace, key) = (task.workspace_id.to_string(), task.key.clone());
-            tokio::spawn(async move { let _ = handle.move_ticket(&workspace, &key, column).await; });
+            tokio::spawn(async move { let _ = handle.move_ticket(&workspace, &key, column, crate::workflow_runtime::MoveBy::runner()).await; });
         }
     } else if let Ok(task) = svc.store.set_task_status(card, status, Actor::Manager) {
         watcher.announce_task_changed(&task, None, Actor::Manager);

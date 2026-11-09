@@ -50,12 +50,18 @@ pub fn item_of(payload: &farcooler_protocol::v1::WorkflowCommand) -> Option<Stri
     serde_json::from_str::<Ask>(&payload.json).ok().map(|a| a.item)
 }
 
+/// How often a running watch asks whether its watcher may still watch (`start`'s `still`).
+pub(crate) const RECHECK: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Attach to the agent `payload` names, read-only: the owner's, or any member's (ov-1000), who reads every
 /// workspace. A released device is turned away before this (`people::gate`) and here. Returns the task that streams the
 /// pane to `push` and the reply that announces the pane's size ahead of its picture.
+///
+/// `still` is asked every `RECHECK` while the watch runs: once it says no (the person was removed, or their
+/// device released), the watch ends and the watcher is told so (R-111, L2).
 pub(crate) fn start(
     push: farcooler_transport::PushSender, caller: crate::people::Person, workspace: uuid::Uuid,
-    payload: &farcooler_protocol::v1::WorkflowCommand,
+    payload: &farcooler_protocol::v1::WorkflowCommand, still: impl Fn() -> bool + Send + 'static,
 ) -> farcooler_core::Result<(tokio::task::JoinHandle<()>, farcooler_protocol::v1::TerminalAttachResult)> {
     use farcooler_core::DomainError;
     if !matches!(caller, crate::people::Person::Owner | crate::people::Person::Member(_)) {
@@ -68,7 +74,18 @@ pub(crate) fn start(
     let ending = crate::resync::TerminalSink::new(push, pane.terminal_id, 0);
     let task = tokio::spawn(async move {
         let (watched, shown) = (runtime.clone(), pane.clone());
-        let _ = runtime.attach(pane, sink).await;
+        let attach = runtime.attach(pane, sink);
+        tokio::pin!(attach);
+        let turned_away = loop {
+            tokio::select! {
+                _ = &mut attach => break false,
+                () = tokio::time::sleep(RECHECK) => if !still() { break true },
+            }
+        };
+        if turned_away {
+            ending.watch_failed();
+            return;
+        }
         // Say "finished" only when tmux confirms the pane is gone. An attach that failed
         // while the agent still runs must not tell the owner it ended.
         if crate::stream_end::pane_is_over(&watched, &shown).await {

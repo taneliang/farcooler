@@ -15,6 +15,7 @@
 
 pub mod recovery;
 mod engine_caller;
+mod watch;
 mod error_response;
 mod screen_revision;
 mod runner_settings;
@@ -789,16 +790,7 @@ impl Rpc {
             // Watch a running engine agent's terminal, read-only (ov-972). Addressed by workspace and
             // item, never by terminal id: the engine's pane is in a tmux server the daemon's inventory
             // does not list, so `terminal.write` and the rest cannot name it. This only attaches.
-            "workflow.watch" => {
-                let workspace = Self::target(&req)?;
-                svc.store.get_workspace(workspace)?;
-                let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
-                let (task, reply) = crate::watch_view::start(self.push.clone(), self.caller()?, workspace, &p)?;
-                if let Ok(mut held) = self.attachment.lock() {
-                    held.replace(Attachment(task));
-                }
-                Ok(result::Value::TerminalAttach(reply))
-            }
+            "workflow.watch" => self.workflow_watch(req).await,
             "workflow.cutover" => {
                 use farcooler_protocol::workflow_cutover::{self, Cutover};
                 if self.caller()? != crate::people::Person::Owner { return Err(DomainError::ScopeDenied { needed: "owner" }); }
@@ -2115,6 +2107,7 @@ impl Rpc {
                 let Some(request::Payload::TerminalSetRole(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                crate::workspace_ops::refuse_an_agent_seating_a_member(svc, terminal, &p, self.caller_pid).await?;
                 crate::workspace_ops::set_role(svc, &self.watcher, terminal, &p).await?;
                 self.terminal_result(terminal).await
             }

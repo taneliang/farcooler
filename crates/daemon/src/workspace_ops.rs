@@ -318,6 +318,25 @@ pub async fn assign_worktree(
     Ok(wire::worktree(&view, scope))
 }
 
+/// A member-led workspace's orchestrator is seated by a person, never by an agent (R-111, L5). On the local socket
+/// the people gate takes every caller for the owner, and the seat checks only the pane's login, so without this a
+/// lead's builder agent could make its own pane the orchestrator and drive the engine as it. The owner's
+/// workspaces keep what they had: the owner's agents act as the owner anyway.
+pub async fn refuse_an_agent_seating_a_member(
+    svc: &Service,
+    terminal: Uuid,
+    req: &pb::TerminalSetRole,
+    caller_pid: Option<i32>,
+) -> Result<()> {
+    if wire::terminal_role_from_wire(req.role) != Some(farcooler_store::models::TerminalRole::Orchestrator) { return Ok(()); }
+    let Some(workspace) = svc.store.get_terminal(terminal)?.workspace_id else { return Ok(()) };
+    if svc.store.workspace_lead(workspace)?.is_none() { return Ok(()); }
+    if crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
+        return Err(DomainError::ScopeDenied { needed: "person" });
+    }
+    Ok(())
+}
+
 /// `terminal.set_role`: shell, agent, or its workspace's orchestrator.
 /// UNSPECIFIED is refused (`role`) rather than read as a default. Answers
 /// with nothing; the caller re-reads the terminal, as `rpc.rs` does.
