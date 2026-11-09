@@ -3,7 +3,8 @@
 //! A gate names `member:<handle>`, and admission gives that name to whoever holds the handle now. A handle a
 //! removed member had could be issued to someone new, who would then decide what waits on the one removed. So a
 //! handle isn't issued again while a workflow in force, or a run not yet closed, names it. Once the owner
-//! publishes a workflow that doesn't and those runs end, it's free.
+//! publishes a workflow that doesn't and those runs end, it's free. (There is no stable person id behind a handle,
+//! so the same person can't be told from a newcomer; they come back once nothing names it.)
 use rusqlite::Connection;
 
 use farcooler_core::Result;
@@ -13,7 +14,7 @@ use crate::error::map_err;
 
 /// Whether a workspace's selected workflow, or a run of any workspace that isn't done or cancelled, names
 /// `member:<handle>` at any step. Read on `conn`, so a caller's transaction sees one moment. A record that
-/// won't read counts as naming it: unread, it can't be said not to.
+/// won't read is skipped and logged, not counted: one bad row must not refuse every new handle (review R2).
 pub(crate) fn named_by_a_workflow(conn: &Connection, handle: &str) -> Result<bool> {
     let name = format!("member:{handle}");
     let names = |definition: &Definition| definition.deciders().contains(&name.as_str());
@@ -25,7 +26,10 @@ pub(crate) fn named_by_a_workflow(conn: &Connection, handle: &str) -> Result<boo
         .map_err(map_err)?;
     let definitions = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(map_err)?;
     for raw in definitions {
-        let Ok(definition) = serde_json::from_str::<Definition>(&raw.map_err(map_err)?) else { return Ok(true) };
+        let Ok(definition) = serde_json::from_str::<Definition>(&raw.map_err(map_err)?) else {
+            tracing::warn!("a workflow definition didn't read while checking who a handle was named by");
+            continue;
+        };
         if names(&definition) {
             return Ok(true);
         }
@@ -33,7 +37,10 @@ pub(crate) fn named_by_a_workflow(conn: &Connection, handle: &str) -> Result<boo
     let mut stmt = conn.prepare("SELECT state FROM workflow_states").map_err(map_err)?;
     let states = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(map_err)?;
     for raw in states {
-        let Ok(state) = serde_json::from_str::<State>(&raw.map_err(map_err)?) else { return Ok(true) };
+        let Ok(state) = serde_json::from_str::<State>(&raw.map_err(map_err)?) else {
+            tracing::warn!("a workflow state didn't read while checking who a handle was named by");
+            continue;
+        };
         if state.items.values().any(|i| !matches!(i.phase, Phase::Done | Phase::Cancelled) && names(&i.definition)) {
             return Ok(true);
         }

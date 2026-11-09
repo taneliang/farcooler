@@ -280,3 +280,37 @@ async fn a_workflow_naming_a_removed_member_starts_no_run_and_keeps_their_handle
         expected_pin: Some(pin), definition: owner_then("member:bob") }).unwrap());
     runtime.store.set_member("alice", "Another Alice", &[]).unwrap();
 }
+
+/// A ticket run the orchestrator starts under a workflow naming a removed member waits for good, so it isn't
+/// started: Enqueue and Start refuse alike, and the run stays where it was (re-review R1).
+#[tokio::test]
+async fn a_start_under_a_workflow_naming_a_removed_member_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+    runtime.store.set_member("alice", "Alice", &[]).unwrap();
+    let definition = owner_then("member:alice");
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+        expected_pin: None, definition }).unwrap());
+    let pin = runtime.store.workflow_configuration("ws").unwrap().unwrap().pin;
+    let revision = runtime.state("ws").unwrap().map_or(0, |s| s.revision);
+    accepted(&runtime.wire_command("ws", "orchestrator", Action::Track { mutation: mutation("t", revision, 2), item: "a".into(), column: None }).unwrap());
+    let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
+    let start = |id: &str, sequence| Action::Start { mutation: mutation(id, state.revision, sequence), item: "a".into(), run: item.run.clone(),
+        pin: item.pin.clone(), start_pin: pin.clone(), models: Default::default(), worktree: None, with: vec![] };
+    runtime.store.remove_member("alice").unwrap();
+    let refused = runtime.wire_command("ws", "orchestrator", start("s", 3));
+    assert!(matches!(&refused, Err(Error::Refused(why)) if why.contains("removed")), "{refused:?}");
+    assert!(runtime.state("ws").unwrap().unwrap().items["a"].definition.is_ticket(), "still the ticket run it was");
+}
+
+/// Editing a member a workflow names changes their name and devices, not whether they're here (re-review R5).
+#[tokio::test]
+async fn editing_a_member_a_workflow_names_is_allowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+    runtime.store.set_member("alice", "Alice", &[]).unwrap();
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+        expected_pin: None, definition: owner_then("member:alice") }).unwrap());
+    assert_eq!(runtime.store.set_member("alice", "Alice Chen", &[]).unwrap().name, "Alice Chen");
+    assert_eq!(runtime.store.member("alice").unwrap().name, "Alice Chen");
+}

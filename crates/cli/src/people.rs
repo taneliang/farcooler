@@ -470,7 +470,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "handle" => "a handle is a lowercase letter, then up to 31 letters, digits or `-`, and not one the runner keeps",
         "member_name" => "a name is one line of up to 64 characters, with no [ or ]",
         "device_taken" => "one of those devices is someone else's. remove it from them first",
-        "handle_waited_on" => "a workflow still waits on someone who had that handle. choose another, or publish one that doesn't name them",
+        "handle_waited_on" => "a workflow or a run still names someone who had that handle. choose another, or cancel the runs naming them and publish a workflow that doesn't. (the same person can't be told from a newcomer, so they get it back then)",
         "devices_changed" => "their devices changed since you read them, so nothing was changed. run `farcooler member list` and try again",
         "rep_running" => "their rep is already running on this board",
         "device" => "that isn't a device enrolled on this runner. `farcooler client list` names them",

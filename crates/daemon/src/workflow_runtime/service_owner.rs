@@ -98,6 +98,14 @@ impl Runtime {
             None => self.resource.clone(),
         }
     }
+    /// A run that would wait on a member who was removed waits for good, so none starts: the one check an Enqueue
+    /// and a Start share (ov-1002 review F2, R1).
+    pub(super) fn refuse_removed_decider(&self, definition: &Definition) -> Result<()> {
+        if crate::workflow_deciders::names_a_removed_member(&self.store, definition).is_some() {
+            return Err(Error::Refused("this workflow waits on a member who was removed. the owner can publish one that names someone who is here"));
+        }
+        Ok(())
+    }
     pub(super) fn validate_publication(&self, definition: &Definition, adapter: Option<&AdapterConfiguration>) -> Result<()> {
         match adapter {
             Some(AdapterConfiguration::Coding(config)) => {

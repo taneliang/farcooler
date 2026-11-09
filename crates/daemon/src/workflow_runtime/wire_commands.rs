@@ -111,10 +111,7 @@ impl Runtime {
                         None => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?,
                         Some(configuration) => {
                             self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
-                            // A run that would wait on someone removed waits for good, so none starts (ov-1002 review F2).
-                            if crate::workflow_deciders::names_a_removed_member(&self.store, &configuration.definition).is_some() {
-                                return Err(Error::Refused("this workflow waits on a member who was removed. the owner can publish one that names someone who is here"));
-                            }
+                            self.refuse_removed_decider(&configuration.definition)?;
                             let initial_candidate = matches!(configuration.definition.stages[0].kind, StageKind::Tracker).then(|| pin.clone());
                             let input = input(Command::Enqueue { item:item.clone(),definition:configuration.definition,
                                 policy_pin:pin.clone(),resource:Exec::item_resource(workspace, item),dependencies:BTreeSet::new(),initial_candidate },Grant::Controller);
@@ -186,6 +183,7 @@ impl Runtime {
                     match configuration {
                         Some(configuration) if state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) => {
                             self.validate_publication(&configuration.definition, configuration.adapter.as_ref())?;
+                            self.refuse_removed_decider(&configuration.definition)?;
                             if worktree.as_ref().map(|w| (&w.name, &w.branch)) != tree.as_ref().map(|t| (&t.name, &t.branch)) {
                                 return Err(Error::Refused("a named worktree is prepared by the runner before Start"));
                             }
