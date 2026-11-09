@@ -95,9 +95,9 @@ fn transfer_baseline_tamper_and_foreign_proof_are_refused() {
 }
 use std::io::Write;
 
-/// Fixture writer for `reports/ov-940/old-reader.py`, which names the directory.
+/// Fixture writer for `scripts/engine-old-reader.py`, which names the directory.
 #[test]
-#[ignore = "run by reports/ov-940/old-reader.py"]
+#[ignore = "run by scripts/engine-old-reader.py"]
 fn old_reader_fixture_writes_source_and_begun_databases() {
     let out = std::path::PathBuf::from(std::env::var_os("OV940_OLD_READER_DIR").expect("the script names a private directory"));
     let source = super::source60::source60(&out);

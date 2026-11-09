@@ -1,3 +1,0 @@
-command=['/usr/bin/python3', 'scripts/doc-comment-check.py', '--base', '880cef91a']
-
-raw_exit=0

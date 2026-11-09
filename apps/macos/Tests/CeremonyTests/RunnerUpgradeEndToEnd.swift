@@ -3,7 +3,7 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Opt-in (FARCOOLER_UPGRADE_E2E, set by `reports/ov-984/end-to-end.py`): the
+/// Opt-in (FARCOOLER_UPGRADE_E2E, set by `scripts/runner-upgrade-e2e.py`): the
 /// recovery screen's model runs the real CLI against a real scratch runner on
 /// schema 60, serving recovery, from Prepare to Finish. Only Touch ID stands
 /// in: a test can't put a finger on the sensor. The harness runs this test as

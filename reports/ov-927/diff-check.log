@@ -1,3 +1,0 @@
-command=['git', 'diff', '--check']
-
-raw_exit=0
