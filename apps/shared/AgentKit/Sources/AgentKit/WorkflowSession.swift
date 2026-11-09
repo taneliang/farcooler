@@ -13,6 +13,8 @@ public struct RetainedWorkflow: Codable, Sendable, Identifiable {
 // invocation; this object owns only observations and an app-private journal.
 @MainActor
 public final class WorkflowSessionAdapter {
+    /// The case Rust sets this app's labels in. Mac and iPhone follow Apple's title case.
+    static let style = "apple"
     public struct Current {
         public let account: String
         public let host: String
@@ -100,7 +102,7 @@ public final class WorkflowSessionAdapter {
     }
     private func read(_ host: String, _ workspace: String) async throws -> String {
         let (c, scope) = try scope(host, workspace)
-        let raw = try await c.call("workflow.snapshot", json(["workspace": workspace]))
+        let raw = try await c.call("workflow.snapshot", json(["workspace": workspace, "style": Self.style]))
         let latest = try self.scope(host, workspace)
         guard latest.1 == scope, latest.0.connection == c.connection else { throw WorkflowDisplayError.pending }
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(raw.utf8))
@@ -145,7 +147,7 @@ public final class WorkflowSessionAdapter {
             label: try JSONDecoder().decode(WorkflowAction.self, from: Data(descriptorJSON.utf8)).label), action: canonical))
         let index = entries.count - 1
         try save(scope, entries) // preparing marker survives loss of prepare reply
-        var args = "{\"workspace\":\(try json(workspace)),\"item\":\(try json(item)),\"action\":\(descriptorJSON),\"revision\":\(try json(String(observed.revision))),\"epoch\":\(try json(String(observed.epoch)))}"
+        var args = "{\"workspace\":\(try json(workspace)),\"style\":\(try json(Self.style)),\"item\":\(try json(item)),\"action\":\(descriptorJSON),\"revision\":\(try json(String(observed.revision))),\"epoch\":\(try json(String(observed.epoch)))}"
         if let reasonJSON { args.removeLast(); args += ",\"reason\":\(reasonJSON)}" }
         let raw = try await c.call("workflow.prepare_selection", args)
         guard try self.scope(host, workspace).1 == scope else { throw WorkflowDisplayError.pending }

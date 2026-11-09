@@ -31,9 +31,9 @@ class WorkflowSessionTest {
         val getter: (String) -> WorkflowSessionPort.Current? = {
             WorkflowSessionPort.Current("b-account","actual-host") { method,args ->
                 when(method) {
-                    "workflow.snapshot" -> buildJsonObject{put("host","actual-host");put("presentation",fixture)}
+                    "workflow.snapshot" -> {assertEquals("material",args.getValue("style").jsonPrimitive.content);buildJsonObject{put("host","actual-host");put("presentation",fixture)}}
                     "workflow.prepare_selection" -> {
-                        prepares++;assertEquals(action,args["action"])
+                        prepares++;assertEquals(action,args["action"]);assertEquals("material",args.getValue("style").jsonPrimitive.content)
                         if(validation) buildJsonObject{put("kind","Validation");put("error",buildJsonObject{put("code","workflow_reason");put("text","shared Rust error")})}
                         else {assertEquals(reason,args.getValue("reason").jsonPrimitive.content);buildJsonObject{put("kind","Mutation");put("prepared",prepared)}}
                     }

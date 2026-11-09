@@ -19,9 +19,9 @@ let account = 'account', available = true, sessionID = 1, preparations = 0, subm
 const prepared = { schema: 1, workspace: fixture.workspace, json: '{"mutation":{"epoch":'+maximum+'},"id":"opaque"}' }
 const session = { generation: 1, async workflow_call(method, raw) {
   const args = JSON.parse(raw)
-  if (method === 'workflow.snapshot') return snapshot.replace('actual-host', actualHost)
+  if (method === 'workflow.snapshot') { assert.equal(args.style, 'web'); return snapshot.replace('actual-host', actualHost) }
   if (method === 'workflow.prepare_selection') {
-    preparations++
+    preparations++; assert.equal(args.style, 'web')
     assert.equal(args.revision, '18446744073709551614'); assert.equal(args.epoch, maximum)
     assert.deepEqual(args.action, fixture.runs[0].actions[0])
     assert.equal(saved().some(e => e.attempts === 0), true)

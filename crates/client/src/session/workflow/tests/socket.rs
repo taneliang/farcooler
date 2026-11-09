@@ -39,7 +39,7 @@ async fn seed(session: &Session, h: &Harness, item: &str, revision: u64, sequenc
         let receipt=session.workflow_wire(h.workspace,serde_json::to_string(&a).unwrap()).await.unwrap();
     assert!(receipt.pointer("/receipt/result/Ok").is_some(),"seed {item} revision={revision} sequence={sequence}: {receipt}");
     }
-    let raw=session.workflow_snapshot(h.workspace).await.unwrap();
+    let raw=session.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     let pin=raw.configuration["pin"].as_str().unwrap().to_string();
     let a=wire::Action::Enqueue {mutation:Mutation {id:format!("enqueue-{item}"),sequence,revision,epoch:1},item:item.into(),pin};
     let receipt=session.workflow_wire(h.workspace,serde_json::to_string(&a).unwrap()).await.unwrap();
@@ -68,7 +68,7 @@ async fn workflow_session_socket_lost_reply_reconnect_stale_and_auth_change() {
         WorkflowCommand {schema:1,json:bytes.clone()})),vec![capability::WORKFLOW_COMMANDS.into()]).unwrap();
     let observer=Session::connect_local(&h.socket).await.unwrap();
     let accepted=tokio::time::timeout(std::time::Duration::from_secs(10),async {
-        loop { let s=observer.workflow_snapshot(h.workspace).await.unwrap();
+        loop { let s=observer.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
             if s.state.items["a"].phase==farcooler_workflow::Phase::Cancelled {break s;}
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
@@ -80,7 +80,7 @@ async fn workflow_session_socket_lost_reply_reconnect_stale_and_auth_change() {
     let receipt=call(&replacement,"workflow.submit_action",json!({"prepared":restored})).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some());
     assert_eq!(call(&replacement,"workflow.submit_action",json!({"prepared":prepared})).await,receipt);
-    assert_eq!(replacement.workflow_snapshot(h.workspace).await.unwrap().state,accepted.state);
+    assert_eq!(replacement.workflow_snapshot(h.workspace,Style::Apple).await.unwrap().state,accepted.state);
     assert!(replacement.workflow_call("workflow.prepare_action",args).await.is_err());
     let mut conflict=prepared.clone();
     let mut tampered:serde_json::Value=serde_json::from_str(&conflict.json).unwrap();
@@ -90,29 +90,29 @@ async fn workflow_session_socket_lost_reply_reconnect_stale_and_auth_change() {
     // A new observation with identical state but a different authenticated scope
     // must not validate a descriptor from the previous caller context.
     seed(&replacement,&h,"b",accepted.state.revision,3).await;
-    let old=replacement.workflow_snapshot(h.workspace).await.unwrap();
+    let old=replacement.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     h.scope.store(Scope::HostAdmin as i32,Ordering::SeqCst);
     let changed=Session::connect_local(&h.socket).await.unwrap();
-    let new=changed.workflow_snapshot(h.workspace).await.unwrap();
+    let new=changed.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     assert_eq!(old.state,new.state);assert_ne!(old.context.binding,new.context.binding);
     let a=old.presentation.runs.iter().find(|r|r.item=="b").unwrap().actions.iter().find(|a|a.kind==cards::ActionKind::Approve).unwrap();
-    assert!(changed.workflow_prepare_action(h.workspace,"b",a.clone(),WorkflowCommandIdentity {
+    assert!(changed.workflow_prepare_action(h.workspace,Style::Apple,"b",a.clone(),WorkflowCommandIdentity {
         id:"approve-b".into(),sequence:4,revision:old.state.revision,epoch:old.state.epoch }).await.is_err());
     let fresh=new.presentation.runs.iter().find(|r|r.item=="b").unwrap().actions.iter().find(|a|a.kind==cards::ActionKind::Cancel).unwrap();
-    let PreparedWorkflowResult::Mutation {prepared:stale_pending}=changed.workflow_prepare_action(h.workspace,"b",fresh.clone(),
+    let PreparedWorkflowResult::Mutation {prepared:stale_pending}=changed.workflow_prepare_action(h.workspace,Style::Apple,"b",fresh.clone(),
         WorkflowCommandIdentity {id:"cancel-b".into(),sequence:4,revision:new.state.revision,epoch:new.state.epoch}).await.unwrap() else {panic!()};
-    let PreparedWorkflowResult::Mutation {prepared:concurrent}=changed.workflow_prepare_action(h.workspace,"b",fresh.clone(),
+    let PreparedWorkflowResult::Mutation {prepared:concurrent}=changed.workflow_prepare_action(h.workspace,Style::Apple,"b",fresh.clone(),
         WorkflowCommandIdentity {id:"concurrent-cancel-b".into(),sequence:4,revision:new.state.revision,epoch:new.state.epoch}).await.unwrap() else {panic!()};
     assert!(changed.workflow_submit_action(&concurrent).await.unwrap().pointer("/receipt/result/Ok").is_some());
     let refused=changed.workflow_submit_action(&stale_pending).await.unwrap();
     assert!(refused.pointer("/receipt/result/Err/Stale").is_some() || refused["receipt"]["result"]["Err"]=="Stale", "{refused}");
     assert_eq!(changed.workflow_submit_action(&stale_pending).await.unwrap(),refused);
     // A revoke/readmit cycle changes authenticated context even after replacement.
-    let before=changed.workflow_snapshot(h.workspace).await.unwrap();
+    let before=changed.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     h.service.sessions().mark_revoked("phone");
     h.service.sessions().readmit("phone").unwrap();
     let readmitted=Session::connect_local(&h.socket).await.unwrap();
-    let after=readmitted.workflow_snapshot(h.workspace).await.unwrap();
+    let after=readmitted.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     assert_eq!(before.state,after.state);assert_ne!(before.context.binding,after.context.binding);
     // Authority withdrawal also refuses already prepared receipt retries.
     h.service.store.set_device_cap("phone",Some(farcooler_store::access::Cap::Viewer)).unwrap();
@@ -128,16 +128,16 @@ async fn workflow_session_socket_lost_reply_reconnect_stale_and_auth_change() {
 async fn workflow_session_socket_effectful_approval_retry_does_not_reexecute() {
     let h=start().await;let session=Session::connect_local(&h.socket).await.unwrap();
     seed(&session,&h,"a",0,1).await;
-    let snapshot=session.workflow_snapshot(h.workspace).await.unwrap();
+    let snapshot=session.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     let action=snapshot.presentation.runs[0].actions.iter().find(|a|a.kind==cards::ActionKind::Approve).unwrap();
-    let PreparedWorkflowResult::Mutation {prepared}=session.workflow_prepare_action(h.workspace,"a",action.clone(),
+    let PreparedWorkflowResult::Mutation {prepared}=session.workflow_prepare_action(h.workspace,Style::Apple,"a",action.clone(),
         WorkflowCommandIdentity {id:"approve-effectful".into(),sequence:2,revision:snapshot.state.revision,epoch:snapshot.state.epoch}).await.unwrap() else {panic!()};
     let bytes=prepared.json.clone();let wire=wire::parse(&bytes).unwrap();
     let lost=session.start(wire.method(),Some(h.workspace),Some(request::Payload::WorkflowCommand(
         WorkflowCommand {schema:1,json:bytes.clone()})),vec![capability::WORKFLOW_COMMANDS.into()]).unwrap();
     let observer=Session::connect_local(&h.socket).await.unwrap();
     let done=tokio::time::timeout(std::time::Duration::from_secs(10),async {
-        loop {let s=observer.workflow_snapshot(h.workspace).await.unwrap();
+        loop {let s=observer.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
             if s.state.items["a"].phase==farcooler_workflow::Phase::Done {break s;}
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
@@ -149,7 +149,7 @@ async fn workflow_session_socket_effectful_approval_retry_does_not_reexecute() {
     let receipt=replacement.workflow_submit_action(&restored).await.unwrap();
     assert!(receipt.pointer("/receipt/result/Ok").is_some());
     assert_eq!(replacement.workflow_submit_action(&restored).await.unwrap(),receipt);
-    assert_eq!(replacement.workflow_snapshot(h.workspace).await.unwrap().state,done.state);
+    assert_eq!(replacement.workflow_snapshot(h.workspace,Style::Apple).await.unwrap().state,done.state);
     assert!(done.state.revision>receipt["receipt"]["result"]["Ok"].as_u64().unwrap());
     eprintln!("effectful trace=opaque Approve -> pending exact bytes -> automatic fixture stages Done -> discard reply -> reconnect same receipt twice; unchanged final state revision={}; request={bytes}; receipt={receipt}",done.state.revision);
 }
@@ -158,7 +158,7 @@ async fn workflow_session_socket_effectful_approval_retry_does_not_reexecute() {
 async fn workflow_session_selection_route_stale_auth_and_retry() {
     let h=start().await; let session=Session::connect_local(&h.socket).await.unwrap();
     seed(&session,&h,"FeatureA",0,1).await;
-    let snapshot=session.workflow_snapshot(h.workspace).await.unwrap();
+    let snapshot=session.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     assert_eq!(snapshot.host,h.service.host_id.to_string());
     let action=snapshot.presentation.runs[0].actions.iter().find(|a|a.kind==cards::ActionKind::Approve).unwrap();
     let args=json!({"workspace":h.workspace,"item":"FeatureA","action":action,
@@ -171,7 +171,7 @@ async fn workflow_session_selection_route_stale_auth_and_retry() {
     assert_eq!(sequence,snapshot.state.source_sequences.get("wire:owner").copied().unwrap_or(0)+1);
     let accepted=call(&session,"workflow.submit_action",json!({"prepared":prepared})).await;
     assert!(accepted.pointer("/receipt/result/Ok").is_some());
-    assert_eq!(session.workflow_snapshot(h.workspace).await.unwrap().state.source_sequences.get("wire:owner"),Some(&sequence));
+    assert_eq!(session.workflow_snapshot(h.workspace,Style::Apple).await.unwrap().state.source_sequences.get("wire:owner"),Some(&sequence));
     drop(session);
     let replacement=Session::connect_local(&h.socket).await.unwrap();
     assert_eq!(call(&replacement,"workflow.submit_action",json!({"prepared":prepared})).await,accepted);
@@ -238,7 +238,7 @@ async fn workflow_host_browser_bridge() {
         if method=="stop" {break;}
     }
     assert_eq!(preparations,1);assert_eq!(submitted.len(),2);assert_eq!(submitted[0],submitted[1]);assert_eq!(receipts[0],receipts[1]);
-    let current=Session::connect_local(&h.socket).await.unwrap();let final_state=current.workflow_snapshot(h.workspace).await.unwrap();
+    let current=Session::connect_local(&h.socket).await.unwrap();let final_state=current.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     assert_eq!(final_state.state.items["FeatureA"].phase,farcooler_workflow::Phase::Done);
     std::fs::write(output.join("result.json"),json!({"preparations":preparations,"submitted":submitted,"receipts":receipts,
         "lossless_stale_observations":lossless,"final_revision":final_state.state.revision,"phase":final_state.state.items["FeatureA"].phase}).to_string()).unwrap();
@@ -256,7 +256,7 @@ async fn workflow_reasoned_socket_selection_loss_and_reconnect() {
     session.workflow_wire(h.workspace,serde_json::to_string(&wire::Action::Publish{notifications:None,adapter:None,mutation:mutation("b-publish"),expected_pin:None,definition}).unwrap()).await.unwrap();
     session.workflow_wire(h.workspace,serde_json::to_string(&wire::Action::Enqueue{mutation:mutation("b-enqueue"),item:"B".into(),pin}).unwrap()).await.unwrap();
     let snapshot=tokio::time::timeout(std::time::Duration::from_secs(10),async {
-        loop {let s=session.workflow_snapshot(h.workspace).await.unwrap();
+        loop {let s=session.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
             if s.state.items["B"].phase==farcooler_workflow::Phase::WaitingReview{break s;}
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;}
     }).await.unwrap();
@@ -273,7 +273,7 @@ async fn workflow_reasoned_socket_selection_loss_and_reconnect() {
     let lost=session.start(parsed.method(),Some(h.workspace),Some(request::Payload::WorkflowCommand(WorkflowCommand{schema:1,json:bytes.clone()})),vec![capability::WORKFLOW_COMMANDS.into()]).unwrap();
     let observer=Session::connect_local(&h.socket).await.unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(10),async {
-        loop {let s=observer.workflow_snapshot(h.workspace).await.unwrap();
+        loop {let s=observer.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
             if !s.state.items["B"].rework_history.is_empty(){assert_eq!(s.state.items["B"].rework_history[0].reason,reason);break;}
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;}
     }).await.unwrap();

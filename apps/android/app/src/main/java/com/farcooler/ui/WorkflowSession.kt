@@ -7,6 +7,9 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
+/** The case Rust sets this app's labels in: Material's sentence case. */
+private const val STYLE = "material"
+
 /** Current Session getter + private durable intent journal. No native workflow policy. */
 class WorkflowSessionPort(
     private val root: File,
@@ -60,7 +63,7 @@ class WorkflowSessionPort(
     }
     override suspend fun read(host: String, workspace: String): String {
         val (c, scope) = scope(host, workspace)
-        val reply = c.call("workflow.snapshot", buildJsonObject { put("workspace", workspace) })
+        val reply = c.call("workflow.snapshot", buildJsonObject { put("workspace", workspace); put("style", STYLE) })
         check(scope(host, workspace).second == scope)
         check(reply.getValue("host").jsonPrimitive.content == c.host)
         val view = WorkflowPresentation.decode(reply.getValue("presentation").toString(), workspace)
@@ -92,7 +95,7 @@ class WorkflowSessionPort(
         entries.add(entry); val index = entries.lastIndex
         save(scope, entries) // preparing marker before prepare, no implicit retry
         val reply = c.call("workflow.prepare_selection", buildJsonObject {
-            put("workspace", workspace); put("item", item); put("action", action)
+            put("workspace", workspace); put("style", STYLE); put("item", item); put("action", action)
             if (reason != null) put("reason", reason)
             put("revision", observation.revision); put("epoch", observation.epoch)
         })

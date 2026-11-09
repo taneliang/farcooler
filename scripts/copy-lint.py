@@ -60,10 +60,19 @@ apart by its id) says so with `not a count` in a comment on the same line; one
 that is a count but is never drawn (the review prompt written to an agent)
 says `not UI copy`.
 
+Strings that come from Rust (ov-1017). The shared client writes its labels once, in
+sentence case, and sets them per platform: title case for Apple and the web page,
+sentence case for Android. crates/client/src/testdata/workflow-labels.json holds
+every label it can produce in each style (a Rust test regenerates it and fails when
+it is stale), and this reads that file: an Apple or Web label must pass the Apple
+title-case rule, a Material one the sentence-case rule. The native source never
+sees these strings, so no other check could.
+
   ./scripts/copy-lint.py              scan the tree; exit 1 on any hit
   ./scripts/copy-lint.py --self-test  check the patterns against known cases
 """
 
+import json
 import pathlib
 import re
 import sys
@@ -248,6 +257,25 @@ def train_hits(text: str) -> list[tuple[int, str]]:
     return out
 
 
+RUST_LABELS = "crates/client/src/testdata/workflow-labels.json"
+
+
+def rust_label_hits(labels_by_style: dict) -> list[tuple[str, str]]:
+    """(style, label) for each label Rust produced in the wrong case for its platform."""
+    out = []
+    for style, labels in labels_by_style.items():
+        for label in labels:
+            if style == "material":
+                wrong = bool(title_case_words(label))
+            elif style in ("apple", "web"):
+                wrong = bool(apple_case_words(label))
+            else:
+                wrong = True  # a style this check doesn't know has no rule, so it can't pass
+            if wrong:
+                out.append((style, label))
+    return out
+
+
 def code(line: str) -> str:
     """The line without a whole-line comment: a doc comment quoting the
     wrong way isn't the wrong way."""
@@ -320,6 +348,20 @@ def scan() -> int:
         for number, line in train_hits(path.read_text(encoding="utf-8")):
             print(f"{path.relative_to(ROOT)}:{number}: train metaphor in copy: {line}")
             trains += 1
+    rust = 0
+    labels_file = ROOT / RUST_LABELS
+    if not labels_file.exists():
+        print(f"{RUST_LABELS}: missing, so the strings the Rust client produces can't be checked")
+        rust += 1
+    else:
+        for style, label in rust_label_hits(json.loads(labels_file.read_text(encoding="utf-8"))):
+            print(f"{RUST_LABELS}: wrong case for {style}: {label!r}")
+            rust += 1
+    if rust:
+        print(
+            f"\n{rust} label(s) from the Rust client in the wrong case. Write the source in sentence case "
+            "(crates/client/src/workflow_presentation/display.rs); Style::label sets Apple and Web in title case "
+            "and leaves Material alone. Regenerate the file with UPDATE_WORKFLOW_GOLDEN=1 cargo test -p farcooler-client workflow_label.")
     apple = 0
     for path, kind in files():
         if kind != "swift":
@@ -356,9 +398,9 @@ def scan() -> int:
             "If one isn't a count, or isn't drawn, say so in a comment on its line: "
             f"{' or '.join(f'`{a}`' for a in ALLOWS)}.")
         return 1
-    if casing or apple or paths or trains:
+    if casing or apple or paths or trains or rust:
         return 1
-    print("copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles, one path glyph, no train metaphors")
+    print("copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles, no mis-cased Rust labels, one path glyph, no train metaphors")
     return 0
 
 
@@ -503,7 +545,22 @@ def self_test() -> int:
         ('Button("save")  // casing ok', False, True),
         ('Button("save")  // casing ok: a typed name', False, False),
     ]
+    rust_cases = [
+        ({"apple": ["Cancel run"]}, True),
+        ({"web": ["Awaiting approval"]}, True),
+        ({"apple": ["Queued in A Batch"]}, True),
+        ({"material": ["Cancel Run"]}, True),
+        ({"material": ["Awaiting Approval"]}, True),
+        ({"android": ["Cancel run"]}, True),
+        ({"apple": ["Cancel Run", "Queued in a Batch", "Check CI", "Inspect Latest Evidence…"]}, False),
+        ({"web": ["Cancel Run", "Wait for CI"]}, False),
+        ({"material": ["Cancel run", "Queued in a batch", "Check CI", "Inspect latest evidence…"]}, False),
+    ]
     failed = 0
+    for labels, caught in rust_cases:
+        if bool(rust_label_hits(labels)) != caught:
+            print(f"self-test: {'missed' if caught else 'wrongly caught'} Rust label: {labels}")
+            failed += 1
     for line, phone, caught in apple_cases:
         if bool(apple_hits(line, phone)) != caught:
             print(f"self-test: {'missed' if caught else 'wrongly caught'} Apple casing: {line}")

@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub const SCHEMA: u32 = 2;
 
 mod display;
+mod style;
+pub use style::Style;
 
 /// This is an explicit trusted input, not a credential or a transport grant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,16 +127,16 @@ pub enum Intent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stop { pub run: String, pub text: String }
 /// Show each run the reason its runner stopped it, when the stop is for the run the card shows.
-pub fn add_stops(view: &mut Presentation, stops: &std::collections::BTreeMap<String, Stop>) {
+pub fn add_stops(view: &mut Presentation, stops: &std::collections::BTreeMap<String, Stop>, style: Style) {
     for card in &mut view.runs {
         let Some(stop) = stops.get(&card.item).filter(|s| s.run == card.run) else { continue };
-        let mut reason = display::reason_card(Reason::WorktreeChanged);
+        let mut reason = display::reason_card(Reason::WorktreeChanged, style);
         reason.text = stop.text.clone();
         card.reasons.push(reason);
     }
 }
 
-pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error> {
+pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Presentation, Error> {
     if state.schema != 1 || state.epoch == 0 || state.items.len() > 1024 {
         return Err(Error::Invalid);
     }
@@ -156,11 +158,11 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
         let stage = item.definition.stages.get(item.stage);
         let gate = match (&item.phase, stage) {
             (Phase::WaitingApproval, Some(s)) => match &s.progression {
-                Progression::AwaitApproval { principal } => Some(display::gate_card(GateKind::Approval, principal)),
+                Progression::AwaitApproval { principal } => Some(display::gate_card(GateKind::Approval, principal, style)),
                 _ => return Err(Error::Invalid),
             },
             (Phase::WaitingReview, Some(s)) => match &s.kind {
-                StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(display::gate_card(GateKind::Review, p)),
+                StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(display::gate_card(GateKind::Review, p, style)),
                 _ => return Err(Error::Invalid),
             },
             _ => None,
@@ -199,22 +201,19 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
         if auth.controller && !matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)
             && !item.run.starts_with("cancel:")
         { kinds.push(ActionKind::Cancel); }
-        runs.push(RunCard { label: "Workflow Run".into(), phase_label: display::phase_label(&item.phase).into(),
+        runs.push(RunCard { label: display::run_label(style), phase_label: display::phase_label(&item.phase, style),
             item: id.clone(), run: item.run.clone(), definition_pin: item.pin.clone(),
             policy_pin: item.policy_pin.clone(), phase: item.phase.clone(),
-            stages: item.definition.stages.iter().map(display::stage_card).collect(),
-            stage: stage.map(display::stage_card), gate, candidate: item.candidate.clone(),
+            stages: item.definition.stages.iter().map(|s| display::stage_card(s, style)).collect(),
+            stage: stage.map(|s| display::stage_card(s, style)), gate, candidate: item.candidate.clone(),
             latest_evidence: item.last_evidence.clone(), pending_effect: item.pending.clone(),
             iteration: item.iteration, reworks_remaining: item.definition.max_reworks - item.iteration,
             attempt: item.attempt, fence: item.fence,
-            forms: if kinds.contains(&ActionKind::RequestRework) { vec![ActionForm {
-                action: ActionKind::RequestRework, label: "Rework Reason".into(),
-                help: "Explain what needs to change. This text is retained with your decision.".into(),
-                submit_label: "Request Rework".into(), max_bytes: farcooler_workflow::MAX_REWORK_REASON_BYTES,
-            }] } else { Vec::new() },
+            forms: if kinds.contains(&ActionKind::RequestRework) {
+                vec![display::rework_form(farcooler_workflow::MAX_REWORK_REASON_BYTES, style)] } else { Vec::new() },
             rework_history: item.rework_history.clone(),
-            reasons: reasons.into_iter().map(display::reason_card).collect(),
-            actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind).into(), kind, guard: guard.clone() }).collect() });
+            reasons: reasons.into_iter().map(|r| display::reason_card(r, style)).collect(),
+            actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind, style), kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,
         revision: state.revision, runs })
@@ -222,13 +221,13 @@ pub fn project(state: &State, auth: &Capabilities) -> Result<Presentation, Error
 
 /// Reproject against the latest snapshot AND current authenticated context on every click.
 /// The resulting command is only an intent; it cannot bypass reducer/store authorization.
-pub fn action(state: &State, auth: &Capabilities, item: &str, requested: &Action) -> Result<Intent, Error> {
-    action_with_reason(state, auth, item, requested, None)
+pub fn action(state: &State, auth: &Capabilities, style: Style, item: &str, requested: &Action) -> Result<Intent, Error> {
+    action_with_reason(state, auth, style, item, requested, None)
 }
-pub fn action_with_reason(state: &State, auth: &Capabilities, item: &str, requested: &Action,
+pub fn action_with_reason(state: &State, auth: &Capabilities, style: Style, item: &str, requested: &Action,
     reason: Option<&str>) -> Result<Intent, Error>
 {
-    let view = project(state, auth)?;
+    let view = project(state, auth, style)?;
     let card = view.runs.iter().find(|c| c.item == item).ok_or(Error::Missing)?;
     if requested.guard != digest(&(digest(&("workflow-presentation/v2", state, auth)), item)) { return Err(Error::Stale); }
     if !card.actions.contains(requested) { return Err(Error::Unavailable); }
@@ -254,6 +253,8 @@ pub struct Request {
     pub schema: u32,
     pub snapshot: State,
     pub capabilities: Capabilities,
+    /// Which platform's case the labels come back in. Required: there is no default to forget.
+    pub style: Style,
     pub selection: Option<Selection>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -274,9 +275,9 @@ pub fn json(request: &str) -> String {
         if request.len() > 4 * 1024 * 1024 { return Err(Error::Invalid); }
         let request: Request = serde_json::from_str(request).map_err(|_| Error::Invalid)?;
         if request.schema != SCHEMA { return Err(Error::Invalid); }
-        let card = project(&request.snapshot, &request.capabilities)?;
+        let card = project(&request.snapshot, &request.capabilities, request.style)?;
         let intent = request.selection.as_ref().map(|s|
-            action_with_reason(&request.snapshot, &request.capabilities, &s.item, &s.action, s.reason.as_deref())).transpose()?;
+            action_with_reason(&request.snapshot, &request.capabilities, request.style, &s.item, &s.action, s.reason.as_deref())).transpose()?;
         Ok((card, intent))
     })();
     let response = match result {

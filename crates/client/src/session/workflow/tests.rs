@@ -13,7 +13,7 @@ fn snapshot() -> WorkflowSnapshot {
     }).unwrap().state;
     let context = WorkflowContext { capabilities:Capabilities { workspace,epoch:1,inspect:true,controller:true,
         decision_principal:Some("owner".into()) },binding:"generation-1".into() };
-    WorkflowSnapshot { schema:2,host:Uuid::nil().to_string(),presentation:project(&state,&context).unwrap(),state,context,
+    WorkflowSnapshot { schema:2,host:Uuid::nil().to_string(),presentation:project(&state,&context,Style::Apple).unwrap(),state,context,
         configuration:serde_json::Value::Null,notices:serde_json::json!([]) }
 }
 fn identity(s: &WorkflowSnapshot) -> WorkflowCommandIdentity {
@@ -62,7 +62,7 @@ fn observed(s: &WorkflowSnapshot, command: Command, grant: Grant) -> WorkflowSna
     next.state=step(&s.state,&Input { schema:1,id:format!("observe-{}",s.state.revision),workspace:s.state.workspace.clone(),
         expected_revision:s.state.revision,epoch:s.state.epoch,source:"fixture".into(),source_sequence:s.state.revision+1,
         now_ms:1,grant,command,busy_resources:Default::default() }).unwrap().state;
-    next.presentation=project(&next.state,&next.context).unwrap();next
+    next.presentation=project(&next.state,&next.context,Style::Apple).unwrap();next
 }
 fn finish(s: &WorkflowSnapshot, candidate: &str) -> WorkflowSnapshot {
     let item=&s.state.items["item"]; let effect=item.pending.clone().unwrap();
@@ -112,7 +112,7 @@ fn workflow_selection_allocates_once_and_preserves_observation() {
     s.state.revision = u64::MAX - 2;
     s.state.epoch = u64::MAX;
     s.context.capabilities.epoch = u64::MAX;
-    s.presentation = project(&s.state, &s.context).unwrap();
+    s.presentation = project(&s.state, &s.context, Style::Apple).unwrap();
     let selected = approve(&s);
     let PreparedWorkflowResult::Mutation { prepared } = prepare_selection(&s, Uuid::nil(), "item", selected.clone(),
         s.state.revision, s.state.epoch).unwrap() else { panic!() };
@@ -124,7 +124,7 @@ fn workflow_selection_allocates_once_and_preserves_observation() {
     let mut changed = s.clone(); changed.context.binding.push('x');
     assert!(prepare_selection(&changed, Uuid::nil(), "item", selected.clone(), s.state.revision, s.state.epoch).is_err());
     s.state.source_sequences.insert("wire:owner".into(), u64::MAX);
-    s.presentation = project(&s.state, &s.context).unwrap();
+    s.presentation = project(&s.state, &s.context, Style::Apple).unwrap();
     let exhausted = approve(&s);
     assert!(matches!(prepare_selection(&s, Uuid::nil(), "item", exhausted, s.state.revision, s.state.epoch),
         Err(SessionError::Protocol(message)) if message == "workflow source sequence exhausted"));
@@ -139,7 +139,7 @@ fn workflow_selection_readonly_ignores_all_sequence_exhaustion() {
     s.state.source_sequences.insert("wire:owner".into(), u64::MAX);
     s.state.source_sequences.insert("unrelated".into(), u64::MAX);
     s.context.capabilities.decision_principal = None;
-    s.presentation = project(&s.state, &s.context).unwrap();
+    s.presentation = project(&s.state, &s.context, Style::Apple).unwrap();
     let selected = s.presentation.runs[0].actions.iter().find(|a| a.kind == cards::ActionKind::InspectLatestEvidence).unwrap().clone();
     assert!(matches!(prepare_selection(&s, Uuid::nil(), "item", selected.clone(), s.state.revision, s.state.epoch).unwrap(),
         PreparedWorkflowResult::Inspection { .. }));

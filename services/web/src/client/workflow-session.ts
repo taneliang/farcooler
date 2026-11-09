@@ -15,6 +15,8 @@ interface Observation { revision: string; epoch: string; run: string }
 interface Entry extends RetainedWorkflow { phase: 'preparing' | 'prepared' | 'complete' | 'abandoned'; action: WorkflowAction; reason?: string; prepared?: unknown; attempts: number; result?: string }
 interface Journal { entries: Entry[] }
 type Exclusive = <T>(key: string, body: () => Promise<T>) => Promise<T>
+/** The case Rust sets this page's labels in. */
+const STYLE = 'web'
 const keyOf = (value: unknown): string => JSON.stringify(value)
 
 // App/origin storage is injected for private-profile tests. setItem is
@@ -62,7 +64,7 @@ export class WorkflowSessionPort implements WorkflowPort {
   async read(workspace: string): Promise<WorkflowPresentation> {
     const current = this.current()
     if (!current || !current.account || !current.host) throw new Error('Workflow session unavailable')
-    const snapshot = workflowJSON(await current.session.workflow_call('workflow.snapshot', keyOf({ workspace })))
+    const snapshot = workflowJSON(await current.session.workflow_call('workflow.snapshot', keyOf({ workspace, style: STYLE })))
     const now = this.current()
     if (!now || now.account !== current.account || now.host !== current.host || now.session !== current.session) throw new Error('Workflow session changed')
     if (typeof snapshot.host !== 'string' || !snapshot.host) throw new Error('Invalid workflow host identity')
@@ -109,7 +111,7 @@ export class WorkflowSessionPort implements WorkflowPort {
       const current = this.scope(workspace)
       if (current.key !== scope.key) throw new Error('Workflow account changed')
       const reply = workflowJSON(await current.session.workflow_call('workflow.prepare_selection', keyOf({
-        workspace, item, action, ...(reason === undefined ? {} : { reason }), revision: observation.revision, epoch: observation.epoch,
+        workspace, style: STYLE, item, action, ...(reason === undefined ? {} : { reason }), revision: observation.revision, epoch: observation.epoch,
       })))
       if (this.scope(workspace).key !== scope.key) throw new Error('Workflow account changed')
       if (reply.kind === 'Validation') {

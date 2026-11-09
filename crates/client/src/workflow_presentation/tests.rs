@@ -1,6 +1,9 @@
 use super::*;
 use farcooler_workflow::{Definition, Grant, Input, Outcome, step};
 
+/// The existing cases read Apple's title case; the per-platform cases below say their own.
+const STYLE: Style = Style::Apple;
+
 fn auth() -> Capabilities {
     Capabilities { workspace: "workspace".into(), epoch: 1, inspect: true,
         controller: true, decision_principal: Some("owner".into()) }
@@ -54,7 +57,7 @@ fn fixtures() -> Vec<(&'static str, State)> {
 #[test]
 fn workflow_presentation_golden() {
     let cases: Vec<_> = fixtures().into_iter().map(|(name, snapshot)| {
-        let request = Request { schema: SCHEMA, snapshot, capabilities: auth(), selection: None };
+        let request = Request { schema: SCHEMA, snapshot, capabilities: auth(), style: STYLE, selection: None };
         let input = serde_json::to_string(&request).unwrap();
         let output = json(&input);
         assert_eq!(output, json(&input));
@@ -80,9 +83,9 @@ fn workflow_presentation_golden() {
 #[test]
 fn workflow_presentation_stale_and_auth_boundaries() {
     let state = fixtures().remove(1).1;
-    let card = project(&state, &auth()).unwrap().runs.remove(0);
+    let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
     let approve = card.actions.iter().find(|a| a.kind == ActionKind::Approve).unwrap();
-    assert!(matches!(action(&state, &auth(), "item", approve), Ok(Intent::Command(Command::Approve { .. }))));
+    assert!(matches!(action(&state, &auth(), STYLE, "item", approve), Ok(Intent::Command(Command::Approve { .. }))));
     for field in ["revision", "epoch", "candidate", "evidence", "run", "policy"] {
         let mut changed = state.clone();
         match field {
@@ -94,44 +97,44 @@ fn workflow_presentation_stale_and_auth_boundaries() {
             "run" => changed.items.get_mut("item").unwrap().run = "replacement".into(),
             _ => changed.items.get_mut("item").unwrap().policy_pin = "new-policy".into(),
         }
-        assert!(action(&changed, &auth(), "item", approve).is_err(), "{field}");
+        assert!(action(&changed, &auth(), STYLE, "item", approve).is_err(), "{field}");
     }
     let mut revoked = auth(); revoked.decision_principal = None;
-    assert_eq!(action(&state, &revoked, "item", approve), Err(Error::Stale));
-    assert!(!project(&state, &revoked).unwrap().runs[0].actions.iter().any(|a| a.kind == ActionKind::Approve));
+    assert_eq!(action(&state, &revoked, STYLE, "item", approve), Err(Error::Stale));
+    assert!(!project(&state, &revoked, STYLE).unwrap().runs[0].actions.iter().any(|a| a.kind == ActionKind::Approve));
     revoked.inspect = false;
-    assert_eq!(project(&state, &revoked), Err(Error::Unauthorized));
+    assert_eq!(project(&state, &revoked, STYLE), Err(Error::Unauthorized));
     let mut forged = approve.clone(); forged.kind = ActionKind::AcceptReview;
-    assert_eq!(action(&state, &auth(), "item", &forged), Err(Error::Unavailable));
+    assert_eq!(action(&state, &auth(), STYLE, "item", &forged), Err(Error::Unavailable));
 }
 
 #[test]
 fn workflow_presentation_invalidated_inspection_and_rework() {
     let cases = fixtures();
     for (_, state) in &cases {
-        let card = &project(state, &auth()).unwrap().runs[0];
+        let card = &project(state, &auth(), STYLE).unwrap().runs[0];
         if let Some(evidence) = &card.latest_evidence {
             let inspect = card.actions.iter().find(|a| a.kind == ActionKind::InspectLatestEvidence).unwrap();
-            assert_eq!(action(state, &auth(), "item", inspect),
+            assert_eq!(action(state, &auth(), STYLE, "item", inspect),
                 Ok(Intent::InspectLatestEvidence { evidence: evidence.clone() }));
         }
     }
     let invalidated = &cases[4].1;
-    assert!(project(invalidated, &auth()).unwrap().runs[0].reasons.iter().any(|r| r.kind == Reason::EvidenceInvalidated));
+    assert!(project(invalidated, &auth(), STYLE).unwrap().runs[0].reasons.iter().any(|r| r.kind == Reason::EvidenceInvalidated));
     let mut definition = Definition::coding();
     definition.stages[3].kind = StageKind::Review(Reviewer::Person("owner".into()));
     let state = enqueue(definition);
     let state = finish(&finish(&finish(&state, "provision", true), "candidate", true), "candidate", true);
-    let card = &project(&state, &auth()).unwrap().runs[0];
+    let card = &project(&state, &auth(), STYLE).unwrap().runs[0];
     let rework = card.actions.iter().find(|a| a.kind == ActionKind::RequestRework).unwrap();
-    let Intent::Command(command) = action_with_reason(&state, &auth(), "item", rework, Some("Please fix the evidence.")).unwrap() else { panic!() };
+    let Intent::Command(command) = action_with_reason(&state, &auth(), STYLE, "item", rework, Some("Please fix the evidence.")).unwrap() else { panic!() };
     let next = apply(&state, command, Grant::Decision { principal: "owner".into() });
     assert_eq!(next.items["item"].iteration, 1);
     let mut stale = state.clone();
     stale.items.get_mut("item").unwrap().last_evidence.as_mut().unwrap().candidate = "old".into();
-    let card = &project(&stale, &auth()).unwrap().runs[0];
+    let card = &project(&stale, &auth(), STYLE).unwrap().runs[0];
     assert!(!card.actions.iter().any(|a| matches!(a.kind, ActionKind::AcceptReview | ActionKind::RequestRework)));
-    assert_eq!(action(&stale, &auth(), "item", rework), Err(Error::Stale));
+    assert_eq!(action(&stale, &auth(), STYLE, "item", rework), Err(Error::Stale));
 }
 
 #[test]
@@ -140,12 +143,12 @@ fn workflow_presentation_errors_and_c_buffer() {
     assert!(json("{\"schema\":99}").contains("Invalid"));
     let state = fixtures().remove(0).1;
     let mut broken = state.clone(); broken.items.get_mut("item").unwrap().stage = usize::MAX;
-    assert_eq!(project(&broken, &auth()), Err(Error::Invalid));
+    assert_eq!(project(&broken, &auth(), STYLE), Err(Error::Invalid));
     #[cfg(feature = "native")]
     {
         use crate::ffi::farcooler_client_workflow_presentation as bridge;
         let request = std::ffi::CString::new(serde_json::to_string(&Request {
-            schema: SCHEMA, snapshot: state, capabilities: auth(), selection: None }).unwrap()).unwrap();
+            schema: SCHEMA, snapshot: state, capabilities: auth(), style: STYLE, selection: None }).unwrap()).unwrap();
         let expected = json(request.to_str().unwrap());
         unsafe {
             let needed = bridge(request.as_ptr(), std::ptr::null_mut(), 0);
@@ -172,16 +175,16 @@ fn workflow_presentation_selected_and_every_stage_approval() {
         }
         let mut state = enqueue(definition);
         for index in 0..6 {
-            let card = project(&state, &auth()).unwrap().runs.remove(0);
+            let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
             if every || index == 2 {
-                assert_eq!(card.gate, Some(display::gate_card(GateKind::Approval, "owner")));
+                assert_eq!(card.gate, Some(display::gate_card(GateKind::Approval, "owner", STYLE)));
                 let approve = card.actions.iter().find(|a| a.kind == ActionKind::Approve).unwrap();
-                let Intent::Command(command) = action(&state, &auth(), "item", approve).unwrap() else { panic!() };
+                let Intent::Command(command) = action(&state, &auth(), STYLE, "item", approve).unwrap() else { panic!() };
                 state = apply(&state, command, Grant::Decision { principal: "owner".into() });
             } else { assert!(card.gate.is_none()); }
             state = finish(&state, if index == 0 { "provision" } else { "candidate" }, true);
         }
-        let card = project(&state, &auth()).unwrap().runs.remove(0);
+        let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
         assert_eq!(card.phase, Phase::Done);
         assert!(card.stage.is_none() && card.gate.is_none());
         assert!(!card.actions.iter().any(|a| matches!(a.kind, ActionKind::Approve | ActionKind::Cancel)));
@@ -203,20 +206,20 @@ fn workflow_presentation_generic_display_slots() {
         slots
     }
     for (_, state) in fixtures() {
-        let view = project(&state, &auth()).unwrap();
+        let view = project(&state, &auth(), STYLE).unwrap();
         let slots = text_slots(&view.runs[0]);
         assert!(slots.iter().all(|s| !s.is_empty()));
         assert!(view.runs[0].stages.iter().all(|s| !s.label.is_empty() && !s.progression_label.is_empty()));
     }
     let state = fixtures().remove(4).1;
-    let card = project(&state, &auth()).unwrap().runs.remove(0);
+    let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
     let slots = text_slots(&card);
     assert!(slots.contains(&"Evidence Invalidated"));
     assert!(slots.contains(&"The latest evidence no longer matches the current candidate or policy."));
     let label = "Inspect Latest Evidence…";
     assert!(slots.contains(&label));
     let button = card.actions.iter().find(|a| a.label == label).unwrap();
-    let request = Request { schema: SCHEMA, snapshot: state, capabilities: auth(),
+    let request = Request { schema: SCHEMA, snapshot: state, capabilities: auth(), style: STYLE,
         selection: Some(Selection { item: card.item.clone(), action: button.clone(), reason: None }) };
     let response: Response = serde_json::from_str(&json(&serde_json::to_string(&request).unwrap())).unwrap();
     assert_eq!(response.schema, 2);
@@ -235,11 +238,11 @@ fn a_tracker_only_ticket_offers_a_person_no_action() {
     let state = apply(&State::empty("workspace".into(), 1), Command::Enqueue {
         item: "item".into(), initial_candidate: Some(definition.pin()), definition, policy_pin: "policy".into(),
         resource: "resource".into(), dependencies: Default::default() }, Grant::Controller);
-    assert!(project(&state, &auth()).unwrap().runs.is_empty(), "a ticket is not a run");
+    assert!(project(&state, &auth(), STYLE).unwrap().runs.is_empty(), "a ticket is not a run");
     // And a hand-built Cancel, with the label a real one carries, is refused.
-    let forged = Action { kind: ActionKind::Cancel, label: display::action_label(&ActionKind::Cancel).into(),
+    let forged = Action { kind: ActionKind::Cancel, label: display::action_label(&ActionKind::Cancel, STYLE),
         guard: digest(&(digest(&("workflow-presentation/v2", &state, &auth())), "item")) };
-    assert!(action(&state, &auth(), "item", &forged).is_err());
+    assert!(action(&state, &auth(), STYLE, "item", &forged).is_err());
 }
 
 /// ov-979: the runner's list of a named tree's changes reaches the run's card, and only for the run it stopped.
@@ -248,12 +251,97 @@ fn a_stopped_run_shows_why() {
     let state = fixtures().into_iter().find(|(name, _)| *name == "uncertain").unwrap().1;
     let run = state.items["item"].run.clone();
     let text = "The run stopped because its worktree has changes, and it left them as they are: mine.txt.";
-    let mut view = project(&state, &auth()).unwrap();
-    add_stops(&mut view, &[("item".to_string(), Stop { run: run.clone(), text: text.into() })].into());
+    let mut view = project(&state, &auth(), STYLE).unwrap();
+    add_stops(&mut view, &[("item".to_string(), Stop { run: run.clone(), text: text.into() })].into(), STYLE);
     let reason = view.runs[0].reasons.last().unwrap();
     assert_eq!((&reason.kind, reason.label.as_str(), reason.text.as_str()), (&Reason::WorktreeChanged, "Worktree Has Changes", text));
-    let mut view = project(&state, &auth()).unwrap();
+    let mut view = project(&state, &auth(), STYLE).unwrap();
     let before = view.runs[0].reasons.clone();
-    add_stops(&mut view, &[("item".to_string(), Stop { run: "an earlier run".into(), text: text.into() })].into());
+    add_stops(&mut view, &[("item".to_string(), Stop { run: "an earlier run".into(), text: text.into() })].into(), STYLE);
     assert_eq!(view.runs[0].reasons, before, "a stop for another run is not this one's");
+}
+
+fn labels(style: Style) -> Vec<String> {
+    let phases = [Phase::Blocked, Phase::WaitingApproval, Phase::WaitingReview, Phase::Running, Phase::Uncertain,
+        Phase::Cancelling, Phase::Done, Phase::Failed, Phase::Cancelled, Phase::WaitingJoin, Phase::Joined];
+    let kinds = [StageKind::Provision, StageKind::Build, StageKind::Check, StageKind::Review(Reviewer::Dispatch),
+        StageKind::Land, StageKind::Ci, StageKind::Tracker, StageKind::Action("x".into()), StageKind::Evaluate("x".into()),
+        StageKind::Join { group: "x".into(), adopt: false }, StageKind::AwaitBase, StageKind::Fold, StageKind::Run,
+        StageKind::Push, StageKind::AwaitCi, StageKind::Route, StageKind::PushBranch, StageKind::OpenPr,
+        StageKind::PrReady, StageKind::AwaitPr];
+    let reasons = [Reason::Automatic, Reason::ApprovalRequired, Reason::ReviewRequired, Reason::DependenciesOrResource,
+        Reason::EffectUncertain, Reason::Reworking, Reason::EvidenceInvalidated, Reason::Completed, Reason::Failed,
+        Reason::Cancelling, Reason::Cancelled, Reason::WorktreeChanged];
+    let actions = [ActionKind::InspectLatestEvidence, ActionKind::InspectUncertainty, ActionKind::Approve,
+        ActionKind::AcceptReview, ActionKind::RequestRework, ActionKind::RejectReview, ActionKind::Cancel];
+    let mut out = vec![display::run_label(style)];
+    out.extend(phases.iter().map(|p| display::phase_label(p, style)));
+    out.extend(kinds.iter().map(|k| style.label(display::stage_label(k))));
+    out.extend(["Automatic", "Approval from"].map(|w| style.label(w)));
+    out.extend([GateKind::Approval, GateKind::Review].map(|k| display::gate_card(k, "owner", style).label));
+    out.extend(reasons.into_iter().map(|r| display::reason_card(r, style).label));
+    out.extend(actions.iter().map(|a| display::action_label(a, style)));
+    let form = display::rework_form(1, style);
+    out.extend([form.label, form.submit_label]);
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Every label Rust can produce, per platform. `scripts/copy-lint.py` reads this file and holds the
+/// Apple and Web labels to title case and the Material ones to sentence case, so a string whose case
+/// the helper gets wrong, or one written in the wrong case at the source, fails there.
+#[test]
+fn workflow_label_golden_per_platform() {
+    let all: std::collections::BTreeMap<_, _> = Style::ALL.iter()
+        .map(|s| (format!("{s:?}").to_lowercase(), labels(*s))).collect();
+    let actual = serde_json::to_string_pretty(&all).unwrap() + "\n";
+    if std::env::var_os("UPDATE_WORKFLOW_GOLDEN").is_some() {
+        std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/src/testdata/workflow-labels.json"), &actual).unwrap();
+    }
+    assert_eq!(actual, include_str!("../testdata/workflow-labels.json"));
+}
+
+/// Apple shows 'Awaiting Approval' and Android 'Awaiting approval' for the same run; the sentences do not move.
+#[test]
+fn each_platform_shows_its_own_case_and_the_sentences_do_not_move() {
+    let state = fixtures().remove(1).1;
+    let view = |style| project(&state, &auth(), style).unwrap().runs.remove(0);
+    let (apple, material, web) = (view(Style::Apple), view(Style::Material), view(Style::Web));
+    assert_eq!((apple.phase_label.as_str(), apple.label.as_str()), ("Awaiting Approval", "Workflow Run"));
+    assert_eq!((material.phase_label.as_str(), material.label.as_str()), ("Awaiting approval", "Workflow run"));
+    assert_eq!(web.phase_label, "Awaiting Approval");
+    let names = |card: &RunCard| card.actions.iter().map(|a| a.label.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&apple), ["Approve", "Cancel Run"]);
+    assert_eq!(names(&material), ["Approve", "Cancel run"]);
+    let gate = |card: &RunCard| card.gate.clone().unwrap();
+    assert_eq!((gate(&apple).label.as_str(), gate(&material).label.as_str()), ("Approval Required", "Approval required"));
+    assert_eq!(gate(&apple).text, gate(&material).text);
+    assert_eq!(apple.reasons.iter().map(|r| &r.text).collect::<Vec<_>>(), material.reasons.iter().map(|r| &r.text).collect::<Vec<_>>());
+    // A principal's name is a value: neither style recases it.
+    let stage = |card: &RunCard| card.stage.clone().unwrap().progression_label;
+    assert_eq!((stage(&apple), stage(&material)), ("Approval from owner".into(), "Approval from owner".into()));
+}
+
+/// An action chosen from one platform's card is refused on another's: a click is matched by its label.
+#[test]
+fn an_action_is_matched_in_the_style_it_was_shown_in() {
+    let state = fixtures().remove(1).1;
+    let shown = project(&state, &auth(), Style::Material).unwrap().runs.remove(0);
+    let cancel = shown.actions.iter().find(|a| a.kind == ActionKind::Cancel).unwrap();
+    assert!(action(&state, &auth(), Style::Material, "item", cancel).is_ok());
+    assert_eq!(action(&state, &auth(), Style::Apple, "item", cancel), Err(Error::Unavailable));
+}
+
+/// The style is required on the wire: a host that forgets it is told so instead of getting another platform's case.
+#[test]
+fn a_request_without_a_style_is_refused() {
+    let state = fixtures().remove(0).1;
+    let mut request = serde_json::to_value(Request { schema: SCHEMA, snapshot: state, capabilities: auth(),
+        style: Style::Material, selection: None }).unwrap();
+    let ok: Response = serde_json::from_str(&json(&request.to_string())).unwrap();
+    assert_eq!(ok.card.unwrap().runs[0].phase_label, "Running");
+    request.as_object_mut().unwrap().remove("style");
+    let refused: Response = serde_json::from_str(&json(&request.to_string())).unwrap();
+    assert_eq!(refused.error, Some(Error::Invalid));
 }
