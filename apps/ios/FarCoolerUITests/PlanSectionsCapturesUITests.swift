@@ -124,6 +124,9 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         }
     }
 
+    /// The share of the screen's width, from the left edge, that holds the glyph column; blacked out in a resting-picture check.
+    private static let glyphColumnShare = 0.14
+
     /// The screen below the status bar, as pixels: the clock ticks over a minute boundary in the middle of a
     /// walk, and a picture that differs only by it is the same page (the sixth page of the light sheet was
     /// the fifth with the clock a minute on, in the first run of this fix).
@@ -142,7 +145,7 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
             UIImage(cgImage: body).draw(in: CGRect(origin: .zero, size: size))
             UIColor.black.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: Double(body.width) * 0.14, height: Double(body.height)))
+            context.fill(CGRect(x: 0, y: 0, width: Double(body.width) * Self.glyphColumnShare, height: Double(body.height)))
         }
     }
 
