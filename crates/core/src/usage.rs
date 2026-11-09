@@ -13,7 +13,7 @@
 
 /// Which price table an estimate was made from: the date its rates were
 /// read. Bump it whenever a rate changes or a model is added.
-pub const PRICE_TABLE: &str = "2026-10-10";
+pub const PRICE_TABLE: &str = "2026-11-09";
 
 /// One turn's tokens for one model, in the store's four buckets.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -147,6 +147,14 @@ const TABLE: &[(&str, Rates)] = &[
     ("claude-sonnet-4", rate(3.0, 3.75, 6.0, 0.3, 15.0)),
     ("claude-haiku-5-5", rate(0.5, 0.625, 1.0, 0.05, 2.5)),
     ("claude-haiku-4-5", rate(1.0, 1.25, 2.0, 0.1, 5.0)),
+];
+
+/// Models the pricing page no longer lists (ov-942, ruling R-106). Their usage
+/// is still in the store and still arrives from old sessions, so they keep the
+/// last rates the page printed. `scripts/claude-prices.py` neither compares nor
+/// rewrites this table; add a row here when the page drops a model.
+const RETIRED: &[(&str, Rates)] = &[
+    // Dropped from the page 2026-11.
     ("claude-haiku-3-5", rate(0.8, 1.0, 1.6, 0.08, 4.0)),
 ];
 
@@ -180,7 +188,7 @@ fn lookup(model: &str) -> Option<(Rates, &'static str)> {
     };
     // The id Anthropic gave Haiku 3.5 puts the version first.
     let base = if base == "claude-3-5-haiku" { "claude-haiku-3-5".to_string() } else { base };
-    TABLE.iter().find(|(name, _)| *name == base).map(|(name, rates)| (*rates, *name))
+    TABLE.iter().chain(RETIRED).find(|(name, _)| *name == base).map(|(name, rates)| (*rates, *name))
 }
 
 /// What `tokens` would cost on `model` at list price, in millionths of a
@@ -248,7 +256,6 @@ mod tests {
             ("claude-sonnet-4", [3.0, 3.75, 6.0, 0.3, 15.0]),
             ("claude-haiku-5-5", [0.5, 0.625, 1.0, 0.05, 2.5]),
             ("claude-haiku-4-5", [1.0, 1.25, 2.0, 0.1, 5.0]),
-            ("claude-haiku-3-5", [0.8, 1.0, 1.6, 0.08, 4.0]),
         ];
         assert_eq!(docs.len(), TABLE.len(), "a row in one list and not the other");
         for (model, [input, write, write_1h, read, output]) in docs {
@@ -278,9 +285,12 @@ mod tests {
     }
 
     #[test]
-    fn haiku_3_5_is_found_under_its_anthropic_id() {
+    fn retired_haiku_3_5_keeps_its_last_rates_and_its_anthropic_id() {
+        // The pricing page dropped it (ov-942); RETIRED keeps it priced.
         let tokens = TokenCounts { input: 1_000_000, ..Default::default() };
         assert_eq!(estimate(Some("claude-3-5-haiku-20241022"), &tokens), Some(800_000));
+        assert_eq!(estimate(Some("claude-haiku-3-5"), &tokens), Some(800_000));
+        assert!(!TABLE.iter().any(|(n, _)| *n == "claude-haiku-3-5"), "retired rows stay out of the checked table");
     }
 
     /// A session's `cost-state` record: 1,169 input and 13 output tokens on
