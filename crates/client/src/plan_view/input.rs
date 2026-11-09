@@ -192,7 +192,7 @@ pub struct Context {
     /// Whether the runner lists agents (`board_line`); without it, the Agents
     /// section isn't drawn, since "No agents running" would be false.
     pub agents_supported: bool,
-    /// The runner's offset from UTC in seconds, which says where its day ends.
+    /// The viewer's offset from UTC in seconds, which says where their day ends (the app sends its own; none is UTC).
     pub utc_offset: i64,
     pub style: super::words::Style,
 }

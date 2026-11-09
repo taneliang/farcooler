@@ -272,7 +272,7 @@ public struct PlanView: Decodable, Equatable, Sendable {
     /// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
     public var waiting: [WaitingGroup]
     public var onLandedLanding: [TicketCard]
-    /// Landed on the runner's day, newest first.
+    /// Landed on the viewer's day, newest first.
     public var landedToday: [TicketCard]
     public var agents: Agents
     public var themes: Themes
@@ -315,7 +315,7 @@ public struct PlanViewContext: Equatable, Sendable {
     /// The board's card titles by task id, for a card the plan carries none
     /// for (the column's tickets).
     public var titles: [String: String]
-    /// The device's offset from UTC in seconds, which says where today ends.
+    /// The viewer's offset from UTC in seconds, which says where their day ends.
     public var utcOffset: Int
 
     public init(

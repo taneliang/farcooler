@@ -133,7 +133,7 @@ struct PlanOverviewView: View {
     /// stamp, and the Mac's is close enough for minutes.
     static func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    /// Landed on the runner's day: the view's cards, under the view's title.
+    /// Landed on the viewer's day: the view's cards, under the view's title.
     private func landedToday(_ section: PlanView.Section, _ view: PlanView) -> some View {
         CollapsibleSection(section.title, id: "plan.landed", style: .navigator, key: key("landed"), defaults: defaults,
             expandedByDefault: !section.folded, count: section.count

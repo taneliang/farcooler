@@ -42,7 +42,7 @@ pub enum SectionKind {
     OnLandedLanding,
     Agents,
     Themes,
-    /// The tickets that landed on the runner's day; drawn last.
+    /// The tickets that landed on the viewer's day; drawn last.
     LandedToday,
 }
 
@@ -332,7 +332,7 @@ pub struct PlanView {
     /// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
     pub waiting: Vec<WaitingGroup>,
     pub on_landed_landing: Vec<TicketCard>,
-    /// Landed on the runner's day, newest first.
+    /// Landed on the viewer's day, newest first.
     pub landed_today: Vec<TicketCard>,
     pub agents: Agents,
     pub themes: Themes,

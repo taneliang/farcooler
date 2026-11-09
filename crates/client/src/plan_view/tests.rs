@@ -375,10 +375,10 @@ fn androids_second_line_leaves_the_agent_to_its_own_line() {
     assert_eq!(material.agent.unwrap().line, "Builder · sonnet · 380K");
 }
 
-/// Landed Today is the tickets that landed on the runner's day, newest first,
+/// Landed Today is the tickets that landed on the viewer's day, newest first,
 /// whose day ends where the context's offset from UTC says.
 #[test]
-fn landed_today_is_the_runners_day_newest_first() {
+fn landed_today_is_the_viewers_day_newest_first() {
     let hour = 3_600_000;
     // 22:00 UTC on a day.
     let now = 1_800_000_000_000i64 - 1_800_000_000_000i64 % (24 * hour) + 22 * hour;
@@ -397,4 +397,7 @@ fn landed_today_is_the_runners_day_newest_first() {
     assert_eq!(keys(-8 * 3600).0, ["ov-2", "ov-1"]);
     let view = view_of(json!({ "schema": SCHEMA, "plan": plan }));
     assert_eq!(view.landed_today[0].status, "Landed · ac840108");
+    // Android draws no status of its own: the sha rides in the second line.
+    let material = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": { "style": "material" } }));
+    assert_eq!(material.landed_today[0].second, "Landed · ac840108 · ov-2");
 }

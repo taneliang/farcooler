@@ -87,6 +87,14 @@ class PlanSectionsViewTest {
         assertTrue(tags.getValue("plan-ticket-ov-310").bounds.top > building)
     }
 
+    @Test fun `Landed today shows each ticket as Landed and its commit, under a long title`() {
+        val open = PlanFolds(listOf("landed-today")) {}
+        val tags = drawn(PlanFixtures.longWithLandedToday(), folds = open)
+        assertTrue("the section is drawn: ${tags.keys}", "plan-landed-header" in tags)
+        val second = tags.getValue("plan-ticket-ov-300-second").words
+        assertTrue(second, second.startsWith("Landed · ac840108") && "ov-300" in second)
+    }
+
     @Test fun `Waiting ranks Next up, then names Not ranked`() {
         val tags = drawn(PlanFixtures.long())
         assertTrue("plan-next-up" in tags && "plan-not-ranked" in tags)

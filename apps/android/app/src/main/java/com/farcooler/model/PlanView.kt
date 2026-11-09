@@ -279,7 +279,7 @@ data class PlanView(
     /** Next Up ranked, Not Ranked, then Waiting on You; empty groups left out. */
     val waiting: List<PlanViewWaitingGroup> = emptyList(),
     @SerialName("on_landed_landing") val onLandedLanding: List<PlanViewTicket> = emptyList(),
-    /** Landed on the runner's day, newest first. */
+    /** Landed on the viewer's day, newest first. */
     @SerialName("landed_today") val landedToday: List<PlanViewTicket> = emptyList(),
     val agents: PlanViewAgents = PlanViewAgents(),
     val themes: PlanViewThemes = PlanViewThemes(),

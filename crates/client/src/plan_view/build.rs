@@ -945,7 +945,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
     .collect();
     let on_landed_landing: Vec<TicketCard> = parked.iter().map(|l| row(l, None)).collect();
 
-    // Landed on the runner's day, newest first.
+    // Landed on the viewer's day, newest first.
     let day = |ms: i64| (ms / 1000 + context.utc_offset).div_euclid(86_400);
     let mut landed: Vec<&Line> =
         plan.lines.iter().filter(|l| r.stage(l) == Stage::Landed && day(l.stage_since) == day(plan.now_ms)).collect();
