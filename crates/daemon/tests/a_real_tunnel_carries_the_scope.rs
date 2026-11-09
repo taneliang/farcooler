@@ -1032,18 +1032,18 @@ impl Runner {
         keygen(&root.join("host_ed25519"), "host");
         let host_fingerprint = fingerprint(&root.join("host_ed25519.pub"));
 
-        let authorized_keys = home.join(".ssh").join("authorized_keys");
+        // Under the runtime root, and sshd is pointed at it: the daemon reads
+        // the file sshd does, as a real runner's does. The forced command runs
+        // it with `FARCOOLER_HOME` set, and a daemon with one keeps its fence
+        // at `$FARCOOLER_HOME/ssh/authorized_keys` (ov-937), then refuses a
+        // session naming a device it has no line for (ov-980,
+        // `sessions::is_known_device`). One real file and not a symlink to
+        // `$HOME/.ssh`'s: the fence reader opens `.ssh` and the file with
+        // `O_NOFOLLOW`, so a link would admit the hello and fail every read
+        // after it (ov-1055).
+        let authorized_keys = runtime.join("ssh").join("authorized_keys");
         write_fence(&authorized_keys, devices);
         scaffold(&authorized_keys, &home, &runtime, &bin, devices);
-        // And the daemon reads the file sshd does, as a real runner's does.
-        // The forced command runs it with `FARCOOLER_HOME` set, and a daemon
-        // with one reads `$FARCOOLER_HOME/ssh/authorized_keys` (ov-937), then
-        // refuses a session naming a device it has no line for (ov-980,
-        // `sessions::is_known_device`). A symlink, not a copy, so a revoke that
-        // rewrites sshd's file is what the daemon reads too (ov-1055).
-        std::fs::create_dir_all(runtime.join("ssh")).expect("the daemon's ssh directory");
-        std::os::unix::fs::symlink(&authorized_keys, runtime.join("ssh").join("authorized_keys"))
-            .expect("the daemon's fence is sshd's");
 
         let ssh_port = free_port();
         let sshd = start_sshd(sshd_binary, &root, &authorized_keys, ssh_port).await;
@@ -1219,10 +1219,11 @@ fn write_fence(path: &Path, devices: &[&Device]) {
 ///
 /// The same scaffolding, for the same reasons, as
 /// `a_real_sshd_forces_the_scope.rs`: the shipped forced command names a
-/// program that can only be found on PATH, and the daemon reads
-/// `$HOME/.ssh/authorized_keys` with no override — so a forced command that
-/// inherited the real HOME would have this test's session reading the
-/// developer's own fence.
+/// program that can only be found on PATH, and a daemon with no
+/// `FARCOOLER_HOME` reads `$HOME/.ssh/authorized_keys` — so a forced command
+/// that inherited the real HOME and runtime would have this test's session
+/// reading the developer's own fence. With both set, it reads the one under
+/// the runtime root, which is the file sshd here reads.
 ///
 /// **Everything after the `environment=` options is `fence::render`'s output
 /// verbatim.** `PermitUserEnvironment` is off by default and no runner turns it
