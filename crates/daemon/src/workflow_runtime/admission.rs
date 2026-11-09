@@ -87,6 +87,13 @@ impl Admission {
         if self.seat != Seat::Person { return Err(DomainError::ScopeDenied { needed: "person" }); }
         Ok(())
     }
+    /// For what stays the owner's when a member's orchestrator drives the engine (ov-999): a cutover.
+    pub(crate) fn require_owner(&self) -> Result<()> {
+        if crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane)? != Person::Owner {
+            return Err(DomainError::ScopeDenied { needed: "owner" });
+        }
+        Ok(())
+    }
     pub(crate) fn recheck_now(&self) -> Result<()> { self.recheck() }
     /// The orchestrator pane this admitted, if it admitted one rather than a person.
     pub(crate) fn orchestrator(&self) -> Option<&Terminal> { self.terminal.as_ref().map(|(term, _, _)| term) }
@@ -95,6 +102,21 @@ impl Admission {
             return Err(DomainError::ScopeDenied { needed: "person" });
         }
         Ok(())
+    }
+
+    /// Whether `person`, whose this caller's pane is, may drive this
+    /// workspace's engine: the owner; or a member, only from the orchestrator
+    /// pane this admitted, on that member's login, while they lead this
+    /// workspace (ov-999). Such a pane is still the `orchestrator` principal,
+    /// so it is refused what the owner's orchestrator is refused. All of it
+    /// read by the daemon: nothing on the wire names a person.
+    fn admits(&self, person: &Person) -> bool {
+        match person {
+            Person::Owner => true,
+            Person::Member(handle) => self.peer.client_id.is_none() && matches!(&self.terminal,
+                Some((_, Login::Member { handle: login, .. }, Some(lead))) if login == handle && lead == handle),
+            Person::Released => false,
+        }
     }
 
     /// The owning runtime calls this after ALL awaits, at consumption before
@@ -115,8 +137,9 @@ impl Admission {
                 .find_map(|(device, state)| (device == id).then_some(state));
             if current != self.owner_device { return Err(DomainError::AuthRequired); }
         }
+        let person = crate::caller_person::caller_person(svc, &self.peer, self.caller_pid, &self.caller_pane)?;
         if self.authority.person != Person::Owner
-            || crate::caller_person::caller_person(svc, &self.peer, self.caller_pid, &self.caller_pane)? != Person::Owner
+            || !self.admits(&person)
             || person_access::effective_scope(&svc.store, &self.peer) != self.peer.scope
             || !matches!(self.peer.scope, Scope::Control | Scope::HostAdmin)
         {

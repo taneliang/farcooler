@@ -139,6 +139,20 @@ impl Rpc {
         crate::caller_person::caller_person(&self.service, &self.peer, self.caller_pid, &self.caller_pane)
     }
 
+    /// Who may send `workspace`'s engine a command at all: the owner, or a
+    /// pane on the login of the member who leads it (ov-999). A member's
+    /// device is never one, and a member reaches no workspace they don't
+    /// lead. This only narrows: `admit` then proves the pane is that
+    /// workspace's orchestrator on its lead's login, and refuses anything else.
+    fn engine_caller(&self, workspace: Uuid) -> Result<()> {
+        match self.caller()? {
+            crate::people::Person::Owner => Ok(()),
+            crate::people::Person::Member(handle) if self.peer.client_id.is_none()
+                && self.service.store.workspace_lead(workspace)?.as_deref() == Some(handle.as_str()) => Ok(()),
+            _ => Err(DomainError::ScopeDenied { needed: "owner" }),
+        }
+    }
+
     /// This connection's caller, admitted to a workspace as the workflow commands admit them.
     pub(crate) async fn admit(&self, ws: Uuid) -> Result<crate::workflow_runtime::Admission> { crate::workflow_runtime::Admission::capture(
         self.service.clone(), self.peer.clone(), self.session.clone(), self.caller_pid, self.caller_pane.clone(), ws).await }
@@ -772,9 +786,7 @@ impl Rpc {
                 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
                 let workspace = Self::target(&req)?;
                 svc.store.get_workspace(workspace)?;
-                if self.caller()? != crate::people::Person::Owner {
-                    return Err(DomainError::ScopeDenied { needed: "owner" });
-                }
+                self.engine_caller(workspace)?;
                 let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
                 if p.schema != 1 || p.json.len() > MAX_BYTES { return Err(DomainError::NotFound); }
                 let action: Action = farcooler_protocol::workflow_commands::parse(&p.json).map_err(|_| DomainError::NotFound)?;

@@ -193,6 +193,8 @@ pub(crate) async fn admit(
         _ => Admission::HOST_WIDE,
     };
     let admission = Admission::capture(svc.clone(), peer, session, caller_pid, caller_pane, workspace).await?;
+    // The engine admits a member's orchestrator on the board they lead (ov-999); a cutover stays the owner's.
+    admission.require_owner()?;
     let Some(term) = admission.orchestrator() else {
         admission.require_person()?;
         return Ok((admission, None));

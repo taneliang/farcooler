@@ -25,8 +25,13 @@ fn admit(svc: &Service, seat: crate::caller_seat::Seat, person: &crate::people::
     let Seat::Agent(Some(pane)) = seat else { return Err(DomainError::ScopeDenied { needed: "workspace orchestrator" }) };
     let term = svc.store.get_terminal(pane)?;
     if term.workspace_id == Some(card.workspace_id) && term.role == TerminalRole::Orchestrator {
-        // `workflow.move` is the owner's; a member's pane is turned away here too.
-        if *person != crate::people::Person::Owner { return Err(DomainError::ScopeDenied { needed: "owner" }); }
+        // As `workflow.move` (ov-999): the owner's orchestrator, or the one a member leads, on their login.
+        let lead = svc.store.workspace_lead(card.workspace_id)?;
+        match person {
+            crate::people::Person::Owner => {}
+            crate::people::Person::Member(handle) if lead.as_deref() == Some(handle.as_str()) => {}
+            _ => return Err(DomainError::ScopeDenied { needed: "owner" }),
+        }
         // The same lead-login check `workflow.move` makes (`Admission::capture`), not a copy of it.
         return svc.refuse_another_leads_login(&term, card.workspace_id);
     }
@@ -154,7 +159,7 @@ mod tests {
         }
     }
 
-    /// B2 remainder: `workflow.move` is the owner's, so an orchestrator pane that is a member's is too.
+    /// B2 remainder: as `workflow.move`, a member's orchestrator pane moves nothing on a board they don't lead.
     #[tokio::test]
     async fn a_members_orchestrator_pane_moves_nothing() {
         let (_dir, svc, repo) = crate::test_support::fixture().await;
@@ -162,6 +167,32 @@ mod tests {
         let card = svc.store.create_task(board.id, "mine", Actor::User).unwrap();
         let (orchestrator, _) = panes(&svc, repo, board.id, card.id);
         let r = admit(&svc, Seat::Agent(Some(orchestrator)), &Person::Member("bob".into()), &card, TaskStatus::Done);
+        assert!(matches!(r, Err(DomainError::ScopeDenied { .. })), "{r:?}");
+    }
+
+    /// ov-999: the orchestrator a member leads, on that member's login, moves its own board's cards. Another
+    /// member's word for the same pane, or the same pane once the lead moves on, moves nothing.
+    #[tokio::test]
+    async fn the_orchestrator_a_member_leads_moves_its_boards_cards() {
+        use farcooler_store::claude_logins::TerminalLogin;
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let board = svc.store.ensure_main_workspace(repo).unwrap();
+        let card = svc.store.create_task(board.id, "mine", Actor::User).unwrap();
+        let (orchestrator, _) = panes(&svc, repo, board.id, card.id);
+        svc.store.set_member("alice", "Alice", &[]).unwrap();
+        svc.store.set_member("bob", "Bob", &[]).unwrap();
+        let login_id = svc.store.ensure_member_login("alice").unwrap();
+        svc.store.set_terminal_login(orchestrator, &TerminalLogin {
+            handle: "alice".into(), login_id, config_dir: "/fixture/login".into(), shared: false,
+        }).unwrap();
+        svc.store.set_workspace_lead(board.id, Some("alice")).unwrap();
+        let seat = Seat::Agent(Some(orchestrator));
+        let alice = Person::Member("alice".into());
+        assert!(admit(&svc, seat, &alice, &card, TaskStatus::Done).is_ok());
+        let r = admit(&svc, seat, &Person::Member("bob".into()), &card, TaskStatus::Done);
+        assert!(matches!(r, Err(DomainError::ScopeDenied { .. })), "{r:?}");
+        svc.store.set_workspace_lead(board.id, Some("bob")).unwrap();
+        let r = admit(&svc, seat, &alice, &card, TaskStatus::Done);
         assert!(matches!(r, Err(DomainError::ScopeDenied { .. })), "{r:?}");
     }
 
