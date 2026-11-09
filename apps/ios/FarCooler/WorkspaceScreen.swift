@@ -74,7 +74,7 @@ struct WorkspaceScreen: View {
         // smaller than the name.
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                WorkflowRunsButton(host: place.runner, workspace: place.workspace)
+                WorkflowRunsButton(host: place.runner, workspace: place.workspace, iconOnly: true)
                     .environment(\.workflowPort, connection.workflows.port(host: place.runner))
                     .environment(\.workflowWatch, { workspace, item in
                         AnyView(AgentWatchView(workspace: workspace, item: item,

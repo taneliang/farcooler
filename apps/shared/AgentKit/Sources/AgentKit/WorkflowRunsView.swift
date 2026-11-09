@@ -27,10 +27,24 @@ extension EnvironmentValues {
 public struct WorkflowRunsButton: View {
     let host: String
     let workspace: String
+    /// A phone's navigation bar has no room for the words at the largest text size, and the audit
+    /// reads a text button there as low contrast and fixed-size (ov-1004): so it draws the icon in
+    /// primary ink, and VoiceOver and the UI tests still find it as "Workflow Runs".
+    let iconOnly: Bool
     @State private var showing = false
-    public init(host: String, workspace: String) { self.host = host; self.workspace = workspace }
+    public init(host: String, workspace: String, iconOnly: Bool = false) { self.host = host; self.workspace = workspace; self.iconOnly = iconOnly }
     public var body: some View {
-        Button("Workflow Runs") { showing = true }
+        Button { showing = true } label: {
+            if iconOnly {
+                Image(systemName: "list.bullet.clipboard").foregroundStyle(.primary)
+            } else {
+                Text("Workflow Runs")
+            }
+        }
+        .accessibilityLabel("Workflow Runs")
+        .accessibilityShowsLargeContentViewer {
+            Label("Workflow Runs", systemImage: "list.bullet.clipboard")
+        }
             .sheet(isPresented: $showing) { WorkflowRunsView(host: host, workspace: workspace) }
     }
 }
