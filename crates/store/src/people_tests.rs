@@ -265,7 +265,7 @@ fn a_set_built_from_a_stale_read_is_refused() {
 /// One workflow state that won't read doesn't refuse every new handle (ov-1002 re-review R2): it's skipped.
 #[test]
 fn a_workflow_state_that_wont_read_doesnt_refuse_a_new_handle() {
-    let (store, _, _) = board();
-    store.conn().execute("INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES('broken', 1, 1, 'not json')", []).unwrap();
+    let (store, main, _) = board();
+    store.conn().execute("INSERT INTO workflow_states(workspace, revision, epoch, state) VALUES(?1, 1, 1, 'not json')", [main.to_string()]).unwrap();
     store.set_member("carol", "Carol", &[]).unwrap();
 }

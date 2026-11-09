@@ -5,28 +5,39 @@
 //! handle isn't issued again while a workflow in force, or a run not yet closed, names it. Once the owner
 //! publishes a workflow that doesn't and those runs end, it's free. (There is no stable person id behind a handle,
 //! so the same person can't be told from a newcomer; they come back once nothing names it.)
+//!
+//! A board that was deleted doesn't count (ov-1045): deleting a board leaves its workflow records behind, since the
+//! event log is append-only, and they must not hold a handle for good.
 use rusqlite::Connection;
 
 use farcooler_core::Result;
 use farcooler_workflow::{Definition, Phase, State};
 
 use crate::error::map_err;
+use crate::models::get_uuid;
 
 /// Whether a workspace's selected workflow, or a run of any workspace that isn't done or cancelled, names
 /// `member:<handle>` at any step. Read on `conn`, so a caller's transaction sees one moment. A record that
 /// won't read is skipped and logged, not counted: one bad row must not refuse every new handle (review R2).
 pub(crate) fn named_by_a_workflow(conn: &Connection, handle: &str) -> Result<bool> {
     let name = format!("member:{handle}");
+    let mut stmt = conn.prepare("SELECT id FROM workspaces").map_err(map_err)?;
+    let boards = stmt.query_map([], |r| get_uuid(r, 0)).map_err(map_err)?;
+    let boards = boards.map(|b| b.map(|b| b.to_string())).collect::<std::result::Result<std::collections::HashSet<_>, _>>().map_err(map_err)?;
+    // A key that is a board's id but no board has it: the board was deleted. (Other keys are fixtures'; they hold.)
+    let deleted = |key: &str| key.parse::<uuid::Uuid>().is_ok() && !boards.contains(key);
     let names = |definition: &Definition| definition.deciders().contains(&name.as_str());
     let mut stmt = conn
         .prepare(
-            "SELECT d.definition FROM workflow_bundle_selections s JOIN workflow_bundles b ON b.pin = s.pin
+            "SELECT s.workspace, d.definition FROM workflow_bundle_selections s JOIN workflow_bundles b ON b.pin = s.pin
              JOIN workflow_definitions d ON d.pin = b.definition_pin",
         )
         .map_err(map_err)?;
-    let definitions = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(map_err)?;
+    let definitions = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(map_err)?;
     for raw in definitions {
-        let Ok(definition) = serde_json::from_str::<Definition>(&raw.map_err(map_err)?) else {
+        let (board, raw) = raw.map_err(map_err)?;
+        if deleted(&board) { continue; }
+        let Ok(definition) = serde_json::from_str::<Definition>(&raw) else {
             tracing::warn!("a workflow definition didn't read while checking who a handle was named by");
             continue;
         };
@@ -34,10 +45,12 @@ pub(crate) fn named_by_a_workflow(conn: &Connection, handle: &str) -> Result<boo
             return Ok(true);
         }
     }
-    let mut stmt = conn.prepare("SELECT state FROM workflow_states").map_err(map_err)?;
-    let states = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(map_err)?;
+    let mut stmt = conn.prepare("SELECT workspace, state FROM workflow_states").map_err(map_err)?;
+    let states = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(map_err)?;
     for raw in states {
-        let Ok(state) = serde_json::from_str::<State>(&raw.map_err(map_err)?) else {
+        let (board, raw) = raw.map_err(map_err)?;
+        if deleted(&board) { continue; }
+        let Ok(state) = serde_json::from_str::<State>(&raw) else {
             tracing::warn!("a workflow state didn't read while checking who a handle was named by");
             continue;
         };

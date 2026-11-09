@@ -281,6 +281,31 @@ async fn a_workflow_naming_a_removed_member_starts_no_run_and_keeps_their_handle
     runtime.store.set_member("alice", "Another Alice", &[]).unwrap();
 }
 
+/// A board deleted while a run under its workflow waits on a removed member: the leftover records don't hold the
+/// handle for good (ov-1045). A board that still exists keeps holding it.
+#[tokio::test]
+async fn deleting_a_board_frees_the_handles_its_workflow_held() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let board = svc.store.create_workspace(repo, "Billing", "BIL").unwrap();
+    let other = svc.store.create_workspace(repo, "Support", "SUP").unwrap();
+    svc.store.set_member("alice", "Alice", &[]).unwrap();
+    let definition = Definition::tracker("member:alice");
+    for (n, workspace) in [board.id, other.id].into_iter().enumerate() {
+        let input = farcooler_workflow::Input { schema: 1, id: "e".into(), workspace: workspace.to_string(), expected_revision: 0, epoch: 1,
+            source: "controller".into(), source_sequence: 1 + n as u64, now_ms: 0, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),
+            command: farcooler_workflow::Command::Enqueue { item: "x".into(), policy_pin: definition.pin(), resource: format!("own{n}"),
+                dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition: definition.clone() } };
+        assert!(svc.store.workflow_apply(&input).unwrap().result.is_ok());
+    }
+    svc.store.remove_member("alice").unwrap();
+    let held = |svc: &Service| matches!(svc.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" }));
+    assert!(held(&svc));
+    svc.store.delete_workspace(board.id).unwrap();
+    assert!(held(&svc), "the other board's run still waits on her");
+    svc.store.delete_workspace(other.id).unwrap();
+    svc.store.set_member("alice", "Another Alice", &[]).unwrap();
+}
+
 /// A ticket run the orchestrator starts under a workflow naming a removed member waits for good, so it isn't
 /// started: Enqueue and Start refuse alike, and the run stays where it was (re-review R1).
 #[tokio::test]
