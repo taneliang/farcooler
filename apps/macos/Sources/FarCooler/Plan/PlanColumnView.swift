@@ -185,7 +185,7 @@ struct PlanFactsLine: View {
                 .monospacedDigit()
                 .foregroundStyle(fact.attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                 .fixedSize()
-                .identified("plan-fact-\(fact.kind.rawValue)")
+                .identified("plan-fact-\(fact.kind.name)")
             }
         }
         .font(.body)
@@ -533,14 +533,14 @@ struct PlanFooterLine: View {
         if !counts.isEmpty {
             PlanFlowLayout(spacing: 0, lineSpacing: Spacing.tight) {
                 ForEach(Array(counts.enumerated()), id: \.element.id) { index, count in
-                    Button { open(count.status) } label: {
+                    Button { open(count.taskStatus) } label: {
                         Text(count.words + (index < counts.count - 1 ? ", " : ""))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.quietInk)
                     .pointerStyle(.link)
                     .help("Open the list")
-                    .identified("plan-footer-\(count.kind.rawValue)")
+                    .identified("plan-footer-\(count.kind.name)")
                 }
             }
             .font(.callout.monospacedDigit())

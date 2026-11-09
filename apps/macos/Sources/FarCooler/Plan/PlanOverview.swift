@@ -136,7 +136,7 @@ struct PlanOverviewView: View {
     /// Landed on the viewer's day: the view's cards, under the view's title.
     private func landedToday(_ section: PlanView.Section, _ view: PlanView) -> some View {
         CollapsibleSection(section.title, id: "plan.landed", style: .navigator, key: key("landed"), defaults: defaults,
-            expandedByDefault: !section.folded, count: section.count
+            expandedByDefault: !section.folded, count: Int(section.count)
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(view.landedToday) { card in

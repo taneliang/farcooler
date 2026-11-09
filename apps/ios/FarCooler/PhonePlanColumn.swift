@@ -140,7 +140,7 @@ struct PhonePlanColumn<Top: View>: View {
                 PhonePlanInitiatives(column: column) { navigator?.open(.plan(place, page: .theme($0))) }
                 PhonePlanPipeline(column: column, actions: actions)
                 PhonePlanFooter(counts: column.footer) {
-                    navigator?.open(.history(place, status: $0.kind == .done ? TaskStatus.done.rawValue : $0.kind.rawValue))
+                    navigator?.open(.history(place, status: $0.kind == .done ? TaskStatus.done.rawValue : $0.kind.name))
                 }
             }
         }

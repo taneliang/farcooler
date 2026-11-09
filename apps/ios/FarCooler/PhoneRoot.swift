@@ -647,7 +647,7 @@ struct PhoneScreen: View {
             }
         case .history(let place, let status):
             // A finished status's History, or a plan footer's list (ov-874).
-            let footer = PlanColumn.Count.Kind(rawValue: status)
+            let footer = PlanColumn.Count.Kind(name: status)
             let stage = PlanColumn.Stage(rawValue: String(status.dropFirst(PlanStageRoute.prefix.count)))
             if let connection = fleet.connection(for: place), status.hasPrefix(PlanStageRoute.prefix), let stage {
                 BoardHistoryScreen(connection: connection, place: place, status: .todo, stage: stage)

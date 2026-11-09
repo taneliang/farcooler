@@ -221,7 +221,7 @@ struct PlanBoardSections: View {
                     }
                 } header: {
                     Button { withAnimation { landedOpen.toggle() } } label: {
-                        PlanHeader(title: landed.title, count: landed.count, open: landedOpen)
+                        PlanHeader(title: landed.title, count: Int(landed.count), open: landedOpen)
                     }
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .ignore)

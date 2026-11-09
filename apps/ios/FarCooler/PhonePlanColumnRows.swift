@@ -37,7 +37,7 @@ struct PhonePlanFacts: View {
                         .monospacedDigit()
                         .foregroundStyle(fact.attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
                         .fixedSize()
-                        .accessibilityIdentifier("plan-fact-\(fact.kind.rawValue)")
+                        .accessibilityIdentifier("plan-fact-\(fact.kind.name)")
                     }
                 }
                 .font(.subheadline)
@@ -350,7 +350,7 @@ struct PhonePlanFooter: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("plan-footer-\(count.kind.rawValue)")
+                        .accessibilityIdentifier("plan-footer-\(count.kind.name)")
                     }
                 }
                 .font(.footnote.monospacedDigit())

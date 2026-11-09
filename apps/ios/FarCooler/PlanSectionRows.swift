@@ -56,7 +56,7 @@ struct PlanSectionsList: View {
 
     /// A section's title and count: none drawn for none.
     private func header(_ section: PlanView.Section) -> PlanHeader {
-        PlanHeader(title: section.title, count: section.count == 0 ? nil : section.count)
+        PlanHeader(title: section.title, count: section.count == 0 ? nil : Int(section.count))
     }
 
     // MARK: Landing
@@ -142,7 +142,7 @@ struct PlanSectionsList: View {
         Section {
             if landedOpen { ForEach(view.onLandedLanding) { cardRow($0) } }
         } header: {
-            PlanHeader(title: section.title, count: section.count, open: landedOpen)
+            PlanHeader(title: section.title, count: Int(section.count), open: landedOpen)
                 .contentShape(.rect)
                 .onTapGesture { withAnimation { landedOpen.toggle() } }
                 .accessibilityElement(children: .ignore)
@@ -185,7 +185,7 @@ struct PlanSectionsList: View {
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         } header: {
-            PlanHeader(title: section.title, count: section.count).accessibilityIdentifier("plan-themes")
+            PlanHeader(title: section.title, count: Int(section.count)).accessibilityIdentifier("plan-themes")
         } footer: {
             if let summary = view.details.trackSummary {
                 Text(summary).accessibilityIdentifier("plan-themes-summary")

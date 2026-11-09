@@ -14,7 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PINNED=1.13.4
-SWIFT=apps/shared/AgentKit/Sources/AgentKit/Generated/WireTypes.swift
+SWIFT=apps/shared/AgentKit/Sources/AgentKit/WireTypes.swift
 KOTLIN=apps/android/app/src/main/java/com/farcooler/core/wire/WireTypes.kt
 TS=services/web/src/client/generated/wire-types.ts
 

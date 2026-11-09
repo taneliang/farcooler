@@ -132,7 +132,7 @@ struct PlanLadderView: View {
     let attention: Bool
     @Environment(\.colorScheme) private var scheme
 
-    private var current: Int { ladder.at }
+    private var current: Int { Int(ladder.at) }
     private var tint: Color? { attention ? Tint.attention(scheme) : nil }
 
     var body: some View {

@@ -100,7 +100,7 @@ struct PlanSectionsView: View {
     ) -> some View {
         CollapsibleSection(
             id: "plan.\(id)", style: .navigator, key: key(id), defaults: defaults, expandedByDefault: !section.folded,
-            count: section.count == 0 ? nil : section.count, accessibilityLabel: section.title,
+            count: section.count == 0 ? nil : Int(section.count), accessibilityLabel: section.title,
             label: { _ in
                 SectionTitle(
                     text: section.title, style: .navigator, tone: .primary,
@@ -138,7 +138,7 @@ struct PlanSectionsView: View {
                     ListChangeRow(
                         id: $0.id,
                         signature: [
-                            $0.phase, PlanLandingCard.facts($0, ci: ci($0), now: 0),
+                            $0.phase.rawValue, PlanLandingCard.facts($0, ci: ci($0), now: 0),
                             $0.tickets.map { "\($0.id)\($0.status)" }.joined(separator: ","),
                         ].joined(separator: "\u{1}"))
                 })
@@ -198,7 +198,7 @@ struct PlanSectionsView: View {
     /// Themes: the grid, with the work outside any theme as a footer.
     private func themes(_ section: PlanView.Section) -> some View {
         CollapsibleSection(
-            section.title, id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults, count: section.count
+            section.title, id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults, count: Int(section.count)
         ) {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 PlanThemeGridView(grid: view.themes, model: model, selected: selected, keyed: keyed, onOpen: onOpen)

@@ -785,6 +785,9 @@ AGENTKIT_SOURCES = [
     # for the owner's runner (ov-797). See `CrashSignatureTests`.
     "CrashSignature.swift",
     "PlanReading.swift",
+    # The wire types the plan, its column and the workflow runs decode into, generated from
+    # the Rust view models by scripts/gen-wire-types.sh (ov-1035).
+    "WireTypes.swift",
     # The plan column's rules, which the Mac, the web and this phone draw (ov-867, ov-874).
     "PlanColumn.swift",
     "PlanRulings.swift",

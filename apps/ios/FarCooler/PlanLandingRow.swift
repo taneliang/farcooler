@@ -133,7 +133,7 @@ struct PlanLadderBar: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let current = ladder.at
+        let current = Int(ladder.at)
         HStack(spacing: 3) {
             ForEach(ladder.steps.indices, id: \.self) { index in
                 Capsule()
