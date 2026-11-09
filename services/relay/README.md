@@ -232,7 +232,7 @@ the page derives from the passkey's PRF output, which the relay never sees.
 - `POST /v1/web/vault` takes `{credential, uv, sealed}` and replaces the
   account's copy for that passkey. `sealed` is at most 12 KB of base64url, and
   a body that looks unsealed gets 400. An account keeps at most 8 passkeys'
-  copies; a ninth gets 409 `full`.
+  copies; a ninth replaces the least recently saved.
 - `GET /v1/web/vault` answers `{vaults}`, every copy the signed-in account
   keeps, and nobody else's.
 - Both spend `CEREMONY_REPLY_LIMIT`.

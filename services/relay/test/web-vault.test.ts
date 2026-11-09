@@ -117,14 +117,24 @@ describe('a browser’s sealed copy', () => {
     expect((await list('alice')).body).toEqual({ vaults: [] })
   })
 
-  it('holds at most VAULTS_MAX passkeys for one account', async () => {
-    for (let i = 0; i < VAULTS_MAX; i++) expect((await save('alice', { credential: base64Url(`cred-${i}`), uv: false, sealed: sealedOf(i + 1) })).status).toBe(200)
-    const over = await save('alice', { credential: base64Url('one too many'), uv: false, sealed: sealedOf(99) })
-    expect(over.status).toBe(409)
-    expect(over.body).toEqual({ error: 'full' })
-    // A passkey already kept can still be saved again.
+  it('holds at most VAULTS_MAX passkeys for one account, dropping the least recently saved for a new one', async () => {
+    for (let i = 0; i < VAULTS_MAX; i++) {
+      expect((await save('alice', { credential: base64Url(`cred-${i}`), uv: false, sealed: sealedOf(i + 1) })).status).toBe(200)
+      await new Promise(resolve => setTimeout(resolve, 2))
+    }
+    // cred-0 is saved again, so cred-1 is now the least recently saved.
     expect((await save('alice', { credential: base64Url('cred-0'), uv: false, sealed: sealedOf(42) })).status).toBe(200)
-    expect((await list('alice')).body.vaults).toHaveLength(VAULTS_MAX)
+    await new Promise(resolve => setTimeout(resolve, 2))
+    expect((await save('alice', { credential: base64Url('new'), uv: false, sealed: sealedOf(99) })).status).toBe(200)
+    const kept = (await list('alice')).body.vaults.map((v: { credential: string }) => v.credential)
+    expect(kept).toHaveLength(VAULTS_MAX)
+    expect(kept).toContain(base64Url('new'))
+    expect(kept).toContain(base64Url('cred-0'))
+    expect(kept).not.toContain(base64Url('cred-1'))
+    // Another account's copies are never what makes room.
+    await save('bob')
+    for (let i = 0; i < VAULTS_MAX; i++) await save('alice', { credential: base64Url(`more-${i}`), uv: false, sealed: sealedOf(i + 1) })
+    expect((await list('bob')).body.vaults).toHaveLength(1)
   })
 
   it('answers other methods 405', async () => {

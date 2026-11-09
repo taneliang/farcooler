@@ -16,7 +16,7 @@
 ///
 /// - `POST {credential, uv, sealed}` keeps the copy for that passkey, replacing
 ///   the one before. At most `VAULTS_MAX` passkeys per account; a new one past
-///   that gets 409 `full`.
+///   that replaces the least recently saved.
 /// - `GET` answers `{vaults: [{credential, uv, sealed}]}`, every copy the
 ///   account keeps, so the page can name the passkeys in `allowCredentials`.
 
@@ -86,18 +86,25 @@ async function saveVault(request: Request, env: Env): Promise<Response> {
   if (sealed.length > VAULT_MAX) return json({ error: 'too large' }, 413)
   if (!BASE64URL.test(sealed) || !looksSealed(sealed)) return json({ error: 'sealed' }, 400)
 
-  // A passkey already kept is always saved again; a new one only while the
-  // account keeps fewer than VAULTS_MAX.
-  const written = await env.DB.prepare(
-    `INSERT INTO web_vaults (account_id, credential, uv, sealed, updated_at)
-     SELECT ?1, ?2, ?3, ?4, ?5
-     WHERE EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2)
-        OR (SELECT COUNT(*) FROM web_vaults WHERE account_id = ?1) < ?6
-     ON CONFLICT (account_id, credential) DO UPDATE SET uv = ?3, sealed = ?4, updated_at = ?5`,
-  )
-    .bind(account, credential, uv ? 1 : 0, sealed, Date.now(), VAULTS_MAX)
-    .run()
-  if (!written.meta.changes) return json({ error: 'full' }, 409)
+  // A passkey already kept is saved again in place. A new one past
+  // VAULTS_MAX makes room by dropping the account's least recently saved copy:
+  // Make a New Passkey replaces the account's passkey in the authenticator, so
+  // the oldest copies belong to passkeys that are gone. One batch, so two saves
+  // at once can't both find room.
+  const now = Date.now()
+  await env.DB.batch([
+    env.DB.prepare(
+      `DELETE FROM web_vaults WHERE account_id = ?1 AND credential IN (
+         SELECT credential FROM web_vaults WHERE account_id = ?1
+         ORDER BY updated_at ASC, credential ASC
+         LIMIT MAX(0, (SELECT COUNT(*) FROM web_vaults WHERE account_id = ?1) - ?3 + 1))
+       AND NOT EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2)`,
+    ).bind(account, credential, VAULTS_MAX),
+    env.DB.prepare(
+      `INSERT INTO web_vaults (account_id, credential, uv, sealed, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT (account_id, credential) DO UPDATE SET uv = ?3, sealed = ?4, updated_at = ?5`,
+    ).bind(account, credential, uv ? 1 : 0, sealed, now),
+  ])
   return json({ ok: true })
 }
 
