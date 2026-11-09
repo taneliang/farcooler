@@ -3,12 +3,21 @@
 
 import { describe, expect, it } from 'vitest'
 
+import words from '../../../test/fixtures/conversation-words.json'
 import { admit, IMAGE_WORDS, type Limits, MOST_IMAGES, parseLimits, type Picked, readImages } from '../src/client/attachments'
+import { useConversationWords } from '../src/client/chat-copy'
+
+// The refusals are the core's (`conversation_words`); wasm can't load here, so the golden answers.
+useConversationWords(() => JSON.stringify((words as any).apple_claude))
 
 const image = (id: number, bytes: number, mime = 'image/png'): Picked => ({ id, name: `${id}.png`, mime, data: new Uint8Array(bytes) })
 const limits: Limits = { images: true, each: 100, total: 150 }
 
 describe('what may be attached', () => {
+  it('says the core’s words, never a blank', () => {
+    expect(IMAGE_WORDS.tooMany).toBe(`A message takes at most ${MOST_IMAGES} images.`)
+  })
+
   it('keeps images in the order they came', () => {
     const { next, said } = admit([image(1, 10)], [image(2, 10), image(3, 10)], limits, 'studio')
     expect(next.map(i => i.id)).toEqual([1, 2, 3])
