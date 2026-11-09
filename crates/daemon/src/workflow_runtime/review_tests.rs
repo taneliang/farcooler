@@ -74,6 +74,68 @@ async fn workflow_watch_is_a_persons_not_an_agents() {
     assert_eq!(refused(&reply), "scope-denied", "an unreadable caller");
 }
 
+/// L10: a running watch asks every second whether its caller is still the person who started it. Alice watches a
+/// run from her phone through `workflow.watch`; once she is removed, the watch ends and her phone is told so,
+/// while the agent still runs. A recheck that always says yes keeps her watching, and this goes red.
+#[tokio::test]
+async fn workflow_a_watch_ends_when_its_watcher_is_removed() {
+    use farcooler_transport::push::PushReceiver;
+    use farcooler_protocol::v1::{event::Payload, terminal_frame::Kind};
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let phone = alices_phone(&svc);
+    let scratch = farcooler_core::scratch::dir("watch-rpc");
+    let server = farcooler_tmux::TmuxServer::in_dir(&format!("test-{}", Uuid::now_v7().simple()), Uuid::now_v7(), &scratch);
+    let window = server.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", scratch.to_str().unwrap(), "sh -c 'echo watched; sleep 60'").await.unwrap();
+    let pane = server.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
+    let _listed = crate::watch_view::publish(&workspace.to_string(), "ov-9", server.clone(), pane);
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+    let rpc = factory(&svc, &runtime, phone, None);
+    let mut pushes: PushReceiver = rpc.pushes().expect("the connection's push stream");
+    let mut watch = farcooler_transport::request("workflow.watch");
+    watch.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
+    watch.payload = Some(pb::request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: r#"{"item":"ov-9"}"#.into() }));
+    let reply = rpc.handle(watch).await;
+    assert!(matches!(reply.outcome, Some(pb::response::Outcome::Result(_))), "Alice watches: {reply:?}");
+    let mut seen = String::new();
+    while !seen.contains("watched") {
+        let event = tokio::time::timeout(Duration::from_secs(20), pushes.recv()).await.expect("a frame in time").expect("a frame");
+        if let Some(Payload::TerminalFrame(frame)) = event.payload && let Some(Kind::Output(output)) = frame.kind {
+            seen.push_str(&String::from_utf8_lossy(&output.payload));
+        }
+    }
+    svc.store.remove_member("alice").unwrap();
+    let ended = tokio::time::timeout(crate::watch_view::RECHECK * 5, async {
+        loop {
+            let Some(event) = pushes.recv().await else { return false };
+            if let Some(Payload::TerminalFrame(frame)) = event.payload && matches!(frame.kind, Some(Kind::Gap(_))) { return true; }
+        }
+    }).await;
+    farcooler_tmux::reap_server(server.socket());
+    assert!(matches!(ended, Ok(true)), "a removed member's watch ends, and her phone is told: {ended:?}");
+}
+
+/// L11: a publication carrying the marker `workflow.get` shows for a hidden value is refused, as a proposal is:
+/// a configuration read, edited and published back would make `(hidden)` the value. The same publication with a
+/// real value gets past that check.
+#[tokio::test]
+async fn workflow_a_publication_carrying_the_hidden_marker_is_refused() {
+    let (_dir, runtime) = super::coding_tests::configured(false, "pass").await;
+    let publish = |value: &str| {
+        let mut config = runtime.coding.clone().unwrap();
+        let definition = config.definition().unwrap();
+        config.checks[0].environment.insert("NPM_TOKEN".into(), value.into());
+        Action::Publish { notifications: None, adapter: Some(Box::new(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))),
+            mutation: mutation("p", 0, 1), expected_pin: None, definition }
+    };
+    let marker = |r: &Result<()>| matches!(r, Err(Error::Domain(farcooler_core::error::DomainError::InvalidArgument { what: "adapter" })));
+    let hidden = runtime.validate_wire_publication("ws", "owner", &publish(wire_commands::HIDDEN)).await;
+    assert!(marker(&hidden), "{hidden:?}");
+    let real = runtime.validate_wire_publication("ws", "owner", &publish("a-real-token")).await;
+    assert!(!marker(&real), "{real:?}");
+}
+
 /// L3: a receipt answered again to someone other than its sender names who sent it, never their device or pane.
 /// The sender's own retry gets it whole.
 #[tokio::test]

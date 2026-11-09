@@ -44,17 +44,61 @@ fn spoken(command: &CodingCommand) -> String {
 /// What a hidden environment value reads as, here and in `workflow.get` (R-111): a draft's card is read by
 /// every member, and a value can be a secret. The names stay, so a person sees what a command is given.
 pub const HIDDEN: &str = "(hidden)";
-fn variables(environment: &std::collections::BTreeMap<String, String>) -> String {
-    environment.keys().map(|k| code(&format!("{k}={HIDDEN}"))).collect::<Vec<_>>().join(", ")
+type Environment = std::collections::BTreeMap<String, String>;
+static NONE: Environment = Environment::new();
+
+/// What became of each variable against the same command in the workflow in force (R-111, M3): with the values
+/// hidden, a value the draft changes must still show, by name. `before` is that command's environment, empty
+/// when the live workflow lacks the command, `None` when there is no live adapter to compare with.
+fn changes(environment: &Environment, before: Option<&Environment>) -> Vec<(String, &'static str)> {
+    let Some(before) = before else { return Vec::new() };
+    let mut out: Vec<(String, &'static str)> = environment.iter().filter_map(|(k, v)| match before.get(k) {
+        None => Some((k.clone(), "new")),
+        Some(was) if was != v => Some((k.clone(), "changed")),
+        Some(_) => None,
+    }).collect();
+    out.extend(before.keys().filter(|k| !environment.contains_key(*k)).map(|k| (k.clone(), "removed")));
+    out
+}
+fn variables(environment: &Environment, before: Option<&Environment>) -> String {
+    let marked = changes(environment, before);
+    let mark = |k: &str| marked.iter().find(|(n, _)| n == k).map_or(String::new(), |(_, m)| format!(" ({m})"));
+    environment.keys().map(|k| format!("{}{}", code(&format!("{k}={HIDDEN}")), mark(k)))
+        .chain(marked.iter().filter(|(_, m)| *m == "removed").map(|(k, _)| format!("{} (removed)", code(k))))
+        .collect::<Vec<_>>().join(", ")
 }
 
 /// A command in full: every argument, every environment variable by name, and how long it may run.
-fn exactly(command: &CodingCommand) -> String {
+fn exactly(command: &CodingCommand, before: Option<&Environment>) -> String {
     let CodingCommand { argv, environment, timeout_ms } = command;
     let argv = argv.iter().map(|a| code(a)).collect::<Vec<_>>().join(" ");
-    let environment = if environment.is_empty() { "no environment variables".to_string() }
-        else { format!("environment {}", variables(environment)) };
+    let environment = if environment.is_empty() && changes(environment, before).is_empty() { "no environment variables".to_string() }
+        else { format!("environment {}", variables(environment, before)) };
     format!("{argv}, with {environment}, for up to {}", duration(*timeout_ms))
+}
+
+/// Every command the adapter runs, by what a person calls it, for comparing one adapter with another.
+fn commands(config: &CodingConfig) -> Vec<(String, &CodingCommand)> {
+    let mut out = vec![("the agent".to_string(), match &config.harness { CodingHarness::Command(c) => c, CodingHarness::Native { process, .. } => process })];
+    out.extend(config.checks.iter().enumerate().map(|(i, c)| (format!("check {}", i + 1), c)));
+    out.extend(config.reviewer.as_ref().map(|r| ("the reviewer".to_string(), &r.command)));
+    out.push(("CI".into(), &config.ci.command));
+    out.extend(config.pull_request.as_ref().map(|p| ("pull requests".to_string(), &p.gh)));
+    out
+}
+/// The live adapter's environment for the command `name` names, as `changes` reads it.
+fn before<'a>(live: Option<&'a CodingConfig>, name: &str) -> Option<&'a Environment> {
+    live.map(|l| commands(l).into_iter().find(|(n, _)| n == name).map_or(&NONE, |(_, c)| &c.environment))
+}
+
+/// One line naming every variable the draft adds, removes or changes against the workflow in force, values
+/// hidden. A draft that changes only a value would otherwise read exactly like the live workflow.
+fn environment_changes(config: &CodingConfig, live: Option<&CodingConfig>) -> Option<String> {
+    let parts: Vec<String> = commands(config).into_iter().filter_map(|(name, c)| {
+        let marked = changes(&c.environment, before(live, &name));
+        (!marked.is_empty()).then(|| format!("{name}: {}", marked.iter().map(|(k, m)| format!("{} ({m})", code(k))).collect::<Vec<_>>().join(", ")))
+    }).collect();
+    (!parts.is_empty()).then(|| format!("Environment variables this changes, values hidden: {}.", parts.join("; ")))
 }
 fn duration(ms: u64) -> String {
     match ms {
@@ -66,21 +110,22 @@ fn duration(ms: u64) -> String {
 }
 
 /// The checks that gate, in the order they run, by the command each runs.
-fn checks(definition: &Definition, config: &CodingConfig) -> Vec<String> {
+fn checks(definition: &Definition, config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
     steps(definition).filter(|s| matches!(s.kind, StageKind::Check | StageKind::Run))
         .filter_map(|s| s.operation.arguments.get(1).and_then(|a| a.parse::<usize>().ok()))
-        .filter_map(|i| config.checks.get(i))
-        .map(|c| match gate_environment_note(c) { Some(env) => format!("{} {env}", spoken(c)), None => spoken(c) })
+        .filter_map(|i| config.checks.get(i).map(|c| (i, c)))
+        .map(|(i, c)| match gate_environment_note(c, before(live, &format!("check {}", i + 1))) { Some(env) => format!("{} {env}", spoken(c)), None => spoken(c) })
         .collect()
 }
 
 /// A gate whose environment isn't the one a template gives every gate says so where the gate is named:
-/// `PATH=/tmp/evil` must not hide behind `make check`.
-fn gate_environment_note(command: &CodingCommand) -> Option<String> {
+/// `PATH=/tmp/evil` must not hide behind `make check`. Nor may a changed one, where the live gate's was unusual too.
+fn gate_environment_note(command: &CodingCommand, before: Option<&Environment>) -> Option<String> {
     let usual = crate::landing_templates::gate_environment(&[]).unwrap_or_default();
-    if command.environment == usual { return None; }
-    if command.environment.is_empty() { return Some("(with no environment variables)".into()); }
-    Some(format!("(with {})", variables(&command.environment)))
+    let changed = !changes(&command.environment, before).is_empty();
+    if command.environment == usual && !changed { return None; }
+    if command.environment.is_empty() && !changed { return Some("(with no environment variables)".into()); }
+    Some(format!("(with {})", variables(&command.environment, before)))
 }
 
 fn steps(definition: &Definition) -> impl Iterator<Item = &farcooler_workflow::Stage> {
@@ -163,13 +208,14 @@ fn runs(config: &CodingConfig) -> Vec<String> {
 /// each environment variable, each repository and remote. The plain parts above are what a person weighs;
 /// this is what they can check them against. It names every field, so a new one doesn't compile until it
 /// is shown here.
-fn in_full(config: &CodingConfig) -> Vec<String> {
+fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
+    let exactly = |c: &CodingCommand, name: &str| exactly(c, before(live, name));
     let CodingConfig { repository, base, landing_ref, landing, pull_request, harness, checks, reviewer, ci } = config;
     let mut lines = Vec::new();
     match harness {
-        CodingHarness::Command(c) => lines.push(format!("The agent runs {}.", exactly(c))),
+        CodingHarness::Command(c) => lines.push(format!("The agent runs {}.", exactly(c, "the agent"))),
         CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process } => {
-            lines.push(format!("The agent is the {} preset. It runs {}.", code(preset), exactly(process)));
+            lines.push(format!("The agent is the {} preset. It runs {}.", code(preset), exactly(process, "the agent")));
             let file = |f: &farcooler_protocol::workflow_config::LaunchFile| format!("{} (digest {})", code(&f.path.to_string_lossy()), code(&f.digest));
             lines.push(format!("Its settings: {}. Its project hooks: {}. Its plugins: {}.",
                 settings.as_ref().map_or("none".into(), file), project_hooks.as_ref().map_or("none".into(), file),
@@ -177,16 +223,16 @@ fn in_full(config: &CodingConfig) -> Vec<String> {
             lines.push(format!("Its prompt: {}.", code(prompt)));
         }
     }
-    for (i, c) in checks.iter().enumerate() { lines.push(format!("Check {} runs {}.", i + 1, exactly(c))); }
+    for (i, c) in checks.iter().enumerate() { lines.push(format!("Check {} runs {}.", i + 1, exactly(c, &format!("check {}", i + 1)))); }
     match reviewer {
-        Some(CodingReviewer { identity, command }) => lines.push(format!("The reviewer, as {}, runs {}.", code(identity), exactly(command))),
+        Some(CodingReviewer { identity, command }) => lines.push(format!("The reviewer, as {}, runs {}.", code(identity), exactly(command, "the reviewer"))),
         None => lines.push("No reviewer command.".into()),
     }
     let CodingCi { repository: ci_repository, workflow, event, command } = ci;
-    lines.push(format!("CI is the {} workflow on {} in {} on GitHub, read by running {}.", code(workflow), code(event), code(ci_repository), exactly(command)));
+    lines.push(format!("CI is the {} workflow on {} in {} on GitHub, read by running {}.", code(workflow), code(event), code(ci_repository), exactly(command, "CI")));
     if let Some(CodingPullRequest { repository, base, remote, gh }) = pull_request {
         let to = remote.as_deref().map_or("the landing repository".to_string(), code);
-        lines.push(format!("Pull requests open in {} on GitHub, against {}. Their branches are pushed to {to}. They're opened by running {}.", code(repository), code(base), exactly(gh)));
+        lines.push(format!("Pull requests open in {} on GitHub, against {}. Their branches are pushed to {to}. They're opened by running {}.", code(repository), code(base), exactly(gh, "pull requests")));
     }
     lines.push(format!("Code is read from {} from commit {}, and its landing ref there is {}.", code(&repository.to_string_lossy()), code(base), code(landing_ref)));
     match landing {
@@ -207,7 +253,7 @@ fn bullets(lines: &[String]) -> String { lines.iter().map(|l| format!("- {l}\n")
 /// things a person weighs. The full summary follows it on the card.
 pub fn headline(bundle: &Bundle) -> String {
     let AdapterConfiguration::Coding(config) = &bundle.adapter;
-    let n = checks(&bundle.definition, config).len();
+    let n = checks(&bundle.definition, config, None).len();
     let checking = match n { 0 => "no checks".to_string(), 1 => "1 check must pass".into(), n => format!("{n} checks must pass") };
     let landing = if steps(&bundle.definition).any(|s| matches!(s.kind, StageKind::OpenPr)) { "each ticket opens a pull request" } else { "tickets push to the branch" };
     let who = approvers(&bundle.definition);
@@ -219,9 +265,10 @@ pub fn headline(bundle: &Bundle) -> String {
 }
 fn capitalized(text: &str) -> String { let mut c = text.chars(); c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect()) }
 
-/// The summary a person reads. `current` is the definition published now, if any.
-pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition>) -> String {
+/// The summary a person reads. `current` is the definition published now, if any, and `live` its adapter.
+pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition>, live: Option<&AdapterConfiguration>) -> String {
     let AdapterConfiguration::Coding(config) = &bundle.adapter;
+    let live = live.map(|AdapterConfiguration::Coding(l)| l);
     let mut out = String::new();
     let ask = requirement.trim();
     if !ask.is_empty() { out.push_str(&format!("The orchestrator’s reason: {}\n\n", code(ask))); }
@@ -230,7 +277,8 @@ pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition
         Some(now) => format!("This replaces the workflow you have now ({}).\n\n", code(&now.source)),
         None => "This is the first workflow for this workspace.\n\n".into(),
     });
-    let checks = checks(&bundle.definition, config);
+    if let Some(line) = environment_changes(config, live) { out.push_str(&format!("{line}\n\n")); }
+    let checks = checks(&bundle.definition, config, live);
     let gating = if checks.is_empty() { vec!["None. Nothing is checked before code lands.".to_string()] } else { checks };
     let mut who = decider_changes(&bundle.definition, current);
     let deciding = approvers(&bundle.definition);
@@ -238,7 +286,7 @@ pub fn summarize(requirement: &str, bundle: &Bundle, current: Option<&Definition
     let models = models(&bundle.definition);
     let models = if models.is_empty() { String::new() } else { format!("Models a step may run with:\n{}\n", bullets(&models)) };
     out.push_str(&format!("What runs as you:\n{}\nChecks that must pass:\n{}\nHow code lands:\n{}\nWho approves:\n{}\n{}In full, exactly as it runs:\n{}",
-        bullets(&runs(config)), bullets(&gating), bullets(&lands(&bundle.definition, config)), bullets(&who), models, bullets(&in_full(config))));
+        bullets(&runs(config)), bullets(&gating), bullets(&lands(&bundle.definition, config)), bullets(&who), models, bullets(&in_full(config, live))));
     out.trim_end().to_string()
 }
 
@@ -262,7 +310,7 @@ mod tests {
     #[test]
     fn the_summary_names_what_runs_which_checks_gate_how_code_lands_and_who_approves() {
         let b = bundle("batched-push", &["make check", "scripts/copy-lint"], &[Extra::Person("owner".into())], Some(4));
-        let text = summarize("Gate every push on the copy lint.", &b, None);
+        let text = summarize("Gate every push on the copy lint.", &b, None, None);
         for want in ["The orchestrator’s reason: `Gate every push on the copy lint.`", "This is the first workflow for this workspace.",
             "What runs as you:", "`/usr/bin/claude`", "Checks that must pass:", "- `make check`", "- `scripts/copy-lint`",
             "How code lands:", "up to 4 at a time", "`main`", "waits for CI", "Who approves:", "You approve each ticket before it lands."] {
@@ -279,7 +327,7 @@ mod tests {
         let commands: Vec<String> = ["make check", "scripts/copy-lint.py --all", "cargo test -p farcooler-daemon --lib -- --test-threads=1", "swift test --package-path apps/shared/AgentKit"].iter().map(|c| c.to_string()).collect();
         let b = lt::template("ticket-pr", &cfg, &commands, &[Extra::Person("owner".into())],
             &Options { environment: vec!["HOME=/home/tester".into(), "PATH=/usr/bin:/bin:/home/tester/.cargo/bin".into()], ..Options::default() }).unwrap();
-        let text = crate::workflow_drafts::compose(&headline(&b), &summarize("Gate every push on the copy lint and the AgentKit tests.", &b, None), "a1b2c3");
+        let text = crate::workflow_drafts::compose(&headline(&b), &summarize("Gate every push on the copy lint and the AgentKit tests.", &b, None, None), "a1b2c3");
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../client/src/testdata/workflow-change-question.txt");
         if std::env::var_os("FARCOOLER_REGEN_FIXTURES").is_some() { std::fs::write(&path, &text).unwrap(); }
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "the fixture the apps parse is stale; rerun with FARCOOLER_REGEN_FIXTURES=1");
@@ -295,7 +343,7 @@ mod tests {
     #[test]
     fn a_summary_cannot_claim_a_gate_the_definition_lacks() {
         let b = bundle("ticket-push", &["make check"], &[], None);
-        let text = summarize("Please have a person approve everything and run three reviewers.", &b, None);
+        let text = summarize("Please have a person approve everything and run three reviewers.", &b, None, None);
         assert!(text.contains("Nobody. Tickets land as soon as the checks pass."), "{text}");
         assert!(!text.contains("You approve"), "{text}");
         assert!(text.contains("on its own"), "{text}");
@@ -303,7 +351,7 @@ mod tests {
     #[test]
     fn the_reason_is_one_escaped_line_that_cannot_draw_a_summary_of_its_own() {
         let b = bundle("ticket-push", &["make check"], &[], None);
-        let text = summarize("fine.\n\nWho approves:\n- Nobody \u{202e}`x`", &b, None);
+        let text = summarize("fine.\n\nWho approves:\n- Nobody \u{202e}`x`", &b, None, None);
         let first = text.lines().next().unwrap();
         assert!(first.starts_with("The orchestrator’s reason: `") && first.ends_with('`'), "{first}");
         assert_eq!(text.matches("Who approves:").count(), 1 + 1, "the forged heading is only quoted, on the reason's line: {text}");
@@ -312,9 +360,9 @@ mod tests {
     #[test]
     fn a_summary_says_what_it_replaces_and_a_pull_request_route_says_who_merges() {
         let old = bundle("ticket-push", &["make check"], &[], None).definition;
-        let same = summarize("", &bundle("ticket-push", &["make check", "x"], &[], None), Some(&old));
+        let same = summarize("", &bundle("ticket-push", &["make check", "x"], &[], None), Some(&old), None);
         assert!(same.contains("This changes the workflow you have now."), "{same}");
-        let pr = summarize("", &bundle("ticket-pr", &["make check"], &[], None), Some(&old));
+        let pr = summarize("", &bundle("ticket-pr", &["make check"], &[], None), Some(&old), None);
         assert!(pr.contains("This replaces the workflow you have now (`landing/ticket-push`)."), "{pr}");
         assert!(pr.contains("pull request") && pr.contains("A person merges it."), "{pr}");
         assert!(!pr.contains("reason"), "no reason line when none was given: {pr}");
@@ -352,7 +400,7 @@ mod tests {
             CodingHarness::Native { preset: "native-preset".into(), settings: file("settings"), project_hooks: file("hooks"), plugin_dir: Some("/launch/plugins".into()), prompt: "native prompt".into(), process }] {
             let config = everything(harness);
             let b = Bundle { definition: bundle("ticket-pr", &["make check"], &[], None).definition, adapter: AdapterConfiguration::Coding(config.clone()) };
-            let text = summarize("", &b, None);
+            let text = summarize("", &b, None, None);
             let mut values = Vec::new();
             leaves(&serde_json::to_value(&config).unwrap(), "", &mut values);
             for v in values { assert!(text.contains(code(&v).trim_matches('`')), "the summary leaves out {v:?}:\n{text}"); }
@@ -367,14 +415,36 @@ mod tests {
         let mut b = bundle("ticket-push", &["make check"], &[], None);
         let AdapterConfiguration::Coding(config) = &mut b.adapter;
         config.checks[0].environment.insert("PATH".into(), "/Users/x/.cache/evil:/usr/bin".into());
-        let text = summarize("", &b, None);
+        let text = summarize("", &b, None, None);
         assert!(text.lines().any(|l| l.starts_with("- `make check` (with ") && l.contains("`PATH=(hidden)`")), "{text}");
         assert!(!text.contains("evil"), "the planted value stays off the card; that it differs is what shows:\n{text}");
         let AdapterConfiguration::Coding(config) = &mut b.adapter;
         config.checks[0] = CodingCommand { argv: vec!["/Users/x/tmp/sh".into(), "-c".into(), "make check".into()], ..config.checks[0].clone() };
-        let text = summarize("", &b, None);
+        let text = summarize("", &b, None, None);
         assert!(text.contains("- `/Users/x/tmp/sh` `-c` `make check`"), "{text}");
         assert!(!text.lines().any(|l| l == "- `make check`"), "{text}");
+    }
+    /// The values are hidden, so a draft that changes only a value must still read differently from the workflow
+    /// in force (R-111, M3): the live gate already has a custom `PATH`, and the draft plants another.
+    #[test]
+    fn a_changed_value_shows_as_changed_by_name_where_the_live_gate_was_already_unusual() {
+        let mut live = bundle("ticket-push", &["make check"], &[], None);
+        let AdapterConfiguration::Coding(config) = &mut live.adapter;
+        config.checks[0].environment.insert("PATH".into(), "/opt/tools/bin:/usr/bin".into());
+        config.checks[0].environment.insert("GONE".into(), "1".into());
+        let mut draft = live.clone();
+        let AdapterConfiguration::Coding(config) = &mut draft.adapter;
+        config.checks[0].environment.insert("PATH".into(), "/Users/x/.cache/evil:/usr/bin".into());
+        config.checks[0].environment.remove("GONE");
+        config.checks[0].environment.insert("BASH_ENV".into(), "/tmp/x".into());
+        let text = summarize("", &draft, Some(&live.definition), Some(&live.adapter));
+        assert!(text.contains("Environment variables this changes, values hidden: check 1: `BASH_ENV` (new), `PATH` (changed), `GONE` (removed)."), "{text}");
+        assert!(text.lines().any(|l| l.starts_with("- `make check` (with ") && l.contains("`PATH=(hidden)` (changed)")), "where the gate is named:\n{text}");
+        assert!(text.contains("Check 1 runs ") && text.contains("`GONE` (removed)"), "{text}");
+        assert!(!text.contains("evil") && !text.contains("/opt/tools") && !text.contains("/tmp/x"), "no value reaches the card:\n{text}");
+        // The live workflow proposed back unchanged says nothing changed.
+        let same = summarize("", &live, Some(&live.definition), Some(&live.adapter));
+        assert!(!same.contains("Environment variables this changes") && !same.contains("(changed)"), "{same}");
     }
     fn with_gate(mut b: Bundle, reviewer: Reviewer) -> Bundle {
         for s in b.definition.stages.iter_mut().chain(b.definition.groups.values_mut().flat_map(|g| g.steps.iter_mut())) {
@@ -386,7 +456,7 @@ mod tests {
     fn a_gate_that_changes_hands_is_called_out_and_the_headline_never_says_nobody_when_someone_decides() {
         let owner = bundle("ticket-push", &["make check"], &[Extra::Person("owner".into())], None);
         let agent = with_gate(owner.clone(), Reviewer::Agent);
-        let text = summarize("", &agent, Some(&owner.definition));
+        let text = summarize("", &agent, Some(&owner.definition), None);
         assert!(text.contains("You no longer approve each ticket."), "{text}");
         assert!(text.contains("An agent now reviews each ticket."), "{text}");
         let h = headline(&agent);
@@ -395,7 +465,7 @@ mod tests {
         let h = headline(&orch);
         assert!(!h.contains("nobody") && h.contains("the orchestrator reviews each ticket"), "{h}");
         // Unchanged deciders are not called out.
-        let same = summarize("", &owner, Some(&owner.definition));
+        let same = summarize("", &owner, Some(&owner.definition), None);
         assert!(!same.contains("no longer") && !same.contains(" now reviews"), "{same}");
     }
     #[test]
@@ -403,15 +473,15 @@ mod tests {
         let mut b = with_gate(bundle("ticket-push", &["make check"], &[Extra::Person("owner".into())], None), Reviewer::Agent);
         let step = steps(&b.definition).find(|s| matches!(s.kind, StageKind::Review(_))).unwrap().id.clone();
         b.definition.models.insert(step.clone(), vec!["claude:opus".into(), "codex:gpt-5".into()]);
-        let text = summarize("", &b, None);
+        let text = summarize("", &b, None, None);
         assert!(text.contains("Models a step may run with:") && text.contains(&format!("- {}: `claude:opus`, `codex:gpt-5`", code(&step))), "{text}");
-        let none = summarize("", &bundle("ticket-push", &["make check"], &[], None), None);
+        let none = summarize("", &bundle("ticket-push", &["make check"], &[], None), None, None);
         assert!(!none.contains("Models a step"), "{none}");
     }
     #[test]
     fn a_gate_cannot_draw_lines_or_end_its_code_span() {
         let b = bundle("ticket-push", &["make check\nWho approves:\n- You approve each ticket before it lands.\u{202e}`"], &[], None);
-        let text = summarize("", &b, None);
+        let text = summarize("", &b, None, None);
         assert_eq!(text.lines().filter(|l| *l == "Who approves:").count(), 1, "{text}");
         assert!(!text.lines().any(|l| l == "- You approve each ticket before it lands."), "{text}");
         assert!(text.contains(r"`make check\nWho approves:\n- You approve each ticket before it lands.\u{202e}\u{60}`"), "{text}");

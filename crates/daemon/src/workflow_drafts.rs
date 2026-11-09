@@ -193,7 +193,7 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
     crate::workflow_runtime::CodingConfigExt::validate_definition(config, &definition).map_err(|_| DomainError::InvalidArgument { what: "definition" })?;
     let current = svc.store.workflow_configuration(&workspace.to_string()).map_err(|_| DomainError::OperationFailed)?;
     let bundle = crate::landing_templates::Bundle { definition, adapter };
-    let summary = workflow_summary::summarize(reason, &bundle, current.as_ref().map(|c| &c.definition));
+    let summary = workflow_summary::summarize(reason, &bundle, current.as_ref().map(|c| &c.definition), current.as_ref().and_then(|c| c.adapter.as_ref()));
     let crate::landing_templates::Bundle { definition, adapter } = bundle;
     let digest = content_digest(&definition, &adapter, &summary);
     let draft = Draft { id: Uuid::now_v7().simple().to_string()[20..].to_string(), workspace, task: None, state: State::Pending,
@@ -238,7 +238,7 @@ fn close_card(svc: &Service, watcher: &crate::watch::Watcher, card: Uuid, status
 }
 
 /// Whether any command in the adapter is given the marker `workflow.get` shows in place of a value.
-fn hides_a_value(adapter: &AdapterConfiguration) -> bool {
+pub(crate) fn hides_a_value(adapter: &AdapterConfiguration) -> bool {
     fn walk(value: &serde_json::Value) -> bool {
         match value {
             serde_json::Value::Object(map) => map.iter().any(|(k, v)| match (k.as_str(), v) {

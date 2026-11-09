@@ -30,6 +30,11 @@ impl Runtime {
         action: &farcooler_protocol::workflow_commands::Action) -> Result<()> {
         use farcooler_protocol::workflow_commands::Action;
         let Action::Publish { mutation, definition, adapter: Some(adapter), .. } = action else { return Ok(()) };
+        // A configuration read back from `workflow.get` carries the marker in place of each value it hides; published
+        // as it is, the marker would become the value (R-111, L11), as `propose` refuses too.
+        if crate::workflow_drafts::hides_a_value(adapter) {
+            return Err(Error::Domain(farcooler_core::error::DomainError::InvalidArgument { what: "adapter" }));
+        }
         let AdapterConfiguration::Coding(config) = adapter.as_ref();
         let payload = serde_json::to_string(&(principal, action))?;
         let id = format!("wire:{principal}:{}", mutation.id);
