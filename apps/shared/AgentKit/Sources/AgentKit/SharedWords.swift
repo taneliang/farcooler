@@ -10,10 +10,12 @@ public enum SharedWords {
         struct Words: Decodable {
             var agentsNone: String
             var blockedDoing: String
+            var handleWaitedOn: String
 
             enum CodingKeys: String, CodingKey {
                 case agentsNone = "agents_none"
                 case blockedDoing = "blocked_doing"
+                case handleWaitedOn = "handle_waited_on"
             }
         }
         var words: Words?
@@ -45,4 +47,6 @@ public enum SharedWords {
     public static var agentsNone: String { words?.agentsNone ?? "" }
     /// What a blocked agent is doing, in the middle of a sentence.
     public static var blockedDoing: String? { words?.blockedDoing }
+    /// Why a removed member's handle can't be reused while a workflow or run names it.
+    public static var handleWaitedOn: String { words?.handleWaitedOn ?? "" }
 }

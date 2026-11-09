@@ -6,6 +6,7 @@
     "words": {
       "agents_none": "No Agents Running",
       "blocked_doing": "waiting on you",
+      "handle_waited_on": "A workflow or a run still names someone who had that handle. Choose another handle, or ask the Owner to cancel those runs and publish a workflow that doesn’t name them.",
       "waiting_on_you": "Waiting on You"
     }
   },
@@ -16,6 +17,7 @@
     "words": {
       "agents_none": "No agents running",
       "blocked_doing": "waiting on you",
+      "handle_waited_on": "A workflow or a run still names someone who had that handle. Choose another handle, or ask the Owner to cancel those runs and publish a workflow that doesn’t name them.",
       "waiting_on_you": "Waiting on you"
     }
   }

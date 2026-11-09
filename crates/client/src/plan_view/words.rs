@@ -168,6 +168,8 @@ pub struct Words {
     pub waiting_on_you: String,
     /// What a blocked agent is doing, in the middle of a sentence: "waiting on you".
     pub blocked_doing: String,
+    /// Why a handle can't be reused yet (ov-1002), in the one sentence every platform shows.
+    pub handle_waited_on: String,
 }
 
 impl Words {
@@ -176,6 +178,7 @@ impl Words {
             agents_none: style.label("no agents running"),
             waiting_on_you: style.label("waiting on you"),
             blocked_doing: "waiting on you".to_string(),
+            handle_waited_on: "A workflow or a run still names someone who had that handle. Choose another handle, or ask the Owner to cancel those runs and publish a workflow that doesn\u{2019}t name them.".to_string(),
         }
     }
 }

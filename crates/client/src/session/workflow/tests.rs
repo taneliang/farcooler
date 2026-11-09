@@ -197,7 +197,7 @@ fn workflow_a_maintainer_cancels_on_their_own_source() {
     s.context.capabilities.decision_principal = Some("member:alice".into());
     s.state.source_sequences.insert("wire:member:alice".into(), 4);
     s.state.source_sequences.insert("wire:owner".into(), 9);
-    s.presentation = project(&s.state, &s.context).unwrap();
+    s.presentation = project(&s.state, &s.context, Style::Apple).unwrap();
     let cancel = s.presentation.runs[0].actions.iter().find(|a| a.kind == cards::ActionKind::Cancel).unwrap().clone();
     match prepare_selection(&s, Uuid::nil(), "item", cancel.clone(), s.state.revision, s.state.epoch).unwrap() {
         PreparedWorkflowResult::Mutation { prepared } => match prepared.validate().unwrap() {
@@ -208,11 +208,11 @@ fn workflow_a_maintainer_cancels_on_their_own_source() {
     }
     let mut empty = s.clone();
     empty.context.capabilities.decision_principal = Some("member:".into());
-    empty.presentation = project(&empty.state, &empty.context).unwrap();
+    empty.presentation = project(&empty.state, &empty.context, Style::Apple).unwrap();
     let offered = empty.presentation.runs[0].actions.iter().find(|a| a.kind == cards::ActionKind::Cancel).unwrap().clone();
     assert!(prepare_selection(&empty, Uuid::nil(), "item", offered, empty.state.revision, empty.state.epoch).is_err());
     let mut plain = s.clone();
     plain.context.capabilities.controller = false;
-    plain.presentation = project(&plain.state, &plain.context).unwrap();
+    plain.presentation = project(&plain.state, &plain.context, Style::Apple).unwrap();
     assert!(!plain.presentation.runs[0].actions.iter().any(|a| a.kind == cards::ActionKind::Cancel), "a plain member is offered no Cancel");
 }

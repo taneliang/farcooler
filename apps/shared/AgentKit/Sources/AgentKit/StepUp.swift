@@ -192,7 +192,7 @@ public enum StepUpWords {
         case "handle_taken", "device_taken":
             "That person or device is already on \(runner), under another name."
         case "handle_waited_on":
-            "A workflow or a run on \(runner) still names someone who had that handle. Choose another handle, or ask the Owner to cancel those runs and publish a workflow that doesn’t name them."
+            SharedWords.handleWaitedOn
         case "scope_access":
             "A Viewer’s device can only look. Choose Viewer, or add it as a Member."
         case "first_key_wrong":
