@@ -72,7 +72,6 @@ pub struct Initiative {
     /// How full its meter is, 0 to 1.
     pub fraction: f64,
     /// "Next: …", or "Waiting on you: …" (`asks_owner`).
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
     /// `next` is the owner's to act on: drawn in amber.
     pub asks_owner: bool,
@@ -134,9 +133,7 @@ pub struct ColumnTicket {
     /// Its title, else the board's, else its key.
     pub title: String,
     /// The initiative it is for: the ticket's own.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub initiative: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub initiative_id: Option<String>,
     pub stage: PipeStage,
     /// When it entered its stage, in ms; 0 when nothing says.
@@ -158,16 +155,12 @@ pub struct ColumnAgent {
     pub doing_is_trouble: bool,
     /// How long it has been at it, in ms.
     #[typeshare(serialized_as = "Option<I54>")]
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed: Option<i64>,
     /// "47 min".
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<String>,
     /// Its pane, to open its chat.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     /// The first ticket it works, for its page when there's no pane to open.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ticket: Option<String>,
     pub tickets: Vec<ColumnTicket>,
     pub working: bool,
@@ -195,7 +188,6 @@ pub struct Group {
     #[typeshare(serialized_as = "I54")]
     pub hidden: u64,
     /// "12 more waiting for review".
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub unattended_words: Option<String>,
 }
 
@@ -243,7 +235,6 @@ pub struct Column {
     /// The rest that are open, said on one quiet line.
     pub quiet_initiatives: Vec<Initiative>,
     /// "Nothing moving: Mac look and feel, 33 of 34; Marketing, 6 of 8".
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub quiet_line: Option<String>,
     #[typeshare(serialized_as = "I54")]
     pub initiative_count: u64,

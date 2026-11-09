@@ -23,7 +23,7 @@ export interface PlanHandlers {
   /// when there is no orchestrator to put it in.
   quote(text: string): boolean
   /// An agent's chat or terminal. False when it has none to open.
-  openAgent(agent: { id: string; name: string; terminal?: string }): boolean
+  openAgent(agent: { id: string; name: string; terminal?: string | null }): boolean
   /// A footer count's list.
   openList(kind: CountKind): void
   edit(theme: string): void

@@ -13,6 +13,7 @@
             "id": "pane:orch",
             "second": "Plan · Working · 4 h",
             "state": "Working · 4 h",
+            "terminal": null,
             "tokens": "2.1M",
             "who": "Orchestrator · opus",
             "working": true,
@@ -25,6 +26,7 @@
             "id": "pane:i1",
             "second": "ov-487, ov-485 · Working · 8 min",
             "state": "Working · 8 min",
+            "terminal": null,
             "tokens": "1.4M",
             "who": "Lander · opus",
             "working": true,
@@ -37,6 +39,7 @@
             "id": "pane:b1",
             "second": "ov-310 · Working · 22 min",
             "state": "Working · 22 min",
+            "terminal": null,
             "tokens": "380K",
             "who": "Builder · sonnet",
             "working": true,
@@ -51,6 +54,7 @@
             "id": "pane:b1",
             "line": "Builder · sonnet · 380K",
             "model": "sonnet",
+            "terminal": null,
             "tokens": "380K",
             "who": "Builder · sonnet"
           },
@@ -58,8 +62,10 @@
           "heading": "The themes grid",
           "id": "t-ov-310",
           "key": "ov-310",
+          "landedLanding": null,
           "mark": "building",
           "markAttention": true,
+          "note": null,
           "notes": [
             {
               "attention": true,
@@ -68,6 +74,7 @@
               "text": "Prepare workspace · Approval required"
             }
           ],
+          "rank": null,
           "run": {
             "attention": true,
             "gate": {
@@ -88,19 +95,25 @@
         },
         {
           "accessibility": "Title of ov-474, Trustworthy agent view, Building · ov-474, No move in 60 h",
+          "agent": null,
           "branch": "lane-474",
           "heading": "Title of ov-474",
           "id": "t-ov-474",
           "key": "ov-474",
+          "landedLanding": null,
           "mark": "building",
           "markAttention": true,
+          "note": null,
           "notes": [
             {
               "attention": true,
+              "help": null,
               "kind": "warning",
               "text": "No move in 60 h"
             }
           ],
+          "rank": null,
+          "run": null,
           "second": "Building · ov-474",
           "stage": "building",
           "status": "Building",
@@ -155,6 +168,7 @@
             "goal": "",
             "id": "th-1",
             "name": "Teams and accounts",
+            "next": null,
             "progress": "2 of 5",
             "total": 5
           },
@@ -176,6 +190,7 @@
             "goal": "",
             "id": "th-3",
             "name": "Trustworthy agent view",
+            "next": null,
             "progress": "0 of 5",
             "total": 5
           }
@@ -239,6 +254,7 @@
                 "more": 1,
                 "name": "Builder",
                 "role": "builder",
+                "terminal": null,
                 "ticket": "t-ov-310",
                 "tickets": [
                   {
@@ -313,6 +329,7 @@
                 "more": 0,
                 "name": "Lander",
                 "role": "lander",
+                "terminal": null,
                 "ticket": "t-ov-487",
                 "tickets": [
                   {
@@ -334,10 +351,12 @@
             "preview": [],
             "stage": "landing",
             "title": "Landing",
-            "unattended": []
+            "unattended": [],
+            "unattendedWords": null
           }
         ],
         "quietInitiatives": [],
+        "quietLine": null,
         "waiting": [
           {
             "key": "ov-485",
@@ -375,63 +394,85 @@
         "tickets": [
           {
             "id": "t-ov-487",
+            "stage": null,
+            "stale": null,
             "status": "Landing · in Landing 86",
             "statusBesideStage": "Landing · in Landing 86"
           },
           {
             "id": "t-ov-485",
+            "stage": null,
+            "stale": null,
             "status": "Waiting · in Landing 86",
             "statusBesideStage": "Waiting · in Landing 86"
           },
           {
             "id": "t-ov-300",
+            "stage": null,
+            "stale": null,
             "status": "Waiting · in Landing 84",
             "statusBesideStage": "Waiting · in Landing 84"
           },
           {
             "id": "t-ov-301",
+            "stage": null,
+            "stale": null,
             "status": "Waiting · in Landing 89",
             "statusBesideStage": "Waiting · in Landing 89"
           },
           {
             "id": "t-ov-302",
+            "stage": null,
+            "stale": null,
             "status": "Waiting",
             "statusBesideStage": "Waiting"
           },
           {
             "id": "t-ov-310",
+            "stage": null,
+            "stale": null,
             "status": "Building",
             "statusBesideStage": "Building"
           },
           {
             "id": "t-ov-311",
+            "stage": null,
+            "stale": null,
             "status": "In review",
             "statusBesideStage": "In review"
           },
           {
             "id": "t-ov-312",
+            "stage": null,
+            "stale": null,
             "status": "Fixing · round 2",
             "statusBesideStage": "Fixing · round 2"
           },
           {
             "id": "t-ov-482",
+            "stage": null,
             "stale": "No move in 30 h",
             "status": "In review",
             "statusBesideStage": "In review"
           },
           {
             "id": "t-ov-474",
+            "stage": null,
             "stale": "No move in 60 h",
             "status": "Building",
             "statusBesideStage": "Building"
           },
           {
             "id": "task-l-old-queued",
+            "stage": null,
+            "stale": null,
             "status": "Waiting",
             "statusBesideStage": "Waiting"
           },
           {
             "id": "t-ov-460",
+            "stage": null,
+            "stale": null,
             "status": "Landed · ab12cd34",
             "statusBesideStage": "Landed · ab12cd34"
           }
@@ -441,13 +482,18 @@
       "inReview": [
         {
           "accessibility": "Title of ov-311, Trustworthy agent view, In review · ov-311",
+          "agent": null,
           "branch": "fleet-ui",
           "heading": "Title of ov-311",
           "id": "t-ov-311",
           "key": "ov-311",
+          "landedLanding": null,
           "mark": "reviewing",
           "markAttention": false,
+          "note": null,
           "notes": [],
+          "rank": null,
+          "run": null,
           "second": "In review · ov-311",
           "stage": "reviewing",
           "status": "In review",
@@ -456,13 +502,18 @@
         },
         {
           "accessibility": "Title of ov-312, Trustworthy agent view, Fixing · round 2 · ov-312",
+          "agent": null,
           "branch": "agent-rows",
           "heading": "Title of ov-312",
           "id": "t-ov-312",
           "key": "ov-312",
+          "landedLanding": null,
           "mark": "fixing",
           "markAttention": false,
+          "note": null,
           "notes": [],
+          "rank": null,
+          "run": null,
           "second": "Fixing · round 2 · ov-312",
           "stage": "building",
           "status": "Fixing · round 2",
@@ -471,19 +522,25 @@
         },
         {
           "accessibility": "Title of ov-482, Trustworthy agent view, In review · ov-482, No move in 30 h",
+          "agent": null,
           "branch": "fix-482",
           "heading": "Title of ov-482",
           "id": "t-ov-482",
           "key": "ov-482",
+          "landedLanding": null,
           "mark": "reviewing",
           "markAttention": true,
+          "note": null,
           "notes": [
             {
               "attention": true,
+              "help": null,
               "kind": "warning",
               "text": "No move in 30 h"
             }
           ],
+          "rank": null,
+          "run": null,
           "second": "In review · ov-482",
           "stage": "reviewing",
           "status": "In review",
@@ -494,13 +551,18 @@
       "landedToday": [
         {
           "accessibility": "Title of ov-460, Mac look and feel, Landed · ab12cd34 · ov-460",
+          "agent": null,
           "branch": "done-lane",
           "heading": "Title of ov-460",
           "id": "t-ov-460",
           "key": "ov-460",
+          "landedLanding": null,
           "mark": "landed",
           "markAttention": false,
+          "note": null,
           "notes": [],
+          "rank": null,
+          "run": null,
           "second": "Landed · ab12cd34 · ov-460",
           "stage": "landed",
           "status": "Landed · ab12cd34",
@@ -511,6 +573,8 @@
       "landings": [
         {
           "attention": false,
+          "carries": null,
+          "ciUnread": null,
           "explanation": "Some of its tickets aren't ready to land yet.",
           "id": "tr-86",
           "label": "Landing 86",
@@ -536,6 +600,7 @@
             "id": "pane:i1",
             "line": "Lander · opus · 1.4M",
             "model": "opus",
+            "terminal": null,
             "tokens": "1.4M",
             "who": "Lander · opus"
           },
@@ -544,7 +609,9 @@
           "phase": "waiting_for_tickets",
           "phaseSentence": "waiting for tickets",
           "phaseWord": "Waiting for tickets",
+          "pushedSha": null,
           "since": 1799992800000,
+          "subtitle": null,
           "tickets": [
             {
               "accessibility": "The team directory",
@@ -552,6 +619,7 @@
                 "id": "pane:i1",
                 "line": "Lander · opus · 1.4M",
                 "model": "opus",
+                "terminal": null,
                 "tokens": "1.4M",
                 "who": "Lander · opus"
               },
@@ -559,9 +627,13 @@
               "heading": "The team directory",
               "id": "t-ov-487",
               "key": "ov-487",
+              "landedLanding": null,
               "mark": "landing",
               "markAttention": false,
+              "note": null,
               "notes": [],
+              "rank": null,
+              "run": null,
               "second": "ov-487 · 3 h",
               "stage": "landing",
               "status": "Landing · in Landing 86",
@@ -574,6 +646,7 @@
                 "id": "pane:i1",
                 "line": "Lander · opus · 1.4M",
                 "model": "opus",
+                "terminal": null,
                 "tokens": "1.4M",
                 "who": "Lander · opus"
               },
@@ -581,9 +654,13 @@
               "heading": "Title of ov-485",
               "id": "t-ov-485",
               "key": "ov-485",
+              "landedLanding": null,
               "mark": "waiting",
               "markAttention": false,
+              "note": null,
               "notes": [],
+              "rank": null,
+              "run": null,
               "second": "ov-485 · 5 h",
               "stage": "waiting",
               "status": "Waiting · in Landing 86",
@@ -594,6 +671,8 @@
         },
         {
           "attention": false,
+          "carries": null,
+          "ciUnread": null,
           "explanation": "Some of its tickets aren't ready to land yet.",
           "id": "tr-89",
           "label": "Landing 89",
@@ -615,21 +694,30 @@
               }
             ]
           },
+          "lander": null,
+          "landerWords": null,
           "number": 89,
           "phase": "waiting_for_tickets",
           "phaseSentence": "waiting for tickets",
           "phaseWord": "Waiting for tickets",
+          "pushedSha": null,
           "since": 1799996400000,
+          "subtitle": null,
           "tickets": [
             {
               "accessibility": "Each person's asks reach the orchestrator",
+              "agent": null,
               "branch": "reps",
               "heading": "Each person's asks reach the orchestrator",
               "id": "t-ov-301",
               "key": "ov-301",
+              "landedLanding": null,
               "mark": "waiting",
               "markAttention": false,
+              "note": null,
               "notes": [],
+              "rank": null,
+              "run": null,
               "second": "ov-301 · 1 h",
               "stage": "waiting",
               "status": "Waiting · in Landing 89",
@@ -640,6 +728,8 @@
         },
         {
           "attention": true,
+          "carries": null,
+          "ciUnread": null,
           "explanation": "Nothing here has moved for a while.",
           "id": "tr-84",
           "label": "Landing 84",
@@ -661,28 +751,37 @@
               }
             ]
           },
+          "lander": null,
+          "landerWords": null,
           "number": 84,
           "phase": "stalled",
           "phaseSentence": "stalled",
           "phaseWord": "Stalled",
+          "pushedSha": null,
           "since": 1799874000000,
+          "subtitle": null,
           "tickets": [
             {
               "accessibility": "Title of ov-300, Needs you",
+              "agent": null,
               "branch": "web-site",
               "heading": "Title of ov-300",
               "id": "t-ov-300",
               "key": "ov-300",
+              "landedLanding": null,
               "mark": "waiting",
               "markAttention": true,
               "note": "Needs you",
               "notes": [
                 {
                   "attention": true,
+                  "help": null,
                   "kind": "warning",
                   "text": "Needs you"
                 }
               ],
+              "rank": null,
+              "run": null,
               "second": "ov-300",
               "stage": "waiting",
               "status": "Waiting · in Landing 84",
@@ -699,12 +798,15 @@
       "sections": [
         {
           "count": 2,
+          "empty": null,
           "folded": false,
+          "help": null,
           "kind": "needs_you",
           "title": "Needs you"
         },
         {
           "count": 3,
+          "empty": null,
           "folded": false,
           "help": "Reviewed tickets land on main together, after one round of checks.",
           "kind": "landing",
@@ -712,37 +814,49 @@
         },
         {
           "count": 3,
+          "empty": null,
           "folded": false,
+          "help": null,
           "kind": "in_review",
           "title": "In review"
         },
         {
           "count": 2,
+          "empty": null,
           "folded": false,
+          "help": null,
           "kind": "building",
           "title": "Building"
         },
         {
           "count": 2,
+          "empty": null,
           "folded": false,
+          "help": null,
           "kind": "waiting",
           "title": "Waiting"
         },
         {
           "count": 3,
+          "empty": null,
           "folded": false,
+          "help": null,
           "kind": "agents",
           "title": "Agents"
         },
         {
           "count": 4,
+          "empty": null,
           "folded": false,
+          "help": null,
           "kind": "themes",
           "title": "Themes"
         },
         {
           "count": 1,
+          "empty": null,
           "folded": true,
+          "help": null,
           "kind": "landed_today",
           "title": "Landed today"
         }
@@ -769,6 +883,7 @@
             "id": "th-4",
             "moving": false,
             "name": "Mac look and feel",
+            "ownerAsk": null,
             "progress": "2 of 2 done",
             "total": 2
           }
@@ -802,6 +917,7 @@
             "id": "th-3",
             "moving": true,
             "name": "Trustworthy agent view",
+            "ownerAsk": null,
             "progress": "0 of 5 done",
             "total": 5
           },
@@ -849,6 +965,7 @@
             "id": "th-1",
             "moving": true,
             "name": "Teams and accounts",
+            "ownerAsk": null,
             "progress": "2 of 5 done",
             "total": 5
           }
@@ -860,13 +977,18 @@
           "cards": [
             {
               "accessibility": "Title of ov-302, Marketing, Waiting · ov-302",
+              "agent": null,
               "branch": "hero-shot",
               "heading": "Title of ov-302",
               "id": "t-ov-302",
               "key": "ov-302",
+              "landedLanding": null,
               "mark": "waiting",
               "markAttention": false,
+              "note": null,
               "notes": [],
+              "rank": null,
+              "run": null,
               "second": "Waiting · ov-302",
               "stage": "waiting",
               "status": "Waiting",
@@ -875,16 +997,22 @@
             },
             {
               "accessibility": "old-queued, Waiting · old-queued",
+              "agent": null,
               "branch": "old-queued",
               "heading": "old-queued",
               "id": "task-l-old-queued",
               "key": "old-queued",
+              "landedLanding": null,
               "mark": "waiting",
               "markAttention": false,
+              "note": null,
               "notes": [],
+              "rank": null,
+              "run": null,
               "second": "Waiting · old-queued",
               "stage": "waiting",
               "status": "Waiting",
+              "theme": null,
               "waitsOnOwner": false
             }
           ],
@@ -892,7 +1020,8 @@
           "title": "Not ranked"
         }
       ]
-    }
+    },
+    "words": null
   },
   "request": {
     "context": {
@@ -1967,6 +2096,7 @@
             }
           ],
           "attempt": 1,
+          "candidate": null,
           "definitionPin": "wf1:afc4d08b5e8e49351ff4d086bea36cd268d4b3318c92613948d0d1ffb62abb9e",
           "fence": 1,
           "gate": {
@@ -1978,6 +2108,8 @@
           "item": "ov-310",
           "iteration": 0,
           "label": "Workflow Run",
+          "latestEvidence": null,
+          "pendingEffect": null,
           "phase": "WaitingApproval",
           "phaseLabel": "Awaiting Approval",
           "policyPin": "policy",

@@ -36,19 +36,19 @@ export interface AgentRef {
 	/** "Builder · Sonnet". */
 	who: string;
 	/** "380K"; nil when no turn stated any. */
-	tokens?: string;
+	tokens?: string | null;
 	/**
 	 * Who it is and what it has spent, as its own line under a card's
 	 * second line on Android ("Builder · sonnet · 380K").
 	 */
 	line: string;
 	/** The pane, to open it. */
-	terminal?: string;
+	terminal?: string | null;
 	/**
 	 * The model as recorded ("claude-opus-4-1"), which a screen reader says
 	 * when `who` shortens it; "" when none is known.
 	 */
-	model?: string;
+	model?: string | null;
 }
 
 export interface AgentRow {
@@ -62,10 +62,10 @@ export interface AgentRow {
 	/** "“Design ov-503” · ov-503 · Working · 22 min". */
 	second: string;
 	doingNow: string;
-	tokens?: string;
+	tokens?: string | null;
 	/** "≈$1.10". */
-	cost?: string;
-	terminal?: string;
+	cost?: string | null;
+	terminal?: string | null;
 	accessibility: string;
 }
 
@@ -114,7 +114,7 @@ export interface Initiative {
 	/** How full its meter is, 0 to 1. */
 	fraction: number;
 	/** "Next: …", or "Waiting on you: …" (`asks_owner`). */
-	next?: string;
+	next?: string | null;
 	/** `next` is the owner's to act on: drawn in amber. */
 	asksOwner: boolean;
 }
@@ -141,8 +141,8 @@ export interface ColumnTicket {
 	/** Its title, else the board's, else its key. */
 	title: string;
 	/** The initiative it is for: the ticket's own. */
-	initiative?: string;
-	initiativeId?: string;
+	initiative?: string | null;
+	initiativeId?: string | null;
 	stage: PipeStage;
 	/** When it entered its stage, in ms; 0 when nothing says. */
 	since: number;
@@ -158,13 +158,13 @@ export interface ColumnAgent {
 	/** `doing` says why it's stuck: drawn in amber. */
 	doingIsTrouble: boolean;
 	/** How long it has been at it, in ms. */
-	elapsed?: number;
+	elapsed?: number | null;
 	/** "47 min". */
-	time?: string;
+	time?: string | null;
 	/** Its pane, to open its chat. */
-	terminal?: string;
+	terminal?: string | null;
 	/** The first ticket it works, for its page when there's no pane to open. */
-	ticket?: string;
+	ticket?: string | null;
 	tickets: ColumnTicket[];
 	working: boolean;
 	/** Tickets in this stage nobody is on, said under the last card. */
@@ -187,7 +187,7 @@ export interface Group {
 	/** The unattended tickets only the list shows. */
 	hidden: number;
 	/** "12 more waiting for review". */
-	unattendedWords?: string;
+	unattendedWords?: string | null;
 }
 
 export enum CountKind {
@@ -220,7 +220,7 @@ export interface Column {
 	/** The rest that are open, said on one quiet line. */
 	quietInitiatives: Initiative[];
 	/** "Nothing moving: Mac look and feel, 33 of 34; Marketing, 6 of 8". */
-	quietLine?: string;
+	quietLine?: string | null;
 	initiativeCount: number;
 	/** The stages with anything in them, in order. */
 	pipeline: Group[];
@@ -246,7 +246,7 @@ export interface DetailStage {
 	 */
 	row: string;
 	/** "PR 31 · 2 threads open", when the ticket has a pull request. */
-	detail?: string;
+	detail?: string | null;
 	/** Changes requested, checks failing or conflicts: drawn in color. */
 	attention: boolean;
 }
@@ -337,7 +337,7 @@ export interface Note {
 	/** Drawn in amber. */
 	attention: boolean;
 	/** Every word of it, for a hover or a long press. */
-	help?: string;
+	help?: string | null;
 }
 
 export enum Phase {
@@ -365,8 +365,8 @@ export interface RunStep {
 	phase: Phase;
 	phaseLabel: string;
 	/** The step it is on; nil past the last. */
-	step?: string;
-	gate?: Gate;
+	step?: string | null;
+	gate?: Gate | null;
 	/** It waits on a person, failed, or its outcome is uncertain. */
 	attention: boolean;
 }
@@ -382,7 +382,7 @@ export interface TicketCard {
 	/** Its title, else its key. */
 	heading: string;
 	/** The theme it serves. */
-	theme?: string;
+	theme?: string | null;
 	/** The stage, as the plan's wire spells it. */
 	stage: string;
 	/** "Fixing · round 1", "Waiting · 2nd", "In Review · in Landing 8". */
@@ -393,23 +393,23 @@ export interface TicketCard {
 	 */
 	second: string;
 	/** Its place in Next Up, from 1. */
-	rank?: number;
+	rank?: number | null;
 	mark: Mark;
 	/** The mark is drawn in amber. */
 	markAttention: boolean;
 	notes: Note[];
 	waitsOnOwner: boolean;
 	/** The landing that landed which it still names. */
-	landedLanding?: string;
-	agent?: AgentRef;
-	run?: RunStep;
+	landedLanding?: string | null;
+	agent?: AgentRef | null;
+	run?: RunStep | null;
 	branch: string;
 	/**
 	 * On a landing, the word drawn beside the title: "Needs you" while it
 	 * waits on the owner (which `notes` then leads with), "Landed · ac840108"
 	 * once it has; nil when it is simply aboard.
 	 */
-	note?: string;
+	note?: string | null;
 	/** What a screen reader says for the row. */
 	accessibility: string;
 }
@@ -420,9 +420,9 @@ export interface LandingCard {
 	/** "Landing 86". */
 	label: string;
 	/** The title without the label in front, or nil. */
-	subtitle?: string;
+	subtitle?: string | null;
 	/** Its tickets' titles on one line. */
-	carries?: string;
+	carries?: string | null;
 	/** The phase, spelled as the plan's wire spells it. */
 	phase: LandingPhase;
 	/** "Checking on CI". */
@@ -435,12 +435,12 @@ export interface LandingCard {
 	/** When it entered this phase, in ms. */
 	since: number;
 	ladder: Ladder;
-	lander?: AgentRef;
+	lander?: AgentRef | null;
 	/** "Lander · Opus · 1.4M". */
-	landerWords?: string;
-	pushedSha?: string;
+	landerWords?: string | null;
+	pushedSha?: string | null;
 	/** What stands in for CI's line when a commit is pushed and the app has no CI read of it yet. */
-	ciUnread?: string;
+	ciUnread?: string | null;
 	tickets: TicketCard[];
 }
 
@@ -464,11 +464,11 @@ export interface Section {
 	/** Its rows; 0 draws no count. */
 	count: number;
 	/** What it says with nothing in it; nil when it has rows or says nothing. */
-	empty?: string;
+	empty?: string | null;
 	/** Drawn folded until opened. */
 	folded: boolean;
 	/** Said on hover over (or a long press of) the title, never its rows. */
-	help?: string;
+	help?: string | null;
 }
 
 export enum WaitingKind {
@@ -515,7 +515,7 @@ export interface ThemeTile {
 	 */
 	cards: TileCard[];
 	/** What waits on the owner, the one amber line. */
-	ownerAsk?: string;
+	ownerAsk?: string | null;
 	/** A ticket of it is landing, in review or building. */
 	moving: boolean;
 }
@@ -525,9 +525,9 @@ export interface Themes {
 	tiles: ThemeTile[];
 	/** Done themes, folded into one tile. */
 	finished: ThemeTile[];
-	finishedTitle?: string;
+	finishedTitle?: string | null;
 	/** "7 themes". */
-	finishedWords?: string;
+	finishedWords?: string | null;
 }
 
 /** What a ticket's page says that its card does not. */
@@ -538,9 +538,9 @@ export interface TicketDetail {
 	status: string;
 	/** `status` when the stage is drawn on a line of its own: only what that stage leaves to the ticket. */
 	statusBesideStage: string;
-	stage?: DetailStage;
+	stage?: DetailStage | null;
 	/** "No move in 2 h", for a stale ticket. */
-	stale?: string;
+	stale?: string | null;
 }
 
 /** The ticket details of a plan, and the one line the Themes section says when it is folded. */
@@ -548,7 +548,7 @@ export interface TicketDetails {
 	/** One per ticket the plan lists, a dropped line only where its task has no other. */
 	tickets: TicketDetail[];
 	/** "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded. */
-	trackSummary?: string;
+	trackSummary?: string | null;
 }
 
 export interface PlanView {
@@ -628,19 +628,19 @@ export interface RunCard {
 	phase: Phase;
 	stages: StageCard[];
 	/** None after the last stage. The definition's approval policies remain visible. */
-	stage?: StageCard;
-	gate?: GateCard;
-	candidate?: string;
-	latestEvidence?: Evidence;
-	pendingEffect?: string;
+	stage?: StageCard | null;
+	gate?: GateCard | null;
+	candidate?: string | null;
+	latestEvidence?: Evidence | null;
+	pendingEffect?: string | null;
 	iteration: number;
 	reworksRemaining: number;
 	attempt: number;
 	fence: number;
 	reasons: ReasonCard[];
 	actions: Action[];
-	forms?: ActionForm[];
-	reworkHistory?: ReworkDecision[];
+	forms?: ActionForm[] | null;
+	reworkHistory?: ReworkDecision[] | null;
 }
 
 export interface Presentation {

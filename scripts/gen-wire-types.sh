@@ -40,7 +40,13 @@ generate() { # language, output
     echo
     # typeshare writes Swift properties as `let`; the hand-written structs these replace were `var`,
     # and a screen's tests change one field of a decoded value.
-    if [ "$1" = swift ]; then sed 's/^\tpublic let /\tpublic var /' "$work/raw"; else cat "$work/raw"; fi
+    case "$1" in
+      swift) sed 's/^\tpublic let /\tpublic var /' "$work/raw" ;;
+      # Rust writes an absent Option as `null`, which typeshare's `field?: T` does not say; a
+      # check for `=== undefined` on one would be wrong.
+      typescript) sed -E 's/^(\t+[A-Za-z0-9_]+)\?: (.*);$/\1?: \2 | null;/' "$work/raw" ;;
+      *) cat "$work/raw" ;;
+    esac
   } >"$work/$2"
 }
 
