@@ -143,9 +143,10 @@ pub struct HookIngress {
     /// Admission for connection tasks and transcript tails (cutover join).
     gate: Option<Arc<crate::writer_gate::WriterGate>>,
     /// Held while a frame that names a launch acts on its pane, and while a
-    /// relaunch cancels what the pane's previous launch left (ov-886). See
-    /// `held_for`.
-    launch_gate: Arc<Mutex<()>>,
+    /// relaunch cancels what the pane's previous launch left (ov-886). One per
+    /// stripe of panes rather than one for the runner, so a pane whose hook is
+    /// slow holds up no other pane's. See `held_for`.
+    launch_gates: Arc<Vec<Mutex<()>>>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -169,6 +170,21 @@ fn release_tail_slot(tails: &Mutex<HashMap<Uuid, Arc<AtomicBool>>>, terminal: Uu
 /// `type_complexity` lint (CI's `-D warnings`) refuses inline.
 pub(crate) type EventSink = Arc<dyn Fn(Uuid, Vec<AgentEvent>) + Send + Sync>;
 
+/// How many stripes the launch gate has (`HookIngress::launch_gates`).
+const LAUNCH_GATES: usize = 64;
+
+/// Pane `terminal`'s stripe of the launch gate.
+fn launch_gate(gates: &[Mutex<()>], terminal: Uuid) -> &Mutex<()> {
+    &gates[(terminal.as_u128() % gates.len() as u128) as usize]
+}
+
+/// What `HookIngress::held_for` hands back: the gate, held, for a frame that
+/// names a launch, and nothing to hold for one that doesn't.
+pub(crate) enum Held<'a> {
+    Free,
+    Gated(#[allow(dead_code)] std::sync::MutexGuard<'a, ()>),
+}
+
 impl HookIngress {
     pub fn new(
         store: Arc<Store>,
@@ -189,7 +205,7 @@ impl HookIngress {
             followups: Arc::default(),
             stopping: Arc::default(),
             gate: None,
-            launch_gate: Arc::default(),
+            launch_gates: Arc::new((0..LAUNCH_GATES).map(|_| Mutex::new(())).collect()),
         }
     }
 
@@ -340,8 +356,8 @@ impl HookIngress {
                 }
             }
             Agent::Codex | Agent::Cursor => {
-                let Some(cwd) = f.cwd.as_deref() else { return None };
-                let Ok(worktree) = self.store.get_worktree(row.worktree_id) else { return None };
+                let cwd = f.cwd.as_deref()?;
+                let worktree = self.store.get_worktree(row.worktree_id).ok()?;
                 canonical(cwd) == canonical(Path::new(&worktree.worktree_path))
             }
         };
@@ -365,12 +381,15 @@ impl HookIngress {
     /// launch is committed: either a frame's effects finished first and
     /// `relaunched` cancels what they left, or they start after and see the
     /// new launch. Never held across an `.await`.
-    pub(crate) fn held_for(&self, terminal: Uuid, launch: Option<Uuid>) -> Option<std::sync::MutexGuard<'_, ()>> {
-        let held = self.launch_gate.lock().unwrap_or_else(|e| e.into_inner());
-        match launch {
-            None => Some(held),
-            Some(launch) => (self.store.current_launch(terminal).ok().flatten() == Some(launch)).then_some(held),
-        }
+    ///
+    /// A frame that names no launch takes no gate: it's routed as it always
+    /// was, and a hook that predates launches mustn't start waiting on one.
+    /// Nothing slow runs under it: `observe_cwd`, which can wait on the claims
+    /// ledger, runs after it's released.
+    pub(crate) fn held_for(&self, terminal: Uuid, launch: Option<Uuid>) -> Option<Held<'_>> {
+        let Some(launch) = launch else { return Some(Held::Free) };
+        let held = launch_gate(&self.launch_gates, terminal).lock().unwrap_or_else(|e| e.into_inner());
+        (self.store.current_launch(terminal).ok().flatten() == Some(launch)).then_some(Held::Gated(held))
     }
 
     /// Cancel what pane `terminal`'s previous launch left in flight, once a
@@ -381,7 +400,7 @@ impl HookIngress {
     /// Narrower than `forget`, which is for a pane that's gone: the pane's
     /// conversation and its subagents' rows carry on into the new launch.
     pub fn relaunched(&self, terminal: Uuid) {
-        let _held = self.launch_gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _held = launch_gate(&self.launch_gates, terminal).lock().unwrap_or_else(|e| e.into_inner());
         self.asks.forget(terminal);
         self.assemblers.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
         if let Some(alive) = self.tails.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal) {
@@ -723,7 +742,7 @@ impl HookIngress {
         // did get running: a slot freed while a loop still holds `alive` true
         // is a tail nothing can stop, and the next payload starts another.
         let stop = alive.clone();
-        let launch_gate = self.launch_gate.clone();
+        let launch_gates = self.launch_gates.clone();
         tokio::spawn(async move {
             let started = tokio::task::spawn_blocking(move || {
                 TranscriptTail::new().follow(
@@ -732,7 +751,7 @@ impl HookIngress {
                     move |text| {
                         // Under the launch gate, so `relaunched` can't stop
                         // this between the check and the delivery.
-                        let _held = launch_gate.lock().unwrap_or_else(|e| e.into_inner());
+                        let _held = launch_gate(&launch_gates, terminal).lock().unwrap_or_else(|e| e.into_inner());
                         if !alive.load(Ordering::Relaxed) {
                             return;
                         }
@@ -1006,11 +1025,6 @@ impl HookIngress {
                 self.asks.dialog_call_ended(terminal, tool);
             }
             self.start_transcript_tail(terminal, hook.agent, &f);
-            // A store read, and a write when it claims. Nothing waits on it
-            // here: a hook that isn't gating hangs up once it has written. The
-            // gating hook, which does wait, is `hold_ask`'s, and there this
-            // runs after the reply.
-            self.observe_cwd(terminal, hook.agent, &f);
 
             let events =
                 self.accept(terminal, hook.agent, &hook.event, &hook.payload, f.session_id.as_deref());
@@ -1018,6 +1032,12 @@ impl HookIngress {
                 on_events(terminal, events);
             }
             drop(held);
+            // A store read, and a write when it claims. Nothing waits on it
+            // here: a hook that isn't gating hangs up once it has written. The
+            // gating hook, which does wait, is `hold_ask`'s, and there this
+            // runs after the reply. Outside the launch gate, since it can wait
+            // on the claims ledger.
+            self.observe_cwd(terminal, hook.agent, &f);
         }
     }
 
@@ -1077,14 +1097,15 @@ impl HookIngress {
         payload[HELD_ASK] = serde_json::Value::String(id.clone());
         let this = self.clone();
         tokio::task::spawn_blocking(move || {
-            let Some(_held) = this.held_for(terminal, launch) else { return };
+            let Some(held) = this.held_for(terminal, launch) else { return };
             this.start_transcript_tail(terminal, hook.agent, &f);
-            this.observe_cwd(terminal, hook.agent, &f);
             let events = this.accept(terminal, hook.agent, &hook.event, &payload, f.session_id.as_deref());
             let sink = this.sink.lock().unwrap_or_else(|e| e.into_inner()).clone();
             if let (false, Some(sink)) = (events.is_empty(), sink) {
                 sink(terminal, events);
             }
+            drop(held);
+            this.observe_cwd(terminal, hook.agent, &f);
         });
 
         let ended = tokio::select! {
