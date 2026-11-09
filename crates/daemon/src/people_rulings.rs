@@ -55,9 +55,10 @@ pub enum Ruling {
     /// lead's and a Maintainer's (`people::may_edit_charter`). A rep never
     /// edits it (`rep_may`); it asks the orchestrator.
     Charter,
-    /// A workspace's name and key prefix (ov-784): the owner's and a
-    /// Maintainer's (`people::maintains`), never a lead's for being one. A
-    /// rep never changes them (`rep_may`).
+    /// A workspace's name and key prefix (ov-784), and cancelling an engine
+    /// run or sending it back (ov-1000): the owner's and a Maintainer's
+    /// (`people::maintains`), never a lead's for being one. A rep never
+    /// does either (`rep_may`).
     Maintains,
     /// The owner's alone, refused `not_yours`, for the reason given.
     Owners(Why),
@@ -85,7 +86,7 @@ pub enum Why {
 pub fn member_ruling(method: M) -> Ruling {
     use Ruling::*;
     match method {
-        M::WorkspaceSetWorkflow | M::WorkflowEnqueue | M::WorkflowGet | M::WorkflowApprove | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue | M::WorkflowLeave | M::WorkflowSettle | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowSendBack | M::WorkflowReopen | M::WorkflowPropose | M::WorkflowDrafts | M::WorkflowCutover | M::WorkflowReview | M::WorkflowWatch => Owners(Why::Reshapes),
+        M::WorkspaceSetWorkflow | M::WorkflowEnqueue | M::WorkflowApprove | M::WorkflowRetry | M::WorkflowQueue | M::WorkflowLeave | M::WorkflowSettle | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowReopen | M::WorkflowPropose | M::WorkflowDrafts | M::WorkflowCutover | M::WorkflowReview => Owners(Why::Reshapes),
         M::HostGet
         | M::HostHealth
         | M::DaemonVersion
@@ -151,6 +152,11 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::WorktreeGrep
         | M::TerminalScreen
         | M::TerminalAttach
+        // An engine run's state, and its agent's terminal, read-only (ov-1000):
+        // members are collaborators (the owner, 25 Oct). A member's own lead's
+        // orchestrator pane drives the rest (ov-999, `Rpc::engine_caller`).
+        | M::WorkflowGet
+        | M::WorkflowWatch
         | M::TerminalAgentSubscribe
         | M::AgentRows
         | M::AgentRowsFollow
@@ -235,7 +241,10 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::WorkspaceSetCharter => Charter,
 
-        M::WorkspaceRename | M::WorkspaceSetPrefix => Maintains,
+        M::WorkspaceRename | M::WorkspaceSetPrefix
+        // Stopping a run, or sending its work back with a reason (ov-1000).
+        | M::WorkflowCancel
+        | M::WorkflowSendBack => Maintains,
 
         M::LineOrder
         | M::BoardThemeCreate

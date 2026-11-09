@@ -50,14 +50,15 @@ pub fn item_of(payload: &farcooler_protocol::v1::WorkflowCommand) -> Option<Stri
     serde_json::from_str::<Ask>(&payload.json).ok().map(|a| a.item)
 }
 
-/// Attach to the agent `payload` names, read-only: the owner's alone to ask. Returns the task that streams the
+/// Attach to the agent `payload` names, read-only: the owner's, or any member's (ov-1000), who reads every
+/// workspace. A released device is turned away before this (`people::gate`) and here. Returns the task that streams the
 /// pane to `push` and the reply that announces the pane's size ahead of its picture.
 pub(crate) fn start(
     push: farcooler_transport::PushSender, caller: crate::people::Person, workspace: uuid::Uuid,
     payload: &farcooler_protocol::v1::WorkflowCommand,
 ) -> farcooler_core::Result<(tokio::task::JoinHandle<()>, farcooler_protocol::v1::TerminalAttachResult)> {
     use farcooler_core::DomainError;
-    if caller != crate::people::Person::Owner {
+    if !matches!(caller, crate::people::Person::Owner | crate::people::Person::Member(_)) {
         return Err(DomainError::ScopeDenied { needed: "owner" });
     }
     let item = item_of(payload).ok_or(DomainError::NotFound)?;

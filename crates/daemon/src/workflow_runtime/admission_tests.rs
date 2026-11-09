@@ -5,7 +5,7 @@ use crate::{rpc::RpcFactory, service::Service, watch::Watcher};
 use farcooler_protocol::{v1::{self as pb, request, response, Scope}, workflow_commands::{Action, Mutation}};
 use farcooler_transport::{Handler, Peer};
 
-fn request(workspace: Uuid, action: &Action) -> pb::Request {
+pub(super) fn request(workspace: Uuid, action: &Action) -> pb::Request {
     let mut req = farcooler_transport::request(action.method());
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
     req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand {
@@ -13,21 +13,21 @@ fn request(workspace: Uuid, action: &Action) -> pb::Request {
     }));
     req
 }
-fn mutation(id: &str, revision: u64, sequence: u64) -> Mutation {
+pub(super) fn mutation(id: &str, revision: u64, sequence: u64) -> Mutation {
     Mutation { id: id.into(), revision, epoch: 1, sequence }
 }
-fn factory(svc: &Arc<Service>, runtime: &Runtime, peer: Peer, pid: Option<i32>) -> RpcFactory {
+pub(super) fn factory(svc: &Arc<Service>, runtime: &Runtime, peer: Peer, pid: Option<i32>) -> RpcFactory {
     RpcFactory::new(svc.clone(), Watcher::new(svc.clone()), Arc::new(tokio::sync::Notify::new()), peer)
         .with_caller_pid(pid).with_workflow_fixture(runtime.command_handle(&runtime.controller()).unwrap())
 }
 // Snapshot every durable admission surface, including inactive outbox entries.
-fn snapshot(runtime: &Runtime, workspace: Uuid) -> serde_json::Value {
+pub(super) fn snapshot(runtime: &Runtime, workspace: Uuid) -> serde_json::Value {
     let w = workspace.to_string();
     serde_json::json!({"configuration": runtime.store.workflow_configuration(&w).unwrap(),
         "state": runtime.state(&w).unwrap(), "events": runtime.events(&w).unwrap(),
         "outbox": format!("{:?}", runtime.store.workflow_outbox(&w).unwrap())})
 }
-async fn held(
+pub(super) async fn held(
     runtime: &mut Runtime, factory: &RpcFactory, workspace: Uuid, action: Action,
     refuse: bool, change: impl FnOnce(),
 ) -> pb::Response {
@@ -164,7 +164,7 @@ fn only_a_person_may_publish_or_settle_a_push() {
 /// ov-999: a pane in `workspace` on the login of Alice, who leads it, as a
 /// real shell in a tagged tmux pane: its id and root pid. As `orchestrator`,
 /// the workspace's orchestrator, marked as an agent's; else her own shell.
-async fn alices_pane(svc: &Arc<Service>, repo: Uuid, workspace: Uuid, orchestrator: bool) -> (Uuid, i32) {
+pub(super) async fn alices_pane(svc: &Arc<Service>, repo: Uuid, workspace: Uuid, orchestrator: bool) -> (Uuid, i32) {
     use farcooler_store::{models::{TerminalRole, TerminalUpdate}, claude_logins::TerminalLogin};
     let worktree = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
     let t = svc.create_terminal(worktree.id, "alice's pane", "shell").await.unwrap();
@@ -192,7 +192,7 @@ async fn alices_pane(svc: &Arc<Service>, repo: Uuid, workspace: Uuid, orchestrat
 
 /// One `workflow.*` call through dispatch, handed to the runtime if it got
 /// that far. `None` in the second place when nothing reached the inbox.
-async fn sent(runtime: &mut Runtime, rpc: &RpcFactory, workspace: Uuid, action: &Action) -> (pb::Response, bool) {
+pub(super) async fn sent(runtime: &mut Runtime, rpc: &RpcFactory, workspace: Uuid, action: &Action) -> (pb::Response, bool) {
     let pending = rpc.handle(request(workspace, action));
     tokio::pin!(pending);
     let reached = tokio::time::timeout(Duration::from_secs(10), async {
@@ -208,7 +208,7 @@ async fn sent(runtime: &mut Runtime, rpc: &RpcFactory, workspace: Uuid, action: 
 }
 
 /// The engine's receipt in a dispatch reply; panics on a refusal.
-fn receipt(response: &pb::Response) -> serde_json::Value {
+pub(super) fn receipt(response: &pb::Response) -> serde_json::Value {
     match &response.outcome {
         Some(response::Outcome::Result(r)) => match &r.value {
             Some(pb::result::Value::WorkflowReply(reply)) => serde_json::from_str(&reply.json).unwrap(),
@@ -217,11 +217,11 @@ fn receipt(response: &pb::Response) -> serde_json::Value {
         other => panic!("refused: {other:?}"),
     }
 }
-fn ok(response: &pb::Response) {
+pub(super) fn ok(response: &pb::Response) {
     let value = receipt(response);
     assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
 }
-fn refused(response: &pb::Response) -> String {
+pub(super) fn refused(response: &pb::Response) -> String {
     match &response.outcome {
         Some(response::Outcome::Error(e)) => farcooler_core::error::word_for(e.code).to_string(),
         other => panic!("admitted: {other:?}"),
@@ -316,10 +316,11 @@ async fn workflow_a_member_led_orchestrator_is_refused_on_another_workspace() {
 
 /// ov-999: `workflow.*` dispatch admits a member's pane only on the
 /// workspace they lead, as owner-only, before admission is asked. Alice's own
-/// shell, an agent nowhere: refused there where she doesn't lead
-/// (`scope-denied`), and by admission where she does, since it is not the
-/// orchestrator (`auth-required`). Remove the check in `Rpc::engine_caller`
-/// and the first answers `auth-required` too.
+/// shell, an agent nowhere, asking to enqueue: refused there where she
+/// doesn't lead (`scope-denied`); where she does, admission takes her as a
+/// member in person, who only reads and, as a Maintainer, cancels and sends
+/// back (ov-1000), and refuses it (`not-yours`). Remove the check in
+/// `Rpc::engine_caller` and the first answers `not-yours` too.
 #[tokio::test]
 async fn workflow_dispatch_admits_a_member_only_where_they_lead() {
     let (_dir, svc, repo) = crate::test_support::fixture().await;
@@ -331,7 +332,7 @@ async fn workflow_dispatch_admits_a_member_only_where_they_lead() {
     runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { notifications: None, adapter: None,
         mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap();
     let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));
-    for (lead, word) in [(None, "scope-denied"), (Some("alice"), "auth-required")] {
+    for (lead, word) in [(None, "scope-denied"), (Some("alice"), "not-yours")] {
         svc.store.set_workspace_lead(workspace, lead).unwrap();
         let before = snapshot(&runtime, workspace);
         let (reply, reached) = sent(&mut runtime, &rpc, workspace, &Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() }).await;

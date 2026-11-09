@@ -188,3 +188,31 @@ fn workflow_prepared_validation_is_shared_and_preserves_bytes() {
     p.schema=99;assert!(p.validate().is_err());assert_eq!(p.json,legacy);
     p.schema=1;p.json=r#"{"action":"Get"}"#.into();assert!(p.validate().is_err());
 }
+
+/// ov-1000: a Maintainer is `member:<handle>` and cancels from the apps, on their own source's sequence. A
+/// member with no Cancel offered, and an empty handle, prepare nothing.
+#[test]
+fn workflow_a_maintainer_cancels_on_their_own_source() {
+    let mut s = snapshot();
+    s.context.capabilities.decision_principal = Some("member:alice".into());
+    s.state.source_sequences.insert("wire:member:alice".into(), 4);
+    s.state.source_sequences.insert("wire:owner".into(), 9);
+    s.presentation = project(&s.state, &s.context).unwrap();
+    let cancel = s.presentation.runs[0].actions.iter().find(|a| a.kind == cards::ActionKind::Cancel).unwrap().clone();
+    match prepare_selection(&s, Uuid::nil(), "item", cancel.clone(), s.state.revision, s.state.epoch).unwrap() {
+        PreparedWorkflowResult::Mutation { prepared } => match prepared.validate().unwrap() {
+            wire::Action::Cancel { mutation, .. } => assert_eq!(mutation.sequence, 5, "Alice's own sequence, not the owner's"),
+            other => panic!("not a cancel: {other:?}"),
+        },
+        other => panic!("not a mutation: {other:?}"),
+    }
+    let mut empty = s.clone();
+    empty.context.capabilities.decision_principal = Some("member:".into());
+    empty.presentation = project(&empty.state, &empty.context).unwrap();
+    let offered = empty.presentation.runs[0].actions.iter().find(|a| a.kind == cards::ActionKind::Cancel).unwrap().clone();
+    assert!(prepare_selection(&empty, Uuid::nil(), "item", offered, empty.state.revision, empty.state.epoch).is_err());
+    let mut plain = s.clone();
+    plain.context.capabilities.controller = false;
+    plain.presentation = project(&plain.state, &plain.context).unwrap();
+    assert!(!plain.presentation.runs[0].actions.iter().any(|a| a.kind == cards::ActionKind::Cancel), "a plain member is offered no Cancel");
+}

@@ -21,6 +21,8 @@ pub(crate) struct Admission {
     workspace: Uuid,
     seat: Seat,
     terminal: Option<(Terminal, Login, Option<String>)>,
+    /// Whose the caller is (`caller_person`) when this was captured; every recheck must find the same.
+    person: Person,
 }
 
 /// The actions an orchestrator may never take on a person's behalf: publishing a definition, and saying
@@ -62,16 +64,28 @@ impl Admission {
             }
             _ => return Err(DomainError::ScopeDenied { needed: "known caller" }),
         };
+        let person = crate::caller_person::caller_person(&service, &peer, caller_pid, &caller_pane)?;
         let admission = Self { service, peer, session, authority, owner_device, caller_pid, incarnation,
-            caller_pane, workspace, seat, terminal };
+            caller_pane, workspace, seat, terminal, person };
         admission.recheck()?;
         Ok(admission)
     }
 
     pub(super) fn workspace(&self) -> String { self.workspace.to_string() }
-    pub(super) fn principal(&self) -> &'static str {
-        match self.seat { Seat::Person => "owner", Seat::Agent(Some(_)) => "orchestrator", _ => unreachable!() }
+    /// Whom the engine records and decides for. An orchestrator pane is `orchestrator`, whoever leads it;
+    /// a member in person is `member:<handle>` (ov-1000), so one member's commands and receipts are never
+    /// another's. Never read off the wire.
+    pub(super) fn principal(&self) -> String {
+        match (self.seat, &self.person) {
+            (Seat::Agent(Some(_)), _) => "orchestrator".into(),
+            (Seat::Person, Person::Member(handle)) => format!("member:{handle}"),
+            (Seat::Person, _) => "owner".into(),
+            _ => unreachable!(),
+        }
     }
+    /// A member in person, rather than the owner or an orchestrator pane: they read runs, and a Maintainer
+    /// cancels and sends back (ov-1000), and nothing else.
+    fn member_in_person(&self) -> bool { self.seat == Seat::Person && matches!(self.person, Person::Member(_)) }
     // Informational context only. Generation and all retained caller proofs bind
     // the Session guard; receipt/mutation authority is always recomputed here.
     pub(super) fn context(&self, epoch: u64) -> serde_json::Value {
@@ -80,7 +94,7 @@ impl Admission {
                 self.caller_pid, self.incarnation, self.seat, &self.terminal, self.session.workflow_auth_generation()))));
         serde_json::json!({"binding":binding,"capabilities":{
             "workspace":self.workspace.to_string(),"epoch":epoch,"inspect":true,
-            "controller":true,"decision_principal":self.principal()}})
+            "controller":self.permits_cancel(),"decision_principal":self.principal()}})
     }
     /// For the commands an agent must not run on a person's behalf.
     pub(crate) fn require_person(&self) -> Result<()> {
@@ -101,20 +115,42 @@ impl Admission {
         if person_only(action) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });
         }
+        if self.member_in_person() {
+            // Read now, at consumption too: a role taken away while a command waits refuses it.
+            let maintains = crate::people::maintains(&self.service.store, &self.person)?;
+            return match action {
+                Action::Get => Ok(()),
+                Action::Cancel { .. } | Action::SendBack { .. } if maintains => Ok(()),
+                // As the people gate answers a member's device asking for the owner's (`Ruling::Owners`).
+                _ => Err(DomainError::NotYours { what: "not_yours" }),
+            };
+        }
         Ok(())
     }
+    /// Whether this caller may cancel a run, for the apps' `controller` (informational only).
+    fn permits_cancel(&self) -> bool {
+        !self.member_in_person() || crate::people::maintains(&self.service.store, &self.person).unwrap_or(false)
+    }
 
-    /// Whether `person`, whose this caller's pane is, may drive this
-    /// workspace's engine: the owner; or a member, only from the orchestrator
-    /// pane this admitted, on that member's login, while they lead this
-    /// workspace (ov-999). Such a pane is still the `orchestrator` principal,
-    /// so it is refused what the owner's orchestrator is refused. All of it
-    /// read by the daemon: nothing on the wire names a person.
+    /// Whether `person`, whose this caller is, may reach this workspace's
+    /// engine at all, by what the daemon reads, never the wire. The local
+    /// socket's `authority` is the owner's; a device's is its own person's.
+    /// - The owner, from the owner's device or the local socket.
+    /// - The orchestrator pane a member leads, on their login, while they
+    ///   lead this workspace (ov-999). It is still the `orchestrator`
+    ///   principal, refused what the owner's orchestrator is refused.
+    /// - A member in person, from their own device or a shell pane on their
+    ///   login (ov-1000): `permits` then holds them to reading runs, and a
+    ///   Maintainer to cancelling and sending back too.
     fn admits(&self, person: &Person) -> bool {
+        let local = self.peer.client_id.is_none() && self.authority.person == Person::Owner;
         match person {
-            Person::Owner => true,
-            Person::Member(handle) => self.peer.client_id.is_none() && matches!(&self.terminal,
-                Some((_, Login::Member { handle: login, .. }, Some(lead))) if login == handle && lead == handle),
+            Person::Owner => self.authority.person == Person::Owner,
+            Person::Member(handle) => match &self.terminal {
+                Some((_, Login::Member { handle: login, .. }, Some(lead))) => local && login == handle && lead == handle,
+                Some(_) => false,
+                None => local || self.authority.person == *person,
+            },
             Person::Released => false,
         }
     }
@@ -138,7 +174,7 @@ impl Admission {
             if current != self.owner_device { return Err(DomainError::AuthRequired); }
         }
         let person = crate::caller_person::caller_person(svc, &self.peer, self.caller_pid, &self.caller_pane)?;
-        if self.authority.person != Person::Owner
+        if person != self.person
             || !self.admits(&person)
             || person_access::effective_scope(&svc.store, &self.peer) != self.peer.scope
             || !matches!(self.peer.scope, Scope::Control | Scope::HostAdmin)

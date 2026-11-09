@@ -773,7 +773,7 @@ impl Rpc {
                 use farcooler_protocol::workflow_commands::{Action, MAX_BYTES};
                 let workspace = Self::target(&req)?;
                 svc.store.get_workspace(workspace)?;
-                self.engine_caller(workspace)?;
+                self.engine_caller(workspace, &req.method)?;
                 let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
                 if p.schema != 1 || p.json.len() > MAX_BYTES { return Err(DomainError::NotFound); }
                 let action: Action = farcooler_protocol::workflow_commands::parse(&p.json).map_err(|_| DomainError::NotFound)?;

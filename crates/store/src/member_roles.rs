@@ -65,7 +65,7 @@ pub enum Role {
     Member,
     /// Edits any workspace's charter (`workspace.set_charter`), renames a
     /// workspace and sets its prefix and the settings that don't act as the
-    /// owner (ov-784).
+    /// owner (ov-784), and cancels an engine run or sends it back (ov-1000).
     Maintainer,
 }
 

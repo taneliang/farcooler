@@ -29,6 +29,8 @@ mod admission;
 pub(crate) use admission::Admission;
 #[cfg(test)]
 mod admission_tests;
+#[cfg(test)]
+mod member_tests;
 use adapters::{Binding, Journal};
 pub use adapters::coding_definition;
 
@@ -643,8 +645,8 @@ impl Runtime {
                 let result = async {
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
-                    self.validate_wire_publication(&admission.workspace(), admission.principal(), &action).await?;
-                    let tree = self.prepare_start(&admission.workspace(), admission.principal(), &action).await?;
+                    self.validate_wire_publication(&admission.workspace(), &admission.principal(), &action).await?;
+                    let tree = self.prepare_start(&admission.workspace(), &admission.principal(), &action).await?;
                     // No await separates final retained authority recheck from receipt/transaction.
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
@@ -652,7 +654,7 @@ impl Runtime {
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
                     } else {
-                        self.wire_command_with(&admission.workspace(), admission.principal(), *action, tree)?
+                        self.wire_command_with(&admission.workspace(), &admission.principal(), *action, tree)?
                     };
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);

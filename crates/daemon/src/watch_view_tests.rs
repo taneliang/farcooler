@@ -111,15 +111,39 @@ async fn a_watcher_sees_the_agent_and_nothing_it_does_reaches_the_pane() {
 
 // ---- who may watch, and what a failed attach tells the watcher (ov-976 review) ----
 
-#[test]
-fn only_the_owner_may_watch() {
-    let (push, _rx) = farcooler_transport::push_queue(8);
+/// ov-1000: a member watches a run's agent as the owner does, through the same read-only path
+/// (`a_watcher_sees_the_agent_and_nothing_it_does_reaches_the_pane`); a released device does not.
+#[tokio::test]
+async fn a_member_watches_a_run_and_a_released_device_does_not() {
+    use crate::people::Person;
+    let (push, mut rx) = farcooler_transport::push_queue(64);
+    let workspace = Uuid::now_v7();
     let ask = payload(r#"{"item":"ov-9"}"#);
-    let member = start(push.clone(), crate::people::Person::Member("alice".into()), Uuid::now_v7(), &ask);
-    assert!(matches!(member, Err(farcooler_core::DomainError::ScopeDenied { needed: "owner" })), "a member got past the owner check");
-    // The owner is let through the check: with nothing running for the item the answer is "not found", not a refusal.
-    let owner = start(push, crate::people::Person::Owner, Uuid::now_v7(), &ask);
-    assert!(matches!(owner, Err(farcooler_core::DomainError::NotFound)));
+    let released = start(push.clone(), Person::Released, workspace, &ask);
+    assert!(matches!(released, Err(farcooler_core::DomainError::ScopeDenied { needed: "owner" })), "a released device got past the check");
+    // Let through the check: with nothing running for the item the answer is "not found", not a refusal.
+    for person in [Person::Owner, Person::Member("alice".into())] {
+        assert!(matches!(start(push.clone(), person.clone(), workspace, &ask), Err(farcooler_core::DomainError::NotFound)), "{person:?}");
+    }
+    let dir = farcooler_core::scratch::dir("watch-member");
+    let server = farcooler_tmux::TmuxServer::in_dir(&format!("test-{}", Uuid::now_v7().simple()), Uuid::now_v7(), &dir);
+    let window = server.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", dir.to_str().unwrap(), "sh -c 'echo member can see this; sleep 30'").await.unwrap();
+    let pane = server.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
+    let terminal = pane.terminal_id;
+    let _listed = publish(&workspace.to_string(), "ov-9", server.clone(), pane);
+    let (task, _reply) = start(push, Person::Member("alice".into()), workspace, &ask).expect("a member watches");
+    let mut seen = String::new();
+    while !seen.contains("member can see this") {
+        let event = tokio::time::timeout(Duration::from_secs(20), rx.recv()).await.expect("a frame in time").expect("a frame");
+        if let Some(farcooler_protocol::v1::event::Payload::TerminalFrame(frame)) = event.payload
+            && let Some(farcooler_protocol::v1::terminal_frame::Kind::Output(output)) = frame.kind
+        {
+            assert_eq!(frame.terminal_id.as_ref(), terminal.as_bytes().as_slice(), "the run's pane, and no other");
+            seen.push_str(&String::from_utf8_lossy(&output.payload));
+        }
+    }
+    task.abort();
+    farcooler_tmux::reap_server(server.socket());
 }
 
 #[tokio::test]

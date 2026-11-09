@@ -119,7 +119,9 @@ fn prepare_selection_with_reason(snapshot: &WorkflowSnapshot, workspace: Uuid, i
     let (intent, card) = selection(snapshot, workspace, item, selected, revision, epoch, reason)?;
     let Intent::Command(command) = intent else { return Ok(PreparedWorkflowResult::Inspection { intent }); };
     let principal = snapshot.context.capabilities.decision_principal.as_deref()
-        .filter(|p| matches!(*p, "owner" | "orchestrator")).ok_or_else(|| invalid("missing workflow caller source"))?;
+        // A member in person is `member:<handle>`: a Maintainer cancels from the apps (ov-1000).
+        .filter(|p| matches!(*p, "owner" | "orchestrator") || p.strip_prefix("member:").is_some_and(|h| !h.is_empty()))
+        .ok_or_else(|| invalid("missing workflow caller source"))?;
     let source = format!("wire:{principal}");
     let sequence = snapshot.state.source_sequences.get(&source).copied().unwrap_or(0)
         .checked_add(1).ok_or_else(|| invalid("workflow source sequence exhausted"))?;
