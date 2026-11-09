@@ -162,7 +162,8 @@ const TABLE: &[(&str, Rates)] = &[
 /// list is not modeled, so it is unpriced.
 ///
 /// GPT-5.6 Sol's rates are promotional on the page until 2026-11-30; after
-/// that the row will need the page's new rate. `scripts/claude-prices.py` does not check this table.
+/// that the row will need the page's new rate. `scripts/openai-prices.py` compares
+/// these rows with the page daily (openai-prices.yml); `--write` rewrites them.
 const OPENAI: &[(&str, Rates)] = &[
     ("gpt-6.1-sol", openai(2.0, 0.1, 10.0)),
     ("gpt-6.1-terra", openai(1.0, 0.05, 5.0)),
@@ -179,8 +180,9 @@ const fn openai(input: f64, cache_read: f64, output: f64) -> Rates {
 
 /// Models the pricing page no longer lists (ov-942, ruling R-106). Their usage
 /// is still in the store and still arrives from old sessions, so they keep the
-/// last rates the page printed. `scripts/claude-prices.py` neither compares nor
-/// rewrites this table; add a row here when the page drops a model.
+/// last rates the page printed. `scripts/claude-prices.py` and
+/// `scripts/openai-prices.py` neither compare nor rewrite this table; add a row
+/// here when a page drops a model (a GPT row keeps its `openai(..)` rates).
 const RETIRED: &[(&str, Rates)] = &[
     // Dropped from the page 2026-11.
     ("claude-haiku-3-5", rate(0.8, 1.0, 1.6, 0.08, 4.0)),
