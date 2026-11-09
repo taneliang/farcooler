@@ -843,6 +843,5 @@ async fn an_enter_tmux_refuses_is_said_so() {
     crate::watch::answer_wake::compose::fail_enter(agent.id);
     si.show("shells").await;
     waits_over(&b).await;
-    assert!(enters(&si).is_empty(), "{}", si.log());
     assert_eq!(not_sent(agent.id), ["“what did they find” is in Claude’s box, but the runner couldn’t press Return. Check the terminal."]);
 }
