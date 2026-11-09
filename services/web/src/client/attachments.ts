@@ -3,11 +3,13 @@
 /// does on the Mac and the phones, so the limits are the runner's own: the
 /// daemon takes at most ten images, and the client core refuses one past
 /// what the runner's `compose` accepts (`compose_limits`, crates/web). The
-/// sentences are AgentKit's (AgentConversation.swift), so every device says
-/// the same thing.
+/// runner's refusals are crates/client's (`conversation_words`), so every
+/// device says the same thing.
 ///
 /// Nothing here touches the page or wasm, so a test runs it with images made
 /// of a few bytes.
+
+import { refused } from './chat-copy'
 
 /// The most images in one message (the daemon's `MOST_IMAGES`).
 export const MOST_IMAGES = 10
@@ -41,11 +43,12 @@ export function parseLimits(json: string): Limits | null {
 }
 
 export const IMAGE_WORDS = {
-  imageTooLarge: 'That image is too large to send. Use a smaller one.',
-  imagesTooLarge: 'These images are too large to send together. Send fewer or smaller ones.',
-  tooMany: `A message takes at most ${MOST_IMAGES} images.`,
+  // The runner's own refusals, in the words the apps share (`conversation_words`).
+  get imageTooLarge() { return refused('image_too_large') },
+  get imagesTooLarge() { return refused('images_too_large') },
+  get tooMany() { return refused('images') },
   notAnImage: 'Only PNG, JPEG, GIF and WebP images can be attached.',
-  unreadable: 'One of the images couldn’t be read, so nothing was sent.',
+  get unreadable() { return refused('image') },
   tooOld: (runner: string) => `${runner} needs a newer Far Cooler to take images from here. Update it, then try again.`,
 }
 

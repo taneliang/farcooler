@@ -40,6 +40,7 @@ import { ChatView } from './chat'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
 import { corePhrases } from './core-phrases'
+import { useConversationWords } from './chat-copy'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
@@ -1201,6 +1202,7 @@ async function start(watch: StartWatch): Promise<void> {
   // are the longest wait, and neither depends on who is signed in.
   const loading = Promise.all([init({ module_or_path: __WASM__.web }), loadTailcat(__WASM__.tailcat)])
   loading.catch(() => {})
+  useConversationWords(planView)
 
   // Which account is signed in decides which device this browser may use, so
   // nothing starts without it.

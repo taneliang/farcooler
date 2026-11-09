@@ -1,5 +1,11 @@
 package com.farcooler.model
 
+import com.farcooler.core.NativeClient
+import com.farcooler.core.coreIsAvailable
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
 /**
  * The conversation view of a terminal-mode claude or codex pane on a phone (ov-374, ov-416):
  * the rules it decides by, here so the JVM tests read them back. AgentKit's
@@ -172,40 +178,25 @@ object AgentConversation {
 
     /** [command] when the message was a slash command, which says which limit `images` means. */
     fun issue(failure: SendFailure, command: Boolean = false, agent: String = "Claude"): SendIssue = when (failure) {
-        // A grant that may read but not type (`read`): saying so beats
-        // "wasn't sent" on every try.
-        is SendFailure.Refused -> if (failure.word == "scope-denied") {
-            SendIssue.Said("This device can’t send messages to this runner.")
-        } else when (failure.what) {
-            "prompt", "dialog" -> SendIssue.Handoff
-            "handoff" -> SendIssue.Panel
-            "draft" -> SendIssue.DraftInTerminal
-            "typing" -> SendIssue.Said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop.")
-            "busy" -> SendIssue.Said(busy(agent))
-            "too_long" -> SendIssue.Said(TOO_LONG)
-            "command" -> SendIssue.Said(commandRefused(agent))
-            "paste_left" -> SendIssue.Said("The message didn’t land in the box as typed, so it was left there and not sent.")
-            "left_at_shell" -> SendIssue.Said("$agent quit as the message was typed. It wasn’t run.")
-            "unconfirmed" -> SendIssue.Said(unconfirmed(agent))
-            "not_running", "not_an_agent" -> SendIssue.Said("$agent isn’t running in this pane.")
-            "unfamiliar", "unproven" -> SendIssue.Said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
-            "unconfirmable" -> SendIssue.Said("Far Cooler can’t find $agent’s session to confirm a send, so nothing was typed.")  // casing ok: names
-            "unsupported" -> SendIssue.Said("$agent can’t take a message from here. Use the terminal.")
-            "picker" -> SendIssue.Said(picker(agent))
-            "too_tall" -> SendIssue.Said(tooTall(agent))
-            "images_too_large" -> SendIssue.Said(IMAGES_TOO_LARGE)
-            "images" -> SendIssue.Said(if (command) COMMAND_WITH_IMAGES else TOO_MANY_IMAGES)
-            "image_too_large" -> SendIssue.Said(IMAGE_TOO_LARGE)
-            "backslash" -> SendIssue.Said(BACKSLASH)
-            "image" -> SendIssue.Said("One of the images couldn’t be read, so nothing was sent.")
-            else -> SendIssue.Said("The message wasn’t sent.")
+        is SendFailure.Refused -> {
+            val send = ConversationWords.table(agent)?.send
+            val found = failure.word?.let { send?.get("word:$it") }
+                ?: (if (command) send?.get("${failure.what ?: ""}:command") else null)
+                ?: send?.get(failure.what ?: "") ?: send?.get("")
+            found?.let(::sendIssue) ?: SendIssue.Said("")
         }
-        // Never "wasn't sent" for a call that may have arrived: the runner may
-        // type it yet, and a second send would go in twice.
+        // Never "wasn't sent" for a call that may have arrived: a second send would go in twice.
         SendFailure.TimedOut -> SendIssue.Said(MAY_HAVE_BEEN_SENT)
         is SendFailure.Lost ->
-            if (failure.notSent) SendIssue.Said("The runner isn’t connected, so the message wasn’t sent.")
-            else SendIssue.Said(MAY_HAVE_BEEN_SENT)
+            if (failure.notSent) SendIssue.Said(ConversationWords.phrase("not_connected")) else SendIssue.Said(MAY_HAVE_BEEN_SENT)
+    }
+
+    private fun sendIssue(found: ConversationWords.Issue): SendIssue? = when (found.kind) {
+        ConversationWords.Kind.Handoff -> SendIssue.Handoff
+        ConversationWords.Kind.Panel -> SendIssue.Panel
+        ConversationWords.Kind.Draft -> SendIssue.DraftInTerminal
+        ConversationWords.Kind.Said -> SendIssue.Said(found.text ?: "")
+        ConversationWords.Kind.Quiet -> null
     }
 
     /** Which key the runner is asked to press (ov-368). */
@@ -252,35 +243,16 @@ object AgentConversation {
      * there's nothing to say: the turn ended on its own (`idle`), or a second press
      * came too soon after the first (`too_soon`).
      */
-    fun keyIssue(failure: SendFailure, key: PaneKey): SendIssue? {
-        val stop = key == PaneKey.Stop
-        return when (failure) {
-            is SendFailure.Refused -> if (failure.word == "scope-denied") {
-                SendIssue.Said("This device can’t control this runner.")
-            } else when (failure.what) {
-                "idle", "too_soon" -> null
-                "prompt" -> SendIssue.Handoff
-                "draft" -> SendIssue.DraftInTerminal
-                "typing" -> SendIssue.Said("Someone is typing in the terminal. Try again in a moment.")
-                "sending" -> SendIssue.Said("A message is still going in. Try again in a moment.")
-                "nothing_queued" -> SendIssue.Said("Nothing is waiting in Claude’s queue.")  // casing ok: names
-                "settling" -> SendIssue.Said(
-                    if (stop) "Claude is starting a step. Try Stop again in a moment."  // casing ok: a button's name
-                    else "Claude is starting a step. Try Send now again in a moment.",  // casing ok: a button's name
-                )
-                "unconfirmed" -> SendIssue.Said(
-                    if (stop) "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
-                    else "Claude didn’t confirm it sent the queued messages. Check the terminal.",
-                )
-                else -> SendIssue.Said(
-                    if (stop) "Far Cooler can’t stop Claude safely from here. Use the terminal."
-                    else "Far Cooler can’t send the queue safely from here. Use the terminal.",
-                )
-            }
-            SendFailure.TimedOut, is SendFailure.Lost ->
-                if (failure is SendFailure.Lost && failure.notSent) SendIssue.Said("The runner isn’t connected. Use the terminal.")
-                else SendIssue.Said("The runner didn’t answer in time. Check the terminal.")
+    fun keyIssue(failure: SendFailure, key: PaneKey): SendIssue? = when (failure) {
+        is SendFailure.Refused -> {
+            val words = ConversationWords.table()
+            val table = if (key == PaneKey.Stop) words?.stop else words?.sendNow
+            val found = failure.word?.let { table?.get("word:$it") } ?: table?.get(failure.what ?: "") ?: table?.get("")
+            found?.let(::sendIssue)
         }
+        SendFailure.TimedOut, is SendFailure.Lost ->
+            if (failure is SendFailure.Lost && failure.notSent) SendIssue.Said(ConversationWords.phrase("key_not_connected"))
+            else SendIssue.Said(ConversationWords.phrase("key_timed_out"))
     }
 
     /**
@@ -312,55 +284,22 @@ object AgentConversation {
 
     fun tooLong(rich: Boolean): String = if (rich) TOO_LONG_COMPOSED else TOO_LONG
 
-    const val TOO_LONG = "That message is over $LONGEST characters. Shorten it, or paste it in the terminal."
-    const val TOO_LONG_COMPOSED =
-        "That message is over 100,000 characters. Shorten it, or paste it in the terminal." // LONGEST_COMPOSED, written out for a const
-    /** The runner's `command`: a `!`, which claude's box runs in a shell, or a `/` before something that isn't a command's name. */
-    const val COMMAND_REFUSED =
-        "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+    /** The sentence for refusal word [what], as [issue] says it. */
+    fun refused(what: String, agent: String = "Claude"): String = ConversationWords.table(agent)?.send?.get(what)?.text ?: ""
 
-    fun commandRefused(agent: String): String =
-        "$agent would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
-
-    /**
-     * The runner's `busy`: an agent that takes nothing mid-turn, as codex. A working claude is never
-     * refused: the runner holds the message and answers Queued (ov-468).
-     */
-    fun busy(agent: String): String =
-        "$agent takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
-
-    fun unconfirmed(agent: String): String = "$agent didn’t confirm it took the message. Check the terminal before sending it again."
-
-    fun handoff(agent: String): String = "$agent is showing something only the terminal can."
-
-    fun panel(agent: String): String = "This opens a panel in $agent, so it’s for the terminal."
-
-    /** The runner's `picker` (codex, ov-416): a last word codex would open a picker for, which takes the Enter. */
-    fun picker(agent: String): String =
-        "$agent would open a picker for a last word that starts with @ or \$, so the message wasn’t sent. Add a word after it, or use the terminal."
-
-    /** The runner's `too_tall` (codex, ov-416): more lines than its box shows, so it couldn't be read back. */
-    fun tooTall(agent: String): String =
-        "That message is too tall for $agent’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
-    const val IMAGES_TOO_LARGE = "These images are too large to send together. Send fewer or smaller ones."
-    const val TOO_MANY_IMAGES = "A message takes at most $MOST_IMAGES images."
-    const val COMMAND_WITH_IMAGES = "A slash command can’t carry images. Send it without them."
-    const val IMAGE_TOO_LARGE = "That image is too large to send. Use a smaller one."
-    const val BACKSLASH =
-        "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
-    const val UNCONFIRMED = "Claude didn’t confirm it took the message. Check the terminal before sending it again."
-    const val PANEL = "This opens a panel in Claude, so it’s for the terminal."
+    val TOO_LONG: String get() = refused("too_long")
+    val TOO_LONG_COMPOSED: String get() = ConversationWords.phrase("too_long_composed")
+    fun handoff(agent: String): String = ConversationWords.phrase("handoff", agent)
+    fun panel(agent: String): String = ConversationWords.phrase("panel", agent)
+    val TOO_MANY_IMAGES: String get() = refused("images")
     const val UNREADABLE_IMAGE =
         "That photo couldn’t be read. If it lives in cloud storage, open it in Photos first so it downloads."  // casing ok: a product's name
-    const val COMMAND =
-        "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
-    const val MAY_HAVE_BEEN_SENT =
-        "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
-    const val DRAFT_IN_TERMINAL = "The terminal’s box already holds a draft. Send or clear it there first."
+    val COMMAND: String get() = ConversationWords.phrase("command")
+    val MAY_HAVE_BEEN_SENT: String get() = ConversationWords.phrase("may_have_been_sent")
+    val DRAFT_IN_TERMINAL: String get() = ConversationWords.phrase("draft_in_terminal")
 
     /** [DRAFT_IN_TERMINAL], where Bring here is offered beside Show terminal. */
-    const val DRAFT_IN_TERMINAL_BRING = "The terminal’s box already holds a draft of its own."
-    const val HANDOFF = "Claude is showing something only the terminal can."
+    val DRAFT_IN_TERMINAL_BRING: String get() = ConversationWords.phrase("draft_in_terminal_bring")
     const val STALE_UNAVAILABLE = "This session isn’t being read anymore. The terminal has it."
     const val STALE_TROUBLE = "Can’t reach the runner, so this may be out of date. Trying again…"
 
@@ -400,8 +339,7 @@ object AgentConversation {
 
     // Words for rows.
 
-    fun gap(gap: AgentRow.Gap): String =
-        if (gap.count > 1) "Some of this session couldn’t be read." else "A line of this session couldn’t be read."
+    fun gap(gap: AgentRow.Gap): String = ConversationWords.phrase(if (gap.count > 1) "gap" else "gap_one")
 
     /** "0:04", "1:12", "2:03:09": the format a running timer counts in, so a finished time reads like the running one did. */
     fun short(ms: Long): String {
@@ -412,7 +350,8 @@ object AgentConversation {
     }
 
     /** What a subagent row says of its work: "1 tool", "14 tools", or null while the count is unknown (0 is how a missing count reads; ov-490). */
-    fun toolsLabel(count: Int): String? = if (count <= 0) null else if (count == 1) "1 tool" else "$count tools"
+    fun toolsLabel(count: Int): String? =
+        if (count <= 0) null else ConversationWords.phrase(if (count == 1) "tools_one" else "tools", fill = mapOf("n" to "$count"))
 
     /** A subagent's type as words: `general-purpose` reads "General purpose". */
     fun agentType(raw: String): String {
@@ -437,30 +376,30 @@ object AgentConversation {
      * The row's heading: "Report from <the agent's description>", else from a
      * short id. A status line is its own words; every note has the same heading.
      */
-    fun harnessTitle(harness: AgentRow.Harness): String = when (harness.kind) {
-        "Report" -> "Report from ${harnessAgentName(harness)}"
-        "Message" -> "Message from ${harnessAgentName(harness)}"
-        "Status" -> harness.title
-        else -> "System note"
-    }
+    fun harnessTitle(harness: AgentRow.Harness): String =
+        if (harness.kind == "Status") harness.title
+        else ConversationWords.phrase("harness", by = harness.kind, fill = mapOf("name" to harnessAgentName(harness)))
 
     /** What the agent is called: its launch's description, else "agent" and its id's first characters, else "a subagent". */
     fun harnessAgentName(harness: AgentRow.Harness): String {
         harness.source?.takeIf { it.isNotEmpty() }?.let { return it }
-        val id = harness.agentId?.takeIf { it.isNotEmpty() } ?: return "a subagent"
-        return "agent ${id.take(6)}"
+        val id = harness.agentId?.takeIf { it.isNotEmpty() } ?: return ConversationWords.phrase("harness_a_subagent")
+        return ConversationWords.phrase("harness_agent", fill = mapOf("id" to id.take(6)))
     }
 
     /** A notice turn's words, without claude's straight quotes. */
     fun noticeText(turn: AgentRow.Turn): String = turn.prompt.replace("\"", "")
 
-    fun outcome(turn: AgentRow.Turn): String? = when (val outcome = turn.outcome) {
-        null -> null
-        AgentRow.Turn.Outcome.Finished -> turn.durationMs?.let { "Took ${short(it)}" } ?: "Done"
-        AgentRow.Turn.Outcome.Interrupted -> "Interrupted"
-        AgentRow.Turn.Outcome.Unrecorded -> "Not recorded"
-        is AgentRow.Turn.Outcome.Failed -> if (outcome.detail.isEmpty()) "Failed" else "Failed: ${outcome.detail}"
-        is AgentRow.Turn.Outcome.Other -> "Ended"
+    fun outcome(turn: AgentRow.Turn): String? {
+        fun say(name: String, fill: Map<String, String> = emptyMap()) = ConversationWords.phrase("outcome_$name", fill = fill)
+        return when (val outcome = turn.outcome) {
+            null -> null
+            AgentRow.Turn.Outcome.Finished -> turn.durationMs?.let { say("took", mapOf("time" to short(it))) } ?: say("done")
+            AgentRow.Turn.Outcome.Interrupted -> say("interrupted")
+            AgentRow.Turn.Outcome.Unrecorded -> say("unrecorded")
+            is AgentRow.Turn.Outcome.Failed -> if (outcome.detail.isEmpty()) say("failed") else say("failed_detail", mapOf("detail" to outcome.detail))
+            is AgentRow.Turn.Outcome.Other -> say("ended")
+        }
     }
 
     /**
@@ -471,13 +410,9 @@ object AgentConversation {
     fun askTitle(ask: AgentRow.Ask, agent: String = "Claude", viewer: String? = null): String {
         if (ask.answered || ask.held == null) ask.answeredSentence(viewer)?.let { return it }
         val by = ask.answeredBy
-        if (by != null && (ask.answered || ask.held == null)) return "Answered on $by"
-        if (ask.answered) return "Answered"
-        return when (ask.kind) {
-            "Permission" -> "$agent is asking for permission"
-            "PlanExit" -> "$agent has a plan for you to review"
-            else -> "$agent is asking a question"
-        }
+        if (by != null && (ask.answered || ask.held == null)) return ConversationWords.phrase("ask_answered_on", fill = mapOf("by" to by))
+        if (ask.answered) return ConversationWords.phrase("ask_answered")
+        return ConversationWords.phrase("ask", agent, by = ask.kind)
     }
 
     // Answering a held ask (ov-370, R-33)
@@ -526,21 +461,13 @@ object AgentConversation {
     }
 
     /** Why an answer didn't land, by the runner's word for it. */
-    fun answerIssue(what: String?, timedOut: Boolean = false, agent: String = "Claude"): String = when {
-        timedOut -> "The runner didn’t answer in time. Check the terminal before answering again."
-        what == "not_held" -> "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
-        what == "not_delivered" -> "The answer didn’t reach $agent. Answer in the terminal."
-        what == "answers" -> "Answer every question first."
-        else -> "The answer wasn’t sent. Answer in the terminal."
+    fun answerIssue(what: String?, timedOut: Boolean = false, agent: String = "Claude"): String {
+        val answer = ConversationWords.table(agent)?.answer
+        return (if (timedOut) answer?.get("timed_out") else answer?.get(what ?: "")) ?: answer?.get("") ?: ""
     }
 
     /** A Queued row's label. `InBox` is a message in claude's box that the runner sends when the turn ends (ov-827). */
-    fun queuedLabel(state: String): String = when (state) {
-        "Withdrawn" -> "Withdrawn"
-        "InBox" -> "Waiting to send"
-        "Sent" -> "Sent mid-turn"
-        else -> "Queued"
-    }
+    fun queuedLabel(state: String): String = ConversationWords.phrase("queued", by = state)
 
     // MARK: - Grouped tool runs (ov-452, ov-459)
 
@@ -617,17 +544,10 @@ object AgentConversation {
      * running.
      */
     fun groupTitle(tools: List<AgentRow.Tool>): String {
-        val n = tools.size
-        val running = tools.any { it.status == AgentRow.Status.Running }
         val names = tools.map { it.name }.toSet()
-        fun all(these: Set<String>) = these.containsAll(names)
-        return when {
-            all(setOf("Bash", "bash")) -> if (running) "Running $n commands" else "Ran $n commands"
-            all(setOf("Read")) -> if (running) "Reading $n files" else "Read $n files"
-            all(setOf("Edit", "MultiEdit", "Write", "NotebookEdit")) -> if (running) "Editing $n files" else "Edited $n files"
-            all(setOf("Grep", "Glob")) -> if (running) "Running $n searches" else "Ran $n searches"
-            else -> if (running) "Using $n tools" else "Used $n tools"
-        }
+        val group = ConversationWords.table()?.groups?.firstOrNull { it.names.isEmpty() || it.names.containsAll(names) } ?: return ""
+        val line = if (tools.any { it.status == AgentRow.Status.Running }) group.running else group.done
+        return line.replace("{n}", "${tools.size}")
     }
 
     /**
@@ -689,25 +609,22 @@ object AgentConversation {
     // Where a message came from
 
     /** What a turn's footer says about where its prompt came from, if anything: a message typed while the agent worked. */
-    fun originNote(turn: AgentRow.Turn): String? = if (turn.origin == "Queued") "Queued during the last turn" else null
+    fun originNote(turn: AgentRow.Turn): String? = if (turn.origin == "Queued") ConversationWords.phrase("origin_queued") else null
 
     /** A scheduled task's firing (`CronCreate`, `/loop`): drawn as one, with its prompt folded, never as the person's message. */
     fun isScheduled(turn: AgentRow.Turn): Boolean = turn.origin == "Scheduled"
 
-    const val SCHEDULED_TASK = "Scheduled task"
+    val SCHEDULED_TASK: String get() = ConversationWords.phrase("scheduled_task")
 
     // Task lists
 
     /** "2 of 5 done". */
-    fun taskProgress(tasks: AgentRow.Tasks): String =
-        "${tasks.items.count { it.status == "Completed" }} of ${tasks.items.size} done"
+    fun taskProgress(tasks: AgentRow.Tasks): String = ConversationWords.phrase(
+        "tasks_progress", fill = mapOf("done" to "${tasks.items.count { it.status == "Completed" }}", "n" to "${tasks.items.size}"),
+    )
 
     /** A task's state, as TalkBack says it. */
-    fun taskState(item: AgentRow.TaskItem): String = when (item.status) {
-        "Completed" -> "Done"
-        "InProgress" -> "In progress"
-        else -> "Not started"
-    }
+    fun taskState(item: AgentRow.TaskItem): String = ConversationWords.phrase("task", by = item.status)
 
     // Prompt images (ov-454, ov-458)
 
@@ -723,5 +640,65 @@ object AgentConversation {
         val out = StringBuilder(prompt)
         for (match in matches.asReversed()) out.delete(match.range.first, match.range.last + 1)
         return out.toString().trim()
+    }
+}
+
+/**
+ * An agent conversation's words, from the shared core's `conversation_words` (ov-1049, ruling R-112) through the
+ * plan view's bridge, in Material's case: one table per agent, asked once. Empty where the core isn't in this build.
+ */
+object ConversationWords {
+    @Serializable
+    enum class Kind {
+        @SerialName("handoff") Handoff, @SerialName("panel") Panel, @SerialName("draft") Draft,
+        @SerialName("said") Said, @SerialName("quiet") Quiet,
+    }
+
+    @Serializable
+    data class Issue(val kind: Kind, val text: String? = null)
+
+    @Serializable
+    data class Group(val names: List<String>, val running: String, val done: String)
+
+    @Serializable
+    data class Table(
+        val send: Map<String, Issue>, val stop: Map<String, Issue>, @SerialName("send_now") val sendNow: Map<String, Issue>,
+        val answer: Map<String, String>, val phrases: Map<String, String>, val groups: List<Group>,
+    )
+
+    @Serializable
+    private data class Reply(val conversation: Table? = null)
+
+    private val core: (String) -> String? = { request -> if (coreIsAvailable) NativeClient.nativePlanView(request) else null }
+
+    /** The core's bridge; a test can stand its own in, and [reset] puts the core back. */
+    internal var bridge: (String) -> String? = core
+
+    private val asked = mutableMapOf<String, Table>()
+    private val json = Json { ignoreUnknownKeys = true }
+
+    internal fun reset() {
+        bridge = core
+        synchronized(asked) { asked.clear() }
+    }
+
+    /** The table for [agent] ("Claude", "Codex"); null until the bridge answers. */
+    fun table(agent: String = "Claude"): Table? = synchronized(asked) {
+        asked[agent]?.let { return it }
+        val answer = bridge("""{"schema":1,"conversation":{"style":"material","agent":"$agent"}}""") ?: return null
+        val table = try {
+            json.decodeFromString<Reply>(answer).conversation
+        } catch (_: IllegalArgumentException) {
+            null
+        } ?: return null
+        asked[agent] = table
+        table
+    }
+
+    /** A phrase with its `{placeholders}` filled: `name_<by>` where the table has one, else `name`. */
+    fun phrase(name: String, agent: String = "Claude", by: String? = null, fill: Map<String, String> = emptyMap()): String {
+        val phrases = table(agent)?.phrases ?: return ""
+        val words = by?.let { phrases["${name}_$it"] } ?: phrases[name] ?: return ""
+        return fill.entries.fold(words) { line, (key, value) -> line.replace("{$key}", value) }
     }
 }

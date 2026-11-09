@@ -428,6 +428,14 @@ struct WordsRequest {
     words: WordsStyle,
 }
 
+/// `{"schema":1,"conversation":{"agent":"Claude"}}`: an agent conversation's words (`conversation_words`).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConversationRequest {
+    schema: u32,
+    conversation: crate::conversation_words::Request,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WordsStyle {
@@ -444,6 +452,11 @@ pub fn view(plan: &input::Plan, context: &input::Context, workflow: Option<&Pres
 /// The JSON bridge every platform calls: a request in, `{schema, view}` or
 /// `{schema, error: "invalid"}` out.
 pub fn json(request: &str) -> String {
+    if let Ok(asked) = serde_json::from_str::<ConversationRequest>(request) {
+        let words = (asked.schema == SCHEMA).then(|| crate::conversation_words::words(asked.conversation.style, &asked.conversation.agent));
+        let error = words.is_none().then_some("invalid");
+        return serde_json::json!({ "schema": SCHEMA, "conversation": words, "error": error }).to_string();
+    }
     if let Ok(asked) = serde_json::from_str::<WordsRequest>(request) {
         let words = (asked.schema == SCHEMA).then(|| words::Words::new(asked.words.style));
         let error = words.is_none().then_some("invalid");

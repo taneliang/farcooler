@@ -5,7 +5,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { agentType, askTitle, groupPurpose, groupTitle, harnessTitle, outcomeLine, queuedLabel, sendFailure, shortDuration, taskProgress } from '../src/client/chat-copy'
+import words from '../../../test/fixtures/conversation-words.json'
+
+import { agentType, askTitle, useConversationWords, groupPurpose, groupTitle, harnessTitle, outcomeLine, queuedLabel, sendFailure, shortDuration, taskProgress } from '../src/client/chat-copy'
 import {
   type Delta,
   FOLLOW_WAIT_MS,
@@ -22,6 +24,9 @@ import {
 import { Outbox, type Speaker } from '../src/client/chat-send'
 import { sourceOf } from '../src/client/chat'
 import { blocksOf } from '../src/client/chat-text'
+
+// wasm can't load under vitest's worker pool: the golden answers for the core.
+useConversationWords(request => JSON.stringify((words as any)[`apple_${JSON.parse(request).conversation.agent.toLowerCase()}`]))
 
 const row = (id: string, ord: number, rev: number, kind: Row['kind'], turn: string | null = null): Row => ({ id, ord, rev, turn, provisional: false, kind })
 const turn = (id: string, ord: number, rev: number, prompt: string, extra: object = {}) =>

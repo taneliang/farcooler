@@ -123,7 +123,7 @@ public enum BringHere {
             case "too_tall": return .said("The terminal’s draft is too long to bring here whole. Use the terminal.")
             case "cursor":
                 return .said("The cursor in the terminal’s box isn’t at the end, so its draft wasn’t moved. Use the terminal.")
-            case "typing": return .said("Someone is typing in the terminal. Try again in a moment.")
+            case "typing": return .said(ConversationWords.table()?.stop["typing"]?.text ?? "")
             case "sending": return .said("Far Cooler is still sending to the terminal. Try again in a moment.")
             case "prompt", "dialog": return .handoff
             case "unsupported": return .said("\(agent)’s draft can’t be brought here. Use the terminal.")
@@ -131,9 +131,9 @@ public enum BringHere {
             default: return .said("Far Cooler can’t read the terminal’s box. Use the terminal.")
             }
         case .timedOut, .lost(notSent: false):
-            return .said("The runner didn’t answer in time. Check the terminal.")
+            return .said(ConversationWords.phrase("key_timed_out"))
         case .lost(notSent: true):
-            return .said("The runner isn’t connected. Use the terminal.")
+            return .said(ConversationWords.phrase("key_not_connected"))
         }
     }
 

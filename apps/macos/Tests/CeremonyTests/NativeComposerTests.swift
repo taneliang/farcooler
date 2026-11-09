@@ -176,10 +176,10 @@ struct NativeComposerTests {
     func refusalsHaveTheirSentences() async throws {
         let refused = { (what: String) in RunnerCore.Failure.refused("no", word: "resource-conflict", what: what) }
         #expect(NativePaneModel.issue(for: refused("handoff")) == .panel)
-        #expect(NativePaneModel.issue(for: refused("images_too_large")) == .said(NativePaneModel.imagesTooLarge))
-        #expect(NativePaneModel.issue(for: refused("command")) == .said(NativePaneModel.commandRefused))
-        #expect(NativePaneModel.issue(for: refused("unconfirmed")) == .said(NativePaneModel.unconfirmed))
-        #expect(NativePaneModel.unconfirmed.contains("Check the pane before sending it again"))
+        #expect(NativePaneModel.issue(for: refused("images_too_large")) == .said(AgentConversation.refused("images_too_large")))
+        #expect(NativePaneModel.issue(for: refused("command")) == .said(AgentConversation.refused("command")))
+        #expect(NativePaneModel.issue(for: refused("unconfirmed")) == .said(AgentConversation.refused("unconfirmed")))
+        #expect(AgentConversation.refused("unconfirmed").contains("Check the terminal before sending it again"))
         for what in ["images", "image", "unconfirmable", "unsupported"] {
             guard case .said(let words) = NativePaneModel.issue(for: refused(what)) else {
                 Issue.record("\(what): no sentence")

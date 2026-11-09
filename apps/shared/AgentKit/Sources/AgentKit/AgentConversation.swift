@@ -167,91 +167,45 @@ extension AgentConversation {
     }
 
     /// `command` when the message was a slash command, which says which limit
-    /// `images` means; `agent` names the agent in the words.
+    /// `images` means; `agent` names the agent in the words (`conversation_words`).
     public static func issue(for failure: SendFailure, command: Bool = false, agent: String = "Claude") -> SendIssue {
+        let words = ConversationWords.table(agent)
         switch failure {
-        // A grant that may read but not type (`read`): saying so beats
-        // "wasn't sent" on every try.
-        case .refused(_, let word?) where word == "scope-denied":
-            return .said("This device can’t send messages to this runner.")
-        case .refused(let what, _):
-            switch what {
-            case "prompt", "dialog": return .handoff
-            case "handoff": return .panel
-            case "draft": return .draftInTerminal
-            case "typing": return .said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop.")
-            case "busy": return .said(busy(agent))
-            case "too_long": return .said(tooLong)
-            case "command": return .said(commandRefused(agent))
-            case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")
-            case "left_at_shell": return .said("\(agent) quit as the message was typed. It wasn’t run.")
-            case "unconfirmed": return .said(unconfirmed(agent))
-            case "not_running", "not_an_agent": return .said("\(agent) isn’t running in this pane.")
-            case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
-            case "unconfirmable": return .said("Far Cooler can’t find \(agent)’s session to confirm a send, so nothing was typed.")
-            case "unsupported": return .said("\(agent) can’t take a message from here. Use the terminal.")
-            case "picker": return .said(picker(agent))
-            case "too_tall": return .said(tooTall(agent))
-            case "images_too_large": return .said(imagesTooLarge)
-            case "images": return .said(command ? commandWithImages : tooManyImages)
-            case "image_too_large": return .said(imageTooLarge)
-            case "backslash": return .said(backslash)
-            case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
-            default: return .said("The message wasn’t sent.")
-            }
-        // Never "wasn't sent" for a call that may have arrived: the runner
-        // may type it yet, and a second send would go in twice.
+        case .refused(let what, let word):
+            let found = word.flatMap { words?.send["word:" + $0] } ?? (command ? words?.send[(what ?? "") + ":command"] : nil)
+                ?? words?.send[what ?? ""] ?? words?.send[""]
+            return found.flatMap(sendIssue) ?? .said("")
+        // Never "wasn't sent" for a call that may have arrived: a second send would go in twice.
         case .timedOut, .lost(notSent: false): return .said(mayHaveBeenSent)
-        case .lost(notSent: true): return .said("The runner isn’t connected, so the message wasn’t sent.")
+        case .lost(notSent: true): return .said(ConversationWords.phrase("not_connected"))
         }
     }
 
-    public static let tooLong = "That message is over \(longest) characters. Shorten it, or paste it in the terminal."
-    public static let tooLongComposed =
-        "That message is over \(longestComposed.formatted(.number.locale(Locale(identifier: "en_US")))) characters. Shorten it, or paste it in the terminal."
-    public static let command =
-        "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
-    /// The runner's `command`: a `!`, which claude's box runs in a shell, or
-    /// a `/` before something that isn't a command's name.
-    public static let commandRefused = commandRefused("Claude")
-    public static func commandRefused(_ agent: String) -> String {
-        "\(agent) would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+    static func sendIssue(_ found: ConversationWords.Issue) -> SendIssue? {
+        switch found.kind {
+        case .handoff: .handoff
+        case .panel: .panel
+        case .draft: .draftInTerminal
+        case .said: .said(found.text ?? "")
+        case .quiet: nil
+        }
     }
-    /// The runner's `busy`: an agent that takes nothing mid-turn, as codex.
-    /// A working claude is never refused: the runner holds the message and
-    /// answers Queued (ov-468).
-    public static func busy(_ agent: String) -> String {
-        "\(agent) takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
+
+    /// The sentence for refusal word `what`, as `issue` says it.
+    public static func refused(_ what: String, _ agent: String = "Claude") -> String {
+        ConversationWords.table(agent)?.send[what]?.text ?? ""
     }
-    public static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
-    public static let tooManyImages = "A message takes at most \(mostImages) images."
-    public static let commandWithImages = "A slash command can’t carry images. Send it without them."
-    public static let imageTooLarge = "That image is too large to send. Use a smaller one."
-    public static let backslash =
-        "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
-    public static let unconfirmed = unconfirmed("Claude")
-    public static func unconfirmed(_ agent: String) -> String {
-        "\(agent) didn’t confirm it took the message. Check the terminal before sending it again."
-    }
-    public static let panel = panel("Claude")
-    public static func panel(_ agent: String) -> String { "This opens a panel in \(agent), so it’s for the terminal." }
-    /// The runner's `picker` (codex, ov-416): a last word codex would open a
-    /// picker for, which takes the Enter.
-    public static func picker(_ agent: String) -> String {
-        "\(agent) would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
-    }
-    /// The runner's `too_tall` (codex, ov-416): more lines than its box
-    /// shows, so it couldn't be read back.
-    public static func tooTall(_ agent: String) -> String {
-        "That message is too tall for \(agent)’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
-    }
-    public static let mayHaveBeenSent =
-        "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
-    public static let draftInTerminal = "The terminal’s box already holds a draft. Send or clear it there first."
+
+    public static var tooLong: String { refused("too_long") }
+    public static var tooLongComposed: String { ConversationWords.phrase("too_long_composed") }
+    public static var command: String { ConversationWords.phrase("command") }
+    public static var tooManyImages: String { refused("images") }
+    public static var mayHaveBeenSent: String { ConversationWords.phrase("may_have_been_sent") }
+    public static var draftInTerminal: String { ConversationWords.phrase("draft_in_terminal") }
     /// `draftInTerminal`, where Bring Here is offered beside Show Terminal.
-    public static let draftInTerminalBring = "The terminal’s box already holds a draft of its own."
-    public static let handoff = handoff("Claude")
-    public static func handoff(_ agent: String) -> String { "\(agent) is showing something only the terminal can." }
+    public static var draftInTerminalBring: String { ConversationWords.phrase("draft_in_terminal_bring") }
+    public static func panel(_ agent: String) -> String { ConversationWords.phrase("panel", agent: agent) }
+    public static func handoff(_ agent: String) -> String { ConversationWords.phrase("handoff", agent: agent) }
 
     /// Messages claude's queue took that its transcript hasn't shown yet,
     /// once the newest rows show them: as a Queued row, or as the turn each
@@ -339,39 +293,21 @@ extension AgentConversation {
     /// there's nothing to say: the turn ended on its own (`idle`), or a
     /// second press came too soon after the first (`too_soon`).
     public static func keyIssue(for failure: SendFailure, _ key: PaneKey) -> SendIssue? {
-        let stop = key == .stop
+        let words = ConversationWords.table()
         switch failure {
-        case .refused(_, let word?) where word == "scope-denied":
-            return .said("This device can’t control this runner.")
-        case .refused(let what, _):
-            switch what {
-            case "idle", "too_soon": return nil
-            case "prompt": return .handoff
-            case "draft": return .draftInTerminal
-            case "typing": return .said("Someone is typing in the terminal. Try again in a moment.")
-            case "sending": return .said("A message is still going in. Try again in a moment.")
-            case "nothing_queued": return .said("Nothing is waiting in Claude’s queue.")
-            case "settling":
-                return .said(stop ? "Claude is starting a step. Try Stop again in a moment."
-                    : "Claude is starting a step. Try Send Now again in a moment.")
-            case "unconfirmed":
-                return .said(stop ? "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
-                    : "Claude didn’t confirm it sent the queued messages. Check the terminal.")
-            default:
-                return .said(stop ? "Far Cooler can’t stop Claude safely from here. Use the terminal."
-                    : "Far Cooler can’t send the queue safely from here. Use the terminal.")
-            }
-        case .timedOut, .lost(notSent: false):
-            return .said("The runner didn’t answer in time. Check the terminal.")
-        case .lost(notSent: true):
-            return .said("The runner isn’t connected. Use the terminal.")
+        case .refused(let what, let word):
+            let table = key == .stop ? words?.stop : words?.sendNow
+            let found = word.flatMap { table?["word:" + $0] } ?? table?[what ?? ""] ?? table?[""]
+            return found.flatMap(sendIssue)
+        case .timedOut, .lost(notSent: false): return .said(ConversationWords.phrase("key_timed_out"))
+        case .lost(notSent: true): return .said(ConversationWords.phrase("key_not_connected"))
         }
     }
 
     // MARK: - Words for rows
 
     public static func gap(_ gap: AgentRow.Gap) -> String {
-        gap.count > 1 ? "Some of this session couldn’t be read." : "A line of this session couldn’t be read."
+        ConversationWords.phrase(gap.count > 1 ? "gap" : "gap_one")
     }
 
     /// "0:04", "1:12", "2:03:09": the format a running timer counts in, so
@@ -383,7 +319,7 @@ extension AgentConversation {
     /// (its notification may carry no count either) looks, and "0 tools" would
     /// be a claim nobody made (ov-490).
     public static func toolsLabel(_ count: Int) -> String? {
-        count <= 0 ? nil : count == 1 ? "1 tool" : "\(count) tools"
+        count <= 0 ? nil : ConversationWords.phrase(count == 1 ? "tools_one" : "tools", ["n": "\(count)"])
     }
 
     /// A subagent's type as words: `general-purpose` reads "General purpose".
@@ -406,29 +342,25 @@ extension AgentConversation {
     }
 
     public static func outcome(_ turn: AgentRow.Turn) -> String? {
+        let say = { (name: String, fill: [String: String]) in ConversationWords.phrase("outcome_" + name, fill) }
         switch turn.outcome {
-        case nil: nil
-        case .finished?: turn.durationMs.map { "Took \(short(ms: $0))" } ?? "Done"
-        case .interrupted?: "Interrupted"
-        case .unrecorded?: "Not recorded"
-        case .failed(let detail)?: detail.isEmpty ? "Failed" : "Failed: \(detail)"
-        case .other?: "Ended"
+        case nil: return nil
+        case .finished?: return turn.durationMs.map { say("took", ["time": short(ms: $0)]) } ?? say("done", [:])
+        case .interrupted?: return say("interrupted", [:])
+        case .unrecorded?: return say("unrecorded", [:])
+        case .failed(let detail)?: return detail.isEmpty ? say("failed", [:]) : say("failed_detail", ["detail": detail])
+        case .other?: return say("ended", [:])
         }
     }
-
     /// `viewer` is who this device is on the runner (`RunnerPeople.you`: ""
     /// for the owner, a member's handle, nil if not told). On a runner with
     /// members, an answered ask says who answered (`Ask.answeredSentence`);
     /// a solo runner, and a viewer not yet told, read as they always did.
     public static func askTitle(_ ask: AgentRow.Ask, agent: String = "Claude", viewer: String? = nil) -> String {
         if ask.answered || ask.held == nil, let who = ask.answeredSentence(viewer: viewer) { return who }
-        if let by = ask.answeredBy, ask.answered || ask.held == nil { return "Answered on \(by)" }
-        if ask.answered { return "Answered" }
-        switch ask.kind {
-        case "Permission": return "\(agent) is asking for permission"
-        case "PlanExit": return "\(agent) has a plan for you to review"
-        default: return "\(agent) is asking a question"
-        }
+        if let by = ask.answeredBy, ask.answered || ask.held == nil { return ConversationWords.phrase("ask_answered_on", ["by": by]) }
+        if ask.answered { return ConversationWords.phrase("ask_answered") }
+        return ConversationWords.phrase("ask", agent: agent, by: ask.kind)
     }
 
     // MARK: - Answering a held ask (ov-370, R-33)
@@ -477,29 +409,16 @@ extension AgentConversation {
 
     /// Why an answer didn't land, by the runner's word for it.
     public static func answerIssue(what: String?, timedOut: Bool = false, agent: String = "Claude") -> String {
-        if timedOut { return "The runner didn’t answer in time. Check the terminal before answering again." }
-        switch what {
-        case "not_held": return "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now."
-        // Its hold is over, so a second try would be refused: the terminal.
-        case "not_delivered": return "The answer didn’t reach \(agent). Answer in the terminal."
-        case "answers": return "Answer every question first."
-        default: return "The answer wasn’t sent. Answer in the terminal."
-        }
+        let answer = ConversationWords.table(agent)?.answer
+        return (timedOut ? answer?["timed_out"] : answer?[what ?? ""]) ?? answer?[""] ?? ""
     }
-
     /// A Queued row's label. `Sent` is a message claude took into the turn
     /// it was running; one sent as a turn of its own is that turn, and its
     /// row is gone (ov-452). `InBox` is a message in claude's box that the
     /// runner sends when the turn ends (ov-827).
     public static func queuedLabel(_ state: String) -> String {
-        switch state {
-        case "Withdrawn": "Withdrawn"
-        case "InBox": "Waiting to send"
-        case "Sent": "Sent mid-turn"
-        default: "Queued"
-        }
-    }
-}
+        ConversationWords.phrase("queued", by: state)
+    }}
 
 /// Where a held ask's answer goes (ov-370): the runner's
 /// `terminal.agent_answer`, which writes it to the hook claude is waiting on.
@@ -536,5 +455,55 @@ extension AgentRowStore {
     /// (`AgentConversation.suggestion`).
     public func suggestion(draft: String) -> String? {
         AgentConversation.suggestion(newestTurn: newestTurn, draft: draft, stale: isStale)
+    }
+}
+
+
+/// An agent conversation's words, from the Rust core's `conversation_words`
+/// (ov-1049, R-112) through the plan view's bridge: one table per agent, asked once.
+public enum ConversationWords {
+    public struct Issue: Decodable, Sendable {
+        public enum Kind: String, Decodable, Sendable { case handoff, panel, draft, said, quiet }
+        public var kind: Kind
+        public var text: String?
+    }
+
+    public struct Group: Decodable, Sendable {
+        public var names: [String], running: String, done: String
+    }
+
+    public struct Table: Decodable, Sendable {
+        public var send, stop, sendNow: [String: Issue]
+        public var answer, phrases: [String: String]
+        public var groups: [Group]
+
+        enum CodingKeys: String, CodingKey {
+            case send, stop, answer, phrases, groups
+            case sendNow = "send_now"
+        }
+    }
+
+    private struct Reply: Decodable { var conversation: Table? }
+
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var asked: [String: Table] = [:]
+
+    /// The table for `agent` ("Claude", "Codex"); nil until the bridge answers.
+    public static func table(_ agent: String = "Claude") -> Table? {
+        if let found = lock.withLock({ asked[agent] }) { return found }
+        let request = #"{"schema":1,"conversation":{"style":"apple","agent":"\#(agent)"}}"#
+        guard let answer = PlanViewPresenter.ask(request),
+              let table = try? JSONDecoder().decode(Reply.self, from: Data(answer.utf8)).conversation
+        else { return nil }
+        lock.withLock { asked[agent] = table }
+        return table
+    }
+
+    /// A phrase with its `{placeholders}` filled: `name_<word>` where the table
+    /// has one ("queued_InBox"), else `name`; "" while the bridge can't answer.
+    public static func phrase(_ name: String, agent: String = "Claude", by word: String? = nil, _ fill: [String: String] = [:]) -> String {
+        let phrases = table(agent)?.phrases
+        let words = word.flatMap { phrases?[name + "_" + $0] } ?? phrases?[name] ?? ""
+        return fill.reduce(words) { $0.replacingOccurrences(of: "{\($1.key)}", with: $1.value) }
     }
 }

@@ -487,7 +487,7 @@ final class TranscriptLayout {
                     kind = .fixed(harness.kind == "Status" ? 16 : harness.kind == "Note" ? 44 : 114)
                 } else if AgentConversation.isScheduled(turn) {
                     kind = .fixed(60)
-                } else if NativeCopy.isNotice(turn) {
+                } else if AgentConversation.isNotice(turn) {
                     kind = .notice
                     paragraphs = counts(AgentConversation.noticeText(turn))
                 } else if turn.prompt.isEmpty {

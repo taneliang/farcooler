@@ -20,7 +20,7 @@ import {
   originNote,
   outcomeLine,
   queuedLabel,
-  SCHEDULED_TASK,
+  scheduledTask,
   subagentState,
   taskProgress,
   toolsLabel,
@@ -213,7 +213,7 @@ function turnRow(row: Row, memory: Memory): HTMLElement | null {
   }
   if (turn.origin === 'Scheduled') {
     const card = el('div', 'card scheduled')
-    card.append(el('p', 'card-title', SCHEDULED_TASK))
+    card.append(el('p', 'card-title', scheduledTask()))
     card.append(folded(prose(String(turn.prompt ?? '')), memory.open.has(`fold:${row.id}`), o => toggle(memory, `fold:${row.id}`, o)))
     return card
   }

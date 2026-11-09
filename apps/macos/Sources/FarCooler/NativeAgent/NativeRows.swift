@@ -34,7 +34,7 @@ struct NativeRowView: View {
             case .queued(let queued): QueuedLine(text: queued.text, state: queued.state, sendNow: sendNow)
             case .notice(let notice): NoticeLine(text: notice.text)
             case .handoff(let handoff): HandoffRow(reason: handoff.reason, showTerminal: showTerminal)
-            case .gap(let gap): NoticeLine(text: NativeCopy.gap(gap))
+            case .gap(let gap): NoticeLine(text: AgentConversation.gap(gap))
             case .tasks(let tasks): NativeTasksRow(tasks: tasks)
             case .hint, .unknown: EmptyView()
             }
@@ -121,56 +121,6 @@ enum LiveScroll {
     static func watch() { _ = scrolling }
 }
 
-/// The words the native view uses, in one place.
-enum NativeCopy {
-    static func gap(_ gap: AgentRow.Gap) -> String {
-        gap.count > 1 ? "Some of this session couldn’t be read." : "A line of this session couldn’t be read."
-    }
-
-    /// "0:04", "1:12", "2:03:09": the format a running timer counts in, so
-    /// a finished time reads like the running one did.
-    static func short(ms: Int64) -> String {
-        let seconds = max(0, ms / 1000)
-        let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60)
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
-    }
-
-    /// A subagent's type as words: `general-purpose` reads "General purpose".
-    static func agentType(_ raw: String) -> String {
-        let words = raw.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
-        guard let first = words.first else { return "Agent" }
-        return first.uppercased() + words.dropFirst()
-    }
-
-    /// A turn nobody typed: a background task finishing, or claude waking
-    /// itself (`TurnOrigin::Notification`, `System`). Drawn as a notice,
-    /// never as the person's message.
-    static func isNotice(_ turn: AgentRow.Turn) -> Bool {
-        turn.origin == "Notification" || turn.origin == "System"
-    }
-
-    /// A tool's or a subagent's state, as VoiceOver says it.
-    static func status(_ status: AgentRow.Status) -> String {
-        switch status {
-        case .running: "Running"
-        case .done: "Done"
-        case .failed: "Failed"
-        case .ended: "Ended"
-        }
-    }
-
-    static func outcome(_ turn: AgentRow.Turn) -> String? {
-        switch turn.outcome {
-        case nil: nil
-        case .finished?: turn.durationMs.map { "Took \(short(ms: $0))" } ?? "Done"
-        case .interrupted?: "Interrupted"
-        case .unrecorded?: "Not recorded"
-        case .failed(let detail)?: detail.isEmpty ? "Failed" : "Failed: \(detail)"
-        case .other?: "Ended"
-        }
-    }
-}
-
 /// A run time that ticks without anything re-laying out: the system redraws
 /// a timer `Text` itself, so no `TimelineView` runs at display rate and no
 /// row's body is evaluated again (the ShimmerBand lesson, ov-382). Fixed
@@ -182,7 +132,7 @@ struct RunTimeChip: View {
     var body: some View {
         Group {
             if let startedMs, let endedMs {
-                Text(NativeCopy.short(ms: endedMs - startedMs))
+                Text(AgentConversation.short(ms: endedMs - startedMs))
             } else if let startedMs {
                 Text(
                     timerInterval: Date(timeIntervalSince1970: TimeInterval(startedMs) / 1000)...Date.distantFuture,
@@ -209,7 +159,7 @@ private struct TurnRow: View {
                 HarnessTurn(harness: harness)
             } else if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
                 ScheduledPrompt(prompt: turn.prompt)
-            } else if NativeCopy.isNotice(turn), !turn.prompt.isEmpty {
+            } else if AgentConversation.isNotice(turn), !turn.prompt.isEmpty {
                 FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
                     .font(.caption)
                     .foregroundStyle(.quietInk)
@@ -225,7 +175,7 @@ private struct TurnRow: View {
                     if turn.backgroundRunning > 0 {
                         Text(turn.backgroundRunning == 1 ? "1 agent still running" : "\(turn.backgroundRunning) agents still running")
                     }
-                    if let outcome = NativeCopy.outcome(turn) {
+                    if let outcome = AgentConversation.outcome(turn) {
                         Text(outcome)
                             .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(Ink.quiet))
                     } else {
@@ -305,7 +255,7 @@ private struct SubagentRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 NativeStatusMark(status: subagent.status)
-                Text(NativeCopy.agentType(subagent.agentType)).fontWeight(.medium)
+                Text(AgentConversation.agentType(subagent.agentType)).fontWeight(.medium)
                 Text(subagent.description).lineLimit(1).layoutPriority(-1)
                 Spacer(minLength: Spacing.group)
                 if let tools = AgentConversation.toolsLabel(subagent.toolCount) {

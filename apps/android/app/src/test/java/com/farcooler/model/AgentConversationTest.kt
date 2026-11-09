@@ -74,7 +74,7 @@ class AgentConversationTest {
             (AgentConversation.issue(SendFailure.Refused("busy"), agent = "Codex") as SendIssue.Said).words,
         )
         assertEquals("Codex is showing something only the terminal can.", AgentConversation.handoff("Codex"))
-        assertTrue(AgentConversation.picker("Codex").contains("@ or $"))
+        assertTrue(AgentConversation.refused("picker", "Codex").contains("@ or $"))
     }
 
     /**
@@ -153,7 +153,7 @@ class AgentConversationTest {
         assertEquals(SendIssue.Handoff, said("prompt"))
         assertEquals(SendIssue.DraftInTerminal, said("draft"))
         assertEquals(SendIssue.Said(AgentConversation.TOO_LONG), said("too_long"))
-        assertEquals(SendIssue.Said(AgentConversation.COMMAND_REFUSED), said("command"))
+        assertEquals(SendIssue.Said(AgentConversation.refused("command")), said("command"))
         assertEquals(SendIssue.Said("Claude isn’t running in this pane."), said("not_running"))
         assertEquals(
             SendIssue.Said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."),
@@ -240,14 +240,14 @@ class AgentConversationTest {
     @Test
     fun `a refused image says which limit it hit`() {
         fun said(what: String, command: Boolean = false) = AgentConversation.issue(SendFailure.Refused(what), command)
-        assertEquals(SendIssue.Said(AgentConversation.IMAGE_TOO_LARGE), said("image_too_large"))
-        assertEquals(SendIssue.Said(AgentConversation.IMAGES_TOO_LARGE), said("images_too_large"))
+        assertEquals(SendIssue.Said(AgentConversation.refused("image_too_large")), said("image_too_large"))
+        assertEquals(SendIssue.Said(AgentConversation.refused("images_too_large")), said("images_too_large"))
         assertEquals(SendIssue.Said(AgentConversation.TOO_MANY_IMAGES), said("images"))
-        assertEquals("a slash command can't carry any, however few", SendIssue.Said(AgentConversation.COMMAND_WITH_IMAGES), said("images", command = true))
-        assertTrue(AgentConversation.IMAGE_TOO_LARGE != AgentConversation.IMAGES_TOO_LARGE)
-        assertEquals(SendIssue.Said(AgentConversation.BACKSLASH), said("backslash"))
+        assertEquals("a slash command can't carry any, however few", SendIssue.Said(AgentConversation.refused("images:command")), said("images", command = true))
+        assertTrue(AgentConversation.refused("image_too_large") != AgentConversation.refused("images_too_large"))
+        assertEquals(SendIssue.Said(AgentConversation.refused("backslash")), said("backslash"))
         assertEquals(SendIssue.Panel, said("handoff"))
-        assertEquals(SendIssue.Said(AgentConversation.UNCONFIRMED), said("unconfirmed"))
+        assertEquals(SendIssue.Said(AgentConversation.refused("unconfirmed")), said("unconfirmed"))
     }
 
     @Test

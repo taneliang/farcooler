@@ -95,17 +95,17 @@ import UniformTypeIdentifiers
     // MARK: Words
 
     @Test func aRefusalOfAnImageSaysWhichLimitItHit() {
-        #expect(AgentConversation.issue(for: .refused(what: "image_too_large")) == .said(AgentConversation.imageTooLarge))
-        #expect(AgentConversation.issue(for: .refused(what: "images_too_large")) == .said(AgentConversation.imagesTooLarge))
+        #expect(AgentConversation.issue(for: .refused(what: "image_too_large")) == .said(AgentConversation.refused("image_too_large")))
+        #expect(AgentConversation.issue(for: .refused(what: "images_too_large")) == .said(AgentConversation.refused("images_too_large")))
         #expect(AgentConversation.issue(for: .refused(what: "images")) == .said(AgentConversation.tooManyImages))
         #expect(
             AgentConversation.issue(for: .refused(what: "images"), command: true)
-                == .said(AgentConversation.commandWithImages), "a slash command can't carry any, however few")
-        #expect(AgentConversation.imageTooLarge != AgentConversation.imagesTooLarge)
-        #expect(AgentConversation.issue(for: .refused(what: "backslash")) == .said(AgentConversation.backslash))
+                == .said(AgentConversation.refused("images:command")), "a slash command can't carry any, however few")
+        #expect(AgentConversation.refused("image_too_large") != AgentConversation.refused("images_too_large"))
+        #expect(AgentConversation.issue(for: .refused(what: "backslash")) == .said(AgentConversation.refused("backslash")))
         #expect(AgentConversation.issue(for: .refused(what: "handoff")) == .panel)
-        #expect(AgentConversation.issue(for: .refused(what: "command")) == .said(AgentConversation.commandRefused))
-        #expect(AgentConversation.issue(for: .refused(what: "unconfirmed")) == .said(AgentConversation.unconfirmed))
+        #expect(AgentConversation.issue(for: .refused(what: "command")) == .said(AgentConversation.refused("command")))
+        #expect(AgentConversation.issue(for: .refused(what: "unconfirmed")) == .said(AgentConversation.refused("unconfirmed")))
     }
 
     @Test func theLimitsFollowWhetherTheRunnerHasCompose() {
@@ -118,9 +118,9 @@ import UniformTypeIdentifiers
 
     @Test func noCopyOnTheWayOutIsRawOrBritish() {
         let words = [
-            AgentConversation.tooLongComposed, AgentConversation.commandRefused, AgentConversation.imagesTooLarge,
-            AgentConversation.tooManyImages, AgentConversation.commandWithImages, AgentConversation.imageTooLarge,
-            AgentConversation.backslash, AgentConversation.unconfirmed, AgentConversation.panel,
+            AgentConversation.tooLongComposed, AgentConversation.refused("command"), AgentConversation.refused("images_too_large"),
+            AgentConversation.tooManyImages, AgentConversation.refused("images:command"), AgentConversation.refused("image_too_large"),
+            AgentConversation.refused("backslash"), AgentConversation.refused("unconfirmed"), AgentConversation.panel("Claude"),
         ]
         for line in words {
             #expect(line.hasSuffix("."), "\(line)")

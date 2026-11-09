@@ -122,17 +122,16 @@ object BringHere {
             "cursor" -> AgentConversation.SendIssue.Said(
                 "The cursor in the terminal’s box isn’t at the end, so its draft wasn’t moved. Use the terminal.",
             )
-            "typing" -> AgentConversation.SendIssue.Said("Someone is typing in the terminal. Try again in a moment.")
+            "typing" -> AgentConversation.SendIssue.Said(ConversationWords.table()?.stop?.get("typing")?.text ?: "")
             "sending" -> AgentConversation.SendIssue.Said("Far Cooler is still sending to the terminal. Try again in a moment.")
             "prompt", "dialog" -> AgentConversation.SendIssue.Handoff
             "unsupported" -> AgentConversation.SendIssue.Said("$agent’s draft can’t be brought here. Use the terminal.")
             "not_running", "not_an_agent" -> AgentConversation.SendIssue.Said("$agent isn’t running in this pane.")
             else -> AgentConversation.SendIssue.Said("Far Cooler can’t read the terminal’s box. Use the terminal.")  // casing ok: names
         }
-        AgentConversation.SendFailure.TimedOut -> AgentConversation.SendIssue.Said("The runner didn’t answer in time. Check the terminal.")
+        AgentConversation.SendFailure.TimedOut -> AgentConversation.SendIssue.Said(ConversationWords.phrase("key_timed_out"))
         is AgentConversation.SendFailure.Lost ->
-            if (failure.notSent) AgentConversation.SendIssue.Said("The runner isn’t connected. Use the terminal.")
-            else AgentConversation.SendIssue.Said("The runner didn’t answer in time. Check the terminal.")
+            AgentConversation.SendIssue.Said(ConversationWords.phrase(if (failure.notSent) "key_not_connected" else "key_timed_out"))
     }
 
     /** What the line says when the box's text is here but the clear went partly or never answered: the text is in both places. */

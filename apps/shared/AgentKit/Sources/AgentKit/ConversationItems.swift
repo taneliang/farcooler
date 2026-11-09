@@ -80,17 +80,12 @@ extension AgentConversation {
     /// "Ran 2 searches", else "Used 5 tools"; in the present tense while any
     /// is still running.
     public static func groupTitle(_ tools: [AgentRow.Tool]) -> String {
-        let n = tools.count
-        let running = tools.contains { $0.status == .running }
         let names = Set(tools.map(\.name))
-        func all(_ these: Set<String>) -> Bool { names.isSubset(of: these) }
-        if all(["Bash", "bash"]) { return running ? "Running \(n) commands" : "Ran \(n) commands" }
-        if all(["Read"]) { return running ? "Reading \(n) files" : "Read \(n) files" }
-        if all(["Edit", "MultiEdit", "Write", "NotebookEdit"]) { return running ? "Editing \(n) files" : "Edited \(n) files" }
-        if all(["Grep", "Glob"]) { return running ? "Running \(n) searches" : "Ran \(n) searches" }
-        return running ? "Using \(n) tools" : "Used \(n) tools"
+        guard let group = ConversationWords.table()?.groups.first(where: { $0.names.isEmpty || names.isSubset(of: $0.names) })
+        else { return "" }
+        let line = tools.contains { $0.status == .running } ? group.running : group.done
+        return line.replacingOccurrences(of: "{n}", with: "\(tools.count)")
     }
-
     /// What a group's calls were for, from their own summaries: a command's
     /// description, a file's name. Each said once, in order, joined by
     /// commas; a view cuts it to fit.
@@ -139,16 +134,15 @@ extension AgentConversation {
     /// anything: a message typed while the agent worked, sent when its turn
     /// ended.
     public static func originNote(_ turn: AgentRow.Turn) -> String? {
-        turn.origin == "Queued" ? "Queued during the last turn" : nil
+        turn.origin == "Queued" ? ConversationWords.phrase("origin_queued") : nil
     }
-
     /// A scheduled task's firing (`CronCreate`, `/loop`): drawn as one, with
     /// its prompt folded, never as the person's message.
     public static func isScheduled(_ turn: AgentRow.Turn) -> Bool {
         turn.origin == "Scheduled"
     }
 
-    public static let scheduledTask = "Scheduled task"
+    public static var scheduledTask: String { ConversationWords.phrase("scheduled_task") }
 
     // MARK: - Turns claude wrote for itself (ov-474)
 
@@ -160,22 +154,15 @@ extension AgentConversation {
     /// from a short id. A status line is its own words; a note's heading is
     /// the same for every note.
     public static func harnessTitle(_ harness: AgentRow.Harness) -> String {
-        switch harness.kind {
-        case "Report": "Report from \(agentName(harness))"
-        case "Message": "Message from \(agentName(harness))"
-        case "Status": harness.title
-        default: "System note"
-        }
+        harness.kind == "Status" ? harness.title : ConversationWords.phrase("harness", by: harness.kind, ["name": agentName(harness)])
     }
-
     /// What the agent is called: its launch's description, else "agent" and
     /// the first characters of its id, else "a subagent".
     public static func agentName(_ harness: AgentRow.Harness) -> String {
         if let source = harness.source, !source.isEmpty { return source }
-        guard let id = harness.agentId, !id.isEmpty else { return "a subagent" }
-        return "agent \(id.prefix(6))"
+        guard let id = harness.agentId, !id.isEmpty else { return ConversationWords.phrase("harness_a_subagent") }
+        return ConversationWords.phrase("harness_agent", ["id": String(id.prefix(6))])
     }
-
     /// The report's agent, when its transcript can be opened: its row's id
     /// and its `agentId`, as `nativeOpenAgent` takes them.
     public static func harnessAgent(_ harness: AgentRow.Harness) -> (row: String, agentId: String)? {
@@ -194,15 +181,9 @@ extension AgentConversation {
     /// "2 of 5 done".
     public static func taskProgress(_ tasks: AgentRow.Tasks) -> String {
         let done = tasks.items.filter { $0.status == "Completed" }.count
-        return "\(done) of \(tasks.items.count) done"
+        return ConversationWords.phrase("tasks_progress", ["done": "\(done)", "n": "\(tasks.items.count)"])
     }
-
     /// A task's state, as VoiceOver says it.
     public static func taskState(_ item: AgentRow.TaskItem) -> String {
-        switch item.status {
-        case "Completed": "Done"
-        case "InProgress": "In progress"
-        default: "Not started"
-        }
-    }
-}
+        ConversationWords.phrase("task", by: item.status)
+    }}

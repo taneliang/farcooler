@@ -136,7 +136,7 @@ final class ImagePasteQueue: ObservableObject {
         // Refused here rather than after the upload: on a phone-speed link the
         // difference is a minute of waiting to be told no.
         if size > 16 * 1024 * 1024 {
-            job.failure = "That file is too large to send. Files up to 16 MB work."
+            job.failure = AgentConversation.refused("file_too_large")
             return
         }
 
@@ -319,7 +319,7 @@ enum ImagePasteProcess {
             return "That terminal may have closed, or this runner’s Far Cooler may be too old."
         }
         if text.contains("file size") {
-            return "That file is too large to send. Files up to 16 MB work."
+            return AgentConversation.refused("file_too_large")
         }
         if text.contains("not found") {
             return "That terminal isn’t running anymore."

@@ -16,6 +16,7 @@ pub mod deadlines;
 #[cfg(feature = "native")]
 pub mod device_keys;
 pub mod changes_json;
+pub mod conversation_words;
 /// The C ABI the phones and the Mac link: `native` only, as a browser calls
 /// through crates/web's wasm-bindgen surface instead (ov-768).
 #[cfg(feature = "native")]

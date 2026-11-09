@@ -144,13 +144,6 @@ extension AgentTray {
     static let thinkingNow = "Thinking"
     static let waiting = "Waiting for agents"
 
-    /// A subagent's type as words: `general-purpose` reads "General purpose".
-    public static func agentType(_ raw: String) -> String {
-        let words = raw.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
-        guard let first = words.first else { return "Agent" }
-        return first.uppercased() + words.dropFirst()
-    }
-
     /// "950 tokens", "87.2K tokens", "1.2M tokens"; `short`, the number
     /// alone, for a narrow row.
     public static func tokens(_ count: Int, short: Bool = false) -> String {

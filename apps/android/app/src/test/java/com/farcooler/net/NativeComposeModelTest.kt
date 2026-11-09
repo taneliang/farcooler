@@ -167,7 +167,7 @@ class NativeComposeModelTest {
         answer = { throw CoreException("no", "invalid-argument", "image_too_large") }
         model.send()
         eventually("the issue") { model.issue != null }
-        assertEquals(AgentConversation.SendIssue.Said(AgentConversation.IMAGE_TOO_LARGE), model.issue)
+        assertEquals(AgentConversation.SendIssue.Said(AgentConversation.refused("image_too_large")), model.issue)
         assertEquals("try this", model.draft)
         assertEquals(1, model.images.size)
     }

@@ -76,34 +76,8 @@ extension NativePaneModel {
     }
 
     /// What the composer says when the runner didn't press `key`, or nil
-    /// when there's nothing to say: the turn ended on its own (`idle`), or a
-    /// second press came too soon after the first (`too_soon`).
+    /// when there's nothing to say: AgentKit's words for it (`conversation_words`).
     static func keyIssue(for error: Error, _ key: PaneKey) -> SendIssue? {
-        let failure = error as? RunnerCore.Failure
-        let stop = key == .stop
-        switch failure?.what {
-        case "idle", "too_soon": return nil
-        case "prompt": return .handoff
-        case "draft": return .draftInTerminal
-        case "typing": return .said("Someone typed in the terminal in the last 3 seconds. Try again in a moment.")
-        case "sending": return .said("A message is still going in. Try again in a moment.")
-        case "nothing_queued": return .said("Nothing is waiting in Claude’s queue.")
-        case "settling":
-            return .said(stop ? "Claude is starting a step. Try Stop again in a moment."
-                : "Claude is starting a step. Try Send Now again in a moment.")
-        case "unconfirmed":
-            return .said(stop ? "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
-                : "Claude didn’t confirm it sent the queued messages. Check the terminal.")
-        default:
-            switch failure {
-            case .timedOut?, .lost(_, notSent: false)?:
-                return .said("The runner didn’t answer in time. Check the terminal.")
-            case .lost(_, notSent: true)?, .notConnected?:
-                return .said("The runner isn’t connected. Use the terminal.")
-            default:
-                return .said(stop ? "Far Cooler can’t stop Claude safely from here. Use the terminal."
-                    : "Far Cooler can’t send the queue safely from here. Use the terminal.")
-            }
-        }
+        AgentConversation.keyIssue(for: failure(error), key == .stop ? .stop : .sendNow).map(issue(from:))
     }
 }

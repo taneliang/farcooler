@@ -113,9 +113,9 @@ struct NativeComposerFixTests {
     @Test("One image too large, and images on a command, each say so")
     func imageSentences() {
         let refused = { (what: String) in RunnerCore.Failure.refused("no", word: "resource-conflict", what: what) }
-        #expect(NativePaneModel.issue(for: refused("image_too_large")) == .said(NativePaneModel.imageTooLarge))
-        #expect(NativePaneModel.issue(for: refused("images"), command: true) == .said(NativePaneModel.commandWithImages))
+        #expect(NativePaneModel.issue(for: refused("image_too_large")) == .said(AgentConversation.refused("image_too_large")))
+        #expect(NativePaneModel.issue(for: refused("images"), command: true) == .said(AgentConversation.refused("images:command")))
         #expect(NativePaneModel.issue(for: refused("images")) == .said(NativePaneModel.tooManyImages))
-        #expect(NativePaneModel.issue(for: refused("backslash")) == .said(NativePaneModel.backslash))
+        #expect(NativePaneModel.issue(for: refused("backslash")) == .said(AgentConversation.refused("backslash")))
     }
 }

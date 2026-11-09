@@ -78,7 +78,7 @@ struct NativeAgentConversation: View {
             .accessibilityIdentifier("native-agent-back")
             if let sub {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(AgentTray.agentType(sub.agentType)).fontWeight(.semibold).lineLimit(1)
+                    Text(AgentConversation.agentType(sub.agentType)).fontWeight(.semibold).lineLimit(1)
                     if !sub.description.isEmpty {
                         Text(sub.description).font(.caption).foregroundStyle(.quietInk).lineLimit(1)
                     }

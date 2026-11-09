@@ -420,78 +420,19 @@ final class NativePaneModel: ObservableObject {
     }
 
     /// `command` when the message was a slash command, which says which
-    /// limit `images` means.
+    /// limit `images` means: AgentKit's words for it (`conversation_words`).
     static func issue(for error: Error, command: Bool = false, agent: String = "Claude") -> SendIssue {
-        let failure = error as? RunnerCore.Failure
-        switch failure?.what {
-        case "prompt", "dialog": return .handoff
-        case "handoff": return .panel
-        case "draft": return .draftInTerminal
-        case "typing": return .said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop.")
-        case "busy": return .said(AgentConversation.busy(agent))
-        case "too_long": return .said(tooLong)
-        case "command": return .said(AgentConversation.commandRefused(agent))
-        case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")
-        case "left_at_shell": return .said("\(agent) quit as the message was typed. It wasn’t run.")
-        case "unconfirmed": return .said(unconfirmed(agent))
-        case "not_running", "not_an_agent": return .said("\(agent) isn’t running in this pane.")
-        case "unfamiliar", "unproven": return .said("Far Cooler can’t read this terminal’s box, so nothing was typed.")
-        case "images_too_large": return .said(imagesTooLarge)
-        case "images": return .said(command ? commandWithImages : tooManyImages)
-        case "image_too_large": return .said(imageTooLarge)
-        case "backslash": return .said(backslash)
-        case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
-        case "files": return .said(command ? commandWithFiles : tooManyFiles)
-        case "file": return .said("One of the files didn’t reach the runner, so nothing was sent.")
-        case "file_too_large": return .said(fileTooLarge)
-        case "files_too_large": return .said(filesTooLarge)
-        case "unconfirmable": return .said("Far Cooler can’t find \(agent)’s session to confirm a send, so nothing was typed.")
-        case "unsupported": return .said("\(agent) can’t take a message from here. Use the terminal.")
-        case "picker": return .said(AgentConversation.picker(agent))
-        case "too_tall": return .said(AgentConversation.tooTall(agent))
-        // An agent's words (ov-620): the runner read this send as coming from
-        // an agent, which reaches a pane only as a message.
-        case "typing_off": return .said("This workspace doesn’t let Far Cooler type into its agents’ panes. Turn on waking agents in its settings.")
-        case "in_pane": return .said("Far Cooler couldn’t tell whether a person or an agent sent this, so it wasn’t sent. Send it from the app.")
-        default:
-            switch failure {
-            // Never "wasn't sent" for a call that may have arrived: the
-            // runner may type it yet, and a second send would go in twice.
-            case .timedOut?, .lost(_, notSent: false)?:
-                return .said(mayHaveBeenSent)
-            case .lost(_, notSent: true)?, .notConnected?:
-                return .said("The runner isn’t connected, so the message wasn’t sent.")
-            default:
-                return .said("The message wasn’t sent.")
-            }
-        }
+        issue(from: AgentConversation.issue(for: failure(error), command: command, agent: agent))
     }
 
-    static let tooLong = "That message is over \(longest) characters. Shorten it, or paste it in the terminal."
-    static let tooLongComposed = "That message is over 100,000 characters. Shorten it, or paste it in the terminal."
-    var tooLongNow: String { rich ? Self.tooLongComposed : Self.tooLong }
-    static let command = "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands."
-    /// The runner's `command`: a `!`, which claude's box runs in a shell, or
-    /// a `/` before something that isn't a command's name.
-    static let commandRefused = "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
-    static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
-    static let tooManyImages = "A message takes at most \(mostImages) images."
-    static let commandWithImages = "A slash command can’t carry images. Send it without them."
-    static let commandWithFiles = "A slash command can’t carry files. Send it without them."
-    static let imageTooLarge = "That image is too large to send. Use a smaller one."
-    static let fileTooLarge = "That file is too large to send. Files up to 16 MB work."
-    static let filesTooLarge = "These files are too large to send together. Send fewer or smaller ones."
-    static let tooManyFiles = "A message takes at most \(mostImages) files."
+    var tooLongNow: String { rich ? AgentConversation.tooLongComposed : AgentConversation.tooLong }
+    static var tooManyImages: String { AgentConversation.tooManyImages }
+    static var fileTooLarge: String { AgentConversation.refused("file_too_large") }
+    static var tooManyFiles: String { AgentConversation.refused("files") }
     /// A file's path as the runner types it before the text (ov-454): its
     /// copy in the paste directory, quoted where it has a space. An echo
     /// carries no paths, so they're left out of what it's matched by.
     static let composedFile = #"(?:"[^"]*/compose-[^"]*"|\S*/compose-\S*)\s*"#
-    static let backslash = "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
-    static let unconfirmed = unconfirmed("Claude")
-    static func unconfirmed(_ agent: String) -> String {
-        "\(agent) didn’t confirm it took the message. Check the pane before sending it again."
-    }
-    static let mayHaveBeenSent = "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again."
 
     // MARK: - The view each pane remembers (R-27)
 

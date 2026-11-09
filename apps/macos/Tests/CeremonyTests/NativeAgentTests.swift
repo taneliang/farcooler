@@ -190,7 +190,7 @@ struct NativeAgentTests {
         model.draft = String(repeating: "a", count: NativePaneModel.longest + 1)
         await model.send()
         #expect(await sink.sent.count == 1)
-        #expect(model.issue == .said(NativePaneModel.tooLong))
+        #expect(model.issue == .said(AgentConversation.tooLong))
     }
 
     @Test("A busy agent takes the message into its queue, and the view shows it Queued")
@@ -298,9 +298,9 @@ struct NativeAgentTests {
 
     @Test("A send that may have arrived never says it wasn't sent")
     func aTimedOutSendMayHaveBeenSent() {
-        #expect(NativePaneModel.issue(for: RunnerCore.Failure.timedOut("late")) == .said(NativePaneModel.mayHaveBeenSent))
-        #expect(NativePaneModel.issue(for: RunnerCore.Failure.lost("dropped")) == .said(NativePaneModel.mayHaveBeenSent))
-        #expect(NativePaneModel.issue(for: RunnerCore.Failure.lost("never left", notSent: true)) != .said(NativePaneModel.mayHaveBeenSent))
+        #expect(NativePaneModel.issue(for: RunnerCore.Failure.timedOut("late")) == .said(AgentConversation.mayHaveBeenSent))
+        #expect(NativePaneModel.issue(for: RunnerCore.Failure.lost("dropped")) == .said(AgentConversation.mayHaveBeenSent))
+        #expect(NativePaneModel.issue(for: RunnerCore.Failure.lost("never left", notSent: true)) != .said(AgentConversation.mayHaveBeenSent))
     }
 
     @Test("Only a runner that serves rows and compose is offered the view")
@@ -321,8 +321,8 @@ struct NativeAgentTests {
         ])))
         await Self.settle(window)
         #expect(seen.ids.contains("native-notice-turn"))
-        #expect(NativeCopy.agentType("general-purpose") == "General purpose")
-        #expect(NativeCopy.short(ms: 42_000) == "0:42" && NativeCopy.short(ms: 220_000) == "3:40")
+        #expect(AgentConversation.agentType("general-purpose") == "General purpose")
+        #expect(AgentConversation.short(ms: 42_000) == "0:42" && AgentConversation.short(ms: 220_000) == "3:40")
     }
 
     nonisolated static func row(_ ord: Int, _ id: String, _ kind: [String: Any]) -> [String: Any] {

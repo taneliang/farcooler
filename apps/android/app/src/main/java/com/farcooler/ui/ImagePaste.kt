@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.farcooler.core.ClientCore
+import com.farcooler.model.AgentConversation
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -70,7 +71,7 @@ class ImagePasteQueue {
     ) {
         val job = ImagePasteJob(thumbnail, data.size.toLong())
         if (data.size > LIMIT) {
-            job.failure = "That file is too large to send. Files up to 16 MB work."
+            job.failure = AgentConversation.refused("file_too_large")
             jobs.add(job)
             return
         }
@@ -119,7 +120,7 @@ class ImagePasteQueue {
             text.contains("predates this") ->
                 "That terminal may have closed, or this runner’s Far Cooler may be too old."
             text.contains("file size") ->
-                "That file is too large to send. Files up to 16 MB work."
+                AgentConversation.refused("file_too_large")
             text.contains("not found") -> "That terminal isn’t running anymore."
             else -> "Couldn’t reach this runner."
         }

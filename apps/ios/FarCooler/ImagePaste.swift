@@ -62,7 +62,7 @@ final class ImagePasteQueue: ObservableObject {
     ) {
         let job = ImagePasteJob(thumbnail: thumbnail, total: Int64(data.count))
         guard Int64(data.count) <= Self.limit else {
-            job.failure = "That file is too large to send. Files up to 16 MB work."
+            job.failure = AgentConversation.refused("file_too_large")
             jobs.append(job)
             return
         }
@@ -109,7 +109,7 @@ final class ImagePasteQueue: ObservableObject {
             return "That terminal may have closed, or this runner’s Far Cooler may be too old."
         }
         if text.contains("file size") {
-            return "That file is too large to send. Files up to 16 MB work."
+            return AgentConversation.refused("file_too_large")
         }
         if text.contains("not found") {
             return "That terminal isn’t running anymore."
