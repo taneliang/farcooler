@@ -25,7 +25,24 @@ extension EnvironmentValues {
     /// nil for the label color. A `UIViewRepresentable` can't read the
     /// foreground style SwiftUI's `Text` would inherit, so it's said here.
     @Entry public var selectableColor: UIColor? = nil
+    #if DEBUG
+    /// Counts the text views bound under here, for a test that no view is
+    /// made where none should be: a folded report (ov-788).
+    @Entry public var textViewTally: TextViewTally? = nil
+    #endif
 }
+
+#if DEBUG
+/// How many text views `SelectableText` bound under a view, made or
+/// taken from the pool. Bumped after the update that bound them, since
+/// publishing during one is refused.
+@MainActor
+public final class TextViewTally: ObservableObject {
+    @Published public private(set) var count = 0
+    public init() {}
+    func bound() { DispatchQueue.main.async { self.count += 1 } }
+}
+#endif
 
 /// Text that selects ranges, with handles and the system's edit menu.
 public struct SelectableText: UIViewRepresentable {
@@ -64,6 +81,9 @@ public struct SelectableText: UIViewRepresentable {
     public func makeCoordinator() -> Coordinator { Coordinator() }
 
     public func makeUIView(context: Context) -> SelectableTextView {
+        #if DEBUG
+        context.environment.textViewTally?.bound()
+        #endif
         if let view = SelectableTextView.reused() {
             view.delegate = context.coordinator
             return view

@@ -105,6 +105,12 @@ struct FoldedMarkdown: View {
     @State private var whole: CGFloat = 0
     @State private var line: CGFloat = 0
     @Environment(\.selectsRanges) private var selectsRanges
+    #if DEBUG
+    /// The text views made under it while folded, which should be none
+    /// (ov-788), shown to a test that asks with `-count-text-views`.
+    @StateObject private var tally = TextViewTally()
+    private static let counts = CommandLine.arguments.contains("-count-text-views")
+    #endif
 
     // `lines` lines and one paragraph break's worth: blocks are set apart,
     // so bare `lines` lines would end inside a gap with nothing under the fade.
@@ -112,19 +118,25 @@ struct FoldedMarkdown: View {
     private var folds: Bool { line > 0 && whole > cap + 1 }
 
     var body: some View {
+        // Folded, only the start that shows and enough past it to know
+        // that it folds (ov-788): an agent's report drawn whole under the
+        // fold was a third of the main thread while flinging past it.
+        let start = open ? text : Markdown.foldPrefix(text, lines: lines)
+        // A start shorter than the text is taller than the fold
+        // (`foldPrefix`), so the report folds, known before anything is
+        // measured. Waiting for `folds` built every long report twice as it
+        // came into view: first in text views, then, measured, as `Text`.
+        let cut = start.utf8.count < text.utf8.count
         // In one pass (ov-675): the fold used to wait for the line's height,
         // so a report was laid out whole and then shrank, by 344 pt for a
         // report of eight paragraphs, moving every row under it.
         FoldStack(fold: .height(lines: lines), open: open) {
-            // Folded, only the start that shows and enough past it to know
-            // that it folds (ov-788): an agent's report drawn whole under the
-            // fold was a third of the main thread while flinging past it.
-            MarkdownText(text: open ? text : Markdown.foldPrefix(text, lines: lines))
+            MarkdownText(text: start)
                 // Folded, it's drawn as `Text`, which the fading mask and the
                 // clip below composite; a `UITextView` under them drew the
                 // last line at full ink, or not at all (review 1). Open, its
                 // words select ranges (ov-609).
-                .environment(\.selectsRanges, selectsRanges && (open || !folds))
+                .environment(\.selectsRanges, selectsRanges && (open || !(cut || folds)))
                 .accessibilityIdentifier("native-folded-markdown")
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
@@ -144,6 +156,17 @@ struct FoldedMarkdown: View {
                     }
                 }
                 .clipped()
+                #if DEBUG
+                .environment(\.textViewTally, open ? nil : tally)
+                .overlay(alignment: .topLeading) {
+                    if Self.counts {
+                        Color.clear.frame(width: 1, height: 1)  // style-exempt: DEBUG probe a UI test reads
+                            .accessibilityElement()
+                            .accessibilityIdentifier("native-folded-text-views")
+                            .accessibilityValue("\(tally.count)")
+                    }
+                }
+                #endif
             Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
                 // Its state, as a disclosure says it (ov-788).
                 .accessibilityValue(open ? "Expanded" : "Collapsed")

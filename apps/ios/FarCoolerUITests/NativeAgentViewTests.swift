@@ -583,10 +583,15 @@ extension NativeAgentViewTests {
     /// a task notice is one muted line; a reminder is a closed System note
     /// that opens. None is XML, and none is the person's bubble.
     func testHarnessTurnsRenderAsTheirOwnRows() {
-        let app = launch(["-native-harness-file", harnessFixture])
+        let app = launch(["-native-harness-file", harnessFixture, "-count-text-views"])
         _ = conversation(app)
         let report = element(app, "native-row-turn:p2")
         XCTAssertTrue(report.waitForExistence(timeout: 30), "no report row")
+        // Folded, it's drawn as `Text` from its first pass (ov-788): no text
+        // view is made for it only to be dropped once it's measured as folding.
+        XCTAssertEqual(
+            report.descendants(matching: .any)["native-folded-text-views"].value as? String, "0",
+            "text views were made under a folded report")
         XCTAssertTrue(report.staticTexts["Report from review dead-layer removal"].exists, report.debugDescription)
         XCTAssertTrue(report.buttons["Show More"].exists, "a nine-line report doesn't fold")
         // Folded, it draws only the start that shows (ov-788): its last
