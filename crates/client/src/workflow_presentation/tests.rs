@@ -245,6 +245,28 @@ fn a_tracker_only_ticket_offers_a_person_no_action() {
     assert!(action(&state, &auth(), STYLE, "item", &forged).is_err());
 }
 
+/// ov-1053: a run cancelled with a reason says it on its Cancelled card; one cancelled without says nothing more.
+#[test]
+fn a_cancelled_run_says_why() {
+    let state = enqueue(Definition::coding());
+    let cancel = |reason: Option<&str>| apply(&state, Command::Cancel { item: "item".into(), reason: reason.map(str::to_owned) }, Grant::Controller);
+    let text = |s: &State| project(s, &auth(), STYLE).unwrap().runs[0].reasons.iter()
+        .find(|r| matches!(r.kind, Reason::Cancelled | Reason::Cancelling)).unwrap().text.clone();
+    // The fixture's run has an operation in flight, so it is Cancelling until the engine stops it.
+    let stopping = cancel(Some("The board this ran on was deleted."));
+    assert_eq!(stopping.items["item"].phase, Phase::Cancelling);
+    assert_eq!(text(&stopping), "The engine is waiting for the operation to stop. The board this ran on was deleted.");
+    assert_eq!(text(&cancel(None)), "The engine is waiting for the operation to stop.");
+    // A run with nothing in flight is Cancelled at once.
+    let mut idle = state.clone();
+    idle.items.get_mut("item").unwrap().pending = None;
+    let done = apply(&idle, Command::Cancel { item: "item".into(), reason: Some("The board this ran on was deleted.".into()) }, Grant::Controller);
+    assert_eq!(done.items["item"].phase, Phase::Cancelled);
+    assert_eq!(text(&done), "This run has been cancelled. The board this ran on was deleted.");
+    let blank = apply(&idle, Command::Cancel { item: "item".into(), reason: Some("  ".into()) }, Grant::Controller);
+    assert_eq!(text(&blank), "This run has been cancelled.");
+}
+
 /// ov-979: the runner's list of a named tree's changes reaches the run's card, and only for the run it stopped.
 #[test]
 fn a_stopped_run_shows_why() {

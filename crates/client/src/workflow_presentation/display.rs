@@ -57,6 +57,16 @@ pub(super) fn reason_card(kind: Reason, style: Style) -> ReasonCard {
     };
     ReasonCard { kind, label: style.label(label), text: text.into() }
 }
+/// A cancelled run says why, when the cancel gave a reason (ov-1053): the reason follows the card's own sentence,
+/// so every app shows the same string. A blank reason says nothing.
+pub(super) fn with_cancel_reason(mut card: ReasonCard, cancel_reason: Option<&str>) -> ReasonCard {
+    if matches!(card.kind, Reason::Cancelled | Reason::Cancelling) {
+        if let Some(why) = cancel_reason.map(str::trim).filter(|w| !w.is_empty()) {
+            card.text = format!("{} {why}", card.text);
+        }
+    }
+    card
+}
 pub(super) fn action_label(kind: &ActionKind, style: Style) -> String {
     style.label(match kind {
         ActionKind::InspectLatestEvidence => "Inspect latest evidence…",

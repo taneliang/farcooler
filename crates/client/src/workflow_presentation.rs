@@ -236,7 +236,8 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             forms: if kinds.contains(&ActionKind::RequestRework) {
                 vec![display::rework_form(farcooler_workflow::MAX_REWORK_REASON_BYTES, style)] } else { Vec::new() },
             rework_history: item.rework_history.clone(),
-            reasons: reasons.into_iter().map(|r| display::reason_card(r, style)).collect(),
+            reasons: reasons.into_iter().map(|r| display::reason_card(r, style))
+                .map(|card| display::with_cancel_reason(card, item.cancel_reason.as_deref())).collect(),
             actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind, style), kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,
