@@ -76,65 +76,6 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
         case kind, label, reviewers, queuePosition, prNumber, prUrl, unresolvedThreads, checks, readAt
     }
 
-    /// The stage in the Plan view's words: title case for a state, as the
-    /// board's statuses are, and a reviewer as GitHub spells the login.
-    /// Nil for a kind this build does not know and the runner gave no words
-    /// for.
-    public var words: String? {
-        switch kind {
-        case .building: "Building"
-        case .agentReview: "Agent Review"
-        case .fixing: "Fixing"
-        case .waitingOnReviewer: Self.waiting(on: reviewers)
-        case .changesRequested: "Changes Requested"
-        case .approvedChecksRunning: "Approved, Checks Running"
-        case .approvedChecksFailing: "Checks Failing"
-        case .approved: "Approved"
-        case .approvedConflicts: "Merge Conflicts"
-        case .queued: queuePosition > 0 ? "Queued, Position \(queuePosition)" : "Queued"
-        case .merged: "Merged"
-        case .closed: "Closed"
-        case .unknown: "PR State Unknown"
-        case .unspecified: label.isEmpty ? nil : label
-        }
-    }
-
-    /// What stays in the gray state line when `words` leads with the problem:
-    /// the pull request is approved, and it is the checks or the merge that
-    /// need a person. Nil for every other stage.
-    public var stateWords: String? {
-        kind == .approvedChecksFailing || kind == .approvedConflicts ? "Approved" : nil
-    }
-
-    /// The stage alone in one phrase, state first, for a line that has no
-    /// room for two ("Approved, Checks Failing"); `words` for every other.
-    public var fullWords: String? {
-        guard let words else { return nil }
-        return stateWords.map { "\($0), \(words)" } ?? words
-    }
-
-    /// "Waiting on alice", "Waiting on alice and bob", "Waiting on alice and 2
-    /// others", and "Waiting on a reviewer" when no one was asked by name.
-    static func waiting(on reviewers: [String]) -> String {
-        switch reviewers.count {
-        case 0: "Waiting on a reviewer"
-        case 1: "Waiting on \(reviewers[0])"
-        case 2: "Waiting on \(reviewers[0]) and \(reviewers[1])"
-        default: "Waiting on \(reviewers[0]) and \(reviewers.count - 1) others"
-        }
-    }
-
-    /// Changes requested, checks failing, conflicts: the stages that need a
-    /// person, and so the only ones drawn in color.
-    public var needsAttention: Bool {
-        kind == .changesRequested || kind == .approvedChecksFailing || kind == .approvedConflicts
-    }
-
-    /// What a ticket row or a card line draws for the stage (ov-317): the problem
-    /// alone when it needs a person, since the gray state line keeps "Approved"
-    /// (`stateWords`); one phrase for every other.
-    public var rowWords: String? { needsAttention ? words : (fullWords ?? words) }
-
     /// Whether the pull request is a draft: the runner derives Agent Review and
     /// Fixing from a draft and from nothing else (`pr_stage::derive`).
     public var isDraft: Bool { kind == .agentReview || kind == .fixing }
@@ -142,11 +83,6 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
     /// Whether a person may mark it ready for review from here: a draft the
     /// runner named (`prNumber`), not one it could not read.
     public var canMarkReady: Bool { isDraft && prNumber > 0 }
-
-    /// What a row says about the stage, or nil when the ticket's own stage word
-    /// already says it ("Building" under a building ticket) or this build cannot
-    /// word it.
-    public var shown: String? { kind == .building ? nil : words }
 
     /// "PR 31 · 2 threads open": the facts under the words, nil without a
     /// pull request.
@@ -161,14 +97,5 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
     public var link: URL? {
         guard let url = URL(string: prUrl), url.scheme == "https" else { return nil }
         return url
-    }
-}
-
-extension PlanTicketLine {
-    /// The pull request stage a ticket row shows: only while the ticket is
-    /// live and the stage has something to add to the stage word.
-    public var shownStage: PlanPrStage? {
-        guard stage.isLive, let prStage, prStage.shown != nil else { return nil }
-        return prStage
     }
 }

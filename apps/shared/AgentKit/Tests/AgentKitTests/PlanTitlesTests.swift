@@ -72,6 +72,6 @@ struct PlanTitlesTests {
         #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .working).now.map(\.name) == ["Title of ov-1", "Title of ov-4"])
         #expect(PlanWords.short("Agents tell the orchestrator when they are done") == "Agents tell the\u{2026}")
         #expect(PlanWords.short("Short title") == "Short title")
-        #expect(PlanWords.status(plan.lines[2]) == "Landing \u{00B7} in Landing 9", "a row says in Landing 9, not the lander's id")
+        #expect(plan.status(of: plan.lines[2]) == "Landing \u{00B7} in Landing 9", "a row says in Landing 9, not the lander's id")
     }
 }

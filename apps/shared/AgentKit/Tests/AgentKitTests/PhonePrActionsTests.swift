@@ -43,15 +43,15 @@ struct PhonePrActionsTests {
     func rowWords() throws {
         let plan = try Self.plan()
         let words = try ["ov-1", "ov-2", "ov-3", "ov-5", "ov-6", "ov-8", "ov-14", "00001100"].map {
-            try Self.line(plan, $0).prStage?.rowWords
+            plan.pages()?.ticket(try Self.line(plan, $0).task)?.stage?.row
         }
         #expect(
             words == [
-                "Building", "Agent Review", "Fixing", "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg",
+                nil, "Agent Review", "Fixing", "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg",
                 "Changes Requested", "Checks Failing", "PR State Unknown", nil,
             ])
         // The gray line keeps what the stage leaves to the state.
-        #expect(try PlanWords.status(Self.line(plan, "ov-8"), stage: false) == "Approved")
+        #expect(try plan.status(of: Self.line(plan, "ov-8"), stage: false) == "Approved")
     }
 
     @Test("Mark Ready is offered for a draft the runner named, and for nothing else")

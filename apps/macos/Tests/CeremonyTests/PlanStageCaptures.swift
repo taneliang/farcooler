@@ -77,4 +77,17 @@ struct PlanStageCaptures {
             until: { store.plan.planned && !store.plan.plan.lines.isEmpty },
             PlanTaskLineView(plan: store.plan, task: PlanStageViewTests.task(pick.0)) { _ in })
     }
+
+    /// A theme's page, whose track line says whether the work is moving (ov-1038): the words the core says.
+    @Test(arguments: [600.0, 380.0])
+    func themePage(_ width: CGFloat) async throws {
+        let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults())
+        await store.plan.reload()
+        let theme = try #require(store.plan.plan.themes.first)
+        try await Self.shoot(
+            "plan-theme-page", width: width, height: 900, expecting: "the plan read",
+            until: { store.plan.planned && !store.plan.plan.themes.isEmpty },
+            PlanPageView(
+                plan: store.plan, page: .theme(theme.id), context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })))
+    }
 }

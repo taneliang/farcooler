@@ -289,7 +289,7 @@ struct PlanModelTests {
                 Self.line("t5", "reviewing", landing: 9), Self.line("t6", "building"),
                 Self.line("t7", "needs_you"),
             ])
-        #expect(plan.lines.map(PlanWords.status) == [
+        #expect(plan.lines.map { plan.status(of: $0) } == [
             "Fixing \u{00B7} round 1", "Landing \u{00B7} in Landing 8", "Waiting \u{00B7} 2nd", "Landed \u{00B7} ac840108",
             "In Review \u{00B7} in Landing 9", "Building", "Needs You",
         ])
@@ -382,7 +382,7 @@ struct PlanModelTests {
                 Self.line("t2", "reviewing", since: Self.now - 70 * 60_000, stale: true),
                 Self.line("t3", "reviewing", since: Self.now - 3 * Self.hour),
             ])
-        #expect(plan.lines.map { PlanWords.stale($0, now: Self.now) } == ["No move in 3 h", "No move in an hour", nil])
+        #expect(plan.pages()?.tickets.map(\.stale) == ["No move in 3 h", "No move in an hour", nil])
     }
 
     // MARK: Records

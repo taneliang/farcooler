@@ -179,7 +179,7 @@ public struct PlanTicketLine: Decodable, Equatable, Identifiable, Sendable {
     /// Its token budget (ov-307); nil when it has none.
     public var budgetTokens: UInt64?
     /// Where its pull request stands (ov-316); nil when the runner had
-    /// nothing to say. Read it through `shownStage`.
+    /// nothing to say.
     public var prStage: PlanPrStage?
 
     public var id: String { task }
@@ -419,6 +419,19 @@ extension PlanModel {
         lines.first { $0.task == task && $0.stage != .dropped }
     }
 
+    /// What the core says of every ticket's page and every theme's track: nil for a plan with no
+    /// wire form, or with no core to ask.
+    public func pages(activity: [String: Int64] = [:]) -> PlanView.Pages? {
+        PlanView.build(plan: self, needsYou: 0, activity: activity)?.pages
+    }
+
+    /// A ticket's status line ("Fixing · round 1", "Landed · ac840108"), in the core's words; its
+    /// stage's own word when the core can't be asked.
+    public func status(of line: PlanTicketLine, stage: Bool = true) -> String {
+        guard let page = pages()?.ticket(line.task) else { return line.stage.word }
+        return stage ? page.status : page.statusBesideStage
+    }
+
     /// The ticket with this key, as a person types it.
     public func line(key: String) -> PlanTicketLine? {
         lines.first { $0.key.lowercased() == key.lowercased() }
@@ -430,8 +443,9 @@ extension PlanModel {
         let line = line(ofTask: task)
         let theme = theme(ofTask: task)
         guard line != nil || theme != nil else { return nil }
-        let stage = line.flatMap { $0.stage.isLive ? $0.shownStage : nil }
-        return PlanTaskLine(line: line, theme: theme, stage: stage)
+        // The words are the core's; only a ticket has a stage to say.
+        let page = line.flatMap { pages()?.ticket($0.task) }
+        return PlanTaskLine(line: line, theme: theme, page: page)
     }
 
     /// Whether a live ticket is waiting on the owner: the runner says so, or
@@ -452,18 +466,22 @@ extension PlanModel {
 public struct PlanTaskLine: Equatable, Sendable {
     public var line: PlanTicketLine?
     public var theme: PlanTheme?
-    /// The card's own pull request stage, while its ticket is live (ov-316).
-    public var stage: PlanPrStage?
+    /// What the core says of the ticket's page: its status beside the stage and the card's own
+    /// pull request stage, while its ticket is live (ov-316).
+    public var page: PlanView.TicketPage?
+
+    /// The card's own pull request stage.
+    public var stage: PlanView.PageStage? { page?.stage }
 
     /// The ticket's half: "Building", "Waiting · 2nd", "Landed · ac840108"; nil
     /// without a ticket on the line.
     public var stageWords: String? {
         guard let line else { return nil }
-        return PlanWords.status(line, stage: false)
+        return page?.statusBesideStage ?? line.stage.word
     }
 
     /// The whole line, as VoiceOver reads it.
-    public var text: String { [stageWords, stage?.fullWords, theme?.name].compactMap { $0 }.joined(separator: " · ") }
+    public var text: String { [stageWords, stage?.full, theme?.name].compactMap { $0 }.joined(separator: " · ") }
 }
 
 // MARK: - Words
@@ -502,35 +520,6 @@ public enum PlanWords {
 
     /// A ticket's stage alone.
     public static func stage(_ stage: TicketStage) -> String { stage.word }
-
-    /// A ticket's stage with what it needs said beside it: "Fixing · round
-    /// 1", "Landing · in Landing 8", "Waiting · 2nd", "Landed · ac840108".
-    public static func status(_ line: PlanTicketLine) -> String { status(line, stage: true) }
-
-    /// `status`, with or without the pull request's stage (ov-316): a row that
-    /// draws the stage on a line of its own leaves it out here.
-    public static func status(_ line: PlanTicketLine, stage: Bool) -> String {
-        var parts = [line.isFixing ? "Fixing" : line.stage.word]
-        // A pull request's stage says more than "In Review" or "Landing", so it
-        // takes the stage's place; one the runner could not read is added, for
-        // it says less than the stage does (ov-316).
-        if let shown = line.shownStage, let words = shown.fullWords {
-            if !stage {
-                // A row that draws the stage on its own line keeps what the
-                // stage leaves to the state ("Approved" beside "Checks Failing").
-                if let kept = shown.stateWords { parts[0] = kept }
-            } else if shown.kind == .unknown {
-                parts.append(words)
-            } else {
-                parts[0] = words
-            }
-        }
-        if line.isFixing, line.fixRounds > 0 { parts.append("round \(line.fixRounds)") }
-        if line.stage == .waiting, let rank = line.planRank { parts.append(ordinal(rank)) }
-        if line.stage == .landed, let sha = line.landedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
-        if line.stage.isLive, let landing = line.landing { parts.append("in Landing \(landing)") }
-        return parts.joined(separator: " · ")
-    }
 
     /// "1st", "2nd", "3rd", "4th", … "11th", "12th", "13th", "21st".
     public static func ordinal(_ n: Int) -> String {
@@ -651,13 +640,6 @@ public enum PlanWords {
         case 60..<1440: return "\(minutes / 60) h ago"
         default: return "\(minutes / 1440) d ago"
         }
-    }
-
-    /// A stale ticket's warning, in words beside its mark: "No move in 2 h".
-    public static func stale(_ line: PlanTicketLine, now: Int64) -> String? {
-        guard line.stale else { return nil }
-        let minutes = max(0, now - line.stageSince) / 60_000
-        return minutes < 120 ? "No move in an hour" : "No move in \(minutes / 60) h"
     }
 }
 

@@ -164,8 +164,8 @@ extension PageWorld {
         case .lane(let name):
             // The page format still names a `lane`; the plan has tickets, so
             // the name is read as a ticket's key or its branch.
-            guard let line = plan?.ticket(named: name) else { return plain }
-            return PageResolved(name: label ?? line.key, status: PlanWords.status(line), destination: .ticket(line.task))
+            guard let plan, let line = plan.ticket(named: name) else { return plain }
+            return PageResolved(name: label ?? line.key, status: plan.status(of: line), destination: .ticket(line.task))
         case .theme(let name):
             guard let theme = plan?.themes.first(where: { $0.name == name || $0.short == name }) else { return plain }
             return PageResolved(name: label ?? theme.name, status: PlanWords.progress(theme.counts), destination: .theme(theme.id))
@@ -242,7 +242,7 @@ extension PageWorld {
         case .cards:
             return (resolved.status ?? resolved.name, stat.detail, stat.tone)
         case .lane:
-            let value = stat.show == .spend ? ticket(of: ref).map { PageWords.tokens($0.spend) } : ticket(of: ref).map(PlanWords.status)
+            let value = stat.show == .spend ? ticket(of: ref).map { PageWords.tokens($0.spend) } : ticket(of: ref).map { plan?.status(of: $0) ?? $0.stage.word }
             return (value ?? resolved.name, stat.detail, stat.tone)
         case .theme:
             let value = stat.show == .spend ? theme(of: ref).map { PageWords.tokens($0.spend ?? PlanSpend()) } : resolved.status
@@ -266,7 +266,7 @@ extension PageWorld {
             default: return resolved.name
             }
         case .state:
-            return ticket(of: ref).map(PlanWords.status) ?? resolved.name
+            return ticket(of: ref).map { plan?.status(of: $0) ?? $0.stage.word } ?? resolved.name
         case .spend:
             if let theme = theme(of: ref) { return PageWords.tokens(theme.spend ?? PlanSpend()) }
             return ticket(of: ref).map { PageWords.tokens($0.spend) } ?? resolved.name

@@ -3,8 +3,9 @@ import Testing
 
 @testable import AgentKit
 
-/// The track line and the rules around it (ov-331): every phrase, which rule
-/// wins when two match, and what "last moved" counts.
+/// What a theme's week holds (ov-331): its rulings, what landed, the work outside every theme. The
+/// track line's phrases and rules are the core's, tested in `crates/client` against
+/// `test/fixtures/plan-track-cases.json` (ov-1038).
 struct PlanThemeTrackTests {
     static let now = PlanModelTests.now
     static let hour = PlanModelTests.hour
@@ -38,176 +39,6 @@ struct PlanThemeTrackTests {
             card, stage, rank: rank, since: since, fixRounds: fixRounds, stale: stale, fixing: fixing, title: title)
     }
 
-    static func track(_ plan: PlanModel, activity: [String: Int64] = [:]) -> PlanTrack {
-        plan.track(of: plan.themes[0], activity: activity)
-    }
-
-    static func words(_ plan: PlanModel, activity: [String: Int64] = [:]) -> String {
-        PlanWords.track(track(plan, activity: activity), now: now)
-    }
-
-    // MARK: Phrases
-
-    @Test("Moving: one ticket is named with its stage, several are counted")
-    func moving() throws {
-        #expect(Self.words(try Self.plan(lines: [Self.line("skill-323", "building")])) == "skill-323 is building")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "reviewing")])) == "a is in review")
-        #expect(Self.words(try Self.plan(lines: [Self.line("fix-gestures", "building", fixRounds: 1, fixing: true)]))
-            == "fix-gestures is fixing, round 1")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "building", fixing: true)])) == "a is fixing")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "building", fixRounds: 2)])) == "a is building",
-            "rounds are said only while a fix is open")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "landing")])) == "a is landing")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "needs_you")])) == "a is waiting on you")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "building"), Self.line("b", "reviewing", card: "c2")]))
-            == "2 tickets moving")
-    }
-
-    @Test("Stuck: a stale ticket is named with how long, as an hour or hours")
-    func stuck() throws {
-        let hourAndABit = try Self.plan(lines: [Self.line("skill-323", "building", since: Self.now - 70 * 60_000, stale: true)])
-        #expect(Self.words(hourAndABit) == "skill-323: no move in an hour")
-        let three = try Self.plan(lines: [Self.line("skill-323", "building", since: Self.now - 3 * Self.hour, stale: true)])
-        #expect(Self.words(three) == "skill-323: no move in 3 h")
-    }
-
-    @Test("A stale ticket among moving ones is named after them, and never hides them")
-    func staleBesideMoving() throws {
-        let plan = try Self.plan(lines: [
-            Self.line("fine", "building"), Self.line("slow", "reviewing", since: Self.now - 4 * Self.hour, stale: true, card: "c2"),
-        ])
-        #expect(Self.words(plan) == "2 tickets moving · slow: no move in 4 h")
-        #expect(Self.track(plan).isMoving)
-    }
-
-    @Test("Waiting: the best rank among its waiting tickets, or none said")
-    func queued() throws {
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "waiting", rank: 1)])) == "Queued, 1st up")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "waiting", rank: 3), Self.line("b", "waiting", rank: 2, card: "c2")]))
-            == "Queued, 2nd up")
-        #expect(Self.words(try Self.plan(lines: [Self.line("a", "waiting")])) == "Queued")
-    }
-
-    @Test("A working ticket beats a waiting one")
-    func movingBeatsQueued() throws {
-        let plan = try Self.plan(lines: [Self.line("a", "waiting", rank: 1, card: "c2"), Self.line("b", "building")])
-        #expect(Self.words(plan) == "b is building")
-    }
-
-    @Test("Quiet: open cards, no ticket, and a day with nothing, said in days")
-    func quiet() throws {
-        let storyAt = Self.now - 3 * Self.day - Self.hour
-        #expect(Self.words(try Self.plan(storyAt: storyAt)) == "No ticket \u{00B7} quiet for 3 days")
-        #expect(Self.words(try Self.plan(storyAt: Self.now - 25 * Self.hour)) == "No ticket \u{00B7} quiet for 1 day")
-        #expect(Self.track(try Self.plan(storyAt: Self.now - Self.day)).isQuiet, "exactly 24 h is quiet")
-    }
-
-    @Test("Idle: open cards and no ticket, but something moved in the last day")
-    func idle() throws {
-        #expect(Self.words(try Self.plan(storyAt: Self.now - 23 * Self.hour)) == "No ticket yet")
-        #expect(!Self.track(try Self.plan(storyAt: Self.now - 23 * Self.hour)).isQuiet)
-    }
-
-    @Test("A theme nothing has ever touched is idle, not quiet for fifty years")
-    func untouched() throws {
-        #expect(Self.words(try Self.plan(storyAt: 0)) == "No ticket yet")
-    }
-
-    @Test("A card the board moved lately keeps a theme from being quiet; the plan alone can't see it")
-    func activityKeepsItAwake() throws {
-        let old = Self.now - 5 * Self.day
-        let plan = try Self.plan(storyAt: old)
-        #expect(Self.track(plan).isQuiet)
-        #expect(Self.track(plan, activity: ["c2": Self.now - Self.hour]) == .idle)
-    }
-
-    @Test("A landed ticket is not moving it, and its landing counts as a move")
-    func landedIsNotMoving() throws {
-        let plan = try Self.plan(lines: [Self.line("a", "landed", since: Self.now - 2 * Self.hour)], storyAt: Self.now - 9 * Self.day)
-        #expect(Self.track(plan) == .idle)
-    }
-
-    @Test("A dropped ticket's time doesn't count as the theme moving")
-    func droppedIsGone() throws {
-        let plan = try Self.plan(lines: [Self.line("a", "dropped", since: Self.now - Self.hour)], storyAt: Self.now - 9 * Self.day)
-        #expect(Self.track(plan).isQuiet)
-    }
-
-    @Test("All done: every counted card done; canceled cards count on neither side")
-    func allDone() throws {
-        #expect(Self.words(try Self.plan(done: 2, open: 0)) == "Every card is done")
-        #expect(Self.words(try Self.plan(done: 2, open: 0, edit: { $0["counts"] = Self.counts(done: 2, cancelled: 3) }))
-            == "Every card is done")
-    }
-
-    @Test("A theme with no cards says no ticket yet, not that everything is done")
-    func empty() throws {
-        #expect(Self.words(try Self.plan(done: 0, open: 0)) == "No ticket yet")
-    }
-
-    @Test("Paused and done say so, whatever else is true of them")
-    func pausedAndDone() throws {
-        let busy = [Self.line("a", "building")]
-        #expect(Self.words(try Self.plan(lines: busy, state: "paused")) == "Paused")
-        #expect(Self.words(try Self.plan(lines: busy, state: "done")) == "Done")
-    }
-
-    @Test("Over budget is the one amber state, and wins over a moving ticket")
-    func overBudget() throws {
-        let plan = try Self.plan(lines: [Self.line("a", "building")]) { theme in
-            theme["budget_tokens"] = 100
-            theme["spend"] = ["input_tokens": 600, "runs": 1, "unmeasured_agents": 0]
-        }
-        let track = Self.track(plan)
-        #expect(track.needsAttention)
-        #expect(PlanWords.track(track, now: Self.now) == "Over budget: 600 of 100 tokens")
-        #expect(!Self.track(try Self.plan(lines: [Self.line("a", "building")])).needsAttention)
-        for other in [PlanTrack.paused, .done, .idle, .allDone, .queued(rank: 1), .quiet(since: 1)] {
-            #expect(!other.needsAttention, "\(other) is never amber")
-        }
-    }
-
-    @Test("Every state has its own glyph, so color never carries it alone")
-    func glyphs() {
-        let tracks: [PlanTrack] = [
-            .overBudget(.over(used: 2, budget: 1)), .stuck(ticket: "a", since: 0), .moving(tickets: [], stalled: nil), .queued(rank: nil),
-            .quiet(since: 0), .idle, .allDone, .paused,
-        ]
-        #expect(Set(tracks.map(\.symbol)).count == tracks.count)
-    }
-
-    @Test("Spoken, the middle dot is a comma")
-    func spoken() throws {
-        let quiet = PlanTrack.quiet(since: Self.now - 3 * Self.day)
-        #expect(PlanWords.trackSpoken(quiet, now: Self.now) == "No ticket, quiet for 3 days")
-    }
-
-    // MARK: Last moved
-
-    @Test("Last moved is the newest of the story, the tickets, the rulings, the cards and the runner's word")
-    func lastMovedCountsEverything() throws {
-        let base = Self.now - 10 * Self.day
-        var plan = try Self.plan(storyAt: base)
-        #expect(plan.lastMoved(plan.themes[0]) == base)
-        #expect(plan.lastMoved(plan.themes[0], activity: ["c2": base + 5]) == base + 5)
-        #expect(plan.lastMoved(plan.themes[0], activity: ["other": base + 99]) == base, "a card in another theme isn't ours")
-
-        plan = try Self.plan(lines: [Self.line("a", "landed", since: base + 7)], storyAt: base)
-        #expect(plan.lastMoved(plan.themes[0]) == base + 7)
-
-        plan = try Self.plan(storyAt: base) { $0["last_moved_at"] = base + 11 }
-        #expect(plan.lastMoved(plan.themes[0]) == base + 11, "the runner's own word counts")
-
-        let ruling: [String: Any] = [
-            "id": "r1", "short": "R-1", "number": 1, "decision": "d", "why": "w", "reversal": "r", "cards": [],
-            "theme_id": "theme-T", "theme": "T", "state": "confirmed", "note": "", "actor": "manager",
-            "created_at": base + 20, "settled_at": base + 30,
-        ]
-        plan = try Self.plan(storyAt: base, extra: ["rulings": [ruling]])
-        #expect(plan.lastMoved(plan.themes[0]) == base + 30, "settling a ruling is a move")
-        #expect(plan.rulings(in: plan.themes[0]).map(\.short) == ["R-1"])
-    }
-
     @Test("A runner's last_moved_at decodes; one without it leaves nil")
     func lastMovedDecodes() throws {
         let with = try Self.plan { $0["last_moved_at"] = 42 }
@@ -217,8 +48,6 @@ struct PlanThemeTrackTests {
         let fixture = try PlanModelTests.fixture()
         #expect(fixture.themes[0].lastMovedAt == Self.now - Self.hour)
     }
-
-    // MARK: Around the themes
 
     @Test("Landed this week: the theme's landed tickets inside seven days, newest first")
     func landedThisWeek() throws {
@@ -256,82 +85,11 @@ struct PlanThemeTrackTests {
         #expect(plan.offTheLine.isEmpty && plan.landedNotClosed.isEmpty)
     }
 
-    @Test("The summary counts asks, moving themes and quiet ones, and leaves out zeros")
-    func summary() throws {
-        func themes(_ specs: [(String, String, String)]) throws -> PlanModel {
-            let themes = specs.enumerated().map { index, spec -> [String: Any] in
-                var t = PlanModelTests.theme(spec.0, cards: ["c\(index)"], ordinal: index, state: spec.1)
-                t["owner_ask"] = spec.2
-                t["counts"] = Self.counts(todo: 1)
-                t["story_at"] = Self.now - 5 * Self.day
-                return t
-            }
-            let lines = [PlanModelTests.line("c0", "building")]
-            let object: [String: Any] = ["now_ms": Self.now, "themes": themes, "lines": lines, "cards": []]
-            return try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
-        }
-        let plan = try themes([("A", "active", "?"), ("B", "active", ""), ("C", "active", "?"), ("D", "paused", "")])
-        #expect(plan.trackSummary() == "2 waiting on you · 1 moving · 2 quiet")
-        let hidden = try themes([("A", "active", ""), ("B", "done", "?"), ("C", "paused", "?")])
-        #expect(hidden.trackSummary() == "1 moving", "a done or paused theme's ask is in the fold, and not counted")
-        let calm = try themes([("A", "active", ""), ("B", "done", "")])
-        #expect(calm.trackSummary() == "1 moving")
-        #expect(try Self.plan(done: 2, open: 0).trackSummary() == nil)
-    }
-
     @Test("The story's age is printed only when there's a story")
     func storyAge() throws {
         let plan = try Self.plan(storyAt: Self.now - 3 * Self.hour) { $0["story"] = "Going well." }
         #expect(PlanWords.storyAge(plan.themes[0], now: Self.now) == "Updated 3 h ago")
         #expect(PlanWords.storyAge(try Self.plan(storyAt: Self.now - Self.hour).themes[0], now: Self.now) == nil)
-    }
-
-    // MARK: The entry's brief
-
-    @Test("The brief lists three tickets and two rulings, says how many more, and leaves empty lines out")
-    func brief() throws {
-        func ruling(_ n: Int, state: String = "standing") -> [String: Any] {
-            ["id": "r\(n)", "short": "R-\(n)", "number": n, "decision": "d\(n)", "why": "w", "reversal": "r", "cards": [],
-             "theme_id": "theme-T", "theme": "T", "state": state, "note": "", "actor": "manager", "created_at": n]
-        }
-        let lines = (1...5).map { Self.line("l\($0)", "building", card: "c\($0)") }
-        let plan = try Self.plan(
-            lines: lines, cards: (1...5).map { "c\($0)" }, extra: ["rulings": [ruling(1), ruling(2), ruling(3), ruling(4, state: "confirmed")]]
-        ) { $0["story"] = "Going well."; $0["story_at"] = Self.now - Self.hour }
-        let brief = PlanThemeBrief(plan.themes[0], in: plan)
-        #expect(brief.moving.map(\.heading) == ["l1", "l2", "l3"] && brief.movingMore == 2)
-        #expect(brief.decided.map(\.short) == ["R-1", "R-2"] && brief.decidedMore == 1, "standing only: R-4 is settled")
-        #expect(brief.story == "Going well." && brief.storyAge == "Updated 1 h ago")
-        #expect(brief.outcome == nil && brief.ask == nil && brief.next == nil && brief.landed == nil && brief.budget == nil)
-        let within = try Self.plan { $0["budget_tokens"] = 1000 }
-        #expect(PlanThemeBrief(within.themes[0], in: within).budget != nil)
-        let over = try Self.plan { $0["budget_tokens"] = 100; $0["spend"] = ["input_tokens": 600, "runs": 1, "unmeasured_agents": 0] }
-        #expect(PlanThemeBrief(over.themes[0], in: over).budget == nil, "over budget is the track line's, not said twice")
-    }
-
-    // MARK: Shared cases
-
-    /// The cases `PlanTrackTest` (Kotlin) reads too: a plan, the first theme's
-    /// track line and the Themes summary, so a phrase or a threshold can't
-    /// change on one platform alone.
-    @Test("Every case in test/fixtures/plan-track-cases.json reads as written")
-    func sharedCases() throws {
-        var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<6 { root.deleteLastPathComponent() }
-        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/plan-track-cases.json"))
-        let file = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let cases = try #require(file["cases"] as? [[String: Any]])
-        #expect(cases.count >= 30)
-        for item in cases {
-            let name = item["name"] as? String ?? "?"
-            let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(item["plan"])))
-            if let want = item["track"] as? String {
-                #expect(Self.words(plan) == want, "\(name)")
-            }
-            if item.keys.contains("summary") {
-                #expect(plan.trackSummary() == item["summary"] as? String, "\(name): the summary")
-            }
-        }
     }
 
     @Test("Themes split into active ones in the board's order and one closed fold of paused and done; dropped are in neither")

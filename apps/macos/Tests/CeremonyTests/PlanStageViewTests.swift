@@ -106,15 +106,17 @@ struct PlanStageViewTests {
         }
         // Amber exactly when the stage says it needs a person, read from the
         // stage and not from a list of tickets.
+        let pages = try #require(store.plan.plan.pages())
+        func shown(_ line: PlanTicketLine) -> PlanView.PageStage? { pages.ticket(line.task)?.stage }
         for n in 1...15 {
             let line = lines[n - 1]
             let drawn = try await row(n)
             let amber = drawn["plan-ticket-\(line.key)-stage-attention"] != nil
             let gray = drawn["plan-ticket-\(line.key)-stage"] != nil
-            #expect(amber == (line.shownStage?.needsAttention == true), "\(line.key) amber")
-            #expect(gray == (line.shownStage != nil && line.shownStage?.needsAttention == false), "\(line.key) gray")
+            #expect(amber == (shown(line)?.attention == true), "\(line.key) amber")
+            #expect(gray == (shown(line) != nil && shown(line)?.attention == false), "\(line.key) gray")
         }
-        #expect(lines.filter { $0.shownStage?.needsAttention == true }.count == 3, "the fixture holds three that need a person")
+        #expect(lines.filter { shown($0)?.attention == true }.count == 3, "the fixture holds three that need a person")
     }
 
     @Test("A long reviewer login stays on one line in a row, elided inside the column")
@@ -147,7 +149,7 @@ struct PlanStageViewTests {
         }
         #expect(await page(4)["plan-ticket-stage"] != nil)
         #expect(await page(6)["plan-ticket-stage"] != nil)
-        #expect(PlanWords.status(plan.lines[5], stage: false) == "In Review", "the title keeps the state; the stage has its line")
+        #expect(plan.status(of: plan.lines[5], stage: false) == "In Review", "the title keeps the state; the stage has its line")
         // A long login on the ticket page: one line, then the pull request under it.
         let narrow = await Self.drawn(
             PlanTicketRecordPage(line: plan.lines[3], plan: plan, record: nil, context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })),

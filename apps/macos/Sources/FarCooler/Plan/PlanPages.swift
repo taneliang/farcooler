@@ -306,7 +306,7 @@ struct PlanThemePage: View {
             PlanSection(title: "Tickets") {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(lines) { line in
-                        PlanPageTicketRow(line: line) { context.onOpen(.ticket(line.id)) }
+                        PlanPageTicketRow(line: line, plan: plan) { context.onOpen(.ticket(line.id)) }
                     }
                 }
             }
@@ -327,6 +327,7 @@ struct PlanThemePage: View {
 /// A ticket on a theme's page: its title, its stage, and its key.
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
+    let plan: PlanModel
     let action: () -> Void
     @State private var hovering = false
 
@@ -342,7 +343,7 @@ private struct PlanPageTicketRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
-                Text(PlanWords.status(line))
+                Text(plan.status(of: line))
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .foregroundStyle(.quietInk)
                     .lineLimit(1)
@@ -417,10 +418,12 @@ struct PlanTicketRecordPage: View {
     let context: PlanPageContext
 
     var body: some View {
+        // The words are the core's: the status beside the stage, the stage, the stale warning.
+        let page = plan.pages()?.ticket(line.task)
         PlanDocument(id: "plan-ticket-record-page") {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 // The stage has its own line below, so the title keeps the state alone.
-                PlanTitle(title: line.heading, state: PlanWords.status(line, stage: false))
+                PlanTitle(title: line.heading, state: page?.statusBesideStage ?? line.stage.word)
                 if !line.reason.isEmpty { Text(line.reason).planBody() }
                 if !place.isEmpty {
                     Text(place)
@@ -437,17 +440,17 @@ struct PlanTicketRecordPage: View {
                     .help("Open the theme this ticket serves")
                     .identified("plan-ticket-theme")
                 }
-                if let stage = line.shownStage, let words = stage.words {
+                if let shown = page?.stage, let stage = line.prStage {
                     // One line when it fits, else the pull request under the
                     // stage: never in the middle of an elided login.
                     ViewThatFits(in: .horizontal) {
-                        stageLine(stage, words, stacked: false)
-                        stageLine(stage, words, stacked: true)
+                        stageLine(stage, shown, stacked: false)
+                        stageLine(stage, shown, stacked: true)
                     }
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .identified("plan-ticket-stage")
                 }
-                if let stale = PlanWords.stale(line, now: plan.nowMs) {
+                if let stale = page?.stale {
                     StaleLine(text: stale)
                 }
             }
@@ -487,11 +490,11 @@ struct PlanTicketRecordPage: View {
     }
 
     /// The stage, and the pull request it reads from, to open on GitHub.
-    @ViewBuilder private func stageLine(_ stage: PlanPrStage, _ words: String, stacked: Bool) -> some View {
+    @ViewBuilder private func stageLine(_ stage: PlanPrStage, _ shown: PlanView.PageStage, stacked: Bool) -> some View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.tight)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.tight))
         layout {
-            PlanStageText(stage: stage, words: words)
-            if let detail = stage.detail {
+            PlanStageText(stage: shown, words: shown.words)
+            if let detail = shown.detail {
                 if !stacked { Text("\u{00B7}").foregroundStyle(.quietInk) }
                 if let link = stage.link {
                     Link(detail, destination: link).help("Open the pull request on GitHub")
@@ -594,9 +597,9 @@ struct PlanTaskLineView: View {
             if let words = line.stageWords {
                 Text(words).foregroundStyle(.quietInk).identified("plan-task-ticket-stage")
             }
-            if let stage = line.stage, let words = stage.rowWords {
+            if let stage = line.stage {
                 if !stacked, line.stageWords != nil { Text("\u{00B7}").foregroundStyle(.quietInk) }
-                PlanStageText(stage: stage, words: words).identified("plan-task-stage")
+                PlanStageText(stage: stage, words: stage.row).identified("plan-task-stage")
             }
             if !stacked, line.line != nil, line.theme != nil {
                 Text("\u{00B7}").foregroundStyle(.quietInk)
@@ -615,16 +618,16 @@ struct PlanTaskLineView: View {
 /// the tooltip says it all: the full words, then the pull request's number and
 /// open threads.
 struct PlanStageText: View {
-    let stage: PlanPrStage
+    let stage: PlanView.PageStage
     let words: String
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Text(words)
-            .foregroundStyle(stage.needsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
-            .fontWeight(stage.needsAttention ? .medium : .regular)
+            .foregroundStyle(stage.attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
+            .fontWeight(stage.attention ? .medium : .regular)
             .lineLimit(1)
             .truncationMode(.middle)
-            .help([stage.fullWords, stage.detail].compactMap { $0 }.joined(separator: " \u{00B7} "))
+            .help([stage.full, stage.detail].compactMap { $0 }.joined(separator: " \u{00B7} "))
     }
 }

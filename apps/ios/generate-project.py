@@ -795,6 +795,8 @@ AGENTKIT_SOURCES = [
     # a landing's phase and the agents list (ov-503), from the Rust core's
     # view (ov-1016).
     "PlanView.swift",
+    # The phrases the Plan, shell close and the Agents card share, from the core (ov-1041).
+    "SharedWords.swift",
     "PlanLandingPhase.swift",
     "PlanAgents.swift",
     "PlanThemeTile.swift",
@@ -806,10 +808,8 @@ AGENTKIT_SOURCES = [
     # Budgets, a theme's trend, the week and the comparison (ov-307).
     "PlanCost.swift",
     "PlanCostViews.swift",
-    # A theme's track line, what its entry says and how a row draws it (ov-331).
+    # What a theme's week holds: rulings, landings, the work outside every theme (ov-331).
     "PlanThemeTrack.swift",
-    "PlanThemeBrief.swift",
-    "PlanTrackViews.swift",
     # The One tree (ov-321) and the plan strip, on the phone too (ov-300): the
     # Mac's sidebar rules, its glyphs and the Needs You count it shares with
     # the title bar, the strip's words, and the phone's own mapping onto

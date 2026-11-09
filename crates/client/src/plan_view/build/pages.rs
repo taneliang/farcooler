@@ -14,6 +14,9 @@ const QUIET_AFTER_MS: i64 = 24 * 3_600_000;
 pub struct PageStage {
     /// The stage in the Plan's words, leading with the problem when a person has to act.
     pub words: String,
+    /// The stage alone in one phrase, state first ("Approved, Checks Failing"), for a line with no
+    /// room for two.
+    pub full: String,
     /// What a card row under the page draws: the problem alone when a person has to act, else the
     /// stage in one phrase, state first.
     pub row: String,
@@ -87,8 +90,9 @@ impl Reader<'_> {
             stage: shown.and_then(|s| {
                 let words = pr_words(s, self.style)?;
                 let attention = pr_needs_attention(s);
-                let row = if attention { words.clone() } else { pr_full_words(s, self.style).unwrap_or_else(|| words.clone()) };
-                Some(PageStage { words, row, detail: pr_detail(s), attention })
+                let full = pr_full_words(s, self.style).unwrap_or_else(|| words.clone());
+                let row = if attention { words.clone() } else { full.clone() };
+                Some(PageStage { words, full, row, detail: pr_detail(s), attention })
             }),
             stale: self.stale(line),
         }

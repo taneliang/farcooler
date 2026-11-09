@@ -252,6 +252,78 @@ public struct PlanView: Decodable, Equatable, Sendable {
         public var moving: Bool
     }
 
+    /// A pull request's stage on a ticket's page, in the core's words.
+    public struct PageStage: Decodable, Equatable, Sendable {
+        /// The stage, leading with the problem when a person has to act.
+        public var words: String
+        /// The stage alone in one phrase, state first ("Approved, Checks Failing").
+        public var full: String
+        /// What a card row under the page draws.
+        public var row: String
+        /// "PR 31 · 2 threads open".
+        public var detail: String?
+        public var attention: Bool
+    }
+
+    /// What a ticket's page says that its card does not (ov-1038).
+    public struct TicketPage: Decodable, Equatable, Sendable {
+        /// The ticket's task id.
+        public var id: String
+        /// "Fixing · round 1", "Landed · ac840108".
+        public var status: String
+        /// `status` when the stage is drawn on a line of its own.
+        public var statusBesideStage: String
+        public var stage: PageStage?
+        /// "No move in 2 h".
+        public var stale: String?
+    }
+
+    public enum TrackKind: String, Decodable, Equatable, Sendable {
+        case overBudget = "over_budget"
+        case stuck, moving, queued, quiet, idle
+        case allDone = "all_done"
+        case paused, done
+
+        /// The glyph beside the words: a shape to scan by, so the state never
+        /// rests on color alone. SF Symbols on the Mac and the iPhone.
+        public var symbol: String {
+            switch self {
+            case .overBudget: "exclamationmark.circle.fill"
+            case .stuck: "exclamationmark.circle"
+            case .moving: "arrow.triangle.2.circlepath"
+            case .queued: "clock"
+            case .quiet: "moon.zzz"
+            case .idle: "circle.dashed"
+            case .allDone, .done: "checkmark.circle"
+            case .paused: "pause.circle"
+            }
+        }
+    }
+
+    /// One plain-words line per theme that says whether the work is moving.
+    public struct ThemeTrack: Decodable, Equatable, Sendable {
+        public var id: String
+        public var kind: TrackKind
+        public var words: String
+        /// The same for VoiceOver: a middle dot isn't read well.
+        public var spoken: String
+        /// Amber, and only for a budget gone over.
+        public var attention: Bool
+
+        /// Being worked on right now, stuck or not.
+        public var isMoving: Bool { kind == .moving || kind == .stuck }
+    }
+
+    public struct Pages: Decodable, Equatable, Sendable {
+        public var tickets: [TicketPage]
+        public var tracks: [ThemeTrack]
+        /// "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded.
+        public var trackSummary: String?
+
+        public func ticket(_ task: String) -> TicketPage? { tickets.first { $0.id == task } }
+        public func track(_ theme: String) -> ThemeTrack? { tracks.first { $0.id == theme } }
+    }
+
     public struct Themes: Decodable, Equatable, Sendable {
         public var tiles: [ThemeTile]
         /// Done themes, folded into one tile.
@@ -280,6 +352,8 @@ public struct PlanView: Decodable, Equatable, Sendable {
     public var themes: Themes
     /// The plan column beside the conversation (ov-867), from the same read.
     public var column: PlanColumn
+    /// What ticket pages and theme tracks say (ov-1038).
+    public var pages: Pages
 
     /// The section of `kind`, when it's drawn.
     public func section(_ kind: SectionKind) -> Section? { sections.first { $0.kind == kind } }

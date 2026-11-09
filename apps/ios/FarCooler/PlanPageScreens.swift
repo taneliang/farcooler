@@ -253,7 +253,7 @@ struct PlanThemePage: View {
             if !lines.isEmpty {
                 Section("Tickets") {
                     ForEach(lines) { line in
-                        PlanPageTicketRow(line: line) { context.onOpen(.ticket(line.task)) }
+                        PlanPageTicketRow(line: line, plan: plan) { context.onOpen(.ticket(line.task)) }
                     }
                 }
             }
@@ -308,6 +308,7 @@ struct PlanThemePage: View {
 /// A ticket on a theme's page: its title, its stage, and its key.
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
+    let plan: PlanModel
     let action: () -> Void
 
     var body: some View {
@@ -320,7 +321,7 @@ private struct PlanPageTicketRow: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(line.heading).font(.subheadline.weight(.medium))
-                    Text(PlanWords.status(line)).font(.footnote).foregroundStyle(.secondary)
+                    Text(plan.status(of: line)).font(.footnote).foregroundStyle(.secondary)
                     // Each key's title in what VoiceOver says (ov-299).
                     TaskKeyText(keysIn: line.key)
                         .font(.system(.caption, design: .monospaced))
@@ -373,22 +374,21 @@ private struct PlanCardRows: View {
         }
     }
 
-    private func stage(of ref: PlanCardRef) -> PlanPrStage? {
-        guard showsStage, let stage = plan.line(ofTask: ref.task)?.prStage, stage.shown != nil else { return nil }
-        return stage
+    private func stage(of ref: PlanCardRef) -> PlanView.PageStage? {
+        showsStage ? plan.pages()?.ticket(ref.task)?.stage : nil
     }
 
-    private func card(key: String, title: String, status: String, stage: PlanPrStage? = nil) -> some View {
+    private func card(key: String, title: String, status: String, stage: PlanView.PageStage? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(key).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             Text(title).font(.subheadline).lineLimit(3)
             Text(status)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            if let stage, let words = stage.rowWords {
-                Text(words)
-                    .font(.caption2.weight(stage.needsAttention ? .medium : .regular))
-                    .foregroundStyle(stage.needsAttention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+            if let stage {
+                Text(stage.row)
+                    .font(.caption2.weight(stage.attention ? .medium : .regular))
+                    .foregroundStyle(stage.attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .accessibilityIdentifier("plan-card-\(key)-stage")
@@ -411,13 +411,14 @@ struct PlanTicketPage: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        let page = plan.pages()?.ticket(line.task)
         List {
             Section {
                 VStack(alignment: .leading, spacing: PaneMetrics.step) {
                     HStack(alignment: .firstTextBaseline) {
                         Text(line.heading).font(.title3.weight(.semibold))
                         Spacer()
-                        Text(PlanWords.status(line, stage: line.shownStage == nil)).font(.subheadline).foregroundStyle(.secondary)
+                        Text(page?.statusBesideStage ?? line.stage.word).font(.subheadline).foregroundStyle(.secondary)
                     }
                     if !line.reason.isEmpty { Text(line.reason) }
                     if !place.isEmpty {
@@ -426,7 +427,7 @@ struct PlanTicketPage: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
-                    if let stale = PlanWords.stale(line, now: plan.nowMs) {
+                    if let stale = page?.stale {
                         Label(stale, systemImage: "exclamationmark.circle.fill")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(GlancePalette.amber(scheme))
@@ -435,7 +436,9 @@ struct PlanTicketPage: View {
                 .padding(.vertical, 2)
                 .accessibilityIdentifier("plan-ticket-page")
                 // Its own row: the header above is one element, named for the page.
-                if let stage = line.shownStage { PlanTicketStageBlock(line: line, stage: stage, markReady: context.markReady) }
+                if let shown = page?.stage, let stage = line.prStage {
+                    PlanTicketStageBlock(line: line, stage: stage, shown: shown, markReady: context.markReady)
+                }
                 if let theme = plan.theme(of: line) {
                     Button { context.onOpen(.theme(theme.id)) } label: {
                         Label(theme.name, systemImage: "map")
@@ -512,6 +515,8 @@ struct PlanTicketPage: View {
 struct PlanTicketStageBlock: View {
     let line: PlanTicketLine
     let stage: PlanPrStage
+    /// The stage as the core words it.
+    let shown: PlanView.PageStage
     /// Nil where this phone may not act on pull requests.
     let markReady: ((PlanTicketLine, PlanPrStage) async -> String?)?
     @Environment(\.colorScheme) private var scheme
@@ -522,15 +527,13 @@ struct PlanTicketStageBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PaneMetrics.tight) {
-            if let words = stage.words {
-                Text(words)
-                    .font(.subheadline.weight(stage.needsAttention ? .medium : .regular))
-                    .foregroundStyle(stage.needsAttention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .accessibilityIdentifier("plan-ticket-stage\(stage.needsAttention ? "-attention" : "")")
-            }
-            if let detail = stage.detail {
+            Text(shown.words)
+                .font(.subheadline.weight(shown.attention ? .medium : .regular))
+                .foregroundStyle(shown.attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .accessibilityIdentifier("plan-ticket-stage\(shown.attention ? "-attention" : "")")
+            if let detail = shown.detail {
                 Text(detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

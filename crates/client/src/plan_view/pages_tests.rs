@@ -183,3 +183,26 @@ fn every_pull_request_stage_kind_has_its_words_on_a_ticket_page() {
     assert_eq!(row(7), Some(("Approved, checks running", false)));
     assert_eq!(row(15), None);
 }
+
+/// The cases every platform read before the words moved here (`test/fixtures/plan-track-cases.json`): a
+/// plan, the first theme's track line and the Themes summary, so a phrase or a threshold can't change
+/// on one platform alone.
+#[test]
+fn every_shared_track_case_reads_as_written() {
+    let file: Value = serde_json::from_str(include_str!("../../../../test/fixtures/plan-track-cases.json")).unwrap();
+    let cases = file["cases"].as_array().unwrap();
+    assert!(cases.len() >= 30);
+    for case in cases {
+        let name = case["name"].as_str().unwrap_or("?");
+        let request = json!({ "schema": SCHEMA, "plan": case["plan"] });
+        let answer: Value = serde_json::from_str(&json(&request.to_string())).unwrap();
+        assert!(answer["error"].is_null(), "{name}: {answer}");
+        let pages = serde_json::from_value::<PlanView>(answer["view"].clone()).unwrap().pages;
+        if let Some(want) = case["track"].as_str() {
+            assert_eq!(pages.tracks[0].words, want, "{name}");
+        }
+        if let Some(summary) = case.get("summary") {
+            assert_eq!(pages.track_summary.as_deref(), summary.as_str(), "{name}: the summary");
+        }
+    }
+}

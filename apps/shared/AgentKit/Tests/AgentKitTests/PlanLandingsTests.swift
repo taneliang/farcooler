@@ -45,7 +45,7 @@ struct PlanLandingsTests {
         let groups = plan.nowGroups
         #expect(groups.map { $0.landing?.number } == [14, 15, nil], "the landed one is out of Now")
         #expect(groups.map { $0.lines.map(\.task) } == [["t1", "t2"], [], ["t3"]])
-        #expect(PlanWords.status(plan.lines[0]) == "In Review \u{00B7} in Landing 14")
+        #expect(plan.status(of: plan.lines[0]) == "In Review \u{00B7} in Landing 14")
         #expect(plan.liveLandings.map(\.number) == [14, 15])
         #expect(plan.lines(on: plan.landings[2]).map(\.task) == ["t9"], "a landed landing still lists its tickets")
     }
