@@ -124,9 +124,6 @@ const fn rate(input: f64, cache_write: f64, cache_write_1h: f64, cache_read: f64
 /// for it can be high, never low. (The cheaper tier is $0.10 in, $0.50 out,
 /// $0.01 cache hit, $0.125 5m and $0.20 1h writes.)
 ///
-/// No OpenAI model is listed. Codex runs gpt-5.5 and gpt-5.6 models whose
-/// prices nobody here has a source for, and a rate typed from memory is a
-/// guess wearing a number's clothes: their turns are recorded as unknown.
 const TABLE: &[(&str, Rates)] = &[
     ("claude-fable-5-1", rate(10.0, 12.5, 20.0, 0.25, 50.0)),
     ("claude-mythos-5-1", rate(10.0, 12.5, 20.0, 0.25, 50.0)),
@@ -148,6 +145,34 @@ const TABLE: &[(&str, Rates)] = &[
     ("claude-haiku-5-5", rate(0.5, 0.625, 1.0, 0.05, 2.5)),
     ("claude-haiku-4-5", rate(1.0, 1.25, 2.0, 0.1, 5.0)),
 ];
+
+/// OpenAI's API list prices for the models Codex runs, from
+/// developers.openai.com/api/docs/pricing (read 2026-11-09), Standard tier,
+/// short context (up to 272,000 input tokens). Rates are per million tokens:
+/// input, cached input, output. OpenAI has no cache-write charge.
+///
+/// These are what the same tokens would cost at API list price. They are not
+/// a ChatGPT subscription's bill and do not measure its remaining allowance.
+///
+/// Where this can be low: the page also prices Fast mode at twice these rates
+/// and requests over 272,000 input tokens at higher ones (Sol 6.1: $4 in,
+/// $15 out). Codex's rollout names neither a service tier nor a request's
+/// size, and its context window (258,400 in the log) stays under 272,000, so
+/// every turn is priced short-context, standard. A model the page does not
+/// list is unpriced. `scripts/claude-prices.py` does not check this table.
+const OPENAI: &[(&str, Rates)] = &[
+    ("gpt-6.1-sol", openai(2.0, 0.1, 10.0)),
+    ("gpt-6.1-terra", openai(1.0, 0.05, 5.0)),
+    ("gpt-6-sol", openai(2.0, 0.2, 10.0)),
+    ("gpt-6-luna", openai(0.1, 0.01, 0.5)),
+    ("gpt-5.6-sol", openai(4.0, 0.4, 20.0)),
+    ("gpt-5.6-terra", openai(2.0, 0.2, 12.0)),
+    ("gpt-5.6-luna", openai(0.2, 0.02, 1.2)),
+];
+
+const fn openai(input: f64, cache_read: f64, output: f64) -> Rates {
+    Rates { input, output, cache_read, cache_write: input, cache_write_1h: input }
+}
 
 /// Models the pricing page no longer lists (ov-942, ruling R-106). Their usage
 /// is still in the store and still arrives from old sessions, so they keep the
@@ -188,7 +213,7 @@ fn lookup(model: &str) -> Option<(Rates, &'static str)> {
     };
     // The id Anthropic gave Haiku 3.5 puts the version first.
     let base = if base == "claude-3-5-haiku" { "claude-haiku-3-5".to_string() } else { base };
-    TABLE.iter().chain(RETIRED).find(|(name, _)| *name == base).map(|(name, rates)| (*rates, *name))
+    TABLE.iter().chain(RETIRED).chain(OPENAI).find(|(name, _)| *name == base).map(|(name, rates)| (*rates, *name))
 }
 
 /// What `tokens` would cost on `model` at list price, in millionths of a
@@ -313,8 +338,26 @@ mod tests {
     #[test]
     fn an_unpriced_or_unnamed_model_has_no_estimate() {
         let tokens = TokenCounts { input: 100, ..Default::default() };
-        assert_eq!(estimate(Some("gpt-5.6-luna"), &tokens), None);
+        assert_eq!(estimate(Some("gpt-5.5"), &tokens), None);
+        assert_eq!(estimate(Some("gpt-7-luna"), &tokens), None);
         assert_eq!(estimate(None, &tokens), None);
         assert_eq!(estimate(Some("<synthetic>"), &tokens), None);
+    }
+
+    /// A Codex turn stores input with the cached part already taken out (see
+    /// session_log/usage.rs), so the three buckets are billed once each:
+    /// gpt-6-luna, 10,000 fresh in + 90,000 cached + 2,000 out
+    /// = 10,000*0.10 + 90,000*0.01 + 2,000*0.50 = 1,000 + 900 + 1,000 micro-$/token units.
+    #[test]
+    fn a_codex_turn_bills_fresh_cached_and_output_once_each() {
+        let tokens = TokenCounts { input: 10_000, cache_read: 90_000, output: 2_000, ..Default::default() };
+        assert_eq!(estimate(Some("gpt-6-luna"), &tokens), Some(2_900));
+        let sol = TokenCounts { input: 1_000_000, cache_read: 1_000_000, output: 1_000_000, ..Default::default() };
+        assert_eq!(estimate(Some("gpt-6.1-sol"), &sol), Some(12_100_000));
+        assert_eq!(estimate(Some("gpt-6.1-terra"), &sol), Some(6_050_000));
+        assert_eq!(estimate(Some("gpt-5.6-sol"), &sol), Some(24_400_000));
+        assert_eq!(estimate(Some("gpt-5.6-terra"), &sol), Some(14_200_000));
+        assert_eq!(estimate(Some("gpt-5.6-luna"), &sol), Some(1_420_000));
+        assert_eq!(estimate(Some("gpt-6-sol"), &sol), Some(12_200_000));
     }
 }

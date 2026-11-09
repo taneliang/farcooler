@@ -176,6 +176,18 @@ fn an_older_codex_rollout_reads_the_same_way() {
     assert_eq!(turns[0].models[0].1, TokenCounts { input: 6631, output: 6, cache_read: 4992, ..Default::default() });
 }
 
+/// The real rollout's 11,623 input tokens include 4,992 cached ones; the
+/// stored 6,631 fresh plus 4,992 cached is priced once each (gpt-5.6-sol:
+/// 6,631 x $4 + 4,992 x $0.40 + 6 x $20 = $0.028641), not 11,623 at the full
+/// input rate on top of the cached ones.
+#[test]
+fn a_real_codex_turn_prices_without_counting_cached_input_twice() {
+    let turns = codex(&fixture("codex-complete-turn.jsonl"));
+    let (_, tokens) = &turns[0].models[0];
+    assert_eq!(crate::usage::estimate(Some("gpt-5.6-sol"), tokens), Some(28_641));
+    assert_eq!(crate::usage::estimate(Some("gpt-5.5"), tokens), None, "an unlisted model stays unpriced");
+}
+
 /// A codex turn that wrote no `token_count` reported nothing.
 #[test]
 fn a_codex_turn_without_a_token_count_is_not_reported() {
