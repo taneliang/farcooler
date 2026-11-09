@@ -17,8 +17,8 @@ struct PlanPrStageTests {
     static func line(_ plan: PlanModel, _ n: Int) -> PlanTicketLine { plan.lines[n - 1] }
 
     /// What the core says of ticket `n`'s pull request stage.
-    static func stage(_ plan: PlanModel, _ n: Int) -> PlanView.PageStage? {
-        plan.pages()?.ticket(line(plan, n).task)?.stage
+    static func stage(_ plan: PlanModel, _ n: Int) -> PlanView.DetailStage? {
+        plan.ticketDetails()?.ticket(line(plan, n).task)?.stage
     }
 
     @Test("Every stage kind the runner sends decodes, and the core words each")

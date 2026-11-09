@@ -419,16 +419,16 @@ extension PlanModel {
         lines.first { $0.task == task && $0.stage != .dropped }
     }
 
-    /// What the core says of every ticket's page and every theme's track: nil for a plan with no
+    /// What the core says of every ticket's detail and every theme's track: nil for a plan with no
     /// wire form, or with no core to ask.
-    public func pages(activity: [String: Int64] = [:]) -> PlanView.Pages? {
-        PlanView.build(plan: self, needsYou: 0, activity: activity)?.pages
+    public func ticketDetails(activity: [String: Int64] = [:]) -> PlanView.TicketDetails? {
+        PlanView.build(plan: self, needsYou: 0, activity: activity)?.details
     }
 
     /// A ticket's status line ("Fixing · round 1", "Landed · ac840108"), in the core's words; its
-    /// stage's own word when the core can't be asked. A list of rows asks once (`pages()`) and hands each row the answer.
-    public func status(of line: PlanTicketLine, stage: Bool = true, pages: PlanView.Pages? = nil) -> String {
-        guard let page = (pages ?? self.pages())?.ticket(line.task) else { return line.stage.word }
+    /// stage's own word when the core can't be asked. A list of rows asks once (`ticketDetails()`) and hands each row the answer.
+    public func status(of line: PlanTicketLine, stage: Bool = true, details: PlanView.TicketDetails? = nil) -> String {
+        guard let page = (details ?? self.ticketDetails())?.ticket(line.task) else { return line.stage.word }
         return stage ? page.status : page.statusBesideStage
     }
 
@@ -444,7 +444,7 @@ extension PlanModel {
         let theme = theme(ofTask: task)
         guard line != nil || theme != nil else { return nil }
         // The words are the core's; only a ticket has a stage to say.
-        let page = line.flatMap { pages()?.ticket($0.task) }
+        let page = line.flatMap { ticketDetails()?.ticket($0.task) }
         return PlanTaskLine(line: line, theme: theme, page: page)
     }
 
@@ -468,10 +468,10 @@ public struct PlanTaskLine: Equatable, Sendable {
     public var theme: PlanTheme?
     /// What the core says of the ticket's page: its status beside the stage and the card's own
     /// pull request stage, while its ticket is live (ov-316).
-    public var page: PlanView.TicketPage?
+    public var page: PlanView.TicketDetail?
 
     /// The card's own pull request stage.
-    public var stage: PlanView.PageStage? { page?.stage }
+    public var stage: PlanView.DetailStage? { page?.stage }
 
     /// The ticket's half: "Building", "Waiting · 2nd", "Landed · ac840108"; nil
     /// without a ticket on the line.

@@ -106,8 +106,8 @@ struct PlanStageViewTests {
         }
         // Amber exactly when the stage says it needs a person, read from the
         // stage and not from a list of tickets.
-        let pages = try #require(store.plan.plan.pages())
-        func shown(_ line: PlanTicketLine) -> PlanView.PageStage? { pages.ticket(line.task)?.stage }
+        let details = try #require(store.plan.plan.ticketDetails())
+        func shown(_ line: PlanTicketLine) -> PlanView.DetailStage? { details.ticket(line.task)?.stage }
         for n in 1...15 {
             let line = lines[n - 1]
             let drawn = try await row(n)

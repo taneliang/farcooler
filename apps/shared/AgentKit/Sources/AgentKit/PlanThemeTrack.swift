@@ -2,7 +2,7 @@ import Foundation
 
 // What a theme's week holds (ov-331): its rulings, what landed, the work outside every theme.
 // The track line is gone from the apps (ov-1038): nothing drew it, and the folded Themes
-// section's summary is the core's (`PlanView.pages.trackSummary`).
+// section's summary is the core's (`PlanView.details.trackSummary`).
 
 extension PlanModel {
     /// The standing and settled rulings that name `theme`, in the plan's order.

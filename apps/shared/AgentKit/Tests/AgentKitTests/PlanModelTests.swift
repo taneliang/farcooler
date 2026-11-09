@@ -382,7 +382,7 @@ struct PlanModelTests {
                 Self.line("t2", "reviewing", since: Self.now - 70 * 60_000, stale: true),
                 Self.line("t3", "reviewing", since: Self.now - 3 * Self.hour),
             ])
-        #expect(plan.pages()?.tickets.map(\.stale) == ["No move in 3 h", "No move in an hour", nil])
+        #expect(plan.ticketDetails()?.tickets.map(\.stale) == ["No move in 3 h", "No move in an hour", nil])
     }
 
     // MARK: Records

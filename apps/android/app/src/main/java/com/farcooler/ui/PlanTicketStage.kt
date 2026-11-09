@@ -23,7 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PlanTicket
-import com.farcooler.model.PlanViewPageStage
+import com.farcooler.model.PlanViewDetailStage
 import com.farcooler.model.PlanPrStage
 import com.farcooler.model.PrActions
 import kotlinx.coroutines.launch
@@ -39,7 +39,7 @@ fun PlanTicketStage(
     ticket: PlanTicket,
     stage: PlanPrStage,
     /** The stage as the core words it. */
-    shown: PlanViewPageStage,
+    shown: PlanViewDetailStage,
     markReady: (suspend (PlanTicket, PlanPrStage) -> String?)?,
     modifier: Modifier = Modifier,
 ) {

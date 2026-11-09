@@ -390,6 +390,95 @@
           }
         ]
       },
+      "details": {
+        "tickets": [
+          {
+            "id": "t-ov-487",
+            "stage": null,
+            "stale": null,
+            "status": "Landing · in Landing 86",
+            "status_beside_stage": "Landing · in Landing 86"
+          },
+          {
+            "id": "t-ov-485",
+            "stage": null,
+            "stale": null,
+            "status": "Waiting · in Landing 86",
+            "status_beside_stage": "Waiting · in Landing 86"
+          },
+          {
+            "id": "t-ov-300",
+            "stage": null,
+            "stale": null,
+            "status": "Waiting · in Landing 84",
+            "status_beside_stage": "Waiting · in Landing 84"
+          },
+          {
+            "id": "t-ov-301",
+            "stage": null,
+            "stale": null,
+            "status": "Waiting · in Landing 89",
+            "status_beside_stage": "Waiting · in Landing 89"
+          },
+          {
+            "id": "t-ov-302",
+            "stage": null,
+            "stale": null,
+            "status": "Waiting",
+            "status_beside_stage": "Waiting"
+          },
+          {
+            "id": "t-ov-310",
+            "stage": null,
+            "stale": null,
+            "status": "Building",
+            "status_beside_stage": "Building"
+          },
+          {
+            "id": "t-ov-311",
+            "stage": null,
+            "stale": null,
+            "status": "In Review",
+            "status_beside_stage": "In Review"
+          },
+          {
+            "id": "t-ov-312",
+            "stage": null,
+            "stale": null,
+            "status": "Fixing · round 2",
+            "status_beside_stage": "Fixing · round 2"
+          },
+          {
+            "id": "t-ov-482",
+            "stage": null,
+            "stale": "No move in 30 h",
+            "status": "In Review",
+            "status_beside_stage": "In Review"
+          },
+          {
+            "id": "t-ov-474",
+            "stage": null,
+            "stale": "No move in 60 h",
+            "status": "Building",
+            "status_beside_stage": "Building"
+          },
+          {
+            "id": "task-l-old-queued",
+            "stage": null,
+            "stale": null,
+            "status": "Waiting",
+            "status_beside_stage": "Waiting"
+          },
+          {
+            "id": "t-ov-460",
+            "stage": null,
+            "stale": null,
+            "status": "Landed · ab12cd34",
+            "status_beside_stage": "Landed · ab12cd34"
+          }
+        ],
+        "track_summary": "1 waiting on you · 2 moving"
+      },
       "in_review": [
         {
           "accessibility": "Title of ov-311, Trustworthy agent view, In Review · ov-311 · 2 h",
@@ -705,95 +794,6 @@
       "needs_you": 2,
       "now": 1800000000000,
       "on_landed_landing": [],
-      "pages": {
-        "tickets": [
-          {
-            "id": "t-ov-487",
-            "stage": null,
-            "stale": null,
-            "status": "Landing · in Landing 86",
-            "status_beside_stage": "Landing · in Landing 86"
-          },
-          {
-            "id": "t-ov-485",
-            "stage": null,
-            "stale": null,
-            "status": "Waiting · in Landing 86",
-            "status_beside_stage": "Waiting · in Landing 86"
-          },
-          {
-            "id": "t-ov-300",
-            "stage": null,
-            "stale": null,
-            "status": "Waiting · in Landing 84",
-            "status_beside_stage": "Waiting · in Landing 84"
-          },
-          {
-            "id": "t-ov-301",
-            "stage": null,
-            "stale": null,
-            "status": "Waiting · in Landing 89",
-            "status_beside_stage": "Waiting · in Landing 89"
-          },
-          {
-            "id": "t-ov-302",
-            "stage": null,
-            "stale": null,
-            "status": "Waiting",
-            "status_beside_stage": "Waiting"
-          },
-          {
-            "id": "t-ov-310",
-            "stage": null,
-            "stale": null,
-            "status": "Building",
-            "status_beside_stage": "Building"
-          },
-          {
-            "id": "t-ov-311",
-            "stage": null,
-            "stale": null,
-            "status": "In Review",
-            "status_beside_stage": "In Review"
-          },
-          {
-            "id": "t-ov-312",
-            "stage": null,
-            "stale": null,
-            "status": "Fixing · round 2",
-            "status_beside_stage": "Fixing · round 2"
-          },
-          {
-            "id": "t-ov-482",
-            "stage": null,
-            "stale": "No move in 30 h",
-            "status": "In Review",
-            "status_beside_stage": "In Review"
-          },
-          {
-            "id": "t-ov-474",
-            "stage": null,
-            "stale": "No move in 60 h",
-            "status": "Building",
-            "status_beside_stage": "Building"
-          },
-          {
-            "id": "task-l-old-queued",
-            "stage": null,
-            "stale": null,
-            "status": "Waiting",
-            "status_beside_stage": "Waiting"
-          },
-          {
-            "id": "t-ov-460",
-            "stage": null,
-            "stale": null,
-            "status": "Landed · ab12cd34",
-            "status_beside_stage": "Landed · ab12cd34"
-          }
-        ],
-        "track_summary": "1 waiting on you · 2 moving"
-      },
       "schema": 1,
       "sections": [
         {

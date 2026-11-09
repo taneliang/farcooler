@@ -360,7 +360,7 @@ private fun LazyListScope.cardRows(
                 supportingContent = {
                     Column {
                         Text(status)
-                        val stage = if (showsStage) PlanViews.page(plan, ref.task)?.stage else null
+                        val stage = if (showsStage) PlanViews.detail(plan, ref.task)?.stage else null
                         stage?.let {
                             Text(
                                 it.row,
@@ -399,7 +399,7 @@ fun PlanTicketPage(
     markReady: (suspend (PlanTicket, com.farcooler.model.PlanPrStage) -> String?)? = null,
 ) {
     val theme = plan.themeOf(ticket)
-    val page = PlanViews.page(plan, ticket.task)
+    val page = PlanViews.detail(plan, ticket.task)
     val place = listOf(
         ticket.worktreePath, ticket.branch.takeIf { it != ticket.worktreePath }.orEmpty(),
         ticket.landing?.let { "in ${com.farcooler.model.PlanLanding.label(it)}" }.orEmpty(),

@@ -187,7 +187,7 @@ struct PlanSectionsList: View {
         } header: {
             PlanHeader(title: section.title, count: section.count).accessibilityIdentifier("plan-themes")
         } footer: {
-            if let summary = view.pages.trackSummary {
+            if let summary = view.details.trackSummary {
                 Text(summary).accessibilityIdentifier("plan-themes-summary")
             }
         }

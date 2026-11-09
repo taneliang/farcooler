@@ -1,4 +1,4 @@
-//! The pages' words and the Themes summary (ov-1038): the cases Android's `PlanTrackTest` and AgentKit's
+//! The ticket details' words and the Themes summary (ov-1038): the cases Android's `PlanTrackTest` and AgentKit's
 //! `PlanThemeTrackTests` held, now in the one place that says them.
 
 use serde_json::{Value, json};
@@ -29,16 +29,16 @@ fn ticket(name: &str, stage: &str, extra: Value) -> Value {
     l
 }
 
-fn pages_of(themes: Vec<Value>, lines: Vec<Value>) -> Pages {
+fn details_of(themes: Vec<Value>, lines: Vec<Value>) -> TicketDetails {
     let request = json!({ "schema": SCHEMA, "plan": { "now_ms": NOW, "themes": themes, "lines": lines } });
     let answer: Value = serde_json::from_str(&json(&request.to_string())).unwrap();
     assert!(answer["error"].is_null(), "{answer}");
-    serde_json::from_value::<PlanView>(answer["view"].clone()).unwrap().pages
+    serde_json::from_value::<PlanView>(answer["view"].clone()).unwrap().details
 }
 
-/// The pages as the core builds them, with the themes' kinds (the wire carries only what they sum to).
-fn built(plan: Value) -> Pages {
-    view(&serde_json::from_value(plan).unwrap(), &input::Context::default(), None).pages
+/// The details as the core builds them, with the themes' kinds (the wire carries only what they sum to).
+fn built(plan: Value) -> TicketDetails {
+    view(&serde_json::from_value(plan).unwrap(), &input::Context::default(), None).details
 }
 
 fn kind(theme: Value, lines: Vec<Value>) -> TrackKind {
@@ -104,9 +104,9 @@ fn the_summary_counts_asks_moving_themes_and_quiet_ones_leaving_out_zeros() {
     };
     let themes = vec![t("A", "active", "?", "c0"), t("B", "active", "", "c1"), t("C", "active", "?", "c2"), t("D", "paused", "", "c3")];
     let moving = json!({ "task": "c0", "key": "c0", "title": "w", "stage": "building", "stage_since": NOW - 600_000 });
-    let pages = pages_of(themes, vec![moving]);
-    assert_eq!(pages.track_summary.as_deref(), Some("2 waiting on you · 1 moving · 2 quiet"));
-    assert_eq!(pages_of(vec![theme(json!({ "counts": { "done": 2 } }))], vec![]).track_summary, None);
+    let details = details_of(themes, vec![moving]);
+    assert_eq!(details.track_summary.as_deref(), Some("2 waiting on you · 1 moving · 2 quiet"));
+    assert_eq!(details_of(vec![theme(json!({ "counts": { "done": 2 } }))], vec![]).track_summary, None);
 }
 
 #[test]
@@ -115,27 +115,27 @@ fn a_ticket_page_says_its_status_its_stage_and_its_stale_warning() {
         "stale": true, "stage_since": NOW - 3 * HOUR,
         "pr_stage": { "kind": "approved_checks_failing", "pr_number": 31, "unresolved_threads": 2 },
     }));
-    let pages = pages_of(vec![], vec![line, ticket("b", "building", json!({}))]);
-    let a = &pages.tickets[0];
+    let details = details_of(vec![], vec![line, ticket("b", "building", json!({}))]);
+    let a = &details.tickets[0];
     assert_eq!(a.stale.as_deref(), Some("No move in 3 h"));
     assert_eq!((a.status.as_str(), a.status_beside_stage.as_str()), ("Approved, Checks Failing", "Approved"));
     let stage = a.stage.as_ref().unwrap();
     assert_eq!((stage.words.as_str(), stage.row.as_str()), ("Checks Failing", "Checks Failing"));
     assert_eq!((stage.detail.as_deref(), stage.attention), (Some("PR 31 · 2 threads open"), true));
-    assert_eq!((pages.tickets[1].status.as_str(), pages.tickets[1].status_beside_stage.as_str()), ("Building", "Building"));
-    assert!(pages.tickets[1].stage.is_none() && pages.tickets[1].stale.is_none());
+    assert_eq!((details.tickets[1].status.as_str(), details.tickets[1].status_beside_stage.as_str()), ("Building", "Building"));
+    assert!(details.tickets[1].stage.is_none() && details.tickets[1].stale.is_none());
 }
 
 /// The runner's own stage messages (`test/fixtures/plan-stages.json`), worded for Android: every
-/// kind says what the pages used to say natively.
+/// kind says what the page used to say natively.
 #[test]
 fn every_pull_request_stage_kind_has_its_words_on_a_ticket_page() {
     let fixture: Value = serde_json::from_str(include_str!("../../../../test/fixtures/plan-stages.json")).unwrap();
     let plan = fixture.get("plan").unwrap_or(&fixture).clone();
     let request = json!({ "schema": SCHEMA, "plan": plan, "context": { "style": "material" } });
     let answer: Value = serde_json::from_str(&json(&request.to_string())).unwrap();
-    let pages = serde_json::from_value::<PlanView>(answer["view"].clone()).unwrap().pages;
-    let words: Vec<Option<&str>> = pages.tickets.iter().take(14).map(|p| p.stage.as_ref().map(|s| s.words.as_str())).collect();
+    let details = serde_json::from_value::<PlanView>(answer["view"].clone()).unwrap().details;
+    let words: Vec<Option<&str>> = details.tickets.iter().take(14).map(|p| p.stage.as_ref().map(|s| s.words.as_str())).collect();
     assert_eq!(
         words,
         [
@@ -145,20 +145,20 @@ fn every_pull_request_stage_kind_has_its_words_on_a_ticket_page() {
             Some("Queued, position 2"), Some("Merged"), Some("Closed"), Some("PR state unknown"),
         ]
     );
-    let status = |n: usize| (pages.tickets[n - 1].status.as_str(), pages.tickets[n - 1].status_beside_stage.as_str());
+    let status = |n: usize| (details.tickets[n - 1].status.as_str(), details.tickets[n - 1].status_beside_stage.as_str());
     assert_eq!(status(1), ("In review", "In review"));
     assert_eq!(status(6), ("Changes requested", "In review"));
     assert_eq!(status(8), ("Approved, checks failing", "Approved"));
     assert_eq!(status(11), ("Queued, position 2", "In review"));
     assert_eq!(status(14), ("In review · PR state unknown", "In review"));
     assert_eq!(status(15), ("In review", "In review"));
-    let row = |n: usize| pages.tickets[n - 1].stage.as_ref().map(|s| (s.row.as_str(), s.attention));
+    let row = |n: usize| details.tickets[n - 1].stage.as_ref().map(|s| (s.row.as_str(), s.attention));
     assert_eq!(row(8), Some(("Checks failing", true)));
     assert_eq!(row(4), Some(("Waiting on alice and 2 others", false)));
     assert_eq!(row(7), Some(("Approved, checks running", false)));
     assert_eq!(row(15), None);
     // The facts under the words: the pull request, and its threads only when some are open.
-    let detail = |n: usize| pages.tickets[n - 1].stage.as_ref().and_then(|s| s.detail.as_deref());
+    let detail = |n: usize| details.tickets[n - 1].stage.as_ref().and_then(|s| s.detail.as_deref());
     assert_eq!(detail(4), Some("PR 31 · 2 threads open"));
     assert_eq!(detail(5), Some("PR 32"));
 }
@@ -173,9 +173,9 @@ fn every_shared_track_case_reads_as_written() {
     assert!(cases.len() >= 30);
     for case in cases {
         let name = case["name"].as_str().unwrap_or("?");
-        let pages = built(case["plan"].clone());
+        let details = built(case["plan"].clone());
         if let Some(want) = case["kind"].as_str() {
-            let got = format!("{:?}", pages.tracks[0]);
+            let got = format!("{:?}", details.tracks[0]);
             let snake: String = got.chars().enumerate().fold(String::new(), |mut out, (i, c)| {
                 if c.is_uppercase() && i > 0 {
                     out.push('_');
@@ -186,24 +186,24 @@ fn every_shared_track_case_reads_as_written() {
             assert_eq!(snake, want, "{name}");
         }
         if let Some(summary) = case.get("summary") {
-            assert_eq!(pages.track_summary.as_deref(), summary.as_str(), "{name}: the summary");
+            assert_eq!(details.track_summary.as_deref(), summary.as_str(), "{name}: the summary");
         }
     }
 }
 
-/// A task with a live line and a dropped one gets one page, the live one: a first-match lookup in an app
-/// then finds the page its own `line(ofTask:)` would draw.
+/// A task with a live line and a dropped one gets one detail, the live one: a first-match lookup in an app
+/// then finds the detail its own `line(ofTask:)` would draw.
 #[test]
 fn a_task_with_a_live_line_and_a_dropped_one_has_only_the_live_page() {
     let dropped = ticket("old", "dropped", json!({ "stage_since": NOW - DAY }));
     let live = ticket("new", "building", json!({}));
     for lines in [vec![dropped.clone(), live.clone()], vec![live.clone(), dropped.clone()]] {
-        let pages = pages_of(vec![], lines);
-        assert_eq!(pages.tickets.len(), 1);
-        assert_eq!(pages.tickets[0].status, "Building");
+        let details = details_of(vec![], lines);
+        assert_eq!(details.tickets.len(), 1);
+        assert_eq!(details.tickets[0].status, "Building");
     }
-    // Alone, a dropped line keeps its page.
-    assert_eq!(pages_of(vec![], vec![dropped]).tickets.len(), 1);
+    // Alone, a dropped line keeps its detail.
+    assert_eq!(details_of(vec![], vec![dropped]).tickets.len(), 1);
 }
 
 /// The Mac and the iPhone's words for the same stage kinds (`Style::Apple` is what a request with no style
@@ -212,8 +212,8 @@ fn a_task_with_a_live_line_and_a_dropped_one_has_only_the_live_page() {
 fn every_pull_request_stage_kind_has_its_apple_words_on_a_ticket_page() {
     let fixture: Value = serde_json::from_str(include_str!("../../../../test/fixtures/plan-stages.json")).unwrap();
     let plan = fixture.get("plan").unwrap_or(&fixture).clone();
-    let pages = built(plan);
-    let words: Vec<Option<&str>> = pages.tickets.iter().take(14).map(|p| p.stage.as_ref().map(|s| s.words.as_str())).collect();
+    let details = built(plan);
+    let words: Vec<Option<&str>> = details.tickets.iter().take(14).map(|p| p.stage.as_ref().map(|s| s.words.as_str())).collect();
     assert_eq!(
         words,
         [

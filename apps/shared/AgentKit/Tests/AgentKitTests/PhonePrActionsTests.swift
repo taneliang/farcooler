@@ -43,7 +43,7 @@ struct PhonePrActionsTests {
     func rowWords() throws {
         let plan = try Self.plan()
         let words = try ["ov-1", "ov-2", "ov-3", "ov-5", "ov-6", "ov-8", "ov-14", "00001100"].map {
-            plan.pages()?.ticket(try Self.line(plan, $0).task)?.stage?.row
+            plan.ticketDetails()?.ticket(try Self.line(plan, $0).task)?.stage?.row
         }
         #expect(
             words == [

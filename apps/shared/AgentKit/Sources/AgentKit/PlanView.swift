@@ -253,7 +253,7 @@ public struct PlanView: Decodable, Equatable, Sendable {
     }
 
     /// A pull request's stage on a ticket's page, in the core's words.
-    public struct PageStage: Decodable, Equatable, Sendable {
+    public struct DetailStage: Decodable, Equatable, Sendable {
         /// The stage, leading with the problem when a person has to act.
         public var words: String
         /// The stage alone in one phrase, state first ("Approved, Checks Failing").
@@ -266,24 +266,24 @@ public struct PlanView: Decodable, Equatable, Sendable {
     }
 
     /// What a ticket's page says that its card does not (ov-1038).
-    public struct TicketPage: Decodable, Equatable, Sendable {
+    public struct TicketDetail: Decodable, Equatable, Sendable {
         /// The ticket's task id.
         public var id: String
         /// "Fixing · round 1", "Landed · ac840108".
         public var status: String
         /// `status` when the stage is drawn on a line of its own.
         public var statusBesideStage: String
-        public var stage: PageStage?
+        public var stage: DetailStage?
         /// "No move in 2 h".
         public var stale: String?
     }
 
-    public struct Pages: Decodable, Equatable, Sendable {
-        public var tickets: [TicketPage]
+    public struct TicketDetails: Decodable, Equatable, Sendable {
+        public var tickets: [TicketDetail]
         /// "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded.
         public var trackSummary: String?
 
-        public func ticket(_ task: String) -> TicketPage? { tickets.first { $0.id == task } }
+        public func ticket(_ task: String) -> TicketDetail? { tickets.first { $0.id == task } }
     }
 
     public struct Themes: Decodable, Equatable, Sendable {
@@ -314,8 +314,8 @@ public struct PlanView: Decodable, Equatable, Sendable {
     public var themes: Themes
     /// The plan column beside the conversation (ov-867), from the same read.
     public var column: PlanColumn
-    /// What ticket pages and theme tracks say (ov-1038).
-    public var pages: Pages
+    /// What ticket details and the Themes summary say (ov-1038).
+    public var details: TicketDetails
 
     /// The section of `kind`, when it's drawn.
     public func section(_ kind: SectionKind) -> Section? { sections.first { $0.kind == kind } }

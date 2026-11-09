@@ -265,36 +265,36 @@ data class PlanViewThemes(
     @SerialName("finished_words") val finishedWords: String? = null,
 )
 
-/** A pull request's stage on a ticket's page, in the core's words. */
+/** A pull request's stage on a ticket's detail, in the core's words. */
 @Serializable
-data class PlanViewPageStage(
+data class PlanViewDetailStage(
     /** The stage, leading with the problem when a person has to act. */
     val words: String,
-    /** What a card row under the page draws. */
+    /** What a card row under the detail draws. */
     val row: String,
     /** "PR 31 · 2 threads open". */
     val detail: String? = null,
     val attention: Boolean = false,
 )
 
-/** What a ticket's page says that its card does not (ov-1038). */
+/** What a ticket's detail says that its card does not (ov-1038). */
 @Serializable
-data class PlanViewTicketPage(
+data class PlanViewTicketDetail(
     /** The ticket's task id. */
     val id: String,
     /** "Fixing · round 1", "Landed · ac840108". */
     val status: String,
     /** [status] when the stage is drawn on a line of its own. */
     @SerialName("status_beside_stage") val statusBesideStage: String,
-    val stage: PlanViewPageStage? = null,
+    val stage: PlanViewDetailStage? = null,
     /** "No move in 2 h". */
     val stale: String? = null,
 )
 
-/** The pages of a plan's tickets. */
+/** The ticket details of a plan. */
 @Serializable
-data class PlanViewPages(val tickets: List<PlanViewTicketPage> = emptyList()) {
-    fun ticket(task: String): PlanViewTicketPage? = tickets.firstOrNull { it.id == task }
+data class PlanViewTicketDetails(val tickets: List<PlanViewTicketDetail> = emptyList()) {
+    fun ticket(task: String): PlanViewTicketDetail? = tickets.firstOrNull { it.id == task }
 }
 
 /** The Plan's view model, decoded: every section to draw, in order, and the rows of each. */
@@ -316,7 +316,7 @@ data class PlanView(
     @SerialName("landed_today") val landedToday: List<PlanViewTicket> = emptyList(),
     val agents: PlanViewAgents = PlanViewAgents(),
     val themes: PlanViewThemes = PlanViewThemes(),
-    val pages: PlanViewPages = PlanViewPages(),
+    val details: PlanViewTicketDetails = PlanViewTicketDetails(),
 ) {
     fun section(kind: PlanViewKind): PlanViewSection? = sections.firstOrNull { it.kind == kind }
 
@@ -391,11 +391,11 @@ object PlanViews {
         }
     }
 
-    /** A ticket's page: its status, its pull request's stage and its stale warning, as the core says them. */
-    fun page(plan: Plan?, task: String): PlanViewTicketPage? = plan?.let { of(it)?.pages?.ticket(task) }
+    /** A ticket's detail: its status, its pull request's stage and its stale warning, as the core says them. */
+    fun detail(plan: Plan?, task: String): PlanViewTicketDetail? = plan?.let { of(it)?.details?.ticket(task) }
 
     /** A ticket's status line; its stage's own word when the core can't be asked. */
-    fun status(plan: Plan?, ticket: PlanTicket): String = page(plan, ticket.task)?.status ?: PlanWords.state(ticket)
+    fun status(plan: Plan?, ticket: PlanTicket): String = detail(plan, ticket.task)?.status ?: PlanWords.state(ticket)
 
     @Synchronized
     fun of(

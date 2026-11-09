@@ -22,8 +22,8 @@ use super::input::{Agent, Landing, Line, Plan, PrStage, Theme};
 use super::words::{self, DOT, Style};
 use super::*;
 
-mod pages;
-pub use pages::{PageStage, Pages, TicketPage, TrackKind};
+mod ticket_detail;
+pub use ticket_detail::{DetailStage, TicketDetails, TicketDetail, TrackKind};
 
 /// A ticket's stage, from the wire's word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -1007,7 +1007,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         .collect();
 
     let column = super::column::column(&r);
-    let pages = pages::pages(&r);
+    let details = ticket_detail::details(&r);
     PlanView {
         schema: SCHEMA,
         now: plan.now_ms,
@@ -1022,6 +1022,6 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         agents,
         themes,
         column,
-        pages,
+        details,
     }
 }

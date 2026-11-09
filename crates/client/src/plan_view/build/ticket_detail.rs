@@ -1,4 +1,4 @@
-//! What a ticket's page says, and the Themes summary (ov-1038): the words the pages used to
+//! What a ticket's page says, and the Themes summary (ov-1038): the words the page used to
 //! work out natively, from the same plan the cards read, so the apps only draw them.
 
 use serde::{Deserialize, Serialize};
@@ -11,13 +11,13 @@ const QUIET_AFTER_MS: i64 = 24 * 3_600_000;
 
 /// A pull request's stage on a ticket's page.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PageStage {
+pub struct DetailStage {
     /// The stage in the Plan's words, leading with the problem when a person has to act.
     pub words: String,
     /// The stage alone in one phrase, state first ("Approved, Checks Failing"), for a line with no
     /// room for two.
     pub full: String,
-    /// What a card row under the page draws: the problem alone when a person has to act, else the
+    /// What a card row under the detail draws: the problem alone when a person has to act, else the
     /// stage in one phrase, state first.
     pub row: String,
     /// "PR 31 · 2 threads open", when the ticket has a pull request.
@@ -28,14 +28,14 @@ pub struct PageStage {
 
 /// What a ticket's page says that its card does not.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TicketPage {
+pub struct TicketDetail {
     /// The ticket's task id.
     pub id: String,
     /// "Fixing · round 1", "Landed · ac840108": its stage with what it needs said beside it.
     pub status: String,
     /// `status` when the stage is drawn on a line of its own: only what that stage leaves to the ticket.
     pub status_beside_stage: String,
-    pub stage: Option<PageStage>,
+    pub stage: Option<DetailStage>,
     /// "No move in 2 h", for a stale ticket.
     pub stale: Option<String>,
 }
@@ -54,11 +54,11 @@ pub enum TrackKind {
     Done,
 }
 
-/// The pages of a plan, and the one line the Themes section says when it is folded.
+/// The ticket details of a plan, and the one line the Themes section says when it is folded.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Pages {
+pub struct TicketDetails {
     /// One per ticket the plan lists, a dropped line only where its task has no other.
-    pub tickets: Vec<TicketPage>,
+    pub tickets: Vec<TicketDetail>,
     /// Where each theme the plan shows stands (active, then paused, then done): what the summary counts.
     /// Never sent; the tests read it.
     #[serde(skip)]
@@ -68,9 +68,9 @@ pub struct Pages {
 }
 
 impl Reader<'_> {
-    fn page(&self, line: &Line) -> TicketPage {
+    fn detail(&self, line: &Line) -> TicketDetail {
         let shown = self.shown_stage(line);
-        TicketPage {
+        TicketDetail {
             id: line.task.clone(),
             status: self.status(line, true),
             status_beside_stage: self.status(line, shown.is_none()),
@@ -79,7 +79,7 @@ impl Reader<'_> {
                 let attention = pr_needs_attention(s);
                 let full = pr_full_words(s, self.style).unwrap_or_else(|| words.clone());
                 let row = if attention { words.clone() } else { full.clone() };
-                Some(PageStage { words, full, row, detail: pr_detail(s), attention })
+                Some(DetailStage { words, full, row, detail: pr_detail(s), attention })
             }),
             stale: self.stale(line),
         }
@@ -137,7 +137,7 @@ impl Reader<'_> {
     }
 }
 
-pub(super) fn pages(r: &Reader) -> Pages {
+pub(super) fn details(r: &Reader) -> TicketDetails {
     let mut shown: Vec<&Theme> = r.plan.themes.iter().filter(|t| t.state != "dropped").collect();
     let rank = |t: &Theme| match t.state.as_str() {
         "active" => 0,
@@ -155,13 +155,13 @@ pub(super) fn pages(r: &Reader) -> Pages {
         (active.iter().filter(|(_, k)| **k == TrackKind::Quiet).count(), "quiet"),
     ];
     let parts: Vec<String> = counts.iter().filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
-    Pages {
+    TicketDetails {
         tickets: r
             .plan
             .lines
             .iter()
             .filter(|l| r.stage(l) != Stage::Dropped || !r.plan.lines.iter().any(|o| o.task == l.task && r.stage(o) != Stage::Dropped))
-            .map(|l| r.page(l))
+            .map(|l| r.detail(l))
             .collect(),
         tracks,
         track_summary: (!parts.is_empty()).then(|| parts.join(DOT)),

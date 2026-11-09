@@ -250,16 +250,16 @@ struct PlanThemePage: View {
                 }
             }
             let lines = plan.lines(in: theme)
-            let pages = plan.pages()
+            let details = plan.ticketDetails()
             if !lines.isEmpty {
                 Section("Tickets") {
                     ForEach(lines) { line in
-                        PlanPageTicketRow(line: line, plan: plan, pages: pages) { context.onOpen(.ticket(line.task)) }
+                        PlanPageTicketRow(line: line, plan: plan, details: details) { context.onOpen(.ticket(line.task)) }
                     }
                 }
             }
             Section {
-                PlanCardRows(refs: theme.cards, plan: plan, pages: pages, context: context)
+                PlanCardRows(refs: theme.cards, plan: plan, details: details, context: context)
             } header: {
                 HStack {
                     Text("Cards")
@@ -310,7 +310,7 @@ struct PlanThemePage: View {
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
     let plan: PlanModel
-    let pages: PlanView.Pages?
+    let details: PlanView.TicketDetails?
     let action: () -> Void
 
     var body: some View {
@@ -323,7 +323,7 @@ private struct PlanPageTicketRow: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(line.heading).font(.subheadline.weight(.medium))
-                    Text(plan.status(of: line, pages: pages)).font(.footnote).foregroundStyle(.secondary)
+                    Text(plan.status(of: line, details: details)).font(.footnote).foregroundStyle(.secondary)
                     // Each key's title in what VoiceOver says (ov-299).
                     TaskKeyText(keysIn: line.key)
                         .font(.system(.caption, design: .monospaced))
@@ -351,7 +351,7 @@ private struct PlanCardRows: View {
     let refs: [PlanCardRef]
     let plan: PlanModel
     /// The plan's pages, asked once by the page that lists the cards.
-    var pages: PlanView.Pages?
+    var details: PlanView.TicketDetails?
     let context: PlanPageContext
     /// Whether each card says where its own pull request stands (ov-317): on a
     /// live ticket's page, where its card has a pull request of its own.
@@ -378,11 +378,11 @@ private struct PlanCardRows: View {
         }
     }
 
-    private func stage(of ref: PlanCardRef) -> PlanView.PageStage? {
-        showsStage ? (pages ?? plan.pages())?.ticket(ref.task)?.stage : nil
+    private func stage(of ref: PlanCardRef) -> PlanView.DetailStage? {
+        showsStage ? (details ?? plan.ticketDetails())?.ticket(ref.task)?.stage : nil
     }
 
-    private func card(key: String, title: String, status: String, stage: PlanView.PageStage? = nil) -> some View {
+    private func card(key: String, title: String, status: String, stage: PlanView.DetailStage? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(key).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             Text(title).font(.subheadline).lineLimit(3)
@@ -415,7 +415,7 @@ struct PlanTicketPage: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let page = plan.pages()?.ticket(line.task)
+        let page = plan.ticketDetails()?.ticket(line.task)
         List {
             Section {
                 VStack(alignment: .leading, spacing: PaneMetrics.step) {
@@ -520,7 +520,7 @@ struct PlanTicketStageBlock: View {
     let line: PlanTicketLine
     let stage: PlanPrStage
     /// The stage as the core words it.
-    let shown: PlanView.PageStage
+    let shown: PlanView.DetailStage
     /// Nil where this phone may not act on pull requests.
     let markReady: ((PlanTicketLine, PlanPrStage) async -> String?)?
     @Environment(\.colorScheme) private var scheme

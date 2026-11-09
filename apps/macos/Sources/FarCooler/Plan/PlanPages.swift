@@ -302,12 +302,12 @@ struct PlanThemePage: View {
 
     @ViewBuilder private var tickets: some View {
         let lines = plan.lines(in: theme)
-        let pages = plan.pages()
+        let details = plan.ticketDetails()
         if !lines.isEmpty {
             PlanSection(title: "Tickets") {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(lines) { line in
-                        PlanPageTicketRow(line: line, plan: plan, pages: pages) { context.onOpen(.ticket(line.id)) }
+                        PlanPageTicketRow(line: line, plan: plan, details: details) { context.onOpen(.ticket(line.id)) }
                     }
                 }
             }
@@ -329,7 +329,7 @@ struct PlanThemePage: View {
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
     let plan: PlanModel
-    let pages: PlanView.Pages?
+    let details: PlanView.TicketDetails?
     let action: () -> Void
     @State private var hovering = false
 
@@ -345,7 +345,7 @@ private struct PlanPageTicketRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
-                Text(plan.status(of: line, pages: pages))
+                Text(plan.status(of: line, details: details))
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .foregroundStyle(.quietInk)
                     .lineLimit(1)
@@ -421,7 +421,7 @@ struct PlanTicketRecordPage: View {
 
     var body: some View {
         // The words are the core's: the status beside the stage, the stage, the stale warning.
-        let page = plan.pages()?.ticket(line.task)
+        let page = plan.ticketDetails()?.ticket(line.task)
         PlanDocument(id: "plan-ticket-record-page") {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 // The stage has its own line below, so the title keeps the state alone.
@@ -492,7 +492,7 @@ struct PlanTicketRecordPage: View {
     }
 
     /// The stage, and the pull request it reads from, to open on GitHub.
-    @ViewBuilder private func stageLine(_ stage: PlanPrStage, _ shown: PlanView.PageStage, stacked: Bool) -> some View {
+    @ViewBuilder private func stageLine(_ stage: PlanPrStage, _ shown: PlanView.DetailStage, stacked: Bool) -> some View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.tight)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.tight))
         layout {
             PlanStageText(stage: shown, words: shown.words)
@@ -620,7 +620,7 @@ struct PlanTaskLineView: View {
 /// the tooltip says it all: the full words, then the pull request's number and
 /// open threads.
 struct PlanStageText: View {
-    let stage: PlanView.PageStage
+    let stage: PlanView.DetailStage
     let words: String
     @Environment(\.colorScheme) private var scheme
 
