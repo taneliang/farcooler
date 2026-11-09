@@ -354,3 +354,16 @@ fn a_landing_ticket_carries_its_mark_and_warnings() {
     assert_eq!(owner.second, "ov-4");
     assert_eq!(owner.accessibility, "Title of ov-4, Needs you");
 }
+
+/// Android draws a working ticket's agent as a line of its own, and its second
+/// line says only the stage and key; the Apple apps and the web say the agent
+/// and the time in stage in the second line.
+#[test]
+fn androids_second_line_leaves_the_agent_to_its_own_line() {
+    let case = cases().into_iter().find(|c| c["name"] == "board-with-phases").unwrap();
+    let card = |style: &str| view_of(request(&case, style)).building.into_iter().find(|c| c.key == "ov-310").unwrap();
+    let (apple, material) = (card("apple"), card("material"));
+    assert_eq!(apple.second, "Building · ov-310 · Builder · sonnet · 380K · 1 h");
+    assert_eq!(material.second, "Building · ov-310");
+    assert_eq!(material.agent.unwrap().line, "Builder · sonnet · 380K");
+}

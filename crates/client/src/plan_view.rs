@@ -105,6 +105,9 @@ pub struct AgentRef {
     pub who: String,
     /// "380K"; nil when no turn stated any.
     pub tokens: Option<String>,
+    /// Who it is and what it has spent, as its own line under a card's
+    /// second line on Android ("Builder · sonnet · 380K").
+    pub line: String,
     /// The pane, to open it.
     pub terminal: Option<String>,
     /// The model as recorded ("claude-opus-4-1"), which a screen reader says

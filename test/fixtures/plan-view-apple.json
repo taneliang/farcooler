@@ -52,6 +52,7 @@
           "accessibility": "The themes grid, Trustworthy agent view, Building · ov-310 · Builder · sonnet · 380K · 1 h, Prepare Workspace · Approval Required",
           "agent": {
             "id": "pane:b1",
+            "line": "Builder · sonnet · 380K",
             "model": "sonnet",
             "terminal": null,
             "tokens": "380K",
@@ -480,6 +481,7 @@
           },
           "lander": {
             "id": "pane:i1",
+            "line": "Lander · opus · 1.4M",
             "model": "opus",
             "terminal": null,
             "tokens": "1.4M",

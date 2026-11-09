@@ -375,10 +375,13 @@ impl<'a> Reader<'a> {
     }
 
     fn agent_ref(&self, agent: &Agent) -> AgentRef {
+        let who = who(agent, self.style);
+        let tokens = (agent.spend.total() > 0).then(|| tokens(agent.spend.total()));
         AgentRef {
             id: agent.id.clone(),
-            who: who(agent, self.style),
-            tokens: (agent.spend.total() > 0).then(|| tokens(agent.spend.total())),
+            line: [Some(who.clone()), tokens.clone()].into_iter().flatten().collect::<Vec<_>>().join(DOT),
+            who,
+            tokens,
             terminal: agent.terminal.clone(),
             model: agent.model.clone(),
         }
@@ -554,11 +557,13 @@ impl Reader<'_> {
                 parts.push(format!("{landed} landed"));
             }
             parts.push(line.key.clone());
-            if let Some(agent) = agent {
-                let r = self.agent_ref(agent);
-                parts.push([Some(r.who), r.tokens].into_iter().flatten().collect::<Vec<_>>().join(DOT));
+            // Android draws the agent as a line of its own and no time in
+            // stage; the Apple apps and the web say both in this one line.
+            let material = style == Style::Material;
+            if let Some(agent) = agent.filter(|_| !material) {
+                parts.push(self.agent_ref(agent).line);
             }
-            if warning.is_none() && line.stage_since > 0 && now > line.stage_since {
+            if !material && warning.is_none() && line.stage_since > 0 && now > line.stage_since {
                 parts.push(words::span(now - line.stage_since));
             }
             parts.retain(|p| !p.is_empty());

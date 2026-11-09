@@ -49,9 +49,10 @@
       },
       "building": [
         {
-          "accessibility": "The themes grid, Trustworthy agent view, Building · ov-310 · Builder · sonnet · 380K · 1 h, Prepare workspace · Approval required",
+          "accessibility": "The themes grid, Trustworthy agent view, Building · ov-310, Prepare workspace · Approval required",
           "agent": {
             "id": "pane:b1",
+            "line": "Builder · sonnet · 380K",
             "model": "sonnet",
             "terminal": null,
             "tokens": "380K",
@@ -85,7 +86,7 @@
             "run": "wf1:9238042ca1b351c53cd9dd92300e5dfb09100425d25ee6640868239dd3ae1d21",
             "step": "Prepare workspace"
           },
-          "second": "Building · ov-310 · Builder · sonnet · 380K · 1 h",
+          "second": "Building · ov-310",
           "stage": "building",
           "status": "Building",
           "theme": "Trustworthy agent view",
@@ -389,7 +390,7 @@
       },
       "in_review": [
         {
-          "accessibility": "Title of ov-311, Trustworthy agent view, In review · ov-311 · 2 h",
+          "accessibility": "Title of ov-311, Trustworthy agent view, In review · ov-311",
           "agent": null,
           "branch": "fleet-ui",
           "heading": "Title of ov-311",
@@ -401,14 +402,14 @@
           "notes": [],
           "rank": null,
           "run": null,
-          "second": "In review · ov-311 · 2 h",
+          "second": "In review · ov-311",
           "stage": "reviewing",
           "status": "In review",
           "theme": "Trustworthy agent view",
           "waits_on_owner": false
         },
         {
-          "accessibility": "Title of ov-312, Trustworthy agent view, Fixing · round 2 · ov-312 · 30 min",
+          "accessibility": "Title of ov-312, Trustworthy agent view, Fixing · round 2 · ov-312",
           "agent": null,
           "branch": "agent-rows",
           "heading": "Title of ov-312",
@@ -420,7 +421,7 @@
           "notes": [],
           "rank": null,
           "run": null,
-          "second": "Fixing · round 2 · ov-312 · 30 min",
+          "second": "Fixing · round 2 · ov-312",
           "stage": "building",
           "status": "Fixing · round 2",
           "theme": "Trustworthy agent view",
@@ -480,6 +481,7 @@
           },
           "lander": {
             "id": "pane:i1",
+            "line": "Lander · opus · 1.4M",
             "model": "opus",
             "terminal": null,
             "tokens": "1.4M",
@@ -810,7 +812,7 @@
           "attention": false,
           "cards": [
             {
-              "accessibility": "Title of ov-302, Marketing, Waiting · ov-302 · 6 h",
+              "accessibility": "Title of ov-302, Marketing, Waiting · ov-302",
               "agent": null,
               "branch": "hero-shot",
               "heading": "Title of ov-302",
@@ -822,14 +824,14 @@
               "notes": [],
               "rank": null,
               "run": null,
-              "second": "Waiting · ov-302 · 6 h",
+              "second": "Waiting · ov-302",
               "stage": "waiting",
               "status": "Waiting",
               "theme": "Marketing",
               "waits_on_owner": false
             },
             {
-              "accessibility": "old-queued, Waiting · old-queued · 2 d",
+              "accessibility": "old-queued, Waiting · old-queued",
               "agent": null,
               "branch": "old-queued",
               "heading": "old-queued",
@@ -841,7 +843,7 @@
               "notes": [],
               "rank": null,
               "run": null,
-              "second": "Waiting · old-queued · 2 d",
+              "second": "Waiting · old-queued",
               "stage": "waiting",
               "status": "Waiting",
               "theme": null,
