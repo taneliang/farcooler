@@ -33,7 +33,7 @@ fn a_cost_is_reported_estimated_or_unknown_and_says_which() {
     assert_eq!(estimated.cost_micros, Some(80_246), "the table agrees with the agent here");
     assert_eq!(estimated.price_table.as_deref(), Some(PRICE_TABLE), "stamped with the table it came from");
 
-    let unknown = TurnModel::priced(Some("gpt-5.6-luna".into()), OPUS, None);
+    let unknown = TurnModel::priced(Some("gpt-5.5".into()), OPUS, None);
     assert_eq!((unknown.cost_source, unknown.cost_micros), (CostSource::Unknown, None));
     let unnamed = TurnModel::priced(None, OPUS, None);
     assert_eq!(unnamed.cost_source, CostSource::Unknown);
