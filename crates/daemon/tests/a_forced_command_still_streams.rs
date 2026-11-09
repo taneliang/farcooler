@@ -84,6 +84,7 @@ async fn both_kinds_of_key_reach_the_first_byte() {
     let terminal = a_pane(&runner).await;
 
     let forced = first_byte(&runner, &runner.forced_key, terminal).await;
+    reads_the_fence_after_the_hello(&runner, &runner.forced_key).await;
     let plain = first_byte(&runner, &runner.plain_key, terminal).await;
 
     eprintln!(
@@ -311,6 +312,26 @@ async fn first_byte(runner: &Runner, key: &Path, terminal: uuid::Uuid) -> Durati
         Ok(Err(e)) => panic!("the stream failed: {e}"),
         Err(_) => FIRST_BYTE_CEILING + Duration::from_millis(1),
     }
+}
+
+/// A request that reads the fence AFTER the hello gets an answer, through this
+/// key: `client.list` reads `$FARCOOLER_HOME/ssh/authorized_keys` with
+/// `fence::read`, which opens with `O_NOFOLLOW`. The hello alone proves nothing
+/// here, since it reads the file with a plain open and so passes through a
+/// symlink (ov-1057).
+async fn reads_the_fence_after_the_hello(runner: &Runner, key: &Path) {
+    let session = Session::connect_ssh(&destination(runner, key))
+        .await
+        .expect("connect the product's client over a real sshd");
+    let listed = session
+        .enrolled_clients()
+        .await
+        .expect("a read of the fence after the hello failed; is the daemon's fence a symlink?");
+    let clients = listed["clients"].as_array().expect("a clients array");
+    assert!(
+        clients.len() >= 2,
+        "the daemon read a fence without the two lines this test wrote: {listed}"
+    );
 }
 
 /// Everything the stream sends in its first moment, through this key.
@@ -549,7 +570,12 @@ async fn start() -> Runner {
     )
     .expect("render a Key B line");
 
-    let authorized_keys = home.join(".ssh").join("authorized_keys");
+    // Under the runtime root, and sshd is pointed at it: the daemon reads the
+    // file sshd does, as a real runner's does. One real file and not a link to
+    // `$HOME/.ssh`'s: the fence reader opens `.ssh` and the file with
+    // `O_NOFOLLOW`, so a link admits the hello (`sessions::is_known_device`
+    // reads with a plain open) and fails every read after it (ov-1055).
+    let authorized_keys = runtime.join("ssh").join("authorized_keys");
     fence::write(
         &authorized_keys,
         fence::AUTHORIZED_KEYS,
@@ -685,9 +711,8 @@ async fn start() -> Runner {
     //
     // And the daemon reads the file sshd does, as a real runner's does: one
     // with a `FARCOOLER_HOME` reads its own, and refuses a session naming a
-    // device it has no line for (ov-980, `sessions::admit_preamble`).
-    std::fs::create_dir_all(runtime.join("ssh")).expect("the daemon's ssh directory");
-    std::os::unix::fs::symlink(&authorized_keys, runtime.join("ssh").join("authorized_keys")).expect("the daemon's fence is sshd's");
+    // device it has no line for (ov-980, `sessions::admit_preamble`). It is the
+    // file written above, not a link to it.
     let daemon = listening_daemon_in(&runtime, &home).await;
     let sshd = Sshd { pid: await_sshd(&pid_file, port, &log).await };
 
