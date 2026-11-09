@@ -1,0 +1,1306 @@
+{
+  "apple_claude": {
+    "conversation": {
+      "answer": {
+        "": "The answer wasn’t sent. Answer in the terminal.",
+        "answers": "Answer every question first.",
+        "not_delivered": "The answer didn’t reach Claude. Answer in the terminal.",
+        "not_held": "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now.",
+        "timed_out": "The runner didn’t answer in time. Check the terminal before answering again."
+      },
+      "groups": [
+        {
+          "done": "Ran {n} commands",
+          "names": [
+            "Bash",
+            "bash"
+          ],
+          "running": "Running {n} commands"
+        },
+        {
+          "done": "Read {n} files",
+          "names": [
+            "Read"
+          ],
+          "running": "Reading {n} files"
+        },
+        {
+          "done": "Edited {n} files",
+          "names": [
+            "Edit",
+            "MultiEdit",
+            "Write",
+            "NotebookEdit"
+          ],
+          "running": "Editing {n} files"
+        },
+        {
+          "done": "Ran {n} searches",
+          "names": [
+            "Grep",
+            "Glob"
+          ],
+          "running": "Running {n} searches"
+        },
+        {
+          "done": "Used {n} tools",
+          "names": [],
+          "running": "Using {n} tools"
+        }
+      ],
+      "phrases": {
+        "ask": "Claude is asking a question",
+        "ask_Permission": "Claude is asking for permission",
+        "ask_PlanExit": "Claude has a plan for you to review",
+        "ask_answered": "Answered",
+        "ask_answered_on": "Answered on {by}",
+        "command": "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands.",
+        "draft_in_terminal": "The terminal’s box already holds a draft. Send or clear it there first.",
+        "draft_in_terminal_bring": "The terminal’s box already holds a draft of its own.",
+        "gap": "Some of this session couldn’t be read.",
+        "gap_one": "A line of this session couldn’t be read.",
+        "handoff": "Claude is showing something only the terminal can.",
+        "harness": "System note",
+        "harness_Message": "Message from {name}",
+        "harness_Report": "Report from {name}",
+        "harness_a_subagent": "a subagent",
+        "harness_agent": "agent {id}",
+        "key_not_connected": "The runner isn’t connected. Use the terminal.",
+        "key_timed_out": "The runner didn’t answer in time. Check the terminal.",
+        "may_have_been_sent": "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again.",
+        "not_connected": "The runner isn’t connected, so the message wasn’t sent.",
+        "origin_queued": "Queued during the last turn",
+        "outcome_done": "Done",
+        "outcome_ended": "Ended",
+        "outcome_failed": "Failed",
+        "outcome_failed_detail": "Failed: {detail}",
+        "outcome_interrupted": "Interrupted",
+        "outcome_took": "Took {time}",
+        "outcome_unrecorded": "Not recorded",
+        "panel": "This opens a panel in Claude, so it’s for the terminal.",
+        "queued": "Queued",
+        "queued_InBox": "Waiting to send",
+        "queued_Sent": "Sent mid-turn",
+        "queued_Withdrawn": "Withdrawn",
+        "scheduled_task": "Scheduled task",
+        "task": "Not started",
+        "task_Completed": "Done",
+        "task_InProgress": "In progress",
+        "tasks_progress": "{done} of {n} done",
+        "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
+        "tools": "{n} tools",
+        "tools_one": "1 tool"
+      },
+      "send": {
+        "": {
+          "kind": "said",
+          "text": "The message wasn’t sent."
+        },
+        "backslash": {
+          "kind": "said",
+          "text": "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
+        },
+        "busy": {
+          "kind": "said",
+          "text": "Claude takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
+        },
+        "command": {
+          "kind": "said",
+          "text": "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+        },
+        "dialog": {
+          "kind": "handoff",
+          "text": null
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "file": {
+          "kind": "said",
+          "text": "One of the files didn’t reach the runner, so nothing was sent."
+        },
+        "file_too_large": {
+          "kind": "said",
+          "text": "That file is too large to send. Files up to 16 MB work."
+        },
+        "files": {
+          "kind": "said",
+          "text": "A message takes at most 10 files."
+        },
+        "files:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry files. Send it without them."
+        },
+        "files_too_large": {
+          "kind": "said",
+          "text": "These files are too large to send together. Send fewer or smaller ones."
+        },
+        "handoff": {
+          "kind": "panel",
+          "text": null
+        },
+        "image": {
+          "kind": "said",
+          "text": "One of the images couldn’t be read, so nothing was sent."
+        },
+        "image_too_large": {
+          "kind": "said",
+          "text": "That image is too large to send. Use a smaller one."
+        },
+        "images": {
+          "kind": "said",
+          "text": "A message takes at most 10 images."
+        },
+        "images:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry images. Send it without them."
+        },
+        "images_too_large": {
+          "kind": "said",
+          "text": "These images are too large to send together. Send fewer or smaller ones."
+        },
+        "in_pane": {
+          "kind": "said",
+          "text": "Far Cooler couldn’t tell whether a person or an agent sent this, so it wasn’t sent. Send it from the app."
+        },
+        "left_at_shell": {
+          "kind": "said",
+          "text": "Claude quit as the message was typed. It wasn’t run."
+        },
+        "not_an_agent": {
+          "kind": "said",
+          "text": "Claude isn’t running in this pane."
+        },
+        "not_running": {
+          "kind": "said",
+          "text": "Claude isn’t running in this pane."
+        },
+        "paste_left": {
+          "kind": "said",
+          "text": "The message didn’t land in the box as typed, so it was left there and not sent."
+        },
+        "picker": {
+          "kind": "said",
+          "text": "Claude would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "too_long": {
+          "kind": "said",
+          "text": "That message is over 500 characters. Shorten it, or paste it in the terminal."
+        },
+        "too_tall": {
+          "kind": "said",
+          "text": "That message is too tall for Claude’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."
+        },
+        "typing_off": {
+          "kind": "said",
+          "text": "This workspace doesn’t let Far Cooler type into its agents’ panes. Turn on waking agents in its settings."
+        },
+        "unconfirmable": {
+          "kind": "said",
+          "text": "Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it took the message. Check the terminal before sending it again."
+        },
+        "unfamiliar": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unproven": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unsupported": {
+          "kind": "said",
+          "text": "Claude can’t take a message from here. Use the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t send messages to this runner."
+        }
+      },
+      "send_now": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t send the queue safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Send Now again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it sent the queued messages. Check the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      },
+      "stop": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t stop Claude safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Stop again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      }
+    },
+    "error": null,
+    "schema": 1
+  },
+  "apple_codex": {
+    "conversation": {
+      "answer": {
+        "": "The answer wasn’t sent. Answer in the terminal.",
+        "answers": "Answer every question first.",
+        "not_delivered": "The answer didn’t reach Codex. Answer in the terminal.",
+        "not_held": "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now.",
+        "timed_out": "The runner didn’t answer in time. Check the terminal before answering again."
+      },
+      "groups": [
+        {
+          "done": "Ran {n} commands",
+          "names": [
+            "Bash",
+            "bash"
+          ],
+          "running": "Running {n} commands"
+        },
+        {
+          "done": "Read {n} files",
+          "names": [
+            "Read"
+          ],
+          "running": "Reading {n} files"
+        },
+        {
+          "done": "Edited {n} files",
+          "names": [
+            "Edit",
+            "MultiEdit",
+            "Write",
+            "NotebookEdit"
+          ],
+          "running": "Editing {n} files"
+        },
+        {
+          "done": "Ran {n} searches",
+          "names": [
+            "Grep",
+            "Glob"
+          ],
+          "running": "Running {n} searches"
+        },
+        {
+          "done": "Used {n} tools",
+          "names": [],
+          "running": "Using {n} tools"
+        }
+      ],
+      "phrases": {
+        "ask": "Codex is asking a question",
+        "ask_Permission": "Codex is asking for permission",
+        "ask_PlanExit": "Codex has a plan for you to review",
+        "ask_answered": "Answered",
+        "ask_answered_on": "Answered on {by}",
+        "command": "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands.",
+        "draft_in_terminal": "The terminal’s box already holds a draft. Send or clear it there first.",
+        "draft_in_terminal_bring": "The terminal’s box already holds a draft of its own.",
+        "gap": "Some of this session couldn’t be read.",
+        "gap_one": "A line of this session couldn’t be read.",
+        "handoff": "Codex is showing something only the terminal can.",
+        "harness": "System note",
+        "harness_Message": "Message from {name}",
+        "harness_Report": "Report from {name}",
+        "harness_a_subagent": "a subagent",
+        "harness_agent": "agent {id}",
+        "key_not_connected": "The runner isn’t connected. Use the terminal.",
+        "key_timed_out": "The runner didn’t answer in time. Check the terminal.",
+        "may_have_been_sent": "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again.",
+        "not_connected": "The runner isn’t connected, so the message wasn’t sent.",
+        "origin_queued": "Queued during the last turn",
+        "outcome_done": "Done",
+        "outcome_ended": "Ended",
+        "outcome_failed": "Failed",
+        "outcome_failed_detail": "Failed: {detail}",
+        "outcome_interrupted": "Interrupted",
+        "outcome_took": "Took {time}",
+        "outcome_unrecorded": "Not recorded",
+        "panel": "This opens a panel in Codex, so it’s for the terminal.",
+        "queued": "Queued",
+        "queued_InBox": "Waiting to send",
+        "queued_Sent": "Sent mid-turn",
+        "queued_Withdrawn": "Withdrawn",
+        "scheduled_task": "Scheduled task",
+        "task": "Not started",
+        "task_Completed": "Done",
+        "task_InProgress": "In progress",
+        "tasks_progress": "{done} of {n} done",
+        "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
+        "tools": "{n} tools",
+        "tools_one": "1 tool"
+      },
+      "send": {
+        "": {
+          "kind": "said",
+          "text": "The message wasn’t sent."
+        },
+        "backslash": {
+          "kind": "said",
+          "text": "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
+        },
+        "busy": {
+          "kind": "said",
+          "text": "Codex takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
+        },
+        "command": {
+          "kind": "said",
+          "text": "Codex would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+        },
+        "dialog": {
+          "kind": "handoff",
+          "text": null
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "file": {
+          "kind": "said",
+          "text": "One of the files didn’t reach the runner, so nothing was sent."
+        },
+        "file_too_large": {
+          "kind": "said",
+          "text": "That file is too large to send. Files up to 16 MB work."
+        },
+        "files": {
+          "kind": "said",
+          "text": "A message takes at most 10 files."
+        },
+        "files:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry files. Send it without them."
+        },
+        "files_too_large": {
+          "kind": "said",
+          "text": "These files are too large to send together. Send fewer or smaller ones."
+        },
+        "handoff": {
+          "kind": "panel",
+          "text": null
+        },
+        "image": {
+          "kind": "said",
+          "text": "One of the images couldn’t be read, so nothing was sent."
+        },
+        "image_too_large": {
+          "kind": "said",
+          "text": "That image is too large to send. Use a smaller one."
+        },
+        "images": {
+          "kind": "said",
+          "text": "A message takes at most 10 images."
+        },
+        "images:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry images. Send it without them."
+        },
+        "images_too_large": {
+          "kind": "said",
+          "text": "These images are too large to send together. Send fewer or smaller ones."
+        },
+        "in_pane": {
+          "kind": "said",
+          "text": "Far Cooler couldn’t tell whether a person or an agent sent this, so it wasn’t sent. Send it from the app."
+        },
+        "left_at_shell": {
+          "kind": "said",
+          "text": "Codex quit as the message was typed. It wasn’t run."
+        },
+        "not_an_agent": {
+          "kind": "said",
+          "text": "Codex isn’t running in this pane."
+        },
+        "not_running": {
+          "kind": "said",
+          "text": "Codex isn’t running in this pane."
+        },
+        "paste_left": {
+          "kind": "said",
+          "text": "The message didn’t land in the box as typed, so it was left there and not sent."
+        },
+        "picker": {
+          "kind": "said",
+          "text": "Codex would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "too_long": {
+          "kind": "said",
+          "text": "That message is over 500 characters. Shorten it, or paste it in the terminal."
+        },
+        "too_tall": {
+          "kind": "said",
+          "text": "That message is too tall for Codex’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."
+        },
+        "typing_off": {
+          "kind": "said",
+          "text": "This workspace doesn’t let Far Cooler type into its agents’ panes. Turn on waking agents in its settings."
+        },
+        "unconfirmable": {
+          "kind": "said",
+          "text": "Far Cooler can’t find Codex’s session to confirm a send, so nothing was typed."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Codex didn’t confirm it took the message. Check the terminal before sending it again."
+        },
+        "unfamiliar": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unproven": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unsupported": {
+          "kind": "said",
+          "text": "Codex can’t take a message from here. Use the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t send messages to this runner."
+        }
+      },
+      "send_now": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t send the queue safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Send Now again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it sent the queued messages. Check the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      },
+      "stop": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t stop Claude safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Stop again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      }
+    },
+    "error": null,
+    "schema": 1
+  },
+  "material_claude": {
+    "conversation": {
+      "answer": {
+        "": "The answer wasn’t sent. Answer in the terminal.",
+        "answers": "Answer every question first.",
+        "not_delivered": "The answer didn’t reach Claude. Answer in the terminal.",
+        "not_held": "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now.",
+        "timed_out": "The runner didn’t answer in time. Check the terminal before answering again."
+      },
+      "groups": [
+        {
+          "done": "Ran {n} commands",
+          "names": [
+            "Bash",
+            "bash"
+          ],
+          "running": "Running {n} commands"
+        },
+        {
+          "done": "Read {n} files",
+          "names": [
+            "Read"
+          ],
+          "running": "Reading {n} files"
+        },
+        {
+          "done": "Edited {n} files",
+          "names": [
+            "Edit",
+            "MultiEdit",
+            "Write",
+            "NotebookEdit"
+          ],
+          "running": "Editing {n} files"
+        },
+        {
+          "done": "Ran {n} searches",
+          "names": [
+            "Grep",
+            "Glob"
+          ],
+          "running": "Running {n} searches"
+        },
+        {
+          "done": "Used {n} tools",
+          "names": [],
+          "running": "Using {n} tools"
+        }
+      ],
+      "phrases": {
+        "ask": "Claude is asking a question",
+        "ask_Permission": "Claude is asking for permission",
+        "ask_PlanExit": "Claude has a plan for you to review",
+        "ask_answered": "Answered",
+        "ask_answered_on": "Answered on {by}",
+        "command": "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands.",
+        "draft_in_terminal": "The terminal’s box already holds a draft. Send or clear it there first.",
+        "draft_in_terminal_bring": "The terminal’s box already holds a draft of its own.",
+        "gap": "Some of this session couldn’t be read.",
+        "gap_one": "A line of this session couldn’t be read.",
+        "handoff": "Claude is showing something only the terminal can.",
+        "harness": "System note",
+        "harness_Message": "Message from {name}",
+        "harness_Report": "Report from {name}",
+        "harness_a_subagent": "a subagent",
+        "harness_agent": "agent {id}",
+        "key_not_connected": "The runner isn’t connected. Use the terminal.",
+        "key_timed_out": "The runner didn’t answer in time. Check the terminal.",
+        "may_have_been_sent": "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again.",
+        "not_connected": "The runner isn’t connected, so the message wasn’t sent.",
+        "origin_queued": "Queued during the last turn",
+        "outcome_done": "Done",
+        "outcome_ended": "Ended",
+        "outcome_failed": "Failed",
+        "outcome_failed_detail": "Failed: {detail}",
+        "outcome_interrupted": "Interrupted",
+        "outcome_took": "Took {time}",
+        "outcome_unrecorded": "Not recorded",
+        "panel": "This opens a panel in Claude, so it’s for the terminal.",
+        "queued": "Queued",
+        "queued_InBox": "Waiting to send",
+        "queued_Sent": "Sent mid-turn",
+        "queued_Withdrawn": "Withdrawn",
+        "scheduled_task": "Scheduled task",
+        "task": "Not started",
+        "task_Completed": "Done",
+        "task_InProgress": "In progress",
+        "tasks_progress": "{done} of {n} done",
+        "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
+        "tools": "{n} tools",
+        "tools_one": "1 tool"
+      },
+      "send": {
+        "": {
+          "kind": "said",
+          "text": "The message wasn’t sent."
+        },
+        "backslash": {
+          "kind": "said",
+          "text": "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
+        },
+        "busy": {
+          "kind": "said",
+          "text": "Claude takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
+        },
+        "command": {
+          "kind": "said",
+          "text": "Claude would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+        },
+        "dialog": {
+          "kind": "handoff",
+          "text": null
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "file": {
+          "kind": "said",
+          "text": "One of the files didn’t reach the runner, so nothing was sent."
+        },
+        "file_too_large": {
+          "kind": "said",
+          "text": "That file is too large to send. Files up to 16 MB work."
+        },
+        "files": {
+          "kind": "said",
+          "text": "A message takes at most 10 files."
+        },
+        "files:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry files. Send it without them."
+        },
+        "files_too_large": {
+          "kind": "said",
+          "text": "These files are too large to send together. Send fewer or smaller ones."
+        },
+        "handoff": {
+          "kind": "panel",
+          "text": null
+        },
+        "image": {
+          "kind": "said",
+          "text": "One of the images couldn’t be read, so nothing was sent."
+        },
+        "image_too_large": {
+          "kind": "said",
+          "text": "That image is too large to send. Use a smaller one."
+        },
+        "images": {
+          "kind": "said",
+          "text": "A message takes at most 10 images."
+        },
+        "images:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry images. Send it without them."
+        },
+        "images_too_large": {
+          "kind": "said",
+          "text": "These images are too large to send together. Send fewer or smaller ones."
+        },
+        "in_pane": {
+          "kind": "said",
+          "text": "Far Cooler couldn’t tell whether a person or an agent sent this, so it wasn’t sent. Send it from the app."
+        },
+        "left_at_shell": {
+          "kind": "said",
+          "text": "Claude quit as the message was typed. It wasn’t run."
+        },
+        "not_an_agent": {
+          "kind": "said",
+          "text": "Claude isn’t running in this pane."
+        },
+        "not_running": {
+          "kind": "said",
+          "text": "Claude isn’t running in this pane."
+        },
+        "paste_left": {
+          "kind": "said",
+          "text": "The message didn’t land in the box as typed, so it was left there and not sent."
+        },
+        "picker": {
+          "kind": "said",
+          "text": "Claude would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "too_long": {
+          "kind": "said",
+          "text": "That message is over 500 characters. Shorten it, or paste it in the terminal."
+        },
+        "too_tall": {
+          "kind": "said",
+          "text": "That message is too tall for Claude’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."
+        },
+        "typing_off": {
+          "kind": "said",
+          "text": "This workspace doesn’t let Far Cooler type into its agents’ panes. Turn on waking agents in its settings."
+        },
+        "unconfirmable": {
+          "kind": "said",
+          "text": "Far Cooler can’t find Claude’s session to confirm a send, so nothing was typed."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it took the message. Check the terminal before sending it again."
+        },
+        "unfamiliar": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unproven": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unsupported": {
+          "kind": "said",
+          "text": "Claude can’t take a message from here. Use the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t send messages to this runner."
+        }
+      },
+      "send_now": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t send the queue safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Send now again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it sent the queued messages. Check the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      },
+      "stop": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t stop Claude safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Stop again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      }
+    },
+    "error": null,
+    "schema": 1
+  },
+  "material_codex": {
+    "conversation": {
+      "answer": {
+        "": "The answer wasn’t sent. Answer in the terminal.",
+        "answers": "Answer every question first.",
+        "not_delivered": "The answer didn’t reach Codex. Answer in the terminal.",
+        "not_held": "This isn’t waiting here anymore. It was answered, or only the terminal can answer it now.",
+        "timed_out": "The runner didn’t answer in time. Check the terminal before answering again."
+      },
+      "groups": [
+        {
+          "done": "Ran {n} commands",
+          "names": [
+            "Bash",
+            "bash"
+          ],
+          "running": "Running {n} commands"
+        },
+        {
+          "done": "Read {n} files",
+          "names": [
+            "Read"
+          ],
+          "running": "Reading {n} files"
+        },
+        {
+          "done": "Edited {n} files",
+          "names": [
+            "Edit",
+            "MultiEdit",
+            "Write",
+            "NotebookEdit"
+          ],
+          "running": "Editing {n} files"
+        },
+        {
+          "done": "Ran {n} searches",
+          "names": [
+            "Grep",
+            "Glob"
+          ],
+          "running": "Running {n} searches"
+        },
+        {
+          "done": "Used {n} tools",
+          "names": [],
+          "running": "Using {n} tools"
+        }
+      ],
+      "phrases": {
+        "ask": "Codex is asking a question",
+        "ask_Permission": "Codex is asking for permission",
+        "ask_PlanExit": "Codex has a plan for you to review",
+        "ask_answered": "Answered",
+        "ask_answered_on": "Answered on {by}",
+        "command": "A message can’t start with a symbol Claude reads as a command, such as / or !. Use the terminal for commands.",
+        "draft_in_terminal": "The terminal’s box already holds a draft. Send or clear it there first.",
+        "draft_in_terminal_bring": "The terminal’s box already holds a draft of its own.",
+        "gap": "Some of this session couldn’t be read.",
+        "gap_one": "A line of this session couldn’t be read.",
+        "handoff": "Codex is showing something only the terminal can.",
+        "harness": "System note",
+        "harness_Message": "Message from {name}",
+        "harness_Report": "Report from {name}",
+        "harness_a_subagent": "a subagent",
+        "harness_agent": "agent {id}",
+        "key_not_connected": "The runner isn’t connected. Use the terminal.",
+        "key_timed_out": "The runner didn’t answer in time. Check the terminal.",
+        "may_have_been_sent": "The runner didn’t answer in time. The message may have been sent, so check the terminal before sending it again.",
+        "not_connected": "The runner isn’t connected, so the message wasn’t sent.",
+        "origin_queued": "Queued during the last turn",
+        "outcome_done": "Done",
+        "outcome_ended": "Ended",
+        "outcome_failed": "Failed",
+        "outcome_failed_detail": "Failed: {detail}",
+        "outcome_interrupted": "Interrupted",
+        "outcome_took": "Took {time}",
+        "outcome_unrecorded": "Not recorded",
+        "panel": "This opens a panel in Codex, so it’s for the terminal.",
+        "queued": "Queued",
+        "queued_InBox": "Waiting to send",
+        "queued_Sent": "Sent mid-turn",
+        "queued_Withdrawn": "Withdrawn",
+        "scheduled_task": "Scheduled task",
+        "task": "Not started",
+        "task_Completed": "Done",
+        "task_InProgress": "In progress",
+        "tasks_progress": "{done} of {n} done",
+        "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
+        "tools": "{n} tools",
+        "tools_one": "1 tool"
+      },
+      "send": {
+        "": {
+          "kind": "said",
+          "text": "The message wasn’t sent."
+        },
+        "backslash": {
+          "kind": "said",
+          "text": "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
+        },
+        "busy": {
+          "kind": "said",
+          "text": "Codex takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
+        },
+        "command": {
+          "kind": "said",
+          "text": "Codex would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+        },
+        "dialog": {
+          "kind": "handoff",
+          "text": null
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "file": {
+          "kind": "said",
+          "text": "One of the files didn’t reach the runner, so nothing was sent."
+        },
+        "file_too_large": {
+          "kind": "said",
+          "text": "That file is too large to send. Files up to 16 MB work."
+        },
+        "files": {
+          "kind": "said",
+          "text": "A message takes at most 10 files."
+        },
+        "files:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry files. Send it without them."
+        },
+        "files_too_large": {
+          "kind": "said",
+          "text": "These files are too large to send together. Send fewer or smaller ones."
+        },
+        "handoff": {
+          "kind": "panel",
+          "text": null
+        },
+        "image": {
+          "kind": "said",
+          "text": "One of the images couldn’t be read, so nothing was sent."
+        },
+        "image_too_large": {
+          "kind": "said",
+          "text": "That image is too large to send. Use a smaller one."
+        },
+        "images": {
+          "kind": "said",
+          "text": "A message takes at most 10 images."
+        },
+        "images:command": {
+          "kind": "said",
+          "text": "A slash command can’t carry images. Send it without them."
+        },
+        "images_too_large": {
+          "kind": "said",
+          "text": "These images are too large to send together. Send fewer or smaller ones."
+        },
+        "in_pane": {
+          "kind": "said",
+          "text": "Far Cooler couldn’t tell whether a person or an agent sent this, so it wasn’t sent. Send it from the app."
+        },
+        "left_at_shell": {
+          "kind": "said",
+          "text": "Codex quit as the message was typed. It wasn’t run."
+        },
+        "not_an_agent": {
+          "kind": "said",
+          "text": "Codex isn’t running in this pane."
+        },
+        "not_running": {
+          "kind": "said",
+          "text": "Codex isn’t running in this pane."
+        },
+        "paste_left": {
+          "kind": "said",
+          "text": "The message didn’t land in the box as typed, so it was left there and not sent."
+        },
+        "picker": {
+          "kind": "said",
+          "text": "Codex would open a picker for a last word that starts with @ or $, so the message wasn’t sent. Add a word after it, or use the terminal."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "too_long": {
+          "kind": "said",
+          "text": "That message is over 500 characters. Shorten it, or paste it in the terminal."
+        },
+        "too_tall": {
+          "kind": "said",
+          "text": "That message is too tall for Codex’s box to show whole, so it wasn’t sent. Shorten it, or paste it in the terminal."
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."
+        },
+        "typing_off": {
+          "kind": "said",
+          "text": "This workspace doesn’t let Far Cooler type into its agents’ panes. Turn on waking agents in its settings."
+        },
+        "unconfirmable": {
+          "kind": "said",
+          "text": "Far Cooler can’t find Codex’s session to confirm a send, so nothing was typed."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Codex didn’t confirm it took the message. Check the terminal before sending it again."
+        },
+        "unfamiliar": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unproven": {
+          "kind": "said",
+          "text": "Far Cooler can’t read this terminal’s box, so nothing was typed."
+        },
+        "unsupported": {
+          "kind": "said",
+          "text": "Codex can’t take a message from here. Use the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t send messages to this runner."
+        }
+      },
+      "send_now": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t send the queue safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Send now again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it sent the queued messages. Check the terminal."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      },
+      "stop": {
+        "": {
+          "kind": "said",
+          "text": "Far Cooler can’t stop Claude safely from here. Use the terminal."
+        },
+        "draft": {
+          "kind": "draft",
+          "text": null
+        },
+        "idle": {
+          "kind": "quiet",
+          "text": null
+        },
+        "nothing_queued": {
+          "kind": "said",
+          "text": "Nothing is waiting in Claude’s queue."
+        },
+        "prompt": {
+          "kind": "handoff",
+          "text": null
+        },
+        "sending": {
+          "kind": "said",
+          "text": "A message is still going in. Try again in a moment."
+        },
+        "settling": {
+          "kind": "said",
+          "text": "Claude is starting a step. Try Stop again in a moment."
+        },
+        "too_soon": {
+          "kind": "quiet",
+          "text": null
+        },
+        "typing": {
+          "kind": "said",
+          "text": "Someone is typing in the terminal. Try again in a moment."
+        },
+        "unconfirmed": {
+          "kind": "said",
+          "text": "Claude didn’t confirm it stopped. It may have stopped; check the terminal before pressing again."
+        },
+        "word:scope-denied": {
+          "kind": "said",
+          "text": "This device can’t control this runner."
+        }
+      }
+    },
+    "error": null,
+    "schema": 1
+  }
+}
