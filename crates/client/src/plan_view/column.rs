@@ -17,18 +17,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use typeshare::typeshare;
 
 use super::build::{LandingPhase, Reader, Stage, Status};
 use super::input::Line;
 use super::words;
 
 /// One run of a fact's text: the number is strong.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Run {
     pub text: String,
     pub strong: bool,
 }
 
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactKind {
@@ -38,7 +42,9 @@ pub enum FactKind {
     Done,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Fact {
     pub kind: FactKind,
     pub runs: Vec<Run>,
@@ -48,14 +54,18 @@ pub struct Fact {
     pub text: String,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Initiative {
     /// The theme's id: an initiative is today's theme.
     pub id: String,
     pub name: String,
     /// The outcome the theme was written for; empty when it has none.
     pub goal: String,
+    #[typeshare(serialized_as = "I54")]
     pub done: u64,
+    #[typeshare(serialized_as = "I54")]
     pub total: u64,
     /// "20 of 29".
     pub progress: String,
@@ -68,6 +78,7 @@ pub struct Initiative {
 }
 
 /// Where an agent's work stands, in the order the pipeline lists them.
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PipeStage {
@@ -91,6 +102,7 @@ impl PipeStage {
 }
 
 /// What an agent does; the apps draw its glyph.
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Role {
@@ -112,7 +124,9 @@ impl Role {
     }
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ColumnTicket {
     pub task: String,
     pub key: String,
@@ -123,10 +137,13 @@ pub struct ColumnTicket {
     pub initiative_id: Option<String>,
     pub stage: PipeStage,
     /// When it entered its stage, in ms; 0 when nothing says.
+    #[typeshare(serialized_as = "I54")]
     pub since: i64,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ColumnAgent {
     pub id: String,
     pub role: Role,
@@ -137,6 +154,7 @@ pub struct ColumnAgent {
     /// `doing` says why it's stuck: drawn in amber.
     pub doing_is_trouble: bool,
     /// How long it has been at it, in ms.
+    #[typeshare(serialized_as = "Option<I54>")]
     pub elapsed: Option<i64>,
     /// "47 min".
     pub time: Option<String>,
@@ -147,10 +165,13 @@ pub struct ColumnAgent {
     pub tickets: Vec<ColumnTicket>,
     pub working: bool,
     /// Tickets in this stage nobody is on, said under the last card.
+    #[typeshare(serialized_as = "I54")]
     pub more: u64,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Group {
     pub stage: PipeStage,
     pub title: String,
@@ -158,16 +179,19 @@ pub struct Group {
     /// Tickets in this stage with no agent on them.
     pub unattended: Vec<ColumnTicket>,
     /// The tickets in this stage, each once.
+    #[typeshare(serialized_as = "I54")]
     pub count: u64,
     /// The unattended tickets drawn in place: the first few in a stage with no
     /// agent; none in a stage with agents, whose "more" line opens them all.
     pub preview: Vec<ColumnTicket>,
     /// The unattended tickets only the list shows.
+    #[typeshare(serialized_as = "I54")]
     pub hidden: u64,
     /// "12 more waiting for review".
     pub unattended_words: Option<String>,
 }
 
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CountKind {
@@ -176,9 +200,12 @@ pub enum CountKind {
     Done,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Count {
     pub kind: CountKind,
+    #[typeshare(serialized_as = "I54")]
     pub count: u64,
     /// The board's list it opens, as the store spells a status.
     pub status: String,
@@ -187,15 +214,20 @@ pub struct Count {
 }
 
 /// A ticket waiting for a builder, as the footer's list draws it.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WaitingTicket {
     pub task: String,
     pub key: String,
     pub title: String,
+    #[typeshare(serialized_as = "I54")]
     pub since: i64,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Column {
     pub facts: Vec<Fact>,
     /// In motion or waiting on the owner, in the board's order.
@@ -204,6 +236,7 @@ pub struct Column {
     pub quiet_initiatives: Vec<Initiative>,
     /// "Nothing moving: Mac look and feel, 33 of 34; Marketing, 6 of 8".
     pub quiet_line: Option<String>,
+    #[typeshare(serialized_as = "I54")]
     pub initiative_count: u64,
     /// The stages with anything in them, in order.
     pub pipeline: Vec<Group>,

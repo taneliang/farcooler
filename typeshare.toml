@@ -1,0 +1,11 @@
+# Wire types for the shared views (ov-1035). scripts/gen-wire-types.sh runs the
+# CLI with this file; CI regenerates and fails on a diff.
+[swift]
+prefix = "Wire"
+default_decorators = ["Equatable", "Sendable"]
+
+[kotlin]
+package = "com.farcooler.core.wire"
+
+[swift.type_mappings]
+I54 = "Int"

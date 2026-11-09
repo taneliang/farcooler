@@ -18,6 +18,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use typeshare::typeshare;
 
 use crate::workflow_presentation::{Presentation, RunCard};
 
@@ -31,6 +32,7 @@ pub use words::Style;
 
 pub const SCHEMA: u32 = 1;
 
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SectionKind {
@@ -47,11 +49,14 @@ pub enum SectionKind {
 }
 
 /// A section to draw, in the order drawn.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Section {
     pub kind: SectionKind,
     pub title: String,
     /// Its rows; 0 draws no count.
+    #[typeshare(serialized_as = "I54")]
     pub count: u64,
     /// What it says with nothing in it; nil when it has rows or says nothing.
     pub empty: Option<String>,
@@ -62,6 +67,7 @@ pub struct Section {
 }
 
 /// What a ticket's mark shows: its stage, a fix round, or its place in Next Up.
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mark {
@@ -77,6 +83,7 @@ pub enum Mark {
     Unknown,
 }
 
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NoteKind {
@@ -90,7 +97,9 @@ pub enum NoteKind {
 }
 
 /// A line under a ticket's second line.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Note {
     pub kind: NoteKind,
     pub text: String,
@@ -101,7 +110,9 @@ pub struct Note {
 }
 
 /// The agent working a ticket.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentRef {
     pub id: String,
     /// "Builder · Sonnet".
@@ -121,7 +132,9 @@ pub struct AgentRef {
 
 /// The engine's run of a ticket, from the workspace's workflow presentation:
 /// the step it is on, the gate it waits at, and the phase.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunStep {
     pub run: String,
     pub phase: farcooler_workflow::Phase,
@@ -133,7 +146,9 @@ pub struct RunStep {
     pub attention: bool,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Gate {
     pub label: String,
     pub text: String,
@@ -142,7 +157,9 @@ pub struct Gate {
 
 /// A ticket's row: in In Review, Building, Waiting or Waiting for the Next
 /// Landing.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TicketCard {
     /// The card's task id.
     pub id: String,
@@ -159,6 +176,7 @@ pub struct TicketCard {
     /// tokens and how long it has been in this stage.
     pub second: String,
     /// Its place in Next Up, from 1.
+    #[typeshare(serialized_as = "Option<I54>")]
     pub rank: Option<u64>,
     pub mark: Mark,
     /// The mark is drawn in amber.
@@ -179,6 +197,7 @@ pub struct TicketCard {
     pub accessibility: String,
 }
 
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WaitingKind {
@@ -188,7 +207,9 @@ pub enum WaitingKind {
 }
 
 /// One of Waiting's groups; only groups with cards are sent.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WaitingGroup {
     pub kind: WaitingKind,
     /// Drawn only when another group shares the section.
@@ -198,25 +219,33 @@ pub struct WaitingGroup {
     pub cards: Vec<TicketCard>,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LadderStep {
     pub label: String,
     pub explanation: String,
 }
 
 /// The ladder a landing climbs: three steps, and the one it stands on.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Ladder {
     pub steps: Vec<LadderStep>,
     /// 0 to 2, or 3 once everything is done.
+    #[typeshare(serialized_as = "I54")]
     pub at: u64,
     /// "Checking on CI · step 2 of 3".
     pub compact: String,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LandingCard {
     pub id: String,
+    #[typeshare(serialized_as = "I54")]
     pub number: u64,
     /// "Landing 86".
     pub label: String,
@@ -234,6 +263,7 @@ pub struct LandingCard {
     /// CI failed, or nothing has moved.
     pub attention: bool,
     /// When it entered this phase, in ms.
+    #[typeshare(serialized_as = "I54")]
     pub since: i64,
     pub ladder: Ladder,
     pub lander: Option<AgentRef>,
@@ -245,7 +275,9 @@ pub struct LandingCard {
     pub tickets: Vec<TicketCard>,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentRow {
     pub id: String,
     pub who: String,
@@ -264,7 +296,9 @@ pub struct AgentRow {
     pub accessibility: String,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Agents {
     /// "5 agents, including the orchestrator · 4 working · 3.9M tokens in the
     /// last 24 hours · ≈$26", or "No agents running."
@@ -273,6 +307,7 @@ pub struct Agents {
     pub rows: Vec<AgentRow>,
 }
 
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Glyph {
@@ -281,7 +316,9 @@ pub enum Glyph {
     NotStarted,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TileCard {
     pub id: String,
     pub key: String,
@@ -289,11 +326,15 @@ pub struct TileCard {
     pub glyph: Glyph,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThemeTile {
     pub id: String,
     pub name: String,
+    #[typeshare(serialized_as = "I54")]
     pub done: u64,
+    #[typeshare(serialized_as = "I54")]
     pub total: u64,
     /// "6 of 10 done".
     pub progress: String,
@@ -308,7 +349,9 @@ pub struct ThemeTile {
     pub moving: bool,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Themes {
     /// Themes in motion first, then the rest by last move.
     pub tiles: Vec<ThemeTile>,
@@ -319,13 +362,17 @@ pub struct Themes {
     pub finished_words: Option<String>,
 }
 
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlanView {
     pub schema: u32,
     /// The runner's clock.
+    #[typeshare(serialized_as = "I54")]
     pub now: i64,
     /// The sections to draw, in order.
     pub sections: Vec<Section>,
+    #[typeshare(serialized_as = "I54")]
     pub needs_you: u64,
     /// Live landings, furthest along first.
     pub landings: Vec<LandingCard>,

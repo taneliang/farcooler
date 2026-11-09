@@ -2,6 +2,7 @@
 //! work out natively, from the same plan the cards read, so the apps only draw them.
 
 use serde::{Deserialize, Serialize};
+use typeshare::typeshare;
 
 use super::*;
 
@@ -10,7 +11,9 @@ use super::*;
 const QUIET_AFTER_MS: i64 = 24 * 3_600_000;
 
 /// A pull request's stage on a ticket's page.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DetailStage {
     /// The stage in the Plan's words, leading with the problem when a person has to act.
     pub words: String,
@@ -27,7 +30,9 @@ pub struct DetailStage {
 }
 
 /// What a ticket's page says that its card does not.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TicketDetail {
     /// The ticket's task id.
     pub id: String,
@@ -55,13 +60,16 @@ pub enum TrackKind {
 }
 
 /// The ticket details of a plan, and the one line the Themes section says when it is folded.
+#[typeshare]
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TicketDetails {
     /// One per ticket the plan lists, a dropped line only where its task has no other.
     pub tickets: Vec<TicketDetail>,
     /// Where each theme the plan shows stands (active, then paused, then done): what the summary counts.
     /// Never sent; the tests read it.
     #[serde(skip)]
+    #[typeshare(skip)]
     pub tracks: Vec<TrackKind>,
     /// "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded.
     pub track_summary: Option<String>,

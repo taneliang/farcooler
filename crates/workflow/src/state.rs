@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
+use typeshare::typeshare;
 use crate::{Definition, StageKind, OperationSpec};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -7,6 +8,7 @@ pub enum Refusal {
     Definition, Invalid, Duplicate, Stale, Unauthorized, Missing, Blocked, Resource,
     Phase, Evidence, Limit,
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Phase { Blocked, WaitingApproval, WaitingReview, Running, Uncertain, Cancelling, Done, Failed, Cancelled,
     /// At a `Join` step, not yet queued into a group. Holds no resource.
@@ -210,6 +212,7 @@ pub enum Command {
     /// `definition`, the tracker-only template at the column it reopens in (ov-968).
     Reopen { item: String, definition: Definition, policy_pin: String, resource: String },
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Evidence {
     pub candidate: String,
@@ -260,10 +263,12 @@ pub struct Transition {
 }
 
 /// Accepted borrowed text and the exact authenticated observation it describes.
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReworkDecision {
     pub id: String,
     pub principal: String,
+    #[typeshare(serialized_as = "I54")]
     pub revision: u64,
     pub run: String,
     pub definition_pin: String,

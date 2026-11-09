@@ -113,6 +113,7 @@ impl Status {
 }
 
 /// Where a landing stands, from the wire's word.
+#[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LandingPhase {

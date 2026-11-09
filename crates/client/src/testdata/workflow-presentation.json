@@ -148,17 +148,17 @@
             ],
             "attempt": 1,
             "candidate": null,
-            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "definitionPin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
             "fence": 1,
             "gate": null,
             "item": "item",
             "iteration": 0,
             "label": "Workflow Run",
-            "latest_evidence": null,
-            "pending_effect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
+            "latestEvidence": null,
+            "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
             "phase": "Running",
-            "phase_label": "Running",
-            "policy_pin": "policy",
+            "phaseLabel": "Running",
+            "policyPin": "policy",
             "reasons": [
               {
                 "kind": "Automatic",
@@ -166,14 +166,14 @@
                 "text": "The engine is executing this stage."
               }
             ],
-            "reworks_remaining": 2,
+            "reworksRemaining": 2,
             "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
             "stage": {
               "id": "stage-0",
               "kind": "Provision",
               "label": "Prepare Workspace",
               "progression": "Automatic",
-              "progression_label": "Automatic"
+              "progressionLabel": "Automatic"
             },
             "stages": [
               {
@@ -181,21 +181,21 @@
                 "kind": "Provision",
                 "label": "Prepare Workspace",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
                 "label": "Build",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
                 "label": "Run Checks",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-3",
@@ -204,21 +204,21 @@
                 },
                 "label": "Review",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
                 "label": "Land Changes",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
                 "label": "Check CI",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               }
             ]
           }
@@ -409,7 +409,7 @@
             ],
             "attempt": 1,
             "candidate": null,
-            "definition_pin": "wf1:f97b17e10cb183f0ee3e9d8bf1fde8b0142d9f669baa54c22a033e6e4ab42010",
+            "definitionPin": "wf1:f97b17e10cb183f0ee3e9d8bf1fde8b0142d9f669baa54c22a033e6e4ab42010",
             "fence": 1,
             "gate": {
               "kind": "Approval",
@@ -420,11 +420,11 @@
             "item": "item",
             "iteration": 0,
             "label": "Workflow Run",
-            "latest_evidence": null,
-            "pending_effect": null,
+            "latestEvidence": null,
+            "pendingEffect": null,
             "phase": "WaitingApproval",
-            "phase_label": "Awaiting Approval",
-            "policy_pin": "policy",
+            "phaseLabel": "Awaiting Approval",
+            "policyPin": "policy",
             "reasons": [
               {
                 "kind": "ApprovalRequired",
@@ -432,7 +432,7 @@
                 "text": "This stage is waiting for its configured approval."
               }
             ],
-            "reworks_remaining": 2,
+            "reworksRemaining": 2,
             "run": "wf1:44c33962a5e1c3994dd7cf9ee3b33c7fd4bc7dba64a8d229360dcf782ca8370a",
             "stage": {
               "id": "stage-0",
@@ -443,7 +443,7 @@
                   "principal": "owner"
                 }
               },
-              "progression_label": "Approval from owner"
+              "progressionLabel": "Approval from owner"
             },
             "stages": [
               {
@@ -455,7 +455,7 @@
                     "principal": "owner"
                   }
                 },
-                "progression_label": "Approval from owner"
+                "progressionLabel": "Approval from owner"
               },
               {
                 "id": "stage-1",
@@ -466,7 +466,7 @@
                     "principal": "owner"
                   }
                 },
-                "progression_label": "Approval from owner"
+                "progressionLabel": "Approval from owner"
               },
               {
                 "id": "stage-2",
@@ -477,7 +477,7 @@
                     "principal": "owner"
                   }
                 },
-                "progression_label": "Approval from owner"
+                "progressionLabel": "Approval from owner"
               },
               {
                 "id": "stage-3",
@@ -490,7 +490,7 @@
                     "principal": "owner"
                   }
                 },
-                "progression_label": "Approval from owner"
+                "progressionLabel": "Approval from owner"
               },
               {
                 "id": "stage-4",
@@ -501,7 +501,7 @@
                     "principal": "owner"
                   }
                 },
-                "progression_label": "Approval from owner"
+                "progressionLabel": "Approval from owner"
               },
               {
                 "id": "stage-5",
@@ -512,7 +512,7 @@
                     "principal": "owner"
                   }
                 },
-                "progression_label": "Approval from owner"
+                "progressionLabel": "Approval from owner"
               }
             ]
           }
@@ -688,22 +688,22 @@
             ],
             "attempt": 1,
             "candidate": null,
-            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "definitionPin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
             "fence": 5,
             "gate": null,
             "item": "item",
             "iteration": 1,
             "label": "Workflow Run",
-            "latest_evidence": {
+            "latestEvidence": {
               "candidate": "candidate",
               "manifest": "manifest-4",
               "policy_pin": "policy",
               "receipt": "receipt-4"
             },
-            "pending_effect": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94",
+            "pendingEffect": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94",
             "phase": "Running",
-            "phase_label": "Running",
-            "policy_pin": "policy",
+            "phaseLabel": "Running",
+            "policyPin": "policy",
             "reasons": [
               {
                 "kind": "Automatic",
@@ -721,14 +721,14 @@
                 "text": "The latest evidence no longer matches the current candidate or policy."
               }
             ],
-            "reworks_remaining": 1,
+            "reworksRemaining": 1,
             "run": "wf1:58a37a47d788ba6e03b25f93f23a3076ac12c0e825248b24e7b4de118ffb9dd2",
             "stage": {
               "id": "stage-1",
               "kind": "Build",
               "label": "Build",
               "progression": "Automatic",
-              "progression_label": "Automatic"
+              "progressionLabel": "Automatic"
             },
             "stages": [
               {
@@ -736,21 +736,21 @@
                 "kind": "Provision",
                 "label": "Prepare Workspace",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
                 "label": "Build",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
                 "label": "Run Checks",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-3",
@@ -759,21 +759,21 @@
                 },
                 "label": "Review",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
                 "label": "Land Changes",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
                 "label": "Check CI",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               }
             ]
           }
@@ -953,22 +953,22 @@
             ],
             "attempt": 1,
             "candidate": "candidate",
-            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "definitionPin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
             "fence": 3,
             "gate": null,
             "item": "item",
             "iteration": 0,
             "label": "Workflow Run",
-            "latest_evidence": {
+            "latestEvidence": {
               "candidate": "candidate",
               "manifest": "manifest-2",
               "policy_pin": "policy",
               "receipt": "receipt-2"
             },
-            "pending_effect": "wf1:da4c770b650e0ee3c7f59e5de7a9b5da8bf6acced6d71a3644ca7eef303c7b46",
+            "pendingEffect": "wf1:da4c770b650e0ee3c7f59e5de7a9b5da8bf6acced6d71a3644ca7eef303c7b46",
             "phase": "Uncertain",
-            "phase_label": "Outcome Uncertain",
-            "policy_pin": "policy",
+            "phaseLabel": "Outcome Uncertain",
+            "policyPin": "policy",
             "reasons": [
               {
                 "kind": "EffectUncertain",
@@ -976,14 +976,14 @@
                 "text": "The operation outcome needs inspection before execution can continue."
               }
             ],
-            "reworks_remaining": 2,
+            "reworksRemaining": 2,
             "run": "wf1:19540cdd3703a146d6c1fb8cf9a1f62f8ba501e1504383196170f71c554350bb",
             "stage": {
               "id": "stage-2",
               "kind": "Check",
               "label": "Run Checks",
               "progression": "Automatic",
-              "progression_label": "Automatic"
+              "progressionLabel": "Automatic"
             },
             "stages": [
               {
@@ -991,21 +991,21 @@
                 "kind": "Provision",
                 "label": "Prepare Workspace",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
                 "label": "Build",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
                 "label": "Run Checks",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-3",
@@ -1014,21 +1014,21 @@
                 },
                 "label": "Review",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
                 "label": "Land Changes",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
                 "label": "Check CI",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               }
             ]
           }
@@ -1205,22 +1205,22 @@
             ],
             "attempt": 1,
             "candidate": "new-candidate",
-            "definition_pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "definitionPin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
             "fence": 6,
             "gate": null,
             "item": "item",
             "iteration": 1,
             "label": "Workflow Run",
-            "latest_evidence": {
+            "latestEvidence": {
               "candidate": "candidate",
               "manifest": "manifest-2",
               "policy_pin": "policy",
               "receipt": "receipt-2"
             },
-            "pending_effect": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d",
+            "pendingEffect": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d",
             "phase": "Running",
-            "phase_label": "Running",
-            "policy_pin": "policy",
+            "phaseLabel": "Running",
+            "policyPin": "policy",
             "reasons": [
               {
                 "kind": "Automatic",
@@ -1238,14 +1238,14 @@
                 "text": "The latest evidence no longer matches the current candidate or policy."
               }
             ],
-            "reworks_remaining": 1,
+            "reworksRemaining": 1,
             "run": "wf1:7badf97655f38b541eff64d4b27b5b9d09f83d87f7549b9f66d02cfecca13679",
             "stage": {
               "id": "stage-2",
               "kind": "Check",
               "label": "Run Checks",
               "progression": "Automatic",
-              "progression_label": "Automatic"
+              "progressionLabel": "Automatic"
             },
             "stages": [
               {
@@ -1253,21 +1253,21 @@
                 "kind": "Provision",
                 "label": "Prepare Workspace",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-1",
                 "kind": "Build",
                 "label": "Build",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-2",
                 "kind": "Check",
                 "label": "Run Checks",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-3",
@@ -1276,21 +1276,21 @@
                 },
                 "label": "Review",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-4",
                 "kind": "Land",
                 "label": "Land Changes",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               },
               {
                 "id": "stage-5",
                 "kind": "Ci",
                 "label": "Check CI",
                 "progression": "Automatic",
-                "progression_label": "Automatic"
+                "progressionLabel": "Automatic"
               }
             ]
           }

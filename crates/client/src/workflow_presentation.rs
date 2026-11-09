@@ -2,6 +2,7 @@
 //! Hosts must supply capabilities from an authenticated session, never from page/user JSON.
 use farcooler_workflow::{digest, Command, Evidence, Phase, Progression, Reviewer, StageKind, State};
 use serde::{Deserialize, Serialize};
+use typeshare::typeshare;
 
 pub const SCHEMA: u32 = 2;
 
@@ -19,6 +20,7 @@ pub struct Capabilities {
     pub controller: bool,
     pub decision_principal: Option<String>,
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Reason {
     Automatic, ApprovalRequired, ReviewRequired, DependenciesOrResource,
@@ -26,40 +28,55 @@ pub enum Reason {
     /// The runner stopped the run on changes in its worktree, and says which (ov-979).
     WorktreeChanged,
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionKind { InspectLatestEvidence, InspectUncertainty, Approve, AcceptReview, RequestRework, RejectReview, Cancel }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Action {
     pub kind: ActionKind,
     pub label: String,
     /// Binds the entire snapshot and capability context; not a secret or an authorization token.
     pub guard: String,
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StageCard {
     pub id: String,
     pub label: String,
     pub progression_label: String,
+    #[typeshare(skip)]
     pub kind: StageKind,
+    #[typeshare(skip)]
     pub progression: Progression,
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GateKind { Approval, Review }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GateCard {
     pub kind: GateKind,
     pub principal: String,
     pub label: String,
     pub text: String,
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReasonCard { pub kind: Reason, pub label: String, pub text: String }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActionForm {
     pub action: ActionKind,
     pub label: String,
     pub help: String,
     pub submit_label: String,
+    #[typeshare(serialized_as = "I54")]
     pub max_bytes: usize,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,7 +92,9 @@ pub fn validate_input(kind: &ActionKind, reason: Option<&str>) -> Result<(), Inp
     };
     Err(InputError { code: "workflow_reason".into(), text: text.into() })
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunCard {
     pub label: String,
     pub phase_label: String,
@@ -94,6 +113,7 @@ pub struct RunCard {
     pub iteration: u8,
     pub reworks_remaining: u8,
     pub attempt: u8,
+    #[typeshare(serialized_as = "I54")]
     pub fence: u64,
     pub reasons: Vec<ReasonCard>,
     pub actions: Vec<Action>,
@@ -102,11 +122,15 @@ pub struct RunCard {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rework_history: Vec<farcooler_workflow::ReworkDecision>,
 }
+#[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Presentation {
     pub schema: u32,
     pub workspace: String,
+    #[typeshare(serialized_as = "I54")]
     pub epoch: u64,
+    #[typeshare(serialized_as = "I54")]
     pub revision: u64,
     pub runs: Vec<RunCard>,
 }
