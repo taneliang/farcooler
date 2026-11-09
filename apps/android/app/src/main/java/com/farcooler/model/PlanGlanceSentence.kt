@@ -34,8 +34,8 @@ data class PlanGlanceSentence(
         const val TITLE_MAX = 72
 
         /** A ticket's title cut at a word, with no comma or colon left hanging before the ellipsis. */
-        internal fun title(ticket: PlanTicket): String {
-            val cut = PlanWords.short(ticket.heading, TITLE_MAX)
+        internal fun title(heading: String): String {
+            val cut = PlanWords.short(heading, TITLE_MAX)
             if (!cut.endsWith("\u2026")) return cut
             return cut.dropLast(1).trimEnd { it in ",;:\u2014- " } + "\u2026"
         }
@@ -43,25 +43,26 @@ data class PlanGlanceSentence(
         const val NOTHING_RUNNING = "No tickets moving"
         const val NOTHING_QUEUED = "Nothing queued"
 
-        fun of(sections: PlanSections): PlanGlanceSentence {
+        /** The glance of [view], the shared core's reading of the plan (ov-1016); this only joins its words. */
+        fun of(view: PlanView): PlanGlanceSentence {
             val parts = mutableListOf<String>()
-            sections.landings.firstOrNull()?.let { lead ->
-                parts += "${lead.landing.label} ${lead.phase.sentence}"
-                val more = sections.landings.size - 1
+            view.landings.firstOrNull()?.let { lead ->
+                parts += "${lead.label} ${lead.phaseSentence}"
+                val more = view.landings.size - 1
                 if (more > 0) parts += if (more == 1) "1 more landing" else "$more more landings"
             }
-            if (sections.building.isNotEmpty()) parts += "${sections.building.size} building"
-            if (sections.inReview.isNotEmpty()) parts += "${sections.inReview.size} in review"
+            if (view.building.isNotEmpty()) parts += "${view.building.size} building"
+            if (view.inReview.isNotEmpty()) parts += "${view.inReview.size} in review"
 
-            val ranked = sections.waiting.next.map { it.ticket }
+            val ranked = view.waiting(PlanViewWaitingKind.NEXT)
             val next = ranked.firstOrNull()?.let { first ->
                 // Titles only, each said once and cut at a word: the key is in the title often enough, and never twice.
-                var said = title(first)
-                ranked.drop(1).firstOrNull { it.task != first.task && it.heading != first.heading }?.let {
-                    said += ", then ${title(it)}"
+                var said = title(first.heading)
+                ranked.drop(1).firstOrNull { it.id != first.id && it.heading != first.heading }?.let {
+                    said += ", then ${title(it.heading)}"
                 }
                 said
-            } ?: if (sections.waiting.count > 0) "${sections.waiting.count} waiting, none ranked" else null
+            } ?: if (view.waitingCount > 0) "${view.waitingCount} waiting, none ranked" else null
             return PlanGlanceSentence(now = if (parts.isEmpty()) null else parts.joinToString(" · "), next = next)
         }
     }

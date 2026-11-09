@@ -11,16 +11,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
-import java.util.Locale
 
 /**
- * The Plan's sections, glance band, themes grid and sidebar lists (ov-503) against
- * `test/fixtures/plan-sections-cases.json`, which AgentKit's `PlanSectionsCasesTests` reads too. The inputs are
+ * The Plan's glance band and sidebar lists (ov-503) against the second half of
+ * `test/fixtures/plan-sections-cases.json`, which AgentKit's `PlanSectionsCasesTests` reads too (its first half, the sections,
+ * is the Rust view model's: `crates/client/src/plan_view/tests.rs`). Needs the host JNI core: `cargo build -p farcooler-jni`
+ * and `-Pfarcooler.nativeLibDir=<repo>/target/debug`. The inputs are
  * `plan --json` shapes as the runner sends them, decoded by the parser the app reads them with; the expected outlines
  * are lowercased, since Android says titles in sentence case and iOS in title case.
  */
 class PlanSectionsCasesTest {
-    private val en = Locale.US
     private val fixture = Json.parseToJsonElement(repositoryFile("test/fixtures/plan-sections-cases.json")).jsonObject
 
     private class Case(c: JsonObject) {
@@ -30,60 +30,18 @@ class PlanSectionsCasesTest {
         val statuses: Map<String, TaskStatus> = c["statuses"]!!.jsonObject.mapNotNull { (k, v) ->
             TaskStatus.parse(v.jsonPrimitive.content)?.let { k to it }
         }.toMap()
-        val expect = c["expect"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
-        val sections get() = PlanSections.of(plan, needsYou, statuses)
+        val expect = c["expect"]?.jsonArray?.map { it.jsonPrimitive.content }?.dropWhile { !it.startsWith("glance now") } ?: emptyList()
     }
 
-    private fun kind(k: PlanSections.Kind) = k.name.lowercase().replace("_", "")
-
-    /** One line a row, as the fixture writes them. */
+    /**
+     * One line a row, as the fixture writes them, from "glance now" on: the glance band, the themes sidebar and the tickets
+     * sidebar, which are still Kotlin (ov-1016 phase 1) but read the shared core's view, asked for here over the host
+     * build of the JNI core. Every line before it is the core's own, pinned by its Rust test over the same fixture.
+     */
     private fun outline(c: Case): List<String> {
-        val s = c.sections
-        val out = mutableListOf("shown: " + s.shown.joinToString(" ") { kind(it) })
-        fun ticket(label: String, row: PlanSections.TicketRow) {
-            var line = "  $label ${row.ticket.key} | ${PlanWords.status(row.ticket)}"
-            row.agent?.let { line += " | agent: ${it.who}" }
-            if (row.waitsOnOwner) line += " | owner"
-            out += line
-        }
-        if (s.needsYou > 0) out += "needs-you ${s.needsYou}"
-        out += "landing"
-        for (card in s.landings) {
-            out += "  landing ${card.landing.label} | ${card.landing.subtitle ?: "-"} | ${card.phase.sentence}"
-            out += "    ladder: ${PlanLadder.compact(card.phase)} | ${card.phase.explanation}"
-            for (t in card.tickets) {
-                out += "    ticket ${t.key} | ${t.note ?: "-"}" + (if (t.waitsOnOwner) " | owner" else "")
-            }
-        }
-        s.emptyWords(PlanSections.Kind.LANDING)?.let { out += "  empty: $it" }
-        if (s.inReview.isNotEmpty()) {
-            out += "inreview"
-            s.inReview.forEach { ticket("ticket", it) }
-        }
-        out += "building"
-        s.building.forEach { ticket("ticket", it) }
-        s.emptyWords(PlanSections.Kind.BUILDING)?.let { out += "  empty: $it" }
-        out += "waiting"
-        s.waiting.next.forEach { ticket("next", it) }
-        s.waiting.notRanked.forEach { ticket("notranked", it) }
-        s.waiting.onYou.forEach { ticket("onyou", it) }
-        s.emptyWords(PlanSections.Kind.WAITING)?.let { out += "  empty: $it" }
-        if (PlanSections.Kind.AGENTS in s.shown) {
-            out += "agents"
-            out += "  header: ${s.fleet.header(en)}"
-            for (a in s.fleet.agents) {
-                out += "  ${if (a.working) "working" else "idle"} ${a.who} | ${a.worksFor} | ${a.state(s.now)} | ${a.tokens(en) ?: "-"} | ${a.cost(en) ?: "-"}"
-            }
-        }
-        out += "themes"
-        for (t in s.themes.tiles) {
-            out += "  tile ${t.name} | ${t.progress} | ${if (t.isMoving) "moving" else "still"} | ask: ${t.ownerAsk ?: "-"}"
-            t.cards.forEach { out += "    card ${it.glyph.name.lowercase().replace("_", "")} ${it.key}" }
-        }
-        val title = s.themes.finishedTitle
-        val words = s.themes.finishedWords
-        if (title != null && words != null) out += "  $title | $words: " + s.themes.finished.joinToString(", ") { it.name }
-        val glance = PlanGlanceSentence.of(s)
+        val view = PlanViews.of(c.plan, c.needsYou, c.statuses) ?: throw AssertionError("${c.name}: the core gave no view")
+        val out = mutableListOf<String>()
+        val glance = PlanGlanceSentence.of(view)
         out += "glance now: ${glance.nowLine}"
         out += "glance next: ${glance.nextLine}"
         out += "glance text: ${glance.text}"
@@ -98,7 +56,7 @@ class PlanSectionsCasesTest {
             }
         }
         out += "tickettree"
-        for (g in TicketTree.of(c.plan, s, en).groups) {
+        for (g in TicketTree.of(c.plan, view).groups) {
             out += "  group ${g.title} | ${g.detail ?: "-"} | ${if (g.folded) "folded" else "open"}"
             for (l in g.landings) {
                 out += "    landing ${l.label} | ${l.subtitle ?: "-"} | ${l.phase}"
@@ -117,7 +75,7 @@ class PlanSectionsCasesTest {
     }
 
     @Test
-    fun `the sections, glance, grid and lists are the fixture's, case by case`() {
+    fun `the glance, themes sidebar and tickets sidebar are the fixture's, case by case`() {
         val cases = fixture["cases"]!!.jsonArray
         assertTrue(cases.size >= 10)
         // Setting FARCOOLER_REGENERATE_CASES to a path writes the outlines this build makes there, for a person to read and

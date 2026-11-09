@@ -26,13 +26,13 @@ import com.farcooler.model.GlancePalette
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanPage
-import com.farcooler.model.PlanSections
-import com.farcooler.model.LANDING_EXPLANATION
+import com.farcooler.model.PlanView
+import com.farcooler.model.PlanViewKind
+import com.farcooler.model.PlanViewTicket
 import com.farcooler.model.ciOf
-import com.farcooler.model.themeGroups
 
-// The Plan's sections, drawn for the phone and the tablet (ov-503, design 7). `PlanSections` decides what is in each and
-// what it says empty; these lay it out, in its order: Needs you, Landing, In review, Building, Waiting, Agents, Themes. Nothing here re-derives a rule.
+// The Plan's sections, drawn for the phone and the tablet (ov-503, design 7). The shared core's `PlanView` decides what is in
+// each, in what order, and every word they say (ov-1016); these lay it out. Nothing here re-derives a rule.
 
 /** Which of the plan's folds are open: a fold's own default, flipped by a tap, kept while the screen is. */
 class PlanFolds(private val flipped: List<String>, private val flip: (String) -> Unit) {
@@ -55,6 +55,7 @@ fun rememberPlanFolds(key: Any?): PlanFolds {
 
 internal object PlanFold {
     const val LANDED_TODAY = "landed-today"
+    const val ON_LANDED_LANDING = "on-landed-landing"
 }
 
 /** What a section says with nothing in it: one quiet line. */
@@ -66,111 +67,96 @@ fun PlanEmptyLine(words: String, modifier: Modifier = Modifier) {
     )
 }
 
-/** The sections [sections] shows, in its order. */
+/** The sections [view] shows, in its order. */
 fun LazyListScope.planSections(
     plan: Plan,
-    sections: PlanSections,
-    statuses: Map<String, com.farcooler.model.TaskStatus>,
+    view: PlanView,
     folds: PlanFolds,
     themeColumns: Int,
     onOpen: (PlanPage) -> Unit,
     onNeedsYou: (() -> Unit)?,
 ) {
-    val now = sections.now
-    for (kind in sections.shown) {
-        val id = "plan/${kind.name.lowercase()}"
-        when (kind) {
-            PlanSections.Kind.NEEDS_YOU -> {
-                item(key = "$id/header") { PlanHeader(kind.title, sections.needsYou, Modifier.testTag("plan-needs-you")) }
-                item(key = "$id/row") { PlanNeedsYouRow(sections.needsYou, onNeedsYou) }
+    val now = view.now
+    for (section in view.sections) {
+        val id = "plan/${section.kind.name.lowercase()}"
+        val count = section.count.takeIf { it > 0 }
+        val empty = section.empty.takeIf { count == null }
+        when (section.kind) {
+            PlanViewKind.NEEDS_YOU -> {
+                item(key = "$id/header") { PlanHeader(section.title, section.count, Modifier.testTag("plan-needs-you")) }
+                item(key = "$id/row") { PlanNeedsYouRow(section.count, onNeedsYou) }
             }
-            PlanSections.Kind.LANDING -> {
+            PlanViewKind.LANDING -> {
                 item(key = "$id/header") {
                     // A long press says what a landing is, where landings first appear.
-                    ExplainedOnLongPress(listOf(LANDING_EXPLANATION)) {
-                        PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-landing"))
-                    }
+                    ExplainedOnLongPress(listOfNotNull(section.help)) { PlanHeader(section.title, count, Modifier.testTag("plan-landing")) }
                 }
-                val empty = sections.emptyWords(kind)
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-landing-empty")) }
-                for (card in sections.landings) item(key = "plan/landing/${card.id}") {
-                    PlanLandingCard(card, plan.ciOf(card.landing), now, onOpenTicket = { onOpen(PlanPage.Ticket(it)) })
+                for (card in view.landings) item(key = "plan/landing/${card.id}") {
+                    PlanLandingCard(card, plan.landings.firstOrNull { it.id == card.id }?.let(plan::ciOf), now, onOpenTicket = { onOpen(PlanPage.Ticket(it)) }, help = section.help)
                 }
             }
-            PlanSections.Kind.IN_REVIEW, PlanSections.Kind.BUILDING -> {
-                val tag = if (kind == PlanSections.Kind.IN_REVIEW) "plan-in-review" else "plan-building"
-                val rows = if (kind == PlanSections.Kind.IN_REVIEW) sections.inReview else sections.building
-                item(key = "$id/header") { PlanHeader(kind.title, rows.size.takeIf { it > 0 }, Modifier.testTag(tag)) }
-                val empty = sections.emptyWords(kind)
+            PlanViewKind.IN_REVIEW, PlanViewKind.BUILDING -> {
+                val tag = if (section.kind == PlanViewKind.IN_REVIEW) "plan-in-review" else "plan-building"
+                item(key = "$id/header") { PlanHeader(section.title, count, Modifier.testTag(tag)) }
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("$tag-empty")) }
-                ticketRows(plan, rows, id, now, rank = false, onOpen)
+                ticketRows(if (section.kind == PlanViewKind.IN_REVIEW) view.inReview else view.building, id, onOpen)
             }
-            PlanSections.Kind.WAITING -> {
-                item(key = "$id/header") { PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-waiting")) }
-                val empty = sections.emptyWords(kind)
+            PlanViewKind.WAITING -> {
+                item(key = "$id/header") { PlanHeader(section.title, count, Modifier.testTag("plan-waiting")) }
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-waiting-empty")) }
-                val waiting = sections.waiting
-                // Next up ranked, then Not ranked, then Waiting on you, each named only when something else shares the section.
-                val groups = listOf(
-                    Triple("Next up", waiting.next, "plan-next-up"),
-                    Triple("Not ranked", waiting.notRanked, "plan-not-ranked"),
-                    Triple("Waiting on you", waiting.onYou, "plan-waiting-on-you"),
-                ).filter { it.second.isNotEmpty() }
-                for ((title, rows, tag) in groups) {
-                    if (groups.size > 1) item(key = "$id/$tag") { PlanGroupTitle(title, Modifier.testTag(tag)) }
-                    ticketRows(plan, rows, "$id/$tag", now, rank = rows === waiting.next, onOpen)
+                // Each group is named only when another shares the section.
+                for (group in view.waiting) {
+                    val tag = "plan-" + group.kind.name.lowercase().replace('_', '-').let { if (it == "on-you") "waiting-on-you" else if (it == "next") "next-up" else it }
+                    if (view.waiting.size > 1) item(key = "$id/$tag") { PlanGroupTitle(group.title, group.attention, Modifier.testTag(tag)) }
+                    ticketRows(group.cards, "$id/$tag", onOpen)
                 }
             }
-            PlanSections.Kind.AGENTS -> {
-                val fleet = sections.fleet
-                item(key = "$id/header") { PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-agents")) }
-                if (fleet.isEmpty) {
-                    item(key = "$id/empty") { PlanEmptyLine(fleet.header(), Modifier.testTag("plan-agents-empty")) }
+            PlanViewKind.ON_LANDED_LANDING -> {
+                val open = folds.isOpen(PlanFold.ON_LANDED_LANDING, default = !section.folded)
+                item(key = "$id/header") {
+                    PlanHeader(section.title, count, Modifier.testTag("plan-on-landed-landing"), open = open) { folds.toggle(PlanFold.ON_LANDED_LANDING) }
+                }
+                if (open) ticketRows(view.onLandedLanding, id, onOpen)
+            }
+            PlanViewKind.AGENTS -> {
+                item(key = "$id/header") { PlanHeader(section.title, count, Modifier.testTag("plan-agents")) }
+                if (view.agents.rows.isEmpty()) {
+                    item(key = "$id/empty") { PlanEmptyLine(view.agents.header, Modifier.testTag("plan-agents-empty")) }
                 } else {
                     item(key = "$id/summary") {
                         Text(
-                            fleet.header(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            view.agents.header, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp).testTag("plan-agents-header"),
                         )
                     }
-                    for (agent in fleet.agents) item(key = "$id/${agent.id}") { PlanAgentRow(agent, now) { onOpen(PlanPage.Ticket(it)) } }
+                    for (agent in view.agents.rows) item(key = "$id/${agent.id}") {
+                        PlanAgentRow(agent, plan.agents.firstOrNull { it.id == agent.id }?.tickets?.firstOrNull()?.task) { onOpen(PlanPage.Ticket(it)) }
+                    }
                 }
             }
-            PlanSections.Kind.THEMES -> {
-                item(key = "$id/header") { PlanHeader(kind.title, sections.count(kind), Modifier.testTag("plan-themes")) }
+            PlanViewKind.THEMES -> {
+                item(key = "$id/header") { PlanHeader(section.title, section.count, Modifier.testTag("plan-themes")) }
                 themeGrid(
-                    sections.themes, themeColumns,
+                    view.themes, themeColumns,
                     budget = { themeId -> plan.themes.firstOrNull { it.id == themeId }?.let(PlanCostWords::overBudget)?.let { PlanCostWords.budgetLine(it) } },
                     onOpen = { onOpen(PlanPage.Theme(it)) },
                 )
             }
+            PlanViewKind.UNKNOWN -> {}
         }
     }
 }
 
-private fun LazyListScope.ticketRows(
-    plan: Plan,
-    rows: List<PlanSections.TicketRow>,
-    group: String,
-    now: Long,
-    rank: Boolean,
-    onOpen: (PlanPage) -> Unit,
-) {
-    rows.forEachIndexed { index, row ->
-        item(key = "$group/${row.id}") {
-            PlanTicketRow(
-                row.ticket, plan.themeOf(row.ticket), rank = if (rank) index + 1 else null, now = now, waitsOnOwner = row.waitsOnOwner,
-                agent = row.agent,
-            ) { onOpen(PlanPage.Ticket(row.id)) }
-        }
-    }
+private fun LazyListScope.ticketRows(cards: List<PlanViewTicket>, group: String, onOpen: (PlanPage) -> Unit) {
+    for (card in cards) item(key = "$group/${card.id}") { PlanCardRow(card) { onOpen(PlanPage.Ticket(card.id)) } }
 }
 
 /** A quiet subtitle inside a section: "Next up", "Not ranked". */
 @Composable
-private fun PlanGroupTitle(title: String, modifier: Modifier = Modifier) {
+private fun PlanGroupTitle(title: String, attention: Boolean, modifier: Modifier = Modifier) {
     Text(
-        title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        title, style = MaterialTheme.typography.labelLarge, color = if (attention) glanceColor(GlancePalette.amber) else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 2.dp),
     )
 }

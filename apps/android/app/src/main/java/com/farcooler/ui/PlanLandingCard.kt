@@ -35,45 +35,42 @@ import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PageLinks
 import com.farcooler.model.PlanCiRead
-import com.farcooler.model.PlanCostWords
-import com.farcooler.model.PlanLadder
-import com.farcooler.model.PlanSections
+import com.farcooler.model.PlanViewLanding
+import com.farcooler.model.PlanViewLandingTicket
 import com.farcooler.model.PlanWords
-import com.farcooler.model.LANDING_EXPLANATION
+import com.farcooler.model.span
 import com.farcooler.model.LandingWords
-import com.farcooler.model.accessibleFacts
-import com.farcooler.model.facts
 import com.farcooler.model.unbroken
 
 // A landing in Landing (ov-503, design 2; ov-522; ov-872), drawn for the phone: a card headed "Landing 86" with its title
 // under it and what it carries, the ladder compactly ("Checking on CI · step 2 of 3"; a long press explains the landing
 // and each step), the CI line, and its tickets. A ticket aboard says nothing; it speaks only once landed or when it waits
 // on the owner. Amber only for CI that failed, a landing that stalled, and a ticket waiting on the owner, each with words.
-// Every word is `PlanSections` and `LandingWords`'; this lays them out.
+// Every word is the core's `PlanView` (ov-1016) but the CI line's, which the plan's CI reads supply; this lays them out.
 
-/** The landing card: tonal, inset from the list's edges. */
+/** The landing card: tonal, inset from the list's edges. [help] is what a landing is, said first on a long press. */
 @Composable
-fun PlanLandingCard(card: PlanSections.LandingCard, ci: PlanCiRead?, now: Long, onOpenTicket: (String) -> Unit, modifier: Modifier = Modifier) {
-    val landing = card.landing
+fun PlanLandingCard(
+    card: PlanViewLanding,
+    ci: PlanCiRead?,
+    now: Long,
+    onOpenTicket: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    help: String? = null,
+) {
     val amber = glanceColor(GlancePalette.amber)
-    val phaseAmber = card.phase.needsAttention || LandingWords.needsAttention(landing, ci)
-    val facts = LandingWords.facts(card, ci, now)
+    val phaseAmber = card.attention || ci?.needsAttention == true
+    val facts = landingFacts(card, ci, now)
     val run = ci?.url?.takeIf { PageLinks.https(it) != null }
     val uri = LocalUriHandler.current
-    val step = PlanLadder.step(card.phase)
-    val spoken = listOfNotNull(
-        landing.label, landing.subtitle, landing.carries,
-        card.phase.word + if (step >= PlanLadder.steps.size) "" else ", step ${step + 1} of ${PlanLadder.steps.size}",
-    ).joinToString(", ")
+    val spoken = listOfNotNull(card.label, card.subtitle, card.carries, card.ladder.compact.replace(" · ", ", ")).joinToString(", ")
     // A long press says what a landing is, then each step of the ladder, the one it stands on in the phase's own words.
-    val explanation = listOf(LANDING_EXPLANATION) + PlanLadder.steps.indices.map { index ->
-        "${PlanLadder.label(index, step, card.phase)}: ${PlanLadder.explanation(index, step, card.phase)}"
-    }
+    val explanation = listOfNotNull(help) + card.ladder.steps.map { "${it.label}: ${it.explanation}" }
     ExplainedOnLongPress(explanation, modifier.fillMaxWidth()) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("plan-landing-${landing.number}"),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("plan-landing-${card.number}"),
     ) {
         Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(
@@ -82,19 +79,19 @@ fun PlanLandingCard(card: PlanSections.LandingCard, ci: PlanCiRead?, now: Long, 
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        landing.label, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold), maxLines = 2,
-                        overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-landing-${landing.number}-label"),
+                        card.label, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold), maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-landing-${card.number}-label"),
                     )
-                    landing.subtitle?.let {
+                    card.subtitle?.let {
                         Text(
                             it, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.testTag("plan-landing-${landing.number}-subtitle"),
+                            modifier = Modifier.testTag("plan-landing-${card.number}-subtitle"),
                         )
                     }
-                    landing.carries?.let {
+                    card.carries?.let {
                         Text(
                             it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-landing-${landing.number}-carries"),
+                            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-landing-${card.number}-carries"),
                         )
                     }
                 }
@@ -110,8 +107,8 @@ fun PlanLandingCard(card: PlanSections.LandingCard, ci: PlanCiRead?, now: Long, 
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (phaseAmber) FontWeight.Medium else FontWeight.Normal),
                             color = if (phaseAmber) amber else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false).testTag("plan-landing-${landing.number}-words")
-                                .semantics { contentDescription = LandingWords.accessibleFacts(card, ci, now) },
+                            modifier = Modifier.weight(1f, fill = false).testTag("plan-landing-${card.number}-words")
+                                .semantics { contentDescription = PlanWords.accessibleModel(facts, card.lander?.model.orEmpty()) },
                         )
                         if (run != null) {
                             Spacer(Modifier.width(6.dp))
@@ -120,21 +117,39 @@ fun PlanLandingCard(card: PlanSections.LandingCard, ci: PlanCiRead?, now: Long, 
                     }
                 }
             }
-            card.tickets.forEach { PlanLandingTicketRow(it, now, onClick = { onOpenTicket(it.id) }) }
+            card.tickets.forEach { PlanLandingTicketRow(it, onClick = { onOpenTicket(it.id) }) }
         }
     }
     }
 }
 
+/**
+ * "3f78754f · Passed · 2 of 5 jobs done · 12 min · Lander · Haiku · 1.4M": the card's facts line. The pushed commit, how long
+ * the landing has been in its phase and the lander are the core's; CI's own line is what the plan's CI read says of it.
+ */
+private fun landingFacts(card: PlanViewLanding, ci: PlanCiRead?, now: Long): String {
+    val parts = mutableListOf<String>()
+    card.pushedSha?.takeIf { it.isNotEmpty() }?.let { parts += it.take(8) }
+    if (ci != null) {
+        parts += LandingWords.ciSummary(ci)
+        LandingWords.ciStale(ci, now)?.let { parts += it }
+    } else if (card.pushedSha != null) {
+        parts += "CI not read yet"
+    }
+    if (card.since > 0) parts += PlanWords.span(now - card.since)
+    card.landerWords?.let { parts += it }
+    return parts.joinToString(" · ")
+}
+
 /** Three segments, the steps behind filled, the one it's on in ink (amber when it needs you), and the phase in words under them. */
 @Composable
-private fun PlanLadderBar(card: PlanSections.LandingCard, attention: Boolean) {
-    val current = PlanLadder.step(card.phase)
+private fun PlanLadderBar(card: PlanViewLanding, attention: Boolean) {
+    val current = card.ladder.at
     val scheme = MaterialTheme.colorScheme
     val amber = glanceColor(GlancePalette.amber)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("plan-ladder")) {
         Row(horizontalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxWidth()) {
-            for (index in PlanLadder.steps.indices) {
+            for (index in card.ladder.steps.indices) {
                 Box(
                     Modifier.weight(1f).height(4.dp).clip(CircleShape).background(
                         when {
@@ -147,25 +162,23 @@ private fun PlanLadderBar(card: PlanSections.LandingCard, attention: Boolean) {
             }
         }
         Text(
-            PlanLadder.compact(card.phase),
+            card.ladder.compact,
             style = MaterialTheme.typography.labelLarge,
             color = if (attention) amber else scheme.onSurface,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.testTag("plan-landing-${card.landing.number}-phase"),
+            modifier = Modifier.testTag("plan-landing-${card.number}-phase"),
         )
     }
 }
 
-/** One ticket inside a landing: its title, how it stands, and what it says in amber. */
+/** One ticket inside a landing: its title, and what it says about itself in amber when it waits on the owner. */
 @Composable
-private fun PlanLandingTicketRow(row: PlanSections.LandingTicket, now: Long, onClick: () -> Unit) {
+private fun PlanLandingTicketRow(row: PlanViewLandingTicket, onClick: () -> Unit) {
     val amber = glanceColor(GlancePalette.amber)
     // "Needs you" is the ticket's note, said once, in amber; a ticket simply aboard says nothing (ov-522).
-    val warning = if (row.waitsOnOwner) null else PlanWords.stale(row.ticket, now)
-    val overBudget = PlanCostWords.overBudget(row.ticket)
     val standing = row.note.orEmpty()
-    val attention = row.noteNeedsAttention || warning != null || overBudget != null
-    val spoken = listOfNotNull(row.ticket.heading, standing.ifEmpty { null }, warning, PlanCostWords.overBudgetSpoken(row.ticket)).joinToString(", ")
+    val attention = row.noteAttention || row.notes.any { it.attention }
+    val spoken = row.accessibility.ifEmpty { listOfNotNull(row.heading, standing.ifEmpty { null }).joinToString(", ") }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick)
@@ -173,16 +186,15 @@ private fun PlanLandingTicketRow(row: PlanSections.LandingTicket, now: Long, onC
             .semantics(mergeDescendants = true) { contentDescription = spoken },
     ) {
         Column(Modifier.weight(1f)) {
-            Text(row.ticket.heading, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(row.heading, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (standing.isNotEmpty()) {
                 Text(
                     standing, style = MaterialTheme.typography.bodySmall,
-                    color = if (row.noteNeedsAttention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (row.noteAttention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-landing-ticket-${row.key}-note"),
                 )
             }
-            if (warning != null) Text(warning, style = MaterialTheme.typography.labelMedium, color = amber)
-            if (overBudget != null) Text(overBudget, style = MaterialTheme.typography.labelMedium, color = amber)
+            row.notes.forEach { Text(it.text, style = MaterialTheme.typography.labelMedium, color = if (it.attention) amber else MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         if (attention) {
             Spacer(Modifier.width(8.dp))

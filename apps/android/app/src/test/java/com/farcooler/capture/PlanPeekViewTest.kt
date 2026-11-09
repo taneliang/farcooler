@@ -7,7 +7,7 @@ import androidx.compose.ui.Modifier
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanGlanceSentence
 import com.farcooler.model.PlanReadState
-import com.farcooler.model.PlanSections
+import com.farcooler.model.PlanViews
 import com.farcooler.model.PlanStrip
 import com.farcooler.model.Terminal
 import com.farcooler.ui.BandShown
@@ -75,7 +75,7 @@ class PlanPeekViewTest {
         assertEquals("a sheet open over the card says both", BandShown.ALL, peekBand(1f, 411, true))
         assertEquals(BandShown.ALL, peekBand(1.5f, 320, true))
         val tags = SemanticsProbe.described {
-            FarCoolerTheme { PlanGlanceBand(PlanGlanceSentence.of(PlanSections.of(plan, 0, emptyMap())), 0, shown = BandShown.NEXT_ONLY) }
+            FarCoolerTheme { PlanGlanceBand(PlanGlanceSentence.of(PlanViews.of(plan)!!), 0, shown = BandShown.NEXT_ONLY) }
         }
         assertTrue("plan-band-next" in tags)
         assertFalse("plan-band-now" in tags)

@@ -50,12 +50,10 @@ class PlanLandingsTest {
 
     @Test
     fun `a landing is its tickets' home while it is live, and a ticket says it's in it`() {
-        val card = PlanSections.of(plan).landings.single()
-        assertEquals(listOf("ov-4"), card.tickets.map { it.key })
-        assertEquals(LandingPhase.CI_FAILED, card.phase)
-        assertTrue(LandingWords.needsAttention(card.landing, null))
+        val landing = plan.landings.single { !it.state.isSettled }
+        assertEquals(listOf("ov-4"), landing.tickets.map { it.key })
+        assertTrue(LandingWords.needsAttention(landing, null))
         assertEquals("Landing · in Landing 9", PlanWords.status(plan.tickets[2]))
-        assertEquals(listOf(plan.tickets[2]), plan.ticketsOn(card.landing))
     }
 
     @Test

@@ -80,12 +80,12 @@ data class PlanStrip(
             val working = plan.working
             val state = state(orchestrator)
             // One reading of the plan for the band and for Next, so a ticket waiting on a decision is in neither.
-            val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses)
+            val view = PlanViews.of(plan, needsYou = needsYou, statuses = statuses)
             return PlanStrip(
                 orchestrator = state, line = line(orchestrator, state), needsYou = maxOf(0, needsYou),
                 now = working.take(NOW_SHOWN).map { PlanWords.short(it.heading) to it.stage },
-                moreNow = maxOf(0, working.size - NOW_SHOWN), next = sections.waiting.next.firstOrNull()?.let { PlanWords.short(it.ticket.heading) },
-                band = PlanGlanceSentence.of(sections),
+                moreNow = maxOf(0, working.size - NOW_SHOWN), next = view?.waiting(PlanViewWaitingKind.NEXT)?.firstOrNull()?.let { PlanWords.short(it.heading) },
+                band = view?.let(PlanGlanceSentence::of),
             )
         }
 

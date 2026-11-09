@@ -5,7 +5,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.farcooler.model.PlanReadState
-import com.farcooler.model.PlanSections
 import com.farcooler.ui.FarCoolerTheme
 import com.farcooler.ui.PlanFolds
 import com.farcooler.ui.planItems
@@ -122,9 +121,7 @@ class PlanSectionsViewTest {
 
     @Test fun `the empty sections say so`() {
         val fixture = PlanFixtures.case("next-empty")
-        val sections = PlanSections.of(fixture.plan, fixture.needsYou, fixture.statuses)
         val tags = drawn(fixture)
-        assertEquals("Nothing is landing right now.", sections.emptyWords(PlanSections.Kind.LANDING))
         assertTrue(tags.getValue("plan-landing-empty").words, "Nothing is landing right now." in tags.getValue("plan-landing-empty").words)
         assertTrue("plan-waiting" in tags)
         val agents = drawn(PlanFixtures.case("board-agents-empty"))

@@ -69,7 +69,6 @@ class PlanTest {
         assertFalse(builder.working)
         assertEquals("gpt-5.6", builder.model)
         assertEquals(1_799_999_940_000L, builder.stopAskedAt)
-        assertEquals("Stopping", builder.state(now))
         assertEquals("2/5 · Reviewing the plan", plan.agents[0].doingNow)
         assertEquals(listOf(reviewer), plan.agentsOn(plan.tickets[1]))
     }

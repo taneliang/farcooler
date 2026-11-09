@@ -575,7 +575,8 @@ class Connection(
     val readState: StateFlow<Map<String, com.farcooler.model.BoardReads>> = readsSync.reads
 
     /** The plan layer (ov-274), read on request behind `board_plan`. */
-    val plans = PlanReads({ method, args -> core.call(method, args) }, runnerCan = { daemonBuild.current.value?.can(Capability.BOARD_PLAN) })
+    val plans = PlanReads({ method, args -> core.call(method, args) }, runnerCan = { daemonBuild.current.value?.can(Capability.BOARD_PLAN) },
+        workflowCan = { daemonBuild.current.value?.can(Capability.WORKFLOW_COMMANDS) })
 
     /** Orchestrator pages (ov-285), read with the plan behind `board_pages`. */
     val pages = PageReads({ method, args -> core.call(method, args) }, runnerCan = { daemonBuild.current.value?.can(Capability.BOARD_PAGES) })

@@ -1178,12 +1178,18 @@ jobs:
       - name: Build the Rust core and the tunnel for Android
         run: ./scripts/build-android-libs.sh
 
+      # The Plan's view model is Rust's (ov-1016), and the phone's glance, sidebar and
+      # screen tests ask the host build of the JNI core for it. Without
+      # `-Pfarcooler.nativeLibDir` they fail on the first ask, which is the point.
+      - name: Build the Rust core for the host
+        run: cargo build -p farcooler-jni
+
       # The ported logic, against the same fixtures the Swift suite uses. This
       # is the job that catches the transcript reducer drifting from the Apple
       # apps', which is the one thing about this client that must not happen.
       - name: Test
         working-directory: apps/android
-        run: ./gradlew testInstrumentedUnitTest
+        run: ./gradlew testInstrumentedUnitTest "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug"
 
       # Both, in one invocation, and the second half is new.
       #
@@ -1289,6 +1295,7 @@ jobs:
           ./gradlew testInstrumentedUnitTest \
             -Pfarcooler.captures \
             "-Pfarcooler.captureJdk=$CAPTURE_JDK" \
+            "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug" \
             --max-workers=2
       # Gradle prints no test count, and a filter that matches nothing passes.
       # Read the result files, print the count, and fail on none, or on a

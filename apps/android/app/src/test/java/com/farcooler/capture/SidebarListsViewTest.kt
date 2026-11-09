@@ -5,7 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.farcooler.model.OneTree
-import com.farcooler.model.PlanSections
+import com.farcooler.model.PlanViews
 import com.farcooler.model.ThemeTree
 import com.farcooler.model.TicketTree
 import com.farcooler.ui.FarCoolerTheme
@@ -40,7 +40,7 @@ class SidebarListsViewTest {
     private val plan = fixture.plan
     private fun models(filter: OneTree.Filter = OneTree.Filter.OPEN) = SidebarModels(
         ThemeTree.of(plan, filter, fixture.statuses),
-        TicketTree.of(plan, PlanSections.of(plan, fixture.needsYou, fixture.statuses)),
+        TicketTree.of(plan, PlanViews.of(plan, fixture.needsYou, fixture.statuses)),
     )
 
     private val opened = mutableListOf<String>()

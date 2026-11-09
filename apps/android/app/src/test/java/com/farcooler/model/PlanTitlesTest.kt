@@ -30,28 +30,12 @@ class PlanTitlesTest {
     }
 
     @Test
-    fun `a landing reads Landing N, what it carries, and the agent landing it`() {
+    fun `a landing is Landing N, with the agent landing it and its tickets' titles on one line`() {
         val landing = plan.landings.first()
         assertEquals("Landing 9", landing.label)
-        assertNull("its title is its label already", landing.subtitle)
-        assertEquals("Title of ov-4", landing.carries)
+        assertEquals("Title of ov-4", landing.summary)
         assertEquals("00000000-0000-0000-0000-000000007004", landing.lander)
-        assertEquals("a landing the plan lists no agent for has no lander to name", null, PlanSections.of(plan).landings.first().lander)
-        val earlier = plan.landings[1]
-        assertEquals("Landing 8", earlier.label)
-        assertEquals("Agents message the plan", earlier.subtitle)
-    }
-
-    @Test
-    fun `a landing's title is its subtitle, never its name, and a number is all its name needs`() {
-        val bare = PlanLanding("i", 72, "", null, LandingState.GATING, 0, tickets = emptyList(), ciSubject = "")
-        assertEquals("Landing 72", bare.label)
-        assertNull(bare.subtitle)
-        val titled = bare.copy(number = 3, title = "Phones catch up")
-        assertEquals("Landing 3", titled.label)
-        assertEquals("the title is the subtitle, never the name", "Phones catch up", titled.subtitle)
-        assertEquals("a title that repeats the label says no more", null, bare.copy(title = "Landing 72").subtitle)
-        assertEquals("the runner's own prefix is not said twice", "Phones", bare.copy(title = "Landing 72 \u00b7 Phones").subtitle)
+        assertEquals("Landing 72", PlanLanding("i", 72, "", null, LandingState.GATING, 0, tickets = emptyList(), ciSubject = "").label)
     }
 
     @Test

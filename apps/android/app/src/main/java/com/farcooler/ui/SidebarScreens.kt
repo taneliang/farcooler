@@ -40,7 +40,7 @@ import com.farcooler.model.OneTree
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
-import com.farcooler.model.PlanSections
+import com.farcooler.model.PlanViews
 import com.farcooler.model.ThemeTree
 import com.farcooler.model.TicketTree
 import com.farcooler.model.WorkspaceSummary
@@ -68,7 +68,7 @@ internal fun rememberSidebarModels(connection: Connection, workspace: WorkspaceS
     val plan = (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan()
     return remember(board, plan, filter) {
         val statuses = board.rows.associate { it.id to it.status }
-        SidebarModels(ThemeTree.of(plan, filter, statuses), TicketTree.of(plan, PlanSections.of(plan, statuses = statuses)))
+        SidebarModels(ThemeTree.of(plan, filter, statuses), TicketTree.of(plan, PlanViews.of(plan, statuses = statuses)))
     }
 }
 

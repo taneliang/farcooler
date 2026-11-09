@@ -1,7 +1,5 @@
 package com.farcooler.model
 
-import java.util.Locale
-
 // The two-list sidebar (ov-503, design 3; ov-872): the why and the how, apart. `ThemeTree` is Themes › Cards; `TicketTree` is
 // Tickets › Agents, grouped as the Plan view's sections are, so the two read in one order. They replace `OneTree`'s
 // single Theme › Task › Ticket › Terminals outline. Terminals are the app's own (live panes, not plan data) and hang under
@@ -134,33 +132,39 @@ data class TicketTree(
         groups.asSequence().flatMap { it.tickets + it.landings.flatMap(LandingNode::tickets) }.firstOrNull { it.id == ticket }?.card
 
     companion object {
-        fun of(plan: Plan, sections: PlanSections = PlanSections.of(plan), locale: Locale = Locale.getDefault()): TicketTree {
-            fun node(agent: PlanAgent) = AgentNode(agent.id, agent.who, agent.working, agent.tokens(locale), agent.terminal)
-            fun agents(ticket: PlanTicket): List<AgentNode> = PlanFleet.of(plan.agentsOn(ticket)).agents.map(::node)
-            fun ticketNode(ticket: PlanTicket, state: String) =
-                TicketNode(ticket.task, ticket.key, ticket.heading, state, agents(ticket), ticket.card)
-            fun rows(rows: List<PlanSections.TicketRow>) = rows.map { ticketNode(it.ticket, PlanWords.status(it.ticket)) }
+        /** The tickets grouped as the Plan view's sections are, from [view] (the shared core's reading of the plan, ov-1016); no view lists nothing. */
+        fun of(plan: Plan, view: PlanView? = PlanViews.of(plan)): TicketTree {
+            view ?: return TicketTree(emptyList())
+            val rows = view.agents.rows.associateBy { it.id }
+            fun agents(task: String): List<AgentNode> = plan.ticket(task)?.let { plan.agentsOn(it) }.orEmpty()
+                .mapNotNull { rows[it.id] }.map { AgentNode(it.id, it.who, it.working, it.tokens, it.terminal) }
+            fun ticketNode(id: String, key: String, heading: String, state: String) =
+                TicketNode(id, key, heading, state, agents(id), PlanCardRef(id, key))
+            fun rows(cards: List<PlanViewTicket>) = cards.map { ticketNode(it.id, it.key, it.heading, it.status) }
 
             val groups = mutableListOf<Group>()
-            if (sections.landings.isNotEmpty()) {
+            if (view.landings.isNotEmpty()) {
                 groups += Group(
-                    Kind.Landing, PlanSections.Kind.LANDING.title, null, false, emptyList(),
-                    sections.landings.map { card ->
-                        LandingNode(card.landing.id, card.landing.label, card.landing.subtitle, card.phase.word, card.tickets.map { ticketNode(it.ticket, it.note?.let { note -> if (note.startsWith("Landed")) "Landed" else note } ?: "") })
+                    Kind.Landing, view.section(PlanViewKind.LANDING)?.title ?: "Landing", null, false, emptyList(),
+                    view.landings.map { card ->
+                        LandingNode(
+                            card.id, card.label, card.subtitle, card.phaseWord,
+                            card.tickets.map { ticketNode(it.id, it.key, it.heading, it.note?.let { note -> if (note.startsWith("Landed")) "Landed" else note } ?: "") },
+                        )
                     },
                 )
             }
-            val waiting = sections.waiting.onYou + sections.waiting.next + sections.waiting.notRanked
-            for ((kind, title, list, folded) in listOf(
-                Quad(Kind.InReview, "In review", sections.inReview, false),
-                Quad(Kind.Building, "Building", sections.building, false),
-                Quad(Kind.Waiting, "Waiting", waiting, true),
+            val waiting = view.waiting(PlanViewWaitingKind.ON_YOU) + view.waiting(PlanViewWaitingKind.NEXT) + view.waiting(PlanViewWaitingKind.NOT_RANKED)
+            for ((kind, section, list, folded) in listOf(
+                Quad(Kind.InReview, PlanViewKind.IN_REVIEW, view.inReview, false),
+                Quad(Kind.Building, PlanViewKind.BUILDING, view.building, false),
+                Quad(Kind.Waiting, PlanViewKind.WAITING, waiting, true),
             )) {
-                if (list.isNotEmpty()) groups += Group(kind, title, if (folded) "${list.size}" else null, folded, rows(list))
+                if (list.isNotEmpty()) groups += Group(kind, view.section(section)?.title ?: "", if (folded) "${list.size}" else null, folded, rows(list))
             }
             return TicketTree(groups)
         }
 
-        private data class Quad(val kind: Kind, val title: String, val list: List<PlanSections.TicketRow>, val folded: Boolean)
+        private data class Quad(val kind: Kind, val section: PlanViewKind, val list: List<PlanViewTicket>, val folded: Boolean)
     }
 }

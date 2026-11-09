@@ -59,9 +59,13 @@ import com.farcooler.model.GlancePalette
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanCounts
-import com.farcooler.model.PlanAgent
 import com.farcooler.model.PlanGlanceSentence
-import com.farcooler.model.PlanSections
+import com.farcooler.model.PlanView
+import com.farcooler.model.PlanViewMark
+import com.farcooler.model.PlanViewNote
+import com.farcooler.model.PlanViewNoteKind
+import com.farcooler.model.PlanViewTicket
+import com.farcooler.model.PlanViews
 import com.farcooler.model.PlanTicket
 import com.farcooler.model.TicketStage
 import com.farcooler.model.ciOf
@@ -180,10 +184,14 @@ private fun LazyListScope.loaded(
         pages?.let { pageItems(it, plan, onOpen) }
         return
     }
-    // One reading of the plan for the band and every section, so they can't disagree.
-    val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses)
-    if (band != BandShown.NONE) item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(sections), sections.needsYou, onNeedsYou = onNeedsYou, pill = false, shown = band) }
-    planSections(plan, sections, statuses, folds, themeColumns, onOpen, onNeedsYou)
+    // One reading of the plan for the band and every section, so they can't disagree: the shared core's (ov-1016).
+    val view = PlanViews.of(plan, needsYou = needsYou, statuses = statuses)
+    if (view == null) {
+        item(key = "plan/unreadable") { PlanNotice(PlanWords.COULDNT_READ, null, Modifier.testTag("plan-unreadable")) }
+    } else {
+        if (band != BandShown.NONE) item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(view), view.needsYou, onNeedsYou = onNeedsYou, pill = false, shown = band) }
+        planSections(plan, view, folds, themeColumns, onOpen, onNeedsYou)
+    }
     // Behind `board_cost`: a runner without it sends no cost (ov-307).
     plan.cost?.takeIf { it.isWorthShowing }?.let { cost ->
         item(key = "plan/cost") { PlanHeader("Cost", null, Modifier.testTag("plan-cost-header")) }
@@ -200,9 +208,7 @@ private fun LazyListScope.loaded(
         }
         if (open) {
             itemsIndexedTickets(landed, "landed") { _, ticket ->
-                PlanTicketRow(ticket, plan.themeOf(ticket), rank = null, now = plan.nowMs, waitsOnOwner = false) {
-                    onOpen(PlanPage.Ticket(ticket.task))
-                }
+                PlanLandedRow(ticket, plan.themeOf(ticket)) { onOpen(PlanPage.Ticket(ticket.task)) }
             }
         }
     }
@@ -295,75 +301,103 @@ fun planGlyph(stage: TicketStage): ImageVector = when (stage) {
     TicketStage.UNKNOWN -> Icons.Outlined.QuestionMark
 }
 
+/** A card's mark: its place in Next Up in numerals, else a glyph per stage. */
+private fun markGlyph(mark: PlanViewMark): ImageVector = when (mark) {
+    PlanViewMark.WAITING -> Icons.Outlined.Schedule
+    PlanViewMark.BUILDING, PlanViewMark.FIXING -> Icons.Outlined.Build
+    PlanViewMark.REVIEWING -> Icons.Outlined.Visibility
+    PlanViewMark.NEEDS_YOU -> Icons.Outlined.ErrorOutline
+    PlanViewMark.LANDING -> Icons.Outlined.VerticalAlignBottom
+    PlanViewMark.LANDED -> Icons.Outlined.CheckCircleOutline
+    PlanViewMark.DROPPED -> Icons.Outlined.Close
+    PlanViewMark.RANK, PlanViewMark.UNKNOWN -> Icons.Outlined.QuestionMark
+}
+
 /**
- * One ticket's row: its title and the theme it serves, then its reason or stage.
- * In Next up its rank sits in the leading column; elsewhere its stage's glyph
- * does, amber only when it's stale, waiting on you or over its token budget
- * (ov-307).
+ * One ticket's row, drawn from the core's card (ov-1016): the theme it serves over the title, then the card's second
+ * line and its notes. In Next up its rank sits in the leading column; elsewhere its stage's glyph does, amber when a
+ * note needs a person. A note with an explanation says it on a long press. Every word is the card's.
  */
 @Composable
-fun PlanTicketRow(
-    ticket: PlanTicket,
-    theme: PlanTheme?,
-    rank: Int?,
-    now: Long,
-    waitsOnOwner: Boolean,
-    /** Its main agent (ov-503): "Builder · Sonnet · 380K". */
-    agent: PlanAgent? = null,
-    onClick: () -> Unit,
-) {
-    val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(ticket, now)
-    val overBudget = PlanCostWords.overBudget(ticket)
+fun PlanCardRow(card: PlanViewTicket, onClick: () -> Unit) {
     val amber = glanceColor(GlancePalette.amber)
-    val second = if (rank != null) ticket.reason.ifEmpty { ticket.key }
-    // The stage has a line of its own, so the stage word keeps only what it leaves to it ("Approved" beside "Checks failing", ov-317).
-    else listOfNotNull(PlanWords.status(ticket, stage = ticket.shownStage == null), ticket.key).joinToString(" · ")
-    val stage = if (rank == null) ticket.shownStage else null
-    val agentWords = agent?.let { listOfNotNull(it.who, it.tokens()).joinToString(" · ") }
-    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, ticket.heading, theme?.name, second, stage?.fullWords, agentWords, warning, PlanCostWords.overBudgetSpoken(ticket)).joinToString(", ")
+    // The agent keeps the line of its own it has always had, smaller, under the second line.
+    val agentWords = card.agent?.line?.ifEmpty { null }
+    val second = card.second
     ListItem(
         leadingContent = {
             Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
-                if (rank != null) {
-                    Text("$rank", style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (card.rank != null) {
+                    Text("${card.rank}", style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    Icon(planGlyph(ticket.stage), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (warning == null && overBudget == null && stage?.needsAttention != true) MaterialTheme.colorScheme.onSurfaceVariant else amber)
+                    Icon(markGlyph(card.mark), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (card.markAttention) amber else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
         // Which theme it serves (the owner's ask, ov-273) sits over the title: beside it, a long title is cut at a third.
-        overlineContent = theme?.let {
+        overlineContent = card.theme?.let {
             {
-                Text(
-                    it.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.testTag("plan-ticket-${ticket.key}-theme"),
-                )
+                Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-ticket-${card.key}-theme"))
             }
         },
         headlineContent = {
-            Text(ticket.heading, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(card.heading, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
             Column {
-                if (second.isNotEmpty()) Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                // Where its pull request stands (ov-317): gray, or amber for what needs a person, which leads with the problem.
-                stage?.rowWords?.let {
-                    Text(
-                        it, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (stage.needsAttention) amber else LocalContentColor.current,
-                        modifier = Modifier.testTag("plan-ticket-${ticket.key}-stage${if (stage.needsAttention) "-attention" else ""}"),
-                    )
-                }
-                if (agentWords != null) Text(agentWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-ticket-${ticket.key}-agent"))
-                if (warning != null) Text(warning, style = MaterialTheme.typography.labelMedium, color = amber)
-                if (overBudget != null) Text(overBudget, style = MaterialTheme.typography.labelMedium, color = amber)
+                if (second.isNotEmpty()) Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-ticket-${card.key}-second"))
+                if (agentWords != null) Text(agentWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-ticket-${card.key}-agent"))
+                card.notes.forEach { PlanCardNote(card.key, it) }
             }
         },
         trailingContent = {
             Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
         },
-        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).testTag("plan-ticket-${ticket.key}").semantics(mergeDescendants = true) { contentDescription = spoken },
+        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).testTag("plan-ticket-${card.key}")
+            .semantics(mergeDescendants = true) { contentDescription = card.accessibility },
+    )
+}
+
+/** A line under a card's second line: where its pull request stands, the engine's step, a warning, a budget gone over. */
+@Composable
+private fun PlanCardNote(key: String, note: PlanViewNote) {
+    val amber = glanceColor(GlancePalette.amber)
+    val line: @Composable () -> Unit = {
+        when (note.kind) {
+            // Where its pull request stands (ov-317): gray, or amber for what needs a person, which leads with the problem.
+            PlanViewNoteKind.STAGE -> Text(
+                note.text, maxLines = 1, overflow = TextOverflow.MiddleEllipsis, style = MaterialTheme.typography.bodyMedium,
+                color = if (note.attention) amber else LocalContentColor.current,
+                modifier = Modifier.testTag("plan-ticket-$key-stage${if (note.attention) "-attention" else ""}"),
+            )
+            PlanViewNoteKind.RUN -> Text(
+                note.text, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
+                color = if (note.attention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("plan-ticket-$key-run"),
+            )
+            else -> Text(note.text, style = MaterialTheme.typography.labelMedium, color = if (note.attention) amber else LocalContentColor.current)
+        }
+    }
+    if (note.help.isNullOrEmpty()) line() else ExplainedOnLongPress(listOf(note.help)) { line() }
+}
+
+/** A ticket that landed today, in Landed today: its title, the theme it serves and its stage. The core's view doesn't carry these rows. */
+@Composable
+fun PlanLandedRow(ticket: PlanTicket, theme: PlanTheme?, onClick: () -> Unit) {
+    val second = listOfNotNull(PlanWords.status(ticket), ticket.key).joinToString(" · ")
+    val spoken = listOfNotNull(ticket.heading, theme?.name, second).joinToString(", ")
+    ListItem(
+        leadingContent = {
+            Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
+                Icon(planGlyph(ticket.stage), contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        overlineContent = theme?.let { { Text(it.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-ticket-${ticket.key}-theme")) } },
+        headlineContent = { Text(ticket.heading, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis) },
+        supportingContent = { Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline) },
+        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).testTag("plan-ticket-${ticket.key}")
+            .semantics(mergeDescendants = true) { contentDescription = spoken },
     )
 }
 

@@ -27,20 +27,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.farcooler.model.PlanAgent
+import com.farcooler.model.PlanViewAgentRow
 
 // Agents (ov-503, design 6), drawn for the phone: one row per agent. Who (role and model) with its tokens beside it and
 // its dollars after, then what it works for and its state. A working agent has a filled dot; a finished one, a ring.
-// A row opens its ticket when it has one.
+// A row opens its ticket when it has one. Every word is the core's (ov-1016).
 
+/** One agent's row, from the core's (ov-1016): [ticket] is the first ticket it works, which a tap opens; null opens nothing. */
 @Composable
-fun PlanAgentRow(agent: PlanAgent, now: Long, onOpenTicket: (String) -> Unit) {
-    // The first ticket it works: a row opens one page, and an agent with several shows the first.
-    val ticket = agent.tickets.firstOrNull()?.task
-    val tokens = agent.tokens()
-    val cost = agent.cost()
-    val second = agentSecondLine(agent, now)
-    val spoken = listOfNotNull(agent.who, agent.model.takeIf { it.isNotEmpty() }?.let { "Model ID $it" }, second, tokens?.let { "$it tokens" }, cost).joinToString(", ")
+fun PlanAgentRow(agent: PlanViewAgentRow, ticket: String?, onOpenTicket: (String) -> Unit) {
+    val tokens = agent.tokens
+    val cost = agent.cost
+    val second = agent.second
+    val spoken = agent.accessibility
     val ink = MaterialTheme.colorScheme.onSurface
     Row(
         verticalAlignment = Alignment.Top,
@@ -80,11 +79,3 @@ private fun column(text: String?, width: androidx.compose.ui.unit.Dp) {
         modifier = Modifier.width(width),
     )
 }
-
-/** "“Design ov-503” · ov-503 · Working · 22 min": what it was called, what it works for, and its state. What it is doing now leads, else its title. */
-internal fun agentSecondLine(agent: PlanAgent, now: Long): String = buildList {
-    val said = agent.doingNow.ifEmpty { agent.title }
-    if (said.isNotEmpty()) add("“$said”")
-    add(agent.worksFor)
-    add(agent.state(now))
-}.joinToString(" · ")

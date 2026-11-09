@@ -9,6 +9,7 @@ import com.farcooler.core.CoreException
 import com.farcooler.core.DisconnectedException
 import com.farcooler.core.UnreachedException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonObject
@@ -32,6 +33,8 @@ class PlanReads(
     /** Whether the runner advertises `board_plan`; null before its build is read. */
     private val runnerCan: () -> Boolean?,
     private val timeoutMs: Long = PlanReadState.TIMEOUT_MS,
+    /** Whether the runner advertises `workflow_commands`; only then is the workspace's workflow presentation asked for. */
+    private val workflowCan: () -> Boolean? = { false },
 ) {
     private val _states = MutableStateFlow<Map<String, PlanReadState>>(emptyMap())
 
@@ -84,11 +87,31 @@ class PlanReads(
                 // A read that fails over a plan already in hand keeps the plan:
                 // the screen draws it, and the next notice reads again.
                 if ((state == PlanReadState.Unavailable || state == PlanReadState.Reconnecting) && _states.value[key] is PlanReadState.Loaded) break
-                set(key, state)
+                set(key, withWorkflow(state, workspace.id))
             } while (movedAgain.contains(key))
         } finally {
             reading -= key
         }
+    }
+
+    /**
+     * [state] with the workspace's workflow presentation beside its plan, when the app has it (ov-1016): the engine's runs
+     * the cards show come from the shared core, which reads the presentation as `workflow.snapshot` answered it. A
+     * workspace without a published workflow, or a runner that doesn't answer, leaves the plan as it was.
+     */
+    private suspend fun withWorkflow(state: PlanReadState, workspace: String): PlanReadState {
+        val loaded = state as? PlanReadState.Loaded ?: return state
+        if (workflowCan() != true) return state
+        val presentation = try {
+            withTimeoutOrNull(timeoutMs) {
+                (call("workflow.snapshot", buildJsonObject { put("workspace", workspace) })["presentation"] as? JsonObject)?.toString()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        return if (presentation == null) state else PlanReadState.Loaded(loaded.plan.copy(workflow = presentation))
     }
 
     /**

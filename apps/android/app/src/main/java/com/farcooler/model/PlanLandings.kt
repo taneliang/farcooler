@@ -66,26 +66,11 @@ data class PlanLanding(
     val lander: String? = null,
     /** Gathering ready tickets while the landing ahead finishes. */
     val collecting: Boolean = false,
-    /** The phase the runner derived (ov-503); null from a runner without it, and for phase 0. */
-    val phase: LandingPhase? = null,
-    /** When the landing entered [phase], in ms; null with it. */
-    val phaseSince: Long? = null,
     /** What it spent, its lander's included (ov-872); null from a runner without it. */
     val spend: PlanSpend? = null,
 ) {
     /** "Landing 72": what every surface calls the landing, as its heading and in a sentence (ov-514, ov-522). The title is its subtitle, never its name. */
     val label: String get() = label(number)
-
-    /** What it is for, under the label: the title without a "Landing 72 ·" the runner put in front, or null when it has none or says no more than the label. */
-    val subtitle: String?
-        get() {
-            var t = title?.takeIf { it.isNotEmpty() && it != label } ?: return null
-            if (t.startsWith("$label · ")) t = t.drop(label.length + 3)
-            return t.takeIf { it.isNotEmpty() }
-        }
-
-    /** Its tickets' titles on one line, or null when it carries none. */
-    val carries: String? get() = summary?.takeIf { it.isNotEmpty() }
 
     companion object {
         /** "Landing 72". */
@@ -101,8 +86,6 @@ data class PlanLanding(
                 tickets = o.items("tickets").map { t -> t.jsonObject.let { PlanCardRef(it.text("task"), it.text("key")) } },
                 ciSubject = o.text("ci_subject"), title = o.maybeText("title"), summary = o.maybeText("summary"),
                 lander = o.maybeText("lander"), collecting = o["collecting"]?.jsonPrimitive?.contentOrNull == "true",
-                phase = o.maybeText("phase")?.let(LandingPhase::parse),
-                phaseSince = o["phase_since"]?.jsonPrimitive?.longOrNull,
                 spend = (o["spend"] as? JsonObject)?.let { Plan.spend(it) },
             )
         }
@@ -229,6 +212,19 @@ object LandingWords {
 
     /** Red, or its CI failed. */
     fun needsAttention(landing: PlanLanding, ci: PlanCiRead?): Boolean = landing.state == LandingState.RED || ci?.needsAttention == true
+}
+
+/** [line] with the spaces inside each " · " span made non-breaking, so a line breaks between spans and never inside "1 h" (ov-515). */
+fun LandingWords.unbroken(line: String): String = line.split(" · ").joinToString(" · ") { it.replace(' ', '\u00A0') }
+
+/** How long, coarsely: "45 min", "2 h", "3 d". */
+fun PlanWords.span(ms: Long): String {
+    val minutes = maxOf(0L, ms) / 60_000
+    return when {
+        minutes < 60 -> "$minutes min"
+        minutes < 1440 -> "${minutes / 60} h"
+        else -> "${minutes / 1440} d"
+    }
 }
 
 private fun JsonObject.text(name: String): String = maybeText(name) ?: ""

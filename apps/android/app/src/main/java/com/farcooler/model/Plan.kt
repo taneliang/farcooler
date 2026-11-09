@@ -201,6 +201,10 @@ data class Plan(
     val agents: List<PlanAgent> = emptyList(),
     /** What every agent of the last 24 hours spent, those no longer in [agents] included; null from a runner before ov-518. */
     val agentsSpend: PlanSpend? = null,
+    /** The plan as the runner sent it, which the shared core builds the Plan view from ([PlanViews]); null for a plan built by hand. */
+    val wire: String? = null,
+    /** The workspace's workflow presentation (`workflow.snapshot`), read beside the plan, for the engine runs the cards show; null without one. */
+    val workflow: String? = null,
 ) {
     /** Nothing planned: no theme and no ticket. Rulings don't count: they never switch a board's layout (review 1005a F1). */
     val isEmpty: Boolean get() = themes.isEmpty() && tickets.isEmpty()
@@ -283,7 +287,7 @@ data class Plan(
             } catch (e: kotlinx.serialization.SerializationException) {
                 throw PlanDecodeException("$")
             }
-            return decode(root as? JsonObject ?: throw PlanDecodeException("$"))
+            return decode(root as? JsonObject ?: throw PlanDecodeException("$")).copy(wire = text)
         }
 
         fun decode(o: JsonObject): Plan = Plan(
@@ -305,6 +309,7 @@ data class Plan(
             cost = DecodePath.at(".cost") { PlanCostRead.decode(o["cost"] as? JsonObject) },
             agents = DecodePath.at(".agents") { PlanAgent.decodeAll(o) },
             agentsSpend = DecodePath.at(".agents_spend") { (o["agents_spend"] as? JsonObject)?.let(::spend) },
+            wire = o.toString(),
         )
 
         /** A status count object: a theme's, or the board's. */
@@ -548,8 +553,6 @@ object PlanWords {
     const val RECONNECTING = "Reconnecting to the runner…"
     const val TRY_AGAIN = "Try again"
     const val NOT_REPORTED = TaskUsageFormat.NOT_REPORTED
-    const val NOT_ON_A_TICKET = "Not on a ticket"
-    const val NO_AGENTS = "No agents running."
 
     /** How many lines a theme's outcome gets before it truncates: the owner's ruling (ov-273). */
     const val OUTCOME_LINES = 3

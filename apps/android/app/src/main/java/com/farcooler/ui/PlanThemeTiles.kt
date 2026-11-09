@@ -41,17 +41,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PlanCardGlyph
-import com.farcooler.model.PlanThemeGrid
-import com.farcooler.model.PlanThemeTile
+import com.farcooler.model.PlanViewThemes
+import com.farcooler.model.PlanViewTile
 
 // The themes grid (ov-503, design 5), drawn for the phone: a tile a theme, modeled on the site's "What it's building
 // now". Each tile says the theme's name, how much is done, a meter, up to three cards and, in amber, what waits on the
-// owner. One column on a phone, two on a tablet. `PlanThemeGrid` decides which cards and which themes lead; a tile
+// owner. One column on a phone, two on a tablet. The core's `PlanView` (ov-1016) decides which cards and which themes lead; a tile
 // opens the theme's page, where the story now lives.
 
 /** The grid as list items, [columns] to a row, every tile in a row as tall as the tallest. */
-fun LazyListScope.themeGrid(grid: PlanThemeGrid, columns: Int, budget: (String) -> String?, onOpen: (String) -> Unit) {
-    val cells = grid.tiles.map<PlanThemeTile, @Composable () -> Unit> { tile ->
+fun LazyListScope.themeGrid(grid: PlanViewThemes, columns: Int, budget: (String) -> String?, onOpen: (String) -> Unit) {
+    val cells = grid.tiles.map<PlanViewTile, @Composable () -> Unit> { tile ->
         { PlanThemeTileCard(tile, budget(tile.id)) { onOpen(tile.id) } }
     } + listOfNotNull(
         grid.finishedTitle?.let { title -> { PlanFinishedTile(title, grid.finishedWords ?: "", grid.finished.map { it.name }) } },
@@ -83,7 +83,7 @@ private fun word(glyph: PlanCardGlyph): String = when (glyph) {
 }
 
 @Composable
-fun PlanThemeTileCard(tile: PlanThemeTile, budget: String?, onClick: () -> Unit) {
+fun PlanThemeTileCard(tile: PlanViewTile, budget: String?, onClick: () -> Unit) {
     val amber = glanceColor(GlancePalette.amber)
     val spoken = listOfNotNull(
         tile.name, tile.progress,
