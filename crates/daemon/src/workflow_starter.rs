@@ -8,11 +8,13 @@
 //! runner's own file, the same for every workspace, and holds nothing of this one. The orchestrator drafts on top of them and
 //! the owner reads every setting on the draft's card before anything publishes (`workflow_drafts`).
 //!
-//! **It refuses rather than suggest settings that can't publish.** Every template lands through a group, and a group
-//! holds a landing transport: a local bare repository, never a network remote. A workspace whose origin is GitHub
-//! has none to suggest, so until the engine can push to a remote (ov-1026) the suggestion says that instead.
+//! **It lands on origin.** Every template lands through a group, and a group holds a landing transport. Since the
+//! engine can push to a remote (ov-1026), the suggestion's is origin itself: an `ssh://` URL for an ssh origin and an
+//! `https://` one for an https origin, signed in with the runner user's own git and ssh (ov-1032). A workspace whose
+//! origin can't be read as a GitHub repository has no CI to wait on and nothing to land on, so the suggestion says that.
 use crate::landing_templates::GATE_PATH;
 use crate::service::Service;
+use farcooler_protocol::workflow_config::CodingLanding;
 use crate::workflow_runtime::{CodingCi, CodingCommand, CodingConfig, CodingHarness, LaunchFile, MAX_COMMAND_MS};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -23,6 +25,8 @@ pub const HARNESS: &str = "claude";
 pub const BUILD_MODELS: [&str; 2] = ["claude:sonnet", "claude:opus"];
 /// The models an agent's review gate may run with, its default first: Opus reviews.
 pub const REVIEW_MODELS: [&str; 2] = ["claude:opus", "claude:sonnet"];
+/// The name of the landing a first draft pushes through.
+pub const LANDING_JOB: &str = "landing-main";
 /// The CI workflow a first draft waits for, by its name on GitHub.
 pub const CI_WORKFLOW: &str = "CI";
 /// What a build agent is told, after the card it works (`briefed` leads with that).
@@ -50,14 +54,10 @@ pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_
 
 /// Settings a first draft can publish on, or why there are none, in a sentence a person reads.
 pub async fn suggest(svc: &Service, workspace: Uuid) -> Result<CodingConfig, String> {
-    let config = settings(svc, workspace).await?;
-    if config.landing.is_none() {
-        return Err("Every workflow lands through a local bare repository, and this workspace’s origin is on GitHub, which Far Cooler can’t land on yet. Nothing can be drafted here until it can.".into());
-    }
-    Ok(config)
+    settings(svc, workspace).await
 }
 
-/// Everything a first draft pins to except the landing transport, which no workspace on GitHub has yet.
+/// Everything a first draft pins to, landing on origin's default branch.
 pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, String> {
     let gone = |_| "Far Cooler couldn’t read this workspace.".to_string();
     let ws = svc.store.get_workspace(workspace).map_err(gone)?;
@@ -71,6 +71,7 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
         .ok_or_else(|| format!("This repository has no {branch} branch to land on."))?;
     let origin = run(&git, &repository, &["remote", "get-url", "origin"]).await.unwrap_or_default();
     let ci_repository = github_repository(&origin).ok_or("Its origin isn’t on GitHub, so there’s no CI for a draft to wait on. Write the settings yourself and publish them with `workspace set-workflow`.")?;
+    let landing = CodingLanding { job: LANDING_JOB.into(), repository: landing_url(&origin, &ci_repository).into(), target: landing_ref.clone(), config_digest: String::new() };
     let gh = farcooler_core::programs::find("gh").ok_or("This runner has no gh, which the CI step looks at GitHub with.")?;
     let settings = engine_hook_settings(svc).ok_or("Far Cooler couldn’t write the engine’s Claude hook settings on this runner.")?;
     let settings = LaunchFile { digest: farcooler_workflow::digest(&std::fs::read(&settings).map_err(|_| "Far Cooler couldn’t read its Claude hook settings.")?),
@@ -81,7 +82,7 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
     let mut look = environment;
     look.extend([("CI_GH".to_string(), gh.to_string_lossy().into_owned()), ("CI_REPOSITORY".into(), ci_repository.clone()),
         ("CI_WORKFLOW".into(), CI_WORKFLOW.into()), ("CI_EVENT".into(), "push".into())]);
-    Ok(CodingConfig { repository, base, landing_ref, landing: None, pull_request: None,
+    Ok(CodingConfig { repository, base, landing_ref, landing: Some(landing), pull_request: None,
         harness: CodingHarness::Native { preset: HARNESS.into(), settings: Some(settings), project_hooks: None, plugin_dir: None, prompt: PROMPT.into(),
             process: CodingCommand { argv: Vec::new(), environment: agent, timeout_ms: MAX_COMMAND_MS } },
         checks: Vec::new(), reviewer: None,
@@ -116,6 +117,11 @@ async fn run(git: &Path, repository: &Path, args: &[&str]) -> Option<String> {
     let out = tokio::process::Command::new(git).arg("-C").arg(repository).args(["-c", "core.hooksPath=/dev/null"]).args(args)
         .stdin(std::process::Stdio::null()).kill_on_drop(true).output().await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// The URL a landing pushes to for a GitHub origin: https for an https origin, else ssh, as `git@github.com:o/n` is.
+fn landing_url(origin: &str, repository: &str) -> String {
+    if origin.starts_with("https://") { format!("https://github.com/{repository}.git") } else { format!("ssh://git@github.com/{repository}.git") }
 }
 
 /// `owner/name` for an origin on github.com, in any of the forms git writes it.

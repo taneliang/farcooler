@@ -278,7 +278,7 @@ async fn mains_draft_landing_on_a_remote_publishes_on_a_scratch_copy() {
 async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion() {
     if as_a_person("a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion").await { return; }
     if farcooler_core::programs::find("gh").is_none() { eprintln!("skipped: this host has no gh, which the suggested CI step needs"); return; }
-    let (dir, configured) = configured().await;
+    let (dir, _) = configured().await;
     let repo = dir.path().join("selected");
     git(&repo, &["update-ref", "refs/heads/main", "HEAD"]).await;
     let host = Host::open(dir.path()).await;
@@ -289,24 +289,25 @@ async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion
     assert!(got["configuration"].is_null() && got.get("suggested_adapter").is_none(), "{got}");
     assert!(got["suggested_adapter_refused"].as_str().unwrap().contains("origin isn’t on GitHub"), "{got}");
 
-    // On GitHub there is CI, but nothing to land through yet: it refuses rather than suggest what can't publish.
+    // On GitHub the suggestion lands on origin itself, over ssh for an ssh origin and https for an https one.
     git(&repo, &["remote", "add", "origin", "git@github.com:example/first-workflow.git"]).await;
     let got = call(&mut link, ws, Action::Get).await;
-    assert!(got.get("suggested_adapter").is_none(), "{got}");
-    assert!(got["suggested_adapter_refused"].as_str().unwrap().contains("can’t land on yet"), "{got}");
+    assert!(got.get("suggested_adapter_refused").is_none(), "{got}");
+    let landing = &got["suggested_adapter"]["config"]["landing"];
+    assert_eq!((landing["repository"].as_str(), landing["target"].as_str(), landing["config_digest"].as_str()),
+        (Some("ssh://git@github.com/example/first-workflow.git"), Some("refs/heads/main"), Some("")), "{got}");
+    git(&repo, &["remote", "set-url", "origin", "https://github.com/example/first-workflow"]).await;
+    let got = call(&mut link, ws, Action::Get).await;
+    assert_eq!(got["suggested_adapter"]["config"]["landing"]["repository"], "https://github.com/example/first-workflow.git", "{got}");
+    git(&repo, &["remote", "set-url", "origin", "git@github.com:example/first-workflow.git"]).await;
 
-    let mut suggested = farcooler_daemon::workflow_starter::settings(&host.service, ws).await.unwrap();
+    let suggested = farcooler_daemon::workflow_starter::settings(&host.service, ws).await.unwrap();
     assert_eq!(suggested.repository, repo.canonicalize().unwrap());
     assert_eq!((suggested.landing_ref.as_str(), suggested.base.clone()), ("refs/heads/main", git(&repo, &["rev-parse", "HEAD"]).await));
     assert_eq!((suggested.ci.repository.as_str(), suggested.ci.workflow.as_str()), ("example/first-workflow", "CI"));
     assert!(matches!(&suggested.harness, CodingHarness::Native { preset, settings: Some(_), .. } if preset == "claude"), "{:?}", suggested.harness);
-    // Without a transport no template is sound, which is why the suggestion refuses.
-    let none = lt::template("batched-push", &suggested, &["make check".into()], &[lt::Extra::Agent], &Options { batch: Some(4), ..Default::default() }).unwrap();
-    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(pinned) = &none.adapter;
-    assert!(farcooler_daemon::workflow_runtime::CodingConfigExt::validate_definition(pinned, &none.definition).is_err());
 
-    // Given the transport, the settings draft, the owner approves, and they publish with each step's models.
-    suggested.landing = configured.landing.clone();
+    // The suggestion's own landing makes every template sound; the owner approves, and they publish with each step's models.
     git(&repo, &["update-ref", "refs/heads/main", &suggested.base]).await;
     let b = lt::template("batched-push", &suggested, &["make check".into()], &[lt::Extra::Agent], &Options { batch: Some(4), ..Default::default() }).unwrap();
     let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(pinned) = &b.adapter;
