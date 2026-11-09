@@ -192,3 +192,4 @@ extension AgentConversation {
     public static func taskState(_ item: AgentRow.TaskItem) -> String {
         ConversationWords.phrase("task", by: item.status)
     }
+}

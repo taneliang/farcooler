@@ -419,6 +419,7 @@ extension AgentConversation {
     public static func queuedLabel(_ state: String) -> String {
         ConversationWords.phrase("queued", by: state)
     }
+}
 
 /// Where a held ask's answer goes (ov-370): the runner's
 /// `terminal.agent_answer`, which writes it to the hook claude is waiting on.
