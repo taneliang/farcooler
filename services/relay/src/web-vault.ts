@@ -16,15 +16,27 @@
 ///
 /// - `POST {credential, uv, sealed}` keeps the copy for that passkey, replacing
 ///   the one before. At most `VAULTS_MAX` passkeys per account; a new one past
-///   that replaces the least recently saved.
+///   that gets 409 `full`, and nothing is dropped to make room. Dropping the
+///   least recently saved would drop the copy in daily use (it is saved only
+///   when the device changes), and would let a session without the passkey
+///   empty the account by saving eight junk ones (ov-779 review, M1).
 /// - `GET` answers `{vaults: [{credential, uv, sealed}]}`, every copy the
 ///   account keeps, so the page can name the passkeys in `allowCredentials`.
+/// - `POST /v1/web/vault/delete {credential}` deletes the account's copy for
+///   that passkey, which Sign Out does (review M2): signing out of a borrowed
+///   computer must not leave its runners one touch away.
+///
+/// The relay can't tell who sealed a copy, so a session without the passkey
+/// can still overwrite one with junk. The page checks, after each touch that
+/// gives it the key, that the relay's copy is the one it last sent, and sends
+/// it again when it isn't (app.ts `keepCopy`).
 
 import { readLimited } from './heartbeat-body'
 import { json, type Env } from './index'
 import { requireAccount } from './session'
 
 export const VAULT_PATH = '/v1/web/vault'
+export const VAULT_DELETE_PATH = '/v1/web/vault/delete'
 
 /// The longest credential id, as base64url: WebAuthn's 1023 bytes is 1364.
 export const CREDENTIAL_MAX = 1400
@@ -51,6 +63,7 @@ const NO_STORE = { 'cache-control': 'no-store' }
 
 /// The route, or `null` for another path, so `fetch` goes on.
 export async function webVault(request: Request, env: Env, pathname: string): Promise<Response | null> {
+  if (pathname === VAULT_DELETE_PATH) return request.method === 'POST' ? await deleteVault(request, env) : json({ error: 'method' }, 405)
   if (pathname !== VAULT_PATH) return null
   if (request.method === 'GET') return await readVaults(request, env)
   if (request.method === 'POST') return await saveVault(request, env)
@@ -86,25 +99,34 @@ async function saveVault(request: Request, env: Env): Promise<Response> {
   if (sealed.length > VAULT_MAX) return json({ error: 'too large' }, 413)
   if (!BASE64URL.test(sealed) || !looksSealed(sealed)) return json({ error: 'sealed' }, 400)
 
-  // A passkey already kept is saved again in place. A new one past
-  // VAULTS_MAX makes room by dropping the account's least recently saved copy:
-  // Make a New Passkey replaces the account's passkey in the authenticator, so
-  // the oldest copies belong to passkeys that are gone. One batch, so two saves
-  // at once can't both find room.
-  const now = Date.now()
-  await env.DB.batch([
-    env.DB.prepare(
-      `DELETE FROM web_vaults WHERE account_id = ?1 AND credential IN (
-         SELECT credential FROM web_vaults WHERE account_id = ?1
-         ORDER BY updated_at ASC, credential ASC
-         LIMIT MAX(0, (SELECT COUNT(*) FROM web_vaults WHERE account_id = ?1) - ?3 + 1))
-       AND NOT EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2)`,
-    ).bind(account, credential, VAULTS_MAX),
-    env.DB.prepare(
-      `INSERT INTO web_vaults (account_id, credential, uv, sealed, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
-       ON CONFLICT (account_id, credential) DO UPDATE SET uv = ?3, sealed = ?4, updated_at = ?5`,
-    ).bind(account, credential, uv ? 1 : 0, sealed, now),
-  ])
+  // A passkey already kept is always saved again; a new one only while the
+  // account keeps fewer than VAULTS_MAX.
+  const written = await env.DB.prepare(
+    `INSERT INTO web_vaults (account_id, credential, uv, sealed, updated_at)
+     SELECT ?1, ?2, ?3, ?4, ?5
+     WHERE EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2)
+        OR (SELECT COUNT(*) FROM web_vaults WHERE account_id = ?1) < ?6
+     ON CONFLICT (account_id, credential) DO UPDATE SET uv = ?3, sealed = ?4, updated_at = ?5`,
+  )
+    .bind(account, credential, uv ? 1 : 0, sealed, Date.now(), VAULTS_MAX)
+    .run()
+  if (!written.meta.changes) return json({ error: 'full' }, 409)
+  return json({ ok: true })
+}
+
+async function deleteVault(request: Request, env: Env): Promise<Response> {
+  const account = await requireAccount(request, env, env.CEREMONY_REPLY_LIMIT)
+  if (account instanceof Response) return account
+  const text = await readLimited(request, CREDENTIAL_MAX + 64)
+  if (text === null) return json({ error: 'too large' }, 413)
+  let credential: unknown
+  try {
+    credential = (JSON.parse(text) ?? {}).credential
+  } catch {
+    return json({ error: 'body' }, 400)
+  }
+  if (typeof credential !== 'string' || !BASE64URL.test(credential) || credential.length > CREDENTIAL_MAX) return json({ error: 'credential' }, 400)
+  await env.DB.prepare(`DELETE FROM web_vaults WHERE account_id = ? AND credential = ?`).bind(account, credential).run()
   return json({ ok: true })
 }
 

@@ -232,12 +232,17 @@ the page derives from the passkey's PRF output, which the relay never sees.
 - `POST /v1/web/vault` takes `{credential, uv, sealed}` and replaces the
   account's copy for that passkey. `sealed` is at most 12 KB of base64url, and
   a body that looks unsealed gets 400. An account keeps at most 8 passkeys'
-  copies; a ninth replaces the least recently saved.
+  copies; a ninth gets 409 `full`, and no copy is dropped to make room.
 - `GET /v1/web/vault` answers `{vaults}`, every copy the signed-in account
   keeps, and nobody else's.
-- Both spend `CEREMONY_REPLY_LIMIT`.
+- `POST /v1/web/vault/delete` takes `{credential}` and deletes the signed-in
+  account's copy for that passkey. Sign Out calls it.
+- All three spend `CEREMONY_REPLY_LIMIT`.
 
-The relay can't read or forge a copy. It could withhold one, which costs the
+The relay can't read or forge a copy, but it can't tell who saved one either:
+a session without the passkey could overwrite a copy with junk. The page
+checks after each passkey touch that the relay's copy is the one it last sent,
+and sends it again if not. The relay could also withhold a copy, which costs the
 person a new enrollment, or hand back an older one, which lists the runners as
 they were then.
 

@@ -33,9 +33,9 @@ async function sessionFor(user: string): Promise<string> {
 
 const ctx = { waitUntil() {}, passThroughOnException() {} } as never
 
-async function call(method: string, user: string | null, body?: string): Promise<{ status: number; body: any; headers: Headers }> {
+async function call(method: string, user: string | null, body?: string, path = '/v1/web/vault'): Promise<{ status: number; body: any; headers: Headers }> {
   const response = await worker.fetch(
-    new Request('https://relay.test/v1/web/vault', { method, headers: user ? { authorization: `Bearer ${await sessionFor(user)}` } : {}, body }),
+    new Request(`https://relay.test${path}`, { method, headers: user ? { authorization: `Bearer ${await sessionFor(user)}` } : {}, body }),
     env as never,
     ctx,
   )
@@ -49,6 +49,7 @@ const CRED = base64Url(new Uint8Array(16).fill(7))
 const save = (user: string | null, body: unknown = { credential: CRED, uv: false, sealed: sealedOf(1) }) =>
   call('POST', user, typeof body === 'string' ? body : JSON.stringify(body))
 const list = (user: string | null) => call('GET', user)
+const remove = (user: string | null, body: unknown) => call('POST', user, JSON.stringify(body), '/v1/web/vault/delete')
 
 let logged: string[] = []
 
@@ -117,28 +118,57 @@ describe('a browser’s sealed copy', () => {
     expect((await list('alice')).body).toEqual({ vaults: [] })
   })
 
-  it('holds at most VAULTS_MAX passkeys for one account, dropping the least recently saved for a new one', async () => {
+  it('holds at most VAULTS_MAX passkeys for one account, and refuses a new one rather than drop a copy', async () => {
     for (let i = 0; i < VAULTS_MAX; i++) {
       expect((await save('alice', { credential: base64Url(`cred-${i}`), uv: false, sealed: sealedOf(i + 1) })).status).toBe(200)
       await new Promise(resolve => setTimeout(resolve, 2))
     }
-    // cred-0 is saved again, so cred-1 is now the least recently saved.
-    expect((await save('alice', { credential: base64Url('cred-0'), uv: false, sealed: sealedOf(42) })).status).toBe(200)
-    await new Promise(resolve => setTimeout(resolve, 2))
-    expect((await save('alice', { credential: base64Url('new'), uv: false, sealed: sealedOf(99) })).status).toBe(200)
-    const kept = (await list('alice')).body.vaults.map((v: { credential: string }) => v.credential)
-    expect(kept).toHaveLength(VAULTS_MAX)
-    expect(kept).toContain(base64Url('new'))
-    expect(kept).toContain(base64Url('cred-0'))
-    expect(kept).not.toContain(base64Url('cred-1'))
-    // Another account's copies are never what makes room.
-    await save('bob')
-    for (let i = 0; i < VAULTS_MAX; i++) await save('alice', { credential: base64Url(`more-${i}`), uv: false, sealed: sealedOf(i + 1) })
-    expect((await list('bob')).body.vaults).toHaveLength(1)
+    // A passkey already kept is saved again at capacity, whichever row it is:
+    // cred-3 is neither the oldest nor the newest.
+    expect((await save('alice', { credential: base64Url('cred-3'), uv: false, sealed: sealedOf(42) })).status).toBe(200)
+    const over = await save('alice', { credential: base64Url('one too many'), uv: false, sealed: sealedOf(99) })
+    expect(over.status).toBe(409)
+    expect(over.body).toEqual({ error: 'full' })
+    const kept = (await list('alice')).body.vaults as { credential: string; sealed: string }[]
+    expect(kept.map(v => v.credential).sort()).toEqual(Array.from({ length: VAULTS_MAX }, (_, i) => base64Url(`cred-${i}`)).sort())
+    expect(kept.find(v => v.credential === base64Url('cred-3'))?.sealed).toBe(sealedOf(42))
+  })
+
+  it('deletes the signed-in account’s copy for one passkey, and nobody else’s', async () => {
+    await save('alice')
+    await save('alice', { credential: base64Url('other'), uv: false, sealed: sealedOf(3) })
+    await save('mallory', { credential: CRED, uv: false, sealed: sealedOf(9) })
+    expect((await remove('mallory', { credential: base64Url('other') })).status).toBe(200)
+    const gone = await remove('alice', { credential: CRED })
+    expect(gone.status).toBe(200)
+    expect((await list('alice')).body).toEqual({ vaults: [{ credential: base64Url('other'), uv: false, sealed: sealedOf(3) }] })
+    expect((await list('mallory')).body.vaults).toHaveLength(1)
+    // Deleting what isn't there is still done: Sign Out doesn't need to know.
+    expect((await remove('alice', { credential: CRED })).status).toBe(200)
+    expect((await remove(null, { credential: CRED })).status).toBe(401)
+    for (const bad of [{}, { credential: '' }, { credential: 'has space' }, { credential: 7 }]) expect((await remove('alice', bad)).status, JSON.stringify(bad)).toBe(400)
+  })
+
+  it('spends the per-account limit on every route, before any D1 read', async () => {
+    const keys: string[] = []
+    const limit = { limit: async ({ key }: { key: string }) => (keys.push(key), { success: keys.length <= 3 }) }
+    const limited = { ...(env as any), CEREMONY_REPLY_LIMIT: limit }
+    const ask = async (method: string, path: string, body?: string) =>
+      (await worker.fetch(new Request(`https://relay.test${path}`, { method, headers: { authorization: `Bearer ${await sessionFor('alice')}` }, body }), limited as never, ctx)).status
+    const body = JSON.stringify({ credential: CRED, uv: false, sealed: sealedOf(1) })
+    const del = JSON.stringify({ credential: CRED })
+    expect(await ask('POST', '/v1/web/vault', body)).toBe(200)
+    expect(await ask('GET', '/v1/web/vault')).toBe(200)
+    expect(await ask('POST', '/v1/web/vault/delete', del)).toBe(200)
+    expect(await ask('POST', '/v1/web/vault', body)).toBe(429)
+    expect(await ask('GET', '/v1/web/vault')).toBe(429)
+    expect(await ask('POST', '/v1/web/vault/delete', del)).toBe(429)
+    expect(keys).toEqual(Array(6).fill('alice'))
   })
 
   it('answers other methods 405', async () => {
     expect((await call('PUT', 'alice', '{}')).status).toBe(405)
+    expect((await call('GET', 'alice', undefined, '/v1/web/vault/delete')).status).toBe(405)
   })
 
   it('logs nothing it was sent', async () => {
