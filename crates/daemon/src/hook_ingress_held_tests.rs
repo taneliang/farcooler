@@ -77,6 +77,7 @@ async fn a_frame_cannot_carry_a_held_asks_id_onto_a_row_of_its_own() {
             HELD_ASK: held,
         }),
         takes: Vec::new(),
+        launch: None,
     };
     let frame = encode_line(&line).expect("encode");
     let mut stream = tokio::net::UnixStream::connect(&socket).await.expect("connect");

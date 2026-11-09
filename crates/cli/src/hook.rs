@@ -95,6 +95,15 @@ fn ceiling(gating: bool, deadline: Duration) -> Duration {
 /// says so here, which lets builds run side by side.
 pub const NATIVE_HOOK_SOCKET: &str = "FARCOOLER_NATIVE_HOOK_SOCKET";
 
+/// The launch of the pane this hook runs in (`pane_env::LAUNCH`, ov-886), if it names one.
+///
+/// A uuid or nothing: the daemon routes a frame by this alone, so a value it couldn't parse would
+/// only turn a frame it would have routed the old way into one it drops.
+fn pane_launch(value: Option<std::ffi::OsString>) -> Option<String> {
+    let value = value?.into_string().ok()?;
+    uuid::Uuid::parse_str(&value).ok().map(|launch| launch.to_string())
+}
+
 /// The socket a native build's pane asks hooks to report to, if it names a usable path.
 fn private_socket(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
     value.filter(|v| !v.is_empty()).map(PathBuf::from).filter(|p| p.is_absolute())
@@ -218,7 +227,8 @@ async fn with_input(
         takes.push(TAKES_FOLLOWUP.to_string());
     }
     let pre_tool = event == "PreToolUse";
-    let line = HookLine { agent, event, payload, takes };
+    let launch = pane_launch(std::env::var_os(farcooler_core::pane_env::LAUNCH));
+    let line = HookLine { agent, event, payload, takes, launch };
     let Ok(encoded) = encode_line(&line) else {
         return String::new();
     };

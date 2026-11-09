@@ -673,6 +673,7 @@ mod tests {
                 "last_assistant_message": "done",
             }),
             takes: Vec::new(),
+            launch: None,
         });
         let mut stream = tokio::net::UnixStream::connect(&socket).await.expect("the daemon listens");
         for line in &lines {

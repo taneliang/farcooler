@@ -65,7 +65,7 @@ async fn eventually<T>(mut f: impl FnMut() -> Option<T>) -> Option<T> {
 /// One hook frame, as `farcooler hook` writes it; a gating one reads the
 /// daemon's answer line.
 async fn hook(socket: &std::path::Path, event: &str, payload: serde_json::Value) -> serde_json::Value {
-    let line = HookLine { agent: Harness::Claude, event: event.into(), payload, takes: Vec::new() };
+    let line = HookLine { agent: Harness::Claude, event: event.into(), payload, takes: Vec::new(), launch: None };
     let mut stream = tokio::net::UnixStream::connect(socket).await.expect("connect");
     stream.write_all(encode_line(&line).unwrap().as_bytes()).await.expect("write");
     if event != "PreToolUse" {

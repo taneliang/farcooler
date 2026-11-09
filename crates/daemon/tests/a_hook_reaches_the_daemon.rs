@@ -237,7 +237,7 @@ async fn send(socket: &std::path::Path, line: &HookLine) {
 fn sentinel(agent: Agent, payload: serde_json::Value) -> HookLine {
     let mut payload = payload;
     payload["prompt"] = serde_json::json!(SENTINEL);
-    HookLine { agent, event: "UserPromptSubmit".to_string(), payload, takes: Vec::new() }
+    HookLine { agent, event: "UserPromptSubmit".to_string(), payload, takes: Vec::new(), launch: None }
 }
 
 const SENTINEL: &str = "the sentinel, sent last";
@@ -271,6 +271,7 @@ async fn a_claude_session_in_a_known_worktree_binds_to_its_terminal() {
             event: "UserPromptSubmit".to_string(),
             payload: serde_json::json!({ "session_id": "sess-1", "prompt": "hello" }),
             takes: Vec::new(),
+            launch: None,
         },
     )
     .await;
@@ -310,6 +311,7 @@ async fn a_session_nothing_claims_is_dropped_rather_than_attached() {
                     "prompt": "hi",
                 }),
                 takes: Vec::new(),
+                launch: None,
             },
             sentinel(Agent::Claude, serde_json::json!({ "session_id": "sess-1" })),
         ],
@@ -344,6 +346,7 @@ async fn half_a_frame_with_no_newline_is_discarded_rather_than_acted_on() {
         event: "UserPromptSubmit".to_string(),
         payload: serde_json::json!({ "session_id": "sess-1", "prompt": "hello" }),
         takes: Vec::new(),
+        launch: None,
     };
     let whole = encode_line(&line).unwrap();
     let truncated = whole.trim_end_matches('\n');
@@ -391,6 +394,7 @@ async fn two_frames_on_one_connection_both_arrive() {
                 event: "UserPromptSubmit".to_string(),
                 payload: serde_json::json!({ "session_id": "sess-1", "prompt": prompt }),
                 takes: Vec::new(),
+                launch: None,
             })
             .unwrap(),
         );
@@ -687,6 +691,7 @@ async fn a_frame_that_cannot_be_read_does_not_swallow_the_one_behind_it() {
             event: "UserPromptSubmit".to_string(),
             payload: serde_json::json!({ "session_id": "sess-1", "prompt": "after the garbage" }),
             takes: Vec::new(),
+            launch: None,
         })
         .unwrap(),
     );
@@ -934,7 +939,7 @@ fn recorded(name: &str, root: &std::path::Path) -> HookLine {
         _ => Agent::Cursor,
     };
     let event = payload["hook_event_name"].as_str().expect("an event name").to_string();
-    HookLine { agent, event, payload, takes: Vec::new() }
+    HookLine { agent, event, payload, takes: Vec::new(), launch: None }
 }
 
 /// The spike's layout, as rows: a repository whose main checkout is Main's,
@@ -1102,6 +1107,7 @@ fn a_permission_request(agent: Agent, session: &str) -> HookLine {
             "tool_input": { "command": "touch x" },
         }),
         takes: Vec::new(),
+        launch: None,
     }
 }
 
@@ -1323,6 +1329,7 @@ async fn a_stop_from_the_same_session_withdraws_its_held_ask() {
                 event: event.to_string(),
                 payload: serde_json::json!({ "session_id": "sess-1" }),
                 takes: Vec::new(),
+                launch: None,
             },
         )
         .await;
@@ -1342,7 +1349,7 @@ async fn a_queued_messages_prompt_withdraws_its_held_ask() {
         ("PostToolUse", serde_json::json!({ "session_id": "sess-1", "tool_use_id": "t0", "prompt_id": "p1" })),
         ("UserPromptSubmit", serde_json::json!({ "session_id": "sess-1", "prompt": "and then", "prompt_id": "p1" })),
     ] {
-        send(&socket, &HookLine { agent: Agent::Claude, event: event.to_string(), payload, takes: Vec::new() }).await;
+        send(&socket, &HookLine { agent: Agent::Claude, event: event.to_string(), payload, takes: Vec::new(), launch: None }).await;
     }
     assert_eq!(asking.line(A_LINE).await.as_deref(), Some("{}\n"));
     assert_eq!(resolutions(&seen, &id), [""]);
@@ -1361,12 +1368,14 @@ async fn a_subagents_stop_leaves_the_turns_held_ask_alone() {
             event: event.to_string(),
             payload: serde_json::json!({ "session_id": "sess-1", "agent_id": "a1" }),
             takes: Vec::new(),
+            launch: None,
         };
         let display = HookLine {
             agent: Agent::Claude,
             event: "MessageDisplay".to_string(),
             payload: serde_json::json!({ "session_id": "sess-1", "turn_id": "t", "message_id": "m", "index": 0, "final": true, "delta": "after" }),
             takes: Vec::new(),
+            launch: None,
         };
         let mut stream = tokio::net::UnixStream::connect(&socket).await.expect("connect");
         let frames = format!("{}{}", encode_line(&stop).unwrap(), encode_line(&display).unwrap());
@@ -1393,6 +1402,7 @@ async fn a_failed_turn_ends_failed() {
         event: "StopFailure".to_string(),
         payload: serde_json::json!({ "session_id": "sess-1", "error": "rate_limit", "last_assistant_message": "API Error: Rate limited" }),
         takes: Vec::new(),
+        launch: None,
     };
     send(&socket, &line).await;
     let got = eventually(|| seen.lock().unwrap().first().cloned()).await.expect("the failure arrived");

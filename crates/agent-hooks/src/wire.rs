@@ -27,6 +27,13 @@ pub struct HookLine {
     /// was answered.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub takes: Vec<String>,
+    /// The launch of the pane the hook ran in (`pane_env::LAUNCH`), as the
+    /// hook binary found it in its environment (ov-886). Ours, not the
+    /// agent's: the payload is never touched. `None` from a hook that predates
+    /// it, an agent Far Cooler didn't launch, or one whose environment didn't
+    /// carry it; ingress routes those as it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<String>,
 }
 
 /// `HookLine::takes`: the hook prints `Decision::Allow`'s `updatedInput`.
@@ -214,6 +221,7 @@ mod tests {
             event: "MessageDisplay".to_string(),
             payload: serde_json::json!({ "session_id": "abc" }),
             takes: Vec::new(),
+            launch: None,
         };
         let encoded = encode_line(&line).expect("encodes");
         assert!(encoded.ends_with('\n'), "a frame is one line");

@@ -21,7 +21,7 @@ async fn cursor_pane(b: &Board) -> Terminal {
 /// writes back, or `None` when it wrote nothing.
 async fn stop(b: &Board, takes: &[&str]) -> Option<String> {
     let payload = serde_json::json!({ "session_id": SESSION, "hook_event_name": "stop", "workspace_roots": [b.lane.worktree_path.clone()] });
-    let line = HookLine { agent: Agent::Cursor, event: "stop".into(), payload, takes: takes.iter().map(|t| t.to_string()).collect() };
+    let line = HookLine { agent: Agent::Cursor, event: "stop".into(), payload, takes: takes.iter().map(|t| t.to_string()).collect(), launch: None };
     let (mut hook, daemon) = tokio::net::UnixStream::pair().unwrap();
     let ingress = b.svc.hooks().clone();
     let served = tokio::spawn(async move { ingress.serve(daemon, &|_, _| {}).await });
@@ -89,7 +89,7 @@ async fn a_hook_that_hung_up_leaves_the_message_claimed() {
     // (1 in 30 on main): no pass runs until the claim has been checked.
     let no_pump = b.watcher.wake_pump.lock().await;
     let payload = serde_json::json!({ "session_id": SESSION, "hook_event_name": "stop", "workspace_roots": [b.lane.worktree_path.clone()] });
-    let line = HookLine { agent: Agent::Cursor, event: "stop".into(), payload, takes: vec![TAKES_FOLLOWUP.into()] };
+    let line = HookLine { agent: Agent::Cursor, event: "stop".into(), payload, takes: vec![TAKES_FOLLOWUP.into()], launch: None };
     let (mut hook, daemon) = tokio::net::UnixStream::pair().unwrap();
     hook.write_all(encode_line(&line).unwrap().as_bytes()).await.unwrap();
     // Gone before the daemon has read a word of it (a current-thread runtime

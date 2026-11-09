@@ -87,6 +87,18 @@ pub mod pane_env {
     /// somebody else's ticket.
     pub const TASK: &str = "FARCOOLER_TASK";
 
+    /// Which launch of this pane the program in it is (ov-886): a fresh uuid
+    /// for every launch of an agent into a pane, a restart included.
+    ///
+    /// `farcooler_daemon::service` exports it beside `ACTOR` and records it as
+    /// the pane's current launch (`Store::begin_launch`); `farcooler hook`
+    /// copies it into every frame it sends (`HookLine::launch`). Ingress then
+    /// routes a frame only while its launch is still the pane's, so a late
+    /// hook from the process a restart killed reaches nothing, even when the
+    /// replacement resumed the same session. A correlation value, not a
+    /// secret: anything running as this user can read it.
+    pub const LAUNCH: &str = "FARCOOLER_LAUNCH";
+
     /// The role of the agent this pane is (ov-872): `orchestrator`,
     /// `builder`, `reviewer` or `lander`.
     ///

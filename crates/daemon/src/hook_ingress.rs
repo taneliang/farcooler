@@ -1217,6 +1217,7 @@ mod tests {
                 "tool_input": { "command": "touch x" },
             }),
             takes: Vec::new(),
+            launch: None,
         };
         // A std socket with the kernel's read timeout, not tokio's timer:
         // with a worker parked in the claim check, nothing is certain to
