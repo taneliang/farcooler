@@ -1387,6 +1387,10 @@ class CeremonyStore(
                 _code.value = answer.json
                 _addressOnlyNote.value = addressOnlyNote(granting, answer.json)
                 _phase.value = Phase.ShowingManifest
+                // A teammate's browser can't scan the reply either: sealed to
+                // its key and posted for its account, which the relay lets a
+                // teammate do (ov-778). An offer with no reply key posts nothing.
+                sealedReply.send(core, rescanned, answer.json, scannedAt?.let { clock() - it } ?: Long.MAX_VALUE)
             }
         }
     }

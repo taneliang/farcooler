@@ -52,6 +52,11 @@ class TeammateAddFlowTest {
         }
         override fun fingerprint(publicKey: String) = "SHA256:test"
         override fun clientId(publicKey: String) = "farcooler-0123456789ab"
+        val sealed = mutableListOf<Pair<String, String>>()
+        override fun seal(offerJson: String, manifestJson: String, heldMs: Long): CeremonyCore.Answer {
+            sealed += offerJson to manifestJson
+            return CeremonyCore.Answer.Payload("""{"sealed":"c2VhbGVkLXJlcGx5","code":"ABC234"}""")
+        }
     }
 
     private val buildBox = Runner(id = "r1", label = "build-box", reach = Reach.Direct("build-box.example.com", 22), user = "alice")
@@ -165,6 +170,53 @@ class TeammateAddFlowTest {
         assertNull(store.teammate.value)
         assertEquals(listOf("r1"), store.rows.value.filter { it.picked }.map { it.runner.id })
         assertTrue(core.directories.isEmpty())
+    }
+
+    /**
+     * A teammate's browser (ov-778) can't scan the reply, so when its offer
+     * names a reply key the reply is sealed by the core and posted once for
+     * the teammate's account, which the relay lets a teammate do, with the code
+     * on screen to match. A phone's offer, with no reply key, posts nothing.
+     */
+    @Test
+    fun aTeammatesBrowserGetsTheReplySealedAndPostedOnce() = runTest {
+        val core = Core()
+        val browser = """{"v":2,"key_a":"$keyA","name":"Chrome on Mac","account":"user_bob","channel":"stable","ceremony":"c-1","node_key":"","reply_key":"YwbAvkATmjREjY8yCsUr87XR8t4kv8l2bK516AhoEWQ"}"""
+        core.scanTeammateAnswer = CeremonyCore.Answer.Payload(
+            """{"offer":${kotlinx.serialization.json.JsonPrimitive(browser)},"teammate":{"account":"user_bob","email":"bob.smith@example.com","team":"Platform"},"held":[]}""",
+        )
+        val posts = mutableListOf<Triple<String, String, String>>()
+        val store = scanned(core)
+        store.sealedReply.post = { ceremony, account, sealed ->
+            posts += Triple(ceremony, account, sealed)
+            SealedReplyPost.Outcome.POSTED
+        }
+        store.toggle(buildBox.id)
+
+        store.confirmTeammate(gate, Recorder().enroller)
+
+        assertEquals(CeremonyStore.Phase.ShowingManifest, store.phase.value)
+        assertEquals("sealed once, over the offer the check passed and the reply on screen", listOf(browser to store.code.value), core.sealed)
+        assertEquals(listOf(Triple("c-1", "user_bob", "c2VhbGVkLXJlcGx5")), posts)
+        assertEquals("ABC234", store.sealedReply.code.value)
+        assertEquals(SealedReply.State.SENT, store.sealedReply.state.value)
+    }
+
+    @Test
+    fun aTeammatesPhoneOfferPostsNothing() = runTest {
+        val core = Core()
+        val posts = mutableListOf<String>()
+        val store = scanned(core)
+        store.sealedReply.post = { ceremony, _, _ ->
+            posts += ceremony
+            SealedReplyPost.Outcome.POSTED
+        }
+        store.toggle(buildBox.id)
+        store.confirmTeammate(gate, Recorder().enroller)
+        assertEquals(CeremonyStore.Phase.ShowingManifest, store.phase.value)
+        assertEquals(emptyList<Pair<String, String>>(), core.sealed)
+        assertEquals(emptyList<String>(), posts)
+        assertEquals(SealedReply.State.NONE, store.sealedReply.state.value)
     }
 
     @Test
