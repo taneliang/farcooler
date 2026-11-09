@@ -110,7 +110,7 @@ fun LazyListScope.planSections(
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-waiting-empty")) }
                 // Each group is named only when another shares the section.
                 for (group in view.waiting) {
-                    val tag = "plan-" + group.kind.name.lowercase().replace('_', '-').let { if (it == "on-you") "waiting-on-you" else if (it == "next") "next-up" else it }
+                    val tag = "plan-" + group.kind.string.replace('_', '-').let { if (it == "on-you") "waiting-on-you" else if (it == "next") "next-up" else it }
                     if (view.waiting.size > 1) item(key = "$id/$tag") { PlanGroupTitle(group.title, group.attention, Modifier.testTag(tag)) }
                     ticketRows(group.cards, "$id/$tag", onOpen)
                 }
