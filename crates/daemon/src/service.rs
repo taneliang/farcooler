@@ -3611,9 +3611,9 @@ impl Service {
         validate::display_name(title)?;
         validate::command_preset(command_preset)?;
         let prompt = prompt.filter(|p| !p.trim().is_empty());
-        if let Some(p) = prompt {
-            validate_launch_prompt(p)?;
-        }
+        if let Some(p) = prompt { validate_launch_prompt(p)?; }
+        // A workspace that runs its work through its workflow gives no ticket a pane by hand (ov-1011).
+        if let Some(task) = task { crate::by_hand::refuse(&self.store, task, crate::by_hand::PANE)?; }
 
         let ws = self.store.get_worktree(worktree_id)?;
         // Whose Claude login, before anything is made: a refusal makes nothing.

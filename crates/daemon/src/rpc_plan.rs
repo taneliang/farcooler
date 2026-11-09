@@ -84,6 +84,7 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
             let task = required_id(&p.task_id)?;
             let actor = actor_from_wire(&p.actor)?;
             let stage = p.stage.map(stage_of).transpose()?;
+            if stage.is_some() { crate::by_hand::refuse(&svc.store, task, crate::by_hand::STAGE)?; }
             let was = svc.store.ensure_on_line(task, actor)?.stage;
             let update = LineUpdate {
                 stage,

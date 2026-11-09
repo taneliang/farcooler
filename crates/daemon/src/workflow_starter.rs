@@ -3,7 +3,9 @@
 //! A draft pins a definition to adapter settings, so a workspace with none had nothing to draft against and
 //! `workspace workflow-draft` refused. The runner knows what a first draft needs: the workspace's checkout, the
 //! branch it lands on, its own Claude hook settings, and the GitHub repository CI runs in. It says them here,
-//! in `workflow get`'s reply, and suggests only: nothing is written. The orchestrator drafts on top of them and
+//! in `workflow get`'s reply, and suggests only. The one thing written is the engine's Claude hook settings file
+//! (`engine_hook_settings`), atomically and only when it differs, even when the suggestion then refuses: it is the
+//! runner's own file, the same for every workspace, and holds nothing of this one. The orchestrator drafts on top of them and
 //! the owner reads every setting on the draft's card before anything publishes (`workflow_drafts`).
 //!
 //! **It refuses rather than suggest settings that can't publish.** Every template lands through a group, and a group
@@ -88,13 +90,13 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
 }
 
 /// Claude's hook settings for the agents the engine starts: they report to the engine's own socket, which publishing
-/// checks (`native_agent_hooks`), not to the one the runner's terminals use. Written once and left as it is after, so
-/// the digest a published workflow pins stays true.
+/// checks (`native_agent_hooks`), not to the one the runner's terminals use. Written once, through a temporary file
+/// and a rename so no reader sees half of it, and left as it is after, so the digest a published workflow pins stays true.
 fn engine_hook_settings(svc: &Service) -> Option<PathBuf> {
     let engine = svc.root_dir().join("workflow").canonicalize().ok()?;
     let text = serde_json::to_string_pretty(&crate::hook_install::claude_settings(&engine.join("h.sock"))).ok()?;
     let path = svc.root_dir().join("workflow-claude-hooks.json");
-    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) { std::fs::write(&path, text).ok()?; }
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) { crate::skill_install::write_atomically(&path, &text).ok()?; }
     path.canonicalize().ok()
 }
 

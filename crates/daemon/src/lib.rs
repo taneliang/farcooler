@@ -42,6 +42,7 @@ pub mod hostwalk;
 pub mod hook_ingress;
 pub mod hook_install;
 pub mod agent_panes;
+mod by_hand;
 pub mod layout;
 pub mod lead_change;
 pub mod log_join;

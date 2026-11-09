@@ -1873,6 +1873,10 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "engine_lands" => "this board lands through the workflow engine now. landings from before the move are kept as history and can't be changed",
         "engine_owned" => "a workflow runs this ticket, so its column follows the run and can't be moved by hand. ask the orchestrator",
         "engine_owned_ended" => "a workflow ran this ticket and its column is final, so it can't be moved by hand",
+        "engine_dispatch" => "this workspace runs its work through its workflow, so a ticket isn't given a pane by hand. \
+             track it with `farcooler workflow track`, then start it with `farcooler workflow start`",
+        "engine_stage" => "this workspace runs its work through its workflow, so a ticket's stage follows its run. \
+             move it with `farcooler workflow move`",
         // `terminal.agent_answer`'s conflicts (no command here sends `pr.thread_reply`, ov-647).
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",
@@ -2503,6 +2507,17 @@ fn task_get_request(task: Uuid) -> pb::Request {
     )
 }
 
+/// Whether `task`'s workspace has a published workflow. A runner that can't say is asked nothing more here: it
+/// refuses the pane itself.
+async fn runs_a_workflow<L: DispatchLink>(link: &mut L, task: &pb::Task) -> bool {
+    use farcooler_protocol::workflow_commands::Action;
+    if !link.capabilities().iter().any(|c| c == farcooler_protocol::capability::WORKFLOW_COMMANDS) { return false; }
+    let Ok(workspace) = Uuid::from_slice(&task.workspace_id) else { return false };
+    let Ok(request) = crate::workflow::request(workspace, &Action::Get) else { return false };
+    let Ok(pb::Result { value: Some(result::Value::WorkflowReply(reply)), .. }) = link.call(request).await else { return false };
+    serde_json::from_str::<serde_json::Value>(&reply.json).ok().and_then(|v| v.get("configuration").cloned()).is_some_and(|c| !c.is_null())
+}
+
 /// `task dispatch`, in order: everything that can refuse, then the lane,
 /// the pane, and only then the board.
 ///
@@ -2539,6 +2554,11 @@ pub(crate) async fn dispatch<L: DispatchLink>(
     agent_preset(d.preset)?;
     if !link.capabilities().iter().any(|c| c == farcooler_protocol::capability::TERMINAL_TASK) {
         return Err("this runner's Far Cooler can't open a pane for a task yet. update it and try again".into());
+    }
+    // A workspace that runs its work through its workflow gives no ticket a pane by hand (ov-1011). Asked before
+    // a new lane is made, so the refusal leaves nothing behind; the runner refuses the pane itself too.
+    if runs_a_workflow(link, task).await {
+        return Err(said_about("engine_dispatch").unwrap_or_default().into());
     }
 
     let r = link.call(req("worktree.list")).await.map_err(|e| refused(e, "the worktrees could not be read"))?;
@@ -3493,6 +3513,8 @@ mod tests {
                     result::Value::TerminalList(pb::TerminalList { items, ..Default::default() })
                 }
                 "worktree.create" => result::Value::Worktree(lane(MADE, "fix-it", REPO)),
+                // A board with no published workflow, so a pane opens by hand (ov-1011).
+                "workflow.get" => result::Value::WorkflowReply(pb::WorkflowReply { schema: 1, json: r#"{"schema":1,"configuration":null,"state":null}"#.into() }),
                 "terminal.create" => result::Value::Terminal(pane(self.opened)),
                 "task.update" | "task.set_status" => result::Value::Task(fc_2()),
                 "task.get" => {

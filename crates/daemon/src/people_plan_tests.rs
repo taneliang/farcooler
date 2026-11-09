@@ -518,3 +518,27 @@ async fn a_member_moves_no_ticket_that_reached_landing() {
     call(&bob, "line.set", to(other, S::Building)).await.expect("Bob builds a waiting ticket");
     call(&bob, "line.set", to(other, S::Dropped)).await.expect("Bob drops a ticket short of landing");
 }
+
+/// Once the workspace publishes a workflow, a stage set by hand is refused in words that name
+/// `workflow move` (ov-1011), and nothing on the line moves. Setting a branch or a reason, and
+/// reading the plan, work as before.
+#[tokio::test]
+async fn a_published_workspace_refuses_a_stage_set_by_hand() {
+    use request::Payload as P;
+    let r = runner().await;
+    let task = r.svc.store.create_task(r.workspace, "Export: invoices as PDF", farcooler_store::models::Actor::Manager).unwrap().id;
+    let local = factory(&r.svc, LOCAL, Scope::Control);
+    let to = |stage: pb::TicketStage| {
+        P::LineSet(pb::TicketLineSet { task_id: id_bytes(task), stage: Some(stage as i32), actor: "manager".into(), ..Default::default() })
+    };
+    call(&local, "line.set", to(pb::TicketStage::Building)).await.expect("as today, before a workflow");
+    crate::test_support::publish_for_test(&r.svc, r.workspace);
+    let refused = call(&local, "line.set", to(pb::TicketStage::Reviewing)).await.err().unwrap_or_default();
+    assert!(refused.ends_with(":engine_stage"), "{refused}");
+    let said = farcooler_core::error::sentence("engine_stage").unwrap();
+    assert!(said.contains("`farcooler workflow move`"), "{said}");
+    let reason = P::LineSet(pb::TicketLineSet { task_id: id_bytes(task), reason: Some("waits on the PDF crate".into()), actor: "manager".into(), ..Default::default() });
+    call(&local, "line.set", reason).await.expect("a reason is not a stage");
+    let plan = plan_as(&r, LOCAL, Scope::Control).await;
+    assert_eq!(plan.lines[0].stage, pb::TicketStage::Building as i32, "the stage stayed where it was");
+}

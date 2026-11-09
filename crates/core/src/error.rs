@@ -388,6 +388,17 @@ const SENTENCES: &[(&str, &str)] = &[
         "engine_owned_ended",
         "A workflow ran this ticket and its column is final, so it can't be moved by hand.",
     ),
+    // Work started or moved by hand once the workspace has a published workflow (ov-1011).
+    (
+        "engine_dispatch",
+        "This workspace runs its work through its workflow, so a ticket isn't given a pane by hand. \
+         Track it with `farcooler workflow track`, then start it with `farcooler workflow start`.",
+    ),
+    (
+        "engine_stage",
+        "This workspace runs its work through its workflow, so a ticket's stage follows its run. \
+         Move it with `farcooler workflow move`.",
+    ),
     ("landing_history", "This workspace has landing history that is kept, so it can't be deleted."),
     // A run told to adopt a branch with work on it (ov-968): only a plain local branch made for the work.
     ("adopt_not_local", "That isn't a local branch. Make a local branch for the work, from a remote one if need be, then adopt it."),

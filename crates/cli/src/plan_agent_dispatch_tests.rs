@@ -323,10 +323,12 @@ async fn a_builder_on_tracked_tickets_goes_through_one_start() {
     assert!(said.contains("Reopen it with `farcooler workflow reopen "), "{said}");
 }
 
-/// A board with no engine, or no tracked ticket, dispatches a pane exactly as before.
+/// A board with no engine, or no published workflow and no tracked ticket, dispatches a pane exactly as before.
 #[tokio::test]
 async fn untracked_tickets_still_open_a_pane() {
+    // A board that tracks tickets but has published nothing: one with a workflow opens no pane by hand (ov-1011).
     let mut link = with_engine(&[("ov-9", "ticket/v1", "WaitingApproval")]);
+    link.engine.as_mut().unwrap()["configuration"] = serde_json::Value::Null;
     say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.unwrap();
     assert!(starts(&link).is_empty() && link.methods().contains(&"terminal.create"), "{:?}", link.methods());
 }
@@ -511,4 +513,21 @@ async fn a_named_worktree_covers_the_run_and_a_taken_one_is_said() {
     (link.start_error, link.start_word) = (Some(pb::ErrorCode::InvalidArgument), "adopt_protected");
     let said = say(&mut link, "--role builder --ticket ov-2 --new main --branch main --adopt").await.unwrap_err().to_string();
     assert!(said.starts_with("ov-2 wasn't started on main. That's the landing branch"), "{said}");
+}
+
+/// A board with a published workflow gives no untracked ticket a pane by hand (ov-1011). `agent dispatch` is
+/// refused in words naming `workflow track` and `workflow start`, before any worktree is made or pane opened. A
+/// board with no published workflow dispatches as before.
+#[tokio::test]
+async fn a_published_board_dispatches_no_pane_by_hand() {
+    let mut link = with_engine(&[]);
+    let said = say(&mut link, "--role builder --ticket ov-2 --new n --branch b").await.unwrap_err().to_string();
+    assert!(said.contains("`farcooler workflow track`") && said.contains("`farcooler workflow start`"), "{said}");
+    for method in ["worktree.create", "terminal.create", "task.update", "task.set_status"] {
+        assert!(!link.methods().contains(&method), "{method}: {:?}", link.methods());
+    }
+    let mut link = with_engine(&[]);
+    link.engine = Some(json!({"schema":1,"configuration":null,"state":null}));
+    say(&mut link, "--role builder --ticket ov-2 --worktree lane").await.expect("no workflow: a pane as before");
+    assert!(link.methods().contains(&"terminal.create"), "{:?}", link.methods());
 }
