@@ -86,16 +86,26 @@ fn commands(config: &CodingConfig) -> Vec<(String, &CodingCommand)> {
     out.extend(config.pull_request.as_ref().map(|p| ("pull requests".to_string(), &p.gh)));
     out
 }
-/// The live adapter's environment for the command `name` names, as `changes` reads it.
-fn before<'a>(live: Option<&'a CodingConfig>, name: &str) -> Option<&'a Environment> {
-    live.map(|l| commands(l).into_iter().find(|(n, _)| n == name).map_or(&NONE, |(_, c)| &c.environment))
+/// The live adapter's environment for the command `name` names, as `changes` reads it. Checks carry no name
+/// of their own, so a check is known by the command it runs (its argv), never by its place in the list: a
+/// reordered list compares each check with itself, and a value moved between checks shows on both. The nth
+/// check with a given argv pairs with the nth live check with that argv.
+fn before<'a>(live: Option<&'a CodingConfig>, config: &CodingConfig, name: &str) -> Option<&'a Environment> {
+    let live = live?;
+    let position = name.strip_prefix("check ").and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1));
+    let Some(i) = position.filter(|i| *i < config.checks.len()) else {
+        return Some(commands(live).into_iter().find(|(n, _)| n == name).map_or(&NONE, |(_, c)| &c.environment));
+    };
+    let argv = &config.checks[i].argv;
+    let nth = config.checks[..i].iter().filter(|c| &c.argv == argv).count();
+    Some(live.checks.iter().filter(|c| &c.argv == argv).nth(nth).map_or(&NONE, |c| &c.environment))
 }
 
 /// One line naming every variable the draft adds, removes or changes against the workflow in force, values
 /// hidden. A draft that changes only a value would otherwise read exactly like the live workflow.
 fn environment_changes(config: &CodingConfig, live: Option<&CodingConfig>) -> Option<String> {
     let parts: Vec<String> = commands(config).into_iter().filter_map(|(name, c)| {
-        let marked = changes(&c.environment, before(live, &name));
+        let marked = changes(&c.environment, before(live, config, &name));
         (!marked.is_empty()).then(|| format!("{name}: {}", marked.iter().map(|(k, m)| format!("{} ({m})", code(k))).collect::<Vec<_>>().join(", ")))
     }).collect();
     (!parts.is_empty()).then(|| format!("Environment variables this changes, values hidden: {}.", parts.join("; ")))
@@ -114,7 +124,7 @@ fn checks(definition: &Definition, config: &CodingConfig, live: Option<&CodingCo
     steps(definition).filter(|s| matches!(s.kind, StageKind::Check | StageKind::Run))
         .filter_map(|s| s.operation.arguments.get(1).and_then(|a| a.parse::<usize>().ok()))
         .filter_map(|i| config.checks.get(i).map(|c| (i, c)))
-        .map(|(i, c)| match gate_environment_note(c, before(live, &format!("check {}", i + 1))) { Some(env) => format!("{} {env}", spoken(c)), None => spoken(c) })
+        .map(|(i, c)| match gate_environment_note(c, before(live, config, &format!("check {}", i + 1))) { Some(env) => format!("{} {env}", spoken(c)), None => spoken(c) })
         .collect()
 }
 
@@ -217,7 +227,7 @@ fn runs(config: &CodingConfig) -> Vec<String> {
 /// this is what they can check them against. It names every field, so a new one doesn't compile until it
 /// is shown here.
 fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
-    let exactly = |c: &CodingCommand, name: &str| exactly(c, before(live, name));
+    let exactly = |c: &CodingCommand, name: &str| exactly(c, before(live, config, name));
     let CodingConfig { repository, base, landing_ref, landing, pull_request, harness, checks, reviewer, ci } = config;
     let mut lines = Vec::new();
     match harness {
@@ -459,6 +469,27 @@ mod tests {
         // The live workflow proposed back unchanged says nothing changed.
         let same = summarize("", &live, Some(&live.definition), Some(&live.adapter));
         assert!(!same.contains("Environment variables this changes") && !same.contains("(changed)"), "{same}");
+    }
+    /// R-118: a check is known by the command it runs, not its place in the list.
+    #[test]
+    fn changed_marks_follow_the_check_not_its_position() {
+        let mut live = bundle("ticket-push", &["make check", "scripts/copy-lint"], &[], None);
+        let AdapterConfiguration::Coding(config) = &mut live.adapter;
+        config.checks[0].environment.insert("ONLY_MAKE".into(), "1".into());
+        config.checks[1].environment.insert("ONLY_LINT".into(), "2".into());
+        // Reordered: each check still carries its own values, so nothing changed.
+        let mut reordered = live.clone();
+        let AdapterConfiguration::Coding(config) = &mut reordered.adapter;
+        config.checks.swap(0, 1);
+        let text = summarize("", &reordered, Some(&live.definition), Some(&live.adapter));
+        assert!(!text.contains("Environment variables this changes") && !text.contains("(changed)") && !text.contains("(new)") && !text.contains("(removed)"), "{text}");
+        // Moved: the value leaves one check and appears on the other, so both are marked.
+        let mut moved = live.clone();
+        let AdapterConfiguration::Coding(config) = &mut moved.adapter;
+        let value = config.checks[0].environment.remove("ONLY_MAKE").unwrap();
+        config.checks[1].environment.insert("ONLY_MAKE".into(), value);
+        let text = summarize("", &moved, Some(&live.definition), Some(&live.adapter));
+        assert!(text.contains("check 1: `ONLY_MAKE` (removed)") && text.contains("check 2: `ONLY_MAKE` (new)"), "{text}");
     }
     fn with_gate(mut b: Bundle, reviewer: Reviewer) -> Bundle {
         for s in b.definition.stages.iter_mut().chain(b.definition.groups.values_mut().flat_map(|g| g.steps.iter_mut())) {
