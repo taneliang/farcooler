@@ -477,8 +477,7 @@ assigns worktrees, and searches their files (`create`, `list`, `adopt`,
 `branches`, `hide`, `unhide`, `reorder`, `assign`, `remove`, `file-search`).
 `farcooler workspace` has `create`, `list`, `show`, `rename`, `set-prefix`,
 `delete` and `start-orchestrator`. `farcooler task` works a board. The wire
-methods for worktrees are `worktree.*`, and the call that lists worktrees git has
-but Far Cooler has not adopted is `worktree.discover`.
+methods for worktrees are `worktree.*`.
 
 Renames never reach the bytes. Protobuf puts field numbers on the wire, not
 names, and those numbers are frozen. A few values are also kept in their old

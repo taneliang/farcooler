@@ -192,7 +192,11 @@ impl DomainError {
     pub fn retired(method: &str) -> DomainError {
         let replaced = method.starts_with("lane.") || method.starts_with("train.") || method == "plan.set";
         DomainError::MethodRetired {
-            said: if replaced {
+            said: if method.starts_with("landing.") {
+                "The runner's engine lands work now. Update Far Cooler to see landings."
+            } else if matches!(method, "worktree.discover" | "stack.set_parent") {
+                "This view was retired. Update Far Cooler to use the current one."
+            } else if replaced {
                 "Lanes and trains were replaced by agents and landings. Update Far Cooler to see them."
             } else {
                 "Chat mode was retired. Open the agent's pane and use the conversation view instead."

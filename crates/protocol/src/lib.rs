@@ -640,9 +640,8 @@ pub mod capability {
     /// the draft to the clipboard instead, as it always did.
     pub const DRAFT_HOLD: &str = "draft_hold";
     /// `settings.set_projector` (ov-372): turned the runner's projector, and
-    /// so `agent_rows`, on or off. From ov-830 there is no setting, and the
-    /// method is gone; the word stays so an app's offer test still recognizes
-    /// a runner that serves rows to whoever views a pane.
+    /// so `agent_rows`, on or off. From ov-830 there is no setting: the method
+    /// is kept, and changes nothing, for apps from before that still send it.
     pub const PROJECTOR_SETTING: &str = "projector_setting";
     /// `terminal.compose` (ov-372): the native view's send. Its own word, so
     /// a runner that serves rows from before compose isn't offered a view
@@ -846,7 +845,8 @@ pub mod capability {
     pub const RETIRED: &[&str] =
         &["adapters", "agent_queue", "board_trains", "board_train_phase", "board_agents", "terminal_lane"];
 
-    /// Methods retired with chat mode (ov-377), and lanes and trains (ov-872).
+    /// Methods retired with chat mode (ov-377), lanes and trains (ov-872), and
+    /// landing writes, worktree discovery and stack parents (ov-1023).
     /// A runner refuses each as `MethodRetired` rather than as a feature it
     /// predates, so an app from before then is told the feature is gone, not
     /// to update the runner.
@@ -871,6 +871,10 @@ pub mod capability {
         "plan.set",
         "train.start",
         "train.set",
+        "landing.start",
+        "landing.set",
+        "worktree.discover",
+        "stack.set_parent",
     ];
 
     /// Capabilities no process offers until something in it says it may.
@@ -1055,6 +1059,7 @@ pub mod method {
         ThemeUpsert = "theme.upsert" => THEMES,
         ThemeDelete = "theme.delete" => THEMES,
         SettingsSetBranchPrefix = "settings.set_branch_prefix" => THEMES,
+        SettingsSetProjector = "settings.set_projector" => PROJECTOR_SETTING,
         ClientList = "client.list" => ENROLLMENT,
         ClientEnroll = "client.enroll" => ENROLLMENT,
         ClientRevoke = "client.revoke" => ENROLLMENT,

@@ -64,6 +64,7 @@ fn every_runner_setting_method_requires_host_admin() {
     // runner that may not be the one asking.
     for method in [
         "settings.set_branch_prefix",
+        "settings.set_projector",
         "theme.upsert",
         "theme.delete",
     ] {

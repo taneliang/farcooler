@@ -122,6 +122,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Agents and their orchestrator, through the CLI (ov-455): the apps
         // read messages as the card's notes.
         Method::MessageSend => None,
+        // The projector's setting, gone (ov-830): a runner serves rows to
+        // whoever views a pane. Kept on the runner for apps from before.
+        Method::SettingsSetProjector => None,
         // Who's on a runner and whose Claude account it runs on (ov-508), for
         // the phones' runner settings. A member's Talk starts their own rep
         // (ov-526), which the runner refuses for anyone else's. Adding and

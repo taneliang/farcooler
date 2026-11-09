@@ -272,6 +272,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::RepositoryRootRemove
         | M::RepositoryRegister
         | M::SettingsSetBranchPrefix
+        | M::SettingsSetProjector
         | M::ThemeUpsert
         | M::ThemeDelete
         | M::DaemonShutdown => Owners(Why::Reshapes),

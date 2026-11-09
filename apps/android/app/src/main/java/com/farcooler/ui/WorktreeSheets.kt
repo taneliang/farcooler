@@ -97,10 +97,9 @@ import kotlinx.coroutines.launch
 /**
  * A branch's parent chain, and what GitHub last said along it.
  *
- * **Read-only on purpose.** `stack.set_parent` exists and is deliberately not
- * reached from here: setting a parent changes what every diff in the stack is
- * compared against, and this screen exists to answer "what is the state of
- * this" — the question a phone is for. iOS says the same at `StackView`.
+ * **Read-only on purpose.** Setting a parent changes what every diff in the
+ * stack is compared against, and this screen exists to answer "what is the
+ * state of this" — the question a phone is for. iOS says the same at `StackView`.
  *
  * The refresh in the title bar is the only thing on it that writes anything
  * anywhere, and what it writes is a GitHub read on somebody's rate limit — see

@@ -1590,7 +1590,15 @@ async fn chat_modes_methods_are_refused_over_the_socket() {
                 assert_eq!(code, ErrorCode::MethodRetired as i32, "{method}");
                 assert!(!retryable, "{method}");
                 let replaced = method.starts_with("lane.") || method.starts_with("train.") || method == "plan.set";
-                let said = if replaced { "agents and landings" } else { "conversation view" };
+                let said = if method.starts_with("landing.") {
+                    "engine lands"
+                } else if matches!(method, "worktree.discover" | "stack.set_parent") {
+                    "view was retired"
+                } else if replaced {
+                    "agents and landings"
+                } else {
+                    "conversation view"
+                };
                 assert!(message.contains(said), "{method}: {message}");
             }
             other => panic!("{method} was not refused as retired: {other:?}"),

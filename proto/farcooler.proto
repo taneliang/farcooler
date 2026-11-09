@@ -1265,7 +1265,8 @@ message HostSettings {
   // Whether this runner serves `agent.rows` (ov-372). Always true from
   // ov-830, which removed the setting: a runner serves rows to whoever
   // views a pane, and `agent_rows` in the hello is the answer to "are rows
-  // served". Kept for apps from before, which read it as their switch.
+  // served". Kept for apps from before, which read it as their switch;
+  // `settings.set_projector`, kept for them too, changes nothing.
   bool projector = 2;
 }
 

@@ -55,7 +55,19 @@ fn the_line_is_one_advertised_capability_owning_every_method() {
     for retired in ["board_trains", "board_train_phase", "board_agents", "terminal_lane"] {
         assert!(capability::RETIRED.contains(&retired), "{retired}");
     }
-    for method in ["lane.create", "lane.update", "lane.cards", "lane.agent", "plan.set", "train.start", "train.set"] {
+    for method in [
+        "lane.create",
+        "lane.update",
+        "lane.cards",
+        "lane.agent",
+        "plan.set",
+        "train.start",
+        "train.set",
+        "landing.start",
+        "landing.set",
+        "worktree.discover",
+        "stack.set_parent",
+    ] {
         assert!(capability::RETIRED_METHODS.contains(&method), "{method}");
         assert_eq!(capability::for_method(method), None, "{method} is no method now");
     }
