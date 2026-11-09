@@ -63,6 +63,14 @@ final class TranscriptLayout {
     private var built = false
     /// The items built now, where the stack put them.
     private var frames: [String: CGRect] = [:]
+    /// Built items whose frames are out of order with the rest: reported
+    /// where the stack doesn't keep them (`ordered()`, ov-906).
+    private var outOfOrder: Set<String> = []
+    /// An item's height before the report that last changed it, and that
+    /// report's frame: its height while that frame is out of order.
+    private var before: [String: (measured: (height: CGFloat, width: CGFloat)?, by: CGRect)] = [:]
+    /// The frames changed since they were last put in order.
+    private var framesChanged = false
     /// The transcript's width the frames were reported at. When it changes
     /// they are all let go, and only rows laid out again at the new width
     /// report: a row the stack keeps but doesn't lay out again would stay
@@ -109,6 +117,7 @@ final class TranscriptLayout {
         index = Dictionary(now.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         built = false
         cached = nil
+        framesChanged = true
         if head != nil, frames[now.first?.id ?? ""] == nil { head = nil }
     }
 
@@ -123,6 +132,7 @@ final class TranscriptLayout {
     /// The sums at the transcript's width now, built again when it changed.
     private func ensureSums() {
         sync()
+        order()
         if let now = contentWidth(), abs(now - width) > 0.5 {
             width = now
             built = false
@@ -150,8 +160,10 @@ final class TranscriptLayout {
             framesWidth = width
         }
         frames[id] = frame
+        framesChanged = true
         cached = nil
         if measured[id].map({ abs($0.height - frame.height) > 0.25 || abs($0.width - width) > 0.5 }) ?? true {
+            if !outOfOrder.contains(id) { before[id] = (measured[id], frame) } else { before[id]?.by = frame }
             measured[id] = (frame.height, width)
             if let clip = contentWidth(), abs(clip - width) <= 0.5 { steady[id] = (frame.height, width) }
             // Its own entry, if the sums are at this width; otherwise they
@@ -177,6 +189,7 @@ final class TranscriptLayout {
     /// estimate (ov-842).
     func drop(_ id: String) {
         frames[id] = nil
+        framesChanged = true
         if let m = measured[id], let clip = contentWidth(), abs(m.width - clip) > 0.5, steady[id].map({ $0.width != m.width }) ?? true {
             measured[id] = steady[id]
             built = false
@@ -187,7 +200,8 @@ final class TranscriptLayout {
 
     private func height(_ i: Int) -> CGFloat {
         let item = items[i]
-        guard let m = measured[item.id] else { return estimate(item, at: width) }
+        let set = before[item.id].flatMap { outOfOrder.contains(item.id) && $0.by == frames[item.id] ? $0 : nil }
+        guard let m = set.map({ $0.measured }) ?? measured[item.id] else { return estimate(item, at: width) }
         if abs(m.width - width) <= 0.5 { return m.height }
         // Laid out at another width: scaled as its estimate scales.
         let then = estimate(item, at: m.width)
@@ -201,6 +215,52 @@ final class TranscriptLayout {
             return shape
         }()
         return shape.height(at: width)
+    }
+
+    /// The built items' frames that are in order: each below the one before
+    /// it in the transcript. On a large width change the stack can report
+    /// rows twice in one pass, the second time where it doesn't keep them,
+    /// and not report again when they go back: in a gate's resize from 900
+    /// to 420 pt, rows above the reader 847 pt lower (the clip's anchoring
+    /// move), one 877 pt tall over the reader's row (471 laid out). Read as
+    /// placed, the reader was on that row, or its height threw the knob
+    /// 2.3% (ov-906). So the longest run of frames in order is the stack's
+    /// layout, and a frame out of it is set aside, with the height the row
+    /// had before it, until a report puts it back in order: one read
+    /// between two rows' reports of the same pass finds them out of order
+    /// for that read only.
+    private func ordered() -> [String: CGRect] {
+        order()
+        return outOfOrder.isEmpty ? frames : frames.filter { !outOfOrder.contains($0.key) }
+    }
+
+    private func order() {
+        guard framesChanged else { return }
+        framesChanged = false
+        let rows = frames.compactMap { id, frame in index[id].map { (i: $0, id: id, frame: frame) } }.sorted { $0.i < $1.i }
+        func inOrder(_ a: CGRect, _ b: CGRect) -> Bool { a.maxY <= b.minY + 1 }
+        var out = Set<String>()
+        if zip(rows, rows.dropFirst()).contains(where: { !inOrder($0.frame, $1.frame) }) {
+            // The longest run in order, and each row's place before it in that run.
+            var longest = [Int](repeating: 1, count: rows.count)
+            var previous = [Int](repeating: -1, count: rows.count)
+            for k in rows.indices {
+                for j in 0..<k where inOrder(rows[j].frame, rows[k].frame) && longest[j] + 1 > longest[k] {
+                    longest[k] = longest[j] + 1
+                    previous[k] = j
+                }
+            }
+            var kept = Set<Int>()
+            var at = longest.indices.max { longest[$0] < longest[$1] } ?? -1
+            while at >= 0 {
+                kept.insert(at)
+                at = previous[at]
+            }
+            out = Set(rows.indices.filter { !kept.contains($0) }.map { rows[$0].id })
+        }
+        if out != outOfOrder || !out.isEmpty { built = false }
+        outOfOrder = out
+        cached = nil
     }
 
     // MARK: The knob
@@ -238,7 +298,7 @@ final class TranscriptLayout {
         let insets = scroll.contentInsets
         let y = clip.minY
         let head = self.head ?? headGuess
-        if let last = items.last, let frame = frames[last.id] { tail = max(0, doc.frame.height - frame.maxY) }
+        if let last = items.last, let frame = ordered()[last.id] { tail = max(0, doc.frame.height - frame.maxY) }
         let place = head + sums.prefix(anchor.i) + (y - anchor.frame.minY)
         let total = content(head) + insets.top + insets.bottom
         let range = total - clip.height
@@ -264,7 +324,7 @@ final class TranscriptLayout {
     /// The built item nearest `y`, and how far from it `y` is.
     private func anchor(near y: CGFloat) -> (i: Int, frame: CGRect, distance: CGFloat)? {
         var anchor: (i: Int, frame: CGRect, distance: CGFloat)?
-        for (id, frame) in frames {
+        for (id, frame) in ordered() {
             guard let i = index[id] else { continue }
             let distance = y < frame.minY ? frame.minY - y : y > frame.maxY ? y - frame.maxY : 0
             if anchor.map({ distance < $0.distance }) ?? true { anchor = (i, frame, distance) }
@@ -276,7 +336,7 @@ final class TranscriptLayout {
     /// into it the clip is (negative when the clip's top is above it).
     func top(_ scroll: NSScrollView) -> (id: String, into: CGFloat)? {
         let y = scroll.contentView.bounds.minY
-        let shown = frames.filter { $0.value.maxY > y }
+        let shown = ordered().filter { $0.value.maxY > y }
         return shown.min { $0.value.minY < $1.value.minY }.map { ($0.key, y - $0.value.minY) }
     }
 
@@ -288,12 +348,12 @@ final class TranscriptLayout {
     }
 
     func reading(_ scroll: NSScrollView) -> Reading? {
-        guard let top = top(scroll), let frame = frames[top.id], frame.height > 0 else { return nil }
+        guard let top = top(scroll), let frame = ordered()[top.id], frame.height > 0 else { return nil }
         return Reading(id: top.id, share: top.into / frame.height)
     }
 
     /// Whether `id`'s row is built.
-    func has(_ id: String) -> Bool { frames[id] != nil }
+    func has(_ id: String) -> Bool { ordered()[id] != nil }
 
     /// The knob's place for `reading`, by our heights: for a row the
     /// stack let go of.
@@ -312,7 +372,7 @@ final class TranscriptLayout {
 
     /// The clip's top for `reading`, if its row is built.
     func origin(for reading: Reading, in scroll: NSScrollView) -> CGFloat? {
-        frames[reading.id].map { $0.minY + reading.share * $0.height }
+        ordered()[reading.id].map { $0.minY + reading.share * $0.height }
     }
 
     /// The clip's top for the knob at `value`: through the item there if it's
@@ -320,6 +380,7 @@ final class TranscriptLayout {
     func origin(for value: Double, in scroll: NSScrollView) -> CGFloat? {
         guard let doc = scroll.documentView else { return nil }
         ensureSums()
+        let frames = ordered()
         guard !items.isEmpty, !frames.isEmpty else { return nil }
         let clip = scroll.contentView.bounds
         let insets = scroll.contentInsets
