@@ -5,6 +5,7 @@ use farcooler_daemon::{service::Service, rpc::RpcFactory, watch::Watcher,
 use farcooler_protocol::{v1::{self as pb, request, result}, workflow_commands::{Action,Mutation}, workflow_config::AdapterConfiguration};
 use farcooler_transport::{Client,HandshakeConfig,UnixListenerServer};
 use farcooler_workflow::{Definition,Progression,Phase};
+mod common;
 use uuid::Uuid;
 async fn git(repo: &Path, args: &[&str]) -> Result<String, std::io::Error> {
     let output = tokio::process::Command::new("/usr/bin/git").current_dir(repo).args(["-c","core.hooksPath=/dev/null"]).args(args).output().await?;
@@ -319,26 +320,7 @@ async fn workflow_service_process_bootstrap_restart_coding_offline_and_joined_sh
 // Run the real socket clients in a real, owned, isolated terminal, whose tmux
 // server is detached from that ancestor. No authority override or stub switch.
 async fn person_terminal(name: &str) -> bool {
-    if std::env::var_os("FARCOOLER_WORKFLOW_PERSON_CHILD").is_some() { return false; }
-    let dir=tempfile::Builder::new().prefix("w931-person").tempdir_in("/tmp").unwrap();
-    let socket=dir.path().join("t.sock");
-    struct Reap(std::path::PathBuf);
-    impl Drop for Reap { fn drop(&mut self) { farcooler_tmux::reap_server(&self.0.to_string_lossy()); } }
-    let _reap=Reap(socket.clone());
-    let log=dir.path().join("output");let status=dir.path().join("status");
-    let quote=|s:&str| format!("'{}'",s.replace('\'',"'\\''"));
-    // The status file appears only by rename, whole: a bare `> status` creates
-    // it empty before printf writes, and a slow runner reads "" (ov-1036).
-    let command=format!("FARCOOLER_WORKFLOW_PERSON_CHILD=1 {} --exact {} --nocapture > {} 2>&1; code=$?; printf '%s' \"$code\" > {status}.tmp && mv {status}.tmp {status}",
-        quote(&std::env::current_exe().unwrap().to_string_lossy()),quote(name),quote(&log.to_string_lossy()),status=quote(&status.to_string_lossy()));
-    let output=tokio::process::Command::new("tmux").args(["-S",&socket.to_string_lossy(),"-f","/dev/null","new-session","-d","-s","person","/bin/sh","-c",&command]).output().await.unwrap();
-    assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
-    tokio::time::timeout(std::time::Duration::from_secs(90),async {
-        while !status.exists() {tokio::time::sleep(std::time::Duration::from_millis(20)).await;}
-    }).await.unwrap();
-    let output=std::fs::read_to_string(log).unwrap();println!("{output}");
-    assert_eq!(std::fs::read_to_string(status).unwrap(),"0","{output}");
-    true
+    common::as_a_person("w931-person", name, std::time::Duration::from_secs(90)).await
 }
 
 #[tokio::test]

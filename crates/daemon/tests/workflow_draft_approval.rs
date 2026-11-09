@@ -8,6 +8,7 @@ use farcooler_daemon::{rpc::RpcFactory, service::Service, watch::Watcher,
 use farcooler_protocol::{v1::{self as pb, request, result}, workflow_commands::{Action, Mutation}};
 use farcooler_store::models::{NoteKind, TaskStatus};
 use farcooler_transport::{Client, HandshakeConfig, UnixListenerServer};
+mod common;
 use uuid::Uuid;
 
 type Link = Client<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>;
@@ -104,25 +105,7 @@ fn card_of(reply: &serde_json::Value) -> Uuid { reply["draft"]["card"].as_str().
 fn pin(host: &Host) -> Option<String> { host.service.store.workflow_configuration(&host.workspace.to_string()).unwrap().map(|c| c.pin) }
 
 async fn as_a_person(name: &str) -> bool {
-    if std::env::var_os("FARCOOLER_WORKFLOW_PERSON_CHILD").is_some() { return false; }
-    let dir = tempfile::Builder::new().prefix("ov971-person").tempdir_in("/tmp").unwrap();
-    let socket = dir.path().join("t.sock");
-    struct Reap(std::path::PathBuf);
-    impl Drop for Reap { fn drop(&mut self) { farcooler_tmux::reap_server(&self.0.to_string_lossy()); } }
-    let _reap = Reap(socket.clone());
-    let (log, status) = (dir.path().join("output"), dir.path().join("status"));
-    let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
-    // The status file appears only by rename, whole: a bare `> status` creates
-    // it empty before printf writes, and a slow runner reads "" (ov-1036).
-    let command = format!("FARCOOLER_WORKFLOW_PERSON_CHILD=1 {} --exact {} --nocapture > {} 2>&1; code=$?; printf '%s' \"$code\" > {status}.tmp && mv {status}.tmp {status}",
-        quote(&std::env::current_exe().unwrap().to_string_lossy()), quote(name), quote(&log.to_string_lossy()), status = quote(&status.to_string_lossy()));
-    let out = tokio::process::Command::new("tmux").args(["-S", &socket.to_string_lossy(), "-f", "/dev/null", "new-session", "-d", "-s", "person", "/bin/sh", "-c", &command]).output().await.unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    tokio::time::timeout(std::time::Duration::from_secs(120), async { while !status.exists() { tokio::time::sleep(std::time::Duration::from_millis(20)).await; } }).await.unwrap();
-    let output = std::fs::read_to_string(log).unwrap();
-    println!("{output}");
-    assert_eq!(std::fs::read_to_string(status).unwrap(), "0", "{output}");
-    true
+    common::as_a_person("ov971-person", name, std::time::Duration::from_secs(120)).await
 }
 async fn settles(host: &Host, card: Uuid, to: TaskStatus) {
     for _ in 0..200 {
