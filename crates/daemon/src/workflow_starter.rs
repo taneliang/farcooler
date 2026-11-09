@@ -44,7 +44,7 @@ printf '%s\n' "$out" > "$FARCOOLER_RECEIPT""#;
 /// `configuration`, and a published workspace's isn't null, so every other reply is left alone.
 pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_json::Value) -> serde_json::Value {
     if value.get("configuration").is_none_or(|c| !c.is_null()) { return value; }
-    let said = match suggest(svc, workspace).await {
+    let said = match settings(svc, workspace).await {
         Ok(config) => ("suggested_adapter", serde_json::json!(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))),
         Err(why) => ("suggested_adapter_refused", why.into()),
     };
@@ -52,12 +52,7 @@ pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_
     value
 }
 
-/// Settings a first draft can publish on, or why there are none, in a sentence a person reads.
-pub async fn suggest(svc: &Service, workspace: Uuid) -> Result<CodingConfig, String> {
-    settings(svc, workspace).await
-}
-
-/// Everything a first draft pins to, landing on origin's default branch.
+/// Everything a first draft pins to, landing on origin's default branch, or why there are none, in a sentence a person reads.
 pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, String> {
     let gone = |_| "Far Cooler couldn’t read this workspace.".to_string();
     let ws = svc.store.get_workspace(workspace).map_err(gone)?;
@@ -70,8 +65,12 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
     let base = run(&git, &repository, &["rev-parse", "--verify", "--quiet", &format!("{landing_ref}^{{commit}}")]).await
         .ok_or_else(|| format!("This repository has no {branch} branch to land on."))?;
     let origin = run(&git, &repository, &["remote", "get-url", "origin"]).await.unwrap_or_default();
+    // Where pushes go: origin's own push URL when it has one, else its fetch URL. CI is looked at on the fetch URL's repository.
+    let push = run(&git, &repository, &["remote", "get-url", "--push", "origin"]).await.unwrap_or_else(|| origin.clone());
+    for url in [&origin, &push] { if carries_credentials(url) { return Err(TOKEN_IN_URL.into()); } }
     let ci_repository = github_repository(&origin).ok_or("Its origin isn’t on GitHub, so there’s no CI for a draft to wait on. Write the settings yourself and publish them with `workspace set-workflow`.")?;
-    let landing = CodingLanding { job: LANDING_JOB.into(), repository: landing_url(&origin, &ci_repository).into(), target: landing_ref.clone(), config_digest: String::new() };
+    let landing_repository = github_repository(&push).ok_or("Its origin pushes somewhere other than GitHub, so a draft has nowhere to land. Write the settings yourself and publish them with `workspace set-workflow`.")?;
+    let landing = CodingLanding { job: LANDING_JOB.into(), repository: landing_url(&push, &landing_repository).into(),target: landing_ref.clone(), config_digest: String::new() };
     let gh = farcooler_core::programs::find("gh").ok_or("This runner has no gh, which the CI step looks at GitHub with.")?;
     let settings = engine_hook_settings(svc).ok_or("Far Cooler couldn’t write the engine’s Claude hook settings on this runner.")?;
     let settings = LaunchFile { digest: farcooler_workflow::digest(&std::fs::read(&settings).map_err(|_| "Far Cooler couldn’t read its Claude hook settings.")?),
@@ -117,6 +116,14 @@ async fn run(git: &Path, repository: &Path, args: &[&str]) -> Option<String> {
     let out = tokio::process::Command::new(git).arg("-C").arg(repository).args(["-c", "core.hooksPath=/dev/null"]).args(args)
         .stdin(std::process::Stdio::null()).kill_on_drop(true).output().await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// Said when a remote URL has a sign-in written into it; never the URL itself, which holds the secret.
+const TOKEN_IN_URL: &str = "Its origin has a token written into its URL, and Far Cooler doesn’t use that. Switch origin to an ssh URL, or sign in through a git credential helper.";
+
+/// Whether an https remote URL carries a user or token before its host.
+fn carries_credentials(url: &str) -> bool {
+    url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).is_some_and(|r| r.split('/').next().is_some_and(|authority| authority.contains('@')))
 }
 
 /// The URL a landing pushes to for a GitHub origin: https for an https origin, else ssh, as `git@github.com:o/n` is.

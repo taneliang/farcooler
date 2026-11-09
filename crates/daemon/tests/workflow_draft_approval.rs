@@ -299,6 +299,21 @@ async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion
     git(&repo, &["remote", "set-url", "origin", "https://github.com/example/first-workflow"]).await;
     let got = call(&mut link, ws, Action::Get).await;
     assert_eq!(got["suggested_adapter"]["config"]["landing"]["repository"], "https://github.com/example/first-workflow.git", "{got}");
+    // A token in an https origin is never used, and never echoed: the sentence says what to do instead.
+    git(&repo, &["remote", "set-url", "origin", "https://x-access-token:ghp_SECRET@github.com/example/first-workflow.git"]).await;
+    let got = call(&mut link, ws, Action::Get).await;
+    let why = got["suggested_adapter_refused"].as_str().unwrap_or_default();
+    assert!(why.contains("token") && why.contains("ssh") && !why.contains("ghp_SECRET") && got.get("suggested_adapter").is_none(), "{got}");
+    // A separate push URL decides where it lands: its form and its owner/name, while CI stays on the fetch URL.
+    git(&repo, &["remote", "set-url", "origin", "https://github.com/example/first-workflow"]).await;
+    git(&repo, &["remote", "set-url", "--push", "origin", "git@github.com:example/pushes-here.git"]).await;
+    let got = call(&mut link, ws, Action::Get).await;
+    assert_eq!(got["suggested_adapter"]["config"]["landing"]["repository"], "ssh://git@github.com/example/pushes-here.git", "{got}");
+    assert_eq!(got["suggested_adapter"]["config"]["ci"]["repository"], "example/first-workflow", "{got}");
+    git(&repo, &["remote", "set-url", "--push", "origin", "https://u:ghp_SECRET@github.com/example/pushes-here.git"]).await;
+    let got = call(&mut link, ws, Action::Get).await;
+    assert!(got["suggested_adapter_refused"].as_str().is_some_and(|w| w.contains("token") && !w.contains("ghp_SECRET")), "{got}");
+    git(&repo, &["config", "--unset", "remote.origin.pushurl"]).await;
     git(&repo, &["remote", "set-url", "origin", "git@github.com:example/first-workflow.git"]).await;
 
     let suggested = farcooler_daemon::workflow_starter::settings(&host.service, ws).await.unwrap();
