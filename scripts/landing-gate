@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# One command that runs CI's jobs for what a change touches, judged by exit code (ov-1013).
+#
+#     scripts/landing-gate                 # this worktree against origin/main
+#     scripts/landing-gate --base main     # any scripts/lane-gate.py option passes through
+#     scripts/landing-gate --dry-run       # the plan only
+#
+# scripts/lane-gate.py reads the job list out of ci.yml, narrows it by path
+# (scripts/ci-changes.py's allowlist: a docs or website-only change runs just the
+# cheap checks, wire and doc-comments) and runs each step with CI's env. This adds
+# the engine's contract: exit 0 only if every step passed, non-zero otherwise, and a
+# run whose plan has a heavy job (Rust, Swift, Android, iOS, tunnel, web) goes
+# through scripts/heavy, so it waits for the load and the machine-wide lock like any
+# other build. A plan of cheap jobs only never queues. Nothing here changes how a
+# plain terminal runs lane-gate.py or scripts/heavy.
+set -u
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+gate=("$here/lane-gate.py")
+for a in "$@"; do
+  case "$a" in --dry-run|--self-test|-h|--help) exec python3 "${gate[@]}" "$@" ;; esac
+done
+
+plan="$(python3 "${gate[@]}" --dry-run "$@")" || { printf '%s\n' "$plan"; echo "landing-gate: could not plan the change" >&2; exit 2; }
+jobs_line="$(printf '%s\n' "$plan" | sed -n 's/^lane-gate: .* jobs: //p' | head -1)"
+if [ -z "$jobs_line" ]; then
+  printf '%s\n' "$plan"
+  echo "landing-gate: could not read the job list from the plan" >&2
+  exit 2
+fi
+echo "landing-gate: jobs: $jobs_line"
+
+if printf '%s' "$jobs_line" | grep -Eq '(^|, )(tunnel|rust|swift-tests|swift|ios|android|web)(,|$)'; then
+  "$here/heavy" -- python3 "${gate[@]}" "$@"
+else
+  python3 "${gate[@]}" "$@"
+fi
+rc=$?
+if [ "$rc" -eq 0 ]; then echo "landing-gate: PASS"; else echo "landing-gate: FAIL (exit $rc)"; fi
+exit "$rc"
