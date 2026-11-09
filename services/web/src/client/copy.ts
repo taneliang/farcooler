@@ -215,13 +215,13 @@ export function sealedRefusal(word: string): string {
 export function compareWords(grantedBy: string | null): { title: string; detail: string } {
   if (!grantedBy) {
     return {
-      title: 'Does your phone show this code?',
-      detail: 'Your phone sent its answer. Check that the code on its screen is the one below before you continue.',
+      title: 'Does your phone show this code?', // platform copy: the browser enrollment check, not runner data
+      detail: 'Your phone sent its answer. Check that the code on its screen is the one below before you continue.', // platform copy: the browser enrollment check
     }
   }
   return {
-    title: `Does ${grantedBy}’s phone show this code?`,
-    detail: `${grantedBy} sent the answer from their phone. Look at the code on their screen, in person, and check that it’s the one below before you continue.`,
+    title: `Does ${grantedBy}’s phone show this code?`, // platform copy: the browser enrollment check
+    detail: `${grantedBy} sent the answer from their phone. Look at the code on their screen, in person, and check that it’s the one below before you continue.`, // platform copy: the browser enrollment check
   }
 }
 

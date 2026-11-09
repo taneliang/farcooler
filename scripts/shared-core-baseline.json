@@ -476,7 +476,7 @@
   "apps/ios/FarCooler/TaskBoardView.swift": 9,
   "apps/ios/FarCooler/TaskScreen.swift": 6,
   "apps/ios/FarCooler/TaskUsageSection.swift": 2,
-  "apps/ios/FarCooler/TeammateAddHarness.swift": 6,
+  "apps/ios/FarCooler/TeammateAddHarness.swift": 5,
   "apps/ios/FarCooler/TeammateJoinHarness.swift": 7,
   "apps/ios/FarCooler/TerminalBenchHarness.swift": 9,
   "apps/ios/FarCooler/TerminalPermissionBar.swift": 1,
@@ -840,5 +840,8 @@
   "services/web/src/client/workflow-view.ts": 7,
   "services/web/src/client/workflow.ts": 5
  },
- "exempt": {}
+ "exempt": {
+  "apps/ios/FarCooler/TeammateAddHarness.swift": 1,
+  "services/web/src/client/copy.ts": 3
+ }
 }

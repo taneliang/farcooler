@@ -73,7 +73,7 @@ struct TeammateAddHarness: View {
                 .accessibilityElement()
                 .accessibilityIdentifier("teammate-sealed")
                 .accessibilityValue(
-                    sealedPosts.isEmpty ? "none" : "\(sealedPosts.count) post\(sealedPosts.count == 1 ? "" : "s") for \(Set(sealedPosts).sorted().joined(separator: ","))")
+                    sealedPosts.isEmpty ? "none" : "\(sealedPosts.count) post\(sealedPosts.count == 1 ? "" : "s") for \(Set(sealedPosts).sorted().joined(separator: ","))") // platform copy: a DEBUG test harness readout, never shipped
         }
         .task { await prepare() }
     }
@@ -83,7 +83,7 @@ struct TeammateAddHarness: View {
         let device =
             Self.has("-teammate-add-long")
             ? "Bartholomew’s Work iPhone (the one with the cracked screen)"
-            : Self.has("-teammate-add-browser") ? "Chrome on Mac" : "Bob’s iPhone"
+            : Self.has("-teammate-add-browser") ? "Chrome on Mac" : "Bob’s iPhone" // platform copy: a DEBUG test harness fixture, never shipped
         guard
             case .payload(let made) = CeremonyCore.offer(name: device, account: offerer, keyA: Self.key, nodeKey: nil),
             let offer = Self.has("-teammate-add-browser") ? Self.withReplyKey(made) : made
