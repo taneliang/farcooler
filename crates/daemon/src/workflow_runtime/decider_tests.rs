@@ -271,7 +271,7 @@ async fn a_workflow_naming_a_removed_member_starts_no_run_and_keeps_their_handle
     runtime.store.remove_member("alice").unwrap();
     let revision = runtime.state("ws").unwrap().map_or(0, |s| s.revision);
     let enqueue = runtime.wire_command("ws", "owner", Action::Enqueue { mutation: mutation("e", revision, 2), item: "a".into(), pin: pin.clone() });
-    assert!(matches!(&enqueue, Err(Error::Refused(why)) if why.contains("removed")), "{enqueue:?}");
+    assert!(matches!(&enqueue, Err(Error::Domain(DomainError::InvalidArgument { what: "decider_removed" }))), "{enqueue:?}");
     assert!(!runtime.state("ws").unwrap().is_some_and(|s| s.items.contains_key("a")));
     assert!(matches!(runtime.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" })));
     // Someone else's handle is issued as ever.
@@ -299,8 +299,31 @@ async fn a_start_under_a_workflow_naming_a_removed_member_is_refused() {
         pin: item.pin.clone(), start_pin: pin.clone(), models: Default::default(), worktree: None, with: vec![] };
     runtime.store.remove_member("alice").unwrap();
     let refused = runtime.wire_command("ws", "orchestrator", start("s", 3));
-    assert!(matches!(&refused, Err(Error::Refused(why)) if why.contains("removed")), "{refused:?}");
+    assert!(matches!(&refused, Err(Error::Domain(DomainError::InvalidArgument { what: "decider_removed" }))), "{refused:?}");
     assert!(runtime.state("ws").unwrap().unwrap().items["a"].definition.is_ticket(), "still the ticket run it was");
+}
+
+/// ov-1002 N1: through `workflow.enqueue` dispatch, the refusal for a workflow naming a removed member reaches the caller
+/// as its own sentence and word, not as a missing engine (`not-found`).
+#[tokio::test]
+async fn dispatch_says_why_a_workflow_naming_a_removed_member_starts_nothing() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    svc.store.set_member("alice", "Alice", &[]).unwrap();
+    let mut runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
+    let rpc = factory(&svc, &runtime, local(), None);
+    let definition = owner_then("member:alice");
+    let pin = definition.pin();
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+        expected_pin: None, definition }).await;
+    accepted(&receipt(&reply));
+    remove(&svc, "alice").await;
+    let revision = runtime.state(&workspace.to_string()).unwrap().map_or(0, |s| s.revision);
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &Action::Enqueue { mutation: mutation("e", revision, 2), item: "a".into(), pin }).await;
+    let Some(response::Outcome::Error(e)) = &reply.outcome else { panic!("admitted: {:?}", reply.outcome) };
+    assert_eq!(farcooler_core::error::word_for(e.code), "invalid-argument", "{e:?}");
+    assert_eq!(e.what, "decider_removed", "{e:?}");
+    assert!(e.message.contains("was removed"), "{e:?}");
 }
 
 /// Editing a member a workflow names changes their name and devices, not whether they're here (re-review R5).

@@ -23,7 +23,7 @@ pub(crate) const MAINTAINER: &str = "role:maintainer";
 /// Whether `name` is one a gate may name, by its shape alone.
 pub(crate) fn well_formed(name: &str) -> bool {
     name == "owner" || name == MAINTAINER
-        || name.strip_prefix("member:").is_some_and(|h| farcooler_store::people::valid_handle(h))
+        || name.strip_prefix("member:").is_some_and(farcooler_store::people::valid_handle)
 }
 
 /// The deciders `definition` names, a group's steps included, in step order, each once.

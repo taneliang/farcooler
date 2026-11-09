@@ -403,6 +403,11 @@ const SENTENCES: &[(&str, &str)] = &[
         "This workspace runs its work through its workflow, so a ticket's stage follows its run. \
          Move it with `farcooler workflow move`.",
     ),
+    // A workflow whose step waits on a member who was removed starts no run (ov-1002).
+    (
+        "decider_removed",
+        "This workflow waits on a member who was removed. The owner can publish one that names someone who is here.",
+    ),
     ("landing_history", "This workspace has landing history that is kept, so it can't be deleted."),
     // A run told to adopt a branch with work on it (ov-968): only a plain local branch made for the work.
     ("adopt_not_local", "That isn't a local branch. Make a local branch for the work, from a remote one if need be, then adopt it."),

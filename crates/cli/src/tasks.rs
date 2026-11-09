@@ -1826,6 +1826,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
         "title" => "a task needs a title, and it has to fit in a line",
         "adopt_not_local" => "that isn't a local branch. make a local branch for the work, from a remote one if need be, then adopt it",
+        "decider_removed" => "this workflow waits on a member who was removed. the owner can publish one that names someone who is here",
         "adopt_alias" => "that branch is a second name for another branch. adopt the branch made for the work by its own name",
         "adopt_protected" => "that's the landing branch or a remote's default branch, which a run must never build on. adopt a branch made for the work",
         "adopt_remote_name" => "that names a remote's branch. make a local branch from it with `git branch <name> <remote>/<name>`, then adopt that",

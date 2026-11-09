@@ -102,7 +102,7 @@ impl Runtime {
     /// and a Start share (ov-1002 review F2, R1).
     pub(super) fn refuse_removed_decider(&self, definition: &Definition) -> Result<()> {
         if crate::workflow_deciders::names_a_removed_member(&self.store, definition).is_some() {
-            return Err(Error::Refused("this workflow waits on a member who was removed. the owner can publish one that names someone who is here"));
+            return Err(Error::Domain(farcooler_core::error::DomainError::InvalidArgument { what: "decider_removed" }));
         }
         Ok(())
     }
