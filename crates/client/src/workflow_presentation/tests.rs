@@ -277,7 +277,7 @@ fn labels(style: Style) -> Vec<String> {
     let mut out = vec![display::run_label(style)];
     out.extend(phases.iter().map(|p| display::phase_label(p, style)));
     out.extend(kinds.iter().map(|k| style.label(display::stage_label(k))));
-    out.extend(["Automatic", "Approval from"].map(|w| style.label(w)));
+    out.push(style.label("Automatic"));
     out.extend([GateKind::Approval, GateKind::Review].map(|k| display::gate_card(k, "owner", style).label));
     out.extend(reasons.into_iter().map(|r| display::reason_card(r, style).label));
     out.extend(actions.iter().map(|a| display::action_label(a, style)));

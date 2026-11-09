@@ -13,7 +13,7 @@ fn snapshot() -> WorkflowSnapshot {
     }).unwrap().state;
     let context = WorkflowContext { capabilities:Capabilities { workspace,epoch:1,inspect:true,controller:true,
         decision_principal:Some("owner".into()) },binding:"generation-1".into() };
-    WorkflowSnapshot { schema:2,host:Uuid::nil().to_string(),presentation:project(&state,&context,Style::Apple).unwrap(),state,context,
+    WorkflowSnapshot { schema:2,host:Uuid::nil().to_string(),presentation:project(&state,&context,Style::Apple).unwrap(),state,context,style:Style::Apple,
         configuration:serde_json::Value::Null,notices:serde_json::json!([]) }
 }
 fn identity(s: &WorkflowSnapshot) -> WorkflowCommandIdentity {

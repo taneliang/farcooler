@@ -27,8 +27,8 @@ pub(super) fn stage_label(kind: &StageKind) -> &'static str {
 pub(super) fn stage_card(stage: &farcooler_workflow::Stage, style: Style) -> StageCard {
     let progression_label = match &stage.progression {
         Progression::Automatic => style.label("Automatic"),
-        // The principal is a name, so only the words around it are set in the style.
-        Progression::AwaitApproval { principal } => format!("{} {principal}", style.label("Approval from")),
+        // A phrase around a name reads the same in every style: the name's case is its own.
+        Progression::AwaitApproval { principal } => format!("Approval from {principal}"),
     };
     StageCard { id: stage.id.clone(), kind: stage.kind.clone(), progression: stage.progression.clone(),
         label: style.label(stage_label(&stage.kind)), progression_label }

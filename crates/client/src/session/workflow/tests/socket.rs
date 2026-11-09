@@ -53,12 +53,12 @@ async fn call(session: &Session, method: &str, args: serde_json::Value) -> serde
 async fn workflow_session_socket_lost_reply_reconnect_stale_and_auth_change() {
     let h=start().await; let session=Session::connect_local(&h.socket).await.unwrap();
     seed(&session,&h,"a",0,1).await;
-    let raw=call(&session,"workflow.snapshot",json!({"workspace":h.workspace})).await;
+    let raw=call(&session,"workflow.snapshot",json!({"workspace":h.workspace,"style":"apple"})).await;
     let snapshot:WorkflowSnapshot=serde_json::from_value(raw.clone()).unwrap();
     assert_eq!(snapshot.presentation.schema,2);
     assert_eq!(snapshot.context.capabilities.decision_principal.as_deref(),Some("owner"));
     let action=snapshot.presentation.runs[0].actions.iter().find(|a|a.kind==cards::ActionKind::Cancel).unwrap();
-    let args=json!({"workspace":h.workspace,"item":"a","action":action,"identity":{
+    let args=json!({"workspace":h.workspace,"style":"apple","item":"a","action":action,"identity":{
         "id":"cancel-a","sequence":2,"revision":snapshot.state.revision,"epoch":snapshot.state.epoch}});
     let result=call(&session,"workflow.prepare_action",args.clone()).await;
     let prepared:PreparedWorkflowAction=serde_json::from_value(result["prepared"].clone()).unwrap();
@@ -118,8 +118,10 @@ async fn workflow_session_socket_lost_reply_reconnect_stale_and_auth_change() {
     h.service.store.set_device_cap("phone",Some(farcooler_store::access::Cap::Viewer)).unwrap();
     assert!(readmitted.workflow_submit_action(&prepared).await.is_err());
     for extra in ["capabilities","principal","grant","snapshot"] {
-        let mut args=json!({"workspace":h.workspace});args[extra]=json!("forged");
+        let mut args=json!({"workspace":h.workspace,"style":"apple"});args[extra]=json!("forged");
         assert!(replacement.workflow_call("workflow.snapshot",args).await.is_err());
+        // The case is the caller's to name: a call that leaves it out is refused, not shown in another platform's.
+        assert!(replacement.workflow_call("workflow.snapshot",json!({"workspace":h.workspace})).await.is_err());
     }
     eprintln!("trace=Session/C-JNI-dispatch -> authenticated getter -> schema2 -> opaque Cancel -> prepared bytes -> dropped answer -> reconnect durable receipt; stale/auth-context/withdrawal refused; prepared={bytes}; receipt={receipt}");
 }
@@ -161,7 +163,7 @@ async fn workflow_session_selection_route_stale_auth_and_retry() {
     let snapshot=session.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();
     assert_eq!(snapshot.host,h.service.host_id.to_string());
     let action=snapshot.presentation.runs[0].actions.iter().find(|a|a.kind==cards::ActionKind::Approve).unwrap();
-    let args=json!({"workspace":h.workspace,"item":"FeatureA","action":action,
+    let args=json!({"workspace":h.workspace,"style":"apple","item":"FeatureA","action":action,
         "revision":snapshot.presentation.revision.to_string(),"epoch":snapshot.presentation.epoch.to_string()});
     let result=call(&session,"workflow.prepare_selection",args.clone()).await;
     let prepared:PreparedWorkflowAction=serde_json::from_value(result["prepared"].clone()).unwrap();
@@ -263,7 +265,7 @@ async fn workflow_reasoned_socket_selection_loss_and_reconnect() {
     let card=&snapshot.presentation.runs[0];let action=card.actions.iter().find(|a|a.kind==cards::ActionKind::RequestRework).unwrap();
     let fixture:serde_json::Value=serde_json::from_str(include_str!("../../../testdata/workflow-rework.json")).unwrap();
     let reason=fixture["reason"].as_str().unwrap();
-    let mut args=json!({"workspace":h.workspace,"item":"B","action":action,"revision":snapshot.state.revision.to_string(),"epoch":snapshot.state.epoch.to_string(),"reason":""});
+    let mut args=json!({"workspace":h.workspace,"style":"apple","item":"B","action":action,"revision":snapshot.state.revision.to_string(),"epoch":snapshot.state.epoch.to_string(),"reason":""});
     let invalid=call(&session,"workflow.prepare_selection",args.clone()).await;
     assert_eq!(invalid["kind"],"Validation");assert!(invalid.get("prepared").is_none());
     args["reason"]=json!(reason);

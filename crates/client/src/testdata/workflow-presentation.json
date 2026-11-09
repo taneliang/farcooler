@@ -130,7 +130,8 @@
           "fixture": 1
         },
         "workspace": "workspace"
-      }
+      },
+      "style": "apple"
     },
     "response": {
       "card": {
@@ -385,7 +386,8 @@
           "fixture": 1
         },
         "workspace": "workspace"
-      }
+      },
+      "style": "apple"
     },
     "response": {
       "card": {
@@ -663,7 +665,8 @@
           "fixture": 5
         },
         "workspace": "workspace"
-      }
+      },
+      "style": "apple"
     },
     "response": {
       "card": {
@@ -922,7 +925,8 @@
           "fixture": 4
         },
         "workspace": "workspace"
-      }
+      },
+      "style": "apple"
     },
     "response": {
       "card": {
@@ -1178,7 +1182,8 @@
           "fixture": 6
         },
         "workspace": "workspace"
-      }
+      },
+      "style": "apple"
     },
     "response": {
       "card": {
