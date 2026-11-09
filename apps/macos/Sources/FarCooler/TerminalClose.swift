@@ -38,6 +38,7 @@ enum CloseTerminalGuard {
         guard [.running, .starting].contains(StateKind.parse(terminal.state)),
             terminal.agent == .working || terminal.agent == .blocked
         else { return nil }
+        PlanViewBridge.install()
         let running = ShellClose.running(
             agent: Terminal.name(of: terminal.preset),
             doing: ShellClose.doing(activity: terminal.activity),

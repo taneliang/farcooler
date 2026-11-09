@@ -39,6 +39,7 @@ import { AgentPane, type View } from './agent-pane'
 import { ChatView } from './chat'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
+import { corePhrases } from './core-phrases'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode, scan } from './qr'
 import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
@@ -659,7 +660,7 @@ function openCard(runner: string, task: { id: string; key: string; title: string
   if (!member || !deps?.task || !deps.note) return
   const read = deps.task
   const write = deps.note
-  sheet ??= new DetailSheet($('detail') as HTMLDialogElement, $)
+  sheet ??= new DetailSheet($('detail') as HTMLDialogElement, $, () => corePhrases(planView).waitingOnYou)
   const subject: Subject = { runner, id: task.id, key: task.key, title: task.title }
   const board = new DetailBoard({ runner: member.label, task: id => read(id), addNote: (id, body) => write(id, body), show: view => sheet?.draw(view) }, subject)
   sheet.open(board, () => answersFor(runner, task.id))

@@ -398,6 +398,14 @@ public enum PlanViewPresenter {
         state.lock.unlock()
     }
 
+    /// Any request to the same bridge, for the shared phrases (`SharedWords`).
+    static func ask(_ request: String) -> String? {
+        state.lock.lock()
+        let present = state.present ?? linked
+        state.lock.unlock()
+        return present?(request)
+    }
+
     static func view(wire: Data, context: PlanViewContext, workflow: Data?) -> PlanView? {
         let key = Key(wire: wire, context: context, workflow: workflow)
         state.lock.lock()

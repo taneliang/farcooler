@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.farcooler.model.AgentOpening
 import com.farcooler.model.GlanceMarkSize
+import com.farcooler.model.CorePhrases
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PlanStrip
 import com.farcooler.model.RunningAgent
@@ -258,7 +259,6 @@ internal val CONTENT_EDGE = 16.dp
 
 /** What the agents view says. */
 internal object AgentsWords {
-    const val NONE_TITLE = "No agents running"
     const val NONE_BODY = "Agents the orchestrator starts, and the subagents they start, show up here while they work."
     const val ORCHESTRATOR_SECTION = "Orchestrator’s subagents"
     const val PANES_SECTION = "Agents"
@@ -269,7 +269,7 @@ internal object AgentsWords {
 internal fun AgentsList(agents: RunningAgents, onChoose: (RunningAgent) -> Unit, modifier: Modifier = Modifier) {
     if (agents.agents.isEmpty()) {
         Column(modifier.fillMaxWidth().padding(CONTENT_EDGE).testTag("agents-none"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(AgentsWords.NONE_TITLE, style = MaterialTheme.typography.titleMedium)
+            Text(CorePhrases.agentsNone.orEmpty(), style = MaterialTheme.typography.titleMedium)
             Text(AgentsWords.NONE_BODY, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return

@@ -63,6 +63,8 @@ class WorkspaceCardsViewTest {
     private val quiet = PlanStrip.of(Plan(), 0, Terminal(id = "o", state = "running", activity = "idle", role = "orchestrator"))
     private val busy = AgentsFixtures.running()
 
+    @org.junit.Before fun words() = com.farcooler.model.CorePhrasesFixture.install()
+
     @androidx.compose.runtime.Composable
     private fun Host(strip: PlanStrip?, agents: RunningAgents, showsPlan: Boolean = true) = FarCoolerTheme {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -134,6 +136,8 @@ class WorkspaceCardsViewTest {
         assertEquals("o", busy.agents.first().terminal)
         val none = SemanticsProbe.tagged { FarCoolerTheme { Surface { AgentsList(RunningAgents.EMPTY, onChoose = {}) } } }
         assertTrue("agents-none" in none && "agents-list" !in none)
+        val said = SemanticsProbe.described { FarCoolerTheme { Surface { AgentsList(RunningAgents.EMPTY, onChoose = {}) } } }
+        assertTrue("the core's words: ${said.getValue("agents-none").words}", said.getValue("agents-none").words.startsWith("No agents running"))
     }
 
     /** What a tap on the node tagged [tag] runs: its semantics' click action, since input injection is gone on SDK 37. */

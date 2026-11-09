@@ -367,7 +367,24 @@ struct Request {
 struct Response {
     schema: u32,
     view: Option<PlanView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    words: Option<words::Words>,
     error: Option<&'static str>,
+}
+
+/// `{"schema":1,"words":{"style":"apple"}}`: the phrases other screens share with the plan.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WordsRequest {
+    schema: u32,
+    words: WordsStyle,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WordsStyle {
+    #[serde(default)]
+    style: words::Style,
 }
 
 /// Build the view from a plan, what the app knows beside it, and the
@@ -379,6 +396,11 @@ pub fn view(plan: &input::Plan, context: &input::Context, workflow: Option<&Pres
 /// The JSON bridge every platform calls: a request in, `{schema, view}` or
 /// `{schema, error: "invalid"}` out.
 pub fn json(request: &str) -> String {
+    if let Ok(asked) = serde_json::from_str::<WordsRequest>(request) {
+        let words = (asked.schema == SCHEMA).then(|| words::Words::new(asked.words.style));
+        let error = words.is_none().then_some("invalid");
+        return serde_json::to_string(&Response { schema: SCHEMA, view: None, words, error }).expect("plan view types serialize");
+    }
     let parsed = (request.len() <= 8 * 1024 * 1024)
         .then(|| serde_json::from_str::<serde_json::Value>(request).ok())
         .flatten()
@@ -397,8 +419,8 @@ pub fn json(request: &str) -> String {
         })
         .filter(|r| r.schema == SCHEMA);
     let response = match parsed {
-        Some(r) => Response { schema: SCHEMA, view: Some(view(&r.plan, &r.context, r.workflow.as_ref())), error: None },
-        None => Response { schema: SCHEMA, view: None, error: Some("invalid") },
+        Some(r) => Response { schema: SCHEMA, view: Some(view(&r.plan, &r.context, r.workflow.as_ref())), words: None, error: None },
+        None => Response { schema: SCHEMA, view: None, words: None, error: Some("invalid") },
     };
     serde_json::to_string(&response).expect("plan view types serialize")
 }

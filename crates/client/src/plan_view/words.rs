@@ -155,3 +155,27 @@ pub fn spoken_tokens(n: u64) -> String {
 }
 
 pub const DOT: &str = " \u{00B7} ";
+
+/// The phrases screens outside the plan say that the plan also says: the shell's
+/// close question, the Agents card's empty state, a card's answer row (ov-1041).
+/// Asked for with `{"schema":1,"words":{"style":"apple"}}` through the same
+/// bridge as the view, so no platform has a second copy.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct Words {
+    /// The Agents card's title when nothing is running: "No Agents Running".
+    pub agents_none: String,
+    /// The label of a card's answer row: "Waiting on You".
+    pub waiting_on_you: String,
+    /// What a blocked agent is doing, in the middle of a sentence: "waiting on you".
+    pub blocked_doing: String,
+}
+
+impl Words {
+    pub fn new(style: Style) -> Self {
+        Self {
+            agents_none: style.label("no agents running"),
+            waiting_on_you: style.label("waiting on you"),
+            blocked_doing: "waiting on you".to_string(),
+        }
+    }
+}

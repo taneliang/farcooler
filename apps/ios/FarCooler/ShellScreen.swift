@@ -851,6 +851,7 @@ struct ShellScreen: View {
             let connection = connection(ref),
             let terminal = live(ref, on: connection)
         else { return }
+        PlanViewBridge.install()
         guard let question = ShellClose.question(about: terminal, at: Date()) else {
             Task { closeFailure = await connection.close(terminal: terminal) }
             return

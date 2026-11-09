@@ -1,0 +1,22 @@
+{
+  "apple": {
+    "error": null,
+    "schema": 1,
+    "view": null,
+    "words": {
+      "agents_none": "No Agents Running",
+      "blocked_doing": "waiting on you",
+      "waiting_on_you": "Waiting on You"
+    }
+  },
+  "material": {
+    "error": null,
+    "schema": 1,
+    "view": null,
+    "words": {
+      "agents_none": "No agents running",
+      "blocked_doing": "waiting on you",
+      "waiting_on_you": "Waiting on you"
+    }
+  }
+}

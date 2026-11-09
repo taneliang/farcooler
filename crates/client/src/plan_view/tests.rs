@@ -401,3 +401,26 @@ fn landed_today_is_the_viewers_day_newest_first() {
     let material = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": { "style": "material" } }));
     assert_eq!(material.landed_today[0].second, "Landed · ac840108 · ov-2");
 }
+
+/// The phrases the shell's close question, the Agents card and a card's answer
+/// row share with the plan (ov-1041), pinned per style. The Swift, Kotlin and
+/// TypeScript tests read `test/fixtures/plan-words.json`. Rewrite with
+/// UPDATE_PLAN_VIEW_GOLDEN=1.
+#[test]
+fn the_shared_words_are_pinned() {
+    let mut out = serde_json::Map::new();
+    for style in ["apple", "material"] {
+        let req = json!({ "schema": 1, "words": { "style": style } });
+        let answer: Value = serde_json::from_str(&json(&req.to_string())).unwrap();
+        assert_eq!(answer["view"], Value::Null);
+        out.insert(style.into(), answer);
+    }
+    let actual = serde_json::to_string_pretty(&Value::Object(out)).unwrap() + "\n";
+    let path = format!("{}/../../test/fixtures/plan-words.json", env!("CARGO_MANIFEST_DIR"));
+    if std::env::var_os("UPDATE_PLAN_VIEW_GOLDEN").is_some() {
+        std::fs::write(&path, &actual).unwrap();
+    }
+    assert_eq!(actual, std::fs::read_to_string(&path).unwrap_or_default(), "{path} is stale: UPDATE_PLAN_VIEW_GOLDEN=1");
+    let bad: Value = serde_json::from_str(&json(r#"{"schema":2,"words":{"style":"apple"}}"#)).unwrap();
+    assert_eq!(bad["error"], "invalid");
+}

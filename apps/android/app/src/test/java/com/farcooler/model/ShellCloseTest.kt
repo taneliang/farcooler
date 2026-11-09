@@ -22,6 +22,8 @@ import org.junit.Test
  * side it was left out of.
  */
 class ShellCloseTest {
+    @org.junit.Before fun words() = CorePhrasesFixture.install()
+
     /** A fixed instant, so every duration below is a number rather than a race. */
     private val now = 1_757_000_000_000L
 

@@ -41,7 +41,7 @@ extension NativePanes {
 enum AgentsWords {
     static let title = "Agents"
     static let allTitle = "All Agents"
-    static let noneTitle = "No Agents Running"
+    static var noneTitle: String { CorePhrases.agentsNone }
     static let noneBody = "Agents the orchestrator starts, and the subagents they start, show up here while they work."
     static let orchestratorSection = "Orchestrator’s Subagents"
     static let panesSection = "Agents"

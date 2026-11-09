@@ -114,7 +114,7 @@ object ShellClose {
      */
     private fun verb(activity: AgentActivity): String? = when (activity) {
         AgentActivity.WORKING -> "working"
-        AgentActivity.BLOCKED -> "waiting on you"
+        AgentActivity.BLOCKED -> CorePhrases.blockedDoing
         AgentActivity.NONE, AgentActivity.IDLE, AgentActivity.DONE,
         AgentActivity.UNKNOWN -> null
     }

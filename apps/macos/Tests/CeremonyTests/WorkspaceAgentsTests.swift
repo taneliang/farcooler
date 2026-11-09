@@ -231,5 +231,6 @@ struct WorkspaceAgentsTests {
         let (none, noneWindow) = await Self.drawn(AgentsPanel(agents: .empty) { _ in }, width: 420, height: 300)
         defer { noneWindow.close() }
         #expect(none.views["agents-none"] != nil && none.views["agents-list"] == nil)
+        #expect(AgentsWords.noneTitle == "No Agents Running", "the core's words, as the Mac showed them before it asked")
     }
 }

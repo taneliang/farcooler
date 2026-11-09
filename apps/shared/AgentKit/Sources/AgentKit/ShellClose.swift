@@ -103,7 +103,7 @@ public enum ShellClose {
     public static func doing(activity: String?) -> String? {
         switch activity {
         case "working": return "working"
-        case "blocked": return "waiting on you"
+        case "blocked": return SharedWords.blockedDoing
         default: return nil
         }
     }
@@ -122,7 +122,7 @@ public enum ShellClose {
     private static func verb(_ activity: AgentActivity) -> String? {
         switch activity {
         case .working: return "working"
-        case .blocked: return "waiting on you"
+        case .blocked: return SharedWords.blockedDoing
         case .none, .idle, .done, .unknown: return nil
         }
     }

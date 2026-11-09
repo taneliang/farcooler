@@ -42,6 +42,8 @@ export class DetailSheet {
   constructor(
     private readonly dialog: HTMLDialogElement,
     private readonly $: (id: string) => HTMLElement,
+    /// The answer row's label, which the core words (core-phrases.ts).
+    private readonly waitingOnYou: () => string,
   ) {
     $('detail-close').addEventListener('click', () => dialog.close())
     // A click on the backdrop is a click on the dialog itself.
@@ -153,7 +155,7 @@ export class DetailSheet {
       if (d.intent) body.push(make('p', 'detail-intent', d.intent))
       if (answers.length) {
         const row = make('div', 'detail-answers')
-        row.append(make('span', 'plan-label', 'Waiting on You'))
+        row.append(make('span', 'plan-label', this.waitingOnYou()))
         const buttons = make('div', 'need-actions')
         for (const answer of answers) {
           const button = make('button', answer.destructive ? 'quiet danger' : answer.primary ? '' : 'quiet', answer.label)
