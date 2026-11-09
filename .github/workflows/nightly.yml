@@ -138,6 +138,12 @@ jobs:
       - run: ./scripts/ios-ui-shard-budget.py
         env:
           GH_TOKEN: ${{ github.token }}
+      # No ci.yml job runs past 85% of its timeout (ov-1056): a cancelled job
+      # reports no verdict, so it arrives as a red main.
+      - run: ./scripts/ci-job-time-check.py --self-test
+      - run: ./scripts/ci-job-time-check.py
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   # Whether the latest claude still has the hook fields mailbox delivery sets
   # (ov-571): asyncRewake, rewakeMessage and rewakeSummary, which Claude Code

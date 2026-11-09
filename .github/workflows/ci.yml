@@ -393,7 +393,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
     # macOS 60: its runners have run 2-3x slower, the crash-matrix binary alone takes about 6 min, and 35 min cut main off about 4900 of 6665 tests in (ov-992).
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 35 }}
+    # Ubuntu 45 (ov-1056): its green runs took 25-31 min and the last one 34.4 of 35; the leak-checked nextest step grew from 11 to 15 min and clippy from 3 to 4.7. 45 leaves over 25% headroom on the slowest.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -1152,7 +1153,8 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.android != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 40 (ov-1056): train 385 was cancelled at 25 after green runs of 20-24.3. Since Nov 9 the Rust build for the phone grew 1.7 to 2.8 min, Test 1.4 to 2.3, the instrumented test bundle added 1.2, and the Robolectric UI tests went 9.1 to 12.8. 40 leaves 25% over a 27-minute run.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
