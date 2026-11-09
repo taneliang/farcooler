@@ -5,12 +5,15 @@ use super::*;
 use super::admission_tests::{alices_pane, factory, mutation, receipt, refused, sent, snapshot};
 use super::member_tests::alices_phone;
 use std::sync::Arc;
+use farcooler_core::DomainError;
 use crate::service::Service;
 use farcooler_protocol::{v1::{self as pb, Scope, request, response}, workflow_commands::Action, workflow_config::AdapterConfiguration};
 use farcooler_store::{member_roles::Role, models::{Actor, NoteKind}};
 use farcooler_transport::{Handler as _, Peer};
 use farcooler_workflow::{Definition, Progression, Reviewer, StageKind};
 
+/// A source sequence above any a test has used: the reducer refuses a source that repeats one.
+fn next_sequence() -> u64 { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(100); N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
 fn local() -> Peer { Peer { client_id: None, scope: Scope::Control } }
 /// Bob, a member, on his phone at Control scope.
 fn bobs_phone(svc: &Arc<Service>) -> Peer {
@@ -29,7 +32,12 @@ async fn waiting_for(runtime: &mut Runtime, workspace: Uuid, decider: &str, item
     let definition = Definition::tracker(decider); let pin = definition.pin();
     accepted(&runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition }).unwrap());
-    accepted(&runtime.wire_command(&w, "owner", Action::Enqueue { mutation: mutation("e", 0, 2), item: item.into(), pin }).unwrap());
+    // Publishing on a store-backed runtime may already have enqueued the card that is `item`.
+    let state = runtime.state(&w).unwrap();
+    if !state.as_ref().is_some_and(|s| s.items.contains_key(item)) {
+        let revision = state.map_or(0, |s| s.revision);
+        accepted(&runtime.wire_command(&w, "owner", Action::Enqueue { mutation: mutation("e", revision, 2), item: item.into(), pin }).unwrap());
+    }
     runtime.pump(10).await.unwrap();
     assert_eq!(phase(runtime, workspace, item), Phase::WaitingApproval);
 }
@@ -41,7 +49,7 @@ async fn approval_for(decider: &str, workspace: Uuid) -> (tempfile::TempDir, Run
 }
 fn approve(runtime: &Runtime, workspace: Uuid, id: &str) -> Action {
     let state = runtime.state(&workspace.to_string()).unwrap().unwrap(); let item = &state.items["a"];
-    Action::Approve { mutation: mutation(id, state.revision, 1), item: "a".into(), run: item.run.clone(), pin: item.pin.clone(),
+    Action::Approve { mutation: mutation(id, state.revision, next_sequence()), item: "a".into(), run: item.run.clone(), pin: item.pin.clone(),
         candidate: item.candidate.clone() }
 }
 /// `peer`'s approval reaches the engine and the reducer refuses it: the run is still waiting.
@@ -87,7 +95,7 @@ async fn workflow_a_review_gate_naming_a_member_takes_only_their_verdict() {
     definition.stages.iter_mut().find(|s| matches!(s.kind, StageKind::Review(_))).unwrap().kind = StageKind::Review(Reviewer::Person("member:alice".into()));
     let pin = definition.pin();
     accepted(&runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap());
-    accepted(&runtime.wire_command(&w, "owner", Action::Enqueue { mutation: mutation("e", 0, 2), item: "a".into(), pin: pin.clone() }).unwrap());
+    accepted(&runtime.wire_command(&w, "owner", Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() }).unwrap());
     for time in 1..15 {
         runtime.pump(time).await.unwrap();
         if phase(&runtime, workspace, "a") == Phase::WaitingReview { break; }
@@ -95,13 +103,15 @@ async fn workflow_a_review_gate_naming_a_member_takes_only_their_verdict() {
     assert_eq!(phase(&runtime, workspace, "a"), Phase::WaitingReview);
     let review = |runtime: &Runtime, id: &str| {
         let state = runtime.state(&w).unwrap().unwrap(); let item = &state.items["a"];
-        Action::Review { mutation: mutation(id, state.revision, 1), item: "a".into(), run: item.run.clone(), pin: pin.clone(),
+        Action::Review { mutation: mutation(id, state.revision, next_sequence()), item: "a".into(), run: item.run.clone(), pin: pin.clone(),
             evidence: item.last_evidence.clone().unwrap(), passed: true, reason: None }
     };
-    let (reply, reached) = sent(&mut runtime, &factory(&svc, &runtime, bob, None), workspace, &review(&runtime, "bob")).await;
+    let (action, runner) = (review(&runtime, "bob"), factory(&svc, &runtime, bob, None));
+    let (reply, reached) = sent(&mut runtime, &runner, workspace, &action).await;
     assert!(reached && unauthorized(&reply), "{reply:?}");
     assert_eq!(phase(&runtime, workspace, "a"), Phase::WaitingReview);
-    let (reply, _) = sent(&mut runtime, &factory(&svc, &runtime, alice, None), workspace, &review(&runtime, "alice")).await;
+    let (action, runner) = (review(&runtime, "alice"), factory(&svc, &runtime, alice, None));
+    let (reply, _) = sent(&mut runtime, &runner, workspace, &action).await;
     accepted(&receipt(&reply));
     assert_ne!(phase(&runtime, workspace, "a"), Phase::WaitingReview);
 }
@@ -191,12 +201,18 @@ async fn removing_the_member_a_run_waits_on_keeps_it_waiting_and_says_so_on_its_
     svc.store.set_member("alice", "Alice", &[]).unwrap();
     svc.store.set_member("bob", "Bob", &[]).unwrap();
     let card = svc.store.create_task(workspace, "Ask Alice", Actor::User).unwrap();
-    let mut runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
-    waiting_for(&mut runtime, workspace, "member:alice", &card.key).await;
+    // Enqueued straight into the store, as an engine-owned card is, under a gate naming Alice.
+    let definition = Definition::tracker("member:alice");
+    let input = farcooler_workflow::Input { schema: 1, id: "e".into(), workspace: workspace.to_string(), expected_revision: 0, epoch: 1,
+        source: "controller".into(), source_sequence: 1, now_ms: 0, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),
+        command: farcooler_workflow::Command::Enqueue { item: card.key.clone(), policy_pin: definition.pin(), resource: "own".into(),
+            dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } };
+    assert!(svc.store.workflow_apply(&input).unwrap().result.is_ok());
+    let waiting = |svc: &Service| svc.store.workflow_state(&workspace.to_string()).unwrap().unwrap().items[&card.key].phase.clone();
+    assert_eq!(waiting(&svc), Phase::WaitingApproval);
     remove(&svc, "bob").await;
     assert_eq!(gone_notes(&svc, card.id), Vec::<String>::new());
     remove(&svc, "alice").await;
     assert_eq!(gone_notes(&svc, card.id), [crate::workflow_deciders::gone_note("alice")]);
-    runtime.pump(30).await.unwrap();
-    assert_eq!(phase(&runtime, workspace, &card.key), Phase::WaitingApproval);
+    assert_eq!(waiting(&svc), Phase::WaitingApproval);
 }
