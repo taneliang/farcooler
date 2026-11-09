@@ -306,6 +306,21 @@ async fn deleting_a_board_frees_the_handles_its_workflow_held() {
     svc.store.set_member("alice", "Another Alice", &[]).unwrap();
 }
 
+/// A deleted board's published workflow (no run under it) doesn't hold a handle either: the selection skip (ov-1045 C1).
+#[tokio::test]
+async fn deleting_a_board_frees_the_handle_its_published_workflow_named() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let board = svc.store.create_workspace(repo, "Billing", "BIL").unwrap();
+    svc.store.set_member("alice", "Alice", &[]).unwrap();
+    let runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
+    accepted(&runtime.wire_command(&board.id.to_string(), "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+        expected_pin: None, definition: owner_then("member:alice") }).unwrap());
+    svc.store.remove_member("alice").unwrap();
+    assert!(matches!(svc.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" })));
+    svc.store.delete_workspace(board.id).unwrap();
+    svc.store.set_member("alice", "Another Alice", &[]).unwrap();
+}
+
 /// A ticket run the orchestrator starts under a workflow naming a removed member waits for good, so it isn't
 /// started: Enqueue and Start refuse alike, and the run stays where it was (re-review R1).
 #[tokio::test]
