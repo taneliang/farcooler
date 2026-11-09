@@ -86,51 +86,45 @@ struct PlanStageViewTests {
         #expect(stage.height <= shortStage.height + 1, "elided to one line, not wrapped: \(stage) \(shortStage)")
     }
 
+    /// Every ticket's card in the view the Rust core built, by key.
+    static func cards(_ store: TaskBoardStore) throws -> [String: PlanView.TicketCard] {
+        let view = try #require(store.plan.view(needsYou: 0, statuses: [:], activity: [:]))
+        let all = view.inReview + view.building + view.waiting.flatMap(\.cards) + view.onLandedLanding + view.landedToday
+            + view.landings.flatMap(\.tickets)
+        return Dictionary(all.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
     @Test("A ticket row draws only a stage that needs a person in color, on a line of its own")
     func ticketRowColorsOnlyWhatNeedsAPerson() async throws {
         let store = try await Self.store()
         await store.plan.reload()
         let lines = store.plan.plan.lines
-        func row(_ n: Int) async -> [String: CGRect] {
-            let line = lines[n - 1]
-            return await Self.drawn(
-                PlanLineRow(
-                    line: line, theme: nil, rank: nil, now: store.plan.plan.nowMs, waitsOnOwner: false, selected: false,
-                    keyed: false, action: {}), width: 420)
+        let cards = try Self.cards(store)
+        func row(_ n: Int) async throws -> [String: CGRect] {
+            let card = try #require(cards[lines[n - 1].key])
+            return await Self.drawn(PlanCardRow(card: card, selected: false, keyed: false, action: {}), width: 420)
         }
         // Amber exactly when the stage says it needs a person, read from the
         // stage and not from a list of tickets.
         for n in 1...15 {
             let line = lines[n - 1]
-            let drawn = await row(n)
+            let drawn = try await row(n)
             let amber = drawn["plan-ticket-\(line.key)-stage-attention"] != nil
             let gray = drawn["plan-ticket-\(line.key)-stage"] != nil
             #expect(amber == (line.shownStage?.needsAttention == true), "\(line.key) amber")
             #expect(gray == (line.shownStage != nil && line.shownStage?.needsAttention == false), "\(line.key) gray")
         }
         #expect(lines.filter { $0.shownStage?.needsAttention == true }.count == 3, "the fixture holds three that need a person")
-        // The state line keeps the state; the stage has a line of its own.
-        func second(_ n: Int) -> String {
-            PlanLineRow.second(lines[n - 1], agent: nil, landedLanding: nil, now: store.plan.plan.nowMs, aged: false,
-                state: lines[n - 1].shownStage == nil ? nil : PlanWords.status(lines[n - 1], stage: false))
-        }
-        #expect(second(6).hasPrefix("In Review"))
-        #expect(second(8).hasPrefix("Approved \u{00B7} "))
-        #expect(second(4).hasPrefix("In Review"))
-        #expect(second(14).hasPrefix("In Review"))
-        #expect(second(15).hasPrefix("In Review"))
     }
 
     @Test("A long reviewer login stays on one line in a row, elided inside the column")
     func longLoginElidesInARow() async throws {
         let store = try await Self.store()
         await store.plan.reload()
-        let lines = store.plan.plan.lines
+        let cards = try Self.cards(store)
         func stage(_ n: Int, _ width: CGFloat) async throws -> CGRect {
             let drawn = await Self.drawn(
-                PlanLineRow(
-                    line: lines[n - 1], theme: nil, rank: nil, now: store.plan.plan.nowMs, waitsOnOwner: false, selected: false,
-                    keyed: false, action: {}), width: width)
+                PlanCardRow(card: try #require(cards["ov-\(n)"]), selected: false, keyed: false, action: {}), width: width)
             return try #require(drawn["plan-ticket-ov-\(n)-stage"])
         }
         let short = try await stage(4, 260)

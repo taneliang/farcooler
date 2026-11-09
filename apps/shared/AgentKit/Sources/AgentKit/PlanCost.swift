@@ -182,19 +182,6 @@ extension PlanWords {
         return used > budget ? .over(used: used, budget: budget) : .within(used: used, budget: budget)
     }
 
-    /// The warning a ticket over its budget carries, in the words a row draws
-    /// in amber; nil when it has no budget or is within it.
-    public static func overBudget(_ line: PlanTicketLine, locale: Locale = .current) -> String? {
-        guard let b = budget(line.spend, against: line.budgetTokens), b.isOver else { return nil }
-        return budgetLine(b, locale: locale)
-    }
-
-    /// The same, said for VoiceOver with the counts as words.
-    public static func overBudgetSpoken(_ line: PlanTicketLine, locale: Locale = .current) -> String? {
-        guard let b = budget(line.spend, against: line.budgetTokens), b.isOver else { return nil }
-        return budgetSpoken(b, locale: locale)
-    }
-
     /// The same for a theme.
     public static func overBudget(_ theme: PlanTheme, locale: Locale = .current) -> PlanBudget? {
         guard let b = budget(theme.spend, against: theme.budgetTokens), b.isOver else { return nil }

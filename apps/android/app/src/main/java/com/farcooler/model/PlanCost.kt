@@ -190,14 +190,6 @@ object PlanCostWords {
         return if (used > against) PlanBudget.Over(used, against) else PlanBudget.Within(used, against)
     }
 
-    /** The warning a ticket over its budget carries, in the words a row draws in amber; null when it has no budget or is within it. */
-    fun overBudget(ticket: PlanTicket, locale: Locale = Locale.getDefault()): String? =
-        (budget(ticket.spend, ticket.budgetTokens) as? PlanBudget.Over)?.let { budgetLine(it, locale) }
-
-    /** The same, said for TalkBack with the counts as words. */
-    fun overBudgetSpoken(ticket: PlanTicket, locale: Locale = Locale.getDefault()): String? =
-        (budget(ticket.spend, ticket.budgetTokens) as? PlanBudget.Over)?.let { budgetSpoken(it, locale) }
-
     /** The same for a theme. */
     fun overBudget(theme: PlanTheme): PlanBudget.Over? = budget(theme.spend, theme.budgetTokens) as? PlanBudget.Over
 

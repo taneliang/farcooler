@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.util.TimeZone
 
 // The Plan's sections and ticket cards as the shared core builds them (ov-1016, ruling R-112): `crates/client/src/plan_view.rs`
 // decides which ticket is in which section, the order of the landings and every word a section, a card, a landing, an
@@ -26,12 +27,12 @@ enum class PlanViewKind {
     @SerialName("on_landed_landing") ON_LANDED_LANDING,
     @SerialName("agents") AGENTS,
     @SerialName("themes") THEMES,
-    UNKNOWN,
+    @SerialName("landed_today") LANDED_TODAY,
 }
 
 @Serializable
 data class PlanViewSection(
-    val kind: PlanViewKind = PlanViewKind.UNKNOWN,
+    val kind: PlanViewKind,
     val title: String = "",
     /** Its rows; 0 draws no count. */
     val count: Int = 0,
@@ -63,13 +64,12 @@ enum class PlanViewNoteKind {
     @SerialName("run") RUN,
     @SerialName("warning") WARNING,
     @SerialName("over_budget") OVER_BUDGET,
-    UNKNOWN,
 }
 
 /** A line under a ticket's second line. */
 @Serializable
 data class PlanViewNote(
-    val kind: PlanViewNoteKind = PlanViewNoteKind.UNKNOWN,
+    val kind: PlanViewNoteKind,
     val text: String = "",
     /** Drawn in amber. */
     val attention: Boolean = false,
@@ -126,6 +126,8 @@ data class PlanViewTicket(
     val agent: PlanViewAgentRef? = null,
     val run: PlanViewRun? = null,
     val branch: String = "",
+    /** On a landing, the word beside the title: "Needs you" while it waits (which [notes] then leads with), "Landed · ac840108" once it has. */
+    val note: String? = null,
     /** What a screen reader says for the row. */
     val accessibility: String = "",
 )
@@ -135,37 +137,16 @@ enum class PlanViewWaitingKind {
     @SerialName("next") NEXT,
     @SerialName("not_ranked") NOT_RANKED,
     @SerialName("on_you") ON_YOU,
-    UNKNOWN,
 }
 
 /** One of Waiting's groups; only groups with cards are sent. */
 @Serializable
 data class PlanViewWaitingGroup(
-    val kind: PlanViewWaitingKind = PlanViewWaitingKind.UNKNOWN,
+    val kind: PlanViewWaitingKind,
     /** Drawn only when another group shares the section. */
     val title: String = "",
     val attention: Boolean = false,
     val cards: List<PlanViewTicket> = emptyList(),
-)
-
-/** A ticket on a live landing. */
-@Serializable
-data class PlanViewLandingTicket(
-    val id: String = "",
-    val key: String = "",
-    val heading: String = "",
-    /** "Ready", "Fixing · round 2", "Landed · ac840108", or the stage. */
-    val standing: String = "",
-    /** What it says about itself; null when it is simply aboard. */
-    val note: String? = null,
-    @SerialName("note_attention") val noteAttention: Boolean = false,
-    @SerialName("waits_on_owner") val waitsOnOwner: Boolean = false,
-    val run: PlanViewRun? = null,
-    /** Its warnings under its title: stale (unless it waits on the owner, which [note] says once) and over budget. */
-    val notes: List<PlanViewNote> = emptyList(),
-    @SerialName("mark_attention") val markAttention: Boolean = false,
-    /** What a screen reader says for the row. */
-    val accessibility: String = "",
 )
 
 @Serializable
@@ -204,7 +185,7 @@ data class PlanViewLanding(
     /** "Lander · Opus · 1.4M". */
     @SerialName("lander_words") val landerWords: String? = null,
     @SerialName("pushed_sha") val pushedSha: String? = null,
-    val tickets: List<PlanViewLandingTicket> = emptyList(),
+    val tickets: List<PlanViewTicket> = emptyList(),
 )
 
 @Serializable
@@ -298,6 +279,8 @@ data class PlanView(
     /** Next Up ranked, Not Ranked, then Waiting on You; empty groups left out. */
     val waiting: List<PlanViewWaitingGroup> = emptyList(),
     @SerialName("on_landed_landing") val onLandedLanding: List<PlanViewTicket> = emptyList(),
+    /** Landed on the runner's day, newest first. */
+    @SerialName("landed_today") val landedToday: List<PlanViewTicket> = emptyList(),
     val agents: PlanViewAgents = PlanViewAgents(),
     val themes: PlanViewThemes = PlanViewThemes(),
 ) {
@@ -359,6 +342,7 @@ object PlanViews {
         put("statuses", buildJsonObject { for ((task, status) in statuses) put(task, status.wire) })
         put("activity", buildJsonObject { for ((task, at) in activity) put(task, at) })
         put("agents_supported", true)
+        put("utc_offset", TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000)
         put("style", "material")
     }
 

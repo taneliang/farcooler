@@ -117,35 +117,6 @@ describe('the page’s workspace', () => {
   })
 })
 
-describe('the workflow presentation beside the plan', () => {
-  const deps = (presentation: PlanDeps['presentation'], views: PlanBoardView[]): PlanDeps => ({
-    runner: 'studio',
-    workspaces: async () => JSON.stringify([{ id: WS, name: 'Main', is_main: true }]),
-    plan: async () => JSON.stringify(plan),
-    presentation,
-    setNext: async () => {},
-    keep: async () => {},
-    keepAll: async () => 0,
-    show: v => void views.push(v),
-  })
-
-  it('hands the view the plan as sent and the workspace’s presentation', async () => {
-    const views: PlanBoardView[] = []
-    const asked: string[] = []
-    await new PlanBoard(deps(async ws => (asked.push(ws), { schema: 2 }), views)).refresh()
-    expect(asked).toEqual([WS])
-    expect(views[views.length - 1].workflow).toEqual({ schema: 2 })
-    expect(views[views.length - 1].raw).toEqual(plan)
-  })
-
-  it('still shows the plan when the presentation can’t be read, or the workspace has none', async () => {
-    const views: PlanBoardView[] = []
-    await new PlanBoard(deps(() => Promise.reject(new Error('no workflow')), views)).refresh()
-    expect(views[views.length - 1].state).toBe('ready')
-    expect(views[views.length - 1].workflow).toBeNull()
-  })
-})
-
 describe('reading and editing', () => {
   it('reads the first board’s plan', async () => {
     const { board, last } = runner()

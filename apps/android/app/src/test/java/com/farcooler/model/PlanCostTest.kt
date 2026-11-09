@@ -51,13 +51,11 @@ class PlanCostTest {
         val over = PlanCostWords.overBudget(plan.themes[0])!!
         assertEquals(PlanBudget.Over(320_000, 250_000), over)
         assertEquals("Over budget: 320K of 250K tokens", PlanCostWords.budgetLine(over, us))
-        assertNull("470K of 500K is within", PlanCostWords.overBudget(plan.tickets[1]))
         val within = PlanCostWords.budget(plan.tickets[1].spend, plan.tickets[1].budgetTokens)!!
         assertEquals("470K of 500K tokens budgeted", PlanCostWords.budgetLine(within, us))
         assertEquals(PlanBudget.Within(500, 500), PlanCostWords.budget(PlanSpend(inputTokens = 500), 500))
         assertTrue(PlanCostWords.budget(PlanSpend(inputTokens = 501), 500)!!.isOver)
         assertNull("no budget, nothing to flag", PlanCostWords.budget(PlanSpend(inputTokens = 501), null))
-        assertEquals("Over budget: 470K of 100K tokens", PlanCostWords.overBudget(plan.tickets[1].copy(budgetTokens = 100_000), us))
     }
 
     @Test

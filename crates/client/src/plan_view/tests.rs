@@ -26,7 +26,12 @@ fn request(case: &Value, style: &str) -> Value {
 fn outline(v: &PlanView) -> Vec<String> {
     let mut out = vec![format!(
         "shown: {}",
-        v.sections.iter().map(|s| serde_json::to_value(s.kind).unwrap().as_str().unwrap().replace('_', "")).collect::<Vec<_>>().join(" ")
+        v.sections
+            .iter()
+            .filter(|s| s.kind != SectionKind::LandedToday)
+            .map(|s| serde_json::to_value(s.kind).unwrap().as_str().unwrap().replace('_', ""))
+            .collect::<Vec<_>>()
+            .join(" ")
     )];
     let shown = |k: SectionKind| v.sections.iter().find(|s| s.kind == k);
     let empty = |k: SectionKind| shown(k).and_then(|s| s.empty.clone());
@@ -130,7 +135,7 @@ fn sections_match_the_shared_cases() {
             .take_while(|l| !l.starts_with("glance now"))
             .collect();
         assert!(!expect.is_empty(), "{} has an outline", case["name"]);
-        for style in ["apple", "material", "web"] {
+        for style in ["apple", "material"] {
             let got = outline(&view_of(request(case, style)));
             assert_eq!(got, expect, "{} in {style}", case["name"]);
         }
@@ -350,7 +355,9 @@ fn a_landing_ticket_carries_its_mark_and_warnings() {
 
     // Waiting on the owner says "Needs you" once, as its note: never stale too.
     let owner = ticket("ov-4");
-    assert!(owner.notes.is_empty());
+    assert_eq!(owner.note.as_deref(), Some("Needs you"));
+    assert_eq!(owner.notes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(), ["Needs you"]);
+    assert!(owner.mark_attention);
     assert_eq!(owner.second, "ov-4");
     assert_eq!(owner.accessibility, "Title of ov-4, Needs you");
 }
@@ -366,4 +373,28 @@ fn androids_second_line_leaves_the_agent_to_its_own_line() {
     assert_eq!(apple.second, "Building · ov-310 · Builder · sonnet · 380K · 1 h");
     assert_eq!(material.second, "Building · ov-310");
     assert_eq!(material.agent.unwrap().line, "Builder · sonnet · 380K");
+}
+
+/// Landed Today is the tickets that landed on the runner's day, newest first,
+/// whose day ends where the context's offset from UTC says.
+#[test]
+fn landed_today_is_the_runners_day_newest_first() {
+    let hour = 3_600_000;
+    // 22:00 UTC on a day.
+    let now = 1_800_000_000_000i64 - 1_800_000_000_000i64 % (24 * hour) + 22 * hour;
+    let line = |task: &str, ago: i64| {
+        json!({ "task": task, "key": task, "title": task, "stage": "landed", "stage_since": now - ago * hour, "landed_sha": "ac840108f" })
+    };
+    let plan = json!({ "now_ms": now, "lines": [line("ov-1", 5), line("ov-2", 1), line("ov-3", 23), line("ov-4", 30)] });
+    let keys = |offset: i64| {
+        let view = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": { "utc_offset": offset } }));
+        let folded = view.sections.iter().find(|s| s.kind == SectionKind::LandedToday).map(|s| (s.count, s.folded));
+        (view.landed_today.iter().map(|c| c.key.clone()).collect::<Vec<_>>(), folded)
+    };
+    assert_eq!(keys(0), (vec!["ov-2".into(), "ov-1".into()], Some((2, true))));
+    // At +6 h it is 04:00 the next morning: ov-1 landed at 23:00 the day before.
+    assert_eq!(keys(6 * 3600).0, ["ov-2"]);
+    assert_eq!(keys(-8 * 3600).0, ["ov-2", "ov-1"]);
+    let view = view_of(json!({ "schema": SCHEMA, "plan": plan }));
+    assert_eq!(view.landed_today[0].status, "Landed · ac840108");
 }

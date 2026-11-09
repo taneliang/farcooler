@@ -89,7 +89,7 @@ struct PlanSectionsView: View {
         case .waiting: waiting(section)
         case .onLandedLanding: chrome(section, id: "plan-on-landed-landing") { cardRows(view.onLandedLanding) }
         case .agents: agents(section)
-        case .needsYou, .themes, .unknown: EmptyView()
+        case .needsYou, .themes, .landedToday: EmptyView()
         }
     }
 
@@ -139,7 +139,7 @@ struct PlanSectionsView: View {
                         id: $0.id,
                         signature: [
                             $0.phase, PlanLandingCard.facts($0, ci: ci($0), now: 0),
-                            $0.tickets.map { "\($0.id)\($0.standing)" }.joined(separator: ","),
+                            $0.tickets.map { "\($0.id)\($0.status)" }.joined(separator: ","),
                         ].joined(separator: "\u{1}"))
                 })
         }

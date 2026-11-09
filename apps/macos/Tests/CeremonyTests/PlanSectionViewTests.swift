@@ -115,17 +115,6 @@ struct PlanSectionViewTests {
         PlanLadderView(ladder: card.ladder, word: card.phaseWord, explanation: card.explanation, attention: card.attention)
     }
 
-    @Test("ticket row accessibility keeps the model ID")
-    func ticketModelAccessibility() async throws {
-        let store = try await Self.store(.busy)
-        var agent = try #require(store.plan.plan.agents.first)
-        agent.model = "gpt-6.1-sol"
-        #expect(PlanLineRow.accessibleLabel("Ticket, GPT-6.1 Sol", agent: agent) == "Ticket, GPT-6.1 Sol, Model ID: gpt-6.1-sol")
-        agent.model = "gpt-6.1-sol-20260101"
-        #expect(PlanLineRow.accessibleLabel("Ticket, gpt-6.1-sol-20260101", agent: agent) == "Ticket, gpt-6.1-sol-20260101")
-        #expect(PlanLineRow.accessibleLabel("Ticket", agent: nil) == "Ticket")
-    }
-
     @Test("Each section says what it says empty, and Needs You-free quiet boards draw nothing else")
     func emptyStates() async throws {
         let quiet = try await Self.drawn(.quiet, width: 600)

@@ -143,12 +143,13 @@ fun LazyListScope.planSections(
                     onOpen = { onOpen(PlanPage.Theme(it)) },
                 )
             }
-            PlanViewKind.UNKNOWN -> {}
+            // Drawn last, after Cost and Pages (`PlanScreens`).
+            PlanViewKind.LANDED_TODAY -> {}
         }
     }
 }
 
-private fun LazyListScope.ticketRows(cards: List<PlanViewTicket>, group: String, onOpen: (PlanPage) -> Unit) {
+internal fun LazyListScope.ticketRows(cards: List<PlanViewTicket>, group: String, onOpen: (PlanPage) -> Unit) {
     for (card in cards) item(key = "$group/${card.id}") { PlanCardRow(card) { onOpen(PlanPage.Ticket(card.id)) } }
 }
 

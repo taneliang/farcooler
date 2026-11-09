@@ -374,18 +374,6 @@ extension PlanModel {
         lines.filter { $0.stage == .waiting && $0.planRank == nil }
     }
 
-    /// The tickets that landed on the runner's day, in `calendar`'s time zone,
-    /// most recent first.
-    public func landedToday(calendar: Calendar = .current) -> [PlanTicketLine] {
-        let today = Date(timeIntervalSince1970: Double(nowMs) / 1000)
-        return lines
-            .filter {
-                $0.stage == .landed
-                    && calendar.isDate(Date(timeIntervalSince1970: Double($0.stageSince) / 1000), inSameDayAs: today)
-            }
-            .sorted { $0.stageSince > $1.stageSince }
-    }
-
     /// The themes as the overview lists them: active, then paused, then
     /// done, each by its order on the board.
     public var shownThemes: [PlanTheme] {
@@ -518,21 +506,6 @@ public enum PlanWords {
     /// A ticket's stage with what it needs said beside it: "Fixing · round
     /// 1", "Landing · in Landing 8", "Waiting · 2nd", "Landed · ac840108".
     public static func status(_ line: PlanTicketLine) -> String { status(line, stage: true) }
-
-    /// "Landed · ac840108 · ov-481 · 3 h": a Landed Today row's second line,
-    /// the stage with its commit, its key, its agent and tokens, and how long
-    /// ago. The Plan's sections' rows say theirs from the view (`PlanView`);
-    /// Landed Today stays here until the view carries it (ov-1015 phase 2).
-    public static func ticketSecond(
-        _ line: PlanTicketLine, agent: PlanAgent?, landedLanding: String?, now: Int64, aged: Bool = true, state: String? = nil
-    ) -> String {
-        var parts = [state ?? status(line)]
-        if let landedLanding, !parts[0].contains(landedLanding) { parts.append("\(landedLanding) landed") }
-        parts.append(line.key)
-        if let agent { parts.append([agent.who, agent.tokens()].compactMap { $0 }.joined(separator: " \u{00B7} ")) }
-        if aged, line.stageSince > 0, now > line.stageSince { parts.append(span(now - line.stageSince)) }
-        return parts.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
-    }
 
     /// `status`, with or without the pull request's stage (ov-316): a row that
     /// draws the stage on a line of its own leaves it out here.

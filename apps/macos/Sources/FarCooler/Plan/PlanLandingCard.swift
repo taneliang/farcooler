@@ -189,12 +189,16 @@ struct PlanLadderView: View {
 
 /// One ticket inside a landing: its title and how it stands, and its key.
 struct PlanLandingTicketRow: View {
-    let ticket: PlanView.LandingTicket
+    let ticket: PlanView.TicketCard
     let selected: Bool
     let keyed: Bool
     let onOpen: () -> Void
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
+
+    /// Under its title: its notes, less the "Needs you" it leads with while it
+    /// waits on the owner, which is drawn beside the title.
+    private var warnings: ArraySlice<PlanView.Note> { ticket.notes.dropFirst(ticket.waitsOnOwner ? 1 : 0) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -202,7 +206,7 @@ struct PlanLandingTicketRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Image(systemName: glyph)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(ticket.markAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
+                        .foregroundStyle(!warnings.isEmpty ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                         .glyphColumn()
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
@@ -215,13 +219,13 @@ struct PlanLandingTicketRow: View {
                             Spacer(minLength: 0)
                             if let note = ticket.note {
                                 Text(note)
-                                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: ticket.noteAttention ? .medium : .regular))
-                                    .foregroundStyle(ticket.noteAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
+                                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: ticket.waitsOnOwner ? .medium : .regular))
+                                    .foregroundStyle(ticket.waitsOnOwner ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                                     .lineLimit(1)
                                     .fixedSize()
                                     .layoutPriority(2)
                                     // Needs you is the ticket's warning, said once, here: its id is the warning's.
-                                    .probed(ticket.noteAttention ? "plan-ticket-\(ticket.key)-warning" : "plan-landing-ticket-\(ticket.key)-note")
+                                    .probed(ticket.waitsOnOwner ? "plan-ticket-\(ticket.key)-warning" : "plan-landing-ticket-\(ticket.key)-note")
                             }
                         }
                         // The key under a title; a ticket with no title is its key already.
@@ -232,8 +236,8 @@ struct PlanLandingTicketRow: View {
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
-                        ForEach(Array(ticket.notes.enumerated()), id: \.offset) { _, note in
-                            PlanNoteLine(note: note, probe: PlanCardRow.probe(note, key: ticket.key))
+                        ForEach(Array(warnings.enumerated()), id: \.offset) { _, note in
+                            PlanNoteLine(note: note, probe: note.probe(key: ticket.key))
                         }
                     }
                 }

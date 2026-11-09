@@ -203,22 +203,6 @@ struct PlanModelTests {
         #expect(plan.unranked.map(\.task) == ["t6"])
     }
 
-    @Test("Landed Today is the tickets landed on the runner's day, newest first")
-    func landedToday() throws {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        // 1_800_000_000_000 is 15 Jan 2027, 08:00 UTC.
-        let plan = try Self.plan(
-            themes: [],
-            lines: [
-                Self.line("t1", "landed", since: Self.now - 7 * Self.hour),
-                Self.line("t2", "landed", since: Self.now - Self.hour),
-                Self.line("t3", "landed", since: Self.now - 9 * Self.hour),
-                Self.line("t4", "landing", since: Self.now - Self.hour),
-            ])
-        #expect(plan.landedToday(calendar: calendar).map(\.task) == ["t2", "t1"])
-    }
-
     @Test("Themes list active, then paused, then done, each in board order; dropped ones not at all")
     func themeOrder() throws {
         let plan = try Self.plan(

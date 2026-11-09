@@ -30,7 +30,7 @@ struct PlanCostTests {
             lines: [PlanModelTests.line("t1", "building")])
         #expect(plan.cost == nil && plan.themes[0].budgetTokens == nil && plan.themes[0].trendTokens == nil)
         #expect(!PlanThemeSpend.hasSomething(plan.themes[0]))
-        #expect(PlanWords.overBudget(plan.lines[0]) == nil && PlanWords.trend(plan.themes[0].trendTokens) == nil)
+        #expect(PlanWords.trend(plan.themes[0].trendTokens) == nil)
     }
 
     @Test("over budget is past it, and equal is within")
@@ -49,17 +49,6 @@ struct PlanCostTests {
         spend.inputTokens = 501
         #expect(PlanWords.budget(spend, against: 500)?.isOver == true)
         #expect(PlanWords.budget(spend, against: nil) == nil, "no budget, nothing to flag")
-    }
-
-    @Test("a ticket over its budget is the warning its row draws in amber")
-    func aTicketWarning() throws {
-        var line = try PlanModelTests.fixture().lines[1]
-        #expect(PlanWords.overBudget(line) == nil)
-        line.budgetTokens = 100_000
-        #expect(PlanWords.overBudget(line, locale: Locale(identifier: "en_US")) == "Over budget: 470K of 100K tokens")
-        #expect(
-            PlanWords.overBudgetSpoken(line, locale: Locale(identifier: "en_US"))
-                == "Over budget. 470 thousand of 100 thousand tokens used.", "VoiceOver hears words, not a suffix letter")
     }
 
     @Test("a screen reader hears the counts as words, never a suffix letter")

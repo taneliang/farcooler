@@ -890,10 +890,7 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
       planList.open(found.plan, found.view, kind, found.count)
     },
   },
-  planView,
-  // The workflow presentation for the cards' engine steps; a workspace with
-  // no published workflow, or one that can't be read now, has none.
-  workspace => workflowPort.read(workspace).catch(() => null))
+  planView)
   showTab('terminals')
   boardTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') void mine.refresh()

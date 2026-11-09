@@ -26,6 +26,7 @@ pub mod column;
 pub mod input;
 pub mod words;
 
+pub use build::LandingPhase;
 pub use words::Style;
 
 pub const SCHEMA: u32 = 1;
@@ -41,6 +42,8 @@ pub enum SectionKind {
     OnLandedLanding,
     Agents,
     Themes,
+    /// The tickets that landed on the runner's day; drawn last.
+    LandedToday,
 }
 
 /// A section to draw, in the order drawn.
@@ -167,6 +170,11 @@ pub struct TicketCard {
     pub agent: Option<AgentRef>,
     pub run: Option<RunStep>,
     pub branch: String,
+    /// On a landing, the word drawn beside the title: "Needs you" while it
+    /// waits on the owner (which `notes` then leads with), "Landed · ac840108"
+    /// once it has; nil when it is simply aboard.
+    #[serde(default)]
+    pub note: Option<String>,
     /// What a screen reader says for the row.
     pub accessibility: String,
 }
@@ -188,46 +196,6 @@ pub struct WaitingGroup {
     /// The title is drawn in amber.
     pub attention: bool,
     pub cards: Vec<TicketCard>,
-}
-
-/// A ticket on a live landing.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LandingTicket {
-    pub id: String,
-    pub key: String,
-    pub heading: String,
-    /// "Ready", "Fixing · round 2", "Landed · ac840108", or the stage.
-    pub standing: String,
-    /// What it says about itself, or nil when it is simply aboard.
-    pub note: Option<String>,
-    /// The note is drawn in amber: it waits on the owner.
-    pub note_attention: bool,
-    pub waits_on_owner: bool,
-    pub run: Option<RunStep>,
-    /// Its stage's mark, or a fix round's.
-    #[serde(default = "unknown_mark")]
-    pub mark: Mark,
-    /// The mark is drawn in amber: a note needs attention.
-    #[serde(default)]
-    pub mark_attention: bool,
-    /// Its warnings under its title: stale (unless it waits on the owner,
-    /// which `note` says once) and over budget.
-    #[serde(default)]
-    pub notes: Vec<Note>,
-    #[serde(default)]
-    pub branch: String,
-    /// The line under its title where a phone draws one: what it says of
-    /// itself (unless it waits on the owner, which its warning says), its key,
-    /// and how long it has stood, unless a warning says so.
-    #[serde(default)]
-    pub second: String,
-    /// What a screen reader says for the row.
-    #[serde(default)]
-    pub accessibility: String,
-}
-
-fn unknown_mark() -> Mark {
-    Mark::Unknown
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,8 +224,8 @@ pub struct LandingCard {
     pub subtitle: Option<String>,
     /// Its tickets' titles on one line.
     pub carries: Option<String>,
-    /// The phase as the plan's wire spells it.
-    pub phase: String,
+    /// The phase, spelled as the plan's wire spells it.
+    pub phase: LandingPhase,
     /// "Checking on CI".
     pub phase_word: String,
     /// "checking on CI", inside a sentence.
@@ -272,7 +240,7 @@ pub struct LandingCard {
     /// "Lander · Opus · 1.4M".
     pub lander_words: Option<String>,
     pub pushed_sha: Option<String>,
-    pub tickets: Vec<LandingTicket>,
+    pub tickets: Vec<TicketCard>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -364,6 +332,8 @@ pub struct PlanView {
     /// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
     pub waiting: Vec<WaitingGroup>,
     pub on_landed_landing: Vec<TicketCard>,
+    /// Landed on the runner's day, newest first.
+    pub landed_today: Vec<TicketCard>,
     pub agents: Agents,
     pub themes: Themes,
     /// The plan column beside the conversation: facts, initiatives, the

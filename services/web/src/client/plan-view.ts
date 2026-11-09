@@ -348,7 +348,7 @@ function draw(plan: Plan, model: PlanViewModel, needs: NeedsRow[], view: PlanBoa
 /// that found nothing new must not take a button out from under a click, or an
 /// open fold closed). Returns what was drawn, to hand back as `last`.
 export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, on: PlanHandlers, last: string, items: NeedsItem[], present: PlanPresenter): string {
-  const signature = JSON.stringify([items, view.state, view.banner, view.raw, view.workflow, view.workspace, view.workspaces, view.editing?.theme ?? null, [...view.busy], [...view.notices], Math.floor(now / 60_000)])
+  const signature = JSON.stringify([items, view.state, view.banner, view.raw, view.workspace, view.workspaces, view.editing?.theme ?? null, [...view.busy], [...view.notices], Math.floor(now / 60_000)])
   if (signature === last) return last
 
   // An open fold stays open across a redraw.
@@ -365,9 +365,9 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
     // Needs You's count is the view's input, and its rows include the
     // initiatives asking the owner, which only the view knows: ask once, then
     // again with the count that includes them.
-    let model = presentPlan(present, view.raw, { needsYou: items.length, workflow: view.workflow })
+    let model = presentPlan(present, view.raw, { needsYou: items.length })
     let needs = needsRows(model, view.plan, items)
-    if (model && needs.length !== items.length) model = presentPlan(present, view.raw, { needsYou: needs.length, workflow: view.workflow })
+    if (model && needs.length !== items.length) model = presentPlan(present, view.raw, { needsYou: needs.length })
     if (model) children.push(...draw(view.plan, model, needs, view, now, on))
     else children.push(make('p', 'note plan-banner', 'The plan couldn’t be read. Try again in a moment.'))
   } else if (view.state === 'ready') children.push(make('h2', 'plan-clear', WORDS.nothingPlanned))

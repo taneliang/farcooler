@@ -23,8 +23,9 @@ struct PlanViewTests {
     @Test("the golden decodes into every slot: sections, cards, notes, runs, landings, agents and tiles")
     func decodesTheGolden() throws {
         let view = try Self.view()
-        #expect(view.sections.map(\.kind) == [.needsYou, .landing, .inReview, .building, .waiting, .agents, .themes])
-        #expect(view.sections.map(\.title) == ["Needs You", "Landing", "In Review", "Building", "Waiting", "Agents", "Themes"])
+        #expect(view.sections.map(\.kind) == [.needsYou, .landing, .inReview, .building, .waiting, .agents, .themes, .landedToday])
+        #expect(view.sections.map(\.title) == ["Needs You", "Landing", "In Review", "Building", "Waiting", "Agents", "Themes", "Landed Today"])
+        #expect(view.landedToday.map(\.key) == ["ov-460"] && view.section(.landedToday)?.folded == true)
         #expect(view.section(.landing)?.help == "Reviewed tickets land on main together, after one round of checks.")
         #expect(view.needsYou == 2 && view.now == 1_800_000_000_000)
 
@@ -43,7 +44,7 @@ struct PlanViewTests {
         #expect(landing.ladder.steps.map(\.label) == ["Waiting for Tickets", "Checking on CI", "Landed"])
         #expect(landing.landerWords == "Lander \u{00B7} opus \u{00B7} 1.4M" && landing.lander?.model == "opus")
         let aboard = try #require(landing.tickets.first)
-        #expect(aboard.standing == "Ready" && aboard.note == nil && aboard.mark == .landing && aboard.branch == "team-dir")
+        #expect(aboard.note == nil && aboard.mark == .landing && aboard.branch == "team-dir")
 
         #expect(view.waiting.map(\.kind) == [.notRanked] && !view.namesWaitingGroups)
         #expect(view.waiting.first?.id == "plan-not-ranked")
@@ -62,7 +63,7 @@ struct PlanViewTests {
         let statuses = (context["statuses"] as? [String: String] ?? [:]).compactMapValues { TaskStatus(rawValue: $0) }
         let workflow = try JSONSerialization.data(withJSONObject: try #require(request["workflow"]))
         let built = PlanView.build(
-            plan: plan, context: PlanViewContext(needsYou: context["needs_you"] as? Int ?? 0, statuses: statuses),
+            plan: plan, context: PlanViewContext(needsYou: context["needs_you"] as? Int ?? 0, statuses: statuses, utcOffset: 0),
             workflow: workflow)
         #expect(built == (try Self.view()))
     }

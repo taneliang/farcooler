@@ -95,8 +95,6 @@ struct PlanPhoneBoardTests {
         #expect(share.contains { $0.contains("3.6 finished cards") }, "\(share)")
         #expect(PlanThemeSpend.hasSomething(theme), "the theme page draws its spend")
         #expect(PlanWords.trend(theme.trendTokens) != nil, "and its trend")
-        let line = try #require(plan.lines.first { PlanWords.overBudget($0) != nil })
-        #expect(PlanWords.overBudget(line) != nil, "\(line.key) is over its budget")
     }
 
     // MARK: Which boards read again

@@ -47,7 +47,7 @@ struct PlanCardRow: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach(Array(card.notes.enumerated()), id: \.offset) { _, note in
-                        PlanNoteLine(note: note, probe: Self.probe(note, key: card.key))
+                        PlanNoteLine(note: note, probe: note.probe(key: card.key))
                     }
                 }
             }
@@ -64,18 +64,6 @@ struct PlanCardRow: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .help(card.branch)
         .identified("plan-ticket-\(card.key)")
-    }
-
-    /// Each note's probe id: the stage's (amber or not), the run's, the
-    /// warning's and the budget's.
-    static func probe(_ note: PlanView.Note, key: String) -> String {
-        switch note.kind {
-        case .stage: note.attention ? "plan-ticket-\(key)-stage-attention" : "plan-ticket-\(key)-stage"
-        case .run: "plan-ticket-\(key)-run"
-        case .warning: "plan-ticket-\(key)-warning"
-        case .overBudget: "plan-ticket-\(key)-over-budget"
-        case .unknown: "plan-ticket-\(key)-note"
-        }
     }
 
     private var title: some View {
@@ -132,19 +120,28 @@ struct PlanNoteLine: View {
     }
 }
 
-extension PlanGlyph {
+/// A ticket stage's glyph: neutral, a shape to scan by.
+enum PlanGlyph {
+    /// A ticket's: a fix in progress has its own mark.
+    static func name(_ line: PlanTicketLine) -> String {
+        line.isFixing ? "wrench.and.screwdriver" : name(line.stage)
+    }
+
+    static func name(_ stage: TicketStage) -> String {
+        switch stage {
+        case .waiting: "clock"
+        case .building: "hammer"
+        case .reviewing: "eye"
+        case .needsYou: "flag"
+        case .landing: "arrow.down.to.line"
+        case .landed: "checkmark.circle"
+        case .dropped: "xmark.circle"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
     /// A card's mark, as the view names it.
     static func name(_ mark: PlanView.Mark) -> String {
-        switch mark {
-        case .rank, .unknown: "questionmark.circle"
-        case .waiting: name(TicketStage.waiting)
-        case .building: name(TicketStage.building)
-        case .fixing: "wrench.and.screwdriver"
-        case .reviewing: name(TicketStage.reviewing)
-        case .needsYou: name(TicketStage.needsYou)
-        case .landing: name(TicketStage.landing)
-        case .landed: name(TicketStage.landed)
-        case .dropped: name(TicketStage.dropped)
-        }
+        mark == .fixing ? "wrench.and.screwdriver" : name(mark.stage)
     }
 }

@@ -70,17 +70,20 @@ struct PlanOverviewView: View {
             // is the home's, above; Landing, In Review, Building, Waiting,
             // Agents and Themes are `PlanSectionsView`'s; then what is
             // unchanged: Cost, Pages and Landed Today.
-            if let view = plan.view(needsYou: needsYou, statuses: statuses, activity: activity) {
+            let view = plan.view(needsYou: needsYou, statuses: statuses, activity: activity)
+            if let view {
                 PlanSectionsView(
                     view: view, model: model, statuses: statuses, plan: plan, selected: selected, keyed: keyed,
                     defaults: defaults, onOpen: onOpen)
+            } else {
+                // The core couldn't read the plan: say so, as Android and the web do.
+                PlanNotice(title: PlanWords.couldntRead, detail: nil).identified("plan-unreadable")
             }
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = model.cost, cost.isWorthShowing { costSection(cost) }
             // After Themes (ov-269 design 6.1): only on a runner with pages.
             if !plan.listedPages.isEmpty || plan.hiddenCount > 0 { pages() }
-            let landed = model.landedToday()
-            if !landed.isEmpty { landedToday(landed, model) }
+            if let view, let landed = view.section(.landedToday) { landedToday(landed, view) }
         }
     }
 
@@ -130,16 +133,14 @@ struct PlanOverviewView: View {
     /// stamp, and the Mac's is close enough for minutes.
     static func nowMs() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    private func landedToday(_ landed: [PlanTicketLine], _ model: PlanModel) -> some View {
-        CollapsibleSection("Landed Today", id: "plan.landed", style: .navigator, key: key("landed"), defaults: defaults,
-            expandedByDefault: false, count: landed.count
+    /// Landed on the runner's day: the view's cards, under the view's title.
+    private func landedToday(_ section: PlanView.Section, _ view: PlanView) -> some View {
+        CollapsibleSection(section.title, id: "plan.landed", style: .navigator, key: key("landed"), defaults: defaults,
+            expandedByDefault: !section.folded, count: section.count
         ) {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(landed) { line in
-                    PlanLineRow(
-                        line: line, theme: model.theme(of: line), rank: nil, now: model.nowMs, waitsOnOwner: false,
-                        selected: selected == .ticket(line.id), keyed: keyed
-                    ) { onOpen(.ticket(line.id)) }
+                ForEach(view.landedToday) { card in
+                    PlanCardRow(card: card, selected: selected == .ticket(card.id), keyed: keyed) { onOpen(.ticket(card.id)) }
                 }
             }
         }
@@ -315,201 +316,6 @@ struct PlanNotice: View {
         .padding(.leading, NavigatorGrid.textInset)
         .padding(.vertical, NavigatorRhythm.card)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// One ticket's row: its title and the theme it serves, then its reason or
-/// stage. In Next Up its rank sits in the glyph column; elsewhere its stage's
-/// glyph does, amber only when it's stale or waiting on the owner.
-struct PlanLineRow: View {
-    let line: PlanTicketLine
-    let theme: PlanTheme?
-    /// Its place in Next Up, or nil.
-    let rank: Int?
-    let now: Int64
-    let waitsOnOwner: Bool
-    let selected: Bool
-    let keyed: Bool
-    /// The agent that works it, for the line under its title (ov-503).
-    var agent: PlanAgent?
-    /// The landed landing it still names, when its stage doesn't already say.
-    var landedLanding: String?
-    let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
-    @State private var hovering = false
-
-    /// Over its token budget (ov-307), drawn beside whatever else it is: a ticket
-    /// that waits on the owner and is over budget says both.
-    private var overBudget: String? { PlanWords.overBudget(line) }
-
-    /// Stale, waiting on the owner or over its token budget: the only tickets
-    /// drawn in color.
-    private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(line, now: now)
-    }
-
-    /// What a row draws under its state: the pull request's stage, gray, or
-    /// amber for one that needs a person (changes requested, checks failing,
-    /// conflicts, ov-316), then the ticket's own warnings. Each has its probe id.
-    private struct Line: Identifiable {
-        let text: String
-        let id: String
-        let amber: Bool
-        var isStage = false
-    }
-
-    private var notes: [Line] {
-        var out: [Line] = []
-        if let stage = line.shownStage, let words = stage.words {
-            let attention = stage.needsAttention
-            out.append(Line(
-                text: attention ? words : (stage.fullWords ?? words),
-                id: attention ? "plan-ticket-\(line.key)-stage-attention" : "plan-ticket-\(line.key)-stage",
-                amber: attention, isStage: true))
-        }
-        if let warning { out.append(Line(text: warning, id: "plan-ticket-\(line.key)-warning", amber: true)) }
-        if let overBudget { out.append(Line(text: overBudget, id: "plan-ticket-\(line.key)-over-budget", amber: true)) }
-        return out
-    }
-
-    /// Its stage's tooltip: every word of it, and the pull request.
-    private var stageHelp: String {
-        guard let stage = line.shownStage else { return "" }
-        return [stage.fullWords, stage.detail].compactMap { $0 }.joined(separator: " \u{00B7} ")
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                mark.glyphColumn()
-                VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-                    // The theme sits beside the title when both fit on a line,
-                    // else under it: a narrow column never squeezes either to
-                    // an ellipsis.
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                            title.fixedSize(horizontal: true, vertical: false)
-                            Spacer(minLength: 0)
-                            themeName
-                        }
-                        VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-                            title
-                            themeName
-                        }
-                    }
-                    // A key in the reason shows its card on hover (ov-299).
-                    TaskKeyText(keysIn: second)
-                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.quietInk)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    ForEach(notes) { note in
-                        Text(note.text)
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: note.amber ? .medium : .regular))
-                            .foregroundStyle(note.amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
-                            // A reviewer's login may be long: one line, elided in
-                            // the middle, never wrapped (ov-316).
-                            .lineLimit(note.isStage ? 1 : 2)
-                            .truncationMode(.middle)
-                            .help(note.isStage ? stageHelp : "")
-                            .probed(note.id)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .navigatorRow(selected: selected, keyed: keyed, leading: 0)
-            .background {
-                if hovering && !selected { RoundedRectangle.control.fill(Fill.hover).boxOutset() }
-            }
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibility)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .help(line.branch)
-        .identified("plan-ticket-\(line.key)")
-    }
-
-    private var title: some View {
-        Text(line.heading)
-            .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
-            .lineLimit(2)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// Which theme it serves (the owner's ask, ov-273).
-    @ViewBuilder private var themeName: some View {
-        if let theme {
-            Text(theme.name)
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.quietInk)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .probed("plan-ticket-\(line.key)-theme")
-        }
-    }
-
-    /// Next Up's reason; elsewhere, the stage with its round, landing or
-    /// commit, and the key.
-    private var second: String {
-        if rank != nil { return line.reason.isEmpty ? line.key : line.reason }
-        return Self.second(
-            line, agent: agent, landedLanding: landedLanding, now: now, aged: warning == nil,
-            state: line.shownStage == nil ? nil : PlanWords.status(line, stage: false))
-    }
-
-    /// "Building · ov-481 · Builder · Sonnet · 380K · 3 h": the stage with its
-    /// round and landing, the key, the main agent and its tokens, and how long
-    /// it has been in this stage.
-    static func second(
-        _ line: PlanTicketLine, agent: PlanAgent?, landedLanding: String?, now: Int64, aged: Bool = true, state: String? = nil
-    ) -> String {
-        PlanWords.ticketSecond(line, agent: agent, landedLanding: landedLanding, now: now, aged: aged, state: state)
-    }
-
-    @ViewBuilder private var mark: some View {
-        if let rank {
-            Text("\(rank)")
-                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.quietInk)
-        } else {
-            Image(systemName: PlanGlyph.name(line))
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(warning == nil && overBudget == nil && line.shownStage?.needsAttention != true ? AnyShapeStyle(.quietInk) : AnyShapeStyle(Tint.attention(scheme)))
-                .accessibilityHidden(true)
-        }
-    }
-
-    static func accessibleLabel(_ words: String, agent: PlanAgent?) -> String {
-        PlanWords.accessibleModel(words, raw: agent?.model ?? "")
-    }
-
-    private var accessibility: String {
-        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, line.heading, theme?.name, second, line.shownStage?.fullWords, warning, PlanWords.overBudgetSpoken(line)]
-        parts.removeAll { $0 == nil }
-        return Self.accessibleLabel(parts.compactMap { $0 }.joined(separator: ", "), agent: agent)
-    }
-}
-
-/// A ticket stage's glyph: neutral, a shape to scan by.
-enum PlanGlyph {
-    /// A ticket's: a fix in progress has its own mark.
-    static func name(_ line: PlanTicketLine) -> String {
-        line.isFixing ? "wrench.and.screwdriver" : name(line.stage)
-    }
-
-    static func name(_ stage: TicketStage) -> String {
-        switch stage {
-        case .waiting: "clock"
-        case .building: "hammer"
-        case .reviewing: "eye"
-        case .needsYou: "flag"
-        case .landing: "arrow.down.to.line"
-        case .landed: "checkmark.circle"
-        case .dropped: "xmark.circle"
-        case .unknown: "questionmark.circle"
-        }
     }
 }
 

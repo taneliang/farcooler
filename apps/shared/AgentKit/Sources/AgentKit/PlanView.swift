@@ -17,11 +17,7 @@ import Foundation
 public struct PlanView: Decodable, Equatable, Sendable {
     public enum SectionKind: String, Decodable, Sendable {
         case needsYou = "needs_you", landing, inReview = "in_review", building, waiting
-        case onLandedLanding = "on_landed_landing", agents, themes, unknown
-
-        public init(from decoder: Decoder) throws {
-            self = SectionKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
-        }
+        case onLandedLanding = "on_landed_landing", agents, themes, landedToday = "landed_today"
     }
 
     /// A section to draw, in the order drawn.
@@ -42,10 +38,6 @@ public struct PlanView: Decodable, Equatable, Sendable {
     /// What a ticket's mark shows: its stage, a fix round, or its place in Next Up.
     public enum Mark: String, Decodable, Sendable {
         case rank, waiting, building, fixing, reviewing, needsYou = "needs_you", landing, landed, dropped, unknown
-
-        public init(from decoder: Decoder) throws {
-            self = Mark(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
-        }
     }
 
     public enum NoteKind: String, Decodable, Sendable {
@@ -56,11 +48,6 @@ public struct PlanView: Decodable, Equatable, Sendable {
         /// Waits on the owner, or hasn't moved.
         case warning
         case overBudget = "over_budget"
-        case unknown
-
-        public init(from decoder: Decoder) throws {
-            self = NoteKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
-        }
     }
 
     /// A line under a ticket's second line.
@@ -71,6 +58,17 @@ public struct PlanView: Decodable, Equatable, Sendable {
         public var attention: Bool
         /// Every word of it, for a hover or a long press.
         public var help: String?
+
+        /// The id a view and the UI tests know it by: the stage's (amber or not),
+        /// the run's, the warning's and the budget's.
+        public func probe(key: String) -> String {
+            switch kind {
+            case .stage: attention ? "plan-ticket-\(key)-stage-attention" : "plan-ticket-\(key)-stage"
+            case .run: "plan-ticket-\(key)-run"
+            case .warning: "plan-ticket-\(key)-warning"
+            case .overBudget: "plan-ticket-\(key)-over-budget"
+            }
+        }
     }
 
     /// The agent working a ticket, or landing a landing.
@@ -129,16 +127,16 @@ public struct PlanView: Decodable, Equatable, Sendable {
         public var agent: AgentRef?
         public var run: RunStep?
         public var branch: String
+        /// On a landing, the word beside the title: "Needs you" while it waits
+        /// on the owner (which `notes` then leads with), "Landed · ac840108"
+        /// once it has; nil when it is simply aboard.
+        public var note: String?
         /// What a screen reader says for the row.
         public var accessibility: String
     }
 
     public enum WaitingKind: String, Decodable, Sendable {
-        case next, notRanked = "not_ranked", onYou = "on_you", unknown
-
-        public init(from decoder: Decoder) throws {
-            self = WaitingKind(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
-        }
+        case next, notRanked = "not_ranked", onYou = "on_you"
     }
 
     /// One of Waiting's groups; only groups with cards are sent.
@@ -156,55 +154,7 @@ public struct PlanView: Decodable, Equatable, Sendable {
             case .next: "plan-next-up"
             case .notRanked: "plan-not-ranked"
             case .onYou: "plan-waiting-on-you"
-            case .unknown: "plan-waiting-group"
             }
-        }
-    }
-
-    /// A ticket on a live landing.
-    public struct LandingTicket: Decodable, Equatable, Identifiable, Sendable {
-        public var id: String
-        public var key: String
-        public var heading: String
-        /// "Ready", "Fixing · round 2", "Landed · ac840108", or the stage.
-        public var standing: String
-        /// What it says about itself, or nil when it is simply aboard.
-        public var note: String?
-        /// The note is drawn in amber: it waits on the owner.
-        public var noteAttention: Bool
-        public var waitsOnOwner: Bool
-        public var run: RunStep?
-        public var mark: Mark
-        public var markAttention: Bool
-        /// Stale and over budget, under its title.
-        public var notes: [Note]
-        public var branch: String
-        /// The line under its title where a phone draws one: what it says of
-        /// itself, its key, and how long it has stood.
-        public var second: String
-        public var accessibility: String
-
-        public init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            id = try c.decode(String.self, forKey: .id)
-            key = try c.decode(String.self, forKey: .key)
-            heading = try c.decode(String.self, forKey: .heading)
-            standing = try c.decode(String.self, forKey: .standing)
-            note = try c.decodeIfPresent(String.self, forKey: .note)
-            noteAttention = try c.decodeIfPresent(Bool.self, forKey: .noteAttention) ?? false
-            waitsOnOwner = try c.decodeIfPresent(Bool.self, forKey: .waitsOnOwner) ?? false
-            run = try c.decodeIfPresent(RunStep.self, forKey: .run)
-            mark = try c.decodeIfPresent(Mark.self, forKey: .mark) ?? .unknown
-            markAttention = try c.decodeIfPresent(Bool.self, forKey: .markAttention) ?? false
-            notes = try c.decodeIfPresent([Note].self, forKey: .notes) ?? []
-            branch = try c.decodeIfPresent(String.self, forKey: .branch) ?? ""
-            second = try c.decodeIfPresent(String.self, forKey: .second) ?? key
-            accessibility = try c.decodeIfPresent(String.self, forKey: .accessibility) ?? heading
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case id, key, heading, standing, note, noteAttention, waitsOnOwner, run, mark, markAttention, notes, branch, second
-            case accessibility
         }
     }
 
@@ -246,7 +196,7 @@ public struct PlanView: Decodable, Equatable, Sendable {
         /// "Lander · Opus · 1.4M".
         public var landerWords: String?
         public var pushedSha: String?
-        public var tickets: [LandingTicket]
+        public var tickets: [TicketCard]
     }
 
     public struct AgentRow: Decodable, Equatable, Identifiable, Sendable {
@@ -274,10 +224,6 @@ public struct PlanView: Decodable, Equatable, Sendable {
 
     public enum Glyph: String, Decodable, Sendable {
         case done, inProgress = "in_progress", notStarted = "not_started"
-
-        public init(from decoder: Decoder) throws {
-            self = Glyph(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .notStarted
-        }
     }
 
     public struct TileCard: Decodable, Equatable, Identifiable, Sendable {
@@ -326,6 +272,8 @@ public struct PlanView: Decodable, Equatable, Sendable {
     /// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
     public var waiting: [WaitingGroup]
     public var onLandedLanding: [TicketCard]
+    /// Landed on the runner's day, newest first.
+    public var landedToday: [TicketCard]
     public var agents: Agents
     public var themes: Themes
     /// The plan column beside the conversation (ov-867), from the same read.
@@ -367,16 +315,19 @@ public struct PlanViewContext: Equatable, Sendable {
     /// The board's card titles by task id, for a card the plan carries none
     /// for (the column's tickets).
     public var titles: [String: String]
+    /// The device's offset from UTC in seconds, which says where today ends.
+    public var utcOffset: Int
 
     public init(
         needsYou: Int = 0, statuses: [String: TaskStatus] = [:], activity: [String: Int64] = [:], agentsSupported: Bool = true,
-        titles: [String: String] = [:]
+        titles: [String: String] = [:], utcOffset: Int = TimeZone.current.secondsFromGMT()
     ) {
         self.needsYou = max(0, needsYou)
         self.statuses = statuses
         self.activity = activity
         self.agentsSupported = agentsSupported
         self.titles = titles
+        self.utcOffset = utcOffset
     }
 
     /// The request's `context`, in the Apple apps' style.
@@ -387,6 +338,7 @@ public struct PlanViewContext: Equatable, Sendable {
             "activity": activity,
             "agents_supported": agentsSupported,
             "titles": titles,
+            "utc_offset": utcOffset,
             "style": "apple",
         ]
         return (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
@@ -503,4 +455,20 @@ public enum PlanViewPresenter {
         let bridge = unsafeBitCast(symbol, to: Bridge.self)
         return { call(bridge, $0) }
     }()
+}
+
+extension PlanView.Mark {
+    /// The ticket stage a mark stands for, for a glyph: a fix round is a build.
+    public var stage: TicketStage {
+        switch self {
+        case .waiting: .waiting
+        case .building, .fixing: .building
+        case .reviewing: .reviewing
+        case .needsYou: .needsYou
+        case .landing: .landing
+        case .landed: .landed
+        case .dropped: .dropped
+        case .rank, .unknown: .unknown
+        }
+    }
 }

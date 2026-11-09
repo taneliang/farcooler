@@ -12,9 +12,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
-import java.util.Calendar
 import java.util.Locale
-import java.util.TimeZone
 
 // The plan layer on Android (ov-268 design 6.5, phase P5 is ov-274; ov-872): themes
 // (why a group of cards exists), the line of tickets (each a card the plan means
@@ -221,16 +219,6 @@ data class Plan(
 
     /** Waiting tickets the plan doesn't rank: written, but not yet ordered. */
     val unranked: List<PlanTicket> get() = tickets.filter { it.stage == TicketStage.WAITING && it.planRank == null }
-
-    /** The tickets that landed on the runner's day, in [zone], most recent first. */
-    fun landedToday(zone: TimeZone = TimeZone.getDefault()): List<PlanTicket> {
-        fun day(ms: Long) = Calendar.getInstance(zone).apply { timeInMillis = ms }.let {
-            it.get(Calendar.YEAR) * 1000 + it.get(Calendar.DAY_OF_YEAR)
-        }
-        val today = day(nowMs)
-        return tickets.filter { it.stage == TicketStage.LANDED && day(it.stageSince) == today }
-            .sortedByDescending { it.stageSince }
-    }
 
     /** The themes as the overview lists them: active, then paused, then done, each by its order on the board. */
     val shownThemes: List<PlanTheme>

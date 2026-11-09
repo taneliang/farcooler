@@ -27,7 +27,7 @@ struct PlanSectionsList: View {
         // order it says (owner decision 7; ov-522).
         ForEach(view.sections.filter { hook.kinds?.contains($0.kind) ?? true }) { section in
             switch section.kind {
-            case .needsYou, .unknown: EmptyView()
+            case .needsYou, .landedToday: EmptyView()
             case .landing: landing(section)
             case .inReview: cardSection(section, id: "plan-in-review", cards: view.inReview)
             case .building: cardSection(section, id: "plan-building", cards: view.building)
@@ -69,7 +69,7 @@ struct PlanSectionsList: View {
                 ForEach(view.landings) { card in
                     PlanLandingRow(card: card, explanation: section.help, ci: ci(card), now: view.now)
                     ForEach(card.tickets) { ticket in
-                        PlanCardRow(ticket: ticket, theme: plan.theme(ofTask: ticket.id)) { hook.onOpen(.ticket(ticket.id)) }
+                        PlanCardRow(card: ticket) { hook.onOpen(.ticket(ticket.id)) }
                             .padding(.leading, PaneMetrics.card)
                     }
                 }
@@ -292,18 +292,9 @@ struct PlanAgentRow: View {
 /// serves, then its reason or state, then its notes (the pull request's stage,
 /// the engine's step and gate, its warnings), each a line. In Next Up its rank
 /// sits in the glyph column; elsewhere its stage's mark, amber when a note
-/// needs a person. A ticket on a landing draws the same row from its landing
-/// ticket: what it says of itself, and its key.
+/// needs a person. A ticket on a landing draws the same row.
 struct PlanCardRow: View {
-    let key: String
-    let heading: String
-    let theme: String?
-    let second: String
-    let rank: Int?
-    let mark: PlanView.Mark
-    let markAttention: Bool
-    let notes: [PlanView.Note]
-    let accessibility: String
+    let card: PlanView.TicketCard
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
     /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
@@ -311,34 +302,6 @@ struct PlanCardRow: View {
     /// At accessibility sizes the name, the theme and the second line wrap
     /// rather than cut off (ov-653).
     @Environment(\.dynamicTypeSize) private var type
-
-    init(card: PlanView.TicketCard, action: @escaping () -> Void) {
-        key = card.key
-        heading = card.heading
-        theme = card.theme
-        second = card.second
-        rank = card.rank
-        mark = card.mark
-        markAttention = card.markAttention
-        notes = card.notes
-        accessibility = card.accessibility
-        self.action = action
-    }
-
-    init(ticket: PlanView.LandingTicket, theme: PlanTheme?, action: @escaping () -> Void) {
-        key = ticket.key
-        heading = ticket.heading
-        self.theme = theme?.name
-        second = ticket.second
-        rank = nil
-        mark = ticket.mark
-        markAttention = ticket.markAttention || ticket.noteAttention
-        // Waiting on the owner is its one warning, said under it as on any row.
-        notes = (ticket.waitsOnOwner ? [PlanView.Note(kind: .warning, text: ticket.note ?? "", attention: true, help: nil)] : [])
-            + ticket.notes
-        accessibility = ticket.accessibility
-        self.action = action
-    }
 
     var body: some View {
         Button(action: action) {
@@ -358,12 +321,12 @@ struct PlanCardRow: View {
                             themeName
                         }
                     }
-                    Text(second)
+                    Text(card.second)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(type.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
-                    ForEach(Array(notes.enumerated()), id: \.offset) { _, note in noteLine(note) }
+                    ForEach(Array(card.notes.enumerated()), id: \.offset) { _, note in noteLine(note) }
                 }
                 Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
@@ -376,14 +339,14 @@ struct PlanCardRow: View {
         // What VoiceOver reads is the view's: the rank, the name, the theme,
         // the reason or state, and its notes, in that order.
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibility)
+        .accessibilityLabel(card.accessibility)
         .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("plan-ticket-\(key)")
+        .accessibilityIdentifier("plan-ticket-\(card.key)")
         .probesShown()
     }
 
     private var name: some View {
-        Text(heading)
+        Text(card.heading)
             .font(.subheadline.weight(.medium))
             .lineLimit(type.isAccessibilitySize ? nil : 2)
             .fixedSize(horizontal: false, vertical: true)
@@ -392,14 +355,14 @@ struct PlanCardRow: View {
     }
 
     @ViewBuilder private var themeName: some View {
-        if let theme {
+        if let theme = card.theme {
             Text(theme)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(type.isAccessibilitySize ? nil : 1)
                 .truncationMode(.tail)
                 .fixedSize(horizontal: false, vertical: type.isAccessibilitySize)
-                .accessibilityIdentifier("plan-ticket-\(key)-theme")
+                .accessibilityIdentifier("plan-ticket-\(card.key)-theme")
         }
     }
 
@@ -413,28 +376,18 @@ struct PlanCardRow: View {
             .foregroundStyle(note.attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
             .lineLimit(oneLine ? 1 : nil)
             .truncationMode(.middle)
-            .accessibilityIdentifier(Self.probe(note, key: key))
-    }
-
-    static func probe(_ note: PlanView.Note, key: String) -> String {
-        switch note.kind {
-        case .stage: note.attention ? "plan-ticket-\(key)-stage-attention" : "plan-ticket-\(key)-stage"
-        case .run: "plan-ticket-\(key)-run"
-        case .warning: "plan-ticket-\(key)-warning"
-        case .overBudget: "plan-ticket-\(key)-over-budget"
-        case .unknown: "plan-ticket-\(key)-note"
-        }
+            .accessibilityIdentifier(note.probe(key: card.key))
     }
 
     @ViewBuilder private var markView: some View {
-        if let rank {
+        if let rank = card.rank {
             Text("\(rank)")
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
         } else {
-            Image(systemName: PlanGlyph.name(mark))
+            Image(systemName: PlanGlyph.name(card.mark))
                 .font(.subheadline)
-                .foregroundStyle(markAttention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+                .foregroundStyle(card.markAttention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
                 .accessibilityHidden(true)
         }
     }
@@ -442,17 +395,5 @@ struct PlanCardRow: View {
 
 extension PlanGlyph {
     /// A card's mark, as the view names it.
-    static func name(_ mark: PlanView.Mark) -> String {
-        switch mark {
-        case .rank, .unknown: "questionmark.circle"
-        case .waiting: name(.waiting)
-        case .building: name(.building)
-        case .fixing: name(.building, fixing: true)
-        case .reviewing: name(.reviewing)
-        case .needsYou: name(.needsYou)
-        case .landing: name(.landing)
-        case .landed: name(.landed)
-        case .dropped: name(.dropped)
-        }
-    }
+    static func name(_ mark: PlanView.Mark) -> String { name(mark.stage, fixing: mark == .fixing) }
 }

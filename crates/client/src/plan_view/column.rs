@@ -97,26 +97,18 @@ pub enum Role {
     Builder,
     Reviewer,
     Lander,
+    #[serde(other)]
     Agent,
 }
 
 impl Role {
     fn of(wire: &str) -> Role {
-        match wire {
-            "builder" => Role::Builder,
-            "reviewer" => Role::Reviewer,
-            "lander" => Role::Lander,
-            _ => Role::Agent,
-        }
+        super::build::wire(wire).unwrap_or(Role::Agent)
     }
 
-    fn word(self) -> &'static str {
-        match self {
-            Role::Builder => "Builder",
-            Role::Reviewer => "Reviewer",
-            Role::Lander => "Lander",
-            Role::Agent => "Agent",
-        }
+    /// "Builder": the variant's own name.
+    fn word(self) -> String {
+        format!("{self:?}")
     }
 }
 
@@ -466,9 +458,7 @@ fn pipeline(r: &Reader) -> Vec<Group> {
                 let phase = landing.map(|l| r.phase(l));
                 match phase {
                     Some(p) if matches!(p, LandingPhase::CiFailed | LandingPhase::Stalled) => {
-                        let sentence = p.sentence();
-                        let mut chars = sentence.chars();
-                        doing = chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
+                        doing = words::capitalize(p.sentence());
                         trouble = true;
                         PipeStage::Stuck
                     }
@@ -506,7 +496,7 @@ fn pipeline(r: &Reader) -> Vec<Group> {
             agent: ColumnAgent {
                 id: agent.id.clone(),
                 role,
-                name: role.word().into(),
+                name: role.word(),
                 doing,
                 doing_is_trouble: trouble,
                 time: elapsed.map(words::span),

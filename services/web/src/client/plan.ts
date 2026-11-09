@@ -234,10 +234,8 @@ export interface PlanBoardView {
   /// `loading` until the first read lands.
   state: 'loading' | 'ready' | 'old' | 'unreadable'
   plan: Plan | null
-  /// The plan as the runner sent it (the view model's input), and the
-  /// workspace's workflow presentation when it has one.
+  /// The plan as the runner sent it (the view model's input).
   raw: unknown
-  workflow: unknown
   workspaces: Workspace[]
   workspace: string | null
   /// The theme whose Next line is being written, and what is typed.
@@ -262,8 +260,6 @@ export interface PlanDeps {
   workspace?: string | null
   workspaces(): Promise<string>
   plan(workspace: string): Promise<string>
-  /// The workspace's workflow presentation, or null when it has none.
-  presentation?(workspace: string): Promise<unknown>
   setNext(theme: string, next: string): Promise<void>
   keep(ruling: string): Promise<void>
   keepAll(workspace: string): Promise<number>
@@ -273,7 +269,6 @@ export interface PlanDeps {
 export class PlanBoard {
   private plan: Plan | null = null
   private raw: unknown = null
-  private workflow: unknown = null
   private workspaces: Workspace[] = []
   private workspace: string | null
   private state: PlanBoardView['state'] = 'loading'
@@ -312,12 +307,11 @@ export class PlanBoard {
         this.banner = ''
       } else {
         this.workspace = chosen.id
-        const [text, workflow] = await Promise.all([this.deps.plan(chosen.id), this.deps.presentation?.(chosen.id).catch(() => null) ?? null])
+        const text = await this.deps.plan(chosen.id)
         const plan = parsePlan(text)
         if (!plan) throw new Error('protocol')
         this.plan = plan
         this.raw = JSON.parse(text)
-        this.workflow = workflow
         this.state = 'ready'
         this.banner = ''
         for (const id of [...this.notices.keys()]) if (id !== 'all' && !this.knows(id)) this.notices.delete(id)
@@ -347,7 +341,6 @@ export class PlanBoard {
     this.workspace = workspace
     this.plan = null
     this.raw = null
-    this.workflow = null
     this.state = 'loading'
     this.editing = null
     this.notices.clear()
@@ -442,7 +435,6 @@ export class PlanBoard {
       state: this.state,
       plan: this.plan,
       raw: this.raw,
-      workflow: this.workflow,
       workspaces: this.workspaces,
       workspace: this.workspace,
       editing: this.editing,

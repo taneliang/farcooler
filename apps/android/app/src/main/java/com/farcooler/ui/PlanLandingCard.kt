@@ -36,7 +36,7 @@ import com.farcooler.model.GlancePalette
 import com.farcooler.model.PageLinks
 import com.farcooler.model.PlanCiRead
 import com.farcooler.model.PlanViewLanding
-import com.farcooler.model.PlanViewLandingTicket
+import com.farcooler.model.PlanViewTicket
 import com.farcooler.model.PlanWords
 import com.farcooler.model.span
 import com.farcooler.model.LandingWords
@@ -173,11 +173,13 @@ private fun PlanLadderBar(card: PlanViewLanding, attention: Boolean) {
 
 /** One ticket inside a landing: its title, and what it says about itself in amber when it waits on the owner. */
 @Composable
-private fun PlanLandingTicketRow(row: PlanViewLandingTicket, onClick: () -> Unit) {
+private fun PlanLandingTicketRow(row: PlanViewTicket, onClick: () -> Unit) {
     val amber = glanceColor(GlancePalette.amber)
     // "Needs you" is the ticket's note, said once, in amber; a ticket simply aboard says nothing (ov-522).
     val standing = row.note.orEmpty()
-    val attention = row.noteAttention || row.notes.any { it.attention }
+    // Its notes lead with that "Needs you" while it waits on the owner.
+    val warnings = row.notes.drop(if (row.waitsOnOwner) 1 else 0)
+    val attention = row.notes.any { it.attention }
     val spoken = row.accessibility.ifEmpty { listOfNotNull(row.heading, standing.ifEmpty { null }).joinToString(", ") }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -190,11 +192,11 @@ private fun PlanLandingTicketRow(row: PlanViewLandingTicket, onClick: () -> Unit
             if (standing.isNotEmpty()) {
                 Text(
                     standing, style = MaterialTheme.typography.bodySmall,
-                    color = if (row.noteAttention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (row.waitsOnOwner) amber else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-landing-ticket-${row.key}-note"),
                 )
             }
-            row.notes.forEach { Text(it.text, style = MaterialTheme.typography.labelMedium, color = if (it.attention) amber else MaterialTheme.colorScheme.onSurfaceVariant) }
+            warnings.forEach { Text(it.text, style = MaterialTheme.typography.labelMedium, color = if (it.attention) amber else MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         if (attention) {
             Spacer(Modifier.width(8.dp))

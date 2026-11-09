@@ -119,8 +119,6 @@ export interface PlanViewModel {
 export interface PlanContext {
   /// The workspace's Needs You count.
   needsYou: number
-  /// The workspace's workflow presentation (`workflow.snapshot`), or null.
-  workflow: unknown
 }
 
 /// The view of `plan` (the runner's `plan.get`, parsed), or null when the
@@ -141,8 +139,7 @@ export function presentPlan(present: PlanPresenter, plan: any, context: PlanCont
   const request = {
     schema: 1,
     plan,
-    context: { needs_you: context.needsYou, statuses, titles, agents_supported: Array.isArray(plan?.agents), style: 'web' },
-    workflow: context.workflow ?? null,
+    context: { needs_you: context.needsYou, statuses, titles, agents_supported: Array.isArray(plan?.agents), style: 'apple' },
   }
   try {
     const answer = JSON.parse(present(JSON.stringify(request)))

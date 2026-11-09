@@ -65,6 +65,7 @@
           "landed_landing": null,
           "mark": "building",
           "mark_attention": true,
+          "note": null,
           "notes": [
             {
               "attention": true,
@@ -102,6 +103,7 @@
           "landed_landing": null,
           "mark": "building",
           "mark_attention": true,
+          "note": null,
           "notes": [
             {
               "attention": true,
@@ -399,6 +401,7 @@
           "landed_landing": null,
           "mark": "reviewing",
           "mark_attention": false,
+          "note": null,
           "notes": [],
           "rank": null,
           "run": null,
@@ -418,6 +421,7 @@
           "landed_landing": null,
           "mark": "fixing",
           "mark_attention": false,
+          "note": null,
           "notes": [],
           "rank": null,
           "run": null,
@@ -437,6 +441,7 @@
           "landed_landing": null,
           "mark": "reviewing",
           "mark_attention": true,
+          "note": null,
           "notes": [
             {
               "attention": true,
@@ -451,6 +456,28 @@
           "stage": "reviewing",
           "status": "In Review",
           "theme": "Trustworthy agent view",
+          "waits_on_owner": false
+        }
+      ],
+      "landed_today": [
+        {
+          "accessibility": "Title of ov-460, Mac look and feel, Landed · ab12cd34 · ov-460 · 1 h",
+          "agent": null,
+          "branch": "done-lane",
+          "heading": "Title of ov-460",
+          "id": "t-ov-460",
+          "key": "ov-460",
+          "landed_landing": null,
+          "mark": "landed",
+          "mark_attention": false,
+          "note": null,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "Landed · ab12cd34 · ov-460 · 1 h",
+          "stage": "landed",
+          "status": "Landed · ab12cd34",
+          "theme": "Mac look and feel",
           "waits_on_owner": false
         }
       ],
@@ -498,34 +525,56 @@
           "tickets": [
             {
               "accessibility": "The team directory",
+              "agent": {
+                "id": "pane:i1",
+                "line": "Lander · opus · 1.4M",
+                "model": "opus",
+                "terminal": null,
+                "tokens": "1.4M",
+                "who": "Lander · opus"
+              },
               "branch": "team-dir",
               "heading": "The team directory",
               "id": "t-ov-487",
               "key": "ov-487",
+              "landed_landing": null,
               "mark": "landing",
               "mark_attention": false,
               "note": null,
-              "note_attention": false,
               "notes": [],
+              "rank": null,
               "run": null,
               "second": "ov-487 · 3 h",
-              "standing": "Ready",
+              "stage": "landing",
+              "status": "Landing · in Landing 86",
+              "theme": "Teams and accounts",
               "waits_on_owner": false
             },
             {
               "accessibility": "Title of ov-485",
+              "agent": {
+                "id": "pane:i1",
+                "line": "Lander · opus · 1.4M",
+                "model": "opus",
+                "terminal": null,
+                "tokens": "1.4M",
+                "who": "Lander · opus"
+              },
               "branch": "ios-overwrite",
               "heading": "Title of ov-485",
               "id": "t-ov-485",
               "key": "ov-485",
+              "landed_landing": null,
               "mark": "waiting",
               "mark_attention": false,
               "note": null,
-              "note_attention": false,
               "notes": [],
+              "rank": null,
               "run": null,
               "second": "ov-485 · 5 h",
-              "standing": "Waiting",
+              "stage": "waiting",
+              "status": "Waiting · in Landing 86",
+              "theme": "Teams and accounts",
               "waits_on_owner": false
             }
           ]
@@ -566,18 +615,22 @@
           "tickets": [
             {
               "accessibility": "Each person's asks reach the orchestrator",
+              "agent": null,
               "branch": "reps",
               "heading": "Each person's asks reach the orchestrator",
               "id": "t-ov-301",
               "key": "ov-301",
+              "landed_landing": null,
               "mark": "waiting",
               "mark_attention": false,
               "note": null,
-              "note_attention": false,
               "notes": [],
+              "rank": null,
               "run": null,
               "second": "ov-301 · 1 h",
-              "standing": "Waiting",
+              "stage": "waiting",
+              "status": "Waiting · in Landing 89",
+              "theme": "Marketing",
               "waits_on_owner": false
             }
           ]
@@ -618,18 +671,29 @@
           "tickets": [
             {
               "accessibility": "Title of ov-300, Needs you",
+              "agent": null,
               "branch": "web-site",
               "heading": "Title of ov-300",
               "id": "t-ov-300",
               "key": "ov-300",
+              "landed_landing": null,
               "mark": "waiting",
-              "mark_attention": false,
+              "mark_attention": true,
               "note": "Needs you",
-              "note_attention": true,
-              "notes": [],
+              "notes": [
+                {
+                  "attention": true,
+                  "help": null,
+                  "kind": "warning",
+                  "text": "Needs you"
+                }
+              ],
+              "rank": null,
               "run": null,
               "second": "ov-300",
-              "standing": "Waiting",
+              "stage": "waiting",
+              "status": "Waiting · in Landing 84",
+              "theme": "Marketing",
               "waits_on_owner": true
             }
           ]
@@ -695,6 +759,14 @@
           "help": null,
           "kind": "themes",
           "title": "Themes"
+        },
+        {
+          "count": 1,
+          "empty": null,
+          "folded": true,
+          "help": null,
+          "kind": "landed_today",
+          "title": "Landed Today"
         }
       ],
       "themes": {
@@ -821,6 +893,7 @@
               "landed_landing": null,
               "mark": "waiting",
               "mark_attention": false,
+              "note": null,
               "notes": [],
               "rank": null,
               "run": null,
@@ -840,6 +913,7 @@
               "landed_landing": null,
               "mark": "waiting",
               "mark_attention": false,
+              "note": null,
               "notes": [],
               "rank": null,
               "run": null,

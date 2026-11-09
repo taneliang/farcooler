@@ -23,7 +23,8 @@ use super::words::{self, DOT, Style};
 use super::*;
 
 /// A ticket's stage, from the wire's word.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum Stage {
     Waiting,
     Building,
@@ -32,21 +33,18 @@ pub(super) enum Stage {
     Landing,
     Landed,
     Dropped,
+    #[serde(other)]
     Unknown,
+}
+
+/// A wire word read as one of the enums above; a word it doesn't know is `None`.
+pub(super) fn wire<T: serde::de::DeserializeOwned>(word: &str) -> Option<T> {
+    serde_json::from_value(word.into()).ok()
 }
 
 impl Stage {
     fn of(word: &str) -> Stage {
-        match word {
-            "waiting" => Stage::Waiting,
-            "building" => Stage::Building,
-            "reviewing" => Stage::Reviewing,
-            "needs_you" => Stage::NeedsYou,
-            "landing" => Stage::Landing,
-            "landed" => Stage::Landed,
-            "dropped" => Stage::Dropped,
-            _ => Stage::Unknown,
-        }
+        wire(word).unwrap_or(Stage::Unknown)
     }
 
     /// Neither landed nor dropped.
@@ -82,7 +80,8 @@ impl Stage {
 }
 
 /// A card's status on the board, from the store's word or the board's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub(super) enum Status {
     Backlog,
     Todo,
@@ -90,22 +89,14 @@ pub(super) enum Status {
     InProgress,
     InReview,
     Done,
+    #[serde(alias = "canceled")]
     Cancelled,
 }
 
 impl Status {
+    /// The store's word (`needs_decision`) or the board's ("Needs Decision").
     fn of(word: &str) -> Option<Status> {
-        let folded: String = word.chars().filter(|c| *c != ' ' && *c != '_').collect::<String>().to_lowercase();
-        Some(match folded.as_str() {
-            "backlog" => Status::Backlog,
-            "todo" => Status::Todo,
-            "needsdecision" => Status::NeedsDecision,
-            "inprogress" => Status::InProgress,
-            "inreview" => Status::InReview,
-            "done" => Status::Done,
-            "cancelled" | "canceled" => Status::Cancelled,
-            _ => return None,
-        })
+        wire(&word.chars().filter(|c| *c != ' ' && *c != '_').collect::<String>().to_lowercase())
     }
 
     /// In review counts as in progress; waiting on a decision hasn't started.
@@ -119,8 +110,9 @@ impl Status {
 }
 
 /// Where a landing stands, from the wire's word.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum LandingPhase {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LandingPhase {
     WaitingForTickets,
     WaitingForPreviousLanding,
     WaitingForMain,
@@ -132,42 +124,13 @@ pub(super) enum LandingPhase {
     Landed,
     Stalled,
     Dropped,
+    #[serde(other)]
     Unknown,
 }
 
 impl LandingPhase {
     fn of(word: &str) -> LandingPhase {
-        match word {
-            "waiting_for_tickets" => LandingPhase::WaitingForTickets,
-            "waiting_for_previous_landing" => LandingPhase::WaitingForPreviousLanding,
-            "waiting_for_main" => LandingPhase::WaitingForMain,
-            "integrating" => LandingPhase::Integrating,
-            "gating_locally" => LandingPhase::GatingLocally,
-            "waiting_for_ci" => LandingPhase::WaitingForCi,
-            "ci_failed" => LandingPhase::CiFailed,
-            "ready_to_land" => LandingPhase::ReadyToLand,
-            "landed" => LandingPhase::Landed,
-            "stalled" => LandingPhase::Stalled,
-            "dropped" => LandingPhase::Dropped,
-            _ => LandingPhase::Unknown,
-        }
-    }
-
-    fn wire(self) -> &'static str {
-        match self {
-            LandingPhase::WaitingForTickets => "waiting_for_tickets",
-            LandingPhase::WaitingForPreviousLanding => "waiting_for_previous_landing",
-            LandingPhase::WaitingForMain => "waiting_for_main",
-            LandingPhase::Integrating => "integrating",
-            LandingPhase::GatingLocally => "gating_locally",
-            LandingPhase::WaitingForCi => "waiting_for_ci",
-            LandingPhase::CiFailed => "ci_failed",
-            LandingPhase::ReadyToLand => "ready_to_land",
-            LandingPhase::Landed => "landed",
-            LandingPhase::Stalled => "stalled",
-            LandingPhase::Dropped => "dropped",
-            LandingPhase::Unknown => "unknown",
-        }
+        wire(word).unwrap_or(LandingPhase::Unknown)
     }
 
     /// The phase inside a sentence: "Landing 86 checking on CI". Every word
@@ -191,10 +154,7 @@ impl LandingPhase {
 
     /// The phase alone, as a label.
     fn word(self, style: Style) -> String {
-        let s = self.sentence();
-        let mut chars = s.chars();
-        let capital: String = chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default();
-        style.label(&capital)
+        style.label(self.sentence())
     }
 
     fn explanation(self) -> &'static str {
@@ -390,14 +350,8 @@ impl<'a> Reader<'a> {
 
 // MARK: Words
 
-fn role_word(role: &str) -> &'static str {
-    match role {
-        "orchestrator" => "Orchestrator",
-        "builder" => "Builder",
-        "reviewer" => "Reviewer",
-        "lander" => "Lander",
-        _ => "Agent",
-    }
+fn role_word(role: &str) -> String {
+    words::title_case(if matches!(role, "orchestrator" | "builder" | "reviewer" | "lander") { role } else { "agent" })
 }
 
 /// "Builder · Sonnet": its role and its model, else its harness.
@@ -632,8 +586,49 @@ impl Reader<'_> {
             agent: agent.map(|a| self.agent_ref(a)),
             run,
             branch: line.branch.clone(),
+            note: None,
             accessibility,
         }
+    }
+}
+
+impl Reader<'_> {
+    /// A ticket on a live landing: its card, with the lines a landing says
+    /// differently. Waiting on the owner is its one warning, so it leads its
+    /// notes and is not also "stale"; "Ready" says nothing, so only a ticket
+    /// that waits and one that has landed carry a `note`; a ticket on a
+    /// landing shows no stage, run or time in stage (ov-522).
+    fn landing_ticket(&self, line: &Line) -> TicketCard {
+        let mut card = self.card(line, None, self.agent_of(line), None);
+        let waits = card.waits_on_owner;
+        let landed = self.stage(line) == Stage::Landed;
+        card.note = if waits {
+            Some("Needs you".to_string())
+        } else if landed {
+            Some(card.status.clone())
+        } else {
+            None
+        };
+        let over = self.over_budget(line);
+        let stale = if waits { None } else { self.stale(line) };
+        let note = |kind, text: &String| Note { kind, text: text.clone(), attention: true, help: None };
+        card.notes = card.note.iter().filter(|_| waits).map(|text| note(NoteKind::Warning, text))
+            .chain(stale.iter().map(|text| note(NoteKind::Warning, text)))
+            .chain(over.iter().map(|(text, _)| note(NoteKind::OverBudget, text)))
+            .collect();
+        card.mark_attention = !card.notes.is_empty();
+        let mut second: Vec<String> = card.note.iter().filter(|_| !waits).cloned().collect();
+        second.push(line.key.clone());
+        if !waits && stale.is_none() && line.stage_since > 0 && self.plan.now_ms > line.stage_since {
+            second.push(words::span(self.plan.now_ms - line.stage_since));
+        }
+        card.second = second.join(DOT);
+        card.accessibility = [Some(card.heading.clone()), card.note.clone(), stale, over.map(|(_, spoken)| spoken)]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
+        card
     }
 }
 
@@ -870,7 +865,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
                 subtitle: (!subtitle.is_empty() && subtitle != label).then(|| subtitle.to_string()),
                 label,
                 carries: (!landing.summary.is_empty()).then(|| landing.summary.clone()),
-                phase: phase.wire().to_string(),
+                phase,
                 phase_word: word.clone(),
                 phase_sentence: phase.sentence().to_string(),
                 explanation: phase.explanation().to_string(),
@@ -907,80 +902,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
                     parts.join(DOT)
                 }),
                 pushed_sha: landing.pushed_sha.clone(),
-                tickets: mine
-                    .into_iter()
-                    .map(|line| {
-                        let waits = r.waits_on_owner(line);
-                        let stage = r.stage(line);
-                        let landed = stage == Stage::Landed;
-                        let standing = if r.is_fixing(line) {
-                            if line.fix_rounds > 0 {
-                                format!("{}{DOT}round {}", style.label("fixing"), line.fix_rounds)
-                            } else {
-                                style.label("fixing")
-                            }
-                        } else {
-                            match stage {
-                                Stage::Landing => style.label("ready"),
-                                Stage::Landed => match line.landed_sha.as_deref().filter(|s| !s.is_empty()) {
-                                    Some(sha) => format!("{}{DOT}{}", stage.word(style), sha.chars().take(8).collect::<String>()),
-                                    None => stage.word(style),
-                                },
-                                other => other.word(style),
-                            }
-                        };
-                        // "Ready" said nothing: only a ticket that waits on the
-                        // owner, and one that has landed, say anything (ov-522).
-                        let note = if waits {
-                            Some("Needs you".to_string())
-                        } else if landed {
-                            Some(standing.clone())
-                        } else {
-                            None
-                        };
-                        let heading = r.heading(line);
-                        // "Needs you" is its note, said once: never stale too.
-                        let stale = if waits { None } else { r.stale(line) };
-                        let over = r.over_budget(line);
-                        let mut notes = Vec::new();
-                        if let Some(text) = &stale {
-                            notes.push(Note { kind: NoteKind::Warning, text: text.clone(), attention: true, help: None });
-                        }
-                        if let Some((text, _)) = &over {
-                            notes.push(Note { kind: NoteKind::OverBudget, text: text.clone(), attention: true, help: None });
-                        }
-                        let mut second: Vec<String> = Vec::new();
-                        if !waits {
-                            second.extend(note.clone());
-                        }
-                        second.push(line.key.clone());
-                        let now = plan.now_ms;
-                        if !waits && stale.is_none() && line.stage_since > 0 && now > line.stage_since {
-                            second.push(words::span(now - line.stage_since));
-                        }
-                        let accessibility = [Some(heading.clone()), note.clone(), stale, over.map(|(_, spoken)| spoken)]
-                            .into_iter()
-                            .flatten()
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        LandingTicket {
-                            id: line.task.clone(),
-                            key: line.key.clone(),
-                            heading,
-                            standing,
-                            note,
-                            note_attention: waits,
-                            waits_on_owner: waits,
-                            run: r.run_of(&line.key),
-                            mark: if r.is_fixing(line) { Mark::Fixing } else { stage.mark() },
-                            mark_attention: !notes.is_empty(),
-                            notes,
-                            branch: line.branch.clone(),
-                            second: second.join(DOT),
-                            accessibility,
-                        }
-                    })
-                    .collect(),
+                tickets: mine.into_iter().map(|line| r.landing_ticket(line)).collect(),
             }
         })
         .collect();
@@ -1023,6 +945,13 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
     .collect();
     let on_landed_landing: Vec<TicketCard> = parked.iter().map(|l| row(l, None)).collect();
 
+    // Landed on the runner's day, newest first.
+    let day = |ms: i64| (ms / 1000 + context.utc_offset).div_euclid(86_400);
+    let mut landed: Vec<&Line> =
+        plan.lines.iter().filter(|l| r.stage(l) == Stage::Landed && day(l.stage_since) == day(plan.now_ms)).collect();
+    landed.sort_by_key(|l| std::cmp::Reverse(l.stage_since));
+    let landed_today: Vec<TicketCard> = landed.into_iter().map(|l| row(l, None)).collect();
+
     let agents = agents(plan, style);
     let moving: BTreeSet<&str> = landings
         .iter()
@@ -1036,7 +965,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
     // something is queued, since the gap between Next and Landing is then
     // worth saying. Agents is left out for a runner that lists none.
     let waiting_count: usize = waiting.iter().map(|g| g.cards.len()).sum();
-    let kinds: [(SectionKind, &str, bool, usize, Option<String>); 8] = [
+    let kinds: [(SectionKind, &str, bool, usize, Option<String>); 9] = [
         (SectionKind::NeedsYou, "needs you", context.needs_you > 0, context.needs_you as usize, None),
         (SectionKind::Landing, "landing", true, landings.len(), Some("Nothing is landing right now.".into())),
         (SectionKind::InReview, "in review", !in_review.is_empty(), in_review.len(), None),
@@ -1052,6 +981,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         // Agents says what the day spent when it spent something.
         (SectionKind::Agents, "agents", context.agents_supported, agents.rows.len(), Some(agents.header.clone())),
         (SectionKind::Themes, "themes", !themes.tiles.is_empty() || !themes.finished.is_empty(), themes.tiles.len() + themes.finished.len(), None),
+        (SectionKind::LandedToday, "landed today", !landed_today.is_empty(), landed_today.len(), None),
     ];
     let sections = kinds
         .into_iter()
@@ -1061,7 +991,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
             title: style.label(title),
             count: count as u64,
             empty: if count == 0 { empty } else { None },
-            folded: kind == SectionKind::OnLandedLanding,
+            folded: matches!(kind, SectionKind::OnLandedLanding | SectionKind::LandedToday),
             help: (kind == SectionKind::Landing).then(|| LANDING_EXPLANATION.to_string()),
         })
         .collect();
@@ -1077,6 +1007,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         building,
         waiting,
         on_landed_landing,
+        landed_today,
         agents,
         themes,
         column,

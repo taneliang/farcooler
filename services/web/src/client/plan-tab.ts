@@ -51,8 +51,6 @@ export function startPlanTab(
   actions: PlanActions,
   /// The view model's presenter (wasm's `planView`).
   present: PlanPresenter,
-  /// The workspace's workflow presentation, or null when it has none.
-  presentation: (workspace: string) => Promise<unknown>,
 ): PlanTab {
   const live = (): WebRunner => {
     const r = current()
@@ -67,7 +65,6 @@ export function startPlanTab(
     workspace,
     workspaces: () => live().workspaces(),
     plan: workspace => live().plan(workspace),
-    presentation,
     setNext: (theme, next) => live().setThemeNext(theme, next),
     keep: ruling => live().keepRuling(ruling),
     keepAll: workspace => live().keepAllRulings(workspace),
@@ -115,7 +112,7 @@ export function startPlanTab(
     },
     listing(kind) {
       if (!last?.plan) return null
-      const view = presentPlan(present, last.raw, { needsYou: items.length, workflow: last.workflow })
+      const view = presentPlan(present, last.raw, { needsYou: items.length })
       return view ? { plan: last.plan, view, count: view.column.footer.find(c => c.kind === kind)?.count ?? 0 } : null
     },
     orchestrator: () => orchestratorOf(last?.plan ?? null),

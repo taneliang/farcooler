@@ -63,6 +63,7 @@ import com.farcooler.model.PlanGlanceSentence
 import com.farcooler.model.PlanView
 import com.farcooler.model.PlanViewMark
 import com.farcooler.model.PlanViewNote
+import com.farcooler.model.PlanViewKind
 import com.farcooler.model.PlanViewNoteKind
 import com.farcooler.model.PlanViewTicket
 import com.farcooler.model.PlanViews
@@ -200,29 +201,12 @@ private fun LazyListScope.loaded(
     // After Themes, as on the Mac and the iPhone (design 6.1): pages of their
     // own, and anchored ones whose theme is gone.
     pages?.let { pageItems(it, plan, onOpen) }
-    val landed = plan.landedToday()
-    if (landed.isNotEmpty()) {
-        val open = folds.isOpen(PlanFold.LANDED_TODAY)
+    view?.section(PlanViewKind.LANDED_TODAY)?.let { landed ->
+        val open = folds.isOpen(PlanFold.LANDED_TODAY, default = !landed.folded)
         item(key = "plan/landed") {
-            PlanHeader("Landed today", landed.size, Modifier.testTag("plan-landed-header"), open = open) { folds.toggle(PlanFold.LANDED_TODAY) }
+            PlanHeader(landed.title, landed.count, Modifier.testTag("plan-landed-header"), open = open) { folds.toggle(PlanFold.LANDED_TODAY) }
         }
-        if (open) {
-            itemsIndexedTickets(landed, "landed") { _, ticket ->
-                PlanLandedRow(ticket, plan.themeOf(ticket)) { onOpen(PlanPage.Ticket(ticket.task)) }
-            }
-        }
-    }
-}
-
-private fun LazyListScope.itemsIndexedTickets(
-    tickets: List<PlanTicket>,
-    group: String,
-    row: @Composable (Int, PlanTicket) -> Unit,
-) {
-    tickets.forEachIndexed { index, ticket ->
-        item(key = "plan/$group/${ticket.task}") {
-            row(index, ticket)
-        }
+        if (open) ticketRows(view.landedToday, "plan/landed", onOpen)
     }
 }
 
@@ -379,26 +363,6 @@ private fun PlanCardNote(key: String, note: PlanViewNote) {
         }
     }
     if (note.help.isNullOrEmpty()) line() else ExplainedOnLongPress(listOf(note.help)) { line() }
-}
-
-/** A ticket that landed today, in Landed today: its title, the theme it serves and its stage. The core's view doesn't carry these rows. */
-@Composable
-fun PlanLandedRow(ticket: PlanTicket, theme: PlanTheme?, onClick: () -> Unit) {
-    val second = listOfNotNull(PlanWords.status(ticket), ticket.key).joinToString(" · ")
-    val spoken = listOfNotNull(ticket.heading, theme?.name, second).joinToString(", ")
-    ListItem(
-        leadingContent = {
-            Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
-                Icon(planGlyph(ticket.stage), contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        },
-        overlineContent = theme?.let { { Text(it.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-ticket-${ticket.key}-theme")) } },
-        headlineContent = { Text(ticket.heading, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline) },
-        modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).testTag("plan-ticket-${ticket.key}")
-            .semantics(mergeDescendants = true) { contentDescription = spoken },
-    )
 }
 
 /**

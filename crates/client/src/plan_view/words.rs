@@ -18,8 +18,6 @@ pub enum Style {
     Apple,
     /// Sentence case, as Material says one.
     Material,
-    /// The web shows the Mac's words.
-    Web,
 }
 
 /// Words a title leaves lowercase unless they start or end it.
@@ -29,11 +27,8 @@ impl Style {
     /// A fixed phrase, written in sentence case, in this style's case.
     pub fn label(self, sentence: &str) -> String {
         match self {
-            Style::Material => {
-                let mut chars = sentence.chars();
-                chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
-            }
-            Style::Apple | Style::Web => title_case(sentence),
+            Style::Material => capitalize(sentence),
+            Style::Apple => title_case(sentence),
         }
     }
 
@@ -42,9 +37,15 @@ impl Style {
     pub fn from_title(self, title: &str) -> String {
         match self {
             Style::Material => sentence_case(title),
-            Style::Apple | Style::Web => title.to_string(),
+            Style::Apple => title.to_string(),
         }
     }
+}
+
+/// The first letter in capitals.
+pub fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// "Waiting for the next landing" as "Waiting for the Next Landing": every word
@@ -61,11 +62,7 @@ pub fn title_case(sentence: &str) -> String {
             if i != 0 && i != last && SMALL.contains(&bare) {
                 return word.to_string();
             }
-            let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect(),
-                None => String::new(),
-            }
+            capitalize(word)
         })
         .collect::<Vec<_>>()
         .join(" ")

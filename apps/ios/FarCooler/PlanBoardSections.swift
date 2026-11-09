@@ -192,7 +192,8 @@ struct PlanBoardSections: View {
         } else {
             // The Rust core's view decides the sections and their words
             // (ov-1016); a plan the runner sent always has one.
-            if let view = PlanViewBridge.view(plan: plan, facts: hook.facts, statuses: hook.statuses) {
+            let view = PlanViewBridge.view(plan: plan, facts: hook.facts, statuses: hook.statuses)
+            if let view {
                 if hook.showsBand {
                     Section {
                         PhoneGlanceBand(band: PlanGlanceSentence(view: view), needsYou: hook.facts.needsYou)
@@ -200,6 +201,9 @@ struct PlanBoardSections: View {
                     }
                 }
                 PlanSectionsList(view: view, plan: plan, hook: hook)
+            } else {
+                // The core couldn't read the plan: say so, as Android and the web do.
+                Section { PlanNotice(title: PlanWords.couldntRead, detail: nil).accessibilityIdentifier("plan-unreadable") }
             }
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = plan.cost, cost.isWorthShowing {
@@ -210,24 +214,18 @@ struct PlanBoardSections: View {
                 }
             }
             pagesSection(plan)
-            let landed = plan.landedToday()
-            if !landed.isEmpty {
+            if let view, let landed = view.section(.landedToday) {
                 Section {
                     if landedOpen {
-                        ForEach(landed) { line in
-                            PlanTicketRow(
-                                line: line, theme: plan.theme(of: line), rank: nil, now: plan.nowMs,
-                                waitsOnOwner: false
-                            ) { hook.onOpen(.ticket(line.task)) }
-                        }
+                        ForEach(view.landedToday) { card in PlanCardRow(card: card) { hook.onOpen(.ticket(card.id)) } }
                     }
                 } header: {
                     Button { withAnimation { landedOpen.toggle() } } label: {
-                        PlanHeader(title: "Landed Today", count: landed.count, open: landedOpen)
+                        PlanHeader(title: landed.title, count: landed.count, open: landedOpen)
                     }
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Landed Today, \(landed.count)")
+                    .accessibilityLabel("\(landed.title), \(landed.count)")
                     .accessibilityValue(landedOpen ? "Expanded" : "Collapsed")
                     .accessibilityIdentifier("plan-landed-header")
                 }
@@ -340,151 +338,6 @@ enum PlanGlyph {
         case .landed: "checkmark.circle"
         case .dropped: "xmark.circle"
         case .unknown: "questionmark.circle"
-        }
-    }
-}
-
-/// One ticket's row: its title and the theme it serves, then its reason or
-/// state. In Next Up its rank sits in the glyph column; elsewhere its state's
-/// glyph does, amber only when it's stale, waiting on you or over its token
-/// budget (ov-307).
-struct PlanTicketRow: View {
-    let line: PlanTicketLine
-    let theme: PlanTheme?
-    /// Its place in Next Up, or nil.
-    let rank: Int?
-    let now: Int64
-    let waitsOnOwner: Bool
-    /// What it says of itself on a landing, in place of its own state's
-    /// words (ov-503, ov-522): "Landed · 3f78754f", or nothing (empty) while
-    /// it is simply on it.
-    var standing: String?
-    /// The agent that works it, for the line under its title.
-    var agent: PlanAgent?
-    /// The landed landing it still names, when its state doesn't already say.
-    var landedLanding: String?
-    let action: () -> Void
-    @Environment(\.colorScheme) private var scheme
-    /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
-    @ScaledMetric(relativeTo: .subheadline) private var markWidth: CGFloat = 22
-    /// At accessibility sizes the name, the theme and the second line wrap
-    /// rather than cut off (ov-653).
-    @Environment(\.dynamicTypeSize) private var type
-
-    /// Stale, or waiting on you: the only tickets drawn in color.
-    private var warning: String? {
-        waitsOnOwner ? "Needs you" : PlanWords.stale(line, now: now)
-    }
-
-    /// Over its token budget (ov-307), drawn beside whatever else it is.
-    private var overBudget: String? { PlanWords.overBudget(line) }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.card) {
-                mark.frameProbe("plan-ticket-mark").frame(width: markWidth, alignment: .leading)
-                VStack(alignment: .leading, spacing: 2) {
-                    // Which theme it serves (the owner's ask, ov-273): beside
-                    // the name, or under it when the name takes the line.
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
-                            name
-                            Spacer(minLength: 0)
-                            themeName
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            name
-                            themeName
-                        }
-                    }
-                    Text(second)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(type.isAccessibilitySize ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    stageLine
-                    ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { words in
-                        Text(words)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(GlancePalette.amber(scheme))
-                            .accessibilityLabel(words == overBudget ? (PlanWords.overBudgetSpoken(line) ?? words) : words)
-                    }
-                }
-                Image(systemName: "chevron.forward")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        // What VoiceOver reads is what's drawn: the rank, the name, the theme,
-        // the reason or state, and a warning, in that order.
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("plan-ticket-\(line.key)")
-        .probesShown()
-    }
-
-    private var name: some View {
-        Text(line.heading)
-            .font(.subheadline.weight(.medium))
-            .lineLimit(type.isAccessibilitySize ? nil : 2)
-            .fixedSize(horizontal: false, vertical: true)
-            .layoutPriority(1)
-            .frameProbe("plan-ticket-name")
-    }
-
-    @ViewBuilder private var themeName: some View {
-        if let theme {
-            Text(theme.name)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(type.isAccessibilitySize ? nil : 1)
-                .truncationMode(.tail)
-                .fixedSize(horizontal: false, vertical: type.isAccessibilitySize)
-                .accessibilityIdentifier("plan-ticket-\(line.key)-theme")
-        }
-    }
-
-    /// Next Up's reason; elsewhere, the stage with its round, landing or
-    /// commit.
-    private var second: String {
-        if rank != nil { return line.reason.isEmpty ? line.key : line.reason }
-        // The stage has a line of its own, so the state keeps only what it leaves
-        // to it ("Approved" beside "Checks Failing", ov-316).
-        let state = standing ?? (line.shownStage == nil ? nil : PlanWords.status(line, stage: false))
-        return PlanWords.ticketSecond(line, agent: agent, landedLanding: landedLanding, now: now, aged: warning == nil, state: state)
-    }
-
-    /// Where its pull request stands (ov-317), on a line of its own: gray, or
-    /// amber for what needs a person, which leads with the problem (Changes
-    /// Requested, Checks Failing, Merge Conflicts). Building is the state's
-    /// word already, and a login too long for the line is cut in the middle.
-    @ViewBuilder private var stageLine: some View {
-        if rank == nil, let stage = line.shownStage, let words = stage.rowWords {
-            let attention = stage.needsAttention
-            Text(words)
-                .font(.footnote.weight(attention ? .medium : .regular))
-                .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .accessibilityIdentifier("plan-ticket-\(line.key)-stage\(attention ? "-attention" : "")")
-        }
-    }
-
-    @ViewBuilder private var mark: some View {
-        if let rank {
-            Text("\(rank)")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-        } else {
-            Image(systemName: PlanGlyph.name(line.stage, fixing: line.isFixing))
-                .font(.subheadline)
-                .foregroundStyle(
-                    warning == nil && overBudget == nil && line.shownStage?.needsAttention != true
-                        ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
-                .accessibilityHidden(true)
         }
     }
 }

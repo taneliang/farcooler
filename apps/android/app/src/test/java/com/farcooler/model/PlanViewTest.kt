@@ -32,7 +32,7 @@ class PlanViewTest {
         assertEquals(
             listOf(
                 PlanViewKind.NEEDS_YOU, PlanViewKind.LANDING, PlanViewKind.IN_REVIEW, PlanViewKind.BUILDING,
-                PlanViewKind.WAITING, PlanViewKind.AGENTS, PlanViewKind.THEMES,
+                PlanViewKind.WAITING, PlanViewKind.AGENTS, PlanViewKind.THEMES, PlanViewKind.LANDED_TODAY,
             ),
             view.sections.map { it.kind },
         )
@@ -62,16 +62,10 @@ class PlanViewTest {
     }
 
     @Test
-    fun `a reply that is not a view decodes to none, and a word this build has none for reads as unknown`() {
+    fun `a reply that is not a view decodes to none`() {
         assertNull(PlanView.decode(null))
         assertNull(PlanView.decode("""{"schema":1,"view":null,"error":"invalid"}"""))
         assertNull(PlanView.decode("not json"))
-        val view = PlanView.decode(
-            """{"schema":1,"view":{"sections":[{"kind":"tomorrow","title":"T"}],"in_review":[{"id":"a","mark":"floating","notes":[{"kind":"new","text":"x"}]}]}}""",
-        )!!
-        assertEquals(PlanViewKind.UNKNOWN, view.sections.single().kind)
-        assertEquals(PlanViewMark.UNKNOWN, view.inReview.single().mark)
-        assertEquals(PlanViewNoteKind.UNKNOWN, view.inReview.single().notes.single().kind)
     }
 
     @Test
@@ -83,7 +77,7 @@ class PlanViewTest {
         assertEquals(request.getValue("plan"), sent.getValue("plan"))
         assertEquals(request.getValue("workflow"), sent.getValue("workflow"))
         assertEquals("material", sent.getValue("context").jsonObject.getValue("style").jsonPrimitive.content)
-        assertEquals(request.getValue("context"), sent.getValue("context").jsonObject.let { JsonObject(it - "agents_supported" - "activity") })
+        assertEquals(request.getValue("context"), sent.getValue("context").jsonObject.let { JsonObject(it - "agents_supported" - "activity" - "utc_offset") })
         assertFalse("no workflow when not asked", "workflow" in Json.parseToJsonElement(PlanViews.request(plan, 2, statuses, emptyMap(), withWorkflow = false)!!).jsonObject)
         assertNull("a plan built by hand has no wire to send", PlanViews.request(Plan(), 0, emptyMap(), emptyMap(), withWorkflow = false))
     }
@@ -95,7 +89,7 @@ class PlanViewTest {
         PlanViews.bridge = { asked++; golden.getValue("answer").toString() }
         val first = PlanViews.of(plan, 2)
         assertNotNull(first)
-        assertEquals(7, first!!.sections.size)
+        assertEquals(8, first!!.sections.size)
         assertSame(first, PlanViews.of(plan, 2))
         assertEquals(1, asked)
         PlanViews.of(plan, 3)

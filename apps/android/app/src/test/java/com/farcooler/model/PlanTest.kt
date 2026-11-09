@@ -9,7 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
-import java.util.TimeZone
 
 /**
  * The plan layer on Android (ov-274), against the bytes the Rust client makes of
@@ -91,7 +90,6 @@ class PlanTest {
         assertEquals(listOf("ov-2"), plan.nextUp.map { it.key })
         assertEquals(listOf("ov-1", "ov-4"), plan.working.map { it.key })
         assertTrue(plan.unranked.isEmpty())
-        assertEquals(listOf("ov-3"), plan.landedToday(TimeZone.getTimeZone("UTC")).map { it.key })
         val unranked = plan.copy(tickets = plan.tickets.map { it.copy(planRank = null) })
         assertEquals(listOf("ov-2"), unranked.unranked.map { it.key })
         assertTrue(unranked.nextUp.isEmpty())
