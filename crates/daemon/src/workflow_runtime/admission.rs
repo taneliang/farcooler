@@ -83,8 +83,8 @@ impl Admission {
             _ => unreachable!(),
         }
     }
-    /// A member in person, rather than the owner or an orchestrator pane: they read runs, and a Maintainer
-    /// cancels and sends back (ov-1000), and nothing else.
+    /// A member in person, rather than the owner or an orchestrator pane: they read runs, and act on them where
+    /// they lead or as a Maintainer (R-107, ov-1000).
     fn member_in_person(&self) -> bool { self.seat == Seat::Person && matches!(self.person, Person::Member(_)) }
     // Informational context only. Generation and all retained caller proofs bind
     // the Session guard; receipt/mutation authority is always recomputed here.
@@ -94,7 +94,7 @@ impl Admission {
                 self.caller_pid, self.incarnation, self.seat, &self.terminal, self.session.workflow_auth_generation()))));
         serde_json::json!({"binding":binding,"capabilities":{
             "workspace":self.workspace.to_string(),"epoch":epoch,"inspect":true,
-            "controller":self.permits_cancel(),"decision_principal":self.principal()}})
+            "controller":self.acts(),"decision_principal":self.principal()}})
     }
     /// For the commands an agent must not run on a person's behalf.
     pub(crate) fn require_person(&self) -> Result<()> {
@@ -116,20 +116,26 @@ impl Admission {
             return Err(DomainError::ScopeDenied { needed: "person" });
         }
         if self.member_in_person() {
-            // Read now, at consumption too: a role taken away while a command waits refuses it.
-            let maintains = crate::people::maintains(&self.service.store, &self.person)?;
+            // Read now, at consumption too: a role or a lead taken away while a command waits refuses it.
+            let store = &self.service.store;
             return match action {
                 Action::Get => Ok(()),
-                Action::Cancel { .. } | Action::SendBack { .. } if maintains => Ok(()),
-                // As the people gate answers a member's device asking for the owner's (`Ruling::Owners`).
+                // Settling a push stays the owner's.
+                Action::Settle { .. } => Err(DomainError::NotYours { what: "not_yours" }),
+                // Only through a draft a Maintainer approved (`workflow_drafts`): `workspace.set_workflow` is
+                // the owner's at dispatch (R-107).
+                Action::Publish { .. } if crate::people::maintains(store, &self.person)? => Ok(()),
+                Action::Publish { .. } => Err(DomainError::NotYours { what: "not_yours" }),
+                _ if crate::people::acts_on_runs(store, &self.person, self.workspace)? => Ok(()),
+                // As the people gate answers a member's device (`Ruling::Engine`).
                 _ => Err(DomainError::NotYours { what: "not_yours" }),
             };
         }
         Ok(())
     }
-    /// Whether this caller may cancel a run, for the apps' `controller` (informational only).
-    fn permits_cancel(&self) -> bool {
-        !self.member_in_person() || crate::people::maintains(&self.service.store, &self.person).unwrap_or(false)
+    /// Whether this caller acts on runs, for the apps' `controller` (informational only).
+    fn acts(&self) -> bool {
+        !self.member_in_person() || crate::people::acts_on_runs(&self.service.store, &self.person, self.workspace).unwrap_or(false)
     }
 
     /// Whether `person`, whose this caller is, may reach this workspace's
@@ -140,8 +146,8 @@ impl Admission {
     ///   lead this workspace (ov-999). It is still the `orchestrator`
     ///   principal, refused what the owner's orchestrator is refused.
     /// - A member in person, from their own device or a shell pane on their
-    ///   login (ov-1000): `permits` then holds them to reading runs, and a
-    ///   Maintainer to cancelling and sending back too.
+    ///   login (ov-1000): `permits` then holds them to reading runs, and to
+    ///   acting on them where they lead or as a Maintainer (R-107).
     fn admits(&self, person: &Person) -> bool {
         let local = self.peer.client_id.is_none() && self.authority.person == Person::Owner;
         match person {

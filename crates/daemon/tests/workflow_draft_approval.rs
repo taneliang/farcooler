@@ -326,3 +326,46 @@ async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion
     drop(link);
     host.close().await;
 }
+
+/// Ruling R-107: approving a workflow change is the owner's and a Maintainer's. Alice answers from her phone with
+/// the words that approve it: as a plain member her answer decides nothing and she is asked again; made a
+/// Maintainer, the same answer publishes it. Whose the answer is, the daemon reads from her device.
+#[tokio::test]
+async fn a_maintainers_answer_publishes_and_a_plain_members_does_not() {
+    use farcooler_transport::Handler as _;
+    if as_a_person("a_maintainers_answer_publishes_and_a_plain_members_does_not").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    let store = &host.service.store;
+    store.bind_owner_device("phone-a", None).unwrap();
+    store.set_member("alice", "Alice", &["phone-a".into()]).unwrap();
+    let reply = propose(&mut link, ws, bundle(&config, "ticket-push", "make check"), "Gate every push on make check.").await;
+    let card = card_of(&reply);
+    let (ask, words) = asked(&host, card);
+    let phone = RpcFactory::new(host.service.clone(), Watcher::new(host.service.clone()), Arc::new(tokio::sync::Notify::new()),
+        farcooler_transport::Peer { client_id: Some("phone-a".into()), scope: pb::Scope::Control });
+    let answer = |body: String| {
+        let mut req = farcooler_transport::request("task.note");
+        req.payload = Some(request::Payload::TaskNoteAppend(pb::TaskNoteAppend { task_id: bytes::Bytes::copy_from_slice(card.as_bytes()),
+            kind: pb::TaskNoteKind::Answer as i32, body, extra_json: String::new(), supersedes: None, actor: String::new() }));
+        let reply = phone.handle(req);
+        async move { assert!(matches!(reply.await.outcome, Some(pb::response::Outcome::Result(_))), "Alice's answer was taken") }
+    };
+
+    answer(words.clone()).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(pin(&host), None, "a plain member's answer publishes nothing");
+    let (again, _) = asked(&host, card);
+    assert_ne!(again.id, ask.id, "asked again, so the card is back in Needs You");
+    assert_eq!(store.get_task(card).unwrap().status, TaskStatus::NeedsDecision);
+    let said = store.notes_for(card, Some(NoteKind::Answer)).unwrap().pop().unwrap();
+    assert_eq!(said.actor.to_string(), "member:alice", "filed as Alice's");
+
+    store.set_member_role("alice", farcooler_store::member_roles::Role::Maintainer, "user").unwrap();
+    answer(words).await;
+    settles(&host, card, TaskStatus::Done).await;
+    assert_eq!(host.service.store.workflow_configuration(&ws.to_string()).unwrap().expect("published").definition.source, "landing/ticket-push");
+    drop(link);
+    host.close().await;
+}

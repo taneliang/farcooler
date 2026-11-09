@@ -314,13 +314,12 @@ async fn workflow_a_member_led_orchestrator_is_refused_on_another_workspace() {
     }
 }
 
-/// ov-999: `workflow.*` dispatch admits a member's pane only on the
-/// workspace they lead, as owner-only, before admission is asked. Alice's own
-/// shell, an agent nowhere, asking to enqueue: refused there where she
-/// doesn't lead (`scope-denied`); where she does, admission takes her as a
-/// member in person, who only reads and, as a Maintainer, cancels and sends
-/// back (ov-1000), and refuses it (`not-yours`). Remove the check in
-/// `Rpc::engine_caller` and the first answers `not-yours` too.
+/// ov-999: `workflow.*` dispatch lets a member's pane reach the engine only
+/// on a workspace they lead (or as a Maintainer, R-107), before admission is
+/// asked. Alice's own shell, an agent nowhere, asking to enqueue: refused
+/// there where she doesn't lead (`scope-denied`); where she does, admitted,
+/// as `member:alice`. Remove the check in `Rpc::engine_caller` and the first
+/// is refused by admission instead (`not-yours`).
 #[tokio::test]
 async fn workflow_dispatch_admits_a_member_only_where_they_lead() {
     let (_dir, svc, repo) = crate::test_support::fixture().await;
@@ -332,12 +331,15 @@ async fn workflow_dispatch_admits_a_member_only_where_they_lead() {
     runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { notifications: None, adapter: None,
         mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap();
     let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));
-    for (lead, word) in [(None, "scope-denied"), (Some("alice"), "not-yours")] {
-        svc.store.set_workspace_lead(workspace, lead).unwrap();
-        let before = snapshot(&runtime, workspace);
-        let (reply, reached) = sent(&mut runtime, &rpc, workspace, &Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() }).await;
-        assert_eq!(refused(&reply), word, "lead {lead:?}");
-        assert!(!reached);
-        assert_eq!(snapshot(&runtime, workspace), before);
-    }
+    let enqueue = Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() };
+    svc.store.set_workspace_lead(workspace, None).unwrap();
+    let before = snapshot(&runtime, workspace);
+    let (reply, reached) = sent(&mut runtime, &rpc, workspace, &enqueue).await;
+    assert_eq!(refused(&reply), "scope-denied", "where she doesn't lead");
+    assert!(!reached);
+    assert_eq!(snapshot(&runtime, workspace), before);
+    svc.store.set_workspace_lead(workspace, Some("alice")).unwrap();
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &enqueue).await;
+    ok(&reply);
+    assert!(runtime.events(&workspace.to_string()).unwrap().iter().any(|e| e.source == "wire:member:alice"), "as Alice, not the owner");
 }

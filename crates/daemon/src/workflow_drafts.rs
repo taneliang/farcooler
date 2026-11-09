@@ -10,9 +10,9 @@
 //! the definition, the adapter and the summary. Only a client that shows the whole question shows the code,
 //! and an answer approves only the draft whose content it was cut from.
 //!
-//! **Nothing publishes without the owner.** The only way out of `Pending` into a published workflow is
-//! `after_note`: the owner's answer to the draft's own, latest question, not said from a pane (an
-//! orchestrator's answer is the manager's and decides nothing). Nobody else can ask on a draft's card or
+//! **Nothing publishes without the owner or a Maintainer** (ruling R-107). The only way out of `Pending` into a
+//! published workflow is `after_note`: their answer to the draft's own, latest question, not said from a pane
+//! (an orchestrator's answer is the manager's and decides nothing). Nobody else can ask on a draft's card or
 //! rewrite it (`refuse_on_card`). It publishes through the ordinary `Publish` command, admitted as that
 //! person, so every check `workspace set-workflow` makes is made here too.
 //!
@@ -49,7 +49,7 @@ pub enum State {
     OutOfDate,
     /// A newer draft took its place.
     Replaced,
-    /// The owner approved it and it is being published now.
+    /// The owner or a Maintainer approved it and it is being published now.
     Publishing,
     /// A person approved it and publishing was refused. The card says why.
     Failed,
@@ -260,13 +260,14 @@ pub(crate) async fn note(rpc: &crate::rpc::Rpc, value: farcooler_protocol::v1::r
     Ok(value)
 }
 
-/// The owner's word on a draft's card. Called after every `task.note`; does nothing unless the note is an
-/// answer by the owner themself (not said from a pane) to a pending draft's card, after the daemon's own,
+/// The owner's or a Maintainer's word on a draft's card. Called after every `task.note`; does nothing unless the
+/// note is a person's answer (not said from a pane) to a pending draft's card, after the daemon's own,
 /// latest question, whose content still digests to what the card was asked with. `decline` declines it;
 /// `approve <code>` with this draft's code approves it. Any other answer asks again, since an answer takes
 /// the card out of Needs You.
 pub(crate) async fn after_note(rpc: &crate::rpc::Rpc, note: &pb::TaskNote) {
-    if note.kind != pb::TaskNoteKind::Answer as i32 || note.actor != "user" { return; }
+    // A person's answer: the owner's, written `user`, or a member's, written `member:<handle>` from their device.
+    if note.kind != pb::TaskNoteKind::Answer as i32 || !(note.actor == "user" || note.actor.starts_with("member:")) { return; }
     let svc = &rpc.service;
     let (Ok(task), Ok(answer)) = (crate::task_ops::required_id(&note.task_id), crate::task_ops::required_id(&note.id)) else { return };
     let Some(draft) = for_task(svc, task).filter(|d| d.state == State::Pending) else { return };
@@ -281,16 +282,21 @@ pub(crate) async fn after_note(rpc: &crate::rpc::Rpc, note: &pb::TaskNote) {
         }
         return;
     }
-    // A member's answer is not the owner's: it decides nothing, and the owner is asked again.
-    let owner = matches!(rpc.caller(), Ok(crate::people::Person::Owner));
+    // Approving a workflow change is the owner's and a Maintainer's (ruling R-107). Anyone else's answer decides
+    // nothing, and they are asked again. Whose the answer is, the daemon reads (`caller_person`), never the note.
+    let decides = match rpc.caller() {
+        Ok(crate::people::Person::Owner) => true,
+        Ok(member @ crate::people::Person::Member(_)) => crate::people::maintains(&svc.store, &member).unwrap_or(false),
+        _ => false,
+    };
     let words = note.body.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
-    if owner && words == DECLINE {
+    if decides && words == DECLINE {
         if settle(svc, &draft.id, State::Pending, State::Declined, Some(answer)).unwrap_or(false) { close_card(svc, &rpc.watcher, task, TaskStatus::Cancelled, "Declined. The workflow is unchanged."); }
-    } else if owner && words == format!("{APPROVE} {}", code(&draft.digest)) {
+    } else if decides && words == format!("{APPROVE} {}", code(&draft.digest)) {
         approve(rpc, draft, task, answer).await;
     } else {
-        let why = if owner { format!("Nothing was published. To publish this change, read it on the card and answer with the words at its end. To leave things as they are, answer `{DECLINE}`.") }
-            else { "Nothing was published. Only the owner can approve or decline a workflow change.".to_string() };
+        let why = if decides { format!("Nothing was published. To publish this change, read it on the card and answer with the words at its end. To leave things as they are, answer `{DECLINE}`.") }
+            else { "Nothing was published. Only the owner or a Maintainer can approve or decline a workflow change.".to_string() };
         let _ = svc.store.add_note(task, NoteKind::Finding, Actor::Manager, &why, serde_json::json!({}));
         if ask(svc, &draft, task).is_ok() && let Ok(card) = svc.store.get_task(task) { rpc.watcher.announce_task_changed(&card, None, Actor::Manager); }
         rpc.watcher.announce_needs_you();

@@ -1,5 +1,6 @@
-//! ov-1000: members see engine runs; Maintainers cancel and send back. Through `workflow.*` dispatch, from a
-//! member's own device, with the people gate and admission both in the way.
+//! ov-1000, ruling R-107: members see engine runs; a workspace's lead acts on its runs, and a Maintainer on any
+//! workspace's. Through `workflow.*` dispatch, from a member's own device, with the people gate and admission
+//! both in the way.
 use super::*;
 use super::admission_tests::{factory, held, mutation, ok, receipt, refused, sent, snapshot};
 use super::coding_tests::configured;
@@ -71,7 +72,7 @@ async fn workflow_a_member_reads_runs_and_drives_nothing() {
 }
 
 /// A plain member may not send a run back or cancel it, and nothing reaches the engine; made a Maintainer, they
-/// may, as `member:alice`.
+/// may, as `member:alice`, on a workspace they don't lead.
 #[tokio::test]
 async fn workflow_a_maintainer_cancels_and_sends_back_and_a_member_may_not() {
     let (_dir, svc, repo) = crate::test_support::fixture().await;
@@ -114,4 +115,68 @@ async fn workflow_a_maintainers_cancel_is_refused_when_the_role_goes_while_it_wa
             svc.store.set_member_role("alice", Role::Member, "user").unwrap();
         }).await;
     }
+}
+
+/// Ruling R-107: a workspace's lead acts on its runs from their own phone, and on no other workspace's.
+#[tokio::test]
+async fn workflow_a_lead_acts_on_their_own_workspace_only() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let other = svc.store.create_workspace(repo, "Other", "oth").unwrap().id;
+    let phone = alices_phone(&svc);
+    svc.store.set_workspace_lead(workspace, Some("alice")).unwrap();
+    let (_run, mut runtime) = a_failed_run(workspace).await;
+    let rpc = factory(&svc, &runtime, phone, None);
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &Action::Get).await;
+    assert_eq!(receipt(&reply).pointer("/context/capabilities/controller").and_then(|p| p.as_bool()), Some(true), "the lead acts");
+    let action = send_back(&runtime, workspace, "b", 1);
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &action).await;
+    ok(&reply);
+    let action = cancel(&runtime, workspace, "c", 2);
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &action).await;
+    ok(&reply);
+    let pin = coding_definition(false).pin();
+    let before = snapshot(&runtime, other);
+    let (reply, reached) = sent(&mut runtime, &rpc, other, &Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin }).await;
+    assert_eq!(refused(&reply), "not-yours", "not her workspace");
+    assert!(!reached);
+    assert_eq!(snapshot(&runtime, other), before);
+}
+
+/// A lead's cancel held in the engine's inbox while the lead passes to someone else is refused when used.
+#[tokio::test]
+async fn workflow_a_leads_cancel_is_refused_when_the_lead_moves_while_it_waits() {
+    for moved in [true, false] {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let phone = alices_phone(&svc);
+        svc.store.set_member("bob", "Bob", &[]).unwrap();
+        svc.store.set_workspace_lead(workspace, Some("alice")).unwrap();
+        let (_run, mut runtime) = a_failed_run(workspace).await;
+        let rpc = factory(&svc, &runtime, phone, None);
+        let action = cancel(&runtime, workspace, "c", 1);
+        held(&mut runtime, &rpc, workspace, action, moved, || if moved {
+            svc.store.set_workspace_lead(workspace, Some("bob")).unwrap();
+        }).await;
+    }
+}
+
+/// R-107: setting a workflow outright stays the owner's. A Maintainer who leads the workspace, in her own shell,
+/// is refused `workspace.set_workflow` at dispatch and nothing is published; she approves a draft instead.
+#[tokio::test]
+async fn workflow_a_maintainer_does_not_set_a_workflow_outright() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let (_pane, pid) = super::admission_tests::alices_pane(&svc, repo, workspace, false).await;
+    svc.store.set_member_role("alice", Role::Maintainer, "user").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+    let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));
+    let before = snapshot(&runtime, workspace);
+    let publish = Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None,
+        definition: coding_definition(false) };
+    let (reply, reached) = sent(&mut runtime, &rpc, workspace, &publish).await;
+    assert_eq!(refused(&reply), "scope-denied");
+    assert!(!reached);
+    assert_eq!(snapshot(&runtime, workspace), before);
 }

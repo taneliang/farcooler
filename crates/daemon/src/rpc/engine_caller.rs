@@ -1,31 +1,25 @@
-//! Who may send a workspace's engine a `workflow.*` command at all (ov-999, ov-1000).
+//! Who may send a workspace's engine a `workflow.*` command at all (ov-999, ruling R-107).
 use super::*;
 
 impl Rpc {
-    /// Who may send `workspace`'s engine `method` at all:
+    /// Who may send `workspace`'s engine `method` at all (ruling R-107):
     /// - the owner;
-    /// - a pane on the login of the member who leads `workspace` (ov-999),
-    ///   never a member's device;
-    /// - any member, to read its runs (`workflow.get`), and a Maintainer to
-    ///   cancel and send back (ov-1000), the way they keep workspace settings.
+    /// - any member, to read its runs (`workflow.get`);
+    /// - the member who leads `workspace`, from their own device or shell or
+    ///   their orchestrator pane (ov-999), and a Maintainer on any workspace,
+    ///   to act on its runs (`people::acts_on_runs`, ov-1000).
     ///
-    /// A member reaches no other command, and no workspace they don't lead
-    /// but for those. This only narrows: `admit` then proves who the caller
-    /// is, and `Admission::permits` holds a member to the same list when the
-    /// command is used.
+    /// Setting a workflow outright and settling a push stay the owner's. This
+    /// only narrows: `admit` then proves who the caller is, and
+    /// `Admission::permits` asks the same again when the command is used.
     pub(super) fn engine_caller(&self, workspace: Uuid, method: &str) -> Result<()> {
         use crate::people::Person;
         let person = self.caller()?;
-        let Person::Member(handle) = &person else {
-            return if person == Person::Owner { Ok(()) } else { Err(DomainError::ScopeDenied { needed: "owner" }) };
-        };
-        if self.peer.client_id.is_none() && self.service.store.workspace_lead(workspace)?.as_deref() == Some(handle.as_str()) {
-            return Ok(());
-        }
-        match method {
-            "workflow.get" => Ok(()),
-            "workflow.cancel" | "workflow.send_back" if crate::people::maintains(&self.service.store, &person)? => Ok(()),
-            "workflow.cancel" | "workflow.send_back" => Err(DomainError::NotYours { what: "not_yours" }),
+        let owners = matches!(method, "workspace.set_workflow" | "workflow.settle");
+        match &person {
+            Person::Owner => Ok(()),
+            Person::Member(_) if method == "workflow.get" => Ok(()),
+            Person::Member(_) if !owners && crate::people::acts_on_runs(&self.service.store, &person, workspace)? => Ok(()),
             _ => Err(DomainError::ScopeDenied { needed: "owner" }),
         }
     }

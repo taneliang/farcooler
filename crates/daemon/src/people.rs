@@ -147,6 +147,16 @@ pub fn maintains(store: &Store, person: &Person) -> Result<bool> {
     })
 }
 
+/// Whether `person` may act on `workspace`'s engine runs, beyond reading them
+/// (ruling R-107, ov-1000): the owner; a Maintainer, on any workspace; the
+/// workspace's lead, on theirs. Never a released device. What only the owner
+/// does (`workspace.set_workflow`, settling a push, a cutover) is ruled
+/// `Owners` and never asked here; a Maintainer also approves a workflow draft
+/// (`workflow_drafts`).
+pub fn acts_on_runs(store: &Store, person: &Person, workspace: Uuid) -> Result<bool> {
+    Ok(maintains(store, person)? || (matches!(person, Person::Member(_)) && leads(store, person, workspace)?))
+}
+
 /// Whether `person` may start `handle`'s rep (`rep.start`), and so wake it
 /// with a message: the owner starts anyone's, a member only their own,
 /// runner admin or not (ov-716 rule 3). A rep runs on its member's login
@@ -448,6 +458,17 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         && !maintains(store, &person_of(store, peer)?)?
     {
         tracing::info!(method = %req.method, "refused: a member who isn't a Maintainer changing a workspace");
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    // An engine run is acted on by the owner, a Maintainer and the
+    // workspace's lead (R-107, ov-1000). A request naming no workspace is its
+    // handler's to refuse.
+    if peer.client_id.is_some()
+        && ruling_of(req) == Some(Ruling::Engine)
+        && let Some(workspace) = req.target_resource_id.as_deref().and_then(crate::wire::parse_id)
+        && !acts_on_runs(store, &person_of(store, peer)?, workspace)?
+    {
+        tracing::info!(method = %req.method, "refused: an engine command from someone who neither leads nor maintains");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     // A charter is edited by the owner, its workspace's lead and a

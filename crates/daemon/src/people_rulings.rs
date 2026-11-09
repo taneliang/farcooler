@@ -55,11 +55,16 @@ pub enum Ruling {
     /// lead's and a Maintainer's (`people::may_edit_charter`). A rep never
     /// edits it (`rep_may`); it asks the orchestrator.
     Charter,
-    /// A workspace's name and key prefix (ov-784), and cancelling an engine
-    /// run or sending it back (ov-1000): the owner's and a Maintainer's
-    /// (`people::maintains`), never a lead's for being one. A rep never
-    /// does either (`rep_may`).
+    /// A workspace's name and key prefix (ov-784): the owner's and a
+    /// Maintainer's (`people::maintains`), never a lead's for being one. A
+    /// rep never changes them (`rep_may`).
     Maintains,
+    /// Acting on a workspace's engine runs (ruling R-107, ov-1000): the
+    /// owner's, a Maintainer's on any workspace, and the lead's on theirs
+    /// (`people::acts_on_runs`), from their own device or shell, and the
+    /// lead's orchestrator's (ov-999). Admission asks again when the engine
+    /// uses the command (`Admission::permits`). A rep never does (`rep_may`).
+    Engine,
     /// The owner's alone, refused `not_yours`, for the reason given.
     Owners(Why),
 }
@@ -86,7 +91,10 @@ pub enum Why {
 pub fn member_ruling(method: M) -> Ruling {
     use Ruling::*;
     match method {
-        M::WorkspaceSetWorkflow | M::WorkflowEnqueue | M::WorkflowApprove | M::WorkflowRetry | M::WorkflowQueue | M::WorkflowLeave | M::WorkflowSettle | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowReopen | M::WorkflowPropose | M::WorkflowDrafts | M::WorkflowCutover | M::WorkflowReview => Owners(Why::Reshapes),
+        M::WorkspaceSetWorkflow | M::WorkflowSettle | M::WorkflowCutover => Owners(Why::Reshapes),
+        M::WorkflowEnqueue | M::WorkflowApprove | M::WorkflowReview | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue
+        | M::WorkflowLeave | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowSendBack | M::WorkflowReopen
+        | M::WorkflowPropose | M::WorkflowDrafts => Engine,
         M::HostGet
         | M::HostHealth
         | M::DaemonVersion
@@ -241,10 +249,7 @@ pub fn member_ruling(method: M) -> Ruling {
 
         M::WorkspaceSetCharter => Charter,
 
-        M::WorkspaceRename | M::WorkspaceSetPrefix
-        // Stopping a run, or sending its work back with a reason (ov-1000).
-        | M::WorkflowCancel
-        | M::WorkflowSendBack => Maintains,
+        M::WorkspaceRename | M::WorkspaceSetPrefix => Maintains,
 
         M::LineOrder
         | M::BoardThemeCreate
