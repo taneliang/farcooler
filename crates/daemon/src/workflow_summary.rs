@@ -155,6 +155,14 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
 fn approvers(definition: &Definition) -> Vec<String> {
     let mut lines = Vec::new();
     for s in steps(definition) {
+        // An approval step is a decider too, and moving it to someone else must show (ov-1002 review F6).
+        match &s.progression {
+            farcooler_workflow::Progression::AwaitApproval { principal } if principal == "owner" =>
+                lines.push(format!("You approve the {} step before it starts.", code(&s.id))),
+            farcooler_workflow::Progression::AwaitApproval { principal } =>
+                lines.push(format!("{} approves the {} step before it starts.", code(principal), code(&s.id))),
+            farcooler_workflow::Progression::Automatic => {}
+        }
         match &s.kind {
             StageKind::Review(Reviewer::Person(p)) if p == "owner" => lines.push("You approve each ticket before it lands.".into()),
             StageKind::Review(Reviewer::Person(p)) => lines.push(format!("{} approves each ticket before it lands.", code(p))),
@@ -473,6 +481,20 @@ mod tests {
         // Unchanged deciders are not called out.
         let same = summarize("", &owner, Some(&owner.definition), None);
         assert!(!same.contains("no longer") && !same.contains(" now reviews"), "{same}");
+    }
+    /// An approval step moved from the owner to a member is called out like a review gate (ov-1002 review F6).
+    #[test]
+    fn an_approval_step_that_changes_hands_is_called_out() {
+        let owner = bundle("ticket-push", &["make check"], &[], None);
+        let mut asks = owner.clone();
+        asks.definition.stages[1].progression = farcooler_workflow::Progression::AwaitApproval { principal: "owner".into() };
+        let step = code(&asks.definition.stages[1].id);
+        let mut bobs = asks.clone();
+        bobs.definition.stages[1].progression = farcooler_workflow::Progression::AwaitApproval { principal: "member:bob".into() };
+        let text = summarize("", &bobs, Some(&asks.definition), None);
+        assert!(text.contains(&format!("No longer: You approve the {step} step before it starts.")), "{text}");
+        assert!(text.contains(&format!("New: `member:bob` approves the {step} step before it starts.")), "{text}");
+        assert!(summarize("", &asks, Some(&owner.definition), None).contains(&format!("New: You approve the {step} step")));
     }
     #[test]
     fn the_summary_shows_the_models_each_step_may_run_with() {

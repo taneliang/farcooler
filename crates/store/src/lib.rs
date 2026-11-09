@@ -75,6 +75,7 @@ pub use pane_launches::Launch;
 pub mod waits;
 pub mod workers;
 pub mod workflow;
+mod workflow_deciders;
 pub mod workflow_effects;
 pub mod engine_cutover;
 #[cfg(any(test, feature = "testing"))]

@@ -30,6 +30,8 @@ fn phase(runtime: &Runtime, workspace: Uuid, item: &str) -> Phase { runtime.stat
 async fn waiting_for(runtime: &mut Runtime, workspace: Uuid, decider: &str, item: &str) {
     let w = workspace.to_string();
     let definition = Definition::tracker(decider); let pin = definition.pin();
+    // A run starts only under a workflow whose members are here, on the runtime's own store too.
+    if let Some(handle) = decider.strip_prefix("member:") { runtime.store.set_member(handle, "Them", &[]).unwrap(); }
     accepted(&runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition }).unwrap());
     // Publishing on a store-backed runtime may already have enqueued the card that is `item`.
@@ -94,6 +96,7 @@ async fn workflow_a_review_gate_naming_a_member_takes_only_their_verdict() {
     let mut definition = coding_definition(true);
     definition.stages.iter_mut().find(|s| matches!(s.kind, StageKind::Review(_))).unwrap().kind = StageKind::Review(Reviewer::Person("member:alice".into()));
     let pin = definition.pin();
+    runtime.store.set_member("alice", "Alice", &[]).unwrap();
     accepted(&runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap());
     accepted(&runtime.wire_command(&w, "owner", Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() }).unwrap());
     for time in 1..15 {
@@ -215,4 +218,65 @@ async fn removing_the_member_a_run_waits_on_keeps_it_waiting_and_says_so_on_its_
     remove(&svc, "alice").await;
     assert_eq!(gone_notes(&svc, card.id), [crate::workflow_deciders::gone_note("alice")]);
     assert_eq!(waiting(&svc), Phase::WaitingApproval);
+    // Her handle isn't issued again while a run waits on it: someone new given it would decide that run (F1).
+    assert!(matches!(svc.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" })));
+    assert!(matches!(svc.store.member("alice"), Err(DomainError::NotFound)), "nothing written");
+    // Once the run is cancelled, nothing names her, and the handle is free.
+    let cancel = farcooler_workflow::Input { id: "c".into(), expected_revision: 1, source_sequence: 2,
+        command: farcooler_workflow::Command::Cancel { item: card.key.clone() }, ..input };
+    assert!(svc.store.workflow_apply(&cancel).unwrap().result.is_ok());
+    assert_eq!(waiting(&svc), Phase::Cancelled);
+    svc.store.set_member("alice", "Another Alice", &[]).unwrap();
+}
+
+/// A removed member named at a later step: the run that hasn't reached it is told on its card too (F2).
+#[tokio::test]
+async fn a_run_that_reaches_a_removed_member_later_is_told_now() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let w = workspace.to_string();
+    svc.store.set_member("alice", "Alice", &[]).unwrap();
+    let card = svc.store.create_task(workspace, "Ask the owner, then Alice", Actor::User).unwrap();
+    let definition = owner_then("member:alice");
+    let input = farcooler_workflow::Input { schema: 1, id: "e".into(), workspace: w.clone(), expected_revision: 0, epoch: 1,
+        source: "controller".into(), source_sequence: 1, now_ms: 0, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),
+        command: farcooler_workflow::Command::Enqueue { item: card.key.clone(), policy_pin: definition.pin(), resource: "own".into(),
+            dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } };
+    assert!(svc.store.workflow_apply(&input).unwrap().result.is_ok());
+    let state = svc.store.workflow_state(&w).unwrap().unwrap();
+    assert_eq!(crate::workflow_deciders::waiting_on(&state, &card.key), Some("owner"), "not at her step yet");
+    remove(&svc, "alice").await;
+    assert_eq!(gone_notes(&svc, card.id), [crate::workflow_deciders::gone_note("alice")]);
+    assert!(matches!(svc.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" })));
+}
+/// A tracker whose first step the owner approves, and whose second `second` does.
+fn owner_then(second: &str) -> Definition {
+    let mut definition = Definition::tracker("owner");
+    let mut step = definition.stages[0].clone(); step.id = "second".into();
+    step.progression = Progression::AwaitApproval { principal: second.into() };
+    definition.stages.push(step);
+    definition
+}
+
+/// Under a published workflow naming a removed member, no new run starts, and their handle isn't issued again
+/// while that workflow is in force; publishing one that doesn't frees it (F1, F2).
+#[tokio::test]
+async fn a_workflow_naming_a_removed_member_starts_no_run_and_keeps_their_handle() {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+    runtime.store.set_member("alice", "Alice", &[]).unwrap();
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+        expected_pin: None, definition: owner_then("member:alice") }).unwrap());
+    let pin = runtime.store.workflow_configuration("ws").unwrap().unwrap().pin;
+    runtime.store.remove_member("alice").unwrap();
+    let revision = runtime.state("ws").unwrap().map_or(0, |s| s.revision);
+    let enqueue = runtime.wire_command("ws", "owner", Action::Enqueue { mutation: mutation("e", revision, 2), item: "a".into(), pin: pin.clone() });
+    assert!(matches!(&enqueue, Err(Error::Refused(why)) if why.contains("removed")), "{enqueue:?}");
+    assert!(!runtime.state("ws").unwrap().is_some_and(|s| s.items.contains_key("a")));
+    assert!(matches!(runtime.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" })));
+    // Someone else's handle is issued as ever.
+    runtime.store.set_member("bob", "Bob", &[]).unwrap();
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p2", revision, 3),
+        expected_pin: Some(pin), definition: owner_then("member:bob") }).unwrap());
+    runtime.store.set_member("alice", "Another Alice", &[]).unwrap();
 }

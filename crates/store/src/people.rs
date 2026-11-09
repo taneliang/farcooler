@@ -241,6 +241,11 @@ impl Store {
         let existed: bool = tx
             .query_row("SELECT EXISTS(SELECT 1 FROM members WHERE handle = ?1)", [handle], |r| r.get(0))
             .map_err(map_err)?;
+        // A gate names a member by handle, so someone new given a removed member's handle would decide what waits
+        // on them (ov-1002 review F1). Not issued again while a workflow in force, or a live run, names it.
+        if !existed && crate::workflow_deciders::named_by_a_workflow(&tx, handle)? {
+            return Err(DomainError::Conflict { what: "handle_waited_on" });
+        }
         if let Some(read) = read {
             // Both sides trimmed, sorted and without repeats: compared as sets.
             let set = |ids: &mut Vec<&str>| {

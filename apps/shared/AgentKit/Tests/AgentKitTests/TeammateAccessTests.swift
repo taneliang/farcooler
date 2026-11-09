@@ -116,7 +116,7 @@ struct TeammateAccessTests {
         #expect(StepUpReason.limit("Cy’s iPad", runner: "studio") == "Limit Cy’s iPad on studio to Viewer.")
         let bob = ExistingPerson(handle: "bob", name: "Bob", access: .member)
         #expect(TeammateAccessRules.keeps(bob, runner: "studio") == "Bob is already on studio as a Member, and keeps that access.")
-        for word in ["add_limit", "admin_is_owners", "access_exists", "handle_taken", "scope_access", "not_admin"] {
+        for word in ["add_limit", "admin_is_owners", "access_exists", "handle_taken", "handle_waited_on", "scope_access", "not_admin"] {
             let said = TeammateAccessRules.refusal(word, runner: "studio", device: "iPhone")
             #expect(!said.contains("_") && !said.contains("Err("), "\(word): \(said)")
         }

@@ -191,6 +191,8 @@ public enum StepUpWords {
             "They already have a different access on \(runner). Change it from People."
         case "handle_taken", "device_taken":
             "That person or device is already on \(runner), under another name."
+        case "handle_waited_on":
+            "A workflow on \(runner) still waits on someone who had that handle. Choose another handle."
         case "scope_access":
             "A Viewer’s device can only look. Choose Viewer, or add it as a Member."
         case "first_key_wrong":

@@ -117,6 +117,22 @@ impl Definition {
         Some(Definition { schema: 2, source: format!("group/{name}"), stages: group.steps.clone(),
             max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None })
     }
+    /// Every principal a step waits on, a group's steps included, in step order, each once (ov-1002): an
+    /// approval step's, and a person's or the orchestrator's review gate's.
+    pub fn deciders(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = Vec::new();
+        for stage in self.stages.iter().chain(self.groups.values().flat_map(|g| g.steps.iter())) {
+            let approval = match &stage.progression { Progression::AwaitApproval { principal } => Some(principal.as_str()), _ => None };
+            let review = match &stage.kind {
+                StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(p.as_str()),
+                _ => None,
+            };
+            for name in approval.into_iter().chain(review) {
+                if !names.contains(&name) { names.push(name); }
+            }
+        }
+        names
+    }
     fn check(&self, in_group: bool) -> Result<(), Refusal> {
         let mut ids = BTreeSet::new();
         if !matches!(self.schema, 1 | 2) || self.source.is_empty() || self.source.len() > 256
