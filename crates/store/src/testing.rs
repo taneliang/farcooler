@@ -256,3 +256,8 @@ pub fn old_landing(store: &crate::Store, workspace: Uuid, number: u32, state: &s
     }
     id
 }
+
+/// How many receipts a workflow board holds for a cancel, refusals included (each stays for good).
+pub fn workflow_cancel_receipt_count(store: &crate::Store, workspace: &str) -> i64 {
+    store.conn().query_row("SELECT count(*) FROM workflow_receipts WHERE workspace = ?1 AND payload LIKE '%Cancel%'", [workspace], |r| r.get(0)).unwrap()
+}

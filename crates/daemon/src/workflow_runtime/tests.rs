@@ -583,3 +583,39 @@ async fn the_sweep_never_asks_to_cancel_what_the_engine_always_refuses() {
     pushed.pushed = Some("abc".into());
     assert!(!super::cancellable_on_deleted_board(&pushed));
 }
+
+/// ov-1047 review: the sweep itself leaves a follower and a pushed group alone, and asks once about a run the engine
+/// refuses though the rule allowed it. Every refusal is a receipt that stays, so the receipts count how often it asked.
+#[tokio::test]
+async fn the_sweep_skips_refused_runs_and_asks_once_about_the_rest() {
+    let (_dir, mut runtime) = fixture().await;
+    let host = Uuid::now_v7();
+    let root = runtime.store.create_repository_root(host, "/repos/ov-1047-sweep", 0).unwrap();
+    let repo = runtime.store.create_repository(host, root.id, "r", "/repos/ov-1047-sweep/.git", "").unwrap();
+    runtime.store.ensure_main_workspace(repo.id).unwrap();
+    let gone = Uuid::now_v7().to_string();
+    let controller = runtime.controller();
+    for (n, item) in ["plain", "follower", "pushed"].into_iter().enumerate() {
+        let request = Request { id: format!("enqueue-{item}"), workspace: gone.clone(), expected_revision: n as u64, sequence: n as u64 + 1,
+            command: Command::Enqueue { item: item.into(), definition: coding_definition(true), policy_pin: "policy/v1".into(),
+                resource: Exec::item_resource(&gone, item), dependencies: BTreeSet::new(), initial_candidate: None } };
+        assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
+    }
+    // Shape the three runs on the stored state: a follower, a group whose push landed, and a run the engine refuses
+    // for a reason the rule cannot see (a stop already named on it).
+    let mut state = runtime.state(&gone).unwrap().unwrap();
+    state.items.get_mut("follower").unwrap().follows = Some("lead".into());
+    let pushed = state.items.get_mut("pushed").unwrap();
+    pushed.members = vec![Member { item: "t".into(), candidate: "c".into() }];
+    pushed.pushed = Some("abc".into());
+    state.items.get_mut("plain").unwrap().run = "cancel:earlier".into();
+    let json = serde_json::to_string(&state).unwrap().replace('\'', "''");
+    farcooler_store::testing::exec_for_tests(&runtime.store, &format!("UPDATE workflow_states SET state='{json}' WHERE workspace='{gone}'"));
+    let receipts = |runtime: &Runtime| farcooler_store::testing::workflow_cancel_receipt_count(&runtime.store, &gone);
+    let before = receipts(&runtime);
+    for time in 2..6 { runtime.pump(time).await.unwrap(); }
+    let after = receipts(&runtime);
+    let items = runtime.state(&gone).unwrap().unwrap().items;
+    assert!(items["follower"].cancel_reason.is_none() && items["pushed"].cancel_reason.is_none());
+    assert_eq!(after - before, 1, "four sweeps: the refused run is asked about once, the follower and the pushed group never");
+}
