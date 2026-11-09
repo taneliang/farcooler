@@ -327,8 +327,10 @@ async fn person_terminal(name: &str) -> bool {
     let _reap=Reap(socket.clone());
     let log=dir.path().join("output");let status=dir.path().join("status");
     let quote=|s:&str| format!("'{}'",s.replace('\'',"'\\''"));
-    let command=format!("FARCOOLER_WORKFLOW_PERSON_CHILD=1 {} --exact {} --nocapture > {} 2>&1; code=$?; printf '%s' \"$code\" > {}",
-        quote(&std::env::current_exe().unwrap().to_string_lossy()),quote(name),quote(&log.to_string_lossy()),quote(&status.to_string_lossy()));
+    // The status file appears only by rename, whole: a bare `> status` creates
+    // it empty before printf writes, and a slow runner reads "" (ov-1036).
+    let command=format!("FARCOOLER_WORKFLOW_PERSON_CHILD=1 {} --exact {} --nocapture > {} 2>&1; code=$?; printf '%s' \"$code\" > {status}.tmp && mv {status}.tmp {status}",
+        quote(&std::env::current_exe().unwrap().to_string_lossy()),quote(name),quote(&log.to_string_lossy()),status=quote(&status.to_string_lossy()));
     let output=tokio::process::Command::new("tmux").args(["-S",&socket.to_string_lossy(),"-f","/dev/null","new-session","-d","-s","person","/bin/sh","-c",&command]).output().await.unwrap();
     assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
     tokio::time::timeout(std::time::Duration::from_secs(90),async {
