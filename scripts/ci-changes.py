@@ -75,6 +75,46 @@ def pattern(names):
 SITE = pattern(SITE_ONLY)
 
 
+# Which job families a path reaches (ov-1021). `app` stays what it was: any file off the
+# allowlist above. The families narrow it: a Swift-only change has no business in the
+# Rust, Android or relay jobs. Anything not named here, and every shared input (the
+# wire in proto/, Cargo.*, every crate the apps link, the toolchain, scripts, the
+# workflows and actions), reaches ALL of them: a job a change can break never skips.
+FAMILIES = ["rust", "apple", "android", "web", "relay"]
+FLAGS = [*FAMILIES, "docs", "app"]
+# crates/android (farcooler-jni) is linked by Android only; crates/cli is built by the Mac
+# (apps/macos/test.sh `cargo build --bins`) and not by Android; crates/web is its own
+# wasm workspace, linked by neither app (checked with `cargo metadata`, ov-1021). Every
+# other crate is in both apps' closures, so it is shared.
+NARROW = [
+    (r"services/relay/.+", {"relay"}),
+    (r"services/(web|common)/.+|\.github/workflows/web\.yml", {"web"}),
+    (r"apps/android/.+", {"android"}),
+    (r"apps/(ios|macos|shared)/.+", {"apple"}),
+    (r"crates/android/.+", {"rust", "android"}),
+    (r"crates/cli/.+", {"rust", "apple"}),
+    (r"crates/web/.+", {"rust", "web"}),
+    (r"test/.+|\.config/.+", {"rust"}),
+]
+
+
+def families(files):
+    """{flag: bool} for a list of changed files; None (unknown) turns every flag on."""
+    if files is None:
+        return {k: True for k in FLAGS}
+    hit = set()
+    app = docs = False
+    for f in files:
+        narrow = next((fam for rx, fam in NARROW if re.fullmatch(rx, f)), None)
+        if SITE.match(f):
+            docs = True
+            hit |= narrow or set()
+        else:
+            app = True
+            hit |= narrow if narrow is not None else set(FAMILIES)
+    return {**{k: k in hit for k in FAMILIES}, "docs": docs, "app": app}
+
+
 def canary_plan():
     spec = importlib.util.spec_from_file_location("canary_plan", ROOT / "scripts" / "canary-plan.py")
     module = importlib.util.module_from_spec(spec)
@@ -89,33 +129,47 @@ def git(repo, *args):
 
 def decide(repo, event, after="", base="", head="", candidates=(), listing_error=""):
     """(app, why): whether the app jobs run."""
+    flags, why = decide_flags(repo, event, after, base, head, candidates, listing_error)
+    return flags["app"], why
+
+
+def decide_flags(repo, event, after="", base="", head="", candidates=(), listing_error=""):
+    """({flag: bool}, why): which job families run. Anything unknown turns them all on."""
+    unknown = families(None)
+    flags, why = _decide(repo, event, after, base, head, candidates, listing_error)
+    return (unknown if flags is None else flags), why
+
+
+def _decide(repo, event, after, base, head, candidates, listing_error):
     if event == "push" and listing_error:
-        return True, f"could not list the green CI runs ({listing_error}): the app jobs run."
+        return None, f"could not list the green CI runs ({listing_error}): the app jobs run."
     if event == "pull_request":
         spec = f"{base}...{head}"
     elif event == "push":
         green = canary_plan().base_commit(repo, after, list(candidates))
         if green is None:
-            return True, "no earlier green CI run in this history to compare with: the app jobs run."
+            return None, "no earlier green CI run in this history to compare with: the app jobs run."
         spec = f"{green}..{after}"
     else:
-        return True, f"{event or 'no event'}: the app jobs run."
+        return None, f"{event or 'no event'}: the app jobs run."
     out = git(repo, "diff", "--no-renames", "--name-only", spec)
     if out.returncode != 0:
-        return True, f"could not compare {spec}: the app jobs run."
+        return None, f"could not compare {spec}: the app jobs run."
     files = [f for f in out.stdout.splitlines() if f]
     if not files:
-        return True, f"no changed files in {spec}: the app jobs run."
-    for f in files:
-        if not SITE.match(f):
-            return True, f"{f} is not website or docs: the app jobs run."
-    return False, f"{len(files)} changed file(s) since {spec.split('..')[0][:8]}, all website or docs: the app jobs are skipped."
+        return None, f"no changed files in {spec}: the app jobs run."
+    flags = families(files)
+    if flags["app"]:
+        off = [k for k in FAMILIES if not flags[k]]
+        first = next(f for f in files if not SITE.match(f))
+        return flags, f"{first} is not website or docs: the app jobs run" + (f" (not {', '.join(off)})." if off else ".")
+    return flags, f"{len(files)} changed file(s) since {spec.split('..')[0][:8]}, all website or docs: the app jobs are skipped."
 
 
 def main():
     error = os.environ.get("CANDIDATES_ERROR", "").strip()
     candidates = [] if error else canary_plan().read_candidates(os.environ.get("CANDIDATES"))
-    app, why = decide(
+    flags, why = decide_flags(
         pathlib.Path.cwd(), os.environ.get("EVENT", ""), os.environ.get("AFTER", ""),
         os.environ.get("BASE", ""), os.environ.get("HEAD", ""),
         candidates, error,
@@ -124,7 +178,8 @@ def main():
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a") as f:
-            f.write(f"app={'true' if app else 'false'}\n")
+            for k in FLAGS:
+                f.write(f"{k}={'true' if flags[k] else 'false'}\n")
     return 0
 
 
@@ -175,6 +230,38 @@ def self_test():
         "build-app.sh", "rust-toolchain.toml", "x.mdx", "a/README.md", "notes.md/x.rs",
     ]:
         expect(f"{path} is code", bool(SITE.match(path)), False)
+
+
+    # Which job families a change reaches (ov-1021). A shared input runs all of them.
+    ALL = {"rust", "apple", "android", "web", "relay"}
+    for what, files, want in [
+        ("a Rust-only crate change", ["crates/web/src/lib.rs"], {"rust", "web"}),
+        ("a Swift-only change", ["apps/macos/Sources/x.swift", "apps/shared/AgentKit/a.swift"], {"apple"}),
+        ("an iOS-only change", ["apps/ios/FarCooler/App.swift"], {"apple"}),
+        ("a Kotlin-only change", ["apps/android/app/src/A.kt"], {"android"}),
+        ("the JNI crate", ["crates/android/src/lib.rs"], {"rust", "android"}),
+        ("the CLI crate, which the Mac bundles", ["crates/cli/src/main.rs"], {"rust", "apple"}),
+        ("a Rust test fixture", ["test/live_agents.rs"], {"rust"}),
+        ("a relay change", ["services/relay/src/lib.rs"], {"relay"}),
+        ("a web worker change", ["services/web/src/index.ts"], {"web"}),
+        ("a docs-only change", ["docs/a.md", "README.md"], set()),
+        ("a wire change", ["proto/farcooler.proto"], ALL),
+        ("Cargo.lock", ["Cargo.lock"], ALL),
+        ("the client crate", ["crates/client/src/lib.rs"], ALL),
+        ("a core crate", ["crates/core/src/lib.rs"], ALL),
+        ("a script", ["scripts/copy-lint.py"], ALL),
+        ("ci.yml", [".github/workflows/ci.yml"], ALL),
+        ("a path nobody classified", ["Makefile"], ALL),
+        ("Swift and Kotlin together", ["apps/macos/a.swift", "apps/android/a.kt"], {"apple", "android"}),
+        ("Swift and a wire change", ["apps/macos/a.swift", "proto/farcooler.proto"], ALL),
+        ("a renamed-into-docs crate file is still code", ["crates/daemon/src/a.rs", "docs/a.md"], ALL),
+    ]:
+        got = {k for k, v in families(files).items() if v and k in ALL}
+        expect(f"{what} selects {sorted(want)}", got, want)
+    expect("docs-only sets the docs flag", families(["docs/a.md"])["docs"], True)
+    expect("docs-only leaves app off", families(["docs/a.md"])["app"], False)
+    expect("a Swift change leaves docs off", families(["apps/macos/a.swift"])["docs"], False)
+    expect("every flag is on when nothing is known", families(None), {k: True for k in [*ALL, "docs", "app"]})
 
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp)
@@ -238,13 +325,15 @@ def self_test():
         env.pop("CANDIDATES_ERROR", None)
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("the script exits 0", done.returncode, 0)
-        expect("and writes app=false", outputs.read_text() if outputs.exists() else None, "app=false\n")
+        expect("and writes every flag off but docs", outputs.read_text() if outputs.exists() else None,
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\n")
         outputs.unlink()
         env["CANDIDATES_ERROR"] = "gh: Server Error (HTTP 502)"
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("a failed listing exits 0", done.returncode, 0)
         expect("with a notice", done.stdout.startswith("::notice::could not list the green CI runs"), True)
-        expect("and writes app=true", outputs.read_text() if outputs.exists() else None, "app=true\n")
+        expect("and writes every flag on", outputs.read_text() if outputs.exists() else None,
+               "rust=true\napple=true\nandroid=true\nweb=true\nrelay=true\ndocs=true\napp=true\n")
 
     for failure in failures:
         print(f"ci-changes self-test: {failure}", file=sys.stderr)

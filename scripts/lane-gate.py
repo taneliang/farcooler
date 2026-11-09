@@ -335,7 +335,15 @@ def changed_files(repo, base):
     return sorted({f for f in diff.stdout.splitlines() + untracked.stdout.splitlines() if f})
 
 
-def jobs_for(files, site, ios_relevant, commands):
+# What each of ci-changes.py's families runs here. The iOS job joins by apps/ios or by
+# scripts/ios-ui-plan.py's RELEVANT, as before: an Apple-family change does not build iOS by itself.
+FAMILY_JOBS = {"rust": {"rust"}, "apple": {"swift", "swift-tests"}, "android": {"android"}, "web": {"web"}, "relay": {"relay"}}
+
+
+KNOWN_SHARED = ("crates/", "proto/", "test/", "Cargo", ".cargo/", ".config/", "rust-toolchain", "Cross.toml")
+
+
+def jobs_for(files, site, ios_relevant, commands, families):
     """{job: [the paths that reach it]}. `commands` is {job: all its run text}."""
     reach = {"wire": [], "doc-comments": []}
 
@@ -345,7 +353,6 @@ def jobs_for(files, site, ios_relevant, commands):
             if f not in reach[j]:
                 reach[j].append(f)
 
-    shared = {"rust", "swift", "swift-tests", "android"}
     for f in files:
         if f.startswith("services/relay/"):
             add({"relay"}, f)
@@ -365,20 +372,20 @@ def jobs_for(files, site, ios_relevant, commands):
             for j, text in commands.items():
                 if f in text:
                     add({j}, f)
-        elif f.startswith("apps/android/"):
-            add({"android"}, f)
         elif f.startswith("apps/ios/"):
-            add({"ios"}, f)
-        elif f.startswith(("apps/macos/", "apps/shared/")):
+            add({"ios"}, f)  # finer than the family: the iOS app is not the Mac app
+        elif f.startswith("apps/macos/"):
             add({"swift", "swift-tests"}, f)
-        elif f.startswith("crates/web/"):
-            add(shared | {"web"}, f)
-        elif f.startswith("crates/tailcat/"):
-            add(shared | {"tunnel", "web"}, f)
-        elif f.startswith(("crates/", "proto/", "test/")) or re.match(r"^(Cargo\.(toml|lock)|rust-toolchain.*|Cross\.toml|\.cargo/.*|\.config/.*)$", f):
-            add(shared, f)
         else:
-            add(APP_JOBS, f)  # unknown: the safe side
+            # The families are scripts/ci-changes.py's, the ones CI's jobs wait on (ov-1021);
+            # a path it does not know reaches all of them.
+            on = {k for k, v in families([f]).items() if v and k in FAMILY_JOBS}
+            for k in on:
+                add(FAMILY_JOBS[k], f)
+            if f.startswith("crates/tailcat/"):
+                add({"tunnel"}, f)
+            elif len(on) == len(FAMILY_JOBS) and not f.startswith(KNOWN_SHARED):
+                add(APP_JOBS, f)  # nothing names this path: every app job, the safe side
         if ios_relevant(f) and not f.startswith(("services/", ".github/workflows/")) and not site.match(f):
             add({"ios"}, f)
     return reach
@@ -659,7 +666,7 @@ def gate(args):
 
     plans = {j: steps_for(j, workflows, ctx) for j in JOBS}
     commands = {j: "\n".join(s.run for s in plans[j] if not s.skip) for j in JOBS}
-    reach = jobs_for(files, changes.SITE, lambda f: bool(ios_plan.RELEVANT.match(f)), commands)
+    reach = jobs_for(files, changes.SITE, lambda f: bool(ios_plan.RELEVANT.match(f)), commands, changes.families)
     only = {j for j in args.only.split(",") if j}
     skip = {j for j in args.skip.split(",") if j}
     for j in only | skip:
@@ -1038,7 +1045,7 @@ def _self_test():
     commands = {j: "\n".join(s.run for s in plans[j] if not s.skip) for j in JOBS}
 
     def reaches(*paths):
-        return set(jobs_for(list(paths), changes.SITE, ios_rel, commands))
+        return set(jobs_for(list(paths), changes.SITE, ios_rel, commands, changes.families))
 
     always = {"wire", "doc-comments"}
     expect("docs only: the lints alone", reaches("docs/releasing.md", "README.md"), always)
@@ -1056,8 +1063,10 @@ def _self_test():
     expect("macos", reaches("apps/macos/Sources/x.swift"), always | {"swift", "swift-tests"})
     expect("agentkit reaches the iOS app too", reaches("apps/shared/AgentKit/Sources/a.swift"), always | {"swift", "swift-tests", "ios"})
     expect("tailcat reaches the tunnel", "tunnel" in reaches("crates/tailcat/go/a.go"), True)
-    expect("a daemon change reaches every app but not the tunnel or iOS",
-           reaches("crates/daemon/src/git.rs"), always | {"rust", "swift", "swift-tests", "android"})
+    expect("a daemon change reaches every family (ci-changes.py) but not the tunnel or iOS",
+           reaches("crates/daemon/src/git.rs"), always | {"rust", "swift", "swift-tests", "android", "web", "relay"})
+    expect("the JNI crate reaches Android and Rust, not the Mac", reaches("crates/android/src/lib.rs"), always | {"rust", "android"})
+    expect("the CLI crate reaches the Mac and Rust, not Android", reaches("crates/cli/src/main.rs"), always | {"rust", "swift", "swift-tests"})
     expect("core reaches iOS", "ios" in reaches("crates/core/src/lib.rs"), True)
     expect("the lockfile reaches every app job", reaches("Cargo.lock") >= always | APP_JOBS - {"tunnel"}, True)
     expect("ci.yml reaches every job", reaches(".github/workflows/ci.yml"), set(JOBS))

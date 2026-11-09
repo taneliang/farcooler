@@ -62,6 +62,11 @@ jobs:
       contents: read
     outputs:
       app: ${{ steps.changes.outputs.app }}
+      rust: ${{ steps.changes.outputs.rust }}
+      apple: ${{ steps.changes.outputs.apple }}
+      android: ${{ steps.changes.outputs.android }}
+      web: ${{ steps.changes.outputs.web }}
+      relay: ${{ steps.changes.outputs.relay }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -353,7 +358,7 @@ jobs:
   rust:
     name: Rust (${{ matrix.os }})
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ${{ matrix.os }}
     # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
     # macOS 60: its runners have run 2-3x slower, the crash-matrix binary alone takes about 6 min, and 35 min cut main off about 4900 of 6665 tests in (ov-992).
@@ -706,7 +711,7 @@ jobs:
   swift:
     name: Swift (app build + bundle checks)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.apple != 'false' }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
@@ -847,7 +852,7 @@ jobs:
   swift-tests:
     name: Swift (AgentKit + Mac tests)
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.apple != 'false' }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
@@ -934,7 +939,7 @@ jobs:
     # `success()`: a misplaced UI test class fails the plan, and that must not
     # also stop the app from being built and checked here.
     needs: [changes, ios-ui-plan]
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.apple != 'false' }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
@@ -1090,7 +1095,7 @@ jobs:
   ios-ui:
     name: iOS UI (smoke)
     needs: [changes, ios-ui-plan, ios]
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' && needs.ios-ui-plan.outputs.run == 'true' }}
+    if: ${{ !cancelled() && needs.changes.outputs.apple != 'false' && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
@@ -1104,7 +1109,7 @@ jobs:
   android:
     name: Android
     needs: changes
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.android != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -1296,6 +1301,8 @@ jobs:
   relay:
     name: Relay
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.relay != 'false' }}
     timeout-minutes: 5
     defaults:
       run:
@@ -1349,6 +1356,8 @@ jobs:
   web:
     name: Web
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.web != 'false' }}
     timeout-minutes: 30
     defaults:
       run:
