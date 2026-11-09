@@ -50,6 +50,18 @@ impl StandIn {
         }
     }
 
+    /// Wait, bounded, until the stand-in is up: it has set bracketed paste,
+    /// drawn its box and logged its first mode.
+    async fn up(&self) {
+        for _ in 0..750 {
+            if self.log().contains("MODE idle") {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("the stand-in never came up: {}", self.log());
+    }
+
     /// Wait, up to 15 seconds, until the stand-in has logged `n` submissions:
     /// it reads the Enter a moment after `pump` returns, longer under load.
     async fn submits(&self, n: usize) {
@@ -762,7 +774,7 @@ async fn stand_in_set_bracketing_before_anyone_followed() {
     // and the daemon only follows it once it's up.
     b.run_unfollowed(&agent, &si_command(&b, &agent)).await;
     b.screen_with(agent.id, "stand-in").await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    si.up().await;
     b.refollow(agent.id).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     b.doing(agent.id, AgentActivity::Idle).await;
@@ -834,7 +846,7 @@ async fn a_record_from_before_a_respawn_is_never_used() {
     let si = b.stand_in(&agent, "claude", "claude").await;
     b.run_unfollowed(&agent, &si_command(&b, &agent)).await;
     b.screen_with(agent.id, "stand-in").await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    si.up().await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
@@ -864,7 +876,16 @@ async fn a_broken_stream_proves_nothing_until_it_is_followed_again() {
     let pane = b.svc.inventory_snapshot().claimants(agent.id).into_iter().next().unwrap().pane_id.clone();
     // Closing the pane's pipe ends its fanout, and so every subscription.
     b.svc.tmux.run(&["pipe-pane", "-t", &pane]).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The fanout ends, and the record with it: wait for that, not a guess.
+    let mut gone = false;
+    for _ in 0..750 {
+        if !b.svc.paste_mode_followed(agent.id).await {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(gone, "the record outlived its pipe");
     b.doing(agent.id, AgentActivity::Idle).await;
     b.answer("Drill in");
     b.pump().await;
