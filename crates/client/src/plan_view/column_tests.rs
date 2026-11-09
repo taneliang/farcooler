@@ -244,3 +244,29 @@ fn an_empty_plan_has_an_empty_column() {
     assert!(c.pipeline.is_empty() && c.initiatives.is_empty() && c.quiet_initiatives.is_empty());
     assert!(c.footer.is_empty() && c.facts.is_empty());
 }
+
+#[test]
+fn a_ticket_that_needs_the_owner_puts_its_agent_in_stuck() {
+    let c = column(
+        json!({
+            "lines": [line("t1", "needs_you")],
+            "agents": [agent("b", "builder", &["t1"], "Asking about the schema", 5)],
+        }),
+        json!({}),
+    );
+    assert_eq!(c.pipeline.len(), 1);
+    assert_eq!(c.pipeline[0].stage, PipeStage::Stuck);
+    assert_eq!(c.pipeline[0].agents[0].doing, "Asking about the schema");
+}
+
+#[test]
+fn a_live_landing_with_no_ticket_aboard_is_not_the_next_landing() {
+    let c = column(
+        json!({
+            "lines": [line("t1", "building")],
+            "landings": [landing(9, "gating", &[], "gating_locally", NOW - 5 * MINUTE)],
+        }),
+        json!({}),
+    );
+    assert!(!c.facts.iter().any(|f| f.kind == FactKind::NextLanding), "{:?}", facts(&c));
+}
