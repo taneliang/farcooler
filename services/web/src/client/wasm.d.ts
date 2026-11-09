@@ -50,6 +50,10 @@ declare module 'fc-web' {
     onLost: () => void,
   ): Promise<WebRunner>
   export function build(): string
+  /// The plan's view model (crates/client's `plan_view`): a request as JSON
+  /// ({schema, plan, context, workflow}), the answer as JSON ({schema, view,
+  /// error}). Pure; no I/O.
+  export function planView(request: string): string
   export class WebRunner {
     workflow_call(method: string, args: string): Promise<string>
     terminals(): Promise<string>

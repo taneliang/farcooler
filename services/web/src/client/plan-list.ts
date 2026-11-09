@@ -9,8 +9,9 @@
 
 import { type CardRef, type Plan } from './plan'
 import { type CountKind, listOf } from './plan-column'
+import type { PlanViewModel } from './plan-present'
 
-const TITLES: Record<CountKind, string> = { waiting: 'Waiting for a Builder', notStarted: 'Not Started', done: 'Done' }
+const TITLES: Record<CountKind, string> = { waiting: 'Waiting for a Builder', not_started: 'Not Started', done: 'Done' }
 
 export class PlanList {
   constructor(
@@ -25,8 +26,8 @@ export class PlanList {
   }
 
   /// Show `kind`'s tickets from `plan`; `count` is what the footer said.
-  open(plan: Plan, kind: CountKind, count: number): void {
-    const rows = listOf(plan, kind)
+  open(plan: Plan, view: PlanViewModel, kind: CountKind, count: number): void {
+    const rows = listOf(plan, view, kind)
     this.$('plan-list-title').textContent = TITLES[kind]
     const note = this.$('plan-list-note')
     note.textContent =
@@ -49,11 +50,11 @@ export class PlanList {
         title.className = 'plan-ticket-title'
         title.textContent = row.title
         b.append(key, title)
-        if (row.initiative) {
-          const initiative = document.createElement('span')
-          initiative.className = 'plan-ticket-for'
-          initiative.textContent = row.initiative
-          b.append(initiative)
+        if (row.theme) {
+          const theme = document.createElement('span')
+          theme.className = 'plan-ticket-for'
+          theme.textContent = row.theme
+          b.append(theme)
         }
         b.onclick = () => {
           this.dialog.close()

@@ -25,26 +25,11 @@ const fixture = () => parsePlan(JSON.stringify(plan))!
 
 describe('the plan', () => {
   // ov-775 acceptance 1: the same plan the Mac decodes, for the same runner.
-  it('keeps the runner’s line, landings, agents, themes and rulings, in its order, as the fixture the Mac decodes holds them', () => {
+  it('keeps the runner’s themes with their Next lines, rulings, cards and the orchestrator’s pane, in its order', () => {
     const shown = fixture()
-    expect(shown.lines.map(l => [l.key, l.stage])).toEqual(plan.lines.map(l => [l.key, l.stage]))
-    expect(shown.landings.map(t => t.heading)).toEqual(plan.landings.map(t => t.title))
-    expect(shown.agents.map(a => [a.role, a.doingNow])).toEqual(plan.agents.map(a => [a.role, a.doing_now]))
-    expect(shown.agents[1].tickets.map(t => [t.key, t.role])).toEqual([['ov-1', 'review']])
-    expect(shown.themes.map(t => [t.name, t.next, t.ask])).toEqual(plan.themes.map(t => [t.name, t.next, t.owner_ask]))
+    expect(shown.themes.map(t => [t.name, t.next])).toEqual(plan.themes.map(t => [t.name, t.next]))
     expect(shown.rulings.map(r => [r.short, r.decision, r.state])).toEqual(plan.rulings.map(r => [r.short, r.decision, r.state]))
-  })
-
-  it('reads a landing’s phase from its state when the runner sent none, and names it by its number', () => {
-    expect(fixture().landings[0].phase).toBe('ci_failed')
-    const wire: any = JSON.parse(JSON.stringify(plan))
-    delete wire.landings[0].phase
-    wire.landings[0].state = 'gating'
-    expect(parsePlan(JSON.stringify(wire))!.landings[0].phase).toBe('gating_locally')
-    wire.landings[0].state = 'pushed'
-    expect(parsePlan(JSON.stringify(wire))!.landings[0].phase).toBe('waiting_for_ci')
-    wire.landings[0].title = ''
-    expect(parsePlan(JSON.stringify(wire))!.landings[0].heading).toBe('Landing 9')
+    expect(shown.agents.map(a => [a.role, a.terminal])).toEqual(plan.agents.map(a => [a.role, a.terminal ?? null]))
   })
 
   it('shows open rulings newest first and past ones most recently settled first', () => {
@@ -56,10 +41,8 @@ describe('the plan', () => {
     expect(parsePlan('not json')).toBeNull()
     expect(parsePlan('{}')).toBeNull()
     const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.lines.push({ title: 'no task' }, null)
     wire.rulings.push({ id: 'r', decision: 5 })
     const shown = parsePlan(JSON.stringify(wire))!
-    expect(shown.lines).toHaveLength(plan.lines.length)
     expect(shown.rulings).toHaveLength(plan.rulings.length)
   })
 })
@@ -106,17 +89,6 @@ function runner() {
   return { state, board: new PlanBoard(deps), last: () => state.views[state.views.length - 1] }
 }
 
-describe('a plan ticket’s cards', () => {
-  it('keeps each ticket’s task beside its key, and leaves out an agent’s or a landing’s ticket that has none', () => {
-    const wire: any = JSON.parse(JSON.stringify(plan))
-    wire.agents[1].tickets = [{ task: 'task-1', key: 'ov-1', role: 'review', started_at: 5 }, { key: 'no-task', role: 'build' }]
-    wire.landings[0].tickets = [{ task: 'task-9', key: 'ov-9' }, { key: 'no-task' }]
-    const shown = parsePlan(JSON.stringify(wire))!
-    expect(shown.agents[1].tickets).toEqual([{ task: 'task-1', key: 'ov-1', role: 'review', startedAt: 5 }])
-    expect(shown.landings[0].tickets).toEqual([{ task: 'task-9', key: 'ov-9' }])
-  })
-})
-
 describe('the page’s workspace', () => {
   const OTHER = '01990000-0000-7000-8000-0000000000b2'
 
@@ -142,6 +114,35 @@ describe('the page’s workspace', () => {
     board.choose(WS)
     await board.refresh()
     expect(asked).toEqual([OTHER, WS])
+  })
+})
+
+describe('the workflow presentation beside the plan', () => {
+  const deps = (presentation: PlanDeps['presentation'], views: PlanBoardView[]): PlanDeps => ({
+    runner: 'studio',
+    workspaces: async () => JSON.stringify([{ id: WS, name: 'Main', is_main: true }]),
+    plan: async () => JSON.stringify(plan),
+    presentation,
+    setNext: async () => {},
+    keep: async () => {},
+    keepAll: async () => 0,
+    show: v => void views.push(v),
+  })
+
+  it('hands the view the plan as sent and the workspace’s presentation', async () => {
+    const views: PlanBoardView[] = []
+    const asked: string[] = []
+    await new PlanBoard(deps(async ws => (asked.push(ws), { schema: 2 }), views)).refresh()
+    expect(asked).toEqual([WS])
+    expect(views[views.length - 1].workflow).toEqual({ schema: 2 })
+    expect(views[views.length - 1].raw).toEqual(plan)
+  })
+
+  it('still shows the plan when the presentation can’t be read, or the workspace has none', async () => {
+    const views: PlanBoardView[] = []
+    await new PlanBoard(deps(() => Promise.reject(new Error('no workflow')), views)).refresh()
+    expect(views[views.length - 1].state).toBe('ready')
+    expect(views[views.length - 1].workflow).toBeNull()
   })
 })
 

@@ -1482,6 +1482,10 @@ jobs:
       # from canary.farcooler.com. Any violation fails it.
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: npx playwright-core install --with-deps --only-shell chromium
+      # The plan page draws the Rust view model's column (ov-1016): every
+      # fact, pipeline group, agent, ticket and footer count the golden view
+      # names is on the page, in its order, and nothing words or sorts it again.
+      - run: node test/browser/plan-render-check.mjs
       # --tunnel-delay holds each tunnel message 100 ms, so the pane is still
       # attaching when the check types: keystrokes typed then must be held
       # and sent, never dropped (train 307 found them dropped on this runner).

@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
+import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, planView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -31,7 +31,6 @@ import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
 import { type PlanTab, startPlanTab } from './plan-tab'
-import { columnOf } from './plan-column'
 import { PlanList } from './plan-list'
 import { parseWorkspaces } from './plan'
 import { firstToOpen, type Listed, noTerminals, parseTerminals, pickSpace, scopeBoard, type Space, terminalsIn, waitingIn } from './scope'
@@ -885,12 +884,16 @@ async function connectTo(session: Session, target: Granted): Promise<void> {
     },
     openAgent: agent => !!agent.terminal && !!paneControls?.open(agent.terminal),
     openList: kind => {
-      const plan = planTab?.current()
-      if (!plan) return
+      const found = planTab?.listing(kind)
+      if (!found) return
       planList ??= new PlanList($('plan-list') as HTMLDialogElement, $, card => openCard(target.id, { id: card.task, key: card.key, title: '' }))
-      planList.open(plan, kind, columnOf(plan).footer.find(c => c.kind === kind)?.count ?? 0)
+      planList.open(found.plan, found.view, kind, found.count)
     },
-  })
+  },
+  planView,
+  // The workflow presentation for the cards' engine steps; a workspace with
+  // no published workflow, or one that can't be read now, has none.
+  workspace => workflowPort.read(workspace).catch(() => null))
   showTab('terminals')
   boardTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') void mine.refresh()

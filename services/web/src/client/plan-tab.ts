@@ -3,7 +3,8 @@
 /// this and nothing else of the plan.
 
 import { type CardRef, type Plan, PLAN_POLL_MS, PlanBoard, type PlanBoardView } from './plan'
-import { type Agent, type CountKind, type NeedsItem, needsRows, type NeedsRow } from './plan-column'
+import type { CountKind, NeedsItem } from './plan-column'
+import { type PlanPresenter, type PlanViewModel, presentPlan } from './plan-present'
 import { renderPlan } from './plan-view'
 import type { WebRunner } from 'fc-web'
 
@@ -14,8 +15,9 @@ export interface PlanTab {
   choose(workspace: string): void
   /// Needs You in this workspace, for the column's own list.
   setNeeds(items: NeedsItem[]): void
-  /// The plan as last read, for a footer count's list.
-  current(): Plan | null
+  /// The plan as last read with its view, and a footer count's size, for
+  /// that count's list.
+  listing(kind: CountKind): { plan: Plan; view: PlanViewModel; count: number } | null
   /// The terminal of this workspace's orchestrator, when the plan names one.
   orchestrator(): string | null
   stop(): void
@@ -28,7 +30,7 @@ export interface PlanActions {
   /// Leave `text` in the orchestrator's input, unsent; false with none to put it in.
   quote(text: string): boolean
   /// Open an agent's chat; false when it has none.
-  openAgent(agent: Agent): boolean
+  openAgent(agent: { id: string; name: string; terminal: string | null }): boolean
   openList(kind: CountKind): void
 }
 
@@ -41,7 +43,17 @@ export function orchestratorOf(plan: Plan | null): string | null {
 }
 
 /// `current` is the connection as it is now, or null when there is none.
-export function startPlanTab(root: HTMLElement, runner: string, current: () => WebRunner | null, workspace: string | null, actions: PlanActions): PlanTab {
+export function startPlanTab(
+  root: HTMLElement,
+  runner: string,
+  current: () => WebRunner | null,
+  workspace: string | null,
+  actions: PlanActions,
+  /// The view model's presenter (wasm's `planView`).
+  present: PlanPresenter,
+  /// The workspace's workflow presentation, or null when it has none.
+  presentation: (workspace: string) => Promise<unknown>,
+): PlanTab {
   const live = (): WebRunner => {
     const r = current()
     if (!r) throw new Error('closed')
@@ -50,12 +62,12 @@ export function startPlanTab(root: HTMLElement, runner: string, current: () => W
   let drawn = ''
   let items: NeedsItem[] = []
   let last: PlanBoardView | null = null
-  const rows = (view: PlanBoardView): NeedsRow[] => needsRows(view.plan, items)
   const board: PlanBoard = new PlanBoard({
     runner,
     workspace,
     workspaces: () => live().workspaces(),
     plan: workspace => live().plan(workspace),
+    presentation,
     setNext: (theme, next) => live().setThemeNext(theme, next),
     keep: ruling => live().keepRuling(ruling),
     keepAll: workspace => live().keepAllRulings(workspace),
@@ -78,7 +90,8 @@ export function startPlanTab(root: HTMLElement, runner: string, current: () => W
           keepAll: () => void board.keepAll(),
         },
         drawn,
-        rows(view),
+        items,
+        present,
       )
     },
   })
@@ -100,7 +113,11 @@ export function startPlanTab(root: HTMLElement, runner: string, current: () => W
       items = next
       if (last && !last.editing) board.redraw()
     },
-    current: () => last?.plan ?? null,
+    listing(kind) {
+      if (!last?.plan) return null
+      const view = presentPlan(present, last.raw, { needsYou: items.length, workflow: last.workflow })
+      return view ? { plan: last.plan, view, count: view.column.footer.find(c => c.kind === kind)?.count ?? 0 } : null
+    },
     orchestrator: () => orchestratorOf(last?.plan ?? null),
     stop() {
       clearInterval(timer)

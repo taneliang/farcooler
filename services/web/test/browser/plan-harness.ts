@@ -5,8 +5,9 @@
 // app.ts's showTab.
 
 import { PlanBoard, type PlanBoardView } from '../../src/client/plan'
-import { needsRows } from '../../src/client/plan-column'
+import type { PlanPresenter } from '../../src/client/plan-present'
 import { renderPlan } from '../../src/client/plan-view'
+import longPlan from '../../../../test/fixtures/plan-android-long.json'
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const NOW = 1_800_000_000_000
@@ -85,12 +86,23 @@ const wire = {
   ],
   rulings: [],
 }
-const text = JSON.stringify(wire)
+const long = (window as any).fixture === 'long'
+const text = JSON.stringify(long ? longPlan.plan : wire)
 const refuse = (window as any).refuse === true
 const needs = [
   { id: 'n1', since: NOW - 12 * MIN, question: 'Allow Bash to run the Android unit tests?', task: { key: key(880), title: 'The Android app no longer crashes on a cold start after the Play update' }, terminal: null },
 ]
 const quoted: string[] = ((window as any).quoted = [])
+// The view model is Rust's, which a page here can't load as wasm: the capture
+// script plays the requests the page makes through crates/client (see
+// plan-capture.mjs) and hands the answers back in `window.answers`. The first
+// pass only records the requests.
+const requests: string[] = ((window as any).requests = [])
+const answers: Record<string, string> | undefined = (window as any).answers
+const present: PlanPresenter = request => {
+  requests.push(request)
+  return answers?.[request] ?? '{"schema":1,"view":null,"error":"invalid"}'
+}
 let drawn = ''
 const board: PlanBoard = new PlanBoard({
   runner: 'studio',
@@ -119,7 +131,8 @@ const board: PlanBoard = new PlanBoard({
         keepAll: () => void board.keepAll(),
       },
       drawn,
-      needsRows(view.plan, needs),
+      needs,
+      present,
     )
   },
 })

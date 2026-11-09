@@ -1,28 +1,18 @@
-/// The plan on the page (ov-775, ov-875): the plan column as the Mac draws it
-/// (plan-column.ts): the facts line, Needs You, Initiatives, the pipeline of
-/// agents with their tickets, and the footer counts; then Decided For You.
+/// The plan on the page (ov-775, ov-875, ov-1016): the plan column as the Mac
+/// draws it: the facts line, Needs You, Initiatives, the pipeline of agents
+/// with their tickets, and the footer counts; then Decided For You.
+///
+/// What the column says (which ticket is on which agent, every count and word)
+/// is crates/client's `view.column` (plan-present.ts); this file is layout and
+/// DOM only, and the Next line's editing.
 ///
 /// Every value is the runner's or the orchestrator's, so each goes in through
 /// `textContent` and never markup (the CSP's Trusted Types refuse an HTML
 /// string sink).
 
 import { age } from './needs'
-import {
-  columnOf,
-  statusesOf,
-  type Agent,
-  type Column,
-  type Count,
-  type CountKind,
-  fraction,
-  type Initiative,
-  type NeedsRow,
-  progressWords,
-  type Role,
-  STAGE_TITLE,
-  span,
-  type Ticket,
-} from './plan-column'
+import { type CountKind, type NeedsItem, type NeedsRow, needsRows } from './plan-column'
+import { type ColumnAgent, type ColumnTicket, type Column, type Count, type Fact, type Initiative, type PlanPresenter, presentPlan, type PlanViewModel, type Role } from './plan-present'
 import { openRulings, pastRulings, type CardRef, type Plan, type PlanBoardView, rulingStateTitle, type Ruling, WORDS } from './plan'
 
 export interface PlanHandlers {
@@ -32,7 +22,7 @@ export interface PlanHandlers {
   /// when there is no orchestrator to put it in.
   quote(text: string): boolean
   /// An agent's chat or terminal. False when it has none to open.
-  openAgent(agent: Agent): boolean
+  openAgent(agent: { id: string; name: string; terminal: string | null }): boolean
   /// A footer count's list.
   openList(kind: CountKind): void
   edit(theme: string): void
@@ -82,14 +72,14 @@ const GLYPHS: Record<Role, string[]> = {
   agent: ['M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5z'],
 }
 
-function glyph(agent: Agent): SVGElement {
+function glyph(agent: ColumnAgent): SVGElement {
   const svg = document.createElementNS(SVG, 'svg')
   svg.setAttribute('viewBox', '0 0 16 16')
   svg.setAttribute('class', 'plan-glyph')
   svg.setAttribute('aria-hidden', 'true')
   // Activity is the agent's: a quiet pulse while it works, amber and still
   // when stuck, still when idle.
-  if (agent.doingIsTrouble) svg.setAttribute('data-trouble', 'true')
+  if (agent.doing_is_trouble) svg.setAttribute('data-trouble', 'true')
   else if (agent.working) svg.setAttribute('data-working', 'true')
   for (const d of GLYPHS[agent.role]) {
     const path = document.createElementNS(SVG, 'path')
@@ -101,10 +91,10 @@ function glyph(agent: Agent): SVGElement {
 
 /// The facts line: each fact whole; the line breaks between them, never
 /// inside one.
-function factsLine(column: Column): HTMLElement | null {
-  if (column.facts.length === 0) return null
+function factsLine(facts: Fact[]): HTMLElement | null {
+  if (facts.length === 0) return null
   const p = make('p', 'plan-facts')
-  for (const fact of column.facts) {
+  for (const fact of facts) {
     const span = make('span', fact.attention ? 'plan-fact plan-fact-amber' : 'plan-fact')
     for (const run of fact.runs) span.append(run.strong ? make('strong', '', run.text) : document.createTextNode(run.text))
     p.append(span)
@@ -178,17 +168,17 @@ function initiativeCard(i: Initiative, view: PlanBoardView, on: PlanHandlers): H
     const b = make('button', 'plan-init')
     b.type = 'button'
     if (i.goal) b.title = i.goal
-    b.setAttribute('aria-label', `${i.name}, ${progressWords(i)} done. ${i.next ?? 'No next step.'} Edit its Next line.`)
+    b.setAttribute('aria-label', `${i.name}, ${i.progress} done. ${i.next ?? 'No next step.'} Edit its Next line.`)
     b.disabled = busy
     b.onclick = () => on.edit(i.id)
     const top = make('span', 'plan-init-top')
     const meter = make('span', 'plan-meter')
     meter.setAttribute('aria-hidden', 'true')
     meter.append(make('span'))
-    ;(meter.firstElementChild as HTMLElement).style.width = `${Math.round(fraction(i) * 100)}%`
-    top.append(make('span', 'plan-init-name', i.name), meter, make('span', 'plan-figures', progressWords(i)))
+    ;(meter.firstElementChild as HTMLElement).style.width = `${Math.round(Math.min(1, Math.max(0, i.fraction)) * 100)}%`
+    top.append(make('span', 'plan-init-name', i.name), meter, make('span', 'plan-figures', i.progress))
     b.append(top)
-    if (i.next) b.append(make('span', i.asksOwner ? 'plan-init-next plan-amber' : 'plan-init-next', i.next))
+    if (i.next) b.append(make('span', i.asks_owner ? 'plan-init-next plan-amber' : 'plan-init-next', i.next))
     li.append(b)
   }
   const n = notice(view.notices.get(i.id))
@@ -197,21 +187,21 @@ function initiativeCard(i: Initiative, view: PlanBoardView, on: PlanHandlers): H
 }
 
 function initiativesSection(column: Column, view: PlanBoardView, on: PlanHandlers): HTMLElement | null {
-  if (column.initiativeCount === 0) return null
+  if (column.initiative_count === 0) return null
   const wrap = make('section', 'plan-section plan-initiatives')
-  wrap.append(heading('Initiatives', column.initiativeCount, true))
+  wrap.append(heading('Initiatives', column.initiative_count, true))
   const ul = make('ul', 'plan-list')
   ul.append(...column.initiatives.map(i => initiativeCard(i, view, on)))
   wrap.append(ul)
-  if (column.quietLine) wrap.append(make('p', 'plan-quiet', column.quietLine))
+  if (column.quiet_line) wrap.append(make('p', 'plan-quiet', column.quiet_line))
   return wrap
 }
 
-function ticketRow(t: Ticket, on: PlanHandlers): HTMLElement {
+function ticketRow(t: ColumnTicket, stage: string, on: PlanHandlers): HTMLElement {
   const b = make('button', 'plan-ticket')
   b.type = 'button'
   b.dataset.task = t.task
-  b.setAttribute('aria-label', `${t.key}, ${t.title}${t.initiative ? `, for ${t.initiative}` : ''}, ${STAGE_TITLE[t.stage]}`)
+  b.setAttribute('aria-label', `${t.key}, ${t.title}${t.initiative ? `, for ${t.initiative}` : ''}, ${stage}`)
   // Its key, in secondary ink at one width so every title starts on one edge;
   // the ticket never reads as progress.
   const key = make('span', 'plan-key', t.key)
@@ -222,17 +212,17 @@ function ticketRow(t: Ticket, on: PlanHandlers): HTMLElement {
   return b
 }
 
-function agentCard(agent: Agent, more: string | null, on: PlanHandlers): HTMLElement {
+function agentCard(agent: ColumnAgent, stage: string, more: string | null, on: PlanHandlers): HTMLElement {
   const li = make('li', 'plan-soft plan-agent')
   li.dataset.agent = agent.id
   const head = make('button', 'plan-agent-head')
   head.type = 'button'
   head.title = agent.terminal ? `Open ${agent.name}’s chat` : `Open ${agent.name}`
-  head.setAttribute('aria-label', `${agent.name}, ${agent.doing}${agent.elapsed !== null ? `, ${span(agent.elapsed)}` : ''}`)
+  head.setAttribute('aria-label', `${agent.name}, ${agent.doing}${agent.time ? `, ${agent.time}` : ''}`)
   const words = make('span', 'plan-agent-words')
-  words.append(make('strong', '', agent.name), document.createTextNode(' '), make('span', agent.doingIsTrouble ? 'plan-amber' : '', agent.doing))
+  words.append(make('strong', '', agent.name), document.createTextNode(' '), make('span', agent.doing_is_trouble ? 'plan-amber' : '', agent.doing))
   head.append(glyph(agent), words)
-  if (agent.elapsed !== null) head.append(make('span', 'plan-time', span(agent.elapsed)))
+  if (agent.time) head.append(make('span', 'plan-time', agent.time))
   head.onclick = () => {
     if (on.openAgent(agent)) return
     // No chat to open: its first ticket is the nearest page.
@@ -240,7 +230,7 @@ function agentCard(agent: Agent, more: string | null, on: PlanHandlers): HTMLEle
     if (first) on.detail({ task: first.task, key: first.key })
   }
   li.append(head)
-  for (const t of agent.tickets) li.append(ticketRow(t, on))
+  for (const t of agent.tickets) li.append(ticketRow(t, stage, on))
   if (more) li.append(make('p', 'plan-more', more))
   return li
 }
@@ -248,21 +238,21 @@ function agentCard(agent: Agent, more: string | null, on: PlanHandlers): HTMLEle
 function pipelineSection(column: Column, on: PlanHandlers): HTMLElement | null {
   if (column.pipeline.length === 0) return null
   const wrap = make('section', 'plan-section plan-pipeline')
-  wrap.append(heading('Pipeline', column.agentWords, true))
+  wrap.append(heading('Pipeline', column.agent_words, true))
   for (const group of column.pipeline) {
     const stage = make('div', 'plan-stage')
     stage.dataset.stage = group.stage
-    stage.append(heading(STAGE_TITLE[group.stage], group.count, false, 'h3'))
+    stage.append(heading(group.title, group.count, false, 'h3'))
     const ul = make('ul', 'plan-list')
-    for (const agent of group.agents) ul.append(agentCard(agent, agent.more > 0 ? group.unattendedWords : null, on))
-    if (group.agents.length === 0 && group.unattendedWords) {
+    for (const agent of group.agents) ul.append(agentCard(agent, group.title, agent.more > 0 ? group.unattended_words : null, on))
+    if (group.agents.length === 0 && group.unattended_words) {
       const li = make('li', 'plan-soft plan-agent')
-      li.append(make('p', 'plan-more', group.unattendedWords))
-      for (const t of group.unattended) li.append(ticketRow(t, on))
+      li.append(make('p', 'plan-more', group.unattended_words))
+      for (const t of group.unattended) li.append(ticketRow(t, group.title, on))
       ul.append(li)
-    } else if (group.agents.length > 0 && !group.agents.some(a => a.more > 0) && group.unattendedWords) {
+    } else if (group.agents.length > 0 && !group.agents.some(a => a.more > 0) && group.unattended_words) {
       // No card has tickets to hang it on: its own line.
-      ul.append(make('li', 'plan-quiet', group.unattendedWords))
+      ul.append(make('li', 'plan-quiet', group.unattended_words))
     }
     stage.append(ul)
     wrap.append(stage)
@@ -310,15 +300,16 @@ function rulingCard(r: Ruling, view: PlanBoardView, on: PlanHandlers): HTMLEleme
   return li
 }
 
-function draw(plan: Plan, column: Column, needs: NeedsRow[], view: PlanBoardView, now: number, on: PlanHandlers): HTMLElement[] {
+function draw(plan: Plan, model: PlanViewModel, needs: NeedsRow[], view: PlanBoardView, now: number, on: PlanHandlers): HTMLElement[] {
   const out: HTMLElement[] = []
-  const empty = plan.lines.length === 0 && plan.landings.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && plan.agents.length === 0 && needs.length === 0
+  const column = model.column
+  const empty = column.facts.length === 0 && column.pipeline.length === 0 && column.initiative_count === 0 && column.footer.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && needs.length === 0
   if (empty) {
     const wrap = make('div', 'plan-none')
     wrap.append(make('h2', 'plan-clear', WORDS.nothingPlanned), make('p', 'plan-empty', WORDS.nothingPlannedDetail))
     return [wrap]
   }
-  for (const part of [factsLine(column), needsSection(needs, now, on), initiativesSection(column, view, on), pipelineSection(column, on), footerLine(column.footer, on)]) {
+  for (const part of [factsLine(column.facts), needsSection(needs, now, on), initiativesSection(column, view, on), pipelineSection(column, on), footerLine(column.footer, on)]) {
     if (part) out.push(part)
   }
 
@@ -356,8 +347,8 @@ function draw(plan: Plan, column: Column, needs: NeedsRow[], view: PlanBoardView
 /// Draw `view` into `root`, or leave it be when it would look the same (a poll
 /// that found nothing new must not take a button out from under a click, or an
 /// open fold closed). Returns what was drawn, to hand back as `last`.
-export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, on: PlanHandlers, last = '', needs: NeedsRow[] = []): string {
-  const signature = JSON.stringify([needs, view.state, view.banner, view.plan, view.workspace, view.workspaces, view.editing?.theme ?? null, [...view.busy], [...view.notices], Math.floor(now / 60_000)])
+export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, on: PlanHandlers, last: string, items: NeedsItem[], present: PlanPresenter): string {
+  const signature = JSON.stringify([items, view.state, view.banner, view.raw, view.workflow, view.workspace, view.workspaces, view.editing?.theme ?? null, [...view.busy], [...view.notices], Math.floor(now / 60_000)])
   if (signature === last) return last
 
   // An open fold stays open across a redraw.
@@ -370,8 +361,16 @@ export function renderPlan(root: HTMLElement, view: PlanBoardView, now: number, 
     children.push(banner)
   }
   if (view.state === 'loading') children.push(make('p', 'plan-empty', 'Reading the plan…'))
-  else if (view.state === 'ready' && view.plan) children.push(...draw(view.plan, columnOf(view.plan, needs.length, statusesOf(view.plan)), needs, view, now, on))
-  else if (view.state === 'ready') children.push(make('h2', 'plan-clear', WORDS.nothingPlanned))
+  else if (view.state === 'ready' && view.plan) {
+    // Needs You's count is the view's input, and its rows include the
+    // initiatives asking the owner, which only the view knows: ask once, then
+    // again with the count that includes them.
+    let model = presentPlan(present, view.raw, { needsYou: items.length, workflow: view.workflow })
+    let needs = needsRows(model, view.plan, items)
+    if (model && needs.length !== items.length) model = presentPlan(present, view.raw, { needsYou: needs.length, workflow: view.workflow })
+    if (model) children.push(...draw(view.plan, model, needs, view, now, on))
+    else children.push(make('p', 'note plan-banner', 'The plan couldn’t be read. Try again in a moment.'))
+  } else if (view.state === 'ready') children.push(make('h2', 'plan-clear', WORDS.nothingPlanned))
   root.replaceChildren(...children)
   if (open) root.querySelector('details.plan-fold')?.setAttribute('open', '')
   if (typing) root.querySelector<HTMLInputElement>('.plan-next-input')?.focus()
