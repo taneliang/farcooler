@@ -118,7 +118,7 @@ export interface NeedsItem {
 /// the ask's own words are the plan's), then the runner's list.
 export function needsRows(view: PlanViewModel | null, plan: Plan | null, items: NeedsItem[]): NeedsRow[] {
   const rows: NeedsRow[] = []
-  for (const i of view ? view.column.initiatives.filter(i => i.asks_owner) : []) {
+  for (const i of view ? view.column.initiatives.filter(i => i.asksOwner) : []) {
     const ask = plan?.themes.find(t => t.id === i.id)?.ask ?? ''
     if (ask) rows.push({ id: `theme:${i.id}`, title: i.name, detail: ask, since: null, quote: quote(null, `${i.name}: ${ask}`) })
   }

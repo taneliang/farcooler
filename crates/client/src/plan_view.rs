@@ -59,10 +59,12 @@ pub struct Section {
     #[typeshare(serialized_as = "I54")]
     pub count: u64,
     /// What it says with nothing in it; nil when it has rows or says nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub empty: Option<String>,
     /// Drawn folded until opened.
     pub folded: bool,
     /// Said on hover over (or a long press of) the title, never its rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub help: Option<String>,
 }
 
@@ -106,6 +108,7 @@ pub struct Note {
     /// Drawn in amber.
     pub attention: bool,
     /// Every word of it, for a hover or a long press.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub help: Option<String>,
 }
 
@@ -118,11 +121,13 @@ pub struct AgentRef {
     /// "Builder · Sonnet".
     pub who: String,
     /// "380K"; nil when no turn stated any.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens: Option<String>,
     /// Who it is and what it has spent, as its own line under a card's
     /// second line on Android ("Builder · sonnet · 380K").
     pub line: String,
     /// The pane, to open it.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     /// The model as recorded ("claude-opus-4-1"), which a screen reader says
     /// when `who` shortens it; "" when none is known.
@@ -140,7 +145,9 @@ pub struct RunStep {
     pub phase: farcooler_workflow::Phase,
     pub phase_label: String,
     /// The step it is on; nil past the last.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub gate: Option<Gate>,
     /// It waits on a person, failed, or its outcome is uncertain.
     pub attention: bool,
@@ -167,6 +174,7 @@ pub struct TicketCard {
     /// Its title, else its key.
     pub heading: String,
     /// The theme it serves.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     /// The stage, as the plan's wire spells it.
     pub stage: String,
@@ -177,6 +185,7 @@ pub struct TicketCard {
     pub second: String,
     /// Its place in Next Up, from 1.
     #[typeshare(serialized_as = "Option<I54>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rank: Option<u64>,
     pub mark: Mark,
     /// The mark is drawn in amber.
@@ -184,14 +193,17 @@ pub struct TicketCard {
     pub notes: Vec<Note>,
     pub waits_on_owner: bool,
     /// The landing that landed which it still names.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub landed_landing: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub run: Option<RunStep>,
     pub branch: String,
     /// On a landing, the word drawn beside the title: "Needs you" while it
     /// waits on the owner (which `notes` then leads with), "Landed · ac840108"
     /// once it has; nil when it is simply aboard.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// What a screen reader says for the row.
     pub accessibility: String,
@@ -250,8 +262,10 @@ pub struct LandingCard {
     /// "Landing 86".
     pub label: String,
     /// The title without the label in front, or nil.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
     /// Its tickets' titles on one line.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub carries: Option<String>,
     /// The phase, spelled as the plan's wire spells it.
     pub phase: LandingPhase,
@@ -266,11 +280,15 @@ pub struct LandingCard {
     #[typeshare(serialized_as = "I54")]
     pub since: i64,
     pub ladder: Ladder,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lander: Option<AgentRef>,
     /// "Lander · Opus · 1.4M".
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub lander_words: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pushed_sha: Option<String>,
     /// What stands in for CI's line when a commit is pushed and the app has no CI read of it yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ci_unread: Option<String>,
     pub tickets: Vec<TicketCard>,
 }
@@ -289,9 +307,12 @@ pub struct AgentRow {
     /// "“Design ov-503” · ov-503 · Working · 22 min".
     pub second: String,
     pub doing_now: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens: Option<String>,
     /// "≈$1.10".
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cost: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
     pub accessibility: String,
 }
@@ -344,6 +365,7 @@ pub struct ThemeTile {
     /// next not started.
     pub cards: Vec<TileCard>,
     /// What waits on the owner, the one amber line.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_ask: Option<String>,
     /// A ticket of it is landing, in review or building.
     pub moving: bool,
@@ -357,8 +379,10 @@ pub struct Themes {
     pub tiles: Vec<ThemeTile>,
     /// Done themes, folded into one tile.
     pub finished: Vec<ThemeTile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_title: Option<String>,
     /// "7 themes".
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_words: Option<String>,
 }
 

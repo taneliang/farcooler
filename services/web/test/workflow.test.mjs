@@ -38,7 +38,7 @@ for (const fixture of fixtures) await test(`Rust ${fixture.name} renders shared 
   await board.refresh(); board.select(presentation.runs[0].item)
   const root = new Element('div'); renderWorkflow(root, view, board)
   const run = presentation.runs[0]; const text = allText(root)
-  for (const value of [run.label, run.phase_label, run.run, run.definition_pin, run.policy_pin, ...run.reasons.flatMap(r => [r.label, r.text])]) assert(text.includes(value))
+  for (const value of [run.label, run.phaseLabel, run.run, run.definitionPin, run.policyPin, ...run.reasons.flatMap(r => [r.label, r.text])]) assert(text.includes(value))
   for (const value of Object.values(run.latest_evidence ?? {})) assert(text.includes(value))
   for (const action of run.actions) {
     await board.dispatch(run.item, action)
@@ -175,7 +175,7 @@ await test('Feature B finite form retains draft/caret/focus and renders borrowed
   const shared = JSON.parse(fs.readFileSync('crates/client/src/testdata/workflow-rework.json','utf8'))
   const p = clone(fixtures[0].response.card), run=p.runs[0]
   run.actions=[{kind:'RequestRework',label:shared.form.submitLabel,guard:'b'}];run.forms=[shared.form]
-  run.rework_history=[{principal:'owner',iteration:0,reason:shared.reason}]
+  run.reworkHistory=[{principal:'owner',iteration:0,reason:shared.reason}]
   const sent=[];let view;const root=new Element('div')
   // Extend only native textarea mechanics in this DOM fixture.
   Element.prototype.setSelectionRange=function(start,end){this.selectionStart=start;this.selectionEnd=end}

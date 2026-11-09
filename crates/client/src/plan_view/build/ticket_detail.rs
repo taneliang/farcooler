@@ -24,6 +24,7 @@ pub struct DetailStage {
     /// stage in one phrase, state first.
     pub row: String,
     /// "PR 31 · 2 threads open", when the ticket has a pull request.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     /// Changes requested, checks failing or conflicts: drawn in color.
     pub attention: bool,
@@ -40,8 +41,10 @@ pub struct TicketDetail {
     pub status: String,
     /// `status` when the stage is drawn on a line of its own: only what that stage leaves to the ticket.
     pub status_beside_stage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<DetailStage>,
     /// "No move in 2 h", for a stale ticket.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stale: Option<String>,
 }
 
@@ -72,6 +75,7 @@ pub struct TicketDetails {
     #[typeshare(skip)]
     pub tracks: Vec<TrackKind>,
     /// "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub track_summary: Option<String>,
 }
 

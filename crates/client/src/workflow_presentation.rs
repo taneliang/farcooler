@@ -105,10 +105,15 @@ pub struct RunCard {
     pub phase: Phase,
     pub stages: Vec<StageCard>,
     /// None after the last stage. The definition's approval policies remain visible.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<StageCard>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub gate: Option<GateCard>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub candidate: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_evidence: Option<Evidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_effect: Option<String>,
     pub iteration: u8,
     pub reworks_remaining: u8,

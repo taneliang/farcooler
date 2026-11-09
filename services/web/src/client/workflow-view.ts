@@ -27,7 +27,7 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
   if (selected) content.append(runCard(selected, view, board))
   else {
     for (const run of view.presentation?.runs ?? []) {
-      content.append(keyed(button(`${run.label} · ${run.item} · ${run.phase_label}`, () => board.select(run.item)), JSON.stringify(['run', run.item])))
+      content.append(keyed(button(`${run.label} · ${run.item} · ${run.phaseLabel}`, () => board.select(run.item)), JSON.stringify(['run', run.item])))
     }
     if (view.ready && view.presentation?.runs.length === 0) content.append(el('p', 'No workflow runs.'))
     if (view.selected && view.ready) content.append(el('p', 'This run is no longer available.'))
@@ -46,22 +46,23 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
 }
 const drafts = new WeakMap<WorkflowBoard, Map<string, { value: string; start: number; end: number }>>()
 function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HTMLElement {
-  const card = el('article'); card.append(el('h2', run.label), el('p', run.phase_label))
+  const card = el('article'); card.append(el('h2', run.label), el('p', run.phaseLabel))
   const fields = el('dl')
-  const field = (name: string, value: string | number | bigint | null) => {
-    if (value !== null) fields.append(el('dt', name), el('dd', String(value)))
+  // An absent optional field is left out of the JSON, so it is undefined here, never null.
+  const field = (name: string, value: string | number | bigint | null | undefined) => {
+    if (value != null) fields.append(el('dt', name), el('dd', String(value)))
   }
-  field('Item', run.item); field('Run', run.run); field('Definition', run.definition_pin); field('Policy', run.policy_pin)
-  field('Candidate', run.candidate); field('Pending Effect', run.pending_effect)
-  field('Iteration', run.iteration); field('Attempt', run.attempt); field('Fence', run.fence); field('Reworks Remaining', run.reworks_remaining)
-  for (const [name, value] of Object.entries(run.latest_evidence ?? {})) field(`Evidence ${name}`, value)
+  field('Item', run.item); field('Run', run.run); field('Definition', run.definitionPin); field('Policy', run.policyPin)
+  field('Candidate', run.candidate); field('Pending Effect', run.pendingEffect)
+  field('Iteration', run.iteration); field('Attempt', run.attempt); field('Fence', run.fence); field('Reworks Remaining', run.reworksRemaining)
+  for (const [name, value] of Object.entries(run.latestEvidence ?? {})) field(`Evidence ${name}`, value as string)
   card.append(fields)
-  if (run.stage) card.append(el('h3', run.stage.label), el('p', run.stage.progression_label))
+  if (run.stage) card.append(el('h3', run.stage.label), el('p', run.stage.progressionLabel))
   if (run.gate) card.append(el('h3', run.gate.label), el('p', run.gate.text), el('p', run.gate.principal))
-  for (const stage of run.stages) card.append(el('p', `${stage.id} · ${stage.label} · ${stage.progression_label}`))
+  for (const stage of run.stages) card.append(el('p', `${stage.id} · ${stage.label} · ${stage.progressionLabel}`))
   for (const reason of run.reasons) card.append(el('h3', reason.label), el('p', reason.text))
   const actions = el('div'); actions.className = 'actions'
-  for (const history of run.rework_history ?? []) card.append(el('p', `${history.principal} · ${history.iteration}`), el('pre', history.reason))
+  for (const history of run.reworkHistory ?? []) card.append(el('p', `${history.principal} · ${history.iteration}`), el('pre', history.reason))
   for (const action of run.actions) {
     const key = JSON.stringify(['action', run.item, run.run, action.kind, action.guard])
     const form = run.forms?.find(f => f.action === action.kind)
@@ -74,7 +75,7 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
       input.oninput = input.onselect = () => { draft.value = input.value; draft.start = input.selectionStart; draft.end = input.selectionEnd }
       input.onfocus = () => input.setSelectionRange(draft.start, draft.end)
       label.append(input); actions.append(label, el('p', form.help),
-        keyed(button(form.submit_label, () => void board.dispatch(run.item, action, draft.value), !view.ready || view.busy), key))
+        keyed(button(form.submitLabel, () => void board.dispatch(run.item, action, draft.value), !view.ready || view.busy), key))
     } else actions.append(keyed(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy), key))
   }
   card.append(actions); return card

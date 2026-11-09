@@ -42,11 +42,11 @@ const failures = await page.evaluate(() => {
   // The pipeline: a heading and count per group, in the view's order, each agent by name, each ticket by key and title.
   const groups = parts('.plan-stage > h3').map(t => t.replace(/\s*\d+$/, ''))
   if (JSON.stringify(groups) !== JSON.stringify(c.pipeline.map(g => g.title))) out.push(`pipeline groups ${JSON.stringify(groups)}`)
-  has('pipeline heading', `Pipeline${c.agent_words}`.replace(/\s+/g, ''), true)
+  has('pipeline heading', `Pipeline${c.agentWords}`.replace(/\s+/g, ''), true)
   for (const g of c.pipeline) {
     const stage = root.querySelector(`.plan-stage[data-stage="${g.stage}"]`)
     if (!stage) continue
-    if (g.unattended_words && !text(stage).includes(g.unattended_words)) out.push(`${g.title}: "${g.unattended_words}"`)
+    if (g.unattendedWords && !text(stage).includes(g.unattendedWords)) out.push(`${g.title}: "${g.unattendedWords}"`)
     for (const a of g.agents) {
       const card = stage.querySelector(`[data-agent="${CSS.escape(a.id)}"]`)
       if (!card) out.push(`${a.name} has no card`)
@@ -55,7 +55,7 @@ const failures = await page.evaluate(() => {
     for (const t of g.unattended) if (g.agents.length === 0 && !text(stage).includes(t.title)) out.push(`${g.title}: ${t.key} "${t.title}"`)
   }
   // Initiatives, then the footer's words.
-  for (const i of [...c.initiatives, ...c.quiet_initiatives]) for (const words of [i.name, i.progress, i.next]) if (words && !(c.quiet_initiatives.includes(i) ? c.quiet_line : text(root)).includes(words)) out.push(`initiative ${i.name}: "${words}"`)
+  for (const i of [...c.initiatives, ...c.quietInitiatives]) for (const words of [i.name, i.progress, i.next]) if (words && !(c.quietInitiatives.includes(i) ? c.quietLine : text(root)).includes(words)) out.push(`initiative ${i.name}: "${words}"`)
   for (const i of c.initiatives) for (const words of [i.name, i.progress, i.next]) has(`initiative ${i.name}`, words)
   const footer = parts('.plan-count-link')
   if (JSON.stringify(footer) !== JSON.stringify(c.footer.map(f => f.words))) out.push(`footer ${JSON.stringify(footer)}`)

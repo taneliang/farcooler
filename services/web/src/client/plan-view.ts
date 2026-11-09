@@ -23,7 +23,7 @@ export interface PlanHandlers {
   /// when there is no orchestrator to put it in.
   quote(text: string): boolean
   /// An agent's chat or terminal. False when it has none to open.
-  openAgent(agent: { id: string; name: string; terminal: string | null }): boolean
+  openAgent(agent: { id: string; name: string; terminal?: string }): boolean
   /// A footer count's list.
   openList(kind: CountKind): void
   edit(theme: string): void
@@ -81,7 +81,7 @@ function glyph(agent: ColumnAgent): SVGElement {
   svg.setAttribute('aria-hidden', 'true')
   // Activity is the agent's: a quiet pulse while it works, amber and still
   // when stuck, still when idle.
-  if (agent.doing_is_trouble) svg.setAttribute('data-trouble', 'true')
+  if (agent.doingIsTrouble) svg.setAttribute('data-trouble', 'true')
   else if (agent.working) svg.setAttribute('data-working', 'true')
   for (const d of GLYPHS[agent.role]) {
     const path = document.createElementNS(SVG, 'path')
@@ -180,7 +180,7 @@ function initiativeCard(i: Initiative, view: PlanBoardView, on: PlanHandlers): H
     ;(meter.firstElementChild as HTMLElement).style.width = `${Math.round(Math.min(1, Math.max(0, i.fraction)) * 100)}%`
     top.append(make('span', 'plan-init-name', i.name), meter, make('span', 'plan-figures', i.progress))
     b.append(top)
-    if (i.next) b.append(make('span', i.asks_owner ? 'plan-init-next plan-amber' : 'plan-init-next', i.next))
+    if (i.next) b.append(make('span', i.asksOwner ? 'plan-init-next plan-amber' : 'plan-init-next', i.next))
     li.append(b)
   }
   const n = notice(view.notices.get(i.id))
@@ -189,13 +189,13 @@ function initiativeCard(i: Initiative, view: PlanBoardView, on: PlanHandlers): H
 }
 
 function initiativesSection(column: Column, view: PlanBoardView, on: PlanHandlers): HTMLElement | null {
-  if (column.initiative_count === 0) return null
+  if (column.initiativeCount === 0) return null
   const wrap = make('section', 'plan-section plan-initiatives')
-  wrap.append(heading('Initiatives', column.initiative_count, true))
+  wrap.append(heading('Initiatives', column.initiativeCount, true))
   const ul = make('ul', 'plan-list')
   ul.append(...column.initiatives.map(i => initiativeCard(i, view, on)))
   wrap.append(ul)
-  if (column.quiet_line) wrap.append(make('p', 'plan-quiet', column.quiet_line))
+  if (column.quietLine) wrap.append(make('p', 'plan-quiet', column.quietLine))
   return wrap
 }
 
@@ -214,7 +214,7 @@ function ticketRow(t: ColumnTicket, stage: string, on: PlanHandlers): HTMLElemen
   return b
 }
 
-function agentCard(agent: ColumnAgent, stage: string, more: string | null, on: PlanHandlers): HTMLElement {
+function agentCard(agent: ColumnAgent, stage: string, more: string | null | undefined, on: PlanHandlers): HTMLElement {
   const li = make('li', 'plan-soft plan-agent')
   li.dataset.agent = agent.id
   const head = make('button', 'plan-agent-head')
@@ -222,7 +222,7 @@ function agentCard(agent: ColumnAgent, stage: string, more: string | null, on: P
   head.title = agent.terminal ? `Open ${agent.name}’s chat` : `Open ${agent.name}`
   head.setAttribute('aria-label', `${agent.name}, ${agent.doing}${agent.time ? `, ${agent.time}` : ''}`)
   const words = make('span', 'plan-agent-words')
-  words.append(make('strong', '', agent.name), document.createTextNode(' '), make('span', agent.doing_is_trouble ? 'plan-amber' : '', agent.doing))
+  words.append(make('strong', '', agent.name), document.createTextNode(' '), make('span', agent.doingIsTrouble ? 'plan-amber' : '', agent.doing))
   head.append(glyph(agent), words)
   if (agent.time) head.append(make('span', 'plan-time', agent.time))
   head.onclick = () => {
@@ -240,21 +240,21 @@ function agentCard(agent: ColumnAgent, stage: string, more: string | null, on: P
 function pipelineSection(column: Column, on: PlanHandlers): HTMLElement | null {
   if (column.pipeline.length === 0) return null
   const wrap = make('section', 'plan-section plan-pipeline')
-  wrap.append(heading('Pipeline', column.agent_words, true))
+  wrap.append(heading('Pipeline', column.agentWords, true))
   for (const group of column.pipeline) {
     const stage = make('div', 'plan-stage')
     stage.dataset.stage = group.stage
     stage.append(heading(group.title, group.count, false, 'h3'))
     const ul = make('ul', 'plan-list')
-    for (const agent of group.agents) ul.append(agentCard(agent, group.title, agent.more > 0 ? group.unattended_words : null, on))
-    if (group.agents.length === 0 && group.unattended_words) {
+    for (const agent of group.agents) ul.append(agentCard(agent, group.title, agent.more > 0 ? group.unattendedWords : null, on))
+    if (group.agents.length === 0 && group.unattendedWords) {
       const li = make('li', 'plan-soft plan-agent')
-      li.append(make('p', 'plan-more', group.unattended_words))
+      li.append(make('p', 'plan-more', group.unattendedWords))
       for (const t of group.unattended) li.append(ticketRow(t, group.title, on))
       ul.append(li)
-    } else if (group.agents.length > 0 && !group.agents.some(a => a.more > 0) && group.unattended_words) {
+    } else if (group.agents.length > 0 && !group.agents.some(a => a.more > 0) && group.unattendedWords) {
       // No card has tickets to hang it on: its own line.
-      ul.append(make('li', 'plan-quiet', group.unattended_words))
+      ul.append(make('li', 'plan-quiet', group.unattendedWords))
     }
     stage.append(ul)
     wrap.append(stage)
@@ -305,7 +305,7 @@ function rulingCard(r: Ruling, view: PlanBoardView, on: PlanHandlers): HTMLEleme
 function draw(plan: Plan, model: PlanViewModel, needs: NeedsRow[], view: PlanBoardView, now: number, on: PlanHandlers): HTMLElement[] {
   const out: HTMLElement[] = []
   const column = model.column
-  const empty = column.facts.length === 0 && column.pipeline.length === 0 && column.initiative_count === 0 && column.footer.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && needs.length === 0
+  const empty = column.facts.length === 0 && column.pipeline.length === 0 && column.initiativeCount === 0 && column.footer.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && needs.length === 0
   if (empty) {
     const wrap = make('div', 'plan-none')
     wrap.append(make('h2', 'plan-clear', WORDS.nothingPlanned), make('p', 'plan-empty', WORDS.nothingPlannedDetail))
