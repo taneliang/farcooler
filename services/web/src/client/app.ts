@@ -25,8 +25,8 @@ import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
-import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, runnerStopped, sealedRefusal, unreachable } from './copy'
-import { assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
+import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, restoreFailure, runnerStopped, sealedRefusal, unreachable } from './copy'
+import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
 import { renderNeeds } from './needs-view'
@@ -48,6 +48,7 @@ import { type LinkView, Reconnector } from './reconnect'
 import { StartWatch } from './start'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
+import { deriveKeys, needsSaving, restore, saveCopy, type Vault } from './vault'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -118,6 +119,95 @@ interface Session {
   /// The passkey's user handle for this account (`userHandle`).
   user: Uint8Array
   tailcat: Tailcat
+  /// The sealed copy's key, once an assertion in this tab gave the passkey's
+  /// PRF output (vault.ts), and whether that output came verified. In memory
+  /// only: the passkey gives it again.
+  vault?: { key: CryptoKey; uv: boolean }
+}
+
+// MARK: The sealed copy
+
+/// Sign with the passkey, and take the PRF output the same touch gave
+/// (vault.ts) before the signature goes on: the node key a first offer names
+/// must be the derived one.
+async function signed(session: Session, signing: Promise<Signed>): Promise<Signed> {
+  const answer = await signing
+  await notePrf(session, answer).catch(e => console.error('Far Cooler couldn’t use the passkey’s PRF output', e))
+  return answer
+}
+
+/// What one assertion's PRF output gives this tab: the sealed copy's key, and
+/// for a browser that hasn't yet named a node key in an offer, a node key
+/// derived from the passkey. An output whose verification flag differs from
+/// the one this device uses may be another output, so it is ignored.
+async function notePrf(session: Session, answer: Signed): Promise<void> {
+  const prf = answer.prf
+  const { device } = session
+  if (!prf || (device.prfUv !== undefined && device.prfUv !== prf.uv)) return
+  const keys = await deriveKeys(prf.output)
+  if (!device.nodeDerived && !device.offer && !device.runners?.length) {
+    const node = session.tailcat.nodeKeyFromSeed(keys.nodeSeed)
+    if (node) {
+      device.nodePriv = node.priv
+      device.nodePub = node.pub
+      device.nodeDerived = true
+    }
+  }
+  device.prfUv = prf.uv
+  session.vault = { key: keys.vaultKey, uv: prf.uv }
+  await saveDevice(device)
+  await keepCopy(session)
+}
+
+/// Bring the relay's sealed copy up to date with this device, when this tab
+/// has its key and the device changed since the last copy. A browser without
+/// PRF has no copy: its storage is asked to persist instead, so the browser
+/// is less likely to clear it.
+async function keepCopy(session: Session): Promise<void> {
+  const { device } = session
+  if (!session.vault) {
+    if (device.runners?.length) void navigator.storage?.persist?.().catch(() => {})
+    return
+  }
+  if (!(await needsSaving(device))) return
+  if (await saveCopy(relayRaw, session.vault.key, device, session.vault.uv)) await saveDevice(device)
+}
+
+/// A browser with nothing kept, on an account with sealed copies: one touch
+/// of the passkey brings the runners back, with no enrollment. Make a New
+/// Passkey is the way to add the browser from the phone instead.
+function restoreScreen(session: Session, vaults: Vault[], migrated: boolean, notice = ''): void {
+  status(
+    'Reconnect with your passkey',
+    notice || 'Far Cooler keeps your runners sealed with your passkey. Touch your passkey once to use them in this browser, with no need to add it from your phone.',
+    { label: 'Use Passkey', run: () => void restoreWith(session, vaults, migrated) },
+    () => passkeyScreen(session, migrated),
+    'Make a New Passkey',
+  )
+}
+
+async function restoreWith(session: Session, vaults: Vault[], migrated: boolean): Promise<void> {
+  const done = await restore(
+    { ask: (ids, uv) => askForCopy(rpId(), ids, uv), nodeKey: seed => session.tailcat.nodeKeyFromSeed(seed) },
+    session.device.account,
+    session.user,
+    vaults,
+  )
+  if (!done.ok) return restoreScreen(session, vaults, migrated, restoreFailure(done.word))
+  const { device } = done
+  session.device = device
+  session.keyLine = keyLineOf(device.passkey as Passkey)
+  session.vault = { key: done.vaultKey, uv: !!device.prfUv }
+  await saveDevice(device)
+  if (device.runners?.length) void work(session)
+  else void enroll(session)
+}
+
+/// The account's sealed copies, or none when the relay has none or can't say.
+async function listCopies(): Promise<Vault[]> {
+  const answer = await relayRaw('web/vault').catch(() => null)
+  const vaults = answer?.status === 200 ? answer.body?.vaults : null
+  return Array.isArray(vaults) ? vaults.filter(v => typeof v?.credential === 'string' && typeof v?.sealed === 'string' && typeof v?.uv === 'boolean') : []
 }
 
 // MARK: The passkey
@@ -202,7 +292,7 @@ async function register(session: Session): Promise<void> {
   const done = await registerDevice(
     {
       call: relayRaw,
-      sign: data => assertWith(passkey, rp, data),
+      sign: data => signed(session, assertWith(passkey, rp, data)),
       data: registrationData,
       proof: (account, challenge, keyLine, signed) =>
         registrationProof(account, challenge, keyLine, new Uint8Array(signed.authenticatorData), new Uint8Array(signed.clientDataJSON), new Uint8Array(signed.signature)),
@@ -217,6 +307,7 @@ async function register(session: Session): Promise<void> {
   }
   device.registered = true
   await saveDevice(device)
+  await keepCopy(session)
   void enroll(session)
 }
 
@@ -402,6 +493,7 @@ async function finishTaken(session: Session, taken: { granted_by: string | null;
   }
   device.runners = taken.runners
   await saveDevice(device)
+  await keepCopy(session)
   void work(session)
 }
 
@@ -424,6 +516,7 @@ function confirmJoin(session: Session, from: string, runners: Granted[]): void {
   $<HTMLButtonElement>('join-yes').onclick = async () => {
     session.device.runners = runners
     await saveDevice(session.device)
+    await keepCopy(session)
     void work(session)
   }
   $<HTMLButtonElement>('join-no').onclick = () => void enroll(session)
@@ -608,7 +701,7 @@ function signIn(session: Session, label: string): (challenge: Uint8Array) => Pro
   const rp = rpId()
   return async challenge => {
     try {
-      return await assertWith(passkey, rp, challenge)
+      return await signed(session, assertWith(passkey, rp, challenge))
     } catch (e) {
       if ((e as Error).message !== 'declined') throw e
     }
@@ -629,7 +722,7 @@ function signIn(session: Session, label: string): (challenge: Uint8Array) => Pro
             cancel()
           },
         ),
-      () => assertWith(passkey, rp, challenge),
+      () => signed(session, assertWith(passkey, rp, challenge)),
     )
   }
 }
@@ -932,7 +1025,7 @@ function joinRunner(session: Session, target: Granted, into: Fleet): void {
         session.keyLine,
         async challenge => {
           try {
-            return await assertWith(passkey, rp, challenge)
+            return await signed(session, assertWith(passkey, rp, challenge))
           } catch (e) {
             throw new Error((e as Error).message === 'declined' ? 'passkey_declined' : (e as Error).message)
           }
@@ -991,6 +1084,7 @@ async function addAgain(session: Session): Promise<void> {
   delete session.device.offer
   delete session.device.offerShownAt
   await saveDevice(session.device)
+  await keepCopy(session)
   void enroll(session)
 }
 
@@ -1003,7 +1097,8 @@ const FORGET_WAIT_MS = 2_000
 /// Sign Out takes this browser's key and runners with it, before the form
 /// posts. The Worker's answer also clears the origin's storage
 /// (`Clear-Site-Data`), which covers a sign-out this page didn't run, and one
-/// whose storage never answered.
+/// whose storage never answered. The relay's sealed copy stays (vault.ts): only
+/// the passkey opens it, and it is how signing in again here costs one touch.
 function signOutForgets(): void {
   const form = document.querySelector<HTMLFormElement>('form[action="/sign-out"]')
   if (!form) return
@@ -1090,8 +1185,12 @@ async function start(watch: StartWatch): Promise<void> {
   const { device, migrated } = kept
   const email = typeof me?.user?.email === 'string' ? (me.user.email as string) : ''
   const session: Session = { device, keyLine: device.passkey ? keyLineOf(device.passkey) : '', email, user: await userHandle(account), tailcat }
+  // Nothing kept here, as after the browser cleared this site's storage: the
+  // account's sealed copies, if it has any, bring it back with one touch.
+  const vaults = device.passkey ? [] : await listCopies()
   watch.done()
-  if (!device.passkey) passkeyScreen(session, migrated)
+  if (!device.passkey && vaults.length) restoreScreen(session, vaults, migrated)
+  else if (!device.passkey) passkeyScreen(session, migrated)
   else if (device.runners?.length) void work(session)
   else void enroll(session)
 }

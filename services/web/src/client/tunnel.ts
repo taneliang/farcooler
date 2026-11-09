@@ -13,6 +13,9 @@ export interface TunnelConn {
 export interface Tailcat {
   /// A fresh node key pair in this product's 43-character encoding.
   mintNodeKey(): { priv: string; pub: string }
+  /// The node key a 32-byte seed derives (vault.ts), or null for a seed that
+  /// isn't 32 bytes.
+  nodeKeyFromSeed(seed: Uint8Array): { priv: string; pub: string } | null
   /// Rejects with an Error whose message is `derp`, `no_answer` or `io`.
   dial(token: string, nodeKey: string): Promise<TunnelConn>
 }

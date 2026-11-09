@@ -260,3 +260,24 @@ export function planRefusal(failure: { word: string; code?: string; what?: strin
       return `${runner} didn’t take that change. Try again.`
   }
 }
+
+/// Why the runners saved for a passkey couldn't be brought back (vault.ts
+/// `restore`), by its word. Each leaves Make a New Passkey on screen.
+export function restoreFailure(word: string): string {
+  switch (word) {
+    case 'declined':
+      return 'Far Cooler didn’t get your passkey. Select Use Passkey and follow your browser’s prompt.'
+    case 'no_prf':
+      return 'This browser or passkey can’t unlock saved runners. Select Make a New Passkey to add this browser from your phone.'
+    case 'other_account':
+      return 'That passkey belongs to another Far Cooler account. Use the passkey for the account you’re signed in to, or make a new one.'
+    case 'not_found':
+      return 'Far Cooler has no runners saved for that passkey. Choose another passkey, or select Make a New Passkey.'
+    case 'unopened':
+      return 'Far Cooler couldn’t unlock the runners saved for that passkey. Select Make a New Passkey to add this browser from your phone.'
+    case 'unreachable':
+      return 'Far Cooler couldn’t reach its service. Check your connection, then try again.'
+    default:
+      return 'Far Cooler couldn’t use your passkey. Try again, or select Make a New Passkey.'
+  }
+}

@@ -12,9 +12,14 @@
 ///   in the authenticator, where only its owner can delete it.
 /// - **The node key** is 32 raw bytes, because WireGuard runs in Go and needs
 ///   them (plan-763 §0 point 8). It grants a route to a runner, never a login.
+///   Where the passkey has PRF it is derived from it, and the rest of this is
+///   kept sealed at the relay too, so clearing this storage costs a touch
+///   rather than an enrollment (vault.ts, ov-779).
 /// - **The open offer** survives a reload, so a phone that already scanned the
 ///   code can still be answered.
 /// - **The granted runners**, each with the host key every connection pins.
+
+import { type Prf, prfExtension, prfOf } from './vault'
 
 export interface Granted {
   id: string
@@ -43,6 +48,15 @@ export interface Device {
   passkey?: Passkey
   nodePriv: string
   nodePub: string
+  /// Whether the node key came from the passkey's PRF output (vault.ts,
+  /// ov-779), so the passkey can make it again. False or absent for one minted
+  /// at random, which the sealed copy carries instead.
+  nodeDerived?: boolean
+  /// Whether the passkey's PRF output this device uses came with the person
+  /// verified. An output with the other flag may differ, so it isn't used.
+  prfUv?: boolean
+  /// What the relay's sealed copy last kept (vault.ts `needsSaving`).
+  vaulted?: string
   /// Whether this passkey is registered with the account's device directory
   /// (ov-771), so a phone can certify it.
   registered?: boolean
@@ -170,11 +184,17 @@ export interface Signed {
   authenticatorData: ArrayBuffer
   clientDataJSON: ArrayBuffer
   signature: ArrayBuffer
+  /// The passkey's PRF output, asked for in the same touch (vault.ts), or
+  /// null from a browser or authenticator without PRF.
+  prf?: Prf | null
 }
 
 /// Ask the passkey to sign `challenge` (the SSH login's data; crates/web
 /// encodes the answer as `webauthn-sk-ecdsa-sha2-nistp256@openssh.com`). One
 /// touch. Throws `declined` when the person or the browser said no.
+///
+/// The same touch asks for the passkey's PRF output (ov-779), so keeping the
+/// sealed copy current costs nothing extra.
 export async function assertWith(passkey: Passkey, rpId: string, challenge: Uint8Array): Promise<Signed> {
   try {
     const credential = (await navigator.credentials.get({
@@ -184,11 +204,38 @@ export async function assertWith(passkey: Passkey, rpId: string, challenge: Uint
         allowCredentials: [{ type: 'public-key', id: passkey.id as Uint8Array<ArrayBuffer> }],
         userVerification: 'discouraged',
         timeout: 120_000,
+        extensions: prfExtension(),
       },
     })) as PublicKeyCredential
     const response = credential.response as AuthenticatorAssertionResponse
-    return { authenticatorData: response.authenticatorData, clientDataJSON: response.clientDataJSON, signature: response.signature }
+    return { authenticatorData: response.authenticatorData, clientDataJSON: response.clientDataJSON, signature: response.signature, prf: prfOf(credential) }
   } catch (e) {
     throw new Error(declined(e) ? 'declined' : 'failed')
   }
+}
+
+/// Ask for the passkey behind one of the relay's sealed copies (vault.ts
+/// `restore`), with its PRF output: one touch. `ids` are the passkeys the
+/// account has copies for, so the browser offers only those; `uv` asks for
+/// verification, for a copy sealed with it. Call it from a click (Safari).
+/// Throws `declined` or `failed`.
+export async function askForCopy(rpId: string, ids: Uint8Array[], uv: boolean): Promise<{ id: Uint8Array; userHandle: Uint8Array | null; prf: Prf | null }> {
+  let credential: PublicKeyCredential
+  try {
+    credential = (await navigator.credentials.get({
+      publicKey: {
+        challenge: bytes(32),
+        rpId,
+        allowCredentials: ids.map(id => ({ type: 'public-key' as const, id: id as Uint8Array<ArrayBuffer> })),
+        userVerification: uv ? 'required' : 'discouraged',
+        timeout: 120_000,
+        extensions: prfExtension(),
+      },
+    })) as PublicKeyCredential
+  } catch (e) {
+    throw new Error(declined(e) ? 'declined' : 'failed')
+  }
+  if (!credential) throw new Error('failed')
+  const handle = (credential.response as AuthenticatorAssertionResponse).userHandle
+  return { id: new Uint8Array(credential.rawId), userHandle: handle ? new Uint8Array(handle) : null, prf: prfOf(credential) }
 }
