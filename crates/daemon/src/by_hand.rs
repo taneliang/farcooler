@@ -55,4 +55,21 @@ mod tests {
         let own = svc.create_terminal_with_prompt(checkout, "scripts", "claude", None, None).await.expect("a plain pane still opens");
         let _ = svc.stop_terminal(own.id).await;
     }
+
+    /// A split beside a pane (`terminal.create` joining the active layout) opens a pane on a ticket without
+    /// passing through `open_terminal`, so it is refused on its own, and opens nothing.
+    #[tokio::test]
+    async fn a_published_workspace_refuses_a_split_pane_on_a_ticket() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let board = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let checkout = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap().id;
+        let card = svc.store.create_task(board, "split by hand", Actor::Manager).unwrap();
+        let anchor = svc.create_terminal_with_prompt(checkout, "own", "claude", None, None).await.expect("a plain pane");
+        crate::test_support::publish_for_test(&svc, board);
+        let opened = svc.store.list_terminals_for_worktree(checkout).unwrap().len();
+        let side = pb::SplitSide::Right;
+        refused(svc.split_terminal_with_prompt(checkout, anchor.id, side, "task", "claude", None, Some(card.id)).await, super::PANE);
+        assert_eq!(svc.store.list_terminals_for_worktree(checkout).unwrap().len(), opened, "a refusal opens nothing");
+        let _ = svc.stop_terminal(anchor.id).await;
+    }
 }

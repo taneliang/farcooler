@@ -4072,6 +4072,8 @@ impl Service {
         if let Some(p) = prompt {
             validate_launch_prompt(p)?;
         }
+        // A split is a pane on a ticket too: refused the same way, before anything is made (ov-1011).
+        if let Some(task) = task { crate::by_hand::refuse(&self.store, task, crate::by_hand::PANE)?; }
 
         let ws = self.store.get_worktree(worktree_id)?;
         let login = self.login_for_new_pane(None)?;
