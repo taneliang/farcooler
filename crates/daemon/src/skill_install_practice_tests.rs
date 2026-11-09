@@ -82,7 +82,8 @@ fn the_landing_mode_is_known_before_anything_lands() {
 
 /// PR mode, as the owner ruled it (Oct 5): approval is a person's, one PR per
 /// card under the owner's login, and review is made faster rather than
-/// rationed. A back-pressure rule must not creep back.
+/// rationed. A back-pressure rule must not creep back. The rehearsal is the
+/// engine's `batched-pr` template now, not a landing by hand (ov-1012).
 #[test]
 fn pr_mode_never_lands_without_approval() {
     for h in ALL {
@@ -92,9 +93,7 @@ fn pr_mode_never_lands_without_approval() {
             "no admin bypass",
             "never approve",
             "One PR per card, under the owner's own `gh` login",
-            "The landing becomes a rehearsal",
-            "never pushed",
-            "Never slow dispatch for busy reviewers: make review faster",
+            "Make review faster, never ration it",
         ] {
             assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
         }
@@ -102,35 +101,60 @@ fn pr_mode_never_lands_without_approval() {
     }
 }
 
-/// The plan is the owner's first read, so a ticket goes on the line when its
-/// agent is dispatched and moves as things happen, not at the next check-in.
+/// The engine runs a published workspace's work (ov-1012, owner Nov 9): the
+/// orchestrator tracks, starts, reviews and sends back through `workflow`
+/// commands, the ids each write needs come from `workflow get`, and the old
+/// ways of starting and landing are named only to be refused. Agents still
+/// report to it, and it steers them.
 #[test]
-fn a_ticket_goes_on_the_line_with_its_dispatch() {
+fn the_orchestrator_drives_the_engine() {
     for h in ALL {
-        let third = section(&skill(h), "3. Dispatch, answer, or report");
-        // An agent dispatch puts its tickets on the line and records the agent
-        // by itself (ov-457, ov-872); a subagent is recorded by hand beside
-        // its launch.
-        assert!(third.contains("puts them on the line and records the agent itself"), "{h:?}: {third}");
-        assert!(third.contains("Move each ticket on the line as each thing happens"), "{h:?}: {third}");
-        assert!(third.contains("farcooler agent dispatch --role builder --ticket <key>"), "{h:?}: {third}");
-        assert!(third.contains("farcooler agent record --role reviewer --subagent <agentId> --ticket <key>"), "{h:?}: {third}");
-        // Agents report to the orchestrator (ov-455), and it steers them.
-        assert!(third.contains("An agent reports to you in this pane"), "{h:?}: {third}");
-        assert!(third.contains("farcooler message <key>"), "{h:?}: {third}");
-        assert!(third.contains("farcooler plan ticket set <key>"), "{h:?}: {third}");
+        let third = section(&skill(h), "3. Start, answer, or report");
+        for rule in [
+            "**The workflow engine runs the work.**",
+            "Only the `workflow` commands below start, move or land its tickets: never `agent dispatch`, `task dispatch`, `plan ticket set --stage`, a pane or a branch of yours",
+            "No `configuration` yet: draft one (section 4) and tell the owner it waits on their approval",
+            "Read `workflow get <ws> --json` before every write",
+            "`--sequence` (one more than the largest value in `state.source_sequences`, or 1)",
+            "`state.items.<key>.run` and `.pin`",
+            "A `Stale` refusal means read again and send with a new id",
+            "**Track.**", "**Start.**", "**Review.**", "**Send back.**", "**Land.** The engine does it",
+            "Read get again: the ticket is `Running` at its build step",
+            "the file holding its `last_evidence` exactly as get gives it",
+            "A person gate waits for that person in the app: never decide it",
+            "farcooler workflow start <ws> <key> --start-pin <pin> --run <run> --pin <pin> --worktree <key>-<slug> --branch <key>-<slug>",
+            "farcooler workflow review <ws> <key> --run <run> --pin <pin> --passed --evidence <file>",
+            "farcooler workflow send-back <ws> <key> --run <run> --pin <pin> --reason \"<what to change>\"",
+            "farcooler agent record --role reviewer --subagent <agentId> --ticket <key>",
+            "An agent reports to you in this pane",
+            "farcooler message <key>",
+        ] {
+            assert!(third.contains(rule), "{h:?} lacks {rule:?}: {third}");
+        }
+        let body = skill(h);
+        for gone in ["farcooler agent dispatch", "farcooler task dispatch", "farcooler plan ticket set", "farcooler agent work", "--again"] {
+            assert!(!body.contains(gone), "{h:?} still teaches {gone:?}");
+        }
     }
 }
 
-/// A dispatched agent is confirmed to have started (ov-493): one that
-/// didn't goes to the owner, and a folder-trust prompt is never answered
-/// for them.
+/// The owner's own terminals are theirs (ov-1012): the engine takes Far
+/// Cooler's work, never the scripts the owner runs in a plain terminal.
 #[test]
-fn a_dispatched_agent_is_confirmed_started() {
+fn plain_terminals_stay_the_owners() {
     for h in ALL {
-        let third = section(&skill(h), "3. Dispatch, answer, or report");
-        assert!(third.contains("Confirm each dispatched agent started"), "{h:?}: {third}");
-        assert!(third.contains("goes to the owner at once with the reason"), "{h:?}: {third}");
+        let third = section(&skill(h), "3. Start");
+        assert!(third.contains("Plain terminals the owner opens for their own scripts are theirs and keep working as they always have: never route them through the engine or stop them"), "{h:?}: {third}");
+    }
+}
+
+/// A started run is confirmed in `workflow get` (ov-493, ov-1012), and a
+/// folder-trust prompt is never answered for the owner.
+#[test]
+fn a_started_run_is_confirmed() {
+    for h in ALL {
+        let third = section(&skill(h), "3. Start");
+        assert!(third.contains("Read get again: the ticket is `Running` at its build step, or the refusal in the receipt says why"), "{h:?}: {third}");
         assert!(third.contains("in Needs You: never answer it for them"), "{h:?}: {third}");
     }
 }
@@ -140,7 +164,7 @@ fn a_dispatched_agent_is_confirmed_started() {
 #[test]
 fn a_reversible_call_is_recorded_as_a_ruling() {
     for h in ALL {
-        let third = section(&skill(h), "3. Dispatch, answer, or report");
+        let third = section(&skill(h), "3. Start, answer, or report");
         assert!(third.contains("is a ruling: make it, keep the work moving, and record it"), "{h:?}: {third}");
         assert!(third.contains("`plan ruling add --decision"), "{h:?}: {third}");
         // Until a CLI has the verb, the ruling still gets written down.
@@ -154,43 +178,42 @@ fn a_reversible_call_is_recorded_as_a_ruling() {
 #[test]
 fn a_kept_ruling_is_precedent_and_a_reversed_one_is_a_lesson() {
     for h in ALL {
-        let third = section(&skill(h), "3. Dispatch, answer, or report");
+        let third = section(&skill(h), "3. Start, answer, or report");
         assert!(third.contains("cite a kept one as precedent"), "{h:?}: {third}");
         assert!(third.contains("`plan ruling reverse R-12 [--sha <commit>]`, note the lesson on its card as a decision, ask next time"), "{h:?}: {third}");
         assert!(third.contains("Never keep one for them."), "{h:?}: {third}");
     }
 }
 
-/// Landing ends with the card closed, the ticket landed, the worktree removed
-/// and its build output gone; a push or a rerun is watched, so a run nobody
-/// looks at doesn't sit green and unlanded; and landings are kept on the plan
-/// (ov-309, ov-872), with a page's figures drawn live (ov-306), never a
-/// hand-kept page.
+/// The engine lands (ov-960, ov-1012): it groups, gates, pushes and watches CI,
+/// so the orchestrator lands nothing by hand and watches no push of its own.
+/// It still checks the card closed, ticks what was verified and cleans up,
+/// and a page's figures are drawn live (ov-306), never a hand-kept page.
 #[test]
-fn landing_is_watched_and_cleaned_up() {
+fn the_engine_lands_and_the_orchestrator_cleans_up() {
     for h in ALL {
         let land = section(&skill(h), "4. Land");
-        assert!(land.contains("After every push or CI rerun, take its run from `gh run list`"), "{h:?}: {land}");
-        // A local bare remote made Sonnet decide there was no CI and skip
-        // the watch (ov-323, S18): the run list decides, never the URL.
-        assert!(land.contains("never decide there is no CI from the remote's URL"), "{h:?}: {land}");
-        assert!(land.contains("start `gh run watch <id> --exit-status`"), "{h:?}: {land}");
-        assert!(land.contains("as a background command"), "{h:?}: {land}");
-        assert!(land.contains("delete its build output, and `worktree remove` it"), "{h:?}: {land}");
-        assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
-        // The engine lands; the old landing job and its writes are gone (ov-960).
-        assert!(land.contains("**The workflow engine lands.**"), "{h:?}: {land}");
-        assert!(land.contains("`workflow queue` puts a ticket waiting at its landing step into the group"), "{h:?}: {land}");
-        assert!(land.contains("Landings from before the engine are history"), "{h:?}: {land}");
-        for gone in ["landing start", "landing set", "landing move", "--record-only", "collecting landing", "--land`"] {
+        for rule in [
+            "**The workflow engine lands.**",
+            "The group folds, gates, pushes and watches CI",
+            "`workflow queue` puts a ticket waiting at its landing step into the group",
+            "look at the target yourself, then `workflow settle … --landed true`",
+            "Landings from before the engine are history",
+            "**Drafting the workflow.** You propose; a person publishes, never you.",
+            "farcooler workspace workflow-draft <ws> batched-push --reason",
+            "`--orchestrator-gate`",
+            "- Route `services/site/**`: ask",
+            "check that its card closed and tick each verified `--met` line",
+            "delete its build output, and `worktree remove` its worktree once nothing works in it",
+            "The workflow's gates mirror CI",
+        ] {
+            assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
+        }
+        assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
+        for gone in ["landing start", "landing set", "landing move", "--record-only", "lands by hand", "gh run watch",
+            "Rebase onto main", "page set trains", "plan ticket set", "landing-template <workspace>"] {
             assert!(!land.contains(gone), "{h:?} still shows {gone:?}: {land}");
         }
-        assert!(land.contains("- Route `services/site/**`: ask"), "{h:?}: {land}");
-        assert!(land.contains("`plan ticket set <key> --stage landed --sha <sha>`"), "{h:?}: {land}");
-        assert!(!land.contains("page set trains"), "{h:?}: the hand-kept page is gone: {land}");
-        assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
-        assert!(land.contains("Local gates mirror CI"), "{h:?}: {land}");
-        assert!(land.contains("runs every gate once"), "{h:?}: {land}");
     }
 }
 
@@ -228,8 +251,8 @@ fn every_plan_and_page_write_names_the_manager() {
         .unwrap()
         .contents;
     let writes = plan_and_page_writes(&text);
-    // Five since the landing writes left the skill with the old landing job (ov-960).
-    assert!(writes.len() >= 5, "too few plan writes to check: {writes:?}");
+    // Two since the engine took dispatch and the line's stages (ov-1012): a message and a subagent's record.
+    assert!(writes.len() >= 2, "too few plan writes to check: {writes:?}");
     assert!(!text.contains("plan lane") && !text.contains("plan train"), "a retired verb is still shown");
     for line in writes {
         assert!(line.contains("--actor manager"), "a write that doesn't name the manager: {line}");
@@ -302,8 +325,8 @@ fn the_owners_conventions_ship_as_defaults() {
         }
         // The repository's own area list is not a default (ov-463).
         assert!(!body.contains("Phones, Watch, Daemon, Relay"), "{h:?}: Far Cooler's areas leaked into the skill");
-        let third = section(&body, "3. Dispatch");
-        assert!(third.contains("--branch <branch> --title \"<what it does>\" --actor manager"), "{h:?}: {third}");
+        let third = section(&body, "3. Start");
+        assert!(third.contains("--worktree <key>-<slug> --branch <key>-<slug>"), "{h:?}: a run's branch starts with its key: {third}");
         let land = section(&body, "4. Land");
         assert!(land.contains("joins that step's open group, which leaves for its gate by itself when nothing is ahead"), "{h:?}: {land}");
         assert!(!body.contains("integ-N>"), "{h:?}: a command still names integ-N");
@@ -360,7 +383,7 @@ fn suggesting_themes_proposes_with_evidence_and_creates_only_what_is_kept() {
 #[test]
 fn an_ask_reaches_a_paired_phone_and_the_reply_still_carries_it() {
     for h in ALL {
-        let third = section(&skill(h), "3. Dispatch");
+        let third = section(&skill(h), "3. Start");
         assert!(!third.contains("reaches no phone"), "{h:?}: {third}");
         assert!(third.contains("put the question in your reply too: a phone hears it only when one is paired"), "{h:?}: {third}");
     }
@@ -372,7 +395,7 @@ fn an_ask_reaches_a_paired_phone_and_the_reply_still_carries_it() {
 #[test]
 fn tickets_are_logged_and_routed_by_the_record() {
     for h in ALL {
-        let third = section(&skill(h), "3. Dispatch");
+        let third = section(&skill(h), "3. Start");
         assert!(third.contains("Log each ticket's tokens, model and fix rounds; route by that record"), "{h:?}: {third}");
     }
 }
@@ -384,8 +407,8 @@ fn tickets_are_logged_and_routed_by_the_record() {
 #[test]
 fn every_brief_wants_each_new_test_seen_failing() {
     for h in ALL {
-        let third = section(&skill(h), "3. Dispatch");
-        let brief = third.find("A brief names the gates").unwrap_or_else(|| panic!("{h:?}: {third}"));
+        let third = section(&skill(h), "3. Start");
+        let brief = third.find("A brief says what done means").unwrap_or_else(|| panic!("{h:?}: {third}"));
         assert!(third[brief..].contains("wants each new test seen failing"), "{h:?}: {}", &third[brief..]);
     }
 }
@@ -419,16 +442,16 @@ fn the_orchestrator_ranks_themes_and_records_overrides() {
     }
 }
 
-/// Landings by hand fold (ov-796; the engine's groups do it themselves,
-/// ov-960): ready tickets join the waiting landing rather than queue behind it, with the reasons to split; a flaky red main is rerun once
-/// and a folded ticket that might interact gets a combined gate.
+/// Ready tickets fold (ov-796), which the engine's groups now do themselves
+/// (ov-960, ov-1012); a flaky red main is rerun once and a folded ticket that
+/// might interact gets a combined gate.
 #[test]
 fn ready_tickets_fold_into_the_waiting_landing() {
     for h in ALL {
         let body = skill(h);
         let land = section(&body, "4. Land");
         for rule in [
-            "Never queue those landings: fold every ticket ready while one waits to land into it (one branch off main, one push, one CI watch), and split only for a conflict or a risky ticket",
+            "A ticket whose run reaches its definition's landing step joins that step's open group",
             "when a known-flaky test did it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result",
         ] {
             assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
@@ -447,8 +470,8 @@ fn every_agent_description_and_pane_title_starts_with_its_ticket_key() {
         let body = prose(h);
         let rule = "Every subagent's description and every pane's title starts with its ticket key";
         let at = body.find(rule).unwrap_or_else(|| panic!("{h:?}: the key rule is gone"));
-        let dispatch = body.find("To put an agent to work, dispatch it in a role").expect("dispatch paragraph");
-        assert!(at < dispatch, "{h:?}: the rule must come before the dispatch text");
+        let dispatch = body.find("**The workflow engine runs the work.**").expect("engine paragraph");
+        assert!(at < dispatch, "{h:?}: the rule must come before the engine text");
         let tail = &body[at..dispatch];
         assert!(tail.contains("(`ov-123: polish the sidebar`)"), "{h:?}: {tail}");
         assert!(tail.contains("how the plan shows which agent works on which ticket"), "{h:?}: {tail}");

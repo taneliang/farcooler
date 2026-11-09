@@ -1030,23 +1030,22 @@ mod tests {
     fn what_an_agent_needs_from_the_charter_goes_on_its_task() {
         for h in ALL {
             let third = step(&skill_body(h), 3);
-            assert!(third.contains("A dispatched agent reads its task and never the charter"), "{h:?}: {third}");
+            assert!(third.contains("The engine's agent reads its task and never the charter"), "{h:?}: {third}");
         }
     }
 
-    /// A manager unsure whether a dispatch took reads the board before
-    /// dispatching again: a pressure run (S10) planned to "do it again", which
-    /// would put a second agent on the task. And dispatching is one of the
-    /// things it may write.
+    /// A manager unsure whether a start took reads the engine's state again
+    /// rather than starting twice: a pressure run (S10) once planned to "do it
+    /// again", which put a second agent on the task. A refused write is read
+    /// again and sent with a new id (ov-1012).
     #[test]
-    fn the_skill_checks_the_board_before_dispatching_again() {
+    fn the_skill_reads_the_engine_before_writing_again() {
         for h in ALL {
             // Read as prose: where a line wraps is not what's being checked.
             let body = skill_body(h).split_whitespace().collect::<Vec<_>>().join(" ");
-            assert!(body.contains("before dispatching again"), "{h:?}");
-            assert!(body.contains("the agent panes dispatch opens"), "{h:?}");
-            // The CLI's refusal offers --again; only the owner can take it up.
-            assert!(body.contains("pass `--again` only if the owner asked for a second agent"), "{h:?}");
+            assert!(body.contains("Read get again: the ticket is `Running` at its build step"), "{h:?}");
+            assert!(body.contains("send one again only to retry a reply that was lost"), "{h:?}");
+            assert!(body.contains("you drive the workflow engine, which starts the agents and lands their work"), "{h:?}");
         }
     }
 
@@ -1126,7 +1125,11 @@ mod tests {
         // an unplanned Commit cannot undo (ov-963): two lines.
         // 355 once a gate could be an agent the engine starts or the
         // orchestrator, each holding the ticket for its verdict (ov-969): one line.
-        assert!(lines <= 355, "{lines} lines");
+        // 367 once the orchestrator drives the engine (ov-1012): the five steps
+        // a ticket takes, which fields of `workflow get` each write names, and
+        // drafting through `workflow-draft`, for the dispatch and hand landing
+        // they replace: twelve lines net.
+        assert!(lines <= 367, "{lines} lines");
     }
 
     #[test]
