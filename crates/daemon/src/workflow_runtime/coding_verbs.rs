@@ -153,8 +153,9 @@ impl Exec {
         // A recorded landing is only believed while the remote still has the commit.
         if matches!(kind, StageKind::Push) && fact.label == "passed" {
             let identity = self.landing()?;
+            let log = self.root.join("receipts").join(format!("{}.reconcile.fetch.output", digest(&binding.effect)));
             if fact.candidate != binding.effect.candidate.clone().unwrap_or_default()
-                || !on_remote(&identity.repository, &identity.target, &fact.candidate).await?
+                || !self.on_target(identity, &fact.candidate, &log).await?
             { return Err(Error::Refused("remote landing SHA changed")); }
         }
         let manifest = digest(&(binding, &fact.candidate, &raw, &fact.label));
@@ -196,11 +197,12 @@ impl Exec {
     async fn fetch_base(&self, binding: &Binding, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<String>> {
         let identity = self.landing()?;
         self.refuse_redirected_transport(binding).await?;
-        let local = format!("refs/farcooler/base/{}", &digest(&(&identity.repository, &identity.target))[4..20]);
+        let log = self.root.join("receipts").join(format!("{}.poll-{poll}.fetch.output", digest(&binding.effect)));
+        if let Some(url) = super::coding::landing_url(identity) { return self.fetch_target(identity, url, &log).await; }
+        let local = Self::base_ref(identity);
         let (program, environment) = self.git_environment().await?;
         let argv = vec![program, "fetch".into(), "--quiet".into(), "--no-tags".into(), "--no-recurse-submodules".into(),
             identity.repository.to_string_lossy().into_owned(), format!("+{}:{local}", identity.target)];
-        let log = self.root.join("receipts").join(format!("{}.poll-{poll}.fetch.output", digest(&binding.effect)));
         durable(&log, b"")?;
         let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, &log,
             Duration::from_secs(60), cancel.clone()).await?;
@@ -323,6 +325,9 @@ impl Exec {
     /// so starting over from the new base is safe. A timeout or a lost connection is not: that is uncertain.
     async fn push(&self, binding: &Binding, cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
         let identity = self.landing()?.clone();
+        let url = super::coding::landing_url(&identity).map(str::to_string);
+        let url = url.as_deref();
+        let read_log = |tag: &str| self.root.join("receipts").join(format!("{}.target-{tag}.output", digest(&binding.effect)));
         // Everything up to the send changes nothing outside: a failure here is retried, not uncertain.
         let checked = async {
             self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?.validate()?;
@@ -335,36 +340,62 @@ impl Exec {
                 return Err(Error::Refused("fold record is for another commit"));
             }
             self.git_recorded(binding, &self.tree(binding), &["merge-base", "--is-ancestor", &base, &candidate]).await?;
-            if adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
+            if url.is_none() && adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
                 return Err(Error::Refused("landing transport is not bare"));
             }
             self.refuse_redirected_transport(binding).await?;
-            let before = adapters::git(&identity.repository, &["rev-parse", &identity.target]).await?;
+            if url.is_some() { self.stage_candidate(binding, &candidate).await?; }
+            let before = self.target_head(&identity, &read_log("before")).await?.ok_or(Error::Refused("the landing remote did not answer"))?;
             Ok((candidate, base, before))
         }.await;
-        let Ok((candidate, base, before)) = checked else {
-            tracing::warn!(effect = %binding.effect.id, "push refused before anything was sent; it will be tried again");
-            return Ok(Outcome::SafeFailure);
+        let (candidate, base, before) = match checked {
+            Ok(checked) => checked,
+            Err(error) => {
+                tracing::warn!(effect = %binding.effect.id, %error, "push refused before anything was sent; it will be tried again");
+                return Ok(Outcome::SafeFailure);
+            }
         };
         if before != base {
             // Another lander got there after the gate; nothing was sent.
             self.write_fact(binding, "base_moved", &candidate, serde_json::json!({ "base": base, "target": before, "sent": false }))?;
             return self.reconcile_verb(binding, &StageKind::Push).await;
         }
-        let (program, environment) = self.git_environment().await?;
-        let argv = vec![program, "push".into(), "--porcelain".into(),
-            "--no-follow-tags".into(), "--recurse-submodules=no".into(), "--signed=false".into(),
-            format!("--force-with-lease={}:{base}", identity.target),
-            identity.repository.to_string_lossy().into_owned(), super::coding_landing::push_target(&candidate, &identity.target)];
         let log = self.remote_log(binding);
-        durable(&log, b"")?;
-        let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, &log, Duration::from_secs(60), cancel).await?;
+        let (argv, environment, exit) = if let Some(url) = url {
+            self.push_remote(url, &identity, &candidate, &base, &log, cancel).await?
+        } else {
+            let (program, environment) = self.git_environment().await?;
+            let argv = vec![program, "push".into(), "--porcelain".into(),
+                "--no-follow-tags".into(), "--recurse-submodules=no".into(), "--signed=false".into(),
+                format!("--force-with-lease={}:{base}", identity.target),
+                identity.repository.to_string_lossy().into_owned(), super::coding_landing::push_target(&candidate, &identity.target)];
+            durable(&log, b"")?;
+            let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, &log, Duration::from_secs(60), cancel).await?;
+            (argv, environment, exit)
+        };
         let output = self.bytes(&log)?;
         durable(&self.root.join("receipts").join(format!("{}.push-process.json", digest(&binding.effect))),
             &serde_json::to_vec(&serde_json::json!({ "binding": binding, "identity": identity, "argv": argv,
                 "environment": environment, "exit": exit, "log_digest": digest(&output) }))?)?;
-        let after = adapters::git(&identity.repository, &["rev-parse", &identity.target]).await.ok();
-        match classify_push(exit, &String::from_utf8_lossy(&output), after.as_deref(), &candidate) {
+        let after = self.target_head(&identity, &read_log("after")).await.ok().flatten();
+        let porcelain = String::from_utf8_lossy(&output).into_owned();
+        // A remote that refused the push while the target still sits at the base did not refuse it for a moved
+        // base: a protected branch, a hook, or no right to push. Starting over would be refused the same way.
+        let refused = match classify_push(exit, &porcelain, after.as_deref(), &candidate) {
+            PushVerdict::Refused if after.as_deref() == Some(base.as_str()) => Some((refusal(&porcelain), true)),
+            // Over a network, a client that exited with no word on the ref never got as far as sending it: it
+            // could not sign in, or reach the host, or find the repository. The target says nothing came.
+            PushVerdict::Unknown if url.is_some() && exit.is_some_and(|e| e != 0) && after.as_deref() == Some(base.as_str())
+                && !porcelain.lines().any(|l| l.split('\t').nth(1).is_some_and(|r| r.ends_with(&format!(":{}", identity.target)))) => Some((unsent(&porcelain), false)),
+            _ => None,
+        };
+        if let Some((why, sent)) = refused {
+            tracing::warn!(effect = %binding.effect.id, why, "the landing remote refused the push");
+            self.write_fact(binding, "rejected", &candidate, serde_json::json!({ "base": base, "target": after, "sent": sent,
+                "why": why, "log": digest(&output) }))?;
+            return self.reconcile_verb(binding, &StageKind::Push).await;
+        }
+        match classify_push(exit, &porcelain, after.as_deref(), &candidate) {
             PushVerdict::Landed => {
                 self.write_fact(binding, "passed", &candidate, serde_json::json!({ "base": base, "log": digest(&output) }))?;
                 // The local copy of the target follows, when it was where this push started. Best effort: the remote is the record.
@@ -382,6 +413,25 @@ impl Exec {
     }
 }
 
+/// The sentence a push the remote refused at the ref ends its run with.
+fn refusal(porcelain: &str) -> &'static str {
+    let said = porcelain.to_ascii_lowercase();
+    if said.contains("protected branch") { "The landing remote's branch protection refused the push. Nothing landed." }
+    else if said.contains("hook declined") { "A hook on the landing remote refused the push. Nothing landed." }
+    else { "The landing remote refused the push, and the target hasn't moved. Nothing landed." }
+}
+/// The sentence a push that never reached the ref ends its run with.
+fn unsent(log: &str) -> &'static str {
+    let said = log.to_ascii_lowercase();
+    if said.contains("permission denied") || said.contains("authentication failed") || said.contains("could not read username")
+        || said.contains("returned error: 401") || said.contains("returned error: 403") {
+        "The landing remote turned down this runner's sign-in, so nothing was sent. Check its git and ssh credentials."
+    } else if said.contains("host key verification failed") {
+        "This runner doesn't know the landing remote's host key, so nothing was sent. Connect once with ssh to trust it."
+    } else if said.contains("repository not found") || said.contains("does not appear to be a git repository") {
+        "The landing remote has no such repository, or this runner can't see it. Nothing was sent."
+    } else { "The push couldn't reach the landing remote, so nothing was sent." }
+}
 /// Whether `candidate` is on the target of the repository at `repository`. A remote that cannot be read is
 /// an error, never an answer of "no": only an object the remote lacks, or one off the target, is absent.
 pub(super) async fn on_remote(repository: &Path, target: &str, candidate: &str) -> Result<bool> {

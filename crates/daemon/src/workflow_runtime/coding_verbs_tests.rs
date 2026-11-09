@@ -68,7 +68,7 @@ fn waiting(config: &CodingConfig, id: &str, kind: StageKind, version: &str, argu
 fn route(mut s: Stage, label: &str, to: Target, limit: u8) -> Stage { s.routes.insert(label.into(), to); s.limit = limit; s }
 fn split() -> Target { Target::Split { step: "base".into(), otherwise: Box::new(Target::Fail) } }
 /// provision, build, check, join(landing); and the group: base, fold, gate, push, ci.
-fn batched_push(runtime: &Runtime, base_mode: &str, patience_ms: u64) -> Definition {
+pub(super) fn batched_push(runtime: &Runtime, base_mode: &str, patience_ms: u64) -> Definition {
     let c = runtime.coding.as_ref().unwrap();
     let mut join = stage(c, "join", StageKind::Join { group: "landing".into(), adopt: true }, "coding-join/v1", "landing");
     join.max_attempts = 1;

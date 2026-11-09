@@ -35,13 +35,17 @@ pub struct CodingCi {
     pub command: CodingCommand,
 }
 
-/// Explicit local transport identity; no named remote lookup or network URL.
+/// Where code lands: an explicit transport identity, never a named remote looked up in a config.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodingLanding {
     pub job: String,
+    /// A local bare repository's path, or an `ssh://` or `https://` URL the engine fetches from and pushes
+    /// to with the runner user's own git and ssh setup (ov-1026). Written as a path so pins made before
+    /// remotes keep their bytes.
     pub repository: PathBuf,
     pub target: String,
+    /// The digest of a local bare repository's config, which fixes where it pushes. Empty for a URL.
     pub config_digest: String,
 }
 

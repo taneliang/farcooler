@@ -238,3 +238,46 @@ async fn a_declined_draft_and_one_the_workflow_has_moved_past_publish_nothing() 
     drop(link);
     host.close().await;
 }
+
+/// ov-1026: Main's draft, on a scratch copy whose landing is a network remote: a batched push behind the landing gate
+/// and an agent's review, landing on `main` at an `ssh://` URL. Publishing makes no network call, so the URL names a
+/// scratch bare repository on a host that doesn't exist; nothing is ever pushed to the real origin.
+#[tokio::test]
+async fn mains_draft_landing_on_a_remote_publishes_on_a_scratch_copy() {
+    if as_a_person("mains_draft_landing_on_a_remote_publishes_on_a_scratch_copy").await { return; }
+    let (dir, mut config) = configured().await;
+    let remote = format!("ssh://git@farcooler-scratch.invalid{}", dir.path().join("private-remote.git").canonicalize().unwrap().display());
+    config.landing = Some(CodingLanding { job: "landing-1026".into(), repository: remote.clone().into(), target: "refs/heads/main".into(), config_digest: String::new() });
+    config.reviewer = Some(farcooler_daemon::workflow_runtime::CodingReviewer { identity: "agent-review".into(),
+        command: CodingCommand { argv: vec!["/usr/bin/true".into()], environment: Default::default(), timeout_ms: 5000 } });
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    let draft = lt::template("batched-push", &config, &["scripts/landing-gate".to_string()], &[lt::Extra::Agent], &Options { batch: Some(4), ..Options::default() }).unwrap();
+    let reply = propose(&mut link, ws, draft, "Land Main's tickets on GitHub's main behind the landing gate and an agent's review.").await;
+    let summary = reply["draft"]["summary"].as_str().unwrap();
+    assert!(summary.contains(&format!("Code lands on `refs/heads/main` at `{remote}`")) && summary.contains("signs in with your own git and ssh settings"), "{summary}");
+    let words = asked(&host, card_of(&reply)).1;
+    say(&mut link, card_of(&reply), pb::TaskNoteKind::Answer, "user", &words).await;
+    settles(&host, card_of(&reply), TaskStatus::Done).await;
+    let published = host.service.store.workflow_configuration(&ws.to_string()).unwrap().expect("published");
+    assert_eq!(published.definition.source, "landing/batched-push");
+    let adapter = published.adapter.expect("an adapter");
+    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(held) = adapter;
+    assert_eq!(held.landing.unwrap().repository.to_string_lossy(), remote);
+
+    // A URL that carries a token is refused: it would be written into receipts and process listings.
+    let mut leaky = config.clone();
+    leaky.landing.as_mut().unwrap().repository = "https://x-access-token:secret@github.com/o/r.git".into();
+    let bad = lt::template("ticket-push", &leaky, &["scripts/landing-gate".to_string()], &[], &Options::default()).unwrap();
+    let state = call(&mut link, ws, Action::Get).await;
+    let action = Action::Publish { notifications: None, adapter: Some(Box::new(bad.adapter)), expected_pin: None, definition: bad.definition,
+        mutation: Mutation { id: "leaky".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 9 } };
+    let mut req = farcooler_transport::request(action.method());
+    req.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
+    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(&action).unwrap() }));
+    let refused = link.call(req).await;
+    assert!(refused.is_err() || !format!("{:?}", refused).contains("\"Ok\""), "{refused:?}");
+    assert_eq!(pin(&host).as_deref(), Some(published.pin.as_str()), "the leaky URL published nothing");
+    drop(link);
+    host.close().await;
+}

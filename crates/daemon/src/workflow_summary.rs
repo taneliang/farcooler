@@ -183,6 +183,9 @@ fn in_full(config: &CodingConfig) -> Vec<String> {
     }
     lines.push(format!("Code is read from {} from commit {}, and its landing ref there is {}.", code(&repository.to_string_lossy()), code(base), code(landing_ref)));
     match landing {
+        Some(CodingLanding { job, repository, target, config_digest }) if config_digest.is_empty() => lines.push(format!(
+            "Code lands on {} at {}, as job {}. The push signs in with your own git and ssh settings.",
+            code(target), code(&repository.to_string_lossy()), code(job))),
         Some(CodingLanding { job, repository, target, config_digest }) => lines.push(format!(
             "Code lands on {} in {}, as job {}. Where that repository pushes is fixed by its config, digest {}.",
             code(target), code(&repository.to_string_lossy()), code(job), code(config_digest))),

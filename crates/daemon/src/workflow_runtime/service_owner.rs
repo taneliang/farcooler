@@ -14,7 +14,9 @@ pub(super) async fn publication_base_current(config: &CodingConfig) -> Result<()
     if !is_ancestor {
         return Err(Error::Refused("publication landing ref differs from selected base"));
     }
-    if let Some(landing) = &config.landing {
+    // A network remote is not read here: publishing makes no network call. The group's first step fetches the
+    // target's head and folds onto it, and the push leases against exactly what it saw (ov-1026).
+    if let Some(landing) = config.landing.as_ref().filter(|l| super::coding::landing_url(l).is_none()) {
         adapters::git(&landing.repository, &["rev-parse", &landing.target]).await?;
         let ancestor = crate::git::git(&landing.repository, &["merge-base", "--is-ancestor", &config.base, &landing.target]).await
             .map_err(|_| Error::Refused("git invocation failed"))?;
@@ -58,7 +60,8 @@ impl Runtime {
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         let (send,inbox) = mpsc::channel(32);
-        Ok(Self { exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None },
+        Ok(Self { exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,
+            #[cfg(test)] user_home:None },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
             last_occupancy:None,inbox,send,next_lease:None,effect_cap:DEFAULT_EFFECT_CAP,continuous:false,
@@ -136,7 +139,10 @@ impl Runtime {
         self.validate_native_host()?;
         if let Some(config) = &self.coding {
             let mut paths = vec![config.repository.join(".git/farcooler-workflow.lock")];
-            if let Some(landing) = &config.landing { paths.push(landing.repository.join("farcooler-workflow.lock")); }
+            // A network remote can't be locked from here; its push leases instead (ov-1026).
+            if let Some(landing) = config.landing.as_ref().filter(|l| super::coding::landing_url(l).is_none()) {
+                paths.push(landing.repository.join("farcooler-workflow.lock"));
+            }
             for path in paths {
                 if self.configuration_locks.contains_key(&path) { continue; }
                 let file = OpenOptions::new().read(true).write(true).create(true).truncate(false)

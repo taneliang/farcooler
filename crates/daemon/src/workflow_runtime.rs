@@ -136,6 +136,9 @@ pub struct Exec {
     launched: Option<(i64, std::time::Instant)>,
     /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
     pub host: Option<WorktreeHost>,
+    /// A test's stand-in for the runner user's home, where git and ssh read their own configuration (ov-1026).
+    #[cfg(test)]
+    pub(super) user_home: Option<PathBuf>,
 }
 impl Exec {
     /// The sweep's clock, moved on by the time this effect has been running.
@@ -249,7 +252,8 @@ impl Runtime {
                 .map_err(|_| Error::Refused("repository already has a configured writer"))?;
             Some(file)
         } else { None };
-        let landing_writer = if let Some(identity) = coding.as_ref().and_then(|c| c.landing.as_ref()) {
+        // A network remote can't be locked from here; its push leases instead (ov-1026).
+        let landing_writer = if let Some(identity) = coding.as_ref().and_then(|c| c.landing.as_ref()).filter(|l| coding::landing_url(l).is_none()) {
             let file = OpenOptions::new().read(true).write(true).create(true).truncate(false)
                 .mode(0o600).custom_flags(libc::O_NOFOLLOW).open(identity.repository.join("farcooler-workflow.lock"))?;
             if file.metadata()?.nlink() != 1 { return Err(Error::Refused("landing writer lock is aliased")); }
@@ -285,7 +289,8 @@ impl Runtime {
         let (send, inbox) = mpsc::channel(32);
         let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
-            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None },
+            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
+                #[cfg(test)] user_home: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None,
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -775,6 +780,8 @@ mod concurrency_tests;
 mod observe_tests;
 #[cfg(test)]
 mod coding_verbs_tests;
+#[cfg(test)]
+mod coding_remote_tests;
 #[cfg(test)]
 mod landing_templates_tests;
 

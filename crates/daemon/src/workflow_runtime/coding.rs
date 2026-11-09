@@ -47,12 +47,20 @@ impl CodingConfigExt for CodingConfig {
             || self.ci.repository.is_empty() || self.ci.workflow.is_empty() || self.ci.event.is_empty()
         { return Err(Error::Refused("invalid coding configuration")); }
         if let Some(landing) = &self.landing {
-            if !valid_id(&landing.job) || landing.repository.canonicalize()? != landing.repository
-                || !landing.repository.join("HEAD").is_file() || landing.repository.join(".git").exists()
-                || !landing.target.starts_with("refs/heads/") || !valid_id(&landing.target)
-                || landing.target.contains("..")
-                || digest(&bounded_file(&landing.repository.join("config"))?) != landing.config_digest {
+            if !valid_id(&landing.job) || !landing.target.starts_with("refs/heads/") || !valid_id(&landing.target)
+                || landing.target.contains("..") {
                 return Err(Error::Refused("invalid or changed local landing identity"));
+            }
+            match landing_url(landing) {
+                // A remote has no config file here to pin; what it is, is its URL (ov-1026).
+                Some(url) => if !sound_remote_url(url) || !landing.config_digest.is_empty() {
+                    return Err(Error::Refused("invalid landing remote"));
+                },
+                None => if landing.repository.canonicalize()? != landing.repository
+                    || !landing.repository.join("HEAD").is_file() || landing.repository.join(".git").exists()
+                    || digest(&bounded_file(&landing.repository.join("config"))?) != landing.config_digest {
+                    return Err(Error::Refused("invalid or changed local landing identity"));
+                },
             }
         }
         match &self.harness {
@@ -88,13 +96,9 @@ impl CodingConfigExt for CodingConfig {
             { return Err(Error::Refused("invalid pull request configuration")); }
             pr.gh.validate()?;
             if let Some(remote) = &pr.remote {
-                let url = remote.starts_with("https://") || remote.starts_with("ssh://");
-                let path = std::path::Path::new(remote).is_absolute();
-                // A token in the URL would be written to receipts and process listings: credentials come from `gh`.
-                let authority = remote.split_once("//").map_or("", |(_, rest)| rest.split('/').next().unwrap_or(""));
-                let credentials = if remote.starts_with("https://") { authority.contains('@') }
-                    else if url { authority.split_once('@').is_some_and(|(user, _)| user.contains(':')) } else { false };
-                if !(url || path) || credentials || remote.len() > 500 || remote.bytes().any(|b| b.is_ascii_control() || b == b' ' || b == b'?' || b == b'#') {
+                let path = std::path::Path::new(remote).is_absolute()
+                    && remote.len() <= 500 && !remote.bytes().any(|b| b.is_ascii_control() || b == b' ' || b == b'?' || b == b'#');
+                if !(path || sound_remote_url(remote)) {
                     return Err(Error::Refused("invalid pull request remote"));
                 }
             }
@@ -280,6 +284,23 @@ pub(super) fn launchable(config: &CodingConfig, preset: &str) -> bool {
         None => settings.is_some(),
     }
 }
+/// The URL of a landing that is a network remote (ov-1026), or `None` for a local bare repository.
+pub(super) fn landing_url(landing: &CodingLanding) -> Option<&str> {
+    landing.repository.to_str().filter(|r| r.starts_with("ssh://") || r.starts_with("https://"))
+}
+/// An `ssh://` or `https://` URL the engine may hand git. A token in the URL would be written to receipts and
+/// process listings, so a URL that carries one is refused: credentials come from the runner's own setup. A host
+/// that starts with `-` would read as an option to ssh.
+pub(super) fn sound_remote_url(remote: &str) -> bool {
+    let Some(rest) = remote.strip_prefix("https://").or_else(|| remote.strip_prefix("ssh://")) else { return false };
+    let authority = rest.split('/').next().unwrap_or("");
+    let (user, host) = authority.rsplit_once('@').map_or(("", authority), |(u, h)| (u, h));
+    // Git decodes a percent-encoded user before it connects, so `%3A` would smuggle a password past the check.
+    let credentials = authority.contains('%') || if remote.starts_with("https://") { authority.contains('@') } else { user.contains(':') };
+    !credentials && !host.is_empty() && !host.starts_with('-') && !user.starts_with('-')
+        && rest.len() > authority.len() + 1 && remote.len() <= 500
+        && !remote.bytes().any(|b| b.is_ascii_control() || b == b' ' || b == b'?' || b == b'#' || b == b'\\')
+}
 pub(super) fn sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -292,7 +313,8 @@ impl Runtime {
         if adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await? != config.base {
             return Err(Error::Refused("configured landing ref differs from selected base"));
         }
-        if let Some(landing) = &config.landing {
+        // A remote's head is read by the first step that builds on it, not here: this makes no network call.
+        if let Some(landing) = config.landing.as_ref().filter(|l| landing_url(l).is_none()) {
             if adapters::git(&landing.repository, &["rev-parse", &landing.target]).await? != config.base {
                 return Err(Error::Refused("remote landing ref differs from selected base"));
             }

@@ -1,7 +1,6 @@
 //! A person's word on a push whose outcome the runtime lost (ov-956).
 use super::*;
 use super::coding::sha;
-use super::coding_verbs::on_remote;
 
 impl Runtime {
     /// The wire's Settle: the reply is a receipt-shaped answer, but no engine state is written, so a
@@ -42,7 +41,8 @@ impl Runtime {
         }
         let identity = exec.landing()?;
         // Read the remote first; a claim it contradicts is refused, and a remote that cannot be read settles nothing.
-        if on_remote(&identity.repository, &identity.target, &candidate).await? != landed {
+        let log = exec.root.join("receipts").join(format!("{}.settle.fetch.output", digest(&stored.effect)));
+        if exec.on_target(identity, &candidate, &log).await? != landed {
             return Err(Error::Refused("the remote disagrees"));
         }
         let base = exec.item_base(workspace, &stored.effect)?;
