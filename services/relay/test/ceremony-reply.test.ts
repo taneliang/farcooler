@@ -83,7 +83,7 @@ async function team(id: string, members: [string, 'admin' | 'member' | 'billing'
 }
 
 /// What a read answers with, for one reply.
-const one = (sealed: string, postedBy: string) => ({ replies: [{ sealed, posted_by: postedBy }] })
+const one = (sealed: string, postedBy: string) => ({ replies: [{ sealed, posted_by: postedBy, posted_by_email: null }] })
 
 /// A sealed-shaped reply that isn't the fixture: 64 bytes of `n`.
 const junk = (n: number) => base64Url(new Uint8Array(64).fill(n))
@@ -140,10 +140,23 @@ describe('the sealed ceremony reply', () => {
     expect((await post('dave', { ceremony: CEREMONY, account: ALICE, sealed: junk(1) })).status).toBe(200)
     expect((await take(ALICE)).body).toEqual({
       replies: [
-        { sealed: fixture.sealed, posted_by: 'carol' },
-        { sealed: junk(1), posted_by: 'dave' },
+        { sealed: fixture.sealed, posted_by: 'carol', posted_by_email: null },
+        { sealed: junk(1), posted_by: 'dave', posted_by_email: null },
       ],
     })
+  })
+
+  it('names each poster by the email the relay has for them, so the browser can hold a reply to its granted_by (ov-778 R-113)', async () => {
+    await team('team_1', [['carol', 'admin'], [ALICE, 'member']])
+    await env.DB.prepare(`UPDATE accounts SET email = 'carol@example.com' WHERE id = 'carol'`).run()
+    expect((await post('carol')).status).toBe(200)
+    expect((await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed: junk(2) })).status).toBe(200)
+    const { replies } = (await take(ALICE)).body as { replies: Record<string, unknown>[] }
+    expect(replies).toEqual([
+      { sealed: fixture.sealed, posted_by: 'carol', posted_by_email: 'carol@example.com' },
+      // No email on file is said as none, never as someone else's.
+      { sealed: junk(2), posted_by: ALICE, posted_by_email: null },
+    ])
   })
 
   it('refuses a teammate whose role, or the account’s, is billing', async () => {
@@ -183,7 +196,7 @@ describe('the sealed ceremony reply', () => {
     expect((await post('carol', { ceremony: CEREMONY, account: ALICE, sealed: junk(9) })).status).toBe(200)
     expect((await post(ALICE)).status).toBe(200)
     const replies = (await take(ALICE)).body.replies
-    expect(replies).toContainEqual({ sealed: fixture.sealed, posted_by: ALICE })
+    expect(replies).toContainEqual({ sealed: fixture.sealed, posted_by: ALICE, posted_by_email: null })
     expect(replies).toHaveLength(2)
   })
 
@@ -202,7 +215,7 @@ describe('the sealed ceremony reply', () => {
 
     const replies = (await take(ALICE)).body.replies
     expect(replies).toHaveLength(4)
-    expect(replies).toContainEqual({ sealed: fixture.sealed, posted_by: ALICE })
+    expect(replies).toContainEqual({ sealed: fixture.sealed, posted_by: ALICE, posted_by_email: null })
     expect(replies.map((r: { posted_by: string }) => r.posted_by).sort()).toEqual([ALICE, 'm1', 'm2', 'm3'])
   })
 

@@ -16,7 +16,8 @@
 ///   post always gets in, and its teammates share `REPLIES_MAX - 1` slots, so
 ///   nobody's junk post can take the slot from the account's own phone.
 /// - `GET /v1/ceremony/reply/<ceremony>`. Only the offer's account may read,
-///   and it gets every reply for it, each with who posted it, and the read
+///   and it gets every reply for it, each with who posted it (`posted_by`, and
+///   `posted_by_email` as this relay has it, or null), and the read
 ///   deletes them all. After `REPLY_TTL_MS` a reply is gone. Every refusal is
 ///   the same 404, so a reader learns nothing about a ceremony that isn't
 ///   theirs. The five-minute cron deletes what nobody read.
@@ -32,8 +33,10 @@
 /// the room": the posters are the account itself and its teammates. What stops
 /// a forged reply is the browser's comparison code (slice 8): six characters
 /// over the manifest that the person matches against the granting phone's
-/// screen before anything is kept. `posted_by` is there so the browser can say
-/// who a reply is from; it proves nothing about the runners inside.
+/// screen before anything is kept. `posted_by` and `posted_by_email` are there
+/// so the browser can say who a reply is from, and refuse a teammate's reply
+/// whose `granted_by` names someone else (ov-778 R-113); neither proves
+/// anything about the runners inside.
 
 import { requireAccount } from './session'
 import { readLimited } from './heartbeat-body'
@@ -160,9 +163,20 @@ async function takeReplies(request: Request, env: Env, ceremony: string): Promis
     .filter(row => now - row.created_at <= REPLY_TTL_MS)
     .sort((a, b) => a.created_at - b.created_at)
     .slice(0, REPLIES_MAX)
-    .map(row => ({ sealed: row.sealed, posted_by: row.posted_by }))
   if (replies.length === 0) return gone
-  return json({ replies }, 200, NO_STORE)
+  // Each poster's email, as this relay has it: a teammate's reply names who
+  // granted it, and the browser refuses one whose name isn't its poster's
+  // (ov-778 R-113). None on file is null, never a guess.
+  const posters = [...new Set(replies.map(row => row.posted_by))]
+  const emails = await env.DB.prepare(`SELECT id, email FROM accounts WHERE id IN (${posters.map(() => '?').join(', ')})`)
+    .bind(...posters)
+    .all<{ id: string; email: string | null }>()
+  const emailOf = new Map(emails.results.map(row => [row.id, row.email]))
+  return json(
+    { replies: replies.map(row => ({ sealed: row.sealed, posted_by: row.posted_by, posted_by_email: emailOf.get(row.posted_by) ?? null })) },
+    200,
+    NO_STORE,
+  )
 }
 
 /// A read that deletes must never be answered from a cache.

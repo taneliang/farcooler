@@ -207,6 +207,24 @@ export function sealedRefusal(word: string): string {
   }
 }
 
+/// The comparison screen's question, about whose phone shows the code. A
+/// teammate's reply (`grantedBy`, which the browser has checked is the
+/// account that posted it, ov-778 R-113) was sent from the teammate's phone,
+/// not this person's, so the screen names them and asks for the code to be
+/// read off their screen.
+export function compareWords(grantedBy: string | null): { title: string; detail: string } {
+  if (!grantedBy) {
+    return {
+      title: 'Does your phone show this code?',
+      detail: 'Your phone sent its answer. Check that the code on its screen is the one below before you continue.',
+    }
+  }
+  return {
+    title: `Does ${grantedBy}’s phone show this code?`,
+    detail: `${grantedBy} sent the answer from their phone. Look at the code on their screen, in person, and check that it’s the one below before you continue.`,
+  }
+}
+
 /// What the page says when the codes don’t match.
 export const MISMATCH =
   'The codes didn’t match, so Far Cooler kept nothing from that reply. If you didn’t just add this browser from your phone, someone else may have posted it. Waiting for another reply…'

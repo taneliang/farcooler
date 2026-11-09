@@ -25,7 +25,7 @@ import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
-import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
+import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
@@ -452,6 +452,9 @@ function waitForSealedReply(session: Session, note: HTMLElement): void {
 function compare(session: Session, opened: Opened): void {
   stopPolling()
   clearTimeout(retiring)
+  const words = compareWords(opened.granted_by)
+  $('compare-title').textContent = words.title
+  $('compare-detail').textContent = words.detail
   $('compare-code').textContent = opened.code
   show('compare')
   // Nothing was kept on a mismatch and the code is still unanswered: the QR

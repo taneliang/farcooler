@@ -210,7 +210,8 @@ It never sees a runner, a host key or a token.
   teammates' can block the account's own phone. A body that looks like an
   unsealed reply gets 400.
 - `GET /v1/ceremony/reply/<ceremony>` answers only `account`, with every reply
-  for it and who posted each, and the read deletes them. After 120 seconds a
+  for it and who posted each (`posted_by`, and `posted_by_email` as the relay
+  has it, or null), and the read deletes them. After 120 seconds a
   reply is gone, and the five-minute cron deletes what nobody read. Every
   refusal is the same 404.
 - Both routes spend `CEREMONY_REPLY_LIMIT`, 120 a minute per account.
@@ -220,7 +221,10 @@ may post can seal a reply that opens and passes the ceremony's checks, listing
 their own machines. The relay narrows who that can be to the account and its
 teammates. What stops it is the browser's comparison code (web slice 8): the
 person matches six characters computed over the reply against the granting
-phone's screen before the browser keeps anything.
+phone's screen before the browser keeps anything. A teammate's reply is
+opened only when its `granted_by` is its poster's email, and the comparison
+screen names that teammate, so a reply from Carol can't pass as Alice's
+(ov-778 R-113).
 
 ## Browsers' sealed copies
 

@@ -30,12 +30,16 @@ pub fn new_reply_secret() -> String {
     ReplyKey::generate().secret()
 }
 
-/// One reply as the relay's read returns it (`{replies: [{sealed, posted_by}]}`).
+/// One reply as the relay's read returns it
+/// (`{replies: [{sealed, posted_by, posted_by_email}]}`).
 #[derive(Debug, Deserialize)]
 struct Posted {
     sealed: String,
     #[serde(default)]
     posted_by: String,
+    /// The poster's email as the relay has it, or none on file.
+    #[serde(default)]
+    posted_by_email: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,8 +74,23 @@ pub struct Opened {
     pub taken: Taken,
 }
 
-/// The relay's answer to a read, down to what the chosen reply grants:
-/// [`earliest`], then [`open`], then [`taken`].
+/// The relay's answer to a read, down to what the chosen reply grants.
+///
+/// The offer's own account's reply, when there is one, is the only one
+/// tried, as [`earliest`] says. Without one, every teammate's reply from this
+/// one read is tried in the order they were posted, and the first that opens
+/// AND names its own poster as the person granting it is the one (ov-778
+/// R-113). The read deleted them all at the relay, so a forged reply refused
+/// here must not cost the real one behind it.
+///
+/// "Names its own poster": the manifest's `granted_by` is the email the relay
+/// has for the account that posted it. Anyone who saw the offer and shares a
+/// team can seal a reply that opens, so without this Carol could post first
+/// and say Alice granted it; with it, hers says Carol, and the comparison
+/// screen asks whether Carol's phone shows the code. One naming nobody, or
+/// posted by an account with no email on file, is refused as `wrong_account`.
+///
+/// Too late and already taken refuse at once: they hold for every reply.
 pub fn open_earliest(
     relay_answer: &str,
     offer: &Offer,
@@ -80,9 +99,39 @@ pub fn open_earliest(
     shown_at_ms: f64,
     now_ms: f64,
 ) -> Result<Opened, CeremonyError> {
-    let sealed = earliest(relay_answer, &offer.account)?;
-    let (manifest, code) = open(&sealed, offer, reply_secret, already_taken, shown_at_ms, now_ms)?;
-    Ok(Opened { code, taken: taken(&manifest) })
+    let answer: Replies = serde_json::from_str(relay_answer).map_err(|_| CeremonyError::Unopened)?;
+    if answer.replies.iter().any(|r| r.posted_by == offer.account) {
+        let sealed = earliest(relay_answer, &offer.account)?;
+        let (manifest, code) = open(&sealed, offer, reply_secret, already_taken, shown_at_ms, now_ms)?;
+        return Ok(Opened { code, taken: taken(&manifest) });
+    }
+    let mut refused = None;
+    for reply in &answer.replies {
+        match open(&reply.sealed, offer, reply_secret, already_taken, shown_at_ms, now_ms) {
+            Err(e @ (CeremonyError::Stale | CeremonyError::AlreadyTaken)) => return Err(e),
+            Err(e) => {
+                refused.get_or_insert(e);
+            }
+            Ok((manifest, code)) => {
+                let taken = taken(&manifest);
+                if granted_by_poster(taken.granted_by.as_deref(), reply.posted_by_email.as_deref()) {
+                    return Ok(Opened { code, taken });
+                }
+                refused.get_or_insert(CeremonyError::WrongAccount);
+            }
+        }
+    }
+    Err(refused.unwrap_or(CeremonyError::Unopened))
+}
+
+/// Whether a teammate's reply names, as the person granting it, the account
+/// that posted it: the relay's email for the poster, ignoring case and the
+/// spaces around it. Neither side may be missing.
+fn granted_by_poster(granted_by: Option<&str>, poster_email: Option<&str>) -> bool {
+    match (granted_by.map(str::trim), poster_email.map(str::trim)) {
+        (Some(named), Some(poster)) => !named.is_empty() && named.eq_ignore_ascii_case(poster),
+        _ => false,
+    }
 }
 
 /// A sealed reply, opened and judged by the ceremony's own order: already
@@ -362,17 +411,82 @@ mod tests {
     }
 
     /// The owner's own reply wins over a teammate's that was posted first; with
-    /// no owner reply the earliest teammate's is opened.
+    /// no owner reply the earliest teammate's that names its own poster is
+    /// opened.
     #[test]
     fn the_owners_reply_wins_over_a_teammate_who_posted_first() {
         let secret = new_reply_secret();
         let o = offer("Chrome on Mac", "acct", KEY, NODE, &secret).unwrap();
         let (honest, honest_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(HOST)])).unwrap();
-        let (forged, forged_code) = farcooler_ceremony::seal_reply(&o, &farcooler_ceremony::manifest(&o, vec![runner(FORGED)])).unwrap();
+        let (forged, forged_code) = sealed_by(&o, FORGED, Some("mate@example.com"));
+        let (second, _) = sealed_by(&o, HOST, Some("mate2@example.com"));
         let won = open_earliest(&relay_says_by(&[(&forged, "mate"), (&honest, "acct")]), &o, &secret, false, SHOWN, SHOWN).unwrap();
         assert_eq!((won.code.as_str(), won.taken.runners[0].host_key.as_str()), (honest_code.as_str(), HOST));
-        let only = open_earliest(&relay_says_by(&[(&forged, "mate"), (&honest, "mate2")]), &o, &secret, false, SHOWN, SHOWN).unwrap();
+        let answer = relay_says_from(&[(&forged, "mate", Some("mate@example.com")), (&second, "mate2", Some("mate2@example.com"))]);
+        let only = open_earliest(&answer, &o, &secret, false, SHOWN, SHOWN).unwrap();
         assert_eq!(only.code, forged_code);
+    }
+
+    /// A reply sealed over one runner at `host_key`, naming `granted_by`.
+    fn sealed_by(o: &Offer, host_key: &str, granted_by: Option<&str>) -> (String, String) {
+        let mut m = farcooler_ceremony::manifest(o, vec![runner(host_key)]);
+        m.granted_by = granted_by.map(str::to_string);
+        farcooler_ceremony::seal_reply(o, &m).unwrap()
+    }
+
+    /// The relay's read with who posted each and their email on file:
+    /// `(sealed, posted_by, posted_by_email)`.
+    fn relay_says_from(posts: &[(&str, &str, Option<&str>)]) -> String {
+        let replies: Vec<_> = posts
+            .iter()
+            .map(|(s, by, email)| serde_json::json!({"sealed": s, "posted_by": by, "posted_by_email": email}))
+            .collect();
+        serde_json::json!({ "replies": replies }).to_string()
+    }
+
+    /// Ov-778 R-113: a teammate's reply is opened only when the person it
+    /// says granted it is the account that posted it. Carol, posting first,
+    /// can't pass hers off as Alice's, and refusing hers doesn't cost Alice's
+    /// real reply behind it: every reply from the one read is tried.
+    #[test]
+    fn a_teammates_reply_naming_someone_else_is_refused_and_the_real_one_behind_it_opens() {
+        let secret = new_reply_secret();
+        let o = offer("Chrome on Mac", "bob", KEY, NODE, &secret).unwrap();
+        let (forged, _) = sealed_by(&o, FORGED, Some("alice@example.com"));
+        let (honest, honest_code) = sealed_by(&o, HOST, Some("alice@example.com"));
+        let answer = relay_says_from(&[(&forged, "carol", Some("carol@example.com")), (&honest, "alice", Some("alice@example.com"))]);
+        let opened = open_earliest(&answer, &o, &secret, false, SHOWN, SHOWN).unwrap();
+        assert_eq!((opened.code.as_str(), opened.taken.runners[0].host_key.as_str()), (honest_code.as_str(), HOST));
+        assert_eq!(opened.taken.granted_by.as_deref(), Some("alice@example.com"));
+
+        // Alone, the forgery is refused as a reply for someone else.
+        let alone = relay_says_from(&[(&forged, "carol", Some("carol@example.com"))]);
+        assert_eq!(open_earliest(&alone, &o, &secret, false, SHOWN, SHOWN), Err(CeremonyError::WrongAccount));
+        // So is one naming nobody, and one whose poster has no email on file.
+        let (unnamed, _) = sealed_by(&o, HOST, None);
+        let nameless = relay_says_from(&[(&unnamed, "alice", Some("alice@example.com"))]);
+        assert_eq!(open_earliest(&nameless, &o, &secret, false, SHOWN, SHOWN), Err(CeremonyError::WrongAccount));
+        let unknown = relay_says_from(&[(&honest, "alice", None)]);
+        assert_eq!(open_earliest(&unknown, &o, &secret, false, SHOWN, SHOWN), Err(CeremonyError::WrongAccount));
+        // The relay's email and the phone's may differ in case and spaces.
+        let shouted = relay_says_from(&[(&honest, "alice", Some(" Alice@Example.com "))]);
+        assert_eq!(open_earliest(&shouted, &o, &secret, false, SHOWN, SHOWN).unwrap().code, honest_code);
+    }
+
+    /// Junk a teammate posts first doesn't hide the real reply either, and the
+    /// window and a second take still refuse outright.
+    #[test]
+    fn a_teammates_junk_is_passed_over_but_the_window_is_not() {
+        let secret = new_reply_secret();
+        let o = offer("Chrome on Mac", "bob", KEY, NODE, &secret).unwrap();
+        let elsewhere = offer("Chrome on Mac", "bob", KEY, NODE, &new_reply_secret()).unwrap();
+        let (junk, _) = sealed_by(&elsewhere, FORGED, Some("carol@example.com"));
+        let (honest, honest_code) = sealed_by(&o, HOST, Some("alice@example.com"));
+        let answer = relay_says_from(&[(&junk, "carol", Some("carol@example.com")), (&honest, "alice", Some("alice@example.com"))]);
+        assert_eq!(open_earliest(&answer, &o, &secret, false, SHOWN, SHOWN).unwrap().code, honest_code);
+        let window = farcooler_ceremony::FRESHNESS.as_millis() as f64;
+        assert_eq!(open_earliest(&answer, &o, &secret, false, SHOWN, SHOWN + window + 1.0), Err(CeremonyError::Stale));
+        assert_eq!(open_earliest(&answer, &o, &secret, true, SHOWN, SHOWN), Err(CeremonyError::AlreadyTaken));
     }
 
     /// A reply sealed to another key, or held past the window or after one was
