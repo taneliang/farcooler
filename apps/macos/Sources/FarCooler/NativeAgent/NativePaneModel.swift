@@ -346,7 +346,7 @@ final class NativePaneModel: ObservableObject {
         // picker or its shell, which Enter would then run. With it, the
         // runner drives the picker, and refuses what it can't.
         if !rich, let first = text.first, "/!#@&$?\\".contains(first) {
-            issue = .said(Self.command)
+            issue = .said(AgentConversation.command)
             return
         }
         sending = true
