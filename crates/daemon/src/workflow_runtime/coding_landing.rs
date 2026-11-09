@@ -2,6 +2,9 @@
 //! user's own git and ssh setup (ov-1026).
 use super::*;
 
+/// Said when a ticket can't start because the landing remote didn't answer (ov-1059).
+pub(crate) const UNREAD_TARGET: &str = "The landing remote couldn’t be read, so the ticket wasn’t started: it would have started from this repository’s own main, which may be far behind. Check that this runner can reach the remote, then start it again.";
+
 /// A push refspec: the candidate commit onto the target ref.
 pub(crate) fn push_target(candidate: &str, target: &str) -> String {
     format!("{candidate}:{target}")
@@ -260,6 +263,23 @@ impl Exec {
             self.stage(candidate, &format!("refs/farcooler/check/{}", candidate.get(..16).unwrap_or(candidate))).await?;
         }
         Ok(self.landing_git(&["merge-base", "--is-ancestor", candidate, &head]).await?.is_some())
+    }
+    /// Where a ticket starts on a network landing (ov-1059): the target's head as the remote has it now, brought
+    /// into the shared repository by its hash. The shared repository's own landing branch may be a checkout's main
+    /// that nobody pulls, weeks behind. `None` for a landing on this machine, whose tickets start at the local
+    /// landing ref as before. A remote that can't be read refuses the start: never the stale local main instead.
+    pub(super) async fn start_head(&self, log: &Path) -> Result<Option<String>> {
+        let Some(identity) = self.coding.as_ref().and_then(|c| c.landing.as_ref()) else { return Ok(None) };
+        let Some(url) = super::coding::landing_url(identity) else { return Ok(None) };
+        // As every other read of the remote: a shared config that redirects transport stops it first.
+        let config = adapters::git(&self.repository(), &["config", "--list"]).await?;
+        if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
+            return Err(Error::Refused("local landing config redirects transport"));
+        }
+        match self.fetch_target(identity, url, log).await {
+            Ok(Some(head)) => Ok(Some(head)),
+            _ => Err(Error::Domain(farcooler_core::error::DomainError::refused(UNREAD_TARGET.into()))),
+        }
     }
     /// The private ref a landing target's head is fetched into.
     pub(super) fn base_ref(identity: &CodingLanding) -> String {

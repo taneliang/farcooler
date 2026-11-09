@@ -97,7 +97,12 @@ impl Exec {
                 // Main as it was at Start, which the run recorded (ov-967).
                 tree.base.clone()
             } else if matches!(effect.kind, EffectKind::Execute(StageKind::Provision)) {
-                git(&self.repository(), &["rev-parse", self.landing_ref()]).await?
+                // The landing target as the remote has it now, else (a landing on this machine) the local ref (ov-1059).
+                let log = self.root.join("receipts").join(format!("{}.start.fetch.output", digest(effect)));
+                match self.start_head(&log).await? {
+                    Some(head) => head,
+                    None => git(&self.repository(), &["rev-parse", self.landing_ref()]).await?,
+                }
             } else { self.base.clone() };
             // A crash while writing leaves only an ignored private temporary file.
             // The exclusive fixture writer makes replacing a proven partial pin safe.

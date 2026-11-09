@@ -35,12 +35,21 @@ impl Runtime {
     /// A Start that names a worktree: where it goes, and main's commit now, which the run records. Refuses a
     /// name or branch that is taken, before anything is made. `None` for any other action, a Start that names
     /// none, one already answered (its receipt is replayed) and one that names a workflow no longer published
-    /// (refused as stale by the command itself).
+    /// (refused as stale by the command itself). A run that lands on a network remote reads the remote's main
+    /// here (ov-1059), and a remote that can't be read refuses the Start with a sentence, named tree or not.
     pub(super) async fn prepare_start(&self, workspace: &str, principal: &str, action: &Action) -> Result<Option<RunTree>> {
-        let Action::Start { mutation, worktree: Some(named), start_pin, .. } = action else { return Ok(None) };
+        let Action::Start { mutation, worktree, start_pin, .. } = action else { return Ok(None) };
         let id = format!("wire:{principal}:{}", mutation.id);
         if self.store.workflow_wire_receipt(workspace, &id, &serde_json::to_string(&(principal, action))?)?.is_some() { return Ok(None); }
         let Some(configuration) = self.store.workflow_configuration(workspace)?.filter(|c| &c.pin == start_pin) else { return Ok(None) };
+        let log = self.root.join("receipts").join(format!("start-{}.fetch.output", digest(&(workspace, &id))));
+        // Read with this workspace's own settings: the runtime holds whichever item it launched last.
+        let start_head = |config: &CodingConfig| { let mut exec = self.exec.clone(); exec.coding = Some(config.clone()); let log = log.clone(); async move { exec.start_head(&log).await } };
+        let Some(named) = worktree else {
+            // A private tree is made at Provision, which reads the remote again; a remote that can't be read now is said now.
+            if let Some(AdapterConfiguration::Coding(config)) = &configuration.adapter { start_head(config).await?; }
+            return Ok(None);
+        };
         let host = self.host.as_ref().ok_or(Error::Refused("this runner can't make a named worktree for a run"))?;
         let Some(AdapterConfiguration::Coding(config)) = configuration.adapter else {
             return Err(Error::Refused("a named worktree needs a coding workflow"));
@@ -86,7 +95,11 @@ impl Runtime {
             name.is_some_and(|n| clashes(n, &named.branch))
         });
         if !named.adopt && clash { return Err(Error::Domain(DomainError::BranchExists)); }
-        let base = adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?;
+        // Main as the landing remote has it now, else (a landing on this machine) the local landing ref (ov-1059).
+        let base = match start_head(&config).await? {
+            Some(head) => head,
+            None => adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?,
+        };
         let tree = RunTree { name: named.name.clone(), branch: named.branch.clone(), path: path.to_string_lossy().into_owned(), base,
             adopted: named.adopt };
         if !tree.valid() { return Err(Error::Refused("invalid worktree")); }

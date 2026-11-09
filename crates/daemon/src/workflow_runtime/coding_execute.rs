@@ -354,6 +354,11 @@ impl Exec {
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;
                 let candidate = binding.effect.candidate.as_deref().ok_or(Error::Refused("missing landing candidate"))?;
+                // A direct land records itself by moving the local landing ref on from the base. A ticket that started
+                // on the remote's main (ov-1059) above a stale local one can't, so it is refused before anything is sent.
+                if adapters::git(&self.repository(), &["rev-parse", self.landing_ref()]).await? != binding.base {
+                    return Err(Error::Refused("the local landing branch isn't at the ticket's base"));
+                }
                 self.land_remote(binding, cancel).await?;
                 self.git_recorded(binding, &self.repository(), &["update-ref", "-m", &format!("workflow:{}", digest(binding)),
                     self.landing_ref(), candidate, &binding.base]).await?;

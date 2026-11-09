@@ -3,7 +3,7 @@
 //! scratch home's own global git config, which runs the remote's end locally with an empty environment, as a
 //! real ssh would. Nothing here reaches the network.
 use super::*;
-use super::coding_verbs_tests::{at_join, batched_push, command, lander, outbox, phase_of, until};
+use super::coding_verbs_tests::{at_join, batched_push, candidate_of, command, lander, outbox, phase_of, until};
 use super::coding_tests::admitted;
 
 struct Remote { _dir: tempfile::TempDir, runtime: Runtime, bare: PathBuf, calls: PathBuf }
@@ -181,9 +181,10 @@ async fn a_url_rewrite_in_the_users_own_config_stops_the_remote_before_any_call(
     std::fs::write(home.join(".gitconfig"), config).unwrap();
     let definition = batched_push(&r.runtime, "any", 5000);
     let first = head(&r.bare).await;
-    at_join(&mut r.runtime, "one", &definition).await;
-    command(&r.runtime, Command::Queue { item: "one".into() });
+    // The ticket's start is the first read of the remote (ov-1059), so it stops there, before any build.
+    super::concurrency_tests::enqueue_item(&mut r.runtime, "w", "one", definition);
     until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    assert_eq!(outbox(&r.runtime, StageKind::Build), 0);
     assert_eq!(head(&r.bare).await, first);
     assert_eq!(calls(&r), "", "no call reached the remote");
 }
@@ -342,15 +343,10 @@ async fn an_alternate_refs_command_in_the_shared_config_runs_on_no_fetch_into_it
     assert!(!marker.exists(), "the shared config's alternate refs command ran");
 }
 
-/// ov-1058: the shared repository's own main is weeks behind the remote's, as a checkout nobody pulls is. The batch
-/// still lands on the remote's main as it is now: the base step fetches it, the fold builds on it, and neither the
-/// configured base nor the local main it was read from goes anywhere near the push.
-#[tokio::test]
-async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
-    let mut r = remote("pass").await;
-    let definition = batched_push(&r.runtime, "any", 5000);
+/// Another lander moves the remote's main on, and this repository never hears of it: its own main, and the
+/// configured base read from it, are now behind. Answers (that local main, the remote's new head).
+async fn move_remote(r: &Remote) -> (String, String) {
     let config = r.runtime.coding.clone().unwrap();
-    // Another lander moves the remote on; this repository never hears of it.
     let other = r._dir.path().join("elsewhere");
     plain_git(r._dir.path(), &["clone", "--quiet", r.bare.to_str().unwrap(), other.to_str().unwrap()]);
     std::fs::write(other.join("landed-elsewhere.txt"), "newer main\n").unwrap();
@@ -362,6 +358,18 @@ async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
     assert_eq!(local, config.base, "the configured base is the local main");
     assert_ne!(moved, config.base, "the remote is ahead of it");
     assert!(adapters::git(&config.repository, &["cat-file", "-e", &format!("{moved}^{{commit}}")]).await.is_err(), "and the local repository doesn't have it");
+    (local, moved)
+}
+
+/// ov-1058: the shared repository's own main is weeks behind the remote's, as a checkout nobody pulls is. The batch
+/// still lands on the remote's main as it is now: the base step fetches it, the fold builds on it, and neither the
+/// configured base nor the local main it was read from goes anywhere near the push.
+#[tokio::test]
+async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let config = r.runtime.coding.clone().unwrap();
+    let (local, moved) = move_remote(&r).await;
     at_join(&mut r.runtime, "one", &definition).await;
     assert!(command(&r.runtime, Command::Queue { item: "one".into() }).result.is_ok());
     until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
@@ -370,4 +378,56 @@ async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
     assert_eq!(fact(&r.runtime, StageKind::Fold)["detail"]["base"], moved.as_str(), "{}", fact(&r.runtime, StageKind::Fold));
     assert!(adapters::git(&r.bare, &["cat-file", "-e", &format!("{pushed}:landed-elsewhere.txt")]).await.is_ok(), "the other lander's work is kept");
     assert_eq!(adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap(), local, "the local main is left as it was");
+}
+
+/// ov-1059: a ticket on a workspace whose own main is stale starts from the remote's main as it is now. Its base
+/// is pinned there, and its build is one commit on top of it, not on the month-old local main.
+#[tokio::test]
+async fn a_ticket_on_a_stale_local_main_starts_at_the_remotes_main() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let config = r.runtime.coding.clone().unwrap();
+    let (local, moved) = move_remote(&r).await;
+    at_join(&mut r.runtime, "one", &definition).await;
+    let provision = r.runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
+    assert_eq!(r.runtime.item_base("w", &provision.effect).unwrap(), moved, "the ticket's base is the remote's main");
+    let state = r.runtime.state("w").unwrap().unwrap();
+    let built = candidate_of(&state, "one").unwrap().to_string();
+    assert_eq!(adapters::git(&config.repository, &["rev-parse", &format!("{built}^")]).await.unwrap(), moved, "the build is one commit on it");
+    assert!(adapters::git(&config.repository, &["cat-file", "-e", &format!("{built}:landed-elsewhere.txt")]).await.is_ok(), "with the newer main's work in its tree");
+    assert_eq!(adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap(), local, "the local main is left as it was");
+}
+
+/// ov-1059: a landing remote that can't be read when a ticket starts stops it with a sentence that says so. A
+/// Start is refused before anything is made; a ticket already past Start fails at Provision, with no base pinned,
+/// no worktree on the stale local main, and no build.
+#[tokio::test]
+async fn a_remote_that_cant_be_read_at_start_stops_the_ticket_and_says_why() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let config = r.runtime.coding.clone().unwrap();
+    let adapter = Some(Box::new(AdapterConfiguration::Coding(config.clone())));
+    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
+    let published = r.runtime.wire_command("w", "owner", Action::Publish { notifications: None, adapter, expected_pin: None,
+        mutation: Mutation { id: "publish".into(), revision: 0, epoch: 1, sequence: 1 }, definition: definition.clone() }).unwrap();
+    assert!(published.pointer("/receipt/result/Ok").is_some(), "{published}");
+    let start = |id: &str| Action::Start { mutation: Mutation { id: id.into(), revision: 1, epoch: 1, sequence: 2 }, item: "ov-7".into(),
+        run: "r".into(), pin: "p".into(), start_pin: pin.clone(), models: Default::default(), worktree: None, with: vec![] };
+    // A remote that answers: the Start goes ahead (a private tree is made at Provision).
+    assert!(r.runtime.prepare_start("w", "orchestrator", &start("answered")).await.unwrap().is_none());
+    std::fs::write(r._dir.path().join("refuse-all"), b"").unwrap();
+    match r.runtime.prepare_start("w", "orchestrator", &start("unanswered")).await {
+        Err(Error::Domain(refused)) => assert_eq!(refused.to_string(), super::coding_landing::UNREAD_TARGET),
+        other => panic!("the Start must be refused with a sentence: {other:?}"),
+    }
+    // A ticket that reaches Provision with the remote unreadable fails there.
+    super::concurrency_tests::enqueue_item(&mut r.runtime, "w", "one", definition);
+    until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    assert_eq!(outbox(&r.runtime, StageKind::Build), 0, "nothing was built");
+    let provision = r.runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
+    assert!(!r.runtime.root.join(format!("base-{}.json", digest(&("w", &provision.effect.item)))).exists(), "no base was pinned");
+    assert!(!r.runtime.root.join(format!("tree-{}", digest(&("w", &provision.effect.item)))).exists(), "no tree was made");
 }
