@@ -883,8 +883,8 @@ impl Store {
             "SELECT 1 FROM terminals WHERE id = ?1",
             &[&uuid_blob(id)],
         )?;
-        // Its launch (`pane_launches`) routes nothing once the row is gone;
-        // this keeps `meta` from collecting one per pane ever made.
+        // Its launch routes nothing once the row is gone; this keeps `meta`
+        // from growing a row per pane ever made.
         self.forget_launch(id)
     }
 
