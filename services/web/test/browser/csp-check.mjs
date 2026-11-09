@@ -41,9 +41,8 @@
 // - on an authenticator with PRF (ov-779): the node key is derived from the
 //   passkey and a sealed copy reaches the relay; after the site's storage is
 //   cleared, Use Passkey brings the runners back at one touch and no
-//   ceremony, with the enrolled node key; a second browser profile holding
-//   the same passkey derives that node key too. Every step before it runs on
-//   an authenticator without PRF, which is the browser that keeps working as
+//   ceremony, with the enrolled node key. Every step before it runs on an
+//   authenticator without PRF, which is the browser that keeps working as
 //   before;
 // - the passkey can't be used from the parent domain's other child
 //   (canary.farcooler.com for canary): Chromium refuses it (ov-767
@@ -326,6 +325,8 @@ function swapDial() {
     set: value => {
       real = {
         mintNodeKey: () => value.mintNodeKey(),
+        // The real Go derivation: the eviction walk checks its node key.
+        nodeKeyFromSeed: seed => value.nodeKeyFromSeed(seed),
         dial: token =>
           new Promise((resolve, reject) => {
             const ws = new WebSocket(`wss://${location.host}/test-tunnel/${token}`)
@@ -374,21 +375,32 @@ function refusable() {
 async function clearSite(context, page) {
   const cdp = await context.newCDPSession(page)
   await cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'all' })
-  await cdp.detach()
+  // Never detached: detaching any DevTools session on the page takes its
+  // virtual authenticators with it (measured: the next create is refused
+  // NotSupportedError), and those hold the passkey.
 }
 
 /// ov-779: the node key survives storage eviction. On an authenticator with
 /// PRF, a fresh browser derives its node key from the passkey and the sealed
 /// copy reaches the relay; once the site's storage is cleared, Use Passkey is
-/// one touch and Connect the usual one, with no new passkey and no code. Then
-/// a second browser, a profile of its own whose authenticator holds the same
-/// passkey (a synced one), comes back with the node key the first enrolled.
-/// Returns the launch it ends on.
-async function evictionWalk(session) {
+/// one touch and Connect the usual one, with no new passkey and no code, and
+/// the node key is the enrolled one.
+///
+/// All on one launch and one authenticator. Chromium's virtual authenticator
+/// keeps a credential's PRF secret to itself: one carried to another
+/// authenticator through WebAuthn.getCredentials and addCredential answers no
+/// PRF at all (measured, ov-779), and DevTools has no field for it. So the
+/// enrollment's runners are written into the device as a taken reply would
+/// write them, rather than relaunching for the camera, and a second browser
+/// sharing a synced passkey can't be played here: that the same PRF output
+/// derives the same node key is test/vault.test.ts's, and that a synced
+/// passkey gives the same output on two devices is the passkey provider's,
+/// checked on real devices.
+async function evictionWalk() {
   credential = null
   await session.context.close()
   session = await launch(null, null, { prf: true })
-  let page = session.page
+  const { page } = session
   await page.goto(`${origin}/version.json`)
   await clearSite(session.context, page)
   reports.vaults?.clear()
@@ -398,19 +410,21 @@ async function evictionWalk(session) {
   const offer = JSON.parse(fresh.offer)
   if (!fresh.nodeDerived) failures.push('a passkey with PRF did not derive the node key')
   if (offer.node_key !== fresh.nodePub) failures.push('the offer names a node key other than the derived one')
+  // The phone's reply, taken: the runner admits the offer's key, and the
+  // device keeps the runner and no offer.
   runner.enroll(offer.key_a)
-  const id = fresh.passkey.id
-  await session.passkeys.held(id)
-  const secret = await replySecret(page)
-  await session.context.close()
-  session = await launch(replyVideo(offer, null, 'prf'), secret, { prf: true })
-  page = session.page
-  await page.goto(origin)
-  await enrolling(page)
-  await page.click('#scan')
+  await edit(page, { offer: null, offerShownAt: null, runners: [{ id: 'r1', label: 'studio', user: me, host_key: runner.hostKey, token: 'test', why: '' }] })
+  const before = (await device(page)).vaulted
+  await page.reload()
   await connect(page)
-  const enrolled = await device(page)
-  const copy = reports.vaults?.get(id.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', ''))
+  let enrolled = await device(page)
+  const id = enrolled.passkey.id.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
+  // The copy is saved after the login, not during it: wait for the one with
+  // the runner in it.
+  const saved = Date.now()
+  while (enrolled.vaulted === before && Date.now() - saved < 10_000) enrolled = await device(page)
+  if (enrolled.vaulted === before) failures.push('the sealed copy was not saved again once the device had its runner')
+  const copy = reports.vaults?.get(id)
   if (!copy) failures.push('no sealed copy reached the relay')
   else {
     const clear = Buffer.from(copy.sealed, 'base64url').toString('latin1')
@@ -433,42 +447,25 @@ async function evictionWalk(session) {
   if (restoring !== 1) failures.push(`restoring cost ${restoring} touches, not 1`)
   if (restored.offer || reports.registered !== registrations || !(await page.isHidden('#enroll'))) failures.push('restoring went through a ceremony')
   if (restored.nodePriv !== enrolled.nodePriv || restored.nodePub !== enrolled.nodePub || !restored.nodeDerived) failures.push('the restored node key is not the enrolled one')
-  if (restored.passkey?.id !== id || !restored.registered) failures.push('the restored device has another passkey, or is not registered')
+  if (restored.passkey?.id !== enrolled.passkey.id || !restored.registered) failures.push('the restored device has another passkey, or is not registered')
   await connect(page)
+  // The sibling-domain step after this asks for this passkey.
+  await session.passkeys.held(enrolled.passkey.id)
   console.log(`csp-check: after the site's storage was cleared, Use Passkey cost ${restoring} touch and no ceremony, the node key was the enrolled one, and Connect opened the terminal at ${touches - at - restoring} more`)
-
-  // A second browser sharing the passkey derives the same node key.
-  await session.passkeys.held(id)
-  await session.context.close()
-  const otherProfile = mkdtempSync(join(tmpdir(), 'fc-csp-profile2-'))
-  try {
-    const other = await launch(null, null, { prf: true, dir: otherProfile })
-    const page2 = other.page
-    await page2.goto(origin)
-    await statusSays(page2, 'Reconnect with your passkey')
-    await page2.click('#status-action')
-    const reached = await statusSays(page2, 'Connect to studio', 30_000).then(
-      () => true,
-      () => false,
-    )
-    const second = await device(page2)
-    if (!reached) failures.push(`a second browser sharing the passkey didn't come back: ${JSON.stringify(await page2.textContent('#status'))}`)
-    else if (second.nodePub !== enrolled.nodePub || second.nodePriv !== enrolled.nodePriv) failures.push('a second browser sharing the passkey derived another node key')
-    else {
-      await connect(page2)
-      console.log('csp-check: a second browser sharing the passkey derived the enrolled node key and connected')
-    }
-    await other.context.close()
-  } finally {
-    rmSync(otherProfile, { recursive: true, force: true })
-  }
-  return await launch(null, null, { prf: true })
 }
 
 /// The stored device, or an edit to it, through the page's own IndexedDB.
+/// Null when there is no database: the open that finds none is aborted, so
+/// reading never makes the empty one the page would then fail to set up.
 const device = page =>
   page.evaluate(async () => {
-    const db = await new Promise(r => (indexedDB.open('farcooler').onsuccess = e => r(e.target.result)))
+    const db = await new Promise(r => {
+      const open = indexedDB.open('farcooler')
+      open.onupgradeneeded = e => e.target.transaction.abort()
+      open.onsuccess = e => r(e.target.result)
+      open.onerror = () => r(null)
+    })
+    if (!db) return null
     const d = await new Promise(r => (db.transaction('device').objectStore('device').get('this').onsuccess = e => r(e.target.result)))
     db.close()
     return d ? { ...d, passkey: d.passkey ? { id: btoa(String.fromCharCode(...d.passkey.id)), spki: d.passkey.spki.length } : undefined } : null
@@ -1262,7 +1259,7 @@ try {
       await detailWalk(page)
       await imageWalk(page)
       await switchWalk(page)
-      session = await evictionWalk(session)
+      await evictionWalk()
       page = session.page
       await page.goto(origin)
     }
@@ -1296,6 +1293,13 @@ try {
     else console.log(`csp-check: from ${SIBLING} Chromium refused the passkey: ${JSON.stringify(refused)}`)
     // The shell itself, served from that host, can't make one for the app host.
     await sibling.goto(`https://${SIBLING}/`)
+    // With --fake-daemon the account has a sealed copy now (the eviction
+    // walk), so the shell opens on Reconnect; Make a New Passkey is the way to
+    // the same ask.
+    if (runner) {
+      await statusSays(sibling, 'Reconnect with your passkey')
+      await sibling.click('#status-cancel')
+    }
     await statusSays(sibling, 'Make a passkey')
     await sibling.click('#status-action')
     await statusSays(sibling, 'couldn’t make a passkey')
@@ -1309,7 +1313,13 @@ try {
     if (await device(page)) failures.push('Sign Out left the passkey and runners behind')
     else console.log('csp-check: Sign Out deleted the passkey and runners')
   } catch (e) {
-    if (!(e instanceof LowLimitDone)) failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}`)
+    if (!(e instanceof LowLimitDone)) {
+      // Where it stopped: the screen on show says more than a timeout does.
+      const shown = await Promise.all(
+        session.context.pages().map(p => p.evaluate(() => [...document.querySelectorAll('main > section:not([hidden]), #status:not([hidden])')].map(e => `${e.id}: ${e.textContent?.trim().slice(0, 200)}`).join(' | ')).catch(() => 'closed')),
+      ).catch(() => [])
+      failures.push(`the walk stopped: ${String(e.message).split('\n')[0]}; on screen: ${shown.join(' || ')}`)
+    }
   }
 
   await new Promise(r => setTimeout(r, 500))
