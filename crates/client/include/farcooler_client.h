@@ -866,6 +866,16 @@ uint64_t farcooler_client_paste_file(void *handle, const char *terminal,
  */
 size_t farcooler_client_workflow_presentation(const char *request, uint8_t *out, size_t capacity);
 
+/* The plan's view model (ov-1016): `plan.get`'s answer, the app's context and the
+ * workspace's workflow presentation in; the sections, landing cards, ticket cards,
+ * agents and theme tiles out, every word already said. Pure: no transport, clock
+ * or authority. Same response as JNI nativePlanView and WASM planView:
+ * {"schema":1,"view":{...}} or {"schema":1,"error":"invalid"}. Returns the
+ * answer's UTF-8 byte length, no NUL; NULL/short out is untouched. NULL request
+ * returns 0. See crates/client/src/plan_view.rs.
+ */
+size_t farcooler_client_plan_view(const char *request, uint8_t *out, size_t capacity);
+
 #ifdef __cplusplus
 }
 #endif

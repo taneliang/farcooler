@@ -284,6 +284,12 @@ internal object NativeClient {
 
     /** The themes compiled in, as JSON. No session needed. */
     external fun nativeBuiltinThemes(): String?
+
+    /**
+     * The plan's view model (ov-1016), `crates/client/src/plan_view.rs`: a request of `plan.get`'s answer and the
+     * app's context in, `{"schema":1,"view":{…}}` or `{"schema":1,"error":"invalid"}` out. No session needed.
+     */
+    external fun nativePlanView(request: String): String?
 }
 
 internal object NativeVt {

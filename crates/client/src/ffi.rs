@@ -3239,6 +3239,10 @@ mod identity_tests;
 mod workflow;
 pub use workflow::farcooler_client_workflow_presentation;
 
+#[path = "plan_view/ffi.rs"]
+mod plan_view;
+pub use plan_view::farcooler_client_plan_view;
+
 #[cfg(test)]
 pub(crate) async fn workflow_test_dispatch(session: &Session, method: &str, args: &Value) -> Result<Value, SessionError> {
     dispatch(session, method, args).await

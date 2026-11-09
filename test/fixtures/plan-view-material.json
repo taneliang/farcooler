@@ -1,0 +1,1728 @@
+{
+  "answer": {
+    "error": null,
+    "schema": 1,
+    "view": {
+      "agents": {
+        "header": "3 agents, including the orchestrator · 3 working · 4.7M tokens in the last 24 hours · ≈$26.10",
+        "rows": [
+          {
+            "accessibility": "Orchestrator · opus, Plan, Working · 4 h, 2.1M tokens",
+            "cost": "≈$14.20",
+            "doing_now": "",
+            "id": "pane:orch",
+            "second": "Plan · Working · 4 h",
+            "state": "Working · 4 h",
+            "terminal": null,
+            "tokens": "2.1M",
+            "who": "Orchestrator · opus",
+            "working": true,
+            "works_for": "Plan"
+          },
+          {
+            "accessibility": "Lander · opus, ov-487, ov-485, Working · 8 min, 1.4M tokens",
+            "cost": "≈$6.30",
+            "doing_now": "",
+            "id": "pane:i1",
+            "second": "ov-487, ov-485 · Working · 8 min",
+            "state": "Working · 8 min",
+            "terminal": null,
+            "tokens": "1.4M",
+            "who": "Lander · opus",
+            "working": true,
+            "works_for": "ov-487, ov-485"
+          },
+          {
+            "accessibility": "Builder · sonnet, ov-310, Working · 22 min, 380K tokens",
+            "cost": "≈$1.10",
+            "doing_now": "",
+            "id": "pane:b1",
+            "second": "ov-310 · Working · 22 min",
+            "state": "Working · 22 min",
+            "terminal": null,
+            "tokens": "380K",
+            "who": "Builder · sonnet",
+            "working": true,
+            "works_for": "ov-310"
+          }
+        ]
+      },
+      "building": [
+        {
+          "accessibility": "The themes grid, Trustworthy agent view, Building · ov-310 · Builder · sonnet · 380K · 1 h, Prepare workspace · Approval required",
+          "agent": {
+            "id": "pane:b1",
+            "terminal": null,
+            "tokens": "380K",
+            "who": "Builder · sonnet"
+          },
+          "branch": "tile-grid",
+          "heading": "The themes grid",
+          "id": "t-ov-310",
+          "key": "ov-310",
+          "landed_landing": null,
+          "mark": "building",
+          "mark_attention": true,
+          "notes": [
+            {
+              "attention": true,
+              "help": "Waiting for approval from owner.",
+              "kind": "run",
+              "text": "Prepare workspace · Approval required"
+            }
+          ],
+          "rank": null,
+          "run": {
+            "attention": true,
+            "gate": {
+              "label": "Approval required",
+              "principal": "owner",
+              "text": "Waiting for approval from owner."
+            },
+            "phase": "WaitingApproval",
+            "phase_label": "Awaiting approval",
+            "run": "wf1:9238042ca1b351c53cd9dd92300e5dfb09100425d25ee6640868239dd3ae1d21",
+            "step": "Prepare workspace"
+          },
+          "second": "Building · ov-310 · Builder · sonnet · 380K · 1 h",
+          "stage": "building",
+          "status": "Building",
+          "theme": "Trustworthy agent view",
+          "waits_on_owner": false
+        },
+        {
+          "accessibility": "Title of ov-474, Trustworthy agent view, Building · ov-474, No move in 60 h",
+          "agent": null,
+          "branch": "lane-474",
+          "heading": "Title of ov-474",
+          "id": "t-ov-474",
+          "key": "ov-474",
+          "landed_landing": null,
+          "mark": "building",
+          "mark_attention": true,
+          "notes": [
+            {
+              "attention": true,
+              "help": null,
+              "kind": "warning",
+              "text": "No move in 60 h"
+            }
+          ],
+          "rank": null,
+          "run": null,
+          "second": "Building · ov-474",
+          "stage": "building",
+          "status": "Building",
+          "theme": "Trustworthy agent view",
+          "waits_on_owner": false
+        }
+      ],
+      "in_review": [
+        {
+          "accessibility": "Title of ov-311, Trustworthy agent view, In review · ov-311 · 2 h",
+          "agent": null,
+          "branch": "fleet-ui",
+          "heading": "Title of ov-311",
+          "id": "t-ov-311",
+          "key": "ov-311",
+          "landed_landing": null,
+          "mark": "reviewing",
+          "mark_attention": false,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "In review · ov-311 · 2 h",
+          "stage": "reviewing",
+          "status": "In review",
+          "theme": "Trustworthy agent view",
+          "waits_on_owner": false
+        },
+        {
+          "accessibility": "Title of ov-312, Trustworthy agent view, Fixing · round 2 · ov-312 · 30 min",
+          "agent": null,
+          "branch": "agent-rows",
+          "heading": "Title of ov-312",
+          "id": "t-ov-312",
+          "key": "ov-312",
+          "landed_landing": null,
+          "mark": "fixing",
+          "mark_attention": false,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "Fixing · round 2 · ov-312 · 30 min",
+          "stage": "building",
+          "status": "Fixing · round 2",
+          "theme": "Trustworthy agent view",
+          "waits_on_owner": false
+        },
+        {
+          "accessibility": "Title of ov-482, Trustworthy agent view, In review · ov-482, No move in 30 h",
+          "agent": null,
+          "branch": "fix-482",
+          "heading": "Title of ov-482",
+          "id": "t-ov-482",
+          "key": "ov-482",
+          "landed_landing": null,
+          "mark": "reviewing",
+          "mark_attention": true,
+          "notes": [
+            {
+              "attention": true,
+              "help": null,
+              "kind": "warning",
+              "text": "No move in 30 h"
+            }
+          ],
+          "rank": null,
+          "run": null,
+          "second": "In review · ov-482",
+          "stage": "reviewing",
+          "status": "In review",
+          "theme": "Trustworthy agent view",
+          "waits_on_owner": false
+        }
+      ],
+      "landings": [
+        {
+          "attention": false,
+          "carries": null,
+          "explanation": "Some of its tickets aren't ready to land yet.",
+          "id": "tr-86",
+          "label": "Landing 86",
+          "ladder": {
+            "at": 0,
+            "compact": "Waiting for tickets · step 1 of 3",
+            "steps": [
+              {
+                "explanation": "Some of its tickets aren't ready to land yet.",
+                "label": "Waiting for tickets"
+              },
+              {
+                "explanation": "Pushed, with CI running its checks.",
+                "label": "Checking on CI"
+              },
+              {
+                "explanation": "Everything passed and it has landed on main.",
+                "label": "Landed"
+              }
+            ]
+          },
+          "lander": {
+            "id": "pane:i1",
+            "terminal": null,
+            "tokens": "1.4M",
+            "who": "Lander · opus"
+          },
+          "lander_words": "Lander · opus · 1.4M",
+          "number": 86,
+          "phase": "waiting_for_tickets",
+          "phase_sentence": "waiting for tickets",
+          "phase_word": "Waiting for tickets",
+          "pushed_sha": null,
+          "since": 1799992800000,
+          "subtitle": null,
+          "tickets": [
+            {
+              "heading": "The team directory",
+              "id": "t-ov-487",
+              "key": "ov-487",
+              "note": null,
+              "note_attention": false,
+              "run": null,
+              "standing": "Ready",
+              "waits_on_owner": false
+            },
+            {
+              "heading": "Title of ov-485",
+              "id": "t-ov-485",
+              "key": "ov-485",
+              "note": null,
+              "note_attention": false,
+              "run": null,
+              "standing": "Waiting",
+              "waits_on_owner": false
+            }
+          ]
+        },
+        {
+          "attention": false,
+          "carries": null,
+          "explanation": "Some of its tickets aren't ready to land yet.",
+          "id": "tr-89",
+          "label": "Landing 89",
+          "ladder": {
+            "at": 0,
+            "compact": "Waiting for tickets · step 1 of 3",
+            "steps": [
+              {
+                "explanation": "Some of its tickets aren't ready to land yet.",
+                "label": "Waiting for tickets"
+              },
+              {
+                "explanation": "Pushed, with CI running its checks.",
+                "label": "Checking on CI"
+              },
+              {
+                "explanation": "Everything passed and it has landed on main.",
+                "label": "Landed"
+              }
+            ]
+          },
+          "lander": null,
+          "lander_words": null,
+          "number": 89,
+          "phase": "waiting_for_tickets",
+          "phase_sentence": "waiting for tickets",
+          "phase_word": "Waiting for tickets",
+          "pushed_sha": null,
+          "since": 1799996400000,
+          "subtitle": null,
+          "tickets": [
+            {
+              "heading": "Each person's asks reach the orchestrator",
+              "id": "t-ov-301",
+              "key": "ov-301",
+              "note": null,
+              "note_attention": false,
+              "run": null,
+              "standing": "Waiting",
+              "waits_on_owner": false
+            }
+          ]
+        },
+        {
+          "attention": true,
+          "carries": null,
+          "explanation": "Nothing here has moved for a while.",
+          "id": "tr-84",
+          "label": "Landing 84",
+          "ladder": {
+            "at": 0,
+            "compact": "Stalled · step 1 of 3",
+            "steps": [
+              {
+                "explanation": "Nothing here has moved for a while.",
+                "label": "Stalled"
+              },
+              {
+                "explanation": "Pushed, with CI running its checks.",
+                "label": "Checking on CI"
+              },
+              {
+                "explanation": "Everything passed and it has landed on main.",
+                "label": "Landed"
+              }
+            ]
+          },
+          "lander": null,
+          "lander_words": null,
+          "number": 84,
+          "phase": "stalled",
+          "phase_sentence": "stalled",
+          "phase_word": "Stalled",
+          "pushed_sha": null,
+          "since": 1799874000000,
+          "subtitle": null,
+          "tickets": [
+            {
+              "heading": "Title of ov-300",
+              "id": "t-ov-300",
+              "key": "ov-300",
+              "note": "Needs you",
+              "note_attention": true,
+              "run": null,
+              "standing": "Waiting",
+              "waits_on_owner": true
+            }
+          ]
+        }
+      ],
+      "needs_you": 2,
+      "now": 1800000000000,
+      "on_landed_landing": [],
+      "schema": 1,
+      "sections": [
+        {
+          "count": 2,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "needs_you",
+          "title": "Needs you"
+        },
+        {
+          "count": 3,
+          "empty": null,
+          "folded": false,
+          "help": "Reviewed tickets land on main together, after one round of checks.",
+          "kind": "landing",
+          "title": "Landing"
+        },
+        {
+          "count": 3,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "in_review",
+          "title": "In review"
+        },
+        {
+          "count": 2,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "building",
+          "title": "Building"
+        },
+        {
+          "count": 2,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "waiting",
+          "title": "Waiting"
+        },
+        {
+          "count": 3,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "agents",
+          "title": "Agents"
+        },
+        {
+          "count": 4,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "themes",
+          "title": "Themes"
+        }
+      ],
+      "themes": {
+        "finished": [
+          {
+            "cards": [
+              {
+                "glyph": "done",
+                "id": "t-ov-461",
+                "key": "ov-461",
+                "title": "Title of ov-461"
+              },
+              {
+                "glyph": "done",
+                "id": "t-ov-460",
+                "key": "ov-460",
+                "title": "Title of ov-460"
+              }
+            ],
+            "done": 2,
+            "fraction": 1.0,
+            "id": "th-4",
+            "moving": false,
+            "name": "Mac look and feel",
+            "owner_ask": null,
+            "progress": "2 of 2 done",
+            "total": 2
+          }
+        ],
+        "finished_title": "Finished",
+        "finished_words": "1 theme",
+        "tiles": [
+          {
+            "cards": [
+              {
+                "glyph": "in_progress",
+                "id": "t-ov-482",
+                "key": "ov-482",
+                "title": "Title of ov-482"
+              },
+              {
+                "glyph": "in_progress",
+                "id": "t-ov-474",
+                "key": "ov-474",
+                "title": "Title of ov-474"
+              },
+              {
+                "glyph": "in_progress",
+                "id": "t-ov-310",
+                "key": "ov-310",
+                "title": "Title of ov-310"
+              }
+            ],
+            "done": 0,
+            "fraction": 0.0,
+            "id": "th-3",
+            "moving": true,
+            "name": "Trustworthy agent view",
+            "owner_ask": null,
+            "progress": "0 of 5 done",
+            "total": 5
+          },
+          {
+            "cards": [
+              {
+                "glyph": "not_started",
+                "id": "t-ov-300",
+                "key": "ov-300",
+                "title": "Title of ov-300"
+              }
+            ],
+            "done": 0,
+            "fraction": 0.0,
+            "id": "th-2",
+            "moving": true,
+            "name": "Marketing",
+            "owner_ask": "How do we ship the site?",
+            "progress": "0 of 3 done",
+            "total": 3
+          },
+          {
+            "cards": [
+              {
+                "glyph": "in_progress",
+                "id": "t-ov-487",
+                "key": "ov-487",
+                "title": "Title of ov-487"
+              },
+              {
+                "glyph": "done",
+                "id": "t-ov-480",
+                "key": "ov-480",
+                "title": "Title of ov-480"
+              },
+              {
+                "glyph": "not_started",
+                "id": "t-ov-485",
+                "key": "ov-485",
+                "title": "Title of ov-485"
+              }
+            ],
+            "done": 2,
+            "fraction": 0.4,
+            "id": "th-1",
+            "moving": true,
+            "name": "Teams and accounts",
+            "owner_ask": null,
+            "progress": "2 of 5 done",
+            "total": 5
+          }
+        ]
+      },
+      "waiting": [
+        {
+          "attention": false,
+          "cards": [
+            {
+              "accessibility": "Title of ov-302, Marketing, Waiting · ov-302 · 6 h",
+              "agent": null,
+              "branch": "hero-shot",
+              "heading": "Title of ov-302",
+              "id": "t-ov-302",
+              "key": "ov-302",
+              "landed_landing": null,
+              "mark": "waiting",
+              "mark_attention": false,
+              "notes": [],
+              "rank": null,
+              "run": null,
+              "second": "Waiting · ov-302 · 6 h",
+              "stage": "waiting",
+              "status": "Waiting",
+              "theme": "Marketing",
+              "waits_on_owner": false
+            },
+            {
+              "accessibility": "old-queued, Waiting · old-queued · 2 d",
+              "agent": null,
+              "branch": "old-queued",
+              "heading": "old-queued",
+              "id": "task-l-old-queued",
+              "key": "old-queued",
+              "landed_landing": null,
+              "mark": "waiting",
+              "mark_attention": false,
+              "notes": [],
+              "rank": null,
+              "run": null,
+              "second": "Waiting · old-queued · 2 d",
+              "stage": "waiting",
+              "status": "Waiting",
+              "theme": null,
+              "waits_on_owner": false
+            }
+          ],
+          "kind": "not_ranked",
+          "title": "Not ranked"
+        }
+      ]
+    }
+  },
+  "request": {
+    "context": {
+      "needs_you": 2,
+      "statuses": {
+        "t-ov-300": "needs_decision"
+      },
+      "style": "material"
+    },
+    "plan": {
+      "agents": [
+        {
+          "doing_now": "",
+          "harness": "claude",
+          "id": "pane:orch",
+          "last_at": 1800000000000,
+          "model": "opus",
+          "parent_terminal": null,
+          "role": "orchestrator",
+          "short": "orch",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": 14200000,
+            "input_tokens": 2100000,
+            "output_tokens": 0,
+            "runs": 1,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "started_at": 1799985600000,
+          "stop_asked_at": null,
+          "subagent_id": "",
+          "terminal": null,
+          "tickets": [],
+          "title": "",
+          "working": true
+        },
+        {
+          "doing_now": "",
+          "harness": "claude",
+          "id": "pane:b1",
+          "last_at": 1800000000000,
+          "model": "sonnet",
+          "parent_terminal": null,
+          "role": "builder",
+          "short": "b1",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": 1100000,
+            "input_tokens": 380000,
+            "output_tokens": 0,
+            "runs": 1,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "started_at": 1799998680000,
+          "stop_asked_at": null,
+          "subagent_id": "",
+          "terminal": null,
+          "tickets": [
+            {
+              "key": "ov-310",
+              "role": "build",
+              "started_at": 1799998680000,
+              "task": "t-ov-310"
+            }
+          ],
+          "title": "",
+          "working": true
+        },
+        {
+          "doing_now": "",
+          "harness": "claude",
+          "id": "pane:i1",
+          "last_at": 1800000000000,
+          "model": "opus",
+          "parent_terminal": null,
+          "role": "lander",
+          "short": "i1",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": 6300000,
+            "input_tokens": 1400000,
+            "output_tokens": 0,
+            "runs": 1,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "started_at": 1799999520000,
+          "stop_asked_at": null,
+          "subagent_id": "",
+          "terminal": null,
+          "tickets": [
+            {
+              "key": "ov-487",
+              "role": "land",
+              "started_at": 1799999520000,
+              "task": "t-ov-487"
+            },
+            {
+              "key": "ov-485",
+              "role": "land",
+              "started_at": 1799999520000,
+              "task": "t-ov-485"
+            }
+          ],
+          "title": "",
+          "working": true
+        }
+      ],
+      "agents_spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": 26100000,
+        "input_tokens": 4710000,
+        "output_tokens": 0,
+        "runs": 5,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "board_counts": null,
+      "cards": [
+        {
+          "key": "ov-487",
+          "status": "In Progress",
+          "task": "t-ov-487",
+          "title": "Title of ov-487"
+        },
+        {
+          "key": "ov-486",
+          "status": "Done",
+          "task": "t-ov-486",
+          "title": "Title of ov-486"
+        },
+        {
+          "key": "ov-480",
+          "status": "Done",
+          "task": "t-ov-480",
+          "title": "Title of ov-480"
+        },
+        {
+          "key": "ov-485",
+          "status": "Backlog",
+          "task": "t-ov-485",
+          "title": "Title of ov-485"
+        },
+        {
+          "key": "ov-484",
+          "status": "To Do",
+          "task": "t-ov-484",
+          "title": "Title of ov-484"
+        },
+        {
+          "key": "ov-300",
+          "status": "Needs Decision",
+          "task": "t-ov-300",
+          "title": "Title of ov-300"
+        },
+        {
+          "key": "ov-301",
+          "status": "Backlog",
+          "task": "t-ov-301",
+          "title": "Title of ov-301"
+        },
+        {
+          "key": "ov-302",
+          "status": "To Do",
+          "task": "t-ov-302",
+          "title": "Title of ov-302"
+        },
+        {
+          "key": "ov-310",
+          "status": "In Progress",
+          "task": "t-ov-310",
+          "title": "Title of ov-310"
+        },
+        {
+          "key": "ov-311",
+          "status": "In Review",
+          "task": "t-ov-311",
+          "title": "Title of ov-311"
+        },
+        {
+          "key": "ov-312",
+          "status": "In Progress",
+          "task": "t-ov-312",
+          "title": "Title of ov-312"
+        },
+        {
+          "key": "ov-482",
+          "status": "In Review",
+          "task": "t-ov-482",
+          "title": "Title of ov-482"
+        },
+        {
+          "key": "ov-474",
+          "status": "In Progress",
+          "task": "t-ov-474",
+          "title": "Title of ov-474"
+        },
+        {
+          "key": "ov-460",
+          "status": "Done",
+          "task": "t-ov-460",
+          "title": "Title of ov-460"
+        },
+        {
+          "key": "ov-461",
+          "status": "Done",
+          "task": "t-ov-461",
+          "title": "Title of ov-461"
+        },
+        {
+          "key": "old-queued",
+          "status": "Backlog",
+          "task": "task-l-old-queued",
+          "title": "old-queued"
+        }
+      ],
+      "ci": [],
+      "cost": null,
+      "landed_not_closed": [],
+      "landings": [
+        {
+          "actor": "manager",
+          "base": "origin/main",
+          "ci_subject": "",
+          "collecting": false,
+          "created_at": 1799874000000,
+          "id": "tr-84",
+          "landed_at": null,
+          "lander": null,
+          "number": 84,
+          "phase": "stalled",
+          "phase_since": 1799874000000,
+          "pushed_sha": null,
+          "route": "push",
+          "short": "tr-84",
+          "spend": null,
+          "state": "open",
+          "state_since": 1799874000000,
+          "summary": null,
+          "tickets": [
+            {
+              "key": "ov-300",
+              "task": "t-ov-300"
+            }
+          ],
+          "title": null
+        },
+        {
+          "actor": "manager",
+          "base": "origin/main",
+          "ci_subject": "",
+          "collecting": false,
+          "created_at": 1799877600000,
+          "id": "tr-86",
+          "landed_at": null,
+          "lander": "pane:i1",
+          "number": 86,
+          "phase": "waiting_for_tickets",
+          "phase_since": 1799992800000,
+          "pushed_sha": null,
+          "route": "push",
+          "short": "tr-86",
+          "spend": null,
+          "state": "open",
+          "state_since": 1799992800000,
+          "summary": null,
+          "tickets": [
+            {
+              "key": "ov-487",
+              "task": "t-ov-487"
+            },
+            {
+              "key": "ov-485",
+              "task": "t-ov-485"
+            }
+          ],
+          "title": null
+        },
+        {
+          "actor": "manager",
+          "base": "origin/main",
+          "ci_subject": "",
+          "collecting": false,
+          "created_at": 1799996400000,
+          "id": "tr-89",
+          "landed_at": null,
+          "lander": null,
+          "number": 89,
+          "phase": "waiting_for_tickets",
+          "phase_since": 1799996400000,
+          "pushed_sha": null,
+          "route": "push",
+          "short": "tr-89",
+          "spend": null,
+          "state": "open",
+          "state_since": 1799996400000,
+          "summary": null,
+          "tickets": [
+            {
+              "key": "ov-301",
+              "task": "t-ov-301"
+            }
+          ],
+          "title": null
+        },
+        {
+          "actor": "manager",
+          "base": "origin/main",
+          "ci_subject": "",
+          "collecting": false,
+          "created_at": 1799784000000,
+          "id": "tr-82",
+          "landed_at": 1799996400000,
+          "lander": null,
+          "number": 82,
+          "phase": "landed",
+          "phase_since": 1799784000000,
+          "pushed_sha": null,
+          "route": "push",
+          "short": "tr-82",
+          "spend": null,
+          "state": "landed",
+          "state_since": 1799784000000,
+          "summary": null,
+          "tickets": [
+            {
+              "key": "ov-474",
+              "task": "t-ov-474"
+            }
+          ],
+          "title": null
+        },
+        {
+          "actor": "manager",
+          "base": "origin/main",
+          "ci_subject": "",
+          "collecting": false,
+          "created_at": 1799784000000,
+          "id": "tr-83",
+          "landed_at": 1799996400000,
+          "lander": null,
+          "number": 83,
+          "phase": "landed",
+          "phase_since": 1799784000000,
+          "pushed_sha": null,
+          "route": "push",
+          "short": "tr-83",
+          "spend": null,
+          "state": "landed",
+          "state_since": 1799784000000,
+          "summary": null,
+          "tickets": [
+            {
+              "key": "ov-482",
+              "task": "t-ov-482"
+            }
+          ],
+          "title": null
+        },
+        {
+          "actor": "manager",
+          "base": "origin/main",
+          "ci_subject": "",
+          "collecting": false,
+          "created_at": 1799784000000,
+          "id": "tr-85",
+          "landed_at": 1799996400000,
+          "lander": null,
+          "number": 85,
+          "phase": "landed",
+          "phase_since": 1799784000000,
+          "pushed_sha": null,
+          "route": "push",
+          "short": "tr-85",
+          "spend": null,
+          "state": "landed",
+          "state_since": 1799784000000,
+          "summary": null,
+          "tickets": [
+            {
+              "key": "old-queued",
+              "task": "task-l-old-queued"
+            }
+          ],
+          "title": null
+        },
+        {
+          "actor": "manager",
+          "base": "origin/main",
+          "ci_subject": "",
+          "collecting": false,
+          "created_at": 1799784000000,
+          "id": "tr-87",
+          "landed_at": 1799996400000,
+          "lander": null,
+          "number": 87,
+          "phase": "landed",
+          "phase_since": 1799784000000,
+          "pushed_sha": null,
+          "route": "push",
+          "short": "tr-87",
+          "spend": null,
+          "state": "landed",
+          "state_since": 1799784000000,
+          "summary": null,
+          "tickets": [],
+          "title": null
+        }
+      ],
+      "lines": [
+        {
+          "branch": "team-dir",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-487",
+          "landed_sha": null,
+          "landing": 86,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "landing",
+          "stage_since": 1799989200000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t-ov-487",
+          "title": "The team directory",
+          "work": [],
+          "worktree_path": ".claude/worktrees/team-dir"
+        },
+        {
+          "branch": "ios-overwrite",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-485",
+          "landed_sha": null,
+          "landing": 86,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "waiting",
+          "stage_since": 1799982000000,
+          "stale": false,
+          "status": "Backlog",
+          "task": "t-ov-485",
+          "title": "Title of ov-485",
+          "work": [],
+          "worktree_path": ".claude/worktrees/ios-overwrite"
+        },
+        {
+          "branch": "web-site",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-300",
+          "landed_sha": null,
+          "landing": 84,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "waiting",
+          "stage_since": 1799874000000,
+          "stale": false,
+          "status": "Needs Decision",
+          "task": "t-ov-300",
+          "title": "Title of ov-300",
+          "work": [],
+          "worktree_path": ".claude/worktrees/web-site"
+        },
+        {
+          "branch": "reps",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-301",
+          "landed_sha": null,
+          "landing": 89,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "waiting",
+          "stage_since": 1799996400000,
+          "stale": false,
+          "status": "Backlog",
+          "task": "t-ov-301",
+          "title": "Each person's asks reach the orchestrator",
+          "work": [],
+          "worktree_path": ".claude/worktrees/reps"
+        },
+        {
+          "branch": "hero-shot",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-302",
+          "landed_sha": null,
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "waiting",
+          "stage_since": 1799978400000,
+          "stale": false,
+          "status": "To Do",
+          "task": "t-ov-302",
+          "title": "Title of ov-302",
+          "work": [],
+          "worktree_path": ".claude/worktrees/hero-shot"
+        },
+        {
+          "branch": "tile-grid",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-310",
+          "landed_sha": null,
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "building",
+          "stage_since": 1799996400000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t-ov-310",
+          "title": "The themes grid",
+          "work": [],
+          "worktree_path": ".claude/worktrees/tile-grid"
+        },
+        {
+          "branch": "fleet-ui",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-311",
+          "landed_sha": null,
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "reviewing",
+          "stage_since": 1799992800000,
+          "stale": false,
+          "status": "In Review",
+          "task": "t-ov-311",
+          "title": "Title of ov-311",
+          "work": [],
+          "worktree_path": ".claude/worktrees/fleet-ui"
+        },
+        {
+          "branch": "agent-rows",
+          "budget_tokens": null,
+          "fix_rounds": 2,
+          "held_off": false,
+          "key": "ov-312",
+          "landed_sha": null,
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "building",
+          "stage_since": 1799998200000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t-ov-312",
+          "title": "Title of ov-312",
+          "work": [
+            {
+              "agent": "fix-agent-ro",
+              "ended_at": null,
+              "linked_by_description": false,
+              "role": "fix",
+              "started_at": 1799998200000,
+              "verdict": ""
+            }
+          ],
+          "worktree_path": ".claude/worktrees/agent-rows"
+        },
+        {
+          "branch": "fix-482",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-482",
+          "landed_sha": null,
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "reviewing",
+          "stage_since": 1799892000000,
+          "stale": true,
+          "status": "In Review",
+          "task": "t-ov-482",
+          "title": "Title of ov-482",
+          "work": [],
+          "worktree_path": ".claude/worktrees/fix-482"
+        },
+        {
+          "branch": "lane-474",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-474",
+          "landed_sha": null,
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "building",
+          "stage_since": 1799784000000,
+          "stale": true,
+          "status": "In Progress",
+          "task": "t-ov-474",
+          "title": "Title of ov-474",
+          "work": [],
+          "worktree_path": ".claude/worktrees/lane-474"
+        },
+        {
+          "branch": "old-queued",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "old-queued",
+          "landed_sha": null,
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "waiting",
+          "stage_since": 1799820000000,
+          "stale": false,
+          "status": "Backlog",
+          "task": "task-l-old-queued",
+          "title": "old-queued",
+          "work": [],
+          "worktree_path": ".claude/worktrees/old-queued"
+        },
+        {
+          "branch": "done-lane",
+          "budget_tokens": null,
+          "fix_rounds": 0,
+          "held_off": false,
+          "key": "ov-460",
+          "landed_sha": "ab12cd34ef56",
+          "landing": null,
+          "plan_rank": null,
+          "pr_number": null,
+          "reason": "",
+          "same_branch": null,
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "stack_parent": null,
+          "stage": "landed",
+          "stage_since": 1799996400000,
+          "stale": false,
+          "status": "Done",
+          "task": "t-ov-460",
+          "title": "Title of ov-460",
+          "work": [],
+          "worktree_path": ".claude/worktrees/done-lane"
+        }
+      ],
+      "now_ms": 1800000000000,
+      "off_the_line": [],
+      "rulings": [],
+      "themes": [
+        {
+          "budget_tokens": null,
+          "cards": [
+            {
+              "key": "ov-487",
+              "task": "t-ov-487"
+            },
+            {
+              "key": "ov-486",
+              "task": "t-ov-486"
+            },
+            {
+              "key": "ov-480",
+              "task": "t-ov-480"
+            },
+            {
+              "key": "ov-485",
+              "task": "t-ov-485"
+            },
+            {
+              "key": "ov-484",
+              "task": "t-ov-484"
+            }
+          ],
+          "counts": {
+            "backlog": 1,
+            "cancelled": 0,
+            "done": 2,
+            "in_progress": 1,
+            "in_review": 0,
+            "needs_decision": 0,
+            "todo": 1
+          },
+          "id": "th-1",
+          "last_moved_at": 1799992800000,
+          "name": "Teams and accounts",
+          "next": "",
+          "ordinal": 1,
+          "outcome": "",
+          "owner_ask": "",
+          "short": "th-1",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "state": "active",
+          "story": "",
+          "story_at": 0,
+          "trend_tokens": null
+        },
+        {
+          "budget_tokens": null,
+          "cards": [
+            {
+              "key": "ov-300",
+              "task": "t-ov-300"
+            },
+            {
+              "key": "ov-301",
+              "task": "t-ov-301"
+            },
+            {
+              "key": "ov-302",
+              "task": "t-ov-302"
+            }
+          ],
+          "counts": {
+            "backlog": 1,
+            "cancelled": 0,
+            "done": 0,
+            "in_progress": 0,
+            "in_review": 0,
+            "needs_decision": 1,
+            "todo": 1
+          },
+          "id": "th-2",
+          "last_moved_at": 1799856000000,
+          "name": "Marketing",
+          "next": "",
+          "ordinal": 2,
+          "outcome": "",
+          "owner_ask": "How do we ship the site?",
+          "short": "th-2",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "state": "active",
+          "story": "",
+          "story_at": 0,
+          "trend_tokens": null
+        },
+        {
+          "budget_tokens": null,
+          "cards": [
+            {
+              "key": "ov-482",
+              "task": "t-ov-482"
+            },
+            {
+              "key": "ov-474",
+              "task": "t-ov-474"
+            },
+            {
+              "key": "ov-310",
+              "task": "t-ov-310"
+            },
+            {
+              "key": "ov-311",
+              "task": "t-ov-311"
+            },
+            {
+              "key": "ov-312",
+              "task": "t-ov-312"
+            }
+          ],
+          "counts": {
+            "backlog": 0,
+            "cancelled": 0,
+            "done": 0,
+            "in_progress": 3,
+            "in_review": 2,
+            "needs_decision": 0,
+            "todo": 0
+          },
+          "id": "th-3",
+          "last_moved_at": 1799998200000,
+          "name": "Trustworthy agent view",
+          "next": "",
+          "ordinal": 3,
+          "outcome": "",
+          "owner_ask": "",
+          "short": "th-3",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "state": "active",
+          "story": "",
+          "story_at": 0,
+          "trend_tokens": null
+        },
+        {
+          "budget_tokens": null,
+          "cards": [
+            {
+              "key": "ov-460",
+              "task": "t-ov-460"
+            },
+            {
+              "key": "ov-461",
+              "task": "t-ov-461"
+            }
+          ],
+          "counts": {
+            "backlog": 0,
+            "cancelled": 0,
+            "done": 2,
+            "in_progress": 0,
+            "in_review": 0,
+            "needs_decision": 0,
+            "todo": 0
+          },
+          "id": "th-4",
+          "last_moved_at": 1799640000000,
+          "name": "Mac look and feel",
+          "next": "",
+          "ordinal": 4,
+          "outcome": "",
+          "owner_ask": "",
+          "short": "th-4",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "state": "done",
+          "story": "",
+          "story_at": 0,
+          "trend_tokens": null
+        },
+        {
+          "budget_tokens": null,
+          "cards": [],
+          "counts": {
+            "backlog": 0,
+            "cancelled": 0,
+            "done": 0,
+            "in_progress": 0,
+            "in_review": 0,
+            "needs_decision": 0,
+            "todo": 0
+          },
+          "id": "th-5",
+          "last_moved_at": null,
+          "name": "Abandoned",
+          "next": "",
+          "ordinal": 5,
+          "outcome": "",
+          "owner_ask": "",
+          "short": "th-5",
+          "spend": {
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost_micros": null,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "runs": 0,
+            "shared_agents": 0,
+            "unmeasured_agents": 0
+          },
+          "state": "dropped",
+          "story": "",
+          "story_at": 0,
+          "trend_tokens": null
+        }
+      ]
+    },
+    "schema": 1,
+    "workflow": {
+      "epoch": 1,
+      "revision": 1,
+      "runs": [
+        {
+          "actions": [
+            {
+              "guard": "wf1:b313ded3e4f9c7790c839d29e258d47e6e967e6a6c76f1dcd727ec753217319e",
+              "kind": "Approve",
+              "label": "Approve"
+            },
+            {
+              "guard": "wf1:b313ded3e4f9c7790c839d29e258d47e6e967e6a6c76f1dcd727ec753217319e",
+              "kind": "Cancel",
+              "label": "Cancel Run"
+            }
+          ],
+          "attempt": 1,
+          "candidate": null,
+          "definition_pin": "wf1:afc4d08b5e8e49351ff4d086bea36cd268d4b3318c92613948d0d1ffb62abb9e",
+          "fence": 1,
+          "gate": {
+            "kind": "Approval",
+            "label": "Approval Required",
+            "principal": "owner",
+            "text": "Waiting for approval from owner."
+          },
+          "item": "ov-310",
+          "iteration": 0,
+          "label": "Workflow Run",
+          "latest_evidence": null,
+          "pending_effect": null,
+          "phase": "WaitingApproval",
+          "phase_label": "Awaiting Approval",
+          "policy_pin": "policy",
+          "reasons": [
+            {
+              "kind": "ApprovalRequired",
+              "label": "Approval Required",
+              "text": "This stage is waiting for its configured approval."
+            }
+          ],
+          "reworks_remaining": 2,
+          "run": "wf1:9238042ca1b351c53cd9dd92300e5dfb09100425d25ee6640868239dd3ae1d21",
+          "stage": {
+            "id": "stage-0",
+            "kind": "Provision",
+            "label": "Prepare Workspace",
+            "progression": {
+              "AwaitApproval": {
+                "principal": "owner"
+              }
+            },
+            "progression_label": "Approval from owner"
+          },
+          "stages": [
+            {
+              "id": "stage-0",
+              "kind": "Provision",
+              "label": "Prepare Workspace",
+              "progression": {
+                "AwaitApproval": {
+                  "principal": "owner"
+                }
+              },
+              "progression_label": "Approval from owner"
+            },
+            {
+              "id": "stage-1",
+              "kind": "Build",
+              "label": "Build",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
+            },
+            {
+              "id": "stage-2",
+              "kind": "Check",
+              "label": "Run Checks",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
+            },
+            {
+              "id": "stage-3",
+              "kind": {
+                "Review": "Dispatch"
+              },
+              "label": "Review",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
+            },
+            {
+              "id": "stage-4",
+              "kind": "Land",
+              "label": "Land Changes",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
+            },
+            {
+              "id": "stage-5",
+              "kind": "Ci",
+              "label": "Check CI",
+              "progression": "Automatic",
+              "progression_label": "Automatic"
+            }
+          ]
+        }
+      ],
+      "schema": 2,
+      "workspace": "workspace"
+    }
+  }
+}
