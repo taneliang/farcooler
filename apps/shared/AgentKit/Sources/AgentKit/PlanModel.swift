@@ -426,9 +426,9 @@ extension PlanModel {
     }
 
     /// A ticket's status line ("Fixing · round 1", "Landed · ac840108"), in the core's words; its
-    /// stage's own word when the core can't be asked.
-    public func status(of line: PlanTicketLine, stage: Bool = true) -> String {
-        guard let page = pages()?.ticket(line.task) else { return line.stage.word }
+    /// stage's own word when the core can't be asked. A list of rows asks once (`pages()`) and hands each row the answer.
+    public func status(of line: PlanTicketLine, stage: Bool = true, pages: PlanView.Pages? = nil) -> String {
+        guard let page = (pages ?? self.pages())?.ticket(line.task) else { return line.stage.word }
         return stage ? page.status : page.statusBesideStage
     }
 

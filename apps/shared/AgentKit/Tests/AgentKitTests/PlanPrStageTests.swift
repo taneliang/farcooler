@@ -56,15 +56,13 @@ struct PlanPrStageTests {
         #expect(Self.stage(plan, 6)?.full == "Changes Requested", "changes requested is its own state")
     }
 
-    @Test("The facts under the words come through: reviewers, checks, the pull request and its threads")
+    @Test("The facts under the words come through: reviewers, checks and the pull request")
     func factsDecode() throws {
         let stage = try #require(Self.line(try Self.fixture(), 4).prStage)
         #expect(stage.reviewers == ["alice", "bob", "org/web"])
         #expect(stage.prNumber == 31 && stage.unresolvedThreads == 2)
-        #expect(stage.detail == "PR 31 \u{00B7} 2 threads open")
         #expect(stage.link?.absoluteString == "https://github.com/acme/app/pull/31")
         #expect(Self.line(try Self.fixture(), 8).prStage?.checks == "failing")
-        #expect(Self.line(try Self.fixture(), 5).prStage?.detail == "PR 32", "no threads counted, none said")
     }
 
     @Test("Unknown is a runner that couldn't ask, so it never reads as no pull request or as building")

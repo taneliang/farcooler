@@ -57,15 +57,6 @@ data class PlanPrStage(
     /** Whether a person may mark it ready for review from here: a draft the runner numbered. */
     val canMarkReady: Boolean get() = isDraft && prNumber > 0
 
-    /** "PR 31 · 2 threads open": the facts under the words, null without a pull request. */
-    val detail: String?
-        get() {
-            if (prNumber <= 0) return null
-            val parts = mutableListOf("PR $prNumber")
-            unresolvedThreads?.takeIf { it > 0 }?.let { parts += if (it == 1) "1 thread open" else "$it threads open" }
-            return parts.joinToString(" · ")
-        }
-
     /** The pull request's page, only when it is a github.com link (see [GitHubLink]). */
     val link: String? get() = GitHubLink.url(prUrl)
 

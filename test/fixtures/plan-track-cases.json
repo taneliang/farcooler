@@ -1,5 +1,5 @@
 {
-  "about": "Cases both PlanThemeTrackTests (Swift) and PlanTrackTest (Kotlin) read: a plan, the first theme's track line (when 'track' is a string) and the Themes summary (when 'summary' is present; null means none). Edit this file, not the tests.",
+  "about": "Cases crates/client's pages tests read: a plan, the first theme's kind (when 'kind' is present: moving, stuck, queued, quiet, idle, all_done, paused, done or over_budget) and the Themes summary (when 'summary' is present; null means none). Edit this file, not the tests.",
   "cases": [
     {
       "name": "one ticket building",
@@ -72,7 +72,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "skill-323 is building"
+      "kind": "moving"
     },
     {
       "name": "one ticket in review",
@@ -145,7 +145,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "a is in review"
+      "kind": "moving"
     },
     {
       "name": "fixing, round 1",
@@ -227,7 +227,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "fix-gestures is fixing, round 1"
+      "kind": "moving"
     },
     {
       "name": "fixing, no round",
@@ -309,7 +309,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "a is fixing"
+      "kind": "moving"
     },
     {
       "name": "landing",
@@ -382,7 +382,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "a is landing"
+      "kind": "moving"
     },
     {
       "name": "two tickets",
@@ -486,7 +486,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "2 tickets moving"
+      "kind": "moving"
     },
     {
       "name": "a lone stale ticket stands alone, an hour",
@@ -559,7 +559,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "s: no move in an hour"
+      "kind": "stuck"
     },
     {
       "name": "a lone stale ticket stands alone, hours",
@@ -632,7 +632,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "s: no move in 3 h"
+      "kind": "stuck"
     },
     {
       "name": "a stale ticket among moving ones is named after them",
@@ -776,7 +776,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "3 tickets moving · slow: no move in 4 h"
+      "kind": "moving"
     },
     {
       "name": "the ticket stalled longest is the one named",
@@ -911,7 +911,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "3 tickets moving · b: no move in 5 h"
+      "kind": "moving"
     },
     {
       "name": "every working ticket stale: stuck, longest named",
@@ -1015,7 +1015,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "b: no move in 5 h"
+      "kind": "stuck"
     },
     {
       "name": "two tickets, one stale, an hour",
@@ -1119,7 +1119,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "2 tickets moving · b: no move in an hour"
+      "kind": "moving"
     },
     {
       "name": "queued first",
@@ -1192,7 +1192,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Queued, 1st up"
+      "kind": "queued"
     },
     {
       "name": "queued best rank",
@@ -1296,7 +1296,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Queued, 2nd up"
+      "kind": "queued"
     },
     {
       "name": "queued no rank",
@@ -1369,7 +1369,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Queued"
+      "kind": "queued"
     },
     {
       "name": "a working ticket beats a queued one",
@@ -1469,7 +1469,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "b is building"
+      "kind": "moving"
     },
     {
       "name": "quiet three days",
@@ -1514,7 +1514,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket · quiet for 3 days"
+      "kind": "quiet"
     },
     {
       "name": "quiet one day",
@@ -1559,7 +1559,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket · quiet for 1 day"
+      "kind": "quiet"
     },
     {
       "name": "quiet at exactly 24 h",
@@ -1604,7 +1604,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket · quiet for 1 day"
+      "kind": "quiet"
     },
     {
       "name": "idle inside the day",
@@ -1649,7 +1649,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket yet"
+      "kind": "idle"
     },
     {
       "name": "untouched is idle",
@@ -1694,7 +1694,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket yet"
+      "kind": "idle"
     },
     {
       "name": "the runner's last_moved_at keeps it awake",
@@ -1740,7 +1740,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket yet"
+      "kind": "idle"
     },
     {
       "name": "a ruling made lately keeps it awake",
@@ -1801,7 +1801,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket yet"
+      "kind": "idle"
     },
     {
       "name": "a ruling settled lately keeps it awake",
@@ -1863,7 +1863,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket yet"
+      "kind": "idle"
     },
     {
       "name": "another theme's ruling does not",
@@ -1924,7 +1924,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket · quiet for 5 days"
+      "kind": "quiet"
     },
     {
       "name": "a dropped ticket does not keep it awake",
@@ -1997,7 +1997,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket · quiet for 5 days"
+      "kind": "quiet"
     },
     {
       "name": "a landed ticket does",
@@ -2070,7 +2070,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket yet"
+      "kind": "idle"
     },
     {
       "name": "every card done",
@@ -2115,7 +2115,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Every card is done"
+      "kind": "all_done"
     },
     {
       "name": "canceled cards count on neither side",
@@ -2160,7 +2160,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Every card is done"
+      "kind": "all_done"
     },
     {
       "name": "no cards is not done",
@@ -2205,7 +2205,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "No ticket yet"
+      "kind": "idle"
     },
     {
       "name": "paused",
@@ -2278,7 +2278,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Paused"
+      "kind": "paused"
     },
     {
       "name": "done",
@@ -2351,7 +2351,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Done"
+      "kind": "done"
     },
     {
       "name": "over budget wins over moving",
@@ -2430,7 +2430,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "Over budget: 600 of 100 tokens"
+      "kind": "over_budget"
     },
     {
       "name": "within budget says nothing of it",
@@ -2509,7 +2509,7 @@
         "landings": [],
         "agents": []
       },
-      "track": "a is building"
+      "kind": "moving"
     },
     {
       "name": "summary: asks, moving, quiet; paused and done asks left out",
@@ -2732,7 +2732,7 @@
         "agents": []
       },
       "summary": null,
-      "track": "Every card is done"
+      "kind": "all_done"
     }
   ]
 }

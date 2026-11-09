@@ -23,7 +23,7 @@ use super::words::{self, DOT, Style};
 use super::*;
 
 mod pages;
-pub use pages::{PageStage, Pages, ThemeTrack, TicketPage, TrackKind};
+pub use pages::{PageStage, Pages, TicketPage, TrackKind};
 
 /// A ticket's stage, from the wire's word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]

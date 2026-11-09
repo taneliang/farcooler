@@ -278,50 +278,12 @@ public struct PlanView: Decodable, Equatable, Sendable {
         public var stale: String?
     }
 
-    public enum TrackKind: String, Decodable, Equatable, Sendable {
-        case overBudget = "over_budget"
-        case stuck, moving, queued, quiet, idle
-        case allDone = "all_done"
-        case paused, done
-
-        /// The glyph beside the words: a shape to scan by, so the state never
-        /// rests on color alone. SF Symbols on the Mac and the iPhone.
-        public var symbol: String {
-            switch self {
-            case .overBudget: "exclamationmark.circle.fill"
-            case .stuck: "exclamationmark.circle"
-            case .moving: "arrow.triangle.2.circlepath"
-            case .queued: "clock"
-            case .quiet: "moon.zzz"
-            case .idle: "circle.dashed"
-            case .allDone, .done: "checkmark.circle"
-            case .paused: "pause.circle"
-            }
-        }
-    }
-
-    /// One plain-words line per theme that says whether the work is moving.
-    public struct ThemeTrack: Decodable, Equatable, Sendable {
-        public var id: String
-        public var kind: TrackKind
-        public var words: String
-        /// The same for VoiceOver: a middle dot isn't read well.
-        public var spoken: String
-        /// Amber, and only for a budget gone over.
-        public var attention: Bool
-
-        /// Being worked on right now, stuck or not.
-        public var isMoving: Bool { kind == .moving || kind == .stuck }
-    }
-
     public struct Pages: Decodable, Equatable, Sendable {
         public var tickets: [TicketPage]
-        public var tracks: [ThemeTrack]
         /// "3 waiting on you · 4 moving · 1 quiet", for the Themes section when it is folded.
         public var trackSummary: String?
 
         public func ticket(_ task: String) -> TicketPage? { tickets.first { $0.id == task } }
-        public func track(_ theme: String) -> ThemeTrack? { tracks.first { $0.id == theme } }
     }
 
     public struct Themes: Decodable, Equatable, Sendable {

@@ -40,10 +40,8 @@ class PlanPrStageTest {
         assertEquals(listOf("alice", "bob", "org/web"), stage.reviewers)
         assertEquals(31, stage.prNumber)
         assertEquals(2, stage.unresolvedThreads)
-        assertEquals("PR 31 · 2 threads open", stage.detail)
         assertEquals("https://github.com/acme/app/pull/31", stage.link)
         assertEquals("failing", ticket(8).prStage?.checks)
-        assertEquals("no threads counted, none said", "PR 32", ticket(5).prStage?.detail)
     }
 
     @Test

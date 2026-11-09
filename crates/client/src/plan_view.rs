@@ -26,7 +26,7 @@ pub mod column;
 pub mod input;
 pub mod words;
 
-pub use build::{LandingPhase, PageStage, Pages, ThemeTrack, TicketPage, TrackKind};
+pub use build::{LandingPhase, PageStage, Pages, TicketPage, TrackKind};
 pub use words::Style;
 
 pub const SCHEMA: u32 = 1;

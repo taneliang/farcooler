@@ -84,15 +84,6 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
     /// runner named (`prNumber`), not one it could not read.
     public var canMarkReady: Bool { isDraft && prNumber > 0 }
 
-    /// "PR 31 · 2 threads open": the facts under the words, nil without a
-    /// pull request.
-    public var detail: String? {
-        guard prNumber > 0 else { return nil }
-        var parts = ["PR \(prNumber)"]
-        if let n = unresolvedThreads, n > 0 { parts.append(n == 1 ? "1 thread open" : "\(n) threads open") }
-        return parts.joined(separator: " \u{00B7} ")
-    }
-
     /// The pull request's page, only when it is a web link.
     public var link: URL? {
         guard let url = URL(string: prUrl), url.scheme == "https" else { return nil }

@@ -250,15 +250,16 @@ struct PlanThemePage: View {
                 }
             }
             let lines = plan.lines(in: theme)
+            let pages = plan.pages()
             if !lines.isEmpty {
                 Section("Tickets") {
                     ForEach(lines) { line in
-                        PlanPageTicketRow(line: line, plan: plan) { context.onOpen(.ticket(line.task)) }
+                        PlanPageTicketRow(line: line, plan: plan, pages: pages) { context.onOpen(.ticket(line.task)) }
                     }
                 }
             }
             Section {
-                PlanCardRows(refs: theme.cards, plan: plan, context: context)
+                PlanCardRows(refs: theme.cards, plan: plan, pages: pages, context: context)
             } header: {
                 HStack {
                     Text("Cards")
@@ -309,6 +310,7 @@ struct PlanThemePage: View {
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
     let plan: PlanModel
+    let pages: PlanView.Pages?
     let action: () -> Void
 
     var body: some View {
@@ -321,7 +323,7 @@ private struct PlanPageTicketRow: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(line.heading).font(.subheadline.weight(.medium))
-                    Text(plan.status(of: line)).font(.footnote).foregroundStyle(.secondary)
+                    Text(plan.status(of: line, pages: pages)).font(.footnote).foregroundStyle(.secondary)
                     // Each key's title in what VoiceOver says (ov-299).
                     TaskKeyText(keysIn: line.key)
                         .font(.system(.caption, design: .monospaced))
@@ -348,6 +350,8 @@ private struct PlanPageTicketRow: View {
 private struct PlanCardRows: View {
     let refs: [PlanCardRef]
     let plan: PlanModel
+    /// The plan's pages, asked once by the page that lists the cards.
+    var pages: PlanView.Pages?
     let context: PlanPageContext
     /// Whether each card says where its own pull request stands (ov-317): on a
     /// live ticket's page, where its card has a pull request of its own.
@@ -375,7 +379,7 @@ private struct PlanCardRows: View {
     }
 
     private func stage(of ref: PlanCardRef) -> PlanView.PageStage? {
-        showsStage ? plan.pages()?.ticket(ref.task)?.stage : nil
+        showsStage ? (pages ?? plan.pages())?.ticket(ref.task)?.stage : nil
     }
 
     private func card(key: String, title: String, status: String, stage: PlanView.PageStage? = nil) -> some View {

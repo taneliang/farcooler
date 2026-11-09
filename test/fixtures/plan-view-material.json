@@ -792,37 +792,7 @@
             "status_beside_stage": "Landed · ab12cd34"
           }
         ],
-        "track_summary": "1 waiting on you · 2 moving",
-        "tracks": [
-          {
-            "attention": false,
-            "id": "th-1",
-            "kind": "moving",
-            "spoken": "The team directory is landing",
-            "words": "The team directory is landing"
-          },
-          {
-            "attention": false,
-            "id": "th-2",
-            "kind": "queued",
-            "spoken": "Queued",
-            "words": "Queued"
-          },
-          {
-            "attention": false,
-            "id": "th-3",
-            "kind": "moving",
-            "spoken": "5 tickets moving, Title of ov-474: no move in 60 h",
-            "words": "5 tickets moving · Title of ov-474: no move in 60 h"
-          },
-          {
-            "attention": false,
-            "id": "th-4",
-            "kind": "done",
-            "spoken": "Done",
-            "words": "Done"
-          }
-        ]
+        "track_summary": "1 waiting on you · 2 moving"
       },
       "schema": 1,
       "sections": [

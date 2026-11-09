@@ -302,11 +302,12 @@ struct PlanThemePage: View {
 
     @ViewBuilder private var tickets: some View {
         let lines = plan.lines(in: theme)
+        let pages = plan.pages()
         if !lines.isEmpty {
             PlanSection(title: "Tickets") {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(lines) { line in
-                        PlanPageTicketRow(line: line, plan: plan) { context.onOpen(.ticket(line.id)) }
+                        PlanPageTicketRow(line: line, plan: plan, pages: pages) { context.onOpen(.ticket(line.id)) }
                     }
                 }
             }
@@ -328,6 +329,7 @@ struct PlanThemePage: View {
 private struct PlanPageTicketRow: View {
     let line: PlanTicketLine
     let plan: PlanModel
+    let pages: PlanView.Pages?
     let action: () -> Void
     @State private var hovering = false
 
@@ -343,7 +345,7 @@ private struct PlanPageTicketRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
-                Text(plan.status(of: line))
+                Text(plan.status(of: line, pages: pages))
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .foregroundStyle(.quietInk)
                     .lineLimit(1)
