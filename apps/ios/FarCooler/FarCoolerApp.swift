@@ -7,6 +7,12 @@ struct FarCoolerApp: App {
     @UIApplicationDelegateAdaptor(PushDelegate.self) private var pushDelegate
     @ObservedObject private var themes = Themes.shared
 
+    init() {
+        // The Plan's view comes from the Rust core (ov-1016); its strip asks
+        // for it too, before any Plan is drawn.
+        PlanViewBridge.install()
+    }
+
     var body: some Scene {
         WindowGroup {
             // The app's chrome follows the system's Light and Dark, and

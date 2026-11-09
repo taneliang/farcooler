@@ -4,10 +4,10 @@ import XCTest
 /// The iPhone's Plan, drawn as the Mac's plan column is (ov-874): the facts
 /// line, Needs You, Initiatives, the pipeline (Stuck, Building, Reviewing,
 /// Landing, each agent a card with its tickets under it) and the footer
-/// counts. What it says is AgentKit's `PlanColumn`, pinned in
-/// `PlanColumnTests`; what is here is what only a screen can show: the order
-/// a person meets it in, monospaced keys, one agent for each ticket, and what a
-/// tap does.
+/// counts. What it says is the Rust core's column (ov-1016), pinned in
+/// `plan_view/column_tests.rs`; what is here is what only a screen can show:
+/// the order a person meets it in, monospaced keys, one agent for each ticket,
+/// and what a tap does.
 ///
 /// Over the canned runner, whose plan is a real board's
 /// (`test/fixtures/plan-seeded.json`), with agents (`-phone-agents`).

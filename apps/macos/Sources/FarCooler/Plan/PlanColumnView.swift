@@ -4,10 +4,10 @@ import SwiftUI
 
 // The plan column (ov-867, C10f): the facts line, Needs You, Initiatives,
 // the pipeline and the footer, on the window's plane beside the
-// orchestrator. The words and rules are AgentKit's `PlanColumn`; this only
-// lays them out, natively: text styles that follow the system's size, the
-// system's hover wash, and no rules. Type, space and the soft fill of each
-// agent's card do the grouping.
+// orchestrator. The words and rules are the Rust core's (`PlanColumn`,
+// ov-1016); this only lays them out, natively: text styles that follow the
+// system's size, the system's hover wash, and no rules. Type, space and the
+// soft fill of each agent's card do the grouping.
 //
 // Nothing here acts on an agent. Stopping, assigning and answering are said
 // to the orchestrator: a Needs You row quotes itself into its input.
@@ -87,9 +87,7 @@ struct PlanColumnView: View {
             }
         } else if plan.plan.isEmpty && needsYou.items.isEmpty {
             PlanEmptyNotice().identified("plan-empty")
-        } else {
-            let column = PlanColumn(
-                plan: plan.plan, needsYou: needsYou.items.count + asks.count, statuses: statuses, titles: titles)
+        } else if let column = plan.column(needsYou: needsYou.items.count + asks.count, statuses: statuses, titles: titles) {
             PlanFactsLine(facts: column.facts)
             needs
             PlanInitiativesSection(column: column, onOpen: onOpen)

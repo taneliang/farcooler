@@ -4,8 +4,9 @@ import SwiftUI
 // modeled on the site's "What it's building now". Each tile says the theme's
 // name, how much is done, a meter, up to three cards and, in amber, what waits
 // on the owner. A tap opens the theme's page, where the story now lives. The
-// rules (which cards, which themes lead, which are finished) are AgentKit's
-// `PlanThemeGrid`; one column on a phone, two in an iPad's plan column.
+// rules (which cards, which themes lead, which are finished) and the words are
+// the Rust core's (`PlanView.Themes`, ov-1016); one column on a phone, two in
+// an iPad's plan column.
 
 /// Places its subviews in `columns` equal columns, every tile in a row as tall
 /// as the tallest, which a lazy grid can't do.
@@ -51,7 +52,7 @@ struct PlanTileLayout: Layout {
 }
 
 struct PlanThemeGridView: View {
-    let grid: PlanThemeGrid
+    let grid: PlanView.Themes
     let plan: PlanModel
     let columns: Int
     let onOpen: (String) -> Void
@@ -121,7 +122,7 @@ private struct TileSurface: ViewModifier {
 }
 
 struct PlanThemeTileView: View {
-    let tile: PlanThemeTile
+    let tile: PlanView.ThemeTile
     let columns: Int
     /// "Over budget: 6.1M of 5M tokens", or nil: amber, with its words.
     var budget: String?
@@ -148,7 +149,7 @@ struct PlanThemeTileView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(tile.cards) { card in
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                PlanCardMark(glyph: card.glyph)
+                                PlanCardMark(glyph: PlanCardGlyph(card.glyph))
                                 Text(card.title.isEmpty ? card.key : card.title)
                                     .font(.footnote)
                                     .foregroundStyle(card.glyph == .done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))

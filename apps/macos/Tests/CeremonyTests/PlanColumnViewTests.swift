@@ -138,8 +138,7 @@ struct PlanColumnViewTests {
     @Test("The \"N more\" line under an agent opens its stage's tickets, and a row there opens its task")
     func moreOpensItsList() async throws {
         let store = try await Self.store()
-        let column = PlanColumn(
-            plan: store.plan.plan, statuses: store.board.statuses, titles: PlanHome.titles(store.board))
+        let column = try #require(store.plan.column(statuses: store.board.statuses, titles: PlanHome.titles(store.board)))
         let reviewing = try #require(column.pipeline.first { $0.stage == .reviewing })
         let card = try #require(reviewing.agents.first { $0.more > 0 }, "the scenario has a reviewer with more waiting")
         var opened: [PlanPage] = []

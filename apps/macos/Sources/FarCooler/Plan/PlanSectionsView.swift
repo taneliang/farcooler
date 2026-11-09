@@ -1,8 +1,9 @@
 import AgentKit
 import SwiftUI
 
-// The Plan's sections, drawn (ov-503, design 2). `PlanSections` decides what is
-// where and what each says empty; this lays it out. Wide, the work in motion
+// The Plan's sections, drawn (ov-503, design 2). The Rust core's view
+// (`PlanView`, ov-1016) decides what is where, every word, and what each says
+// empty; this lays it out. Wide, the work in motion
 // (Landing, In Review, Building) fills the left column and what is queued and
 // what it costs (Waiting, Waiting for the Next Landing, Agents) the right, the themes
 // spanning both below; narrow, the same sections stack in the same order.
@@ -47,17 +48,8 @@ struct PlanColumnsLayout: Layout {
     }
 }
 
-/// One of Waiting's groups.
-private struct WaitingGroup {
-    let title: String
-    let rows: [PlanSections.TicketRow]
-    let ranked: Bool
-    let tone: SectionTitle.Tone
-    let id: String
-}
-
 struct PlanSectionsView: View {
-    let sections: PlanSections
+    let view: PlanView
     let model: PlanModel
     let statuses: [String: TaskStatus]
     @ObservedObject var plan: PlanStore
@@ -66,62 +58,62 @@ struct PlanSectionsView: View {
     let defaults: UserDefaults
     let onOpen: (PlanPage) -> Void
     /// The left column's sections: the work in motion.
-    private static let left: [PlanSections.Kind] = [.landing, .inReview, .building]
+    private static let left: [PlanView.SectionKind] = [.landing, .inReview, .building]
+    private static let right: [PlanView.SectionKind] = [.waiting, .onLandedLanding, .agents]
 
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
             PlanColumnsLayout {
                 column(Self.left)
-                column([.waiting, .onLandedLanding, .agents])
+                column(Self.right)
             }
-            if sections.shown.contains(.themes) { themes }
+            if let themes = view.section(.themes) { self.themes(themes) }
         }
         .identified("plan-sections")
     }
 
-    private func column(_ kinds: [PlanSections.Kind]) -> some View {
+    private func column(_ kinds: [PlanView.SectionKind]) -> some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
-            ForEach(sections.shown.filter { kinds.contains($0) }, id: \.self) { section($0) }
+            ForEach(view.sections.filter { kinds.contains($0.kind) }) { section($0) }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func key(_ section: String) -> String { "board.plan.section.\(section).\(plan.host).\(plan.workspace.id)" }
 
-    @ViewBuilder private func section(_ kind: PlanSections.Kind) -> some View {
-        switch kind {
-        case .landing: landing
-        case .inReview: ticketSection(kind, id: "plan-in-review", rows: sections.inReview)
-        case .building: ticketSection(kind, id: "plan-building", rows: sections.building)
-        case .waiting: waiting
-        case .onLandedLanding: landedLanding
-        case .agents: agents
-        case .needsYou, .themes: EmptyView()
+    @ViewBuilder private func section(_ section: PlanView.Section) -> some View {
+        switch section.kind {
+        case .landing: landing(section)
+        case .inReview: chrome(section, id: "plan-in-review") { cardRows(view.inReview) }
+        case .building: chrome(section, id: "plan-building") { cardRows(view.building) }
+        case .waiting: waiting(section)
+        case .onLandedLanding: chrome(section, id: "plan-on-landed-landing") { cardRows(view.onLandedLanding) }
+        case .agents: agents(section)
+        case .needsYou, .themes, .unknown: EmptyView()
         }
     }
 
-    /// A section's rows, or what it says empty.
-    /// `help` is said on hover over the section's title only, never its rows.
+    /// A section's rows, or what it says empty. Its help is said on hover
+    /// over its title only, never its rows; a folded one starts closed.
     private func chrome<Content: View>(
-        _ kind: PlanSections.Kind, id: String, expanded: Bool = true, help: String? = nil,
-        @ViewBuilder content: @escaping () -> Content
+        _ section: PlanView.Section, id: String, @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         CollapsibleSection(
-            id: "plan.\(id)", style: .navigator, key: key(id), defaults: defaults, expandedByDefault: expanded,
-            count: sections.count(kind) == 0 ? nil : sections.count(kind), accessibilityLabel: kind.title,
+            id: "plan.\(id)", style: .navigator, key: key(id), defaults: defaults, expandedByDefault: !section.folded,
+            count: section.count == 0 ? nil : section.count, accessibilityLabel: section.title,
             label: { _ in
                 SectionTitle(
-                    text: kind.title, style: .navigator, tone: .primary,
+                    text: section.title, style: .navigator, tone: .primary,
                     gridRow: CollapsibleSection<SectionTitle, EmptyView, EmptyView>.gridRow("plan.\(id)")
                 )
-                .help(help ?? "")
+                .help(section.help ?? "")
             },
             accessory: { EmptyView() }
         ) {
-            if let empty = sections.emptyWords(kind) {
+            if let empty = section.empty {
                 PlanEmptyLine(words: empty).identified("\(id)-empty")
                 // Where the queue's work comes from, said where it's empty.
-                if kind == .waiting { PlanNextStep() }
+                if section.kind == .waiting { PlanNextStep() }
             } else {
                 content()
             }
@@ -129,12 +121,12 @@ struct PlanSectionsView: View {
         .identified(id)
     }
 
-    private var landing: some View {
-        chrome(.landing, id: "plan-landing", help: PlanWords.landingExplanation) {
+    private func landing(_ section: PlanView.Section) -> some View {
+        chrome(section, id: "plan-landing") {
             VStack(alignment: .leading, spacing: Spacing.group) {
-                ForEach(sections.landings) { card in
+                ForEach(view.landings) { card in
                     PlanLandingCard(
-                        card: card, ci: model.ci(of: card.landing), now: sections.now,
+                        card: card, explanation: section.help, ci: ci(card), now: view.now,
                         selected: selected, keyed: keyed, onOpen: onOpen
                     )
                     .changeWashed(card.id)
@@ -142,54 +134,51 @@ struct PlanSectionsView: View {
             }
             .padding(.top, NavigatorRhythm.air)
             .listChanges(
-                sections.landings.map {
+                view.landings.map {
                     ListChangeRow(
                         id: $0.id,
                         signature: [
-                            $0.phase.rawValue, PlanLandingCard.facts($0, ci: model.ci(of: $0.landing), now: 0),
-                            $0.tickets.map { "\($0.id)\($0.standing.word)" }.joined(separator: ","),
+                            $0.phase, PlanLandingCard.facts($0, ci: ci($0), now: 0),
+                            $0.tickets.map { "\($0.id)\($0.standing)" }.joined(separator: ","),
                         ].joined(separator: "\u{1}"))
                 })
         }
     }
 
-    private func ticketSection(_ kind: PlanSections.Kind, id: String, rows: [PlanSections.TicketRow]) -> some View {
-        chrome(kind, id: id) { ticketRows(rows) }
+    /// The CI read of a landing's pushed commit, the app's own.
+    private func ci(_ card: PlanView.LandingCard) -> PlanCIRead? {
+        model.landings.first { $0.id == card.id }.flatMap { model.ci(of: $0) }
     }
 
-    private func ticketRows(_ rows: [PlanSections.TicketRow], rank: Bool = false) -> some View {
+    private func cardRows(_ cards: [PlanView.TicketCard]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                PlanLineRow(
-                    line: row.line, theme: model.theme(of: row.line), rank: rank ? index + 1 : nil, now: sections.now,
-                    waitsOnOwner: row.waitsOnOwner, selected: selected == .ticket(row.id), keyed: keyed, agent: row.agent,
-                    landedLanding: row.landedLanding
-                ) { onOpen(.ticket(row.id)) }
-                .changeWashed(row.id)
+            ForEach(cards) { card in
+                PlanCardRow(card: card, selected: selected == .ticket(card.id), keyed: keyed) { onOpen(.ticket(card.id)) }
+                    .changeWashed(card.id)
             }
         }
-        .listChanges(PlanChanges.tickets(rows.map(\.line), model, statuses: statuses))
+        .listChanges(PlanChanges.tickets(lines(cards), model, statuses: statuses))
+    }
+
+    /// The plan's lines of `cards`, in their order, for what changed since the last read.
+    private func lines(_ cards: [PlanView.TicketCard]) -> [PlanTicketLine] {
+        let byTask = Dictionary(model.lines.map { ($0.task, $0) }, uniquingKeysWith: { first, _ in first })
+        return cards.compactMap { byTask[$0.id] }
     }
 
     /// Next Up ranked, then Not Ranked, then Waiting on You, each named only
     /// when something else shares the section.
-    private var waiting: some View {
-        chrome(.waiting, id: "plan-waiting") {
-            let waiting = sections.waiting
-            let groups = [
-                WaitingGroup(title: "Next Up", rows: waiting.next, ranked: true, tone: .primary, id: "plan-next-up"),
-                WaitingGroup(title: "Not Ranked", rows: waiting.notRanked, ranked: false, tone: .primary, id: "plan-not-ranked"),
-                WaitingGroup(title: "Waiting on You", rows: waiting.onYou, ranked: false, tone: .attention, id: "plan-waiting-on-you"),
-            ].filter { !$0.rows.isEmpty }
+    private func waiting(_ section: PlanView.Section) -> some View {
+        chrome(section, id: "plan-waiting") {
             VStack(alignment: .leading, spacing: NavigatorRhythm.group) {
-                ForEach(groups, id: \.id) { group in
+                ForEach(view.waiting) { group in
                     VStack(alignment: .leading, spacing: 0) {
-                        if groups.count > 1 {
-                            SectionTitle(text: group.title, style: .minor, tone: group.tone)
+                        if view.namesWaitingGroups {
+                            SectionTitle(text: group.title, style: .minor, tone: group.attention ? .attention : .primary)
                                 .padding(.leading, NavigatorGrid.textInset)
                                 .padding(.vertical, NavigatorRhythm.air)
                         }
-                        ticketRows(group.rows, rank: group.ranked)
+                        cardRows(group.cards)
                     }
                     .identified(group.id)
                 }
@@ -197,24 +186,22 @@ struct PlanSectionsView: View {
         }
     }
 
-    private var landedLanding: some View {
-        chrome(.onLandedLanding, id: "plan-on-landed-landing", expanded: false) { ticketRows(sections.onLandedLanding) }
-    }
-
-    private var agents: some View {
-        chrome(.agents, id: "plan-agents") {
-            PlanAgentsView(fleet: sections.fleet, now: sections.now, onOpen: onOpen)
+    private func agents(_ section: PlanView.Section) -> some View {
+        chrome(section, id: "plan-agents") {
+            PlanAgentsView(
+                agents: view.agents,
+                opens: Dictionary(model.agents.compactMap { a in a.tickets.first.map { (a.id, $0.task) } }, uniquingKeysWith: { first, _ in first }),
+                onOpen: onOpen)
         }
     }
 
     /// Themes: the grid, with the work outside any theme as a footer.
-    private var themes: some View {
-        let count = sections.themes.tiles.count + sections.themes.finished.count
-        return CollapsibleSection(
-            "Themes", id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults, count: count
+    private func themes(_ section: PlanView.Section) -> some View {
+        CollapsibleSection(
+            section.title, id: "plan.themes", style: .navigator, key: key("themes"), defaults: defaults, count: section.count
         ) {
             VStack(alignment: .leading, spacing: Spacing.group) {
-                PlanThemeGridView(grid: sections.themes, model: model, selected: selected, keyed: keyed, onOpen: onOpen)
+                PlanThemeGridView(grid: view.themes, model: model, selected: selected, keyed: keyed, onOpen: onOpen)
                 PlanOutsideRow(outside: model.outsideThemes(statuses: statuses), onOpen: onOpen)
             }
             .padding(.top, NavigatorRhythm.air)

@@ -792,10 +792,11 @@ AGENTKIT_SOURCES = [
     # Landings and the CI the runner reads for them and for pages (ov-309).
     "PlanLandings.swift",
     # The Plan as sections, its glance band, themes grid and two-list sidebar,
-    # a landing's phase and the agents list (ov-503).
+    # a landing's phase and the agents list (ov-503), from the Rust core's
+    # view (ov-1016).
+    "PlanView.swift",
     "PlanLandingPhase.swift",
     "PlanAgents.swift",
-    "PlanSections.swift",
     "PlanThemeTile.swift",
     "PlanGlanceSentence.swift",
     # What the phone's Plan decides, as values, so swift test reaches it (ov-538).

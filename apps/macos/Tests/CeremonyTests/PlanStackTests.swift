@@ -66,7 +66,7 @@ struct PlanStackTests {
     @Test("A ticket on an agent's card names the agent; the same ticket elsewhere does not")
     func cardsNameTheirAgent() async throws {
         let store = try await PlanColumnViewTests.store()
-        let column = PlanColumn(plan: store.plan.plan)
+        let column = try #require(store.plan.column())
         let agent = try #require(column.pipeline.flatMap(\.agents).first { !$0.tickets.isEmpty })
         var under: [String] = []
         var plain: [String] = []

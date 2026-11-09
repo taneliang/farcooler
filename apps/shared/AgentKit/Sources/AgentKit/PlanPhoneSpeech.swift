@@ -2,72 +2,32 @@ import Foundation
 
 // What the phone's Plan view decides, as values (ov-538). These rules used to
 // live in the iOS views' bodies, where only a launched app could check them:
-// which of Waiting's groups are named, the sentence VoiceOver reads for a
-// landing, an agent, a theme tile and the band, which rulings and buttons show,
-// and what keeping a ruling does to the plan on screen. The iOS target has no
+// the sentence VoiceOver reads for a landing, a theme tile and the band,
+// which rulings and buttons show, and what keeping a ruling does to the plan
+// on screen. Which tickets are where, and their words, are the Rust core's
+// (`PlanView`, ov-1016). The iOS target has no
 // unit tests, so they are here, and the views only draw what these answer.
-
-// MARK: Waiting
-
-extension PlanSections.Waiting {
-    /// One of Waiting's groups.
-    public struct Group: Equatable, Identifiable, Sendable {
-        public var title: String
-        public var rows: [PlanSections.TicketRow]
-        /// Its rows carry their place, 1, 2, 3: the plan's own order.
-        public var ranked: Bool
-        /// It waits on the owner: drawn with the amber mark.
-        public var attention: Bool
-        public var id: String
-
-        /// The number a row at `index` carries, or nil in a group that isn't ranked.
-        public func rank(at index: Int) -> Int? { ranked ? index + 1 : nil }
-    }
-
-    /// The groups that have rows, in the order they are drawn.
-    public var groups: [Group] {
-        [
-            Group(title: "Next Up", rows: next, ranked: true, attention: false, id: "plan-next-up"),
-            Group(title: "Not Ranked", rows: notRanked, ranked: false, attention: false, id: "plan-not-ranked"),
-            Group(title: "Waiting on You", rows: onYou, ranked: false, attention: true, id: "plan-waiting-on-you"),
-        ].filter { !$0.rows.isEmpty }
-    }
-
-    /// Each group is named only when something else shares the section.
-    public var namesGroups: Bool { groups.count > 1 }
-}
 
 // MARK: Landings
 
-extension PlanSections.LandingCard {
+extension PlanView.LandingCard {
     /// What VoiceOver reads for a landing row, and what the UI tests read as its
     /// label: "Landing 86, Teams on a shared runner, …, Checking on CI · step 2
     /// of 3, 3f78754f · … · Lander · Opus".
     public func spoken(ci: PlanCIRead?, now: Int64) -> String {
-        [landing.label, landing.subtitle, landing.carries, PlanLadder.compact(phase), accessibleFacts(ci: ci, now: now)]
+        [label, subtitle, carries, ladder.compact, accessibleFacts(ci: ci, now: now)]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
-    /// A long press says what a landing is, then each step of the ladder, the
-    /// one it stands on in the phase's own words.
-    public var explanation: [String] {
-        let current = PlanLadder.step(phase)
-        return [PlanWords.landingExplanation]
-            + PlanLadder.steps.indices.map { index in
-                "\(PlanLadder.label(index, current: current, phase: phase)): \(PlanLadder.explanation(index, current: current, phase: phase))"
-            }
+    /// A long press says what a landing is (`landing`, the Landing section's
+    /// help), then each step of the ladder, the one it stands on in the
+    /// phase's own words.
+    public func explanation(landing: String?) -> [String] {
+        [landing].compactMap { $0 } + ladder.steps.map { "\($0.label): \($0.explanation)" }
     }
 }
 
-// MARK: Agents, tiles and the band
-
-extension PlanAgent {
-    /// What VoiceOver reads for an agent's row: who, for what and its state,
-    /// then its tokens.
-    public func spoken(now: Int64) -> String {
-        [who, second(now: now), tokens().map { "\($0) tokens" }].compactMap { $0 }.joined(separator: ", ")
-    }
-}
+// MARK: Tiles and the band
 
 extension PlanCardGlyph {
     /// What VoiceOver says for a card's mark.
@@ -80,13 +40,13 @@ extension PlanCardGlyph {
     }
 }
 
-extension PlanThemeTile {
+extension PlanView.ThemeTile {
     /// What VoiceOver reads for a tile: its name and progress, each card with
     /// its mark, the budget when it is over, and what waits on the owner.
     /// `budget` is `PlanWords.budgetLine` of an overspent theme, or nil.
     public func spoken(budget: String? = nil) -> String {
         var parts = [name, progress]
-        parts += cards.map { "\($0.title.isEmpty ? $0.key : $0.title), \($0.glyph.word.lowercased())" }
+        parts += cards.map { "\($0.title.isEmpty ? $0.key : $0.title), \(PlanCardGlyph($0.glyph).word.lowercased())" }
         if let budget { parts.append(budget) }
         if let ask = ownerAsk { parts.append("Needs you: \(ask)") }
         return parts.joined(separator: ", ")

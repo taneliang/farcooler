@@ -14,9 +14,8 @@ struct PlanStageListPage: View {
     /// The stage's tickets with no agent on them, as the column reads them.
     private var tickets: [PlanColumn.Ticket] {
         let rows = context.rows
-        let column = PlanColumn(
-            plan: plan.plan, statuses: rows.mapValues(\.status), titles: rows.mapValues(\.title))
-        return column.pipeline.first { $0.stage.rawValue == stage }?.unattended ?? []
+        let column = plan.column(statuses: rows.mapValues(\.status), titles: rows.mapValues(\.title))
+        return column?.pipeline.first { $0.stage.rawValue == stage }?.unattended ?? []
     }
 
     var body: some View {

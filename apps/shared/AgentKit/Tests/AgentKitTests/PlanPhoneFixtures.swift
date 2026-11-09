@@ -33,17 +33,12 @@ enum PlanPhoneFixtures {
     /// thing needs the owner.
     static let decision = "0198f2c0-0000-7000-8000-00000000e007"
 
-    static func sections(agents: Bool = true) throws -> PlanSections {
-        PlanSections(
-            plan: try plan("plan-phones-ov503.json"), needsYou: 1, statuses: [decision: .needsDecision],
-            agentsSupported: agents)
-    }
-
-    /// The row for the ticket with `key`, wherever Waiting, In Review or Building holds it.
-    static func row(_ sections: PlanSections, _ key: String) -> PlanSections.TicketRow? {
-        let all = sections.inReview + sections.building + sections.onLandedLanding + sections.waiting.next
-            + sections.waiting.notRanked + sections.waiting.onYou
-        return all.first { $0.line.key == key }
+    /// The Rust core's view of it, through the bridge the apps call.
+    static func view(agents: Bool = true) throws -> PlanView {
+        try #require(
+            PlanView.build(
+                plan: try plan("plan-phones-ov503.json"), needsYou: 1, statuses: [decision: .needsDecision],
+                agentsSupported: agents))
     }
 
     static let en = Locale(identifier: "en_US")

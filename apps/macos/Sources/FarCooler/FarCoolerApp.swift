@@ -98,6 +98,8 @@ enum Entry {
         // A tunneled runner's `ProxyCommand` names this link; keep it pointing
         // at the app that is running.
         StableCLI.refreshIfPresent()
+        // The Plan's view is the Rust core's; AgentKit reaches it through this.
+        PlanViewBridge.install()
         if let path = ProcessInfo.processInfo.environment["FARCOOLER_RENDER_PROBE"] {
             MainActor.assumeIsolated { RenderProbe.run(writingTo: path) }
         }

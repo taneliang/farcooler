@@ -70,10 +70,11 @@ struct PlanOverviewView: View {
             // is the home's, above; Landing, In Review, Building, Waiting,
             // Agents and Themes are `PlanSectionsView`'s; then what is
             // unchanged: Cost, Pages and Landed Today.
-            let sections = plan.sections(needsYou: needsYou, statuses: statuses, activity: activity)
-            PlanSectionsView(
-                sections: sections, model: model, statuses: statuses, plan: plan, selected: selected, keyed: keyed,
-                defaults: defaults, onOpen: onOpen)
+            if let view = plan.view(needsYou: needsYou, statuses: statuses, activity: activity) {
+                PlanSectionsView(
+                    view: view, model: model, statuses: statuses, plan: plan, selected: selected, keyed: keyed,
+                    defaults: defaults, onOpen: onOpen)
+            }
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = model.cost, cost.isWorthShowing { costSection(cost) }
             // After Themes (ov-269 design 6.1): only on a runner with pages.

@@ -5,7 +5,8 @@ import SwiftUI
 // "What it's building now". Each tile says the theme's name, how much is done,
 // a meter, up to three cards and, in amber, what waits on the owner. A click
 // opens the theme's page, where the story now lives. The rules (which cards,
-// which themes lead, which are finished) are AgentKit's `PlanThemeGrid`.
+// which themes lead, which are finished) and the words are the Rust core's
+// (`PlanView.Themes`, ov-1016).
 
 /// Places its subviews in as many equal columns as fit at least `minimum` wide,
 /// every tile in a row as tall as the tallest, which a lazy grid can't do.
@@ -51,7 +52,7 @@ struct PlanTileLayout: Layout {
 }
 
 struct PlanThemeGridView: View {
-    let grid: PlanThemeGrid
+    let grid: PlanView.Themes
     let model: PlanModel
     let selected: PlanPage?
     let keyed: Bool
@@ -72,7 +73,7 @@ struct PlanThemeGridView: View {
         }
         .listChanges(grid.tiles.map { tile in
             let spent = model.themes.first { $0.id == tile.id }?.spend?.totalTokens ?? 0
-            let cards = tile.cards.map { "\($0.key)\($0.status)" }.joined(separator: ",")
+            let cards = tile.cards.map { "\($0.key)\($0.glyph)" }.joined(separator: ",")
             return ListChangeRow(
                 id: tile.id, signature: [tile.name, tile.progress, tile.ownerAsk ?? "", "\(spent)", cards].joined(separator: "\u{1}"))
         })
@@ -99,15 +100,6 @@ struct PlanCardMark: View {
         case .notStarted: "circle"
         }
     }
-
-    /// What VoiceOver says for it.
-    static func word(_ glyph: PlanCardGlyph) -> String {
-        switch glyph {
-        case .done: "Done"
-        case .inProgress: "In progress"
-        case .notStarted: "Not started"
-        }
-    }
 }
 
 /// The theme's cards by how far along they are, as one meter: the filled part
@@ -128,7 +120,7 @@ struct PlanMeter: View {
 }
 
 struct PlanThemeTileView: View {
-    let tile: PlanThemeTile
+    let tile: PlanView.ThemeTile
     /// "Over budget: 6.1M of 5M tokens", or nil: amber, with its words.
     var budget: String?
     @Environment(\.colorScheme) private var scheme
@@ -156,13 +148,13 @@ struct PlanThemeTileView: View {
                     VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                         ForEach(tile.cards) { card in
                             HStack(alignment: .firstTextBaseline, spacing: NavigatorGrid.gap) {
-                                PlanCardMark(glyph: card.glyph)
+                                PlanCardMark(glyph: PlanCardGlyph(card.glyph))
                                 Text(card.title.isEmpty ? card.key : card.title)
                                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                                     .foregroundStyle(card.glyph == .done ? .quietInk : .primary)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
-                                    .help("\(card.key) \u{00B7} \(PlanCardMark.word(card.glyph))")
+                                    .help("\(card.key) \u{00B7} \(PlanCardGlyph(card.glyph).word)")
                             }
                         }
                     }
@@ -196,13 +188,7 @@ struct PlanThemeTileView: View {
         .identified("plan-theme-tile-\(tile.name)")
     }
 
-    private var accessibility: String {
-        var parts = [tile.name, tile.progress]
-        parts += tile.cards.map { "\($0.title.isEmpty ? $0.key : $0.title), \(PlanCardMark.word($0.glyph).lowercased())" }
-        if let budget { parts.append(budget) }
-        if let ask = tile.ownerAsk { parts.append("Needs you: \(ask)") }
-        return parts.joined(separator: ", ")
-    }
+    private var accessibility: String { tile.spoken(budget: budget) }
 }
 
 /// The one tile for every finished theme: how many, and their names.

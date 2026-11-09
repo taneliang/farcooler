@@ -1,4 +1,5 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
 
 // Shared because both apps must agree about one session.
@@ -13,6 +14,20 @@ import PackageDescription
 // DIFFERENT producers. The phone's is `CoreModel.swift` in this package now,
 // and it is here to be tested rather than to be shared — every type in it is
 // internal, so the Mac still cannot see it. Its header has the argument.
+// Where the Rust client core's static library lands (`apps/macos/build-vt.sh`,
+// or `cargo build --release -p farcooler-client`). Only the TESTS link it: the
+// Plan's view is the Rust core's (`PlanView.swift`, ov-1016), and AgentKit's
+// tests of what reads it call the real thing. AgentKit itself never links it,
+// since the watch and the widgets compile its sources and can't; each app
+// installs its own call (`PlanViewPresenter.install`), and the tests reach the
+// symbol the `-u` below keeps in their link.
+let rustLibDir = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()  // apps/shared/AgentKit
+    .deletingLastPathComponent()  // apps/shared
+    .deletingLastPathComponent()  // apps
+    .deletingLastPathComponent()  // repo root
+    .appendingPathComponent("target/release").path
+
 let package = Package(
     name: "AgentKit",
     // iOS 26 is this app's minimum, so the shared code can use what the phone
@@ -41,6 +56,10 @@ let package = Package(
             name: "AgentKitTests",
             dependencies: ["AgentKit"],
             exclude: ["task_start_lines.json"],  // read from the source tree, not the bundle (ov-237)
-            resources: [.copy("live_events.jsonl")]),
+            resources: [.copy("live_events.jsonl")],
+            linkerSettings: [
+                .unsafeFlags(["-L\(rustLibDir)", "-Xlinker", "-u", "-Xlinker", "_farcooler_client_plan_view"]),
+                .linkedLibrary("farcooler_client"),
+            ]),
     ]
 )

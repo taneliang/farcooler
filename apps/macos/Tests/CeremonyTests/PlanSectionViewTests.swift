@@ -8,8 +8,9 @@ import Testing
 /// The Plan's sections on the Mac (ov-503, phase 5): each section drawn, what
 /// it says empty, the two columns from 960 pt and the one column below, no
 /// 680-pt cap, a landing's tickets inside its card, and the folded stranded section. The
-/// rules are AgentKit's (`PlanSectionsTests`); this holds the real views to
-/// them over `PlanScenario`'s plans.
+/// rules and the words are the Rust core's view (`PlanView`, ov-1016), pinned
+/// by its tests; this holds the real views to it over `PlanScenario`'s plans,
+/// through the bridge the app calls.
 @MainActor
 @Suite(.serialized)
 struct PlanSectionViewTests {
@@ -19,6 +20,11 @@ struct PlanSectionViewTests {
         let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
         await store.plan.reload()
         return store
+    }
+
+    /// The Rust core's view of the store's plan.
+    static func view(_ store: TaskBoardStore, needsYou: Int = 0, statuses: [String: TaskStatus] = [:]) throws -> PlanView {
+        try #require(store.plan.view(needsYou: needsYou, statuses: statuses, activity: [:]), "the bridge built no view")
     }
 
     /// What the overview drew in a canvas `width` wide.
@@ -73,37 +79,40 @@ struct PlanSectionViewTests {
         let inside = ["plan-landing-ticket-ov-487", "plan-landing-ticket-ov-492"].compactMap { drawn[$0] }
         #expect(inside.count == 2 && inside.allSatisfy { card.contains($0) }, "both tickets are inside the card: \(drawn.keys.sorted())")
         #expect(drawn["plan-ticket-ov-487"] == nil && drawn["plan-ticket-ov-492"] == nil, "and not drawn again as rows")
-        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        let aboard = try #require(sections.landings.first { $0.landing.number == 86 })
-        let spoken = aboard.spoken(ci: nil, now: sections.now)
+        let view = try Self.view(store)
+        let aboard = try #require(view.landings.first { $0.number == 86 })
+        let spoken = aboard.spoken(ci: nil, now: view.now)
         #expect(spoken.hasPrefix("Landing 86, Teams on a shared runner, "), "\(spoken)")
-        #expect(spoken.contains(PlanLadder.compact(.waitingForTickets)), "it says where it stands: \(spoken)")
+        #expect(spoken.contains("Waiting for Tickets \u{00B7} step 1 of 3"), "it says where it stands: \(spoken)")
     }
 
     @Test("Waiting for Main's Checks to Pass is a landing's phase, drawn on the card and said in its label")
     func waitingForMain() async throws {
         let store = try await Self.store(.ladder)
-        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        let card = try #require(sections.landings.first { $0.landing.number == 94 })
-        #expect(card.phase == .waitingForMain)
-        #expect(card.phase.word == "Waiting for Main's Checks to Pass")
+        let card = try #require(try Self.view(store).landings.first { $0.number == 94 })
+        #expect(card.phase == "waiting_for_main")
+        #expect(card.phaseWord == "Waiting for Main's Checks to Pass")
         let drawn = try await Self.drawn(.ladder, width: 600)
         #expect(drawn["plan-landing-94"] != nil && drawn["plan-ladder-step-0"] != nil, "\(drawn.keys.sorted())")
-        let widths = await PlanThemePageTests.frames(PlanLadderView(phase: .waitingForMain), width: 560, height: 120)
+        let widths = await PlanThemePageTests.frames(Self.ladder(card), width: 560, height: 120)
         #expect((0..<3).allSatisfy { widths["plan-ladder-step-\($0)"] != nil }, "\(widths.keys.sorted())")
     }
 
     @Test("A landing whose CI failed reads its phase, commit and jobs; the ladder stands on its step")
     func ciFailedLanding() async throws {
         let store = try await Self.store(.busy)
-        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        let card = try #require(sections.landings.first { $0.landing.number == 88 })
-        let words = PlanLandingCard.facts(card, ci: store.plan.plan.ci(of: card.landing), now: sections.now)
+        let view = try Self.view(store)
+        let card = try #require(view.landings.first { $0.number == 88 })
+        let landing = try #require(store.plan.plan.landings.first { $0.id == card.id })
+        let words = PlanLandingCard.facts(card, ci: store.plan.plan.ci(of: landing), now: view.now)
         #expect(words.hasPrefix("3f78754f \u{00B7} Failed \u{00B7} 1 of 3 jobs failed"), "\(words)")
-        #expect(card.phase == .ciFailed && card.phase.needsAttention)
-        #expect(PlanLadder.step(.ciFailed) == 1 && PlanLadder.step(.waitingForCi) == 1 && PlanLadder.step(.landed) == 3)
-        #expect(PlanLadder.label(1, current: 1, phase: .ciFailed) == "CI Failed" && PlanLadder.label(0, current: 1, phase: .ciFailed) == "Checking Here")
-        #expect(sections.landings.first?.landing.number == 88, "furthest along first")
+        #expect(card.phase == "ci_failed" && card.attention)
+        #expect(card.ladder.at == 1 && card.ladder.steps.map(\.label) == ["Checking Here", "CI Failed", "Landed"])
+        #expect(view.landings.first?.number == 88, "furthest along first")
+    }
+
+    static func ladder(_ card: PlanView.LandingCard) -> PlanLadderView {
+        PlanLadderView(ladder: card.ladder, word: card.phaseWord, explanation: card.explanation, attention: card.attention)
     }
 
     @Test("ticket row accessibility keeps the model ID")
@@ -126,9 +135,9 @@ struct PlanSectionViewTests {
         #expect(none["plan-waiting-empty"] != nil && none["plan-landing-empty"] == nil, "Next is empty; landings are landing")
         #expect(none["plan-agents"] != nil && none["plan-agents-empty"] == nil)
         let store = try await Self.store(.quiet)
-        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        #expect(sections.emptyWords(.landing) == "Nothing is landing right now." && sections.emptyWords(.agents) == "No agents running.")
-        let band = PlanGlanceSentence(sections: sections)
+        let view = try Self.view(store)
+        #expect(view.section(.landing)?.empty == "Nothing is landing right now." && view.section(.agents)?.empty == "No agents running.")
+        let band = PlanGlanceSentence(view: view)
         #expect(band.text == "No tickets moving. Next: nothing queued.")
     }
 
@@ -138,8 +147,7 @@ struct PlanSectionViewTests {
         let closed = try await Self.drawn(.busy, width: 600, defaults: defaults)
         #expect(closed["plan-on-landed-landing"] != nil && closed["plan-ticket-ov-474"] == nil, "folded: rows aren't drawn")
         let store = try await Self.store(.busy)
-        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        #expect(Set(sections.onLandedLanding.map(\.line.key)) == ["ov-474", "ov-482"])
+        #expect(Set(try Self.view(store).onLandedLanding.map(\.key)) == ["ov-474", "ov-482"])
         let key = "board.plan.section.plan-on-landed-landing.\(store.plan.host).\(store.plan.workspace.id)"
         defaults.set(true, forKey: key)
         let open = try await Self.drawn(.busy, width: 600, defaults: defaults)
@@ -149,23 +157,27 @@ struct PlanSectionViewTests {
     @Test("Tickets in review and building say their agent and tokens; Next Up is ranked, with a group each for the rest")
     func ticketRows() async throws {
         let store = try await Self.store(.busy)
-        let sections = store.plan.sections(needsYou: 0, statuses: store.board.statuses, activity: [:])
-        let building = try #require(sections.building.first { $0.line.key == "ov-490" })
-        let words = PlanLineRow.second(building.line, agent: building.agent, landedLanding: nil, now: sections.now)
-        #expect(words == "Building \u{00B7} ov-490 \u{00B7} Builder \u{00B7} sonnet \u{00B7} 380K \u{00B7} 1 h", "\(words)")
-        #expect(sections.waiting.next.map(\.line.key) == ["ov-494", "ov-495", "ov-496"])
-        #expect(sections.waiting.onYou.map(\.line.key) == ["ov-1"], "a card waiting on a decision")
+        let view = try Self.view(store, statuses: store.board.statuses)
+        let building = try #require(view.building.first { $0.key == "ov-490" })
+        #expect(building.second == "Building \u{00B7} ov-490 \u{00B7} Builder \u{00B7} sonnet \u{00B7} 380K \u{00B7} 1 h", "\(building.second)")
+        #expect(view.waiting(.next).map(\.key) == ["ov-494", "ov-495", "ov-496"])
+        #expect(view.waiting(.onYou).map(\.key) == ["ov-1"], "a card waiting on a decision")
         let drawn = try await Self.drawn(.busy, width: 600)
         for id in ["plan-next-up", "plan-not-ranked", "plan-waiting-on-you"] { #expect(drawn[id] != nil, "\(id)") }
+        // The row draws the view's words: its title, theme, second line and notes.
+        let row = await PlanThemePageTests.frames(
+            PlanCardRow(card: building, selected: false, keyed: false) {}, width: 560, height: 200)
+        #expect(row["plan-ticket-ov-490"] != nil, "\(row.keys.sorted())")
+        if building.theme != nil { #expect(row["plan-ticket-ov-490-theme"] != nil, "\(row.keys.sorted())") }
     }
 
     @Test("Agents: a header, one row per agent that exists, working first with tokens then dollars in columns, and no Finished fold")
     func agents() async throws {
         let store = try await Self.store(.busy)
-        let fleet = store.plan.sections(needsYou: 0, statuses: [:], activity: [:]).fleet
-        #expect(fleet.agents.map(\.id).first == "pane:orchestrator")
-        #expect(fleet.agents.map(\.id).last == "pane:idle", "the idle pane that still runs is last")
-        #expect(fleet.header(locale: Locale(identifier: "en_US")).hasPrefix("\(fleet.agents.count) agents, including the orchestrator \u{00B7} 5 working \u{00B7} 6.3M tokens in the last 24 hours"), "the day's total counts the finished reviewer")
+        let agents = try Self.view(store).agents
+        #expect(agents.rows.map(\.id).first == "pane:orchestrator")
+        #expect(agents.rows.map(\.id).last == "pane:idle", "the idle pane that still runs is last")
+        #expect(agents.header.hasPrefix("\(agents.rows.count) agents, including the orchestrator \u{00B7} 5 working \u{00B7} 6.3M tokens in the last 24 hours"), "the day's total counts the finished reviewer")
         let drawn = try await Self.drawn(.busy, width: 600)
         #expect(drawn["plan-agents-header"] != nil)
         #expect(drawn["plan-agents-finished"] == nil, "there is no Finished fold")
@@ -173,10 +185,10 @@ struct PlanSectionViewTests {
         let builder = try #require(drawn["plan-agent-agent:b1"])
         #expect(abs(orchestrator.maxX - builder.maxX) < 0.5, "the columns share a right edge")
         #expect(drawn["plan-agent-agent:r1"] == nil, "a finished agent is not listed")
-        let subagent = try #require(fleet.agents.first { $0.title == "Design ov-503" })
+        let subagent = try #require(agents.rows.first { $0.second.hasPrefix("\u{201C}Design ov-503\u{201D}") })
         #expect(subagent.working, "a subagent resumed for another round reads Working")
         #expect(drawn["plan-agent-\(subagent.id)"] != nil && drawn["plan-agent-pane:idle"] != nil)
-        #expect(PlanAgentRow.second(subagent, now: PlanScenario.now).hasPrefix("\u{201C}Design ov-503\u{201D} \u{00B7} Not on a ticket \u{00B7} Working"))
+        #expect(subagent.second.hasPrefix("\u{201C}Design ov-503\u{201D} \u{00B7} Not on a ticket \u{00B7} Working"))
     }
 
     @Test("Themes: a tile each with its progress, cards and ask, finished ones in one tile, over-budget in amber")
@@ -199,8 +211,8 @@ struct PlanSectionViewTests {
         #expect(drawn["plan-home"] != nil && drawn["plan-pipeline"] != nil, "\(drawn.keys.sorted())")
         for id in ["plan-band-now", "plan-band-next", "plan-band-needs-you"] { #expect(drawn[id] == nil, "\(id) is gone") }
         // The sentence is still the whole summary where there is no room for sections.
-        let sections = store.plan.sections(needsYou: 2, statuses: store.board.statuses, activity: [:])
-        #expect(PlanGlanceSentence(sections: sections).now?.hasPrefix("Landing 88 CI failed") == true)
+        let view = try Self.view(store, needsYou: 2, statuses: store.board.statuses)
+        #expect(PlanGlanceSentence(view: view).now?.hasPrefix("Landing 88 CI failed") == true)
     }
 
     @Test("A landing is Landing N with its title under it, and its ladder explains each step")
@@ -209,24 +221,25 @@ struct PlanSectionViewTests {
         #expect(drawn["plan-landing-86-label"] != nil && drawn["plan-landing-86-subtitle"] != nil, "Landing 86, then its title")
         #expect(drawn["plan-landing-88-subtitle"] == nil, "a title that says no more than the label is not said again")
         #expect(drawn["plan-landing-ticket-ov-487-note"] == nil, "a ticket simply aboard says nothing")
-        let titles = PlanSections.Kind.allCases.map(\.title) + PlanLadder.steps + LandingPhase.allCases.map(\.word)
+        let view = try Self.view(try await Self.store(.busy))
+        let titles = view.sections.map(\.title) + view.landings.flatMap { $0.ladder.steps.map(\.label) }
         #expect(titles.allSatisfy { !$0.contains("Shipping") && !$0.contains("Picked") && !$0.contains("Gated") })
-        #expect(PlanLadder.explanation(0, current: 0, phase: .integrating) == "The full test run, on the runner.")
-        #expect(PlanWords.landingExplanation == "Reviewed tickets land on main together, after one round of checks.")
+        #expect(view.section(.landing)?.help == "Reviewed tickets land on main together, after one round of checks.")
     }
 
     @Test("With no agent alive the Agents section still says what the day spent, and the Landing ladders line up card to card")
     func ladderAndSpend() async throws {
         let store = try await Self.store(.ladder)
-        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
+        let view = try Self.view(store)
         let said = "No agents running \u{00B7} 1.2M tokens in the last 24 hours \u{00B7} \u{2248}$12.00"
-        #expect(sections.emptyWords(.agents) == said, "\(sections.emptyWords(.agents) ?? "-")")
+        #expect(view.section(.agents)?.empty == said, "\(view.section(.agents)?.empty ?? "-")")
         let drawn = try await Self.drawn(.ladder, width: 600)
         #expect(drawn["plan-agents-empty"] != nil)
         // (A point of rounding at most.) The first step is the same width whatever it says: a long phase wraps in its own column.
         var widths: [[CGFloat]] = []
-        for phase in [LandingPhase.waitingForPreviousLanding, .waitingForMain, .waitingForCi, .readyToLand] {
-            let frames = await PlanThemePageTests.frames(PlanLadderView(phase: phase), width: 560, height: 120)
+        #expect(view.landings.count >= 2, "the ladder scenario's landings: \(view.landings.map(\.phase))")
+        for card in view.landings {
+            let frames = await PlanThemePageTests.frames(Self.ladder(card), width: 560, height: 120)
             widths.append((0..<3).compactMap { frames["plan-ladder-step-\($0)"]?.width })
         }
         #expect(widths.allSatisfy { $0.count == 3 }, "\(widths)")

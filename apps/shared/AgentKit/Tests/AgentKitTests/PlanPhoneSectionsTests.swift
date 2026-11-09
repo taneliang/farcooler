@@ -4,9 +4,12 @@ import Testing
 @testable import AgentKit
 
 /// What `PlanSectionsUITests` pinned by launching the app and scrolling, as
-/// values over the same fixture (`plan-phones-ov503.json`, ov-538): the order of
-/// the sections, the band's words, a landing and the words it speaks, Waiting's
-/// groups, the fold, the agents, the themes and the two pushed lists.
+/// values over the same fixture (`plan-phones-ov503.json`, ov-538): the band's
+/// words, a landing and the words it speaks, Waiting's groups, the themes and
+/// the two pushed lists. What is in each section, and its words, is the Rust
+/// core's view (ov-1016); these check what the phone says from it, and that
+/// what the phone knows beside the plan (the board's statuses, whether the
+/// runner lists agents) reaches it.
 struct PlanPhoneSectionsTests {
     typealias F = PlanPhoneFixtures
 
@@ -14,9 +17,9 @@ struct PlanPhoneSectionsTests {
 
     @Test("the band says Now and Next in two lines, and what needs the owner as its one mark")
     func theBand() throws {
-        let sections = try F.sections()
-        let band = PlanGlanceSentence(sections: sections)
-        let spoken = band.spoken(needsYou: sections.needsYou)
+        let view = try F.view()
+        let band = PlanGlanceSentence(view: view)
+        let spoken = band.spoken(needsYou: view.needsYou)
         #expect(spoken.contains("Landing 86 checking on CI"), "\(spoken)")
         #expect(spoken.contains(" building") && spoken.contains(" in review"), "\(spoken)")
         #expect(spoken.contains("Next: A real window capture on the front page, then Onboarding"), "\(spoken)")
@@ -25,8 +28,7 @@ struct PlanPhoneSectionsTests {
 
     @Test("at the sheet's medium detent the band says Now only; at large it says Next as well")
     func theBandAtMedium() throws {
-        let sections = try F.sections()
-        let band = PlanGlanceSentence(sections: sections)
+        let band = PlanGlanceSentence(view: try F.view())
         let medium = band.spoken(needsYou: 2, nowOnly: true)
         #expect(medium.contains("Landing 86 checking on CI"), "\(medium)")
         #expect(!medium.contains("Next:"), "the band says Next at the medium detent: \(medium)")
@@ -38,23 +40,11 @@ struct PlanPhoneSectionsTests {
 
     // MARK: The sections
 
-    @Test("the sections come in the owner's order: Landing, In Review, Building, Waiting, Waiting for the Next Landing, Agents, Themes")
-    func order() throws {
-        let sections = try F.sections()
-        #expect(
-            sections.shown == [.needsYou, .landing, .inReview, .building, .waiting, .agents, .themes],
-            "\(sections.shown)")
-        #expect(PlanSections.Kind.allCases == [.needsYou, .landing, .inReview, .building, .waiting, .onLandedLanding, .agents, .themes])
-        #expect(PlanSections.Kind.allCases.map(\.title) == [
-            "Needs You", "Landing", "In Review", "Building", "Waiting", "Waiting for the Next Landing", "Agents", "Themes",
-        ])
-    }
-
     @Test("a landing is Landing N with its title under it, where it stands on the ladder, and one waiting for main says so")
     func theLadderAndTheLandingWaitingForMain() throws {
-        let sections = try F.sections()
-        let now = sections.now
-        func card(_ number: Int) throws -> PlanSections.LandingCard { try #require(sections.landings.first { $0.landing.number == number }) }
+        let view = try F.view()
+        let now = view.now
+        func card(_ number: Int) throws -> PlanView.LandingCard { try #require(view.landings.first { $0.number == number }) }
         let ready = try card(86).spoken(ci: nil, now: now)
         #expect(ready.hasPrefix("Landing 86, Teams on a shared runner"), "\(ready)")
         #expect(ready.contains("Checking on CI \u{00B7} step 2 of 3"), "\(ready)")
@@ -72,93 +62,54 @@ struct PlanPhoneSectionsTests {
 
     @Test("landing speech preserves the recorded model identity without repeating literal IDs")
     func landingModelIdentity() throws {
-        var card = try #require(F.sections().landings.first { $0.landing.number == 86 })
+        // The lander's words are the view's ("Lander · GPT-6.1 Sol"); the raw
+        // model it carries is what the screen reader adds.
+        var card = try #require(F.view().landings.first { $0.number == 86 })
+        card.landerWords = "Lander \u{00B7} GPT-6.1 Sol"
         card.lander?.model = "gpt-6.1-sol"
         #expect(card.facts(ci: nil, now: 0).contains("GPT-6.1 Sol"))
         #expect(card.spoken(ci: nil, now: 0).contains("Model ID: gpt-6.1-sol"))
+        card.landerWords = "Lander \u{00B7} gpt-6.1-sol-20260101"
         card.lander?.model = "gpt-6.1-sol-20260101"
         let literal = card.spoken(ci: nil, now: 0)
         #expect(literal.components(separatedBy: "gpt-6.1-sol-20260101").count == 2)
         card.lander?.model = ""
         #expect(!card.spoken(ci: nil, now: 0).contains("Model ID:"))
         card.lander = nil
+        card.landerWords = nil
         #expect(!card.spoken(ci: nil, now: 0).contains("Model ID:"))
-    }
-
-    @Test("a ticket aboard a landing says nothing of its own state, and none says it holds the landing")
-    func aTicketAboardSaysNothing() throws {
-        let sections = try F.sections()
-        let ready = try #require(sections.landings.first { $0.landing.number == 86 })
-        let teamDir = try #require(ready.tickets.first { $0.key == "ov-487" })
-        #expect(teamDir.note == nil, "a ticket aboard says nothing: ready for what?")
-        let waiting = try #require(sections.landings.first { $0.landing.number == 89 })
-        let holder = try #require(waiting.tickets.first { $0.key == "ov-485" })
-        #expect(holder.note == nil && !(holder.standing.word.isEmpty), "its round isn't said aboard")
-        #expect(holder.note?.contains("round 2") != true)
     }
 
     @Test("a long press explains what a landing is, then each step of its ladder, the one it stands on in the phase's words")
     func explanation() throws {
-        let sections = try F.sections()
-        let landing = try #require(sections.landings.first { $0.landing.number == 86 })
-        let said = landing.explanation
+        let view = try F.view()
+        let landing = try #require(view.landings.first { $0.number == 86 })
+        let said = landing.explanation(landing: view.section(.landing)?.help)
         #expect(said.first == "Reviewed tickets land on main together, after one round of checks.")
-        #expect(said.count == 1 + PlanLadder.steps.count)
+        #expect(said.count == 1 + landing.ladder.steps.count)
         #expect(said.contains("Checking Here: The full test run, on the runner."), "\(said)")
-        #expect(PlanWords.landingExplanation == said[0])
     }
 
-    @Test("Waiting is ranked, then not ranked, and each group is named once something else shares the section")
+    @Test("Waiting is ranked, then not ranked, then on you, each group named, and the board's decision reaches it")
     func waitingGroups() throws {
-        let waiting = try F.sections().waiting
-        #expect(waiting.groups.map(\.id) == ["plan-next-up", "plan-not-ranked", "plan-waiting-on-you"])
-        #expect(waiting.groups.map(\.title) == ["Next Up", "Not Ranked", "Waiting on You"])
-        #expect(waiting.namesGroups)
-        let next = try #require(waiting.groups.first)
-        #expect(next.rows.first?.line.key == "ov-302")
-        #expect(next.rows.first?.line.reason == "Unblocked once the site is one project")
-        #expect(next.rank(at: 0) == 1 && next.rank(at: 1) == 2, "the first ranked ticket is numbered 1")
-        #expect(waiting.groups[1].rank(at: 0) == nil && waiting.groups[2].rank(at: 0) == nil)
-        #expect(waiting.groups[2].attention && !next.attention)
-        #expect(waiting.onYou.map(\.line.key) == ["ov-300"], "the ticket whose card needs a decision is Waiting on You")
-        #expect(!waiting.next.map(\.line.key).contains("ov-300"))
-    }
-
-    @Test("a group alone in Waiting is not named")
-    func aLoneGroupIsNotNamed() throws {
-        let plan = try PlanModelTests.plan(
-            themes: [], lines: [PlanModelTests.line("t1", "waiting", rank: 1)])
-        let waiting = PlanSections(plan: plan).waiting
-        #expect(waiting.groups.map(\.id) == ["plan-next-up"] && !waiting.namesGroups)
-    }
-
-    @Test("agents are who, for what and how many tokens, working ones first; one that finished is not listed")
-    func agents() throws {
-        let sections = try F.sections()
-        let fleet = sections.fleet
-        #expect(fleet.header(locale: F.en).contains("working"))
-        let builder = try #require(fleet.agents.first { $0.id == "pane:b1" })
-        let said = builder.spoken(now: sections.now)
-        #expect(said.contains("Builder \u{00B7} sonnet"), "\(said)")
-        #expect(said.contains("ov-310"), "the ticket it works for isn't said: \(said)")
-        #expect(said.contains("380K tokens"), "\(said)")
-        let loose = try #require(fleet.agents.first { $0.id == "agent:s1" }).spoken(now: sections.now)
-        #expect(loose.contains("Design ov-503") && loose.contains(PlanWords.onNoTicket), "\(loose)")
-        #expect(loose.contains("Working"), "a subagent resumed for another round reads Working: \(loose)")
-        #expect(!fleet.agents.map(\.id).contains("agent:r1"), "a finished agent is listed")
-        // Working ones lead.
-        let working = fleet.agents.map(\.working)
-        #expect(working == working.sorted { $0 && !$1 })
+        let view = try F.view()
+        #expect(view.waiting.map(\.id) == ["plan-next-up", "plan-not-ranked", "plan-waiting-on-you"])
+        #expect(view.waiting.map(\.title) == ["Next Up", "Not Ranked", "Waiting on You"])
+        #expect(view.namesWaitingGroups)
+        #expect(view.waiting(.next).first?.key == "ov-302" && view.waiting(.next).first?.rank == 1)
+        #expect(view.waiting.map(\.attention) == [false, false, true])
+        #expect(view.waiting(.onYou).map(\.key) == ["ov-300"], "the ticket whose card needs a decision is Waiting on You")
     }
 
     @Test("no agents are drawn on a runner that doesn't list them")
     func agentsNeedTheCapability() throws {
-        #expect(try F.sections(agents: false).shown.contains(.agents) == false)
+        #expect(try F.view(agents: false).section(.agents) == nil)
+        #expect(try F.view(agents: true).section(.agents) != nil)
     }
 
     @Test("themes are tiles: progress, cards and the one line for what waits on the owner; the finished ones are one tile")
     func themeTiles() throws {
-        let grid = try F.sections().themes
+        let grid = try F.view().themes
         let first = try #require(grid.tiles.first { $0.name == "Teams and accounts" })
         #expect(first.spoken().contains("done"))
         let marketing = try #require(grid.tiles.first { $0.name == "Marketing" })
@@ -185,7 +136,7 @@ struct PlanPhoneSectionsTests {
     @Test("Tickets groups them as the Plan does: Landing with its landings and tickets, and Waiting starts folded")
     func ticketsList() throws {
         let plan = try F.plan("plan-phones-ov503.json")
-        let sections = try F.sections()
+        let view = try F.view()
         let outline = SidebarOutline.build(OneTreeInput(tasks: [], plan: plan))
         let landing = try #require(outline.tickets.first { $0.rowName == "Landing" })
         let landingRow = try #require(landing.children.first { $0.rowName == "Landing 86" })
@@ -197,6 +148,6 @@ struct PlanPhoneSectionsTests {
         #expect(landing.expandedByDefault, "Landing starts open")
         let rows = waiting.children.map(\.rowName)
         #expect(rows.contains("ov-302"), "\(rows)")
-        #expect(sections.waiting.count > 0)
+        #expect(view.waitingCount > 0)
     }
 }

@@ -3,30 +3,38 @@ import SwiftUI
 // The Plan's sections on a phone and in the iPad's plan column (ov-503,
 // design 2 and 7; ov-522): Landing, In Review, Building, Waiting, Waiting for the Next Landing
 // (folded), Agents, then Themes as a grid and, on a phone, Themes and Tickets
-// as two rows that push lists. `PlanSections` decides what is where and what
-// each says empty; this lays it out as an inset list's sections, one column.
+// as two rows that push lists. The Rust core's view (`PlanView`, ov-1016)
+// decides what is where, every word and what each says empty; this lays it
+// out as an inset list's sections, one column.
 
 struct PlanSectionsList: View {
-    let sections: PlanSections
+    let view: PlanView
     let plan: PlanModel
     let hook: PlanBoardHook
 
-    @State private var landedOpen = !PlanSections.Kind.onLandedLanding.startsFolded
+    @State private var landedOpen: Bool
     @Environment(\.colorScheme) private var scheme
 
+    init(view: PlanView, plan: PlanModel, hook: PlanBoardHook) {
+        self.view = view
+        self.plan = plan
+        self.hook = hook
+        _landedOpen = State(initialValue: !(view.section(.onLandedLanding)?.folded ?? true))
+    }
+
     var body: some View {
-        // In `shown`'s order, so what is drawn is what the model says, in the
+        // In the view's order, so what is drawn is what the model says, in the
         // order it says (owner decision 7; ov-522).
-        ForEach(sections.shown.filter { hook.kinds?.contains($0) ?? true }, id: \.self) { kind in
-            switch kind {
-            case .needsYou: EmptyView()
-            case .landing: landing
-            case .inReview: ticketSection(.inReview, id: "plan-in-review", rows: sections.inReview)
-            case .building: ticketSection(.building, id: "plan-building", rows: sections.building)
-            case .waiting: waiting
-            case .onLandedLanding: landedLanding
-            case .agents: agents
-            case .themes: themes
+        ForEach(view.sections.filter { hook.kinds?.contains($0.kind) ?? true }) { section in
+            switch section.kind {
+            case .needsYou, .unknown: EmptyView()
+            case .landing: landing(section)
+            case .inReview: cardSection(section, id: "plan-in-review", cards: view.inReview)
+            case .building: cardSection(section, id: "plan-building", cards: view.building)
+            case .waiting: waiting(section)
+            case .onLandedLanding: landedLanding(section)
+            case .agents: agents(section)
+            case .themes: themes(section)
             }
         }
         if hook.pushesLists, hook.outline != nil { browse }
@@ -34,11 +42,8 @@ struct PlanSectionsList: View {
 
     // MARK: Rows
 
-    private func ticketRow(_ row: PlanSections.TicketRow, rank: Int? = nil) -> some View {
-        PlanTicketRow(
-            line: row.line, theme: plan.theme(of: row.line), rank: rank, now: sections.now, waitsOnOwner: row.waitsOnOwner,
-            agent: row.agent, landedLanding: row.landedLanding
-        ) { hook.onOpen(.ticket(row.line.task)) }
+    private func cardRow(_ card: PlanView.TicketCard) -> some View {
+        PlanCardRow(card: card) { hook.onOpen(.ticket(card.id)) }
     }
 
     /// What a section says with nothing in it.
@@ -49,69 +54,71 @@ struct PlanSectionsList: View {
             .accessibilityIdentifier("\(id)-empty")
     }
 
+    /// A section's title and count: none drawn for none.
+    private func header(_ section: PlanView.Section) -> PlanHeader {
+        PlanHeader(title: section.title, count: section.count == 0 ? nil : section.count)
+    }
+
     // MARK: Landing
 
-    private var landing: some View {
+    private func landing(_ section: PlanView.Section) -> some View {
         Section {
-            if let words = sections.emptyWords(.landing) {
+            if let words = section.empty {
                 empty(words, id: "plan-landing")
             } else {
-                ForEach(sections.landings) { card in
-                    PlanLandingRow(card: card, ci: plan.ci(of: card.landing), now: sections.now)
+                ForEach(view.landings) { card in
+                    PlanLandingRow(card: card, explanation: section.help, ci: ci(card), now: view.now)
                     ForEach(card.tickets) { ticket in
-                        PlanTicketRow(
-                            line: ticket.line, theme: plan.theme(of: ticket.line), rank: nil, now: sections.now,
-                            waitsOnOwner: ticket.waitsOnOwner, standing: ticket.waitsOnOwner ? "" : ticket.note ?? ""
-                        ) { hook.onOpen(.ticket(ticket.line.task)) }
-                        .padding(.leading, PaneMetrics.card)
+                        PlanCardRow(ticket: ticket, theme: plan.theme(ofTask: ticket.id)) { hook.onOpen(.ticket(ticket.id)) }
+                            .padding(.leading, PaneMetrics.card)
                     }
                 }
             }
         } header: {
-            PlanHeader(title: PlanSections.Kind.landing.title, count: sections.count(.landing) == 0 ? nil : sections.count(.landing))
-                .explainedOnLongPress([PlanWords.landingExplanation])
+            header(section)
+                .explainedOnLongPress([section.help].compactMap { $0 })
                 .accessibilityIdentifier("plan-landing")
         }
     }
 
+    /// The CI read of a landing's pushed commit, the app's own.
+    private func ci(_ card: PlanView.LandingCard) -> PlanCIRead? {
+        plan.landings.first { $0.id == card.id }.flatMap { plan.ci(of: $0) }
+    }
+
     // MARK: In Review and Building
 
-    private func ticketSection(_ kind: PlanSections.Kind, id: String, rows: [PlanSections.TicketRow]) -> some View {
+    private func cardSection(_ section: PlanView.Section, id: String, cards: [PlanView.TicketCard]) -> some View {
         Section {
-            if let words = sections.emptyWords(kind) {
+            if let words = section.empty {
                 empty(words, id: id)
             } else {
-                ForEach(rows) { ticketRow($0) }
+                ForEach(cards) { cardRow($0) }
             }
         } header: {
-            PlanHeader(title: kind.title, count: rows.isEmpty ? nil : rows.count).accessibilityIdentifier(id)
+            header(section).accessibilityIdentifier(id)
         }
     }
 
     // MARK: Waiting
 
-    private var waiting: some View {
-        let waiting = sections.waiting
-        let groups = waiting.groups
-        return Section {
-            if let words = sections.emptyWords(.waiting) {
+    private func waiting(_ section: PlanView.Section) -> some View {
+        Section {
+            if let words = section.empty {
                 empty(words, id: "plan-waiting")
             } else {
-                ForEach(groups) { group in
+                ForEach(view.waiting) { group in
                     // Each group is named only when something else shares the section.
-                    if waiting.namesGroups { groupTitle(group) }
-                    ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, row in
-                        ticketRow(row, rank: group.rank(at: index))
-                    }
+                    if view.namesWaitingGroups { groupTitle(group) }
+                    ForEach(group.cards) { cardRow($0) }
                 }
             }
         } header: {
-            PlanHeader(title: PlanSections.Kind.waiting.title, count: waiting.isEmpty ? nil : waiting.count)
-                .accessibilityIdentifier("plan-waiting")
+            header(section).accessibilityIdentifier("plan-waiting")
         }
     }
 
-    private func groupTitle(_ group: PlanSections.Waiting.Group) -> some View {
+    private func groupTitle(_ group: PlanView.WaitingGroup) -> some View {
         HStack(spacing: 6) {
             if group.attention {
                 Circle().fill(GlancePalette.amber(scheme)).frame(width: 6, height: 6).accessibilityHidden(true)
@@ -131,15 +138,15 @@ struct PlanSectionsList: View {
 
     // MARK: Waiting for the Next Landing
 
-    private var landedLanding: some View {
+    private func landedLanding(_ section: PlanView.Section) -> some View {
         Section {
-            if landedOpen { ForEach(sections.onLandedLanding) { ticketRow($0) } }
+            if landedOpen { ForEach(view.onLandedLanding) { cardRow($0) } }
         } header: {
-            PlanHeader(title: PlanSections.Kind.onLandedLanding.title, count: sections.onLandedLanding.count, open: landedOpen)
+            PlanHeader(title: section.title, count: section.count, open: landedOpen)
                 .contentShape(.rect)
                 .onTapGesture { withAnimation { landedOpen.toggle() } }
                 .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(PlanSections.Kind.onLandedLanding.title), \(sections.onLandedLanding.count)")
+            .accessibilityLabel("\(section.title), \(section.count)")
             .accessibilityValue(landedOpen ? "Expanded" : "Collapsed")
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("plan-on-landed-landing")
@@ -148,36 +155,37 @@ struct PlanSectionsList: View {
 
     // MARK: Agents
 
-    private var agents: some View {
-        let fleet = sections.fleet
+    private func agents(_ section: PlanView.Section) -> some View {
+        let agents = view.agents
+        let opens = Dictionary(plan.agents.compactMap { a in a.tickets.first.map { (a.id, $0.task) } }, uniquingKeysWith: { first, _ in first })
         return Section {
-            if fleet.isEmpty {
-                empty(fleet.header(), id: "plan-agents")
+            if let words = section.empty {
+                empty(words, id: "plan-agents")
             } else {
-                Text(fleet.header())
+                Text(agents.header)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("plan-agents-header")
-                ForEach(fleet.agents) { agent in
-                    PlanAgentRow(agent: agent, now: sections.now) { hook.onOpen(.ticket($0.task)) }
+                ForEach(agents.rows) { agent in
+                    PlanAgentRow(agent: agent, opens: opens[agent.id]) { hook.onOpen(.ticket($0)) }
                 }
             }
         } header: {
-            PlanHeader(title: PlanSections.Kind.agents.title, count: nil).accessibilityIdentifier("plan-agents")
+            PlanHeader(title: section.title, count: nil).accessibilityIdentifier("plan-agents")
         }
     }
 
-        // MARK: Themes
+    // MARK: Themes
 
-    private var themes: some View {
+    private func themes(_ section: PlanView.Section) -> some View {
         Section {
-            PlanThemeGridView(grid: sections.themes, plan: plan, columns: hook.tileColumns) { hook.onOpen(.theme($0)) }
+            PlanThemeGridView(grid: view.themes, plan: plan, columns: hook.tileColumns) { hook.onOpen(.theme($0)) }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         } header: {
-            PlanHeader(title: PlanSections.Kind.themes.title, count: sections.count(.themes)).accessibilityIdentifier("plan-themes")
+            PlanHeader(title: section.title, count: section.count).accessibilityIdentifier("plan-themes")
         } footer: {
             if let summary = plan.trackSummary() {
                 Text(summary).accessibilityIdentifier("plan-themes-summary")
@@ -212,17 +220,18 @@ struct PlanSectionsList: View {
 /// its state, and its tokens. A working agent has a filled dot, an idle one a
 /// ring; a tap opens its first ticket.
 struct PlanAgentRow: View {
-    let agent: PlanAgent
-    let now: Int64
-    let onOpen: (PlanAgentTicket) -> Void
+    let agent: PlanView.AgentRow
+    /// The task its row opens, or nil for an agent on no ticket.
+    let opens: String?
+    let onOpen: (String) -> Void
     @ScaledMetric(relativeTo: .subheadline) private var markWidth: CGFloat = 22
     @Environment(\.dynamicTypeSize) private var type
 
     var body: some View {
         let row = content
         Group {
-            if let first = agent.tickets.first {
-                Button { onOpen(first) } label: { row }
+            if let opens {
+                Button { onOpen(opens) } label: { row }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(.isButton)
             } else {
@@ -230,7 +239,7 @@ struct PlanAgentRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([agent.who, agent.model.isEmpty ? nil : "Model ID \(agent.model)", agent.second(now: now), agent.tokens().map { "\($0) tokens" }].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel(agent.accessibility)
         .accessibilityIdentifier("plan-agent-\(agent.id)")
     }
 
@@ -249,26 +258,26 @@ struct PlanAgentRow: View {
                     .lineLimit(type.isAccessibilitySize ? nil : 1)
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: type.isAccessibilitySize)
-                Text(agent.second(now: now))
+                Text(agent.second)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(type.isAccessibilitySize ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
-                if type.isAccessibilitySize, let tokens = agent.tokens() {
+                if type.isAccessibilitySize, let tokens = agent.tokens {
                     Text(tokens)
                         .font(.footnote.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
             Spacer(minLength: 4)
-            if !type.isAccessibilitySize, let tokens = agent.tokens() {
+            if !type.isAccessibilitySize, let tokens = agent.tokens {
                 Text(tokens)
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .fixedSize()
             }
-            if !agent.tickets.isEmpty {
+            if opens != nil {
                 Image(systemName: "chevron.forward")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
@@ -276,5 +285,174 @@ struct PlanAgentRow: View {
             }
         }
         .contentShape(.rect)
+    }
+}
+
+/// One ticket's row, from the Rust core's card: its title and the theme it
+/// serves, then its reason or state, then its notes (the pull request's stage,
+/// the engine's step and gate, its warnings), each a line. In Next Up its rank
+/// sits in the glyph column; elsewhere its stage's mark, amber when a note
+/// needs a person. A ticket on a landing draws the same row from its landing
+/// ticket: what it says of itself, and its key.
+struct PlanCardRow: View {
+    let key: String
+    let heading: String
+    let theme: String?
+    let second: String
+    let rank: Int?
+    let mark: PlanView.Mark
+    let markAttention: Bool
+    let notes: [PlanView.Note]
+    let accessibility: String
+    let action: () -> Void
+    @Environment(\.colorScheme) private var scheme
+    /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
+    @ScaledMetric(relativeTo: .subheadline) private var markWidth: CGFloat = 22
+    /// At accessibility sizes the name, the theme and the second line wrap
+    /// rather than cut off (ov-653).
+    @Environment(\.dynamicTypeSize) private var type
+
+    init(card: PlanView.TicketCard, action: @escaping () -> Void) {
+        key = card.key
+        heading = card.heading
+        theme = card.theme
+        second = card.second
+        rank = card.rank
+        mark = card.mark
+        markAttention = card.markAttention
+        notes = card.notes
+        accessibility = card.accessibility
+        self.action = action
+    }
+
+    init(ticket: PlanView.LandingTicket, theme: PlanTheme?, action: @escaping () -> Void) {
+        key = ticket.key
+        heading = ticket.heading
+        self.theme = theme?.name
+        second = ticket.second
+        rank = nil
+        mark = ticket.mark
+        markAttention = ticket.markAttention || ticket.noteAttention
+        // Waiting on the owner is its one warning, said under it as on any row.
+        notes = (ticket.waitsOnOwner ? [PlanView.Note(kind: .warning, text: ticket.note ?? "", attention: true, help: nil)] : [])
+            + ticket.notes
+        accessibility = ticket.accessibility
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.card) {
+                markView.frameProbe("plan-ticket-mark").frame(width: markWidth, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    // Which theme it serves (the owner's ask, ov-273): beside
+                    // the name, or under it when the name takes the line.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.step) {
+                            name
+                            Spacer(minLength: 0)
+                            themeName
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            name
+                            themeName
+                        }
+                    }
+                    Text(second)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(type.isAccessibilitySize ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(Array(notes.enumerated()), id: \.offset) { _, note in noteLine(note) }
+                }
+                Image(systemName: "chevron.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        // What VoiceOver reads is the view's: the rank, the name, the theme,
+        // the reason or state, and its notes, in that order.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibility)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("plan-ticket-\(key)")
+        .probesShown()
+    }
+
+    private var name: some View {
+        Text(heading)
+            .font(.subheadline.weight(.medium))
+            .lineLimit(type.isAccessibilitySize ? nil : 2)
+            .fixedSize(horizontal: false, vertical: true)
+            .layoutPriority(1)
+            .frameProbe("plan-ticket-name")
+    }
+
+    @ViewBuilder private var themeName: some View {
+        if let theme {
+            Text(theme)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(type.isAccessibilitySize ? nil : 1)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: type.isAccessibilitySize)
+                .accessibilityIdentifier("plan-ticket-\(key)-theme")
+        }
+    }
+
+    /// A note: gray, or amber for what needs a person. A pull request's stage
+    /// or the engine's step keeps to one line, cut in the middle (a login may
+    /// be long, ov-316).
+    @ViewBuilder private func noteLine(_ note: PlanView.Note) -> some View {
+        let oneLine = note.kind == .stage || note.kind == .run
+        Text(note.text)
+            .font(.footnote.weight(note.attention ? .medium : .regular))
+            .foregroundStyle(note.attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+            .lineLimit(oneLine ? 1 : nil)
+            .truncationMode(.middle)
+            .accessibilityIdentifier(Self.probe(note, key: key))
+    }
+
+    static func probe(_ note: PlanView.Note, key: String) -> String {
+        switch note.kind {
+        case .stage: note.attention ? "plan-ticket-\(key)-stage-attention" : "plan-ticket-\(key)-stage"
+        case .run: "plan-ticket-\(key)-run"
+        case .warning: "plan-ticket-\(key)-warning"
+        case .overBudget: "plan-ticket-\(key)-over-budget"
+        case .unknown: "plan-ticket-\(key)-note"
+        }
+    }
+
+    @ViewBuilder private var markView: some View {
+        if let rank {
+            Text("\(rank)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+        } else {
+            Image(systemName: PlanGlyph.name(mark))
+                .font(.subheadline)
+                .foregroundStyle(markAttention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+extension PlanGlyph {
+    /// A card's mark, as the view names it.
+    static func name(_ mark: PlanView.Mark) -> String {
+        switch mark {
+        case .rank, .unknown: "questionmark.circle"
+        case .waiting: name(.waiting)
+        case .building: name(.building)
+        case .fixing: name(.building, fixing: true)
+        case .reviewing: name(.reviewing)
+        case .needsYou: name(.needsYou)
+        case .landing: name(.landing)
+        case .landed: name(.landed)
+        case .dropped: name(.dropped)
+        }
     }
 }

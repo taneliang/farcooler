@@ -5,19 +5,22 @@ import SwiftUI
 // working ones first. An agent that finished or exited is not listed. Each
 // row says who (role and model), what for (its tickets, or "On no
 // ticket"), its state and age, then its tokens and, second, the
-// API-equivalent dollars, in columns that line up down the section. A working agent has a filled dot; an idle one, a ring.
+// API-equivalent dollars, in columns that line up down the section. A working
+// agent has a filled dot; an idle one, a ring. The rows, their order and every
+// word are the Rust core's (`PlanView.Agents`, ov-1016).
 
 struct PlanAgentsView: View {
-    let fleet: PlanFleet
-    let now: Int64
+    let agents: PlanView.Agents
+    /// The ticket each agent's row opens, by agent id: its first.
+    let opens: [String: String]
     let onOpen: (PlanPage) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if fleet.isEmpty {
-                PlanEmptyLine(words: fleet.header()).identified("plan-agents-empty")
+            if agents.rows.isEmpty {
+                PlanEmptyLine(words: agents.header).identified("plan-agents-empty")
             } else {
-                Text(fleet.header())
+                Text(agents.header)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.quietInk)
                     .lineLimit(2)
@@ -25,15 +28,16 @@ struct PlanAgentsView: View {
                     .padding(.leading, NavigatorGrid.textInset)
                     .padding(.vertical, NavigatorRhythm.air)
                     .identified("plan-agents-header")
-                ForEach(fleet.agents) { PlanAgentRow(agent: $0, now: now, onOpen: onOpen) }
+                ForEach(agents.rows) { PlanAgentRow(agent: $0, opens: opens[$0.id], onOpen: onOpen) }
             }
         }
     }
 }
 
 struct PlanAgentRow: View {
-    let agent: PlanAgent
-    let now: Int64
+    let agent: PlanView.AgentRow
+    /// The task its row opens, or nil for an agent on no ticket.
+    let opens: String?
     let onOpen: (PlanPage) -> Void
     @State private var hovering = false
 
@@ -46,11 +50,11 @@ struct PlanAgentRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .navigatorRow(selected: false, keyed: false, leading: 0)
             .background {
-                if hovering && agent.tickets.first != nil { RoundedRectangle.control.fill(Fill.hover).boxOutset() }
+                if hovering && opens != nil { RoundedRectangle.control.fill(Fill.hover).boxOutset() }
             }
         return Group {
-            if let first = agent.tickets.first {
-                Button { onOpen(.ticket(first.task)) } label: { row }
+            if let opens {
+                Button { onOpen(.ticket(opens)) } label: { row }
                     .buttonStyle(.plain)
                     .onHover { hovering = $0 }
                     .accessibilityAddTraits(.isButton)
@@ -59,7 +63,7 @@ struct PlanAgentRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibility)
+        .accessibilityLabel([agent.accessibility, agent.cost].compactMap { $0 }.joined(separator: ", "))
         .identified("plan-agent-\(agent.id)")
     }
 
@@ -78,10 +82,10 @@ struct PlanAgentRow: View {
                         .truncationMode(.tail)
                         .layoutPriority(1)
                     Spacer(minLength: 0)
-                    column(agent.tokens(), width: Self.tokensWidth)
-                    column(agent.cost(), width: Self.costWidth)
+                    column(agent.tokens, width: Self.tokensWidth)
+                    column(agent.cost, width: Self.costWidth)
                 }
-                Text(Self.second(agent, now: now))
+                Text(agent.second)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
                     .foregroundStyle(.quietInk)
                     .lineLimit(2)
@@ -96,15 +100,6 @@ struct PlanAgentRow: View {
             .foregroundStyle(.quietInk)
             .lineLimit(1)
             .frame(width: width, alignment: .trailing)
-    }
-
-    /// "“Design ov-503” · Not on a ticket · Working · 22 min": what it was told, what
-    /// it works for, and its state.
-    static func second(_ agent: PlanAgent, now: Int64) -> String { agent.second(now: now) }
-
-    private var accessibility: String {
-        [agent.who, agent.model.isEmpty ? nil : "Model ID \(agent.model)", Self.second(agent, now: now), agent.tokens().map { "\($0) tokens" }, agent.cost()]
-            .compactMap { $0 }.joined(separator: ", ")
     }
 }
 

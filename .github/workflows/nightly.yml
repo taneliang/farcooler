@@ -200,6 +200,10 @@ jobs:
       - id: toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # AgentKit's tests link the Rust client library for the Plan's view
+      # (ov-1016), which nothing else in this job builds first.
+      - name: Build the Rust client library for AgentKit's tests
+        run: cargo build --release -p farcooler-client
       - name: AgentKit row budgets
         run: ./scripts/swift-test-guard.sh <(echo 2) -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests
       # One `swift test` each: in one run the two suites go at once on the one

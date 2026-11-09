@@ -157,40 +157,53 @@ public struct TicketTree: Equatable, Sendable {
     /// the folded Waiting; a group with no tickets isn't listed.
     public var groups: [Group]
 
-    public init(plan: PlanModel, sections: PlanSections? = nil, locale: Locale = .current) {
-        let sections = sections ?? PlanSections(plan: plan)
-        func node(_ agent: PlanAgent, _ locale: Locale) -> AgentNode {
-            AgentNode(
-                id: agent.id, who: agent.who, working: agent.working, tokens: agent.tokens(locale: locale),
-                terminal: agent.terminal)
+    /// The groups of the Plan's view (`PlanView`, the Rust core's sections):
+    /// `view` when the caller has it, else the view of `plan` with nothing
+    /// beside it. Each ticket's agents are still the plan's, all of them,
+    /// working first (ov-1015 phase 3).
+    public init(plan: PlanModel, view: PlanView? = nil, locale: Locale = .current) {
+        let lines = Dictionary(plan.lines.map { ($0.task, $0) }, uniquingKeysWith: { first, _ in first })
+        guard let view = view ?? PlanView.build(plan: plan) else {
+            groups = []
+            return
         }
-        func agents(_ line: PlanTicketLine) -> [AgentNode] {
-            let mine = plan.agents.filter { agent in agent.role != .orchestrator && agent.tickets.contains { $0.task == line.task } }
-            return PlanFleet(mine).agents.map { node($0, locale) }
+        func agents(_ task: String) -> [AgentNode] {
+            plan.agents
+                .filter { agent in agent.role != .orchestrator && agent.tickets.contains { $0.task == task } }
+                .sorted { $0.working != $1.working ? $0.working : $0.spend.totalTokens > $1.spend.totalTokens }
+                .map { AgentNode(id: $0.id, who: $0.who, working: $0.working, tokens: $0.tokens(locale: locale), terminal: $0.terminal) }
         }
-        func ticketNode(_ line: PlanTicketLine, state: String) -> TicketNode {
-            TicketNode(id: line.task, key: line.key, heading: line.heading, state: state, agents: agents(line), cards: [line.card])
+        func ticketNode(id: String, key: String, heading: String, state: String) -> TicketNode {
+            TicketNode(
+                id: id, key: key, heading: heading, state: state, agents: agents(id),
+                cards: [lines[id]?.card ?? PlanCardRef(task: id, key: key)])
         }
-        func rows(_ rows: [PlanSections.TicketRow]) -> [TicketNode] { rows.map { ticketNode($0.line, state: PlanWords.status($0.line)) } }
+        func rows(_ cards: [PlanView.TicketCard]) -> [TicketNode] {
+            cards.map { ticketNode(id: $0.id, key: $0.key, heading: $0.heading, state: $0.status) }
+        }
 
         var groups: [Group] = []
-        if !sections.landings.isEmpty {
+        if let section = view.section(.landing), !view.landings.isEmpty {
             groups.append(
                 Group(
-                    kind: .landing, title: PlanSections.Kind.landing.title, detail: nil, folded: false, tickets: [],
-                    landings: sections.landings.map { card in
+                    kind: .landing, title: section.title, detail: nil, folded: false, tickets: [],
+                    landings: view.landings.map { card in
                         LandingNode(
-                            id: card.landing.id, label: card.landing.label, subtitle: card.landing.subtitle, phase: card.phase.word,
-                            tickets: card.tickets.map { ticketNode($0.line, state: Self.aboard($0.note)) })
+                            id: card.id, label: card.label, subtitle: card.subtitle, phase: card.phaseWord,
+                            tickets: card.tickets.map {
+                                ticketNode(id: $0.id, key: $0.key, heading: $0.heading, state: Self.aboard($0.note))
+                            })
                     }))
         }
-        let waiting = sections.waiting.onYou + sections.waiting.next + sections.waiting.notRanked
-        for (kind, title, list, folded) in [
-            (Kind.inReview, "In Review", sections.inReview, false), (.building, "Building", sections.building, false),
-            (.waiting, "Waiting", waiting, true), (.onLandedLanding, "Waiting for the Next Landing", sections.onLandedLanding, true),
+        let waiting = view.waiting(.onYou) + view.waiting(.next) + view.waiting(.notRanked)
+        for (kind, section, list, folded) in [
+            (Kind.inReview, PlanView.SectionKind.inReview, view.inReview, false), (.building, .building, view.building, false),
+            (.waiting, .waiting, waiting, true), (.onLandedLanding, .onLandedLanding, view.onLandedLanding, true),
         ] where !list.isEmpty {
             groups.append(
-                Group(kind: kind, title: title, detail: folded ? "\(list.count)" : nil, folded: folded, tickets: rows(list)))
+                Group(
+                    kind: kind, title: view.section(section)?.title ?? "", detail: folded ? "\(list.count)" : nil, folded: folded,
+                    tickets: rows(list)))
         }
         self.groups = groups
     }

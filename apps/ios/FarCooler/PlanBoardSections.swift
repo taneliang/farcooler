@@ -1,3 +1,4 @@
+import FarCoolerClient
 import SwiftUI
 
 // The Plan view on a phone (ov-268 design 6.5): what the board's list shows
@@ -54,7 +55,7 @@ struct PlanBoardHook {
     var showsBand = true
     /// The sections drawn, nil for all of them. The iPhone's Plan sheet,
     /// whose tree lists every theme and card, leaves Themes out (ov-616).
-    var kinds: Set<PlanSections.Kind>?
+    var kinds: Set<PlanView.SectionKind>?
 }
 
 /// What the Plan's sections are decided from besides the plan itself: the
@@ -64,6 +65,30 @@ struct PlanFacts {
     var needsYou = 0
     var activity: [String: Int64] = [:]
     var listsAgents = false
+}
+
+/// The Rust core's plan view (ov-1016), asked through the client library this
+/// app links: AgentKit can't link it, since the watch and the widgets compile
+/// it without, so the app hands it the call.
+enum PlanViewBridge {
+    private static let installed: Void = PlanViewPresenter.install { PlanViewPresenter.call(farcooler_client_plan_view, $0) }
+
+    static func install() { _ = installed }
+
+    static func view(plan: PlanModel, facts: PlanFacts, statuses: [String: TaskStatus]) -> PlanView? {
+        install()
+        return PlanView.build(
+            plan: plan, needsYou: facts.needsYou, statuses: statuses, activity: facts.activity,
+            agentsSupported: facts.listsAgents)
+    }
+
+    /// The plan column (ov-874), from the same view.
+    static func column(
+        plan: PlanModel, needsYou: Int = 0, statuses: [String: TaskStatus], titles: [String: String]
+    ) -> PlanColumn? {
+        install()
+        return PlanColumn.of(plan, needsYou: needsYou, statuses: statuses, titles: titles)
+    }
 }
 
 extension Connection {
@@ -165,16 +190,17 @@ struct PlanBoardSections: View {
             pagesSection(plan)
             PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions, pastOpen: $pastRulingsOpen)
         } else {
-            let sections = PlanSections(
-                plan: plan, needsYou: hook.facts.needsYou, statuses: hook.statuses, activity: hook.facts.activity,
-                agentsSupported: hook.facts.listsAgents)
-            if hook.showsBand {
-                Section {
-                    PhoneGlanceBand(band: PlanGlanceSentence(sections: sections), needsYou: hook.facts.needsYou)
-                        .padding(.vertical, 2)
+            // The Rust core's view decides the sections and their words
+            // (ov-1016); a plan the runner sent always has one.
+            if let view = PlanViewBridge.view(plan: plan, facts: hook.facts, statuses: hook.statuses) {
+                if hook.showsBand {
+                    Section {
+                        PhoneGlanceBand(band: PlanGlanceSentence(view: view), needsYou: hook.facts.needsYou)
+                            .padding(.vertical, 2)
+                    }
                 }
+                PlanSectionsList(view: view, plan: plan, hook: hook)
             }
-            PlanSectionsList(sections: sections, plan: plan, hook: hook)
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = plan.cost, cost.isWorthShowing {
                 Section {

@@ -128,16 +128,20 @@ struct PhonePlanColumn<Top: View>: View {
             }
         } else {
             let rows = connection.boards[summary.id]?.rows ?? []
-            let column = PlanColumn(
+            let column = PlanViewBridge.column(
                 plan: plan, needsYou: items.count + asks.count,
                 statuses: Dictionary(rows.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first }),
                 titles: Dictionary(rows.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first }))
-            PhonePlanFacts(facts: column.facts)
+            if let column {
+                PhonePlanFacts(facts: column.facts)
+            }
             needsYou(asks: asks, items: items)
-            PhonePlanInitiatives(column: column) { navigator?.open(.plan(place, page: .theme($0))) }
-            PhonePlanPipeline(column: column, actions: actions)
-            PhonePlanFooter(counts: column.footer) {
-                navigator?.open(.history(place, status: $0.kind == .done ? TaskStatus.done.rawValue : $0.kind.rawValue))
+            if let column {
+                PhonePlanInitiatives(column: column) { navigator?.open(.plan(place, page: .theme($0))) }
+                PhonePlanPipeline(column: column, actions: actions)
+                PhonePlanFooter(counts: column.footer) {
+                    navigator?.open(.history(place, status: $0.kind == .done ? TaskStatus.done.rawValue : $0.kind.rawValue))
+                }
             }
         }
         rulings(plan)

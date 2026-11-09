@@ -8,11 +8,13 @@ import SwiftUI
 // only for CI that failed or a landing that stalled, each with its words. The arrow at the trailing edge opens the CI run in the browser, the
 // one place it goes; a long press never does.
 //
-// The words are AgentKit's (`PlanSections.LandingCard`, `PlanLadder`); this
-// draws them.
+// The words and the ladder are the Rust core's (`PlanView.LandingCard`,
+// ov-1016), the CI read the app's; this draws them.
 
 struct PlanLandingRow: View {
-    let card: PlanSections.LandingCard
+    let card: PlanView.LandingCard
+    /// What a landing is, said first on a long press: the Landing section's help.
+    let explanation: String?
     let ci: PlanCIRead?
     /// The runner's clock, for how old a stale read is.
     var now: Int64 = 0
@@ -23,8 +25,7 @@ struct PlanLandingRow: View {
     /// landing glyph run into "Landing 86".
     @ScaledMetric(relativeTo: .body) private var glyphWidth: CGFloat = 22
 
-    private var landing: PlanLanding { card.landing }
-    private var attention: Bool { card.phase.needsAttention || PlanWords.landingNeedsAttention(landing, ci: ci) }
+    private var attention: Bool { card.needsAttention(ci: ci) }
     private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
     private var facts: String { card.facts(ci: ci, now: now) }
     /// The same words with each span held together: a line breaks between
@@ -37,8 +38,8 @@ struct PlanLandingRow: View {
         // explanation. The run opens from its own control, at the trailing edge.
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(LandingRowSpeech(spoken: card.spoken(ci: ci, now: now), id: String(landing.number)))
-            .explainedOnLongPress(card.explanation)
+            .modifier(LandingRowSpeech(spoken: card.spoken(ci: ci, now: now), id: String(card.number)))
+            .explainedOnLongPress(card.explanation(landing: explanation))
             // On the title's line, outside the row's one spoken element.
             .overlay(alignment: .topTrailing) { runControl }
     }
@@ -56,7 +57,7 @@ struct PlanLandingRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open CI Run")
-            .accessibilityIdentifier("plan-landing-\(landing.number)-run")
+            .accessibilityIdentifier("plan-landing-\(card.number)-run")
         }
     }
 
@@ -71,30 +72,30 @@ struct PlanLandingRow: View {
                     .frame(minWidth: glyphWidth, alignment: .leading)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(landing.label).font(.body.weight(.semibold))
-                        .accessibilityIdentifier("plan-landing-\(landing.number)-label")
-                    if let subtitle = landing.subtitle {
+                    Text(card.label).font(.body.weight(.semibold))
+                        .accessibilityIdentifier("plan-landing-\(card.number)-label")
+                    if let subtitle = card.subtitle {
                         Text(subtitle)
                             .font(.subheadline)
                             .lineLimit(type.isAccessibilitySize ? nil : 3)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("plan-landing-\(landing.number)-subtitle")
+                            .accessibilityIdentifier("plan-landing-\(card.number)-subtitle")
                     }
-                    if let carries = landing.carries {
+                    if let carries = card.carries {
                         Text(carries)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(type.isAccessibilitySize ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("plan-landing-\(landing.number)-carries")
+                            .accessibilityIdentifier("plan-landing-\(card.number)-carries")
                     }
-                    Text(PlanLadder.compact(card.phase))
+                    Text(card.ladder.compact)
                         .font(.footnote.weight(attention ? .medium : .regular))
                         .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
                         .lineLimit(type.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("plan-landing-\(landing.number)-phase")
-                    PlanLadderBar(phase: card.phase, attention: attention)
+                        .accessibilityIdentifier("plan-landing-\(card.number)-phase")
+                    PlanLadderBar(ladder: card.ladder, attention: attention)
                         .padding(.vertical, 2)
                     if !facts.isEmpty {
                         Text(factsShown)
@@ -102,7 +103,7 @@ struct PlanLandingRow: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(type.isAccessibilitySize ? nil : 3)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("plan-landing-\(landing.number)-words")
+                            .accessibilityIdentifier("plan-landing-\(card.number)-words")
                     }
                 }
                 Spacer(minLength: 0)
@@ -127,14 +128,14 @@ private struct LandingRowSpeech: ViewModifier {
 /// Where a landing stands, as three short segments: the ones climbed are
 /// filled, the one it is on is dark, or amber when it needs attention.
 struct PlanLadderBar: View {
-    let phase: LandingPhase
+    let ladder: PlanView.Ladder
     let attention: Bool
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let current = PlanLadder.step(phase)
+        let current = ladder.at
         HStack(spacing: 3) {
-            ForEach(0..<PlanLadder.steps.count, id: \.self) { index in
+            ForEach(ladder.steps.indices, id: \.self) { index in
                 Capsule()
                     .fill(style(index, current: current))
                     .frame(height: 4)

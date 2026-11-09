@@ -30,29 +30,31 @@ public struct PlanGlanceSentence: Equatable, Sendable {
         self.next = next
     }
 
-    public init(sections: PlanSections) {
+    /// The band for the Plan's view as the Rust core built it: the sentence is
+    /// still put together here (ov-1015 phase 2), from the view's sections.
+    public init(view: PlanView) {
         var parts: [String] = []
-        if let lead = sections.landings.first {
-            parts.append("\(lead.landing.label) \(lead.phase.sentence)")
-            let more = sections.landings.count - 1
+        if let lead = view.landings.first {
+            parts.append("\(lead.label) \(lead.phaseSentence)")
+            let more = view.landings.count - 1
             if more > 0 { parts.append(more == 1 ? "1 more landing" : "\(more) more landings") }
         }
-        if !sections.building.isEmpty { parts.append("\(sections.building.count) building") }
-        if !sections.inReview.isEmpty { parts.append("\(sections.inReview.count) in review") }
+        if !view.building.isEmpty { parts.append("\(view.building.count) building") }
+        if !view.inReview.isEmpty { parts.append("\(view.inReview.count) in review") }
         now = parts.isEmpty ? nil : parts.joined(separator: " · ")
 
-        let ranked = sections.waiting.next.map(\.line)
+        let ranked = view.waiting(.next)
         if let first = ranked.first {
             // Titles only, each said once and cut at a word: the ticket's key
             // is in its title often enough, and never twice.
-            var said = Self.title(first)
+            var said = Self.title(first.heading)
             if let second = ranked.dropFirst().first(where: { $0.id != first.id && $0.heading != first.heading }) {
-                said += ", then \(Self.title(second))"
+                said += ", then \(Self.title(second.heading))"
             }
             next = said
-        } else if sections.waiting.count > 0 {
+        } else if view.waitingCount > 0 {
             // Tickets wait and none is ranked: "Nothing queued" would be false.
-            next = "\(sections.waiting.count) waiting, none ranked"
+            next = "\(view.waitingCount) waiting, none ranked"
         } else {
             next = nil
         }
@@ -63,8 +65,8 @@ public struct PlanGlanceSentence: Equatable, Sendable {
 
     /// A ticket's title cut at a word, with no comma or colon left hanging
     /// before the ellipsis.
-    static func title(_ line: PlanTicketLine) -> String {
-        let cut = PlanWords.short(line.heading, max: titleMax)
+    static func title(_ heading: String) -> String {
+        let cut = PlanWords.short(heading, max: titleMax)
         guard cut.hasSuffix("\u{2026}") else { return cut }
         var head = cut.dropLast()
         while let last = head.last, ",;:\u{2014}- ".contains(last) { head = head.dropLast() }
@@ -84,7 +86,7 @@ public struct PlanGlanceSentence: Equatable, Sendable {
 
     /// The Now line with each "·"-separated span held together, for a view that
     /// wraps: "2 building" is not cut after "2" (ov-515). The words are `nowLine`'s.
-    public var nowLineUnbroken: String { PlanSections.LandingCard.unbroken(nowLine) }
+    public var nowLineUnbroken: String { PlanWords.unbroken(nowLine) }
 
     /// The Next line as the band says it.
     public var nextLine: String { next ?? Self.nothingQueued }

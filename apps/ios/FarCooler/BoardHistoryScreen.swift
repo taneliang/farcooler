@@ -25,7 +25,7 @@ struct BoardHistoryScreen: View {
     private var column: PlanColumn? {
         guard case .loaded(let plan)? = connection.plans.state(place.workspace) else { return nil }
         let board = connection.boards[place.workspace]?.rows ?? []
-        return PlanColumn(
+        return PlanViewBridge.column(
             plan: plan, statuses: Dictionary(board.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first }),
             titles: Dictionary(board.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first }))
     }
