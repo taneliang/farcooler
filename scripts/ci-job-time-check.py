@@ -10,7 +10,9 @@ trimmed) while it still passes.
 
   - A job's time is start to finish, setup included: what the timeout measures.
   - The figure checked is the max of the five. The p50 is printed beside it.
-  - Skipped jobs and jobs without a timeout are ignored.
+  - Skipped jobs and jobs without a timeout are ignored, but a job that has a
+    limit and no timing in any of the five runs fails the check (a renamed job
+    must not drop out unnoticed), as does fetching no timings at all.
   - The limit comes from ci.yml. `timeout-minutes: ${{ ... && A || B }}` (the
     Rust matrix) reads as A for a macOS job and B otherwise.
 
@@ -75,7 +77,10 @@ def minutes(job):
 
 
 def evaluate(runs, limit_map, scale=1.0):
-    """runs: a list of job lists. Returns (rows, names over the threshold)."""
+    """runs: a list of job lists. Returns (rows, names over the threshold,
+    problems). A problem is a reason the check saw too little to vouch for
+    anything: no successful job timings at all, or a limit in ci.yml that no
+    job timing matches (a renamed job, or one skipped in every run)."""
     times = {}
     for jobs in runs:
         for job in jobs:
@@ -93,7 +98,11 @@ def evaluate(runs, limit_map, scale=1.0):
         rows.append((name, limit, statistics.median(ts), max(ts), share, len(ts)))
         if share > THRESHOLD:
             over.append(name)
-    return rows, over
+    problems = [] if times else ["no successful job timings in the runs"]
+    for template in limit_map:
+        if not any(limit_for(n, {template: limit_map[template]}) for n in times):
+            problems.append(template)
+    return rows, over, problems
 
 
 def report(rows, over):
@@ -129,11 +138,16 @@ def self_test():
     assert limit_for("Rust (ubuntu-24.04)", lm) == 35 and limit_for("Nope", lm) is None
     runs = [[job("Android", "10:00", "10:20"), job("Rust (macos-latest)", "10:00", "10:40"),
              job("Rust (ubuntu-24.04)", "10:00", "10:20", "skipped")]]
-    rows, over = evaluate(runs, lm)
+    rows, over, _ = evaluate(runs, lm)
     assert over == [], over                      # 80% and 67%; the skipped job is ignored
     runs.append([job("Android", "10:00", "10:22")])
     assert evaluate(runs, lm)[1] == ["Android"]  # 22/25 = 88%
     assert evaluate(runs, lm, scale=0.5)[1] == ["Android", "Rust (macos-latest)"]
+    # A check that saw nothing must not pass: no runs at all, or a limited job with no timing.
+    assert evaluate([], lm)[2] != [], "zero runs must be a problem"
+    missing = evaluate(runs, {**lm, "Renamed": "10"})[2]
+    assert missing == ["Renamed"], missing       # limited in ci.yml, absent from the runs
+    assert evaluate(runs, lm)[2] == [], "all limited jobs present"
     print("ci-job-time-check: self-test passed")
 
 
@@ -142,8 +156,12 @@ def main():
     if "--self-test" in args:
         return self_test()
     scale = float(args[args.index("--limit-scale") + 1]) if "--limit-scale" in args else 1.0
-    rows, over = evaluate(fetch(5), limits(WORKFLOW.read_text()), scale)
+    rows, over, problems = evaluate(fetch(5), limits(WORKFLOW.read_text()), scale)
     report(rows, over)
+    if problems:
+        sys.exit("\nThe check could not vouch for: " + "; ".join(problems)
+                 + ". A job it has a limit for has no successful timing in the last five green runs"
+                 + " (renamed, skipped every time, or the runs were not fetched). Fix the name or the fetch.")
     if over:
         sys.exit("\nPast 85% of the limit: " + ", ".join(over)
                  + ". Raise timeout-minutes in ci.yml (aim for 25% headroom over the max) or trim the job.")
