@@ -160,8 +160,21 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     let signal_error = group.kill().err();
     let timed_out = matches!(result, Some(Err(_)));
     let observed = matches!(result, Some(Ok(Ok(()))));
-    let status = tokio::time::timeout(Duration::from_secs(1), child.wait()).await
-        .map_err(|_| std::io::Error::other("owned process leader reap unproved"))??;
+    let status = tokio::time::timeout(Duration::from_secs(1), async {
+        // A child the kernel was still creating when the group was signalled can miss the signal and
+        // outlive its dying parent (ov-1027). The leader forks nothing once it has exited, and until it
+        // is reaped its zombie still holds the PGID, so signalling the group again cannot hit a recycled
+        // one. A repeat narrows the race, it does not close it: a few short rounds, then the quiescence
+        // loop below decides whether anything survived.
+        exited(pid).await?;
+        if signal_error.is_none() {
+            for _ in 0..5 {
+                unsafe { libc::killpg(pid as i32, libc::SIGKILL); }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+        child.wait().await
+    }).await.map_err(|_| std::io::Error::other("owned process leader reap unproved"))??;
     // A surviving group (including unreaped grandchildren) is not quiescence.
     for _ in 0..100 {
         if matches!(Group::gone(pid), Ok(true)) {
@@ -219,5 +232,35 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("owned group survived cancellation");
+    }
+    /// A cancel that lands while the command is forking must still end everything it started. A child
+    /// the kernel is creating while the group is signalled can miss that signal and outlive its dying
+    /// parent; the workflow shutdown test leaked its fixture's `sleep` this way under load (ov-1027).
+    #[tokio::test]
+    async fn a_cancel_during_a_fork_leaves_nothing_of_the_group_running() {
+        let dir = tempfile::tempdir().unwrap();
+        // Forks without pause, so each cancel very likely lands mid-fork.
+        let argv = ["/bin/sh".to_string(), "-c".into(), "echo $$ > leader.pid; while :; do /bin/sleep 30 & done".into()];
+        let environment: std::collections::BTreeMap<String, String> = [("PATH".to_string(), "/usr/bin:/bin".to_string())].into();
+        for round in 0..20 {
+            let _ = std::fs::remove_file(dir.path().join("leader.pid"));
+            let (cancel, cancelled) = tokio::sync::watch::channel(false);
+            let (tree, argv, environment) = (dir.path().to_path_buf(), argv.clone(), environment.clone());
+            let task = tokio::spawn(async move {
+                configured(&tree, &argv, &environment, &tree.join("fork.log"), Duration::from_secs(60), cancelled).await
+            });
+            let leader = loop {
+                if let Some(pid) = std::fs::read_to_string(dir.path().join("leader.pid")).ok().and_then(|t| t.trim().parse::<i32>().ok()) { break pid; }
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            };
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancel.send_replace(true);
+            let settled = task.await.unwrap();
+            // Clean up a leak before failing, so one red round leaves no sleeps behind.
+            let alive = unsafe { libc::killpg(leader, 0) } == 0;
+            if alive { unsafe { libc::killpg(leader, libc::SIGKILL); } }
+            assert!(!alive, "round {round}: a member of the cancelled group is still running");
+            assert_eq!(settled.unwrap(), None, "round {round}: a cancel with the whole group gone settles as cancelled");
+        }
     }
 }
