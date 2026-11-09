@@ -367,6 +367,27 @@ async fn a_client_behind_when_the_pane_dies_gets_the_restarted_program() {
     attached.abort();
 }
 
+/// A fanout slow to start is waited for (ov-1051). The first exec of a fresh
+/// `farcoolerd` is assessed by macOS before it runs, about 0.9 s on its own,
+/// and on a loaded machine that went past the second a fanout was given: the
+/// stream ended before its pipe came up. Started here through a wrapper that
+/// takes 1.5 s, and then it has to carry the pane's output.
+#[tokio::test]
+async fn a_fanout_slow_to_start_is_waited_for() {
+    if !fanout_built("a_fanout_slow_to_start_is_waited_for") {
+        return;
+    }
+    let t = Pane::start().await;
+    let exe = crate::runtime::fanout_binary().unwrap();
+    let slow = t.dir.join("slow-fanout");
+    std::fs::write(&slow, format!("#!/bin/sh\nsleep 1.5\nexec '{}' \"$@\"\n", exe.display())).unwrap();
+    std::fs::set_permissions(&slow, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let install = t.runtime.tmux.socket().to_string();
+    let mut socket = t.runtime.start_fanout(&t.pane, &install, &slow).await.expect("the slow fanout was given up on");
+    let mut seen = Vec::new();
+    t.piped(&mut socket, &mut seen).await;
+}
+
 /// A `farcoolerd stream` whose client hangs up while its pane is dead ends
 /// then, rather than waiting on the pane forever.
 #[tokio::test]

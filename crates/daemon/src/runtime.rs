@@ -624,8 +624,15 @@ impl Runtime {
             tracing::warn!("cannot find farcoolerd to pipe this pane into");
             DomainError::OperationFailed
         })?;
+        self.start_fanout(pane_id, &install, &exe).await
+    }
+
+    /// Pipe the pane into a new fanout run from `exe`, and connect to it once
+    /// it is listening. `attach_to_fanout`'s second half, given the binary so
+    /// a test can hand it one that is slow to start.
+    pub(crate) async fn start_fanout(&self, pane_id: &str, install: &str, exe: &std::path::Path) -> Result<tokio::net::UnixStream> {
         // See `fanout::pipe_command` for what is in it and why.
-        let command = crate::fanout::pipe_command(&exe, pane_id, &install);
+        let command = crate::fanout::pipe_command(exe, pane_id, install);
         self.tmux.pipe_pane_start(pane_id, &command).await?;
 
         // Retried rather than slept through: the fanout has a process to spawn
@@ -639,13 +646,15 @@ impl Runtime {
         // a pane that was open moments ago still has a live one to connect to —
         // the common case when someone switches away from a layout and back.
         // Sleeping first put a floor under every one of those.
-        for attempt in 0..100 {
-            if attempt > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            if let Some(socket) = crate::fanout::subscribe(&install, pane_id).await {
+        let deadline = std::time::Instant::now() + FANOUT_START;
+        loop {
+            if let Some(socket) = crate::fanout::subscribe(install, pane_id).await {
                 return Ok(socket);
             }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         tracing::warn!(pane = pane_id, "the pane fanout never came up");
         Err(DomainError::OperationFailed)
@@ -767,13 +776,26 @@ impl Runtime {
     }
 }
 
+/// How long a new fanout has to start listening before the pane it was
+/// piped is given up on (ov-1051).
+///
+/// The fanout is a process tmux spawns, through `sh`, from `farcoolerd`, and
+/// the first time macOS runs a binary it assesses it first: a fresh
+/// `farcoolerd` took 0.87-0.94 s to exec once and 10 ms every time after, at
+/// a load of 64. The first stream after an update starts a fresh one, and so
+/// does the first test after a build. The budget was a second, so a cold start
+/// on a busy machine ended a stream that would have worked, and at 62 s it
+/// failed the stream_end tests in full runs. The cost of waiting longer falls
+/// only on a fanout that is never coming, where 10 s is still an answer.
+const FANOUT_START: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// The binary that serves a pane fanout: `farcoolerd`, never `farcooler`.
 ///
 /// NOT `current_exe()`. `--fanout` is the daemon's flag, but this code also
 /// runs inside the CLI — `farcooler terminal stream` opens a Runtime of its
 /// own — so `current_exe()` there is the CLI, which pipes the pane into
 /// `farcooler --fanout N`, gets "unexpected argument", and never binds the
-/// socket. The stream then times out after a second and exits, which a client
+/// socket. The stream then times out after `FANOUT_START` and exits, which a client
 /// cannot tell apart from a pane that finished: keystrokes land, the pane
 /// changes, and the screen simply never updates.
 ///
@@ -1461,7 +1483,7 @@ mod fanout_binary_tests {
     /// A `~/.local/bin` with two channels installed in it holds two daemons,
     /// and the pane has to go to this one. The other one's fanout listens on a
     /// socket this daemon never subscribes to, so the stream would time out
-    /// after a second and exit — which a client cannot tell apart from a pane
+    /// after `FANOUT_START` and exit — which a client cannot tell apart from a pane
     /// that finished.
     #[test]
     fn the_pane_goes_to_this_channels_daemon() {
