@@ -45,7 +45,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, rework_history: Vec::new(),
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
@@ -71,7 +71,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             let mut record = Item { definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, rework_history: Vec::new(),
+                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
@@ -81,7 +81,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
         command => {
             let id = match command {
                 Command::Approve { item, .. } | Command::Review { item, .. }
-                | Command::Observe { item, .. } | Command::Cancel { item } | Command::Retry { item }
+                | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
                 | Command::Queue { item } | Command::Leave { item }
                 | Command::Move { item, .. } | Command::Start { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } => item,
@@ -196,7 +196,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         }
                     }
                 }
-                Command::Cancel { .. } => {
+                Command::Cancel { reason, .. } => {
                     controller(input)?;
                     // A follower goes where its lead's run goes (ov-970).
                     if item.follows.is_some() { return Err(Refusal::Phase); }
@@ -214,6 +214,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         return Err(Refusal::Phase);
                     }
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    item.cancel_reason = reason.clone();
                     if let Some(operation) = item.pending.take() {
                         item.phase = Phase::Cancelling;
                         item.stopping = Some(operation.clone());
@@ -246,7 +247,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, cancel_reason: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });

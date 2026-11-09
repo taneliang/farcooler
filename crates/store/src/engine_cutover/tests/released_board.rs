@@ -241,7 +241,7 @@ fn released_engine_moves_the_card_it_owns_and_leaves_the_catalog_as_it_was() {
     let before = catalog();
     let cancel = farcooler_workflow::Input { schema: 1, id: "c".into(), workspace: r.ws.to_string(), expected_revision: 1, epoch: 1,
         source: "controller".into(), source_sequence: 2, now_ms: 1, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),
-        command: farcooler_workflow::Command::Cancel { item: s.get_task(r.owned).unwrap().key } };
+        command: farcooler_workflow::Command::Cancel { item: s.get_task(r.owned).unwrap().key , reason: None } };
     assert!(s.workflow_apply(&cancel).unwrap().result.is_ok());
     assert_eq!(status(r.owned), TaskStatus::Cancelled);
     let stage: String = s.conn().query_row("SELECT stage FROM ticket_lines WHERE task_id=?1", [r.owned.as_bytes().as_slice()], |row| row.get(0)).unwrap();

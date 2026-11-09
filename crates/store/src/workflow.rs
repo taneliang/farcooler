@@ -100,6 +100,16 @@ impl Store {
         Ok(receipt)
     }
 
+    /// Whether `workspace` names a board that was deleted: a key that is a board id with no board behind it.
+    /// Other keys are fixtures' and hold (the rule `named_by_a_workflow` uses, ov-1045). So does every key in a
+    /// store with no boards at all: a real one always has Main, and a runtime opened alone has none to compare with.
+    pub fn workflow_board_deleted(&self, workspace: &str) -> Result<bool> {
+        let Ok(id) = workspace.parse::<uuid::Uuid>() else { return Ok(false) };
+        let conn = self.conn();
+        let boards: i64 = conn.query_row("SELECT count(*) FROM workspaces", [], |r| r.get(0))?;
+        let found: Option<i64> = conn.query_row("SELECT 1 FROM workspaces WHERE id = ?1", [crate::models::uuid_blob(id)], |r| r.get(0)).optional()?;
+        Ok(boards > 0 && found.is_none())
+    }
     /// Recovery discovers persisted aggregates without a connected controller.
     pub fn workflow_workspaces(&self) -> Result<Vec<String>> {
         let conn = self.conn();
@@ -235,7 +245,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: O
             .query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let target=match &input.command {
             Command::Enqueue {resource,..} | Command::Start {resource,..} | Command::Reopen {resource,..} => Some(resource.as_str()),
-            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
+            Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
                 |Command::SendBack {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::Advance => None,
         };

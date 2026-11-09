@@ -266,7 +266,7 @@ pub fn action_with_reason(state: &State, auth: &Capabilities, style: Style, item
         ActionKind::AcceptReview | ActionKind::RequestRework | ActionKind::RejectReview => Intent::Command(Command::Review {
             item: item.into(), run: card.run.clone(), evidence: card.latest_evidence.clone().ok_or(Error::Unavailable)?,
             passed: requested.kind == ActionKind::AcceptReview, reason: reason.map(str::to_owned) }),
-        ActionKind::Cancel => Intent::Command(Command::Cancel { item: item.into() }),
+        ActionKind::Cancel => Intent::Command(Command::Cancel { item: item.into() , reason: None }),
     })
 }
 

@@ -183,7 +183,7 @@ fn a_member_whose_resource_was_taken_while_it_waited_queues_for_it() {
     assert_eq!(log.state.items["a"].pending, None);
     assert_eq!(log.stage("a"), "tidy");
     // It goes when the resource frees: drive `other` to its end of life.
-    log.run(Command::Cancel { item: "other".into() }, Grant::Controller);
+    log.run(Command::Cancel { item: "other".into() , reason: None }, Grant::Controller);
     let stop = log.state.items["other"].stopping.clone().unwrap();
     log.outcome("other", Outcome::Stopped { operation: stop, receipt: "quiet".into() });
     assert_eq!(log.state.items["a"].phase, Phase::Running);
@@ -221,7 +221,7 @@ fn a_cancelled_group_drops_its_members_and_an_unrouted_drop_fails_them() {
     let mut log = Log::new();
     log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
-    log.run(Command::Cancel { item: group.clone() }, Grant::Controller);
+    log.run(Command::Cancel { item: group.clone() , reason: None }, Grant::Controller);
     assert_eq!(log.state.items[&group].phase, Phase::Cancelling);
     assert_eq!(log.state.items["a"].phase, Phase::Joined, "not until it has really stopped");
     let stop = log.state.items[&group].stopping.clone().unwrap();
@@ -303,16 +303,16 @@ fn cancelling_a_waiting_member_removes_it_and_cancelling_a_departed_one_is_refus
     for t in ["x", "a"] { log.join_group(t); }
     log.queue("x"); log.queue("a");
     let waiting = log.group_of("a");
-    log.run(Command::Cancel { item: "a".into() }, Grant::Controller);
+    log.run(Command::Cancel { item: "a".into() , reason: None }, Grant::Controller);
     assert_eq!(log.state.items["a"].phase, Phase::Cancelled);
     assert_eq!(log.state.items[&waiting].phase, Phase::Cancelled, "no members left");
-    assert_eq!(log.try_run(Command::Cancel { item: "x".into() }, Grant::Controller).unwrap_err(), Refusal::Phase);
+    assert_eq!(log.try_run(Command::Cancel { item: "x".into() , reason: None }, Grant::Controller).unwrap_err(), Refusal::Phase);
 }
 #[test]
 fn a_member_of_a_group_in_flight_cannot_leave_by_any_route() {
     let mut log = Log::new();
     log.join_group("a"); log.queue("a");
-    assert!(log.try_run(Command::Cancel { item: "a".into() }, Grant::Controller).is_err());
+    assert!(log.try_run(Command::Cancel { item: "a".into() , reason: None }, Grant::Controller).is_err());
     assert!(log.try_run(Command::Retry { item: "a".into() }, Grant::Controller).is_err());
 }
 #[test]
@@ -345,7 +345,7 @@ fn queueing_that_would_open_a_group_past_the_item_cap_is_refused_and_nothing_is_
     fill(&mut log, 1024);
     assert_eq!(log.try_run(Command::Queue { item: "a".into() }, Grant::Controller).unwrap_err(), Refusal::Limit);
     // The workspace still takes commands.
-    log.run(Command::Cancel { item: "filler-0".into() }, Grant::Controller);
+    log.run(Command::Cancel { item: "filler-0".into() , reason: None }, Grant::Controller);
 }
 #[test]
 fn a_split_with_no_room_for_a_new_group_takes_its_fallback() {
@@ -599,7 +599,7 @@ fn a_group_cannot_be_cancelled_while_it_pushes_or_after_it_has() {
     let mut log = Log::new();
     let group = verb_group(&mut log, verb_ticket());
     walk_to(&mut log, &group, "push");
-    let cancel = Command::Cancel { item: group.clone() };
+    let cancel = Command::Cancel { item: group.clone() , reason: None };
     assert_eq!(log.try_run(cancel.clone(), Grant::Controller).unwrap_err(), Refusal::Phase, "the push may be in flight");
     log.pass(&group);
     assert_eq!(log.stage(&group), "ci");
@@ -608,7 +608,7 @@ fn a_group_cannot_be_cancelled_while_it_pushes_or_after_it_has() {
     let mut early = Log::new();
     let group = verb_group(&mut early, verb_ticket());
     walk_to(&mut early, &group, "gate");
-    early.run(Command::Cancel { item: group }, Grant::Controller);
+    early.run(Command::Cancel { item: group , reason: None }, Grant::Controller);
 }
 #[test]
 fn a_wait_that_a_restart_interrupted_looks_again_spends_no_attempt_and_keeps_its_patience() {

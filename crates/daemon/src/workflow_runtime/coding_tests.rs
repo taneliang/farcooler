@@ -167,7 +167,7 @@ async fn workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncert
     assert!(!runtime.root.join("receipts").join(format!("{}.output", digest(&binding.effect))).exists());
     let state = runtime.state("w").unwrap().unwrap();
     runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(), expected_revision: state.revision,
-        sequence: 2, command: Command::Cancel { item: "one".into() } }, 201).unwrap();
+        sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 201).unwrap();
     runtime.pump(202).await.unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
 }
@@ -185,7 +185,7 @@ async fn workflow_coding_cancel_running_owned_process_settles_original_then_stop
     }).await.unwrap();
     let state = handle.state("w").await.unwrap().unwrap();
     let result = handle.submit(&controller, Request { id: "cancel".into(), workspace: "w".into(),
-        expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into() } }, 200).await.unwrap();
+        expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 200).await.unwrap();
     assert!(result.result.is_ok());
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -342,7 +342,7 @@ async fn workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_f
     let original = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap();
     let state = runtime.state("w").unwrap().unwrap();
     runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(), expected_revision: state.revision,
-        sequence: 2, command: Command::Cancel { item: "one".into() } }, 100).unwrap();
+        sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 100).unwrap();
     runtime.pump(101).await.unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
     let path = runtime.root.join("receipts").join(format!("{}.provider.json", digest(&original.effect)));

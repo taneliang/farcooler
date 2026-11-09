@@ -148,7 +148,7 @@ fn workflow_uncertain_boundary_reopen_and_cancellation_holds_resource() {
     assert_eq!(store.workflow_apply(&enqueue("other", "resource")).unwrap().result, Err(Refusal::Resource));
     let mut cancel = enqueue("workspace", "resource");
     cancel.id = "cancel".into(); cancel.expected_revision = 2; cancel.source_sequence = 2;
-    cancel.command = Command::Cancel { item: "item".into() };
+    cancel.command = Command::Cancel { item: "item".into() , reason: None };
     store.workflow_apply(&cancel).unwrap();
     let state = store.workflow_state("workspace").unwrap().unwrap();
     assert_eq!(state.items["item"].phase, Phase::Cancelling);
@@ -216,7 +216,7 @@ fn workflow_claim_dispatch_crash_boundaries_and_generation() {
     assert!(store.workflow_claim_effect("workspace", &effect, "reconciler", 2, 1, 5000, 6000).unwrap().is_none());
     let mut cancel = enqueue("workspace", "resource");
     cancel.id = "cancel".into(); cancel.expected_revision = 2; cancel.source_sequence = 2;
-    cancel.command = Command::Cancel { item: "item".into() };
+    cancel.command = Command::Cancel { item: "item".into() , reason: None };
     store.workflow_apply(&cancel).unwrap();
     let state = store.workflow_state("workspace").unwrap().unwrap();
     let stop = state.items["item"].pending.clone().unwrap();

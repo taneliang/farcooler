@@ -97,7 +97,7 @@ fn workflow_uncertainty_cancel_and_late_result_fences() {
     assert_eq!(state.items["item"].phase, Phase::Uncertain);
     assert!(owns_resource(&state.items["item"]));
     assert_eq!(step(&state, &observe(&state, Outcome::SafeFailure)), Err(Refusal::Phase));
-    let cancel = input(&state, Command::Cancel { item: "item".into() }, Grant::Controller);
+    let cancel = input(&state, Command::Cancel { item: "item".into() , reason: None }, Grant::Controller);
     let transition = step(&state, &cancel).unwrap();
     assert!(matches!(transition.effects[0].kind, EffectKind::Stop { .. }));
     state = transition.state;
@@ -185,9 +185,9 @@ fn a_failed_run_can_be_cancelled_by_its_controller() {
     }
     for _ in 0..2 { state = step(&state, &observe(&state, Outcome::SafeFailure)).unwrap().state; }
     assert_eq!(state.items["item"].phase, Phase::Failed);
-    let cancel = input(&state, Command::Cancel { item: "item".into() }, Grant::Controller);
+    let cancel = input(&state, Command::Cancel { item: "item".into() , reason: None }, Grant::Controller);
     assert_eq!(step(&state, &cancel).unwrap().state.items["item"].phase, Phase::Cancelled);
-    let nobody = input(&state, Command::Cancel { item: "item".into() }, Grant::Decision { principal: "owner".into() });
+    let nobody = input(&state, Command::Cancel { item: "item".into() , reason: None }, Grant::Decision { principal: "owner".into() });
     assert!(step(&state, &nobody).is_err(), "only a controller may");
 }
 #[test]
@@ -226,7 +226,7 @@ fn workflow_seeded_adversarial_replay_properties() {
                     observe(&state, match rng % 7 { 0 => Outcome::SafeFailure, 1 => Outcome::Uncertain,
                         2 => Outcome::Rejected(evidence(&state.items["item"])),
                         _ => Outcome::Passed(evidence(&state.items["item"])) })
-                } else { input(&state, Command::Cancel { item: "item".into() }, Grant::Controller) };
+                } else { input(&state, Command::Cancel { item: "item".into() , reason: None }, Grant::Controller) };
             event.id = format!("seed-{seed}-{n}");
             match rng % 11 { 0 => event.epoch += 1, 1 => event.expected_revision += 1,
                 2 => event.grant = Grant::Decision { principal: "intruder".into() }, _ => {} }
@@ -356,7 +356,7 @@ fn workflow_blocked_shared_resource_does_not_reserve_and_releases_one_waiter() {
     }
     assert_eq!(state.items["dependent-a"].phase, Phase::WaitingApproval);
     assert_eq!(state.items["dependent-b"].phase, Phase::Blocked);
-    let cancel = input(&state, Command::Cancel { item: "dependent-a".into() }, Grant::Controller);
+    let cancel = input(&state, Command::Cancel { item: "dependent-a".into() , reason: None }, Grant::Controller);
     state = step(&state, &cancel).unwrap().state;
     assert_eq!(state.items["dependent-b"].phase, Phase::WaitingApproval);
     // Blocked items remain cancellable even though they hold no resource authority.
@@ -365,7 +365,7 @@ fn workflow_blocked_shared_resource_does_not_reserve_and_releases_one_waiter() {
         *item = "blocked".into(); dependencies.insert("dependent-b".into());
     }
     state = step(&state, &add).unwrap().state;
-    let cancel = input(&state, Command::Cancel { item: "blocked".into() }, Grant::Controller);
+    let cancel = input(&state, Command::Cancel { item: "blocked".into() , reason: None }, Grant::Controller);
     assert_eq!(step(&state, &cancel).unwrap().state.items["blocked"].phase, Phase::Cancelled);
 }
 

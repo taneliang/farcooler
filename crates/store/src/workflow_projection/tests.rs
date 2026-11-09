@@ -68,7 +68,7 @@ fn a_run_waiting_on_a_person_asks_for_one_and_cancelling_it_drops_the_card() {
     let b = board();
     enqueue(&b, Definition::tracker("owner"));
     assert_eq!(seen(&b), ("needs_decision".into(), Some("needs_you".into())));
-    let r = b.store.workflow_apply(&input(&b, "cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() })).unwrap();
+    let r = b.store.workflow_apply(&input(&b, "cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() , reason: None })).unwrap();
     assert!(r.result.is_ok());
     assert_eq!(seen(&b), ("cancelled".into(), Some("dropped".into())));
 }
@@ -115,7 +115,7 @@ fn an_engine_move_is_told_once_after_the_commit_and_a_replay_tells_nothing() {
     b.store.workflow_apply(&i).unwrap();
     assert_eq!(told.lock().unwrap().len(), 1, "a replay moves nothing, so tells nothing");
     // A refused command projects nothing.
-    let again = input(&b, "dup", 1, Grant::Controller, Command::Cancel { item: "no-such".into() });
+    let again = input(&b, "dup", 1, Grant::Controller, Command::Cancel { item: "no-such".into() , reason: None });
     let _ = b.store.workflow_apply(&again);
     assert_eq!(told.lock().unwrap().len(), 1);
 }
@@ -124,7 +124,7 @@ fn an_engine_move_is_told_once_after_the_commit_and_a_replay_tells_nothing() {
 fn an_ended_run_refuses_a_hand_move_without_promising_the_card_comes_free() {
     let b = board();
     enqueue(&b, Definition::tracker("owner"));
-    b.store.workflow_apply(&input(&b, "cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() })).unwrap();
+    b.store.workflow_apply(&input(&b, "cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() , reason: None })).unwrap();
     let e = b.store.set_task_status(b.task.id, TaskStatus::InProgress, Actor::User).unwrap_err();
     assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned_ended" }), "{e:?}");
     assert!(!e.to_string().to_lowercase().contains("cancel"), "cancelling is what ended it: {e}");
@@ -153,7 +153,7 @@ fn a_failed_run_is_on_the_needs_you_list_until_the_controller_cancels_it() {
     let e = b.store.set_task_status(b.task.id, TaskStatus::Done, Actor::User).unwrap_err();
     assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned" }), "{e:?}");
     // The orchestrator's way out is the same Cancel it uses on any run.
-    b.store.workflow_apply(&input(&b, "cancel", revision, Grant::Controller, Command::Cancel { item: b.task.key.clone() })).unwrap();
+    b.store.workflow_apply(&input(&b, "cancel", revision, Grant::Controller, Command::Cancel { item: b.task.key.clone() , reason: None })).unwrap();
     assert_eq!(seen(&b), ("cancelled".into(), Some("dropped".into())));
     let e = b.store.set_task_status(b.task.id, TaskStatus::Done, Actor::User).unwrap_err();
     assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned_ended" }), "{e:?}");
@@ -308,7 +308,7 @@ fn a_card_a_persons_command_moves_names_them() {
         let b = board();
         enqueue(&b, Definition::tracker("owner"));
         assert!(status_changes(&b).iter().all(|n| n.actor == Actor::Runner), "the run's own moves are the runner's");
-        let cancel = input(&b, "wire:x:cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() });
+        let cancel = input(&b, "wire:x:cancel", 1, Grant::Controller, Command::Cancel { item: b.task.key.clone() , reason: None });
         let receipt = b.store.workflow_wire_write_by(&b.ws.to_string(), "wire:x:cancel", "cancel", Some(&actor), Write::Apply(&cancel)).unwrap();
         assert!(receipt.result.is_ok());
         assert_eq!(receipt.actor.as_ref(), Some(&actor));

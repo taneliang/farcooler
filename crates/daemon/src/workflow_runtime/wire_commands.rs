@@ -137,7 +137,7 @@ impl Runtime {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
-                        let input = input(Command::Cancel { item:item.clone() },Grant::Controller);
+                        let input = input(Command::Cancel { item:item.clone() , reason: None },Grant::Controller);
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }

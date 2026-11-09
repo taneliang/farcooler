@@ -85,6 +85,9 @@ pub struct Item {
     /// A run's other tickets, which follow it (ov-970). One agent, one branch, one pull request for all of them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub followers: Vec<String>,
+    /// Why the run was cancelled, when the cancel gave a reason (ov-1047): the board it ran on was deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel_reason: Option<String>,
 }
 /// One send-back: who asked (the input), when (the revision), from which step to which, on which run, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,7 +190,8 @@ pub enum Command {
     Review { item: String, run: String, evidence: Evidence, passed: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
     Observe { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
-    Cancel { item: String },
+    /// `reason` is why, kept on the run when the runtime or a person gives one (ov-1047).
+    Cancel { item: String, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
     /// A controller runs a failed item's step again, within `MAX_RETRIES`.
     Retry { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.

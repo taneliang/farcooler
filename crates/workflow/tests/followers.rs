@@ -62,7 +62,7 @@ fn one_run_carries_three_tickets_and_they_land_with_it() {
     assert_eq!(log.effects[0].with, ["ov-2", "ov-3"], "the build knows every ticket");
     // Its followers go where it goes: moving or starting one alone is refused.
     assert_eq!(log.try_run(Command::Move { item: "ov-2".into(), to: "done".into() }, Grant::Controller), Err(Refusal::Phase));
-    assert_eq!(log.try_run(Command::Cancel { item: "ov-2".into() }, Grant::Controller), Err(Refusal::Phase));
+    assert_eq!(log.try_run(Command::Cancel { item: "ov-2".into() , reason: None }, Grant::Controller), Err(Refusal::Phase));
     assert_eq!(log.start("ov-2", &[]), Err(Refusal::Phase));
     for outcome in [ev("c1"), ev("c1"), ev("c1")] { log.observe("ov-1", Outcome::Passed(outcome)); }
     for t in ["ov-1", "ov-2", "ov-3"] { assert_eq!(log.phase(t), Phase::Done, "{t}"); }
@@ -84,7 +84,7 @@ fn a_cancelled_run_hands_its_followers_back_and_a_failed_one_keeps_them() {
     assert_eq!((log.phase("ov-1"), log.phase("ov-2")), (Phase::Failed, Phase::WaitingApproval));
     assert_eq!(log.state.items["ov-2"].follows.as_deref(), Some("ov-1"), "a failed run still has its tickets");
     let fence = log.state.items["ov-2"].fence;
-    log.try_run(Command::Cancel { item: "ov-1".into() }, Grant::Controller).unwrap();
+    log.try_run(Command::Cancel { item: "ov-1".into() , reason: None }, Grant::Controller).unwrap();
     // Cancelling the run drops its own ticket. The one it carried goes back to rest, where it was before.
     assert_eq!((log.phase("ov-1"), log.phase("ov-2")), (Phase::Cancelled, Phase::WaitingApproval));
     let ov2 = &log.state.items["ov-2"];
@@ -114,6 +114,6 @@ fn a_ticket_is_never_claimed_by_two_leads() {
     log.start("ov-1", &["ov-2"]).unwrap();
     // A state where a second lead names a ticket that follows the first is refused before any command reads it.
     log.state.items.get_mut("ov-3").unwrap().followers = vec!["ov-2".into()];
-    assert_eq!(log.try_run(Command::Cancel { item: "ov-1".into() }, Grant::Controller), Err(Refusal::Invalid));
+    assert_eq!(log.try_run(Command::Cancel { item: "ov-1".into() , reason: None }, Grant::Controller), Err(Refusal::Invalid));
     // (A closed lead's list is history, and its tickets have let go: `one_run_carries_three_tickets…` goes on past one.)
 }

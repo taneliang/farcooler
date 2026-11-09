@@ -433,6 +433,17 @@ impl Runtime {
                 self.internal(workspace, Command::Advance, Grant::Controller, now_ms)?;
             }
         }
+        // Nobody can decide a run on a board that was deleted, so it stops, with the reason on the run (ov-1047).
+        for workspace in &workspaces {
+            if !self.store.workflow_board_deleted(workspace)? { continue; }
+            let Some(state) = self.state(workspace)? else { continue };
+            for (id, item) in state.items.iter().filter(|(_, i)| !matches!(i.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)) {
+                let reason = Some("The board this ran on was deleted.".to_string());
+                if let Err(error) = self.internal(workspace, Command::Cancel { item: id.clone(), reason }, Grant::Controller, now_ms) {
+                    tracing::warn!(%workspace, item = %id, phase = ?item.phase, %error, "a run on a deleted board could not be cancelled");
+                }
+            }
+        }
         let mut stopping = false;
         let mut scan = true;
         loop {

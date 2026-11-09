@@ -14,7 +14,7 @@ pub(super) fn enqueue(runtime: &mut Runtime, workspace: &str, item: &str, defini
     let request = Request { id: format!("enqueue-{item}"), workspace: workspace.into(), expected_revision: revision,
         sequence, command: Command::Enqueue { item: item.into(), definition, policy_pin: "policy/v1".into(),
             resource: runtime.resource().into(), dependencies: BTreeSet::new(), initial_candidate: None } };
-    assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
+    let receipt = runtime.submit(&controller, request, 1).unwrap(); assert!(receipt.result.is_ok(), "{:?}", receipt.result);
 }
 pub(super) async fn finish(runtime: &mut Runtime, workspace: &str) -> State {
     for time in 2..40 {
@@ -159,7 +159,7 @@ async fn workflow_runtime_cancel_requires_original_settlement() {
         let controller = runtime.controller();
         let revision = runtime.state("w").unwrap().unwrap().revision;
         assert!(runtime.submit(&controller, Request { id: "cancel".into(), workspace: "w".into(),
-            expected_revision: revision, sequence: 2, command: Command::Cancel { item: "coding".into() } }, 3)
+            expected_revision: revision, sequence: 2, command: Command::Cancel { item: "coding".into() , reason: None } }, 3)
             .unwrap().result.is_ok());
         drop(runtime);
         let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
@@ -215,7 +215,7 @@ fn enqueue_tracker(runtime: &mut Runtime, workspace: &str, item: &str, dependenc
         command: Command::Enqueue { item: item.into(), definition, policy_pin: "policy/v1".into(),
             resource: runtime.resource().into(), dependencies: dependencies.iter().map(|d| (*d).into()).collect(),
             initial_candidate: Some("checklist:exact-revision".into()) } };
-    assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
+    let receipt = runtime.submit(&controller, request, 1).unwrap(); assert!(receipt.result.is_ok(), "{:?}", receipt.result);
 }
 
 #[tokio::test]
@@ -382,7 +382,7 @@ async fn workflow_runtime_owned_inbox_approval_cancel_and_idle() {
                 assert_eq!(handle.decide(&owner, stale, 20).await.unwrap().result, Err(Refusal::Stale));
                 if cancel {
                     let request = Request { id: "inbox-cancel".into(), sequence: 2,
-                        command: Command::Cancel { item: "coding".into() }, ..request };
+                        command: Command::Cancel { item: "coding".into() , reason: None }, ..request };
                     assert!(handle.submit(&foreign_controller, request.clone(), 20).await.is_err());
                     assert!(handle.submit(&controller, request, 20).await.unwrap().result.is_ok());
                 } else {
@@ -530,4 +530,29 @@ async fn workflow_runtime_admitted_base_is_never_recreated() {
     assert!(std::fs::read(path).unwrap().is_empty());
     assert_eq!(runtime.store.workflow_outbox("w").unwrap()[0].dispatch_state, "uncertain");
     assert!(!runtime.tree(&binding).exists());
+}
+
+/// ov-1047: nobody can decide a run on a board that was deleted, so the next sweep cancels it and says why on the run.
+/// A fixture's key (not a board id) is never read as a deleted board.
+#[tokio::test]
+async fn workflow_runtime_cancels_runs_on_a_deleted_board_with_a_reason() {
+    let (_dir, mut runtime) = fixture().await;
+    // A store that has boards: one real board, so a board id with no row is a deleted one.
+    let host = Uuid::now_v7();
+    let root = runtime.store.create_repository_root(host, "/repos/ov-1047", 0).unwrap();
+    let repo = runtime.store.create_repository(host, root.id, "r", "/repos/ov-1047/.git", "").unwrap();
+    runtime.store.ensure_main_workspace(repo.id).unwrap();
+    let gone = Uuid::now_v7().to_string();
+    enqueue(&mut runtime, &gone, "coding", coding_definition(true));
+    let controller = runtime.controller();
+    let request = Request { id: "enqueue-kept".into(), workspace: "w".into(), expected_revision: 0, sequence: 1,
+        command: Command::Enqueue { item: "coding".into(), definition: coding_definition(true), policy_pin: "policy/v1".into(),
+            resource: Exec::item_resource("w", "coding"), dependencies: BTreeSet::new(), initial_candidate: None } };
+    assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
+    runtime.pump(2).await.unwrap();
+    let item = runtime.state(&gone).unwrap().unwrap().items["coding"].clone();
+    assert!(matches!(item.phase, Phase::Cancelled | Phase::Cancelling), "{:?}", item.phase);
+    assert_eq!(item.cancel_reason.as_deref(), Some("The board this ran on was deleted."));
+    let kept = runtime.state("w").unwrap().unwrap().items["coding"].clone();
+    assert!(kept.cancel_reason.is_none() && !matches!(kept.phase, Phase::Cancelled | Phase::Cancelling), "{:?}", kept.phase);
 }

@@ -251,7 +251,7 @@ fn only_a_controller_can_retry_and_only_a_failed_run() {
     assert_eq!(step(&state, &other), Err(Refusal::Unauthorized));
     let running = start(Definition::coding());
     assert_eq!(step(&running, &retry(&running)), Err(Refusal::Phase));
-    let cancelled = go(state.clone(), input(&state, Command::Cancel { item: "item".into() }, Grant::Controller));
+    let cancelled = go(state.clone(), input(&state, Command::Cancel { item: "item".into() , reason: None }, Grant::Controller));
     assert_eq!(step(&cancelled, &retry(&cancelled)), Err(Refusal::Phase));
 }
 #[test]

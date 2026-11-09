@@ -223,7 +223,7 @@ async fn removing_the_member_a_run_waits_on_keeps_it_waiting_and_says_so_on_its_
     assert!(matches!(svc.store.member("alice"), Err(DomainError::NotFound)), "nothing written");
     // Once the run is cancelled, nothing names her, and the handle is free.
     let cancel = farcooler_workflow::Input { id: "c".into(), expected_revision: 1, source_sequence: 2,
-        command: farcooler_workflow::Command::Cancel { item: card.key.clone() }, ..input };
+        command: farcooler_workflow::Command::Cancel { item: card.key.clone() , reason: None }, ..input };
     assert!(svc.store.workflow_apply(&cancel).unwrap().result.is_ok());
     assert_eq!(waiting(&svc), Phase::Cancelled);
     svc.store.set_member("alice", "Another Alice", &[]).unwrap();

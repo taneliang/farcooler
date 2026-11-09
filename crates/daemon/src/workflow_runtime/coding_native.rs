@@ -494,7 +494,7 @@ mod recovery_tests {
         assert_eq!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
         let state = runtime.state("w").unwrap().unwrap();
         runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
-            expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into() } }, 201).unwrap();
+            expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 201).unwrap();
         assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Cancelled);
         assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
     }
@@ -553,7 +553,7 @@ mod recovery_tests {
             assert_eq!(state.items["one"].phase,Phase::Uncertain,"{drift}");
             assert_eq!(host.0.pane_life(&owner.pane,id).await.unwrap(),farcooler_tmux::PaneLife::Live);
             runtime.submit(&runtime.controller(),Request { id:"cancel".into(),workspace:workspace.clone(),
-                expected_revision:state.revision,sequence:2,command:Command::Cancel { item:"one".into() } },201).unwrap();
+                expected_revision:state.revision,sequence:2,command:Command::Cancel { item:"one".into() , reason: None } },201).unwrap();
             assert_eq!(finish(&mut runtime,&workspace).await.items["one"].phase,Phase::Cancelled,"{drift}");
             assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(),Outcome::SafeFailure);
             assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["one"].policy_pin,pin);

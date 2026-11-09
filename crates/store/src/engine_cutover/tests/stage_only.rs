@@ -499,7 +499,7 @@ fn a_followers_line_ends_where_its_run_ends() {
         let item = s.workflow_state(&b.ws.to_string()).unwrap().unwrap().items[&b.ticket.key].clone();
         let (grant, command) = if landed {
             (Grant::Decision { principal: "owner".into() }, Command::Approve { item: b.ticket.key.clone(), run: item.run, pin: item.pin, candidate: item.candidate })
-        } else { (Grant::Controller, Command::Cancel { item: b.ticket.key.clone() }) };
+        } else { (Grant::Controller, Command::Cancel { item: b.ticket.key.clone() , reason: None }) };
         assert!(b.apply_as("end", grant, command).result.is_ok(), "{phase:?}: the run ends");
         if landed {
             // Approved, the checklist runs and passes.

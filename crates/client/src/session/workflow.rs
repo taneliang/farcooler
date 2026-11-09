@@ -87,7 +87,7 @@ fn mutation(workspace: Uuid, command: Command, card: cards::RunCard,
         Command::Approve { item, run, pin, candidate } => wire::Action::Approve { mutation, item, run, pin, candidate },
         Command::Review { item, run, evidence, passed, reason } => wire::Action::Review {
             mutation, item, run, pin: card.definition_pin.clone(), evidence, passed, reason },
-        Command::Cancel { item } => wire::Action::Cancel { mutation, item, run: card.run.clone(), pin: card.definition_pin.clone() },
+        Command::Cancel { item, .. } => wire::Action::Cancel { mutation, item, run: card.run.clone(), pin: card.definition_pin.clone() },
         _ => return Err(invalid("unsupported workflow intent")),
     };
     let json = serde_json::to_string(&action).map_err(|e| invalid(e.to_string()))?;
