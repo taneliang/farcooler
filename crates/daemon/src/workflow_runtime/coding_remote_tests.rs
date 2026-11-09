@@ -341,3 +341,33 @@ async fn an_alternate_refs_command_in_the_shared_config_runs_on_no_fetch_into_it
     until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
     assert!(!marker.exists(), "the shared config's alternate refs command ran");
 }
+
+/// ov-1058: the shared repository's own main is weeks behind the remote's, as a checkout nobody pulls is. The batch
+/// still lands on the remote's main as it is now: the base step fetches it, the fold builds on it, and neither the
+/// configured base nor the local main it was read from goes anywhere near the push.
+#[tokio::test]
+async fn a_batch_folds_onto_the_remotes_main_when_the_local_main_is_stale() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let config = r.runtime.coding.clone().unwrap();
+    // Another lander moves the remote on; this repository never hears of it.
+    let other = r._dir.path().join("elsewhere");
+    plain_git(r._dir.path(), &["clone", "--quiet", r.bare.to_str().unwrap(), other.to_str().unwrap()]);
+    std::fs::write(other.join("landed-elsewhere.txt"), "newer main\n").unwrap();
+    plain_git(&other, &["add", "landed-elsewhere.txt"]);
+    plain_git(&other, &["-c", "user.name=T", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "newer main"]);
+    plain_git(&other, &["-c", "core.hooksPath=/dev/null", "push", "--quiet", "origin", "HEAD:refs/heads/main"]);
+    let moved = head(&r.bare).await;
+    let local = adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap();
+    assert_eq!(local, config.base, "the configured base is the local main");
+    assert_ne!(moved, config.base, "the remote is ahead of it");
+    assert!(adapters::git(&config.repository, &["cat-file", "-e", &format!("{moved}^{{commit}}")]).await.is_err(), "and the local repository doesn't have it");
+    at_join(&mut r.runtime, "one", &definition).await;
+    assert!(command(&r.runtime, Command::Queue { item: "one".into() }).result.is_ok());
+    until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    let pushed = head(&r.bare).await;
+    assert_eq!(adapters::git(&r.bare, &["rev-parse", &format!("{pushed}^")]).await.unwrap(), moved, "the batch built on the remote's main, not the stale one");
+    assert_eq!(fact(&r.runtime, StageKind::Fold)["detail"]["base"], moved.as_str(), "{}", fact(&r.runtime, StageKind::Fold));
+    assert!(adapters::git(&r.bare, &["cat-file", "-e", &format!("{pushed}:landed-elsewhere.txt")]).await.is_ok(), "the other lander's work is kept");
+    assert_eq!(adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap(), local, "the local main is left as it was");
+}
