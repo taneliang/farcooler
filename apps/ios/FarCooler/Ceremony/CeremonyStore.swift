@@ -1147,7 +1147,10 @@ final class CeremonyStore: ObservableObject {
         case .payload(let data):
             code = String(decoding: data, as: UTF8.self)
             addressOnlyNote = Self.addressOnlyNote(granting: granting, reply: data)
-            phase = .showingManifest
+            phase = .showingManifest            // A teammate's browser can't scan the reply (ov-778): its offer
+            // names a reply key, so the reply is sealed to it and posted once,
+            // for the teammate's account, as for one's own browser (ov-770).
+            sealedReply.send(offer: rescanned, reply: data, heldFor: scannedAt.map { Date().timeIntervalSince($0) } ?? .infinity)
         }
     }
 
