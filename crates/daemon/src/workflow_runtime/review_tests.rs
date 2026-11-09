@@ -65,6 +65,13 @@ async fn workflow_watch_is_a_persons_not_an_agents() {
         let reply = factory(&svc, &runtime, local(), Some(pid)).handle(watch).await;
         assert_eq!(refused(&reply), word, "orchestrator: {orchestrator}");
     }
+    // L10: a caller whose process cannot be read is never taken for a person either, so a seat check that only
+    // turns agents away (or none) lets it watch.
+    let mut watch = farcooler_transport::request("workflow.watch");
+    watch.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
+    watch.payload = Some(pb::request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: r#"{"item":"ov-9"}"#.into() }));
+    let reply = factory(&svc, &runtime, local(), Some(crate::caller_seat::UNKNOWN_PID)).handle(watch).await;
+    assert_eq!(refused(&reply), "scope-denied", "an unreadable caller");
 }
 
 /// L3: a receipt answered again to someone other than its sender names who sent it, never their device or pane.
