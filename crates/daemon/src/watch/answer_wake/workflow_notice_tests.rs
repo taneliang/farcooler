@@ -180,7 +180,15 @@ async fn assert_group_gone(ids:[i32;4]) {
     }
     println!("owned cleanup receipt: leader={} pgid={} descendant={} descendant_pgid={}: all ESRCH",ids[0],ids[1],ids[2],ids[3]);
 }
-const SHORT_BOUND_MS:u64=1500;
+/// Waits until the fixture queue has logged `runs` starts, then expires that try's bound.
+async fn expire_after_runs(log:&std::path::Path,runs:usize,expiry:&tokio::sync::Semaphore) {
+    tokio::time::timeout(Duration::from_secs(60),async {
+        while std::fs::read_to_string(log).map(|text|text.lines().count()).unwrap_or(0)<runs {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("the queue started");
+    expiry.add_permits(1);
+}
 /// A queue that stalls past the bound on its first run only (ov-1044).
 fn slow_first_queue(b:&Board,always:bool)->(PathBuf,PathBuf) {
     let (program,log)=queue(b,0);
@@ -194,7 +202,10 @@ async fn deliver_slow(always:bool)->(String,usize) {
     let notice=b.svc.store.workflow_pending_notices(0).unwrap()[0].1.notice.clone();
     let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
     let (_keep,mut stop)=tokio::sync::watch::channel(false);
-    notices::TEST_QUEUE_MS.scope(SHORT_BOUND_MS,notices::invoke(&b.svc.store,&b.svc.inventory,&notice,proof,&mut stop)).await.unwrap();
+    let expiry=Arc::new(tokio::sync::Semaphore::new(0));
+    let invoke=notices::TEST_QUEUE_EXPIRY.scope(expiry.clone(),notices::invoke(&b.svc.store,&b.svc.inventory,&notice,proof,&mut stop));
+    let grants=async { expire_after_runs(&log,1,&expiry).await; if always { expire_after_runs(&log,2,&expiry).await; } };
+    let (done,())=tokio::join!(invoke,grants);done.unwrap();
     let d=b.svc.store.workflow_notice_delivery(&notice.id).unwrap().unwrap();let state=d.state;
     (state,std::fs::read_to_string(&log).unwrap().lines().count())
 }
@@ -216,9 +227,9 @@ async fn owned_descendant(mode: &str) {
     let proof=TEST_PROGRAM.scope(program,endpoint(&b,&notice)).await;
     let id=notice.id.clone();
     let (panic_send,panic_recv)=tokio::sync::oneshot::channel::<()>();
-    // The timeout mode stalls through the retry too, so it runs a short bound; the rest use the test default.
-    let bound=if mode=="timeout" {SHORT_BOUND_MS} else {notices::TEST_QUEUE_DEFAULT_MS};
-    let owner=tokio::spawn(notices::TEST_QUEUE_MS.scope(bound,async move {
+    // The timeout mode stalls through the retry too; its bound expires by permit, once per try.
+    let expiry=Arc::new(tokio::sync::Semaphore::new(0));
+    let owner=tokio::spawn(notices::TEST_QUEUE_EXPIRY.scope(expiry.clone(),async move {
         let invocation=notices::invoke(&store,&inventory,&notice,proof,&mut signal);
         tokio::pin!(invocation);
         tokio::select! {
@@ -234,10 +245,12 @@ async fn owned_descendant(mode: &str) {
         assert_eq!(unsafe{libc::getpgid(ids[2])},ids[1]);
     }
     let prepared=b.svc.store.workflow_notice_delivery(&id).unwrap().unwrap();
+    // Each try's bound expires once the fixture has started it, never on a timer.
+    if mode=="timeout" { expiry.add_permits(1); expire_after_runs(&log,2,&expiry).await; }
     if mode=="cancel" {stop.send_replace(true);}
     if mode=="drop" {owner.abort();}
     if mode=="unwind" {panic_send.send(()).unwrap();}
-    let joined=tokio::time::timeout(Duration::from_secs(8),owner).await.unwrap();
+    let joined=tokio::time::timeout(Duration::from_secs(60),owner).await.unwrap();
     match mode {
         "drop"=>assert!(joined.unwrap_err().is_cancelled()),
         "unwind"=>assert!(joined.unwrap_err().is_panic()),

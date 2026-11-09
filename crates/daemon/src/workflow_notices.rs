@@ -120,14 +120,18 @@ async fn queue_exited(pid:u32)->std::io::Result<()> {
     crate::effect_runner::exited(pid).await
 }
 // A fixture queue that exits 0 must read as a handoff however long a stalled
-// runner takes to schedule it; a 5 s CI stall turned one into "unknown"
-// (ov-1036). Only the timeout test holds a fixture to the real bound.
-fn queue_bound()->Duration {
+// runner takes to schedule it (ov-1036), so a test never races a timer: the bound
+// expires only when the test grants it a permit, after it saw the queue start (ov-1044).
+async fn queue_expired() {
     #[cfg(test)]
-    let ms=TEST_QUEUE_MS.try_with(|ms|*ms).unwrap_or(TEST_QUEUE_DEFAULT_MS);
+    if let Ok(permits)=TEST_QUEUE_EXPIRY.try_with(Clone::clone) {
+        permits.acquire().await.expect("expiry permits never close").forget();
+        return;
+    }
     #[cfg(not(test))]
-    let ms=QUEUE_MS;
-    Duration::from_millis(ms)
+    tokio::time::sleep(Duration::from_millis(QUEUE_MS)).await;
+    #[cfg(test)]
+    tokio::time::sleep(Duration::from_secs(60)).await;
 }
 // The flag is true only when the bound expired and the group was then proved gone.
 async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'static str,&'static str,bool) {
@@ -135,7 +139,7 @@ async fn own_queue(mut queue:OwnedQueue,stop:&mut watch::Receiver<bool>)->(&'sta
     let mut timed_out=false;
     let exited=tokio::select! {
         result=queue_exited(pid)=>result.is_ok(),
-        _=tokio::time::sleep(queue_bound())=>{timed_out=true;false},
+        _=queue_expired()=>{timed_out=true;false},
         _=async {if !stopping(stop){let _=stop.changed().await;}}=>false,
     };
     // Signal while the unreaped leader still pins this owned group, then never
@@ -207,6 +211,4 @@ tokio::task_local! { pub(crate) static TEST_LOST_REPLY: bool; }
 #[cfg(test)]
 tokio::task_local! { pub(crate) static TEST_IDLE: Arc<Notify>; }
 #[cfg(test)]
-tokio::task_local! { pub(crate) static TEST_QUEUE_MS: u64; }
-#[cfg(test)]
-pub(crate) const TEST_QUEUE_DEFAULT_MS:u64=60_000;
+tokio::task_local! { pub(crate) static TEST_QUEUE_EXPIRY: Arc<tokio::sync::Semaphore>; }
