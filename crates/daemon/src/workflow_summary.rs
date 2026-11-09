@@ -442,6 +442,12 @@ mod tests {
         assert!(text.lines().any(|l| l.starts_with("- `make check` (with ") && l.contains("`PATH=(hidden)` (changed)")), "where the gate is named:\n{text}");
         assert!(text.contains("Check 1 runs ") && text.contains("`GONE` (removed)"), "{text}");
         assert!(!text.contains("evil") && !text.contains("/opt/tools") && !text.contains("/tmp/x"), "no value reaches the card:\n{text}");
+        // A value of the same length still reads as changed: the mark compares values, never lengths.
+        let mut swapped = live.clone();
+        let AdapterConfiguration::Coding(config) = &mut swapped.adapter;
+        config.checks[0].environment.insert("GONE".into(), "2".into());
+        let text = summarize("", &swapped, Some(&live.definition), Some(&live.adapter));
+        assert!(text.contains("`GONE` (changed)") && !text.contains("`GONE=1`") && !text.contains("GONE=2"), "{text}");
         // The live workflow proposed back unchanged says nothing changed.
         let same = summarize("", &live, Some(&live.definition), Some(&live.adapter));
         assert!(!same.contains("Environment variables this changes") && !same.contains("(changed)"), "{same}");

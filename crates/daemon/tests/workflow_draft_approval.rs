@@ -396,3 +396,33 @@ async fn a_proposal_that_carries_the_hidden_marker_is_refused() {
     drop(link);
     host.close().await;
 }
+
+/// R-111, L12: `propose` compares the draft with the workflow in force. Values are hidden on the card, so a draft
+/// that changes only a value (here to one of the same length) must still read as changed, by name, through the
+/// call a member's orchestrator makes and on the card every member reads.
+#[tokio::test]
+async fn a_draft_that_changes_only_a_value_shows_it_as_changed_on_its_card() {
+    if as_a_person("a_draft_that_changes_only_a_value_shows_it_as_changed_on_its_card").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    let with = |value: &str| lt::template("ticket-push", &config, &["make check".to_string()], &[], &Options { environment: vec![format!("TOKEN={value}")], ..Options::default() }).unwrap();
+    let live = with("aaaaaaaa");
+    let adapter = Some(Box::new(live.adapter.clone()));
+    let state = call(&mut link, ws, Action::Get).await;
+    let receipt = call(&mut link, ws, Action::Publish { notifications: None, adapter, expected_pin: None, definition: live.definition,
+        mutation: Mutation { id: "live".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 1 } }).await;
+    assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
+
+    let reply = propose(&mut link, ws, with("bbbbbbbb"), "Rotate the token.").await;
+    let (summary, ask) = (reply["draft"]["summary"].as_str().unwrap().to_string(), asked(&host, card_of(&reply)).0.body);
+    for text in [&summary, &ask] {
+        assert!(text.contains("`TOKEN` (changed)"), "the changed variable shows by name:\n{text}");
+        assert!(!text.contains("aaaaaaaa") && !text.contains("bbbbbbbb"), "no value reaches the card:\n{text}");
+    }
+    // The same value proposed again is no change, so the mark is the comparison's and not a habit.
+    let same = propose(&mut link, ws, with("aaaaaaaa"), "No change.").await;
+    assert!(!same["draft"]["summary"].as_str().unwrap().contains("(changed)"), "{same}");
+    drop(link);
+    host.close().await;
+}
