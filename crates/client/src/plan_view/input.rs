@@ -18,6 +18,7 @@ pub struct Plan {
     pub landings: Vec<Landing>,
     pub agents: Vec<Agent>,
     pub agents_spend: Option<Spend>,
+    pub board_counts: Option<Counts>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -51,6 +52,8 @@ impl Counts {
 pub struct Theme {
     pub id: String,
     pub name: String,
+    pub outcome: String,
+    pub next: String,
     pub story_at: i64,
     pub owner_ask: String,
     pub state: String,
@@ -184,6 +187,8 @@ pub struct Context {
     pub statuses: BTreeMap<String, String>,
     /// When each card last moved, in ms, by task id.
     pub activity: BTreeMap<String, i64>,
+    /// The board's card titles by task id, for a card the plan carries none for.
+    pub titles: BTreeMap<String, String>,
     /// Whether the runner lists agents (`board_line`); without it, the Agents
     /// section isn't drawn, since "No agents running" would be false.
     pub agents_supported: bool,
@@ -196,6 +201,7 @@ impl Default for Context {
             needs_you: 0,
             statuses: BTreeMap::new(),
             activity: BTreeMap::new(),
+            titles: BTreeMap::new(),
             agents_supported: true,
             style: super::words::Style::Apple,
         }

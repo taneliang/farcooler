@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::workflow_presentation::{Presentation, RunCard};
 
 mod build;
+pub mod column;
 pub mod input;
 pub mod words;
 
@@ -106,6 +107,10 @@ pub struct AgentRef {
     pub tokens: Option<String>,
     /// The pane, to open it.
     pub terminal: Option<String>,
+    /// The model as recorded ("claude-opus-4-1"), which a screen reader says
+    /// when `who` shortens it; "" when none is known.
+    #[serde(default)]
+    pub model: String,
 }
 
 /// The engine's run of a ticket, from the workspace's workflow presentation:
@@ -196,6 +201,30 @@ pub struct LandingTicket {
     pub note_attention: bool,
     pub waits_on_owner: bool,
     pub run: Option<RunStep>,
+    /// Its stage's mark, or a fix round's.
+    #[serde(default = "unknown_mark")]
+    pub mark: Mark,
+    /// The mark is drawn in amber: a note needs attention.
+    #[serde(default)]
+    pub mark_attention: bool,
+    /// Its warnings under its title: stale (unless it waits on the owner,
+    /// which `note` says once) and over budget.
+    #[serde(default)]
+    pub notes: Vec<Note>,
+    #[serde(default)]
+    pub branch: String,
+    /// The line under its title where a phone draws one: what it says of
+    /// itself (unless it waits on the owner, which its warning says), its key,
+    /// and how long it has stood, unless a warning says so.
+    #[serde(default)]
+    pub second: String,
+    /// What a screen reader says for the row.
+    #[serde(default)]
+    pub accessibility: String,
+}
+
+fn unknown_mark() -> Mark {
+    Mark::Unknown
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -334,6 +363,9 @@ pub struct PlanView {
     pub on_landed_landing: Vec<TicketCard>,
     pub agents: Agents,
     pub themes: Themes,
+    /// The plan column beside the conversation: facts, initiatives, the
+    /// pipeline of agents and the footer counts (ov-867).
+    pub column: column::Column,
 }
 
 impl PlanView {
@@ -409,3 +441,7 @@ fn drop_nulls(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "plan_view/column_tests.rs"]
+mod column_tests;

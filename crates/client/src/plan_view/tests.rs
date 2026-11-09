@@ -300,3 +300,57 @@ fn the_view_golden_is_current() {
         assert_eq!(actual, std::fs::read_to_string(&path).unwrap_or_default(), "{path} is stale: UPDATE_PLAN_VIEW_GOLDEN=1");
     }
 }
+
+/// A ticket on a landing carries what the Apple apps draw beside its title:
+/// its mark, its warnings (stale, over budget) as notes, its branch and what a
+/// screen reader says; and an agent names its raw model for the screen reader.
+#[test]
+fn a_landing_ticket_carries_its_mark_and_warnings() {
+    let hour = 3_600_000;
+    let now = 1_800_000_000_000i64;
+    let line = |task: &str, stage: &str, extra: Value| {
+        let mut l = json!({ "task": task, "key": task, "title": format!("Title of {task}"), "stage": stage,
+            "branch": format!("lane-{task}"), "stage_since": now - 30 * hour, "landing": 7 });
+        l.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        l
+    };
+    let plan = json!({
+        "now_ms": now,
+        "lines": [
+            line("ov-1", "building", json!({ "stale": true, "budget_tokens": 10, "spend": { "input_tokens": 20 } })),
+            line("ov-2", "landing", json!({})),
+            line("ov-3", "building", json!({ "work": [{ "agent": "a", "role": "fix" }], "fix_rounds": 2 })),
+            line("ov-4", "needs_you", json!({ "stale": true })),
+        ],
+        "landings": [{ "id": "l7", "number": 7, "state": "open", "tickets": [] }],
+        "agents": [{ "id": "pane:l", "role": "lander", "model": "claude-opus-4-1", "working": true, "tickets": [] }],
+    });
+    let mut plan = plan;
+    plan["landings"][0]["lander"] = json!("pane:l");
+    let view = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": { "style": "apple" } }));
+    let card = &view.landings[0];
+    assert_eq!(card.lander.as_ref().unwrap().model, "claude-opus-4-1");
+    let ticket = |key: &str| card.tickets.iter().find(|t| t.key == key).unwrap();
+
+    let stale = ticket("ov-1");
+    assert_eq!(stale.mark, Mark::Building);
+    assert!(stale.mark_attention);
+    assert_eq!(stale.branch, "lane-ov-1");
+    let notes: Vec<(NoteKind, &str)> = stale.notes.iter().map(|n| (n.kind, n.text.as_str())).collect();
+    assert_eq!(notes, [(NoteKind::Warning, "No move in 30 h"), (NoteKind::OverBudget, "Over budget: 20 of 10 tokens")]);
+    assert_eq!(stale.accessibility, "Title of ov-1, No move in 30 h, Over budget. 20 of 10 tokens used.");
+
+    // The line under its title: its key, and how long it has stood, unless a
+    // warning says so; a landed one leads with its commit.
+    assert_eq!(stale.second, "ov-1");
+    let ready = ticket("ov-2");
+    assert_eq!((ready.mark, ready.mark_attention, ready.notes.len()), (Mark::Landing, false, 0));
+    assert_eq!(ready.second, "ov-2 · 1 d");
+    assert_eq!(ticket("ov-3").mark, Mark::Fixing);
+
+    // Waiting on the owner says "Needs you" once, as its note: never stale too.
+    let owner = ticket("ov-4");
+    assert!(owner.notes.is_empty());
+    assert_eq!(owner.second, "ov-4");
+    assert_eq!(owner.accessibility, "Title of ov-4, Needs you");
+}

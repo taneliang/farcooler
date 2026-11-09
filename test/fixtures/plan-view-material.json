@@ -52,6 +52,7 @@
           "accessibility": "The themes grid, Trustworthy agent view, Building · ov-310 · Builder · sonnet · 380K · 1 h, Prepare workspace · Approval required",
           "agent": {
             "id": "pane:b1",
+            "model": "sonnet",
             "terminal": null,
             "tokens": "380K",
             "who": "Builder · sonnet"
@@ -117,6 +118,275 @@
           "waits_on_owner": false
         }
       ],
+      "column": {
+        "agent_words": "2 agents",
+        "facts": [
+          {
+            "attention": true,
+            "kind": "needs_you",
+            "runs": [
+              {
+                "strong": true,
+                "text": "2"
+              },
+              {
+                "strong": false,
+                "text": " need you"
+              }
+            ],
+            "text": "2 need you"
+          },
+          {
+            "attention": true,
+            "kind": "stuck",
+            "runs": [
+              {
+                "strong": false,
+                "text": "2 stuck"
+              }
+            ],
+            "text": "2 stuck"
+          }
+        ],
+        "footer": [
+          {
+            "count": 5,
+            "kind": "waiting",
+            "status": "todo",
+            "words": "5 tickets waiting for a builder"
+          }
+        ],
+        "initiative_count": 3,
+        "initiatives": [
+          {
+            "asks_owner": false,
+            "done": 2,
+            "fraction": 0.4,
+            "goal": "",
+            "id": "th-1",
+            "name": "Teams and accounts",
+            "next": null,
+            "progress": "2 of 5",
+            "total": 5
+          },
+          {
+            "asks_owner": true,
+            "done": 0,
+            "fraction": 0.0,
+            "goal": "",
+            "id": "th-2",
+            "name": "Marketing",
+            "next": "Waiting on you: How do we ship the site?",
+            "progress": "0 of 3",
+            "total": 3
+          },
+          {
+            "asks_owner": false,
+            "done": 0,
+            "fraction": 0.0,
+            "goal": "",
+            "id": "th-3",
+            "name": "Trustworthy agent view",
+            "next": null,
+            "progress": "0 of 5",
+            "total": 5
+          }
+        ],
+        "pipeline": [
+          {
+            "agents": [],
+            "count": 2,
+            "hidden": 0,
+            "preview": [
+              {
+                "initiative": "Trustworthy agent view",
+                "initiative_id": "th-3",
+                "key": "ov-482",
+                "since": 1799892000000,
+                "stage": "stuck",
+                "task": "t-ov-482",
+                "title": "Title of ov-482"
+              },
+              {
+                "initiative": "Trustworthy agent view",
+                "initiative_id": "th-3",
+                "key": "ov-474",
+                "since": 1799784000000,
+                "stage": "stuck",
+                "task": "t-ov-474",
+                "title": "Title of ov-474"
+              }
+            ],
+            "stage": "stuck",
+            "title": "Stuck",
+            "unattended": [
+              {
+                "initiative": "Trustworthy agent view",
+                "initiative_id": "th-3",
+                "key": "ov-482",
+                "since": 1799892000000,
+                "stage": "stuck",
+                "task": "t-ov-482",
+                "title": "Title of ov-482"
+              },
+              {
+                "initiative": "Trustworthy agent view",
+                "initiative_id": "th-3",
+                "key": "ov-474",
+                "since": 1799784000000,
+                "stage": "stuck",
+                "task": "t-ov-474",
+                "title": "Title of ov-474"
+              }
+            ],
+            "unattended_words": "2 tickets with no agent on them"
+          },
+          {
+            "agents": [
+              {
+                "doing": "Working",
+                "doing_is_trouble": false,
+                "elapsed": 1320000,
+                "id": "pane:b1",
+                "more": 1,
+                "name": "Builder",
+                "role": "builder",
+                "terminal": null,
+                "ticket": "t-ov-310",
+                "tickets": [
+                  {
+                    "initiative": "Trustworthy agent view",
+                    "initiative_id": "th-3",
+                    "key": "ov-310",
+                    "since": 1799996400000,
+                    "stage": "building",
+                    "task": "t-ov-310",
+                    "title": "The themes grid"
+                  }
+                ],
+                "time": "22 min",
+                "working": true
+              }
+            ],
+            "count": 2,
+            "hidden": 1,
+            "preview": [],
+            "stage": "building",
+            "title": "Building",
+            "unattended": [
+              {
+                "initiative": "Trustworthy agent view",
+                "initiative_id": "th-3",
+                "key": "ov-312",
+                "since": 1799998200000,
+                "stage": "building",
+                "task": "t-ov-312",
+                "title": "Title of ov-312"
+              }
+            ],
+            "unattended_words": "1 more with no builder running"
+          },
+          {
+            "agents": [],
+            "count": 1,
+            "hidden": 0,
+            "preview": [
+              {
+                "initiative": "Trustworthy agent view",
+                "initiative_id": "th-3",
+                "key": "ov-311",
+                "since": 1799992800000,
+                "stage": "reviewing",
+                "task": "t-ov-311",
+                "title": "Title of ov-311"
+              }
+            ],
+            "stage": "reviewing",
+            "title": "Reviewing",
+            "unattended": [
+              {
+                "initiative": "Trustworthy agent view",
+                "initiative_id": "th-3",
+                "key": "ov-311",
+                "since": 1799992800000,
+                "stage": "reviewing",
+                "task": "t-ov-311",
+                "title": "Title of ov-311"
+              }
+            ],
+            "unattended_words": "1 ticket waiting for review"
+          },
+          {
+            "agents": [
+              {
+                "doing": "Working",
+                "doing_is_trouble": false,
+                "elapsed": 480000,
+                "id": "pane:i1",
+                "more": 0,
+                "name": "Lander",
+                "role": "lander",
+                "terminal": null,
+                "ticket": "t-ov-487",
+                "tickets": [
+                  {
+                    "initiative": "Teams and accounts",
+                    "initiative_id": "th-1",
+                    "key": "ov-487",
+                    "since": 1799989200000,
+                    "stage": "landing",
+                    "task": "t-ov-487",
+                    "title": "The team directory"
+                  }
+                ],
+                "time": "8 min",
+                "working": true
+              }
+            ],
+            "count": 1,
+            "hidden": 0,
+            "preview": [],
+            "stage": "landing",
+            "title": "Landing",
+            "unattended": [],
+            "unattended_words": null
+          }
+        ],
+        "quiet_initiatives": [],
+        "quiet_line": null,
+        "waiting": [
+          {
+            "key": "ov-485",
+            "since": 1799982000000,
+            "task": "t-ov-485",
+            "title": "Title of ov-485"
+          },
+          {
+            "key": "ov-300",
+            "since": 1799874000000,
+            "task": "t-ov-300",
+            "title": "Title of ov-300"
+          },
+          {
+            "key": "ov-301",
+            "since": 1799996400000,
+            "task": "t-ov-301",
+            "title": "Each person's asks reach the orchestrator"
+          },
+          {
+            "key": "ov-302",
+            "since": 1799978400000,
+            "task": "t-ov-302",
+            "title": "Title of ov-302"
+          },
+          {
+            "key": "old-queued",
+            "since": 1799820000000,
+            "task": "task-l-old-queued",
+            "title": "old-queued"
+          }
+        ]
+      },
       "in_review": [
         {
           "accessibility": "Title of ov-311, Trustworthy agent view, In review · ov-311 · 2 h",
@@ -210,6 +480,7 @@
           },
           "lander": {
             "id": "pane:i1",
+            "model": "opus",
             "terminal": null,
             "tokens": "1.4M",
             "who": "Lander · opus"
@@ -224,22 +495,34 @@
           "subtitle": null,
           "tickets": [
             {
+              "accessibility": "The team directory",
+              "branch": "team-dir",
               "heading": "The team directory",
               "id": "t-ov-487",
               "key": "ov-487",
+              "mark": "landing",
+              "mark_attention": false,
               "note": null,
               "note_attention": false,
+              "notes": [],
               "run": null,
+              "second": "ov-487 · 3 h",
               "standing": "Ready",
               "waits_on_owner": false
             },
             {
+              "accessibility": "Title of ov-485",
+              "branch": "ios-overwrite",
               "heading": "Title of ov-485",
               "id": "t-ov-485",
               "key": "ov-485",
+              "mark": "waiting",
+              "mark_attention": false,
               "note": null,
               "note_attention": false,
+              "notes": [],
               "run": null,
+              "second": "ov-485 · 5 h",
               "standing": "Waiting",
               "waits_on_owner": false
             }
@@ -280,12 +563,18 @@
           "subtitle": null,
           "tickets": [
             {
+              "accessibility": "Each person's asks reach the orchestrator",
+              "branch": "reps",
               "heading": "Each person's asks reach the orchestrator",
               "id": "t-ov-301",
               "key": "ov-301",
+              "mark": "waiting",
+              "mark_attention": false,
               "note": null,
               "note_attention": false,
+              "notes": [],
               "run": null,
+              "second": "ov-301 · 1 h",
               "standing": "Waiting",
               "waits_on_owner": false
             }
@@ -326,12 +615,18 @@
           "subtitle": null,
           "tickets": [
             {
+              "accessibility": "Title of ov-300, Needs you",
+              "branch": "web-site",
               "heading": "Title of ov-300",
               "id": "t-ov-300",
               "key": "ov-300",
+              "mark": "waiting",
+              "mark_attention": false,
               "note": "Needs you",
               "note_attention": true,
+              "notes": [],
               "run": null,
+              "second": "ov-300",
               "standing": "Waiting",
               "waits_on_owner": true
             }

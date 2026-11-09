@@ -24,7 +24,7 @@ use super::*;
 
 /// A ticket's stage, from the wire's word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Stage {
+pub(super) enum Stage {
     Waiting,
     Building,
     Reviewing,
@@ -50,7 +50,7 @@ impl Stage {
     }
 
     /// Neither landed nor dropped.
-    fn is_live(self) -> bool {
+    pub(super) fn is_live(self) -> bool {
         self != Stage::Landed && self != Stage::Dropped
     }
 
@@ -83,7 +83,7 @@ impl Stage {
 
 /// A card's status on the board, from the store's word or the board's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Status {
+pub(super) enum Status {
     Backlog,
     Todo,
     NeedsDecision,
@@ -120,7 +120,7 @@ impl Status {
 
 /// Where a landing stands, from the wire's word.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LandingPhase {
+pub(super) enum LandingPhase {
     WaitingForTickets,
     WaitingForPreviousLanding,
     WaitingForMain,
@@ -173,7 +173,7 @@ impl LandingPhase {
     /// The phase inside a sentence: "Landing 86 checking on CI". Every word
     /// maps to a state the runner derives; combining the tickets, the local
     /// gates and the full test run are one step to a person (ov-522).
-    fn sentence(self) -> &'static str {
+    pub(super) fn sentence(self) -> &'static str {
         match self {
             LandingPhase::WaitingForTickets => "waiting for tickets",
             LandingPhase::WaitingForPreviousLanding => "waiting for the earlier landing",
@@ -215,7 +215,7 @@ impl LandingPhase {
 
     /// How far along, for ordering landings furthest first. A stalled landing
     /// has lost its place, and an unknown one never leads.
-    fn progress(self) -> u8 {
+    pub(super) fn progress(self) -> u8 {
         match self {
             LandingPhase::Landed | LandingPhase::Dropped => 8,
             LandingPhase::ReadyToLand => 7,
@@ -249,17 +249,35 @@ const LADDER: [(&str, &str); 3] = [
 /// What a landing is, where one first appears.
 const LANDING_EXPLANATION: &str = "Reviewed tickets land on main together, after one round of checks.";
 
-struct Reader<'a> {
-    plan: &'a Plan,
-    context: &'a input::Context,
-    style: Style,
+pub(super) struct Reader<'a> {
+    pub(super) plan: &'a Plan,
+    pub(super) context: &'a input::Context,
+    pub(super) style: Style,
     statuses: BTreeMap<&'a str, Status>,
     runs: Vec<&'a RunCard>,
 }
 
 impl<'a> Reader<'a> {
-    fn stage(&self, line: &Line) -> Stage {
+    pub(super) fn stage(&self, line: &Line) -> Stage {
         Stage::of(&line.stage)
+    }
+
+    /// The board's status for a card, when the app read one.
+    pub(super) fn status_of(&self, task: &str) -> Option<Status> {
+        self.statuses.get(task).copied()
+    }
+
+    /// What every surface shows first: the ticket's title, else its card's in
+    /// the plan, else the board's, else its key.
+    pub(super) fn heading(&self, line: &Line) -> String {
+        if !line.title.is_empty() {
+            return line.title.clone();
+        }
+        let card = self.plan.cards.iter().find(|c| c.task == line.task).map(|c| c.title.as_str());
+        match card.filter(|t| !t.is_empty()).or_else(|| self.context.titles.get(&line.task).map(String::as_str)) {
+            Some(title) if !title.is_empty() => title.to_string(),
+            _ => line.key.clone(),
+        }
     }
 
     /// A builder has it again, for a fix round: the work open on it is a fix.
@@ -295,7 +313,7 @@ impl<'a> Reader<'a> {
     }
 
     /// The tickets on a landing: those it lists, plus any that name its number.
-    fn lines_on(&self, landing: &Landing) -> Vec<&'a Line> {
+    pub(super) fn lines_on(&self, landing: &Landing) -> Vec<&'a Line> {
         self.plan
             .lines
             .iter()
@@ -304,7 +322,7 @@ impl<'a> Reader<'a> {
     }
 
     /// The phase to show: the runner's, else what `state` and the tickets say.
-    fn phase(&self, landing: &Landing) -> LandingPhase {
+    pub(super) fn phase(&self, landing: &Landing) -> LandingPhase {
         if let Some(phase) = landing.phase.as_deref().map(LandingPhase::of).filter(|p| *p != LandingPhase::Unknown) {
             return phase;
         }
@@ -325,7 +343,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn phase_since(&self, landing: &Landing) -> i64 {
+    pub(super) fn phase_since(&self, landing: &Landing) -> i64 {
         let known = landing.phase.as_deref().map(LandingPhase::of).is_some_and(|p| p != LandingPhase::Unknown);
         match landing.phase_since {
             Some(since) if known => since,
@@ -333,7 +351,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn theme_of(&self, task: &str) -> Option<&'a Theme> {
+    pub(super) fn theme_of(&self, task: &str) -> Option<&'a Theme> {
         self.plan.themes.iter().find(|t| t.state != "dropped" && t.cards.iter().any(|c| c.task == task))
     }
 
@@ -362,6 +380,7 @@ impl<'a> Reader<'a> {
             who: who(agent, self.style),
             tokens: (agent.spend.total() > 0).then(|| tokens(agent.spend.total())),
             terminal: agent.terminal.clone(),
+            model: agent.model.clone(),
         }
     }
 }
@@ -496,7 +515,7 @@ impl Reader<'_> {
     }
 
     /// A stale ticket's warning: "No move in 2 h".
-    fn stale(&self, line: &Line) -> Option<String> {
+    pub(super) fn stale(&self, line: &Line) -> Option<String> {
         if !line.stale {
             return None;
         }
@@ -523,7 +542,7 @@ impl Reader<'_> {
         let over = self.over_budget(line);
         let shown = self.shown_stage(line);
         let run = self.run_of(&line.key);
-        let heading = if line.title.is_empty() { line.key.clone() } else { line.title.clone() };
+        let heading = self.heading(line);
 
         let second = if rank.is_some() {
             if line.reason.is_empty() { line.key.clone() } else { line.reason.clone() }
@@ -914,15 +933,46 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
                         } else {
                             None
                         };
+                        let heading = r.heading(line);
+                        // "Needs you" is its note, said once: never stale too.
+                        let stale = if waits { None } else { r.stale(line) };
+                        let over = r.over_budget(line);
+                        let mut notes = Vec::new();
+                        if let Some(text) = &stale {
+                            notes.push(Note { kind: NoteKind::Warning, text: text.clone(), attention: true, help: None });
+                        }
+                        if let Some((text, _)) = &over {
+                            notes.push(Note { kind: NoteKind::OverBudget, text: text.clone(), attention: true, help: None });
+                        }
+                        let mut second: Vec<String> = Vec::new();
+                        if !waits {
+                            second.extend(note.clone());
+                        }
+                        second.push(line.key.clone());
+                        let now = plan.now_ms;
+                        if !waits && stale.is_none() && line.stage_since > 0 && now > line.stage_since {
+                            second.push(words::span(now - line.stage_since));
+                        }
+                        let accessibility = [Some(heading.clone()), note.clone(), stale, over.map(|(_, spoken)| spoken)]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         LandingTicket {
                             id: line.task.clone(),
                             key: line.key.clone(),
-                            heading: if line.title.is_empty() { line.key.clone() } else { line.title.clone() },
+                            heading,
                             standing,
                             note,
                             note_attention: waits,
                             waits_on_owner: waits,
                             run: r.run_of(&line.key),
+                            mark: if r.is_fixing(line) { Mark::Fixing } else { stage.mark() },
+                            mark_attention: !notes.is_empty(),
+                            notes,
+                            branch: line.branch.clone(),
+                            second: second.join(DOT),
+                            accessibility,
                         }
                     })
                     .collect(),
@@ -1011,6 +1061,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         })
         .collect();
 
+    let column = super::column::column(&r);
     PlanView {
         schema: SCHEMA,
         now: plan.now_ms,
@@ -1023,5 +1074,6 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         on_landed_landing,
         agents,
         themes,
+        column,
     }
 }
