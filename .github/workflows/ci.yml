@@ -183,6 +183,11 @@ jobs:
       # test names `temp_dir()` either (ov-552): `scratch::dir` removes itself.
       - run: ./scripts/test-leak-check.py --lint
       - run: ./scripts/copy-lint.py
+      # Feature logic that reads runner data lives in crates/client (R-112, ov-1018):
+      # each rule planted and seen red, then the tree against its recorded baseline,
+      # so only a new duplicate string, wire-word switch, twin file or growth fails.
+      - run: ./scripts/shared-core-lint.py --self-test
+      - run: ./scripts/shared-core-lint.py
       # The capability names the apps ask a runner for are generated from
       # `farcooler_protocol::capability` (ov-154), and `can` takes the
       # generated type, so a misspelling does not compile. A generated file

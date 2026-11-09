@@ -38,6 +38,7 @@ check "proto lint canary"  ./scripts/proto-lint.py --channel canary
 check "migration lint"     ./scripts/migration-lint.py
 check "capability names"   ./scripts/capability-names.py --check
 check "copy lint"          ./scripts/copy-lint.py
+check "shared core lint"   ./scripts/shared-core-lint.py
 check "doc comments"       ./scripts/doc-comment-check.py --base "$base"
 
 echo
