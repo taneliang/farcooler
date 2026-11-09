@@ -49,17 +49,36 @@ pub struct Output {
     pub out: Option<std::path::PathBuf>,
 }
 
-/// What a runner already holds, from `workflow get`: the adapter to pin to and the definition published.
-pub struct Held { pub pin: Option<String>, pub adapter: Option<farcooler_protocol::workflow_config::CodingConfig>, pub source: Option<String> }
+/// What a runner already holds, from `workflow get`: the adapter to pin to and the definition published. A workspace
+/// that has never published has neither, and the runner suggests settings for its first draft instead (ov-1010).
+pub struct Held { pub pin: Option<String>, pub adapter: Option<farcooler_protocol::workflow_config::CodingConfig>, pub source: Option<String>,
+    pub suggested: Result<Option<farcooler_protocol::workflow_config::CodingConfig>, String> }
+impl Held {
+    /// The settings a draft pins to: the published ones, else the runner's suggestion.
+    fn config(&self) -> Result<&farcooler_protocol::workflow_config::CodingConfig, lt::Error> {
+        if let Some(config) = &self.adapter { return Ok(config); }
+        match &self.suggested { Ok(Some(config)) => Ok(config), Ok(None) => Err(lt::Error::NoAdapter), Err(why) => Err(lt::Error::NoSuggestion(why.clone())) }
+    }
+    /// Whether a draft would pin to the runner's suggestion rather than published settings.
+    pub fn suggesting(&self) -> bool { self.adapter.is_none() && matches!(self.suggested, Ok(Some(_))) }
+}
 
 pub fn held(get: &serde_json::Value) -> Result<Held, Box<dyn std::error::Error>> {
-    let Some(configuration) = get.get("configuration").filter(|c| !c.is_null()) else { return Ok(Held { pin: None, adapter: None, source: None }) };
+    let Some(configuration) = get.get("configuration").filter(|c| !c.is_null()) else {
+        // A runner from before ov-1010 sends neither, and the draft is refused as it was.
+        let suggested = match (get.get("suggested_adapter").filter(|a| !a.is_null()), get.get("suggested_adapter_refused").and_then(|w| w.as_str())) {
+            (Some(a), _) => { let AdapterConfiguration::Coding(config) = serde_json::from_value(a.clone())?; Ok(Some(config)) }
+            (None, Some(why)) => Err(why.to_string()),
+            (None, None) => Ok(None),
+        };
+        return Ok(Held { pin: None, adapter: None, source: None, suggested });
+    };
     let adapter = match configuration.get("adapter").filter(|a| !a.is_null()) {
         Some(a) => { let AdapterConfiguration::Coding(config) = serde_json::from_value(a.clone())?; Some(config) }
         None => None,
     };
     Ok(Held { pin: configuration.get("pin").and_then(|p| p.as_str()).map(String::from),
-        source: configuration.pointer("/definition/source").and_then(|s| s.as_str()).map(String::from), adapter })
+        source: configuration.pointer("/definition/source").and_then(|s| s.as_str()).map(String::from), adapter, suggested: Ok(None) })
 }
 
 pub fn list() -> String {
@@ -67,12 +86,12 @@ pub fn list() -> String {
 }
 
 pub fn import(charter: &str, held: &Held, gates: &Gates) -> Result<(Bundle, Vec<String>), lt::Error> {
-    let config = held.adapter.as_ref().ok_or(lt::Error::NoAdapter)?;
+    let config = held.config()?;
     lt::import_charter(charter, config, held.source.as_deref(), &gates.extras(), &gates.gate_env)
 }
 
 pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, routes: &Routes, batch: Option<u8>) -> Result<Bundle, lt::Error> {
-    let config = held.adapter.as_ref().ok_or(lt::Error::NoAdapter)?;
+    let config = held.config()?;
     let options = lt::Options { batch, environment: gates.gate_env.clone(), route_default: routes.route_default.clone(), routes: routes.route.clone() };
     lt::template(name, config, commands, &gates.extras(), &options)
 }
@@ -178,6 +197,21 @@ mod tests {
         let held = held(&serde_json::json!({"schema": 1, "configuration": null})).unwrap();
         assert_eq!(import("## Landing\n\n- Gate: none\n", &held, &Gates::default()).unwrap_err(), lt::Error::NoAdapter);
         assert!(lt::Error::NoAdapter.to_string().ends_with('.'));
+    }
+    #[test]
+    fn a_workspace_with_no_workflow_drafts_on_the_runners_suggestion_or_says_why_it_cant() {
+        let suggested = serde_json::to_value(AdapterConfiguration::Coding(config())).unwrap();
+        let held = held(&serde_json::json!({"schema": 1, "configuration": null, "suggested_adapter": suggested})).unwrap();
+        assert!(held.suggesting() && held.pin.is_none());
+        let bundle = template("batched-push", &held, &["make check".into()], &Gates::default(), &Routes::default(), Some(4)).unwrap();
+        let AdapterConfiguration::Coding(pinned) = &bundle.adapter;
+        assert_eq!((&pinned.repository, &pinned.harness, &pinned.ci), (&config().repository, &config().harness, &config().ci), "pinned to the suggestion");
+        let held = super::held(&serde_json::json!({"schema": 1, "configuration": null, "suggested_adapter_refused": "Its origin isn’t on GitHub."})).unwrap();
+        let err = template("batched-push", &held, &["make check".into()], &Gates::default(), &Routes::default(), None).unwrap_err();
+        assert_eq!(err, lt::Error::NoSuggestion("Its origin isn’t on GitHub.".into()));
+        assert!(err.to_string().ends_with("Its origin isn’t on GitHub."), "{err}");
+        // Published settings win over a suggestion, which a runner never sends beside them anyway.
+        assert!(!super::held(&get(None)).unwrap().suggesting());
     }
     #[test]
     fn a_template_routes_tickets_by_path_from_flags() {

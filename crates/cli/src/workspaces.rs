@@ -649,6 +649,7 @@ async fn workspace_via(
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
             let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, &routes, batch)?;
+            if held.suggesting() { eprintln!("This workspace has no workflow yet, so the draft uses the settings this runner suggests. The card shows every one."); }
             let action = crate::landing_templates::propose_action(&reason, bundle);
             let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &action).await?;
             crate::landing_templates::print_draft(&reply, json)?;

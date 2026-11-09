@@ -1024,7 +1024,7 @@ fn claude_hook_settings_path(runtime_dir: &Path) -> PathBuf {
 /// that cannot write its own runtime directory has a larger problem than a
 /// silent agent, and refusing to open a terminal over it would turn a missing
 /// live view into a feature that will not start.
-fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn write_claude_hook_settings(runtime_dir: &Path) -> Option<PathBuf> {
     let socket = hook_ingress::HookIngress::socket_path(runtime_dir);
     let settings = crate::hook_install::claude_settings(&socket);
     let text = serde_json::to_string_pretty(&settings).ok()?;

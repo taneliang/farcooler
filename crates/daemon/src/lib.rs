@@ -126,6 +126,7 @@ pub mod landing;
 pub mod landing_templates;
 pub mod workflow_summary;
 pub mod workflow_drafts;
+pub mod workflow_starter;
 pub mod path_routes;
 pub mod landing_read;
 pub mod charter_draft;

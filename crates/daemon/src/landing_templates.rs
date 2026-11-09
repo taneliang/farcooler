@@ -56,6 +56,8 @@ pub enum Error {
     Unsound,
     /// The runner has no adapter to pin to.
     NoAdapter,
+    /// The workspace has never published, and the runner says why it can't suggest settings for a first draft (ov-1010).
+    NoSuggestion(String),
     /// A `--gate-env` that isn't `NAME=value`.
     BadEnvironment(String),
     /// A person gate can only name someone who can decide.
@@ -79,6 +81,7 @@ impl std::fmt::Display for Error {
             Self::NoSuchTemplate(name) => write!(f, "There's no template called {name}. The four are batched-push, ticket-push, ticket-pr and batched-pr."),
             Self::Unsound => f.write_str("Those choices don't make a sound definition. A push needs at least one command gate to stand behind it."),
             Self::NoAdapter => f.write_str("This workspace has no adapter settings yet, so there is nothing to pin a definition to."),
+            Self::NoSuggestion(why) => write!(f, "This workspace has no workflow yet, and the runner can’t suggest settings for a first one. {why}"),
             Self::BadEnvironment(text) => write!(f, "`{text}` isn't a gate setting. Write it as NAME=value."),
             Self::NotADecider(who) => write!(f, "{who} can't decide a gate. Only the owner can, so name owner."),
             Self::NoReviewer => f.write_str("An agent gate needs an agent to start or a reviewer to run, and this runner isn't set up with either."),
@@ -190,7 +193,8 @@ pub fn import_charter(charter: &str, config: &CodingConfig, published: Option<&s
     plan.ci = rules.ci;
     plan.green_base = rules.ci;
     plan.paths = by_path.map(|p| PathRoutes { argument: p.argument(), approver: Some("owner".into()) });
-    let definition = templates::build(&plan, &Host(&config)).map_err(|_| Error::Unsound)?;
+    let mut definition = templates::build(&plan, &Host(&config)).map_err(|_| Error::Unsound)?;
+    models(&config, &mut definition);
     Ok((Bundle { definition, adapter: AdapterConfiguration::Coding(config) }, notes))
 }
 
@@ -245,6 +249,15 @@ pub fn template(name: &str, config: &CodingConfig, commands: &[String], extra: &
         let asks = p.default == "ask" || p.rules.iter().any(|(_, r)| r == "ask");
         PathRoutes { argument: p.argument(), approver: asks.then(|| "owner".into()) }
     });
-    let definition = templates::build(&plan, &Host(&config)).map_err(|_| Error::Unsound)?;
+    let mut definition = templates::build(&plan, &Host(&config)).map_err(|_| Error::Unsound)?;
+    models(&config, &mut definition);
     Ok(Bundle { definition, adapter: AdapterConfiguration::Coding(config) })
+}
+
+/// On a runner whose agents are Claude, each agent step lists the models it may run with (ov-1010): Sonnet builds and
+/// Opus reviews by default, and the orchestrator picks the other per step at Start (ov-966).
+fn models(config: &CodingConfig, definition: &mut Definition) {
+    if matches!(&config.harness, CodingHarness::Native { preset, .. } if preset == crate::workflow_starter::HARNESS) {
+        crate::workflow_starter::default_models(definition);
+    }
 }
