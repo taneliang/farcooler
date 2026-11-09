@@ -87,14 +87,20 @@ FLAGS = [*FAMILIES, "docs", "app"]
 # wasm workspace, linked by neither app (checked with `cargo metadata`, ov-1021). Every
 # other crate is in both apps' closures, so it is shared.
 NARROW = [
+    # Cross-reads, found by grep (ov-1021): Rust and wasm tests include the relay's fixtures;
+    # relay imports services/common and Notifier.kt; Android tests read AgentKit and its
+    # build reads iOS's fonts. test/fixtures is read by every platform, so it is not narrowed.
+    (r"services/relay/test/fixtures/.+", {"relay", "rust", "web"}),
     (r"services/relay/.+", {"relay"}),
-    (r"services/(web|common)/.+|\.github/workflows/web\.yml", {"web"}),
-    (r"apps/android/.+", {"android"}),
-    (r"apps/(ios|macos|shared)/.+", {"apple"}),
+    (r"services/common/.+", {"web", "relay"}),
+    (r"services/web/.+|\.github/workflows/web\.yml", {"web"}),
+    (r"apps/android/.+", {"android", "relay"}),
+    (r"apps/ios/FarCooler/Fonts/.+|apps/shared/.+", {"apple", "android"}),
+    (r"apps/(ios|macos)/.+", {"apple"}),
     (r"crates/android/.+", {"rust", "android"}),
     (r"crates/cli/.+", {"rust", "apple"}),
     (r"crates/web/.+", {"rust", "web"}),
-    (r"test/.+|\.config/.+", {"rust"}),
+    (r"test/live_agents\.rs|\.config/.+", {"rust"}),
 ]
 
 
@@ -236,12 +242,19 @@ def self_test():
     ALL = {"rust", "apple", "android", "web", "relay"}
     for what, files, want in [
         ("a Rust-only crate change", ["crates/web/src/lib.rs"], {"rust", "web"}),
-        ("a Swift-only change", ["apps/macos/Sources/x.swift", "apps/shared/AgentKit/a.swift"], {"apple"}),
+        ("a Swift-only change", ["apps/macos/Sources/x.swift", "apps/ios/FarCooler/a.swift"], {"apple"}),
         ("an iOS-only change", ["apps/ios/FarCooler/App.swift"], {"apple"}),
-        ("a Kotlin-only change", ["apps/android/app/src/A.kt"], {"android"}),
+        ("a Kotlin change, which relay.test.ts reads", ["apps/android/app/src/A.kt"], {"android", "relay"}),
         ("the JNI crate", ["crates/android/src/lib.rs"], {"rust", "android"}),
         ("the CLI crate, which the Mac bundles", ["crates/cli/src/main.rs"], {"rust", "apple"}),
-        ("a Rust test fixture", ["test/live_agents.rs"], {"rust"}),
+        ("the Rust live-agent test", ["test/live_agents.rs"], {"rust"}),
+        ("nextest config", [".config/nextest.toml"], {"rust"}),
+        ("a shared contract fixture, which every platform's tests read", ["test/fixtures/plan.json"], ALL),
+        ("a relay fixture, which Rust and the wasm tests include", ["services/relay/test/fixtures/device-proof.json"], {"relay", "rust", "web"}),
+        ("AgentKit, whose files Android tests read", ["apps/shared/AgentKit/Sources/AgentKit/RunnerRefusal.swift"], {"apple", "android"}),
+        ("Kotlin, which relay.test.ts imports", ["apps/android/app/src/main/java/com/farcooler/notify/Notifier.kt"], {"android", "relay"}),
+        ("session code relay imports", ["services/common/visitor.ts"], {"web", "relay"}),
+        ("fonts Android builds from iOS's folder", ["apps/ios/FarCooler/Fonts/A.ttf"], {"apple", "android"}),
         ("a relay change", ["services/relay/src/lib.rs"], {"relay"}),
         ("a web worker change", ["services/web/src/index.ts"], {"web"}),
         ("a docs-only change", ["docs/a.md", "README.md"], set()),
@@ -252,7 +265,7 @@ def self_test():
         ("a script", ["scripts/copy-lint.py"], ALL),
         ("ci.yml", [".github/workflows/ci.yml"], ALL),
         ("a path nobody classified", ["Makefile"], ALL),
-        ("Swift and Kotlin together", ["apps/macos/a.swift", "apps/android/a.kt"], {"apple", "android"}),
+        ("Swift and Kotlin together", ["apps/macos/a.swift", "apps/android/a.kt"], {"apple", "android", "relay"}),
         ("Swift and a wire change", ["apps/macos/a.swift", "proto/farcooler.proto"], ALL),
         ("a renamed-into-docs crate file is still code", ["crates/daemon/src/a.rs", "docs/a.md"], ALL),
     ]:
