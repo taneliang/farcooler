@@ -882,7 +882,10 @@ impl Store {
             &[&uuid_blob(id), &(expected_version as i64)],
             "SELECT 1 FROM terminals WHERE id = ?1",
             &[&uuid_blob(id)],
-        )
+        )?;
+        // Its launch (`pane_launches`) routes nothing once the row is gone;
+        // this keeps `meta` from collecting one per pane ever made.
+        self.forget_launch(id)
     }
 
     /// Record which mode this terminal's pane is in, and the session it names.

@@ -70,6 +70,8 @@ pub use check_ins::{EnableCheckIn, PinCheckInRollout, fixed_check_in_message, Ch
 pub use crash_signatures::{CrashFiling, CrashRecord};
 mod subagent_notes;
 mod web_panes;
+mod pane_launches;
+pub use pane_launches::Launch;
 pub mod waits;
 pub mod workers;
 pub mod workflow;
