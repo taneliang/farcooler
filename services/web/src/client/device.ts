@@ -57,6 +57,9 @@ export interface Device {
   prfUv?: boolean
   /// What the relay's sealed copy last kept (vault.ts `needsSaving`).
   vaulted?: string
+  /// A SHA-256 of the sealed string the relay last kept, so a later touch can
+  /// tell whether the relay still holds it (vault.ts `relayHoldsOurs`).
+  vaultSealed?: string
   /// Whether this passkey is registered with the account's device directory
   /// (ov-771), so a phone can certify it.
   registered?: boolean

@@ -25,7 +25,7 @@ import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
 import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
-import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, restoreFailure, runnerStopped, sealedRefusal, unreachable } from './copy'
+import { connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
@@ -48,7 +48,7 @@ import { type LinkView, Reconnector } from './reconnect'
 import { StartWatch } from './start'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
-import { deriveKeys, needsSaving, restore, saveCopy, type Vault } from './vault'
+import { b64url, deriveKeys, needsSaving, prfUse, relayHoldsOurs, restore, saveCopy, type Saved, type Vault } from './vault'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
 
@@ -143,9 +143,10 @@ async function signed(session: Session, signing: Promise<Signed>): Promise<Signe
 async function notePrf(session: Session, answer: Signed): Promise<void> {
   const prf = answer.prf
   const { device } = session
-  if (!prf || (device.prfUv !== undefined && device.prfUv !== prf.uv)) return
+  const use = prfUse(device, prf)
+  if (!prf || !use.use) return
   const keys = await deriveKeys(prf.output)
-  if (!device.nodeDerived && !device.offer && !device.runners?.length) {
+  if (use.deriveNode) {
     const node = session.tailcat.nodeKeyFromSeed(keys.nodeSeed)
     if (node) {
       device.nodePriv = node.priv
@@ -157,21 +158,44 @@ async function notePrf(session: Session, answer: Signed): Promise<void> {
   session.vault = { key: keys.vaultKey, uv: prf.uv }
   await saveDevice(device)
   // Not awaited: this runs inside an SSH login, which mustn't wait on the relay.
-  void keepCopy(session).catch(e => console.error('Far Cooler couldn’t keep the sealed copy', e))
+  void keepCopy(session, true).catch(e => console.error('Far Cooler couldn’t keep the sealed copy', e))
 }
 
 /// Bring the relay's sealed copy up to date with this device, when this tab
 /// has its key and the device changed since the last copy. A browser without
 /// PRF has no copy: its storage is asked to persist instead, so the browser
 /// is less likely to clear it.
-async function keepCopy(session: Session): Promise<void> {
+///
+/// `recheck`, after a passkey touch, also asks the relay whether it still
+/// holds the copy this browser last sent, and saves it again when it doesn't:
+/// a full account refused it, another browser's Sign Out deleted it, or a
+/// browser restored from it overwrote it (vault.ts `relayHoldsOurs`).
+async function keepCopy(session: Session, recheck = false): Promise<void> {
   const { device } = session
   if (!session.vault) {
     if (device.runners?.length) void navigator.storage?.persist?.().catch(() => {})
     return
   }
-  if (!(await needsSaving(device))) return
-  if (await saveCopy(relayRaw, session.vault.key, device, session.vault.uv)) await saveDevice(device)
+  let save = await needsSaving(device)
+  if (!save && recheck) {
+    const answer = await relayRaw('web/vault').catch(() => null)
+    const vaults = answer?.status === 200 && Array.isArray(answer.body?.vaults) ? (answer.body.vaults as Vault[]) : null
+    save = !!vaults && !(await relayHoldsOurs(vaults, device))
+  }
+  if (!save) return
+  const saved = await saveCopy(relayRaw, session.vault.key, device, session.vault.uv)
+  if (saved === 'saved') await saveDevice(device)
+  copyNote(saved)
+}
+
+/// A copy the relay turned down is said once, in the banner under the header,
+/// since this browser's runners then go when its storage does. A relay that
+/// didn't answer isn't: the next touch tries again.
+function copyNote(saved: Saved): void {
+  if (saved === 'unreachable') return
+  const note = $('copy-note')
+  note.hidden = saved === 'saved'
+  if (saved !== 'saved') $('copy-note-text').textContent = saveFailure(saved)
 }
 
 /// A browser with nothing kept, on an account with sealed copies: one touch
@@ -1098,17 +1122,28 @@ const FORGET_WAIT_MS = 2_000
 /// Sign Out takes this browser's key and runners with it, before the form
 /// posts. The Worker's answer also clears the origin's storage
 /// (`Clear-Site-Data`), which covers a sign-out this page didn't run, and one
-/// whose storage never answered. The relay's sealed copy stays (vault.ts): only
-/// the passkey opens it, and it is how signing in again here costs one touch.
-function signOutForgets(): void {
+/// whose storage never answered. The relay's sealed copy for this browser's
+/// passkey goes too, in the same wait: signing out is "this browser is done",
+/// and a copy left behind would restore its runners for anyone who later
+/// signs in here with a synced passkey (ov-779 review M2). Copies other
+/// browsers keep stay.
+function signOutForgets(session: () => Session | null): void {
   const form = document.querySelector<HTMLFormElement>('form[action="/sign-out"]')
   if (!form) return
   form.addEventListener('submit', event => {
     event.preventDefault()
     dropSecret()
-    void Promise.race([forgetDevice().catch(() => {}), new Promise(resolve => setTimeout(resolve, FORGET_WAIT_MS))]).finally(() => form.submit())
+    const passkey = session()?.device.passkey
+    const forgetting = Promise.all([
+      forgetDevice().catch(() => {}),
+      passkey ? relayRaw('web/vault/delete', { credential: b64url(passkey.id) }).catch(() => {}) : null,
+    ])
+    void Promise.race([forgetting, new Promise(resolve => setTimeout(resolve, FORGET_WAIT_MS))]).finally(() => form.submit())
   })
 }
+
+/// The session boot made, for Sign Out.
+let signedIn: Session | null = null
 
 /// Sign Out and Start Again, from the start screen: the header's Sign Out.
 function signOut(): void {
@@ -1133,7 +1168,8 @@ async function boot(): Promise<void> {
     if (document.visibilityState === 'visible') recheckLink()
   })
   window.addEventListener('online', recheckLink)
-  signOutForgets()
+  signOutForgets(() => signedIn)
+  $('copy-note-close').addEventListener('click', () => ($('copy-note').hidden = true))
 
   // Nothing below has a deadline of its own, so the screen says which step
   // the start is on, counts the seconds, and offers a way forward when it is
@@ -1186,6 +1222,7 @@ async function start(watch: StartWatch): Promise<void> {
   const { device, migrated } = kept
   const email = typeof me?.user?.email === 'string' ? (me.user.email as string) : ''
   const session: Session = { device, keyLine: device.passkey ? keyLineOf(device.passkey) : '', email, user: await userHandle(account), tailcat }
+  signedIn = session
   // Nothing kept here, as after the browser cleared this site's storage: the
   // account's sealed copies, if it has any, bring it back with one touch.
   const vaults = device.passkey ? [] : await listCopies()

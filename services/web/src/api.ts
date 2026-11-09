@@ -27,15 +27,17 @@ import { withHeaders } from './headers'
 /// - `ceremony/reply`: the sealed reply to this browser's offer, a GET at the
 ///   relay (`{ceremony}` in, `{replies}` out). Only the offer's own account
 ///   can read it, and the page opens it in wasm; the Worker holds no key.
-/// - `web/vault` and `web/vault/save`: this browser's sealed copy of its
-///   runners (ov-779), read as a GET and saved as a POST at the relay's
-///   `/v1/web/vault`. The relay keeps it per account; it is sealed under a key
+/// - `web/vault`, `web/vault/save` and `web/vault/delete`: this browser's
+///   sealed copy of its runners (ov-779), read as a GET and saved as a POST at
+///   the relay's `/v1/web/vault`, and deleted at Sign Out as a POST to
+///   `/v1/web/vault/delete` (`{credential}`), which removes only the signed-in
+///   account's own copy. The relay keeps it per account; it is sealed under a key
 ///   only the passkey can give back, so neither the relay nor this Worker can
 ///   read it.
 ///
 /// With WEB_CLIENT "everyone" a route here is reachable by every signed-in
 /// stranger, so any new route needs its own security review (ov-810).
-export const ROUTES = new Set(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save'])
+export const ROUTES = new Set(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save', 'web/vault/delete'])
 
 /// A ceremony id as the relay mints it (`fresh_ceremony_id`): 128 bits as hex.
 const CEREMONY = /^[0-9a-f]{32}$/
@@ -80,7 +82,10 @@ export async function api(request: Request, url: URL, env: Configured & WebEnv):
       if (typeof ceremony !== 'string' || !CEREMONY.test(ceremony)) return json({ error: 'bad request' }, 400, cookies())
       answer = await caller.ceremonyReply(ceremony)
     } else if (kind === 'web') {
-      answer = sub === 'vault/save' ? await caller.saveVault(body as Record<string, unknown>) : await caller.vaults()
+      answer =
+        sub === 'vault/save' ? await caller.saveVault(body as Record<string, unknown>)
+        : sub === 'vault/delete' ? await caller.deleteVault(body as Record<string, unknown>)
+        : await caller.vaults()
     } else {
       answer = kind === 'account' ? await caller.account(sub, body as Record<string, unknown>) : await caller.directory(sub, body as Record<string, unknown>)
     }

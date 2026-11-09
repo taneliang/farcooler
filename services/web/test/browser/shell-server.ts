@@ -19,6 +19,9 @@ export interface Reports {
   /// how many saves it took.
   vaults?: Map<string, { credential: string; uv: boolean; sealed: string }>
   vaultSaves?: number
+  /// When true, a save for a credential the stub doesn't hold yet is refused
+  /// as the relay refuses one for a full account: 409 `full`.
+  vaultFull?: boolean
 }
 
 export interface ShellOptions {
@@ -90,8 +93,15 @@ export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pic
       const sent = (await request.json().catch(() => null)) as { credential?: unknown; uv?: unknown; sealed?: unknown } | null
       if (typeof sent?.credential !== 'string' || typeof sent.uv !== 'boolean' || typeof sent.sealed !== 'string') return withHeaders('{"error":"body"}', 400, { 'content-type': 'application/json' })
       reports.vaults ??= new Map()
+      if (reports.vaultFull && !reports.vaults.has(sent.credential)) return withHeaders('{"error":"full"}', 409, { 'content-type': 'application/json' })
       reports.vaults.set(sent.credential, { credential: sent.credential, uv: sent.uv, sealed: sent.sealed })
       reports.vaultSaves = (reports.vaultSaves ?? 0) + 1
+      return withHeaders('{"ok":true}', 200, { 'content-type': 'application/json' })
+    }
+    if (path === '/api/relay/web/vault/delete') {
+      const sent = (await request.json().catch(() => null)) as { credential?: unknown } | null
+      if (typeof sent?.credential !== 'string') return withHeaders('{"error":"body"}', 400, { 'content-type': 'application/json' })
+      reports.vaults?.delete(sent.credential)
       return withHeaders('{"ok":true}', 200, { 'content-type': 'application/json' })
     }
     if (path === '/') {

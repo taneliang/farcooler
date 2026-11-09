@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Device, Granted } from '../src/client/device'
-import { b64url, type Copy, copyOf, deriveKeys, fromB64url, needsSaving, openCopy, type Prf, prfOf, PRF_SALT, restore, type RestoreDeps, saveCopy, sealCopy, type Vault } from '../src/client/vault'
+import { b64url, type Copy, copyOf, deriveKeys, fromB64url, needsSaving, openCopy, type Prf, prfOf, PRF_SALT, prfUse, relayHoldsOurs, restore, type RestoreDeps, saveCopy, sealCopy, type Vault } from '../src/client/vault'
 
 const ACCOUNT = 'user_OWNER'
 const RUNNERS: Granted[] = [{ id: 'r1', label: 'studio', user: 'owner', host_key: 'ssh-ed25519 AAAAhost', token: 'tok', why: '' }]
@@ -81,7 +81,7 @@ describe('the sealed copy', () => {
       return { status: 200, body: { ok: true } }
     }
     expect(await needsSaving(device)).toBe(true)
-    expect(await saveCopy(call, vaultKey, device, true)).toBe(true)
+    expect(await saveCopy(call, vaultKey, device, true)).toBe('saved')
     expect(posts).toHaveLength(1)
     const [route, body] = posts[0] as [string, any]
     expect(route).toBe('web/vault/save')
@@ -93,11 +93,63 @@ describe('the sealed copy', () => {
     expect(await needsSaving(device)).toBe(true)
   })
 
-  it('isn’t marked saved when the relay refused it', async () => {
+  it('isn’t marked saved when the relay refused it, and says why', async () => {
+    const { vaultKey } = await deriveKeys(prfBytes(7))
+    const answers: [{ status: number; body: any } | Error, string][] = [
+      [{ status: 409, body: { error: 'full' } }, 'full'],
+      [{ status: 413, body: { error: 'too large' } }, 'too_large'],
+      [{ status: 429, body: { error: 'limited' } }, 'unreachable'],
+      [{ status: 502, body: { error: 'unreachable' } }, 'unreachable'],
+      [new Error('offline'), 'unreachable'],
+      [{ status: 400, body: { error: 'sealed' } }, 'refused'],
+    ]
+    for (const [answer, word] of answers) {
+      const device = enrolled()
+      const call = async () => {
+        if (answer instanceof Error) throw answer
+        return answer
+      }
+      expect(await saveCopy(call, vaultKey, device, false), word).toBe(word)
+      expect(await needsSaving(device)).toBe(true)
+      expect(device.vaultSealed).toBeUndefined()
+    }
+  })
+
+  it('knows whether the relay still holds the copy this browser last sent', async () => {
     const { vaultKey } = await deriveKeys(prfBytes(7))
     const device = enrolled()
-    expect(await saveCopy(async () => ({ status: 409, body: { error: 'full' } }), vaultKey, device, false)).toBe(false)
-    expect(await needsSaving(device)).toBe(true)
+    let sent = ''
+    await saveCopy(async (_route, body: any) => ((sent = body.sealed), { status: 200, body: { ok: true } }), vaultKey, device, false)
+    const ours = { credential: b64url(CRED), uv: false, sealed: sent }
+    expect(await relayHoldsOurs([ours], device)).toBe(true)
+    // Overwritten by a session without the passkey, or gone: not ours.
+    expect(await relayHoldsOurs([{ ...ours, sealed: sent.slice(0, -2) + 'AA' }], device)).toBe(false)
+    expect(await relayHoldsOurs([], device)).toBe(false)
+    expect(await relayHoldsOurs([{ ...ours, credential: 'b3RoZXI' }], device)).toBe(false)
+    // A device that never sent one holds nothing there.
+    expect(await relayHoldsOurs([ours], enrolled({ vaultSealed: undefined }))).toBe(false)
+  })
+})
+
+describe('what one assertion’s PRF output may change', () => {
+  const prf = (uv: boolean): Prf => ({ output: prfBytes(7), uv })
+  const fresh = (over: Partial<Device> = {}): Device => ({ account: ACCOUNT, passkey: { id: CRED, spki: SPKI }, nodePriv: 'random', nodePub: 'Random', ...over })
+
+  it('derives the node key only for a browser that hasn’t named one in an offer or been granted runners', () => {
+    expect(prfUse(fresh(), prf(false))).toEqual({ use: true, deriveNode: true })
+    // An offer on screen names the random key: a phone may already have it.
+    expect(prfUse(fresh({ offer: '{}' }), prf(false))).toEqual({ use: true, deriveNode: false })
+    // A browser enrolled before ov-779: its runners admit the random key.
+    expect(prfUse(fresh({ runners: RUNNERS }), prf(false))).toEqual({ use: true, deriveNode: false })
+    // Derived already: never again.
+    expect(prfUse(fresh({ nodeDerived: true }), prf(false))).toEqual({ use: true, deriveNode: false })
+  })
+
+  it('is nothing at all without PRF, or with the other verification flag than this device’s', () => {
+    expect(prfUse(fresh(), null)).toEqual({ use: false })
+    expect(prfUse(fresh({ prfUv: true }), prf(false))).toEqual({ use: false })
+    expect(prfUse(fresh({ prfUv: false }), prf(true))).toEqual({ use: false })
+    expect(prfUse(fresh({ prfUv: true, runners: RUNNERS }), prf(true))).toEqual({ use: true, deriveNode: false })
   })
 })
 
@@ -160,6 +212,9 @@ describe('restoring after the site’s storage was cleared', () => {
     expect(done.device.prfUv).toBe(false)
     // No ceremony: nothing about an offer comes back.
     expect(done.device.offer).toBeUndefined()
+    // The copy it came from is the one the relay holds: nothing to save again.
+    expect(await needsSaving(done.device)).toBe(false)
+    expect(await relayHoldsOurs(vaults, done.device)).toBe(true)
   })
 
   it('gets back a node key enrolled before ov-779 from the copy, since the passkey can’t derive it', async () => {

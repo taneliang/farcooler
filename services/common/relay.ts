@@ -172,6 +172,11 @@ export class Caller {
     return await this.call('/v1/web/vault', body)
   }
 
+  /// Delete the account's sealed copy for one passkey (ov-779), at Sign Out.
+  async deleteVault(body: Record<string, unknown>): Promise<Answer> {
+    return await this.call('/v1/web/vault/delete', body)
+  }
+
   private async call(path: string, body: Record<string, unknown>, method: 'POST' | 'GET' = 'POST'): Promise<Answer> {
     if (this.signedOut) return { kind: 'signed-out' }
     try {

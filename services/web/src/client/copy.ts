@@ -263,6 +263,20 @@ export function planRefusal(failure: { word: string; code?: string; what?: strin
 
 /// Why the runners saved for a passkey couldn't be brought back (vault.ts
 /// `restore`), by its word. Each leaves Make a New Passkey on screen.
+/// Why the relay didn't keep this browser's sealed copy (vault.ts `Saved`).
+/// Each says what it costs, since nothing breaks until the storage goes.
+export function saveFailure(word: string): string {
+  const cost = 'If this browser clears this site’s data, you’ll add it again from your phone.'
+  switch (word) {
+    case 'full':
+      return `Your account already keeps runners for as many passkeys as it can, so this browser’s aren’t kept. Sign out of a browser you no longer use to make room. ${cost}`
+    case 'too_large':
+      return `This browser has more runners than Far Cooler can keep for it. ${cost}`
+    default:
+      return `Far Cooler couldn’t keep this browser’s runners with your passkey. ${cost}`
+  }
+}
+
 export function restoreFailure(word: string): string {
   switch (word) {
     case 'declined':

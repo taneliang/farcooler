@@ -47,7 +47,7 @@
 // - the passkey can't be used from the parent domain's other child
 //   (canary.farcooler.com for canary): Chromium refuses it (ov-767
 //   acceptance 2);
-// - Sign Out deletes the passkey's id and the runners.
+// - Sign Out deletes the passkey's id, the runners and the passkey's sealed copy at the relay.
 //
 // What the swapped dial leaves out is Tailcat's own traffic: the DERP
 // WebSocket and its `/derp/probe` fetch, which the CSP must allow too. CI
@@ -396,6 +396,10 @@ async function clearSite(context, page) {
 /// derives the same node key is test/vault.test.ts's, and that a synced
 /// passkey gives the same output on two devices is the passkey provider's,
 /// checked on real devices.
+/// The eviction walk's passkey, as the relay keys its copy: Sign Out must
+/// delete that copy.
+let walkCredential = null
+
 async function evictionWalk() {
   credential = null
   await session.context.close()
@@ -431,6 +435,25 @@ async function evictionWalk() {
     if (['studio', runner.hostKey, '"runners"', enrolled.nodePriv].some(s => clear.includes(s))) failures.push('the sealed copy holds a runner, host key or node key in the clear')
   }
   console.log(`csp-check: a passkey with PRF derived the node key the offer named, and its sealed copy reached the relay (${reports.vaultSaves} saves)`)
+
+  // A full account refuses the copy: the page says so, and the next touch
+  // after there's room saves it again (ov-779 review M1, L2).
+  reports.vaults.delete(id)
+  reports.vaultFull = true
+  await page.reload()
+  await connect(page)
+  await page.waitForSelector('#copy-note:not([hidden])', { timeout: 10_000 }).catch(() => failures.push('a refused copy wasn’t shown'))
+  const said = await page.textContent('#copy-note-text')
+  if (!/Sign out of a browser you no longer use/.test(said ?? '')) failures.push(`a full account’s refusal said “${said}”`)
+  await shoot(page, 'copy-refused')
+  reports.vaultFull = false
+  await page.reload()
+  await connect(page)
+  const healing = Date.now()
+  while (!reports.vaults.has(id) && Date.now() - healing < 10_000) await page.waitForTimeout(100)
+  if (!reports.vaults.has(id)) failures.push('the copy a full account refused wasn’t saved again at the next touch')
+  else console.log('csp-check: a full account’s refusal was shown, and the next touch saved the copy again')
+  walkCredential = id
 
   // The site's storage is cleared: one touch brings the runners back.
   const registrations = reports.registered
@@ -1312,6 +1335,10 @@ try {
     await page.goto(`${origin}/version.json`)
     if (await device(page)) failures.push('Sign Out left the passkey and runners behind')
     else console.log('csp-check: Sign Out deleted the passkey and runners')
+    if (walkCredential) {
+      if (reports.vaults?.has(walkCredential)) failures.push('Sign Out left the passkey’s sealed copy at the relay')
+      else console.log('csp-check: Sign Out deleted the passkey’s sealed copy at the relay')
+    }
   } catch (e) {
     if (!(e instanceof LowLimitDone)) {
       // Where it stopped: the screen on show says more than a timeout does.

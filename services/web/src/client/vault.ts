@@ -153,18 +153,67 @@ export async function needsSaving(device: Device): Promise<boolean> {
   return !!device.passkey && device.vaulted !== (await digest(device))
 }
 
+/// What became of one save: kept, or why not, in a word app.ts has a
+/// sentence for (copy.ts `saveFailure`).
+///
+///   full         the account holds as many copies as the relay keeps, and
+///                this passkey's isn't one of them
+///   too_large    more runners than a copy holds
+///   unreachable  the relay didn't answer, or asked for a pause
+///   refused      anything else the relay turned down
+export type Saved = 'saved' | 'full' | 'too_large' | 'unreachable' | 'refused'
+
 /// Seal `device` and keep it at the relay, through `call` (`/api/relay`).
-/// True when the relay kept it; `device.vaulted` then says what was kept, and
-/// the caller saves the device.
-export async function saveCopy(call: (route: string, body: unknown) => Promise<{ status: number; body: any }>, key: CryptoKey, device: Device, uv: boolean): Promise<boolean> {
+/// On 'saved', `device.vaulted` says what was kept and `device.vaultSealed`
+/// which sealed string, and the caller saves the device. Anything else leaves
+/// both alone, so the next chance tries again.
+export async function saveCopy(call: (route: string, body: unknown) => Promise<{ status: number; body: any }>, key: CryptoKey, device: Device, uv: boolean): Promise<Saved> {
   const passkey = device.passkey
-  if (!passkey) return false
+  if (!passkey) return 'refused'
   const kept = await digest(device)
   const sealed = await sealCopy(key, device.account, passkey.id, copyOf(device))
   const answer = await call('web/vault/save', { credential: b64url(passkey.id), uv, sealed }).catch(() => null)
-  if (answer?.status !== 200) return false
+  if (answer?.status !== 200) {
+    if (!answer || answer.status === 429 || answer.status >= 500) return 'unreachable'
+    if (answer.status === 409 && answer.body?.error === 'full') return 'full'
+    if (answer.status === 413) return 'too_large'
+    return 'refused'
+  }
   device.vaulted = kept
-  return true
+  device.vaultSealed = await sealedHash(sealed)
+  return 'saved'
+}
+
+/// Whether `vaults` holds, for this device's passkey, the very copy this
+/// browser last sent. Not when it is gone (a full account refused it, Sign
+/// Out elsewhere deleted it) or another session overwrote it: then the next
+/// touch saves it again. Compared by the sealed string, since a copy sealed
+/// twice from the same device differs in its nonce.
+export async function relayHoldsOurs(vaults: Vault[], device: Device): Promise<boolean> {
+  if (!device.passkey || !device.vaultSealed) return false
+  const ours = vaults.find(v => v.credential === b64url(device.passkey!.id))
+  return !!ours && (await sealedHash(ours.sealed)) === device.vaultSealed
+}
+
+async function sealedHash(sealed: string): Promise<string> {
+  return b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sealed))))
+}
+
+// MARK: One assertion's PRF output
+
+/// What one assertion's PRF output may change on `device`.
+///
+///   - Nothing, without PRF, or with the other verification flag than the
+///     one this device's output came with: an authenticator may give another
+///     output with it, and another output is another vault key.
+///   - The node key, only for a browser that hasn't named its random one in an
+///     offer (a phone may already have scanned it) or been granted runners
+///     with it (a browser enrolled before ov-779), and only once.
+export type PrfUse = { use: false } | { use: true; deriveNode: boolean }
+
+export function prfUse(device: Device, prf: Prf | null): PrfUse {
+  if (!prf || (device.prfUv !== undefined && device.prfUv !== prf.uv)) return { use: false }
+  return { use: true, deriveNode: !device.nodeDerived && !device.offer && !device.runners?.length }
 }
 
 // MARK: Restoring
@@ -225,6 +274,7 @@ export async function restore(deps: RestoreDeps, account: string, handle: Uint8A
     runners: copy.runners,
   }
   device.vaulted = await digest(device)
+  device.vaultSealed = await sealedHash(vault.sealed)
   return { ok: true, device, vaultKey }
 }
 
