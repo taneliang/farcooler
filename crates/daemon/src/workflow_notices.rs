@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::{workflow_runtime::{Result, Error}, watch::answer_wake::{self, codex_turn}, claude_registry::{Kernel, Processes}};
 
 const DISCOVERY_MS:u64=15_000;
+#[cfg(not(test))]
 pub(crate) const QUEUE_MS:u64=5_000;
 const MAX_BYTES:usize=16*1024;
 // Dropping the last owner closes the channel without changing its last bool.
