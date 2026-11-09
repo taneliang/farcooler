@@ -218,3 +218,28 @@ func TestARelayItCannotProbeIsNotBlamed(t *testing.T) {
 		t.Fatalf("probed %v for a map with no hostnames", got)
 	}
 }
+
+// The page gets the pair nodeKeyFromSeed makes, and nothing for a seed that
+// isn't 32 bytes: a shorter one padded with zeroes would be a weak key the
+// page never asked for.
+func TestThePageGetsTheSeedsNodeKeyAndNothingForABadSeed(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i * 7)
+	}
+	u8 := js.Global().Get("Uint8Array").New(32)
+	js.CopyBytesToJS(u8, seed)
+	got := jsNodeKeyFromSeed(js.Undefined(), []js.Value{u8}).(js.Value)
+	wantPriv, wantPub := nodeKeyFromSeed([32]byte(seed))
+	if got.Get("priv").String() != wantPriv || got.Get("pub").String() != wantPub {
+		t.Fatalf("got %s/%s, want %s/%s", got.Get("priv"), got.Get("pub"), wantPriv, wantPub)
+	}
+	for _, bad := range []js.Value{js.Global().Get("Uint8Array").New(31), js.Global().Get("Uint8Array").New(33), js.ValueOf("x"), js.Null()} {
+		if v := jsNodeKeyFromSeed(js.Undefined(), []js.Value{bad}).(js.Value); !v.IsNull() {
+			t.Fatalf("a bad seed %v gave %v", bad, v)
+		}
+	}
+	if v := jsNodeKeyFromSeed(js.Undefined(), nil).(js.Value); !v.IsNull() {
+		t.Fatalf("no seed gave %v", v)
+	}
+}

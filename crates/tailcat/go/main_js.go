@@ -45,6 +45,7 @@ import (
 func main() {
 	api := js.Global().Get("Object").New()
 	api.Set("mintNodeKey", js.FuncOf(jsMintNodeKey))
+	api.Set("nodeKeyFromSeed", js.FuncOf(jsNodeKeyFromSeed))
 	api.Set("dial", js.FuncOf(jsDial))
 	js.Global().Set("fcTailcat", api)
 	if ready := js.Global().Get("fcTailcatReady"); ready.Type() == js.TypeFunction {
@@ -159,6 +160,20 @@ func jsMintNodeKey(js.Value, []js.Value) any {
 		"priv": encodeNodeKey(id.priv.Raw32()),
 		"pub":  encodeNodeKey(id.priv.Public().Raw32()),
 	})
+}
+
+// jsNodeKeyFromSeed is `nodeKeyFromSeed(seed) → {priv, pub} | null`: the
+// node key a browser derives from its passkey (ov-779), from the 32 bytes the
+// page derived from the PRF output. Anything but a 32-byte Uint8Array is null,
+// never a key from fewer bytes.
+func jsNodeKeyFromSeed(_ js.Value, args []js.Value) any {
+	if len(args) < 1 || !args[0].InstanceOf(js.Global().Get("Uint8Array")) || args[0].Length() != 32 {
+		return js.Null()
+	}
+	var seed [32]byte
+	js.CopyBytesToGo(seed[:], args[0])
+	priv, pub := nodeKeyFromSeed(seed)
+	return js.ValueOf(map[string]any{"priv": priv, "pub": pub})
 }
 
 // jsDial is `dial(token, key) → Promise<conn>`.

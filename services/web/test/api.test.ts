@@ -42,8 +42,8 @@ describe('/api/relay', () => {
   })
 
   it('forwards nothing off the allowlist, however the path is spelled', async () => {
-    expect([...ROUTES]).toEqual(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply'])
-    for (const path of ['directory/teams/members', 'ceremony/reply/0123456789abcdef0123456789abcdef', 'ceremony', 'directory/devices/revoke', 'directory/devices/certify', 'account/signout-all', 'auth/token', 'directory/me/', 'directory/me/../teams', 'directory//me', '../v1/directory/me']) {
+    expect([...ROUTES]).toEqual(['directory/me', 'directory/devices/challenge', 'directory/devices/register', 'ceremony/reply', 'web/vault', 'web/vault/save'])
+    for (const path of ['web/vault/', 'web/vault/../me', 'web', 'web/vault/delete', 'directory/teams/members', 'ceremony/reply/0123456789abcdef0123456789abcdef', 'ceremony', 'directory/devices/revoke', 'directory/devices/certify', 'account/signout-all', 'auth/token', 'directory/me/', 'directory/me/../teams', 'directory//me', '../v1/directory/me']) {
       const calls = relay()
       const res = await post(`/api/relay/${path}`, good)
       // 404, or 405 for a path that normalized out of /api/relay/.
@@ -90,6 +90,35 @@ describe('/api/relay', () => {
         expect((await read({ ceremony: bad })).status, String(bad)).toBe(400)
         expect(calls.filter(c => c.path.startsWith('/v1/ceremony/')), String(bad)).toEqual([])
       }
+    })
+  })
+
+  // ov-779: a browser's sealed copy, read as a GET and saved as a POST at the relay.
+  describe('the sealed copy (web/vault)', () => {
+    const send = (route: string, body: unknown) => post(`/api/relay/${route}`, { ...good, 'content-type': 'application/json' }, JSON.stringify(body))
+
+    it("reads the account's copies as a GET with the session's bearer", async () => {
+      const vaults = { vaults: [{ credential: 'Y3JlZA', uv: false, sealed: 'AAAA' }] }
+      const calls = relay(OWNER, { '/v1/web/vault': () => Response.json(vaults) })
+      const res = await send('web/vault', {})
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual(vaults)
+      const asked = calls.filter(c => c.path === '/v1/web/vault')
+      expect(asked).toEqual([{ path: '/v1/web/vault', method: 'GET', authorization: `Bearer ${ACCESS}`, body: null }])
+    })
+
+    it('saves a copy as a POST, body and all', async () => {
+      const calls = relay(OWNER, { '/v1/web/vault': () => Response.json({ ok: true }) })
+      const copy = { credential: 'Y3JlZA', uv: true, sealed: 'AAAA' }
+      expect((await send('web/vault/save', copy)).status).toBe(200)
+      expect(calls.filter(c => c.path === '/v1/web/vault')).toEqual([{ path: '/v1/web/vault', method: 'POST', authorization: `Bearer ${ACCESS}`, body: copy }])
+    })
+
+    it("passes the relay's refusal through", async () => {
+      relay(OWNER, { '/v1/web/vault': () => Response.json({ error: 'full' }, { status: 409 }) })
+      const res = await send('web/vault/save', { credential: 'Y3JlZA', uv: true, sealed: 'AAAA' })
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: 'full' })
     })
   })
 

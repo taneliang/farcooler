@@ -1071,3 +1071,19 @@ func dialConn(token, clientKey string, port uint16) (conn *clientConn, rc int) {
 	}
 	return &clientConn{Conn: c, client: client}, 0
 }
+
+// nodeKeyFromSeed is a browser's node key derived from its passkey (ov-779):
+// the page hands over 32 bytes it got from the passkey's PRF output through
+// HKDF, and gets back the pair in this product's 43-character encoding. The
+// same seed always gives the same pair, so a browser whose storage was
+// cleared, or a second browser sharing the passkey, is the node the runners
+// already admit.
+//
+// Clamped as key.NewNode clamps: WireGuard clamps on its own, but DERP uses the
+// private key as given.
+func nodeKeyFromSeed(seed [32]byte) (priv, pub string) {
+	seed[0] &= 248
+	seed[31] = (seed[31] & 127) | 64
+	private := key.NodePrivateFromRaw32(mem.B(seed[:]))
+	return encodeNodeKey(private.Raw32()), encodeNodeKey(private.Public().Raw32())
+}

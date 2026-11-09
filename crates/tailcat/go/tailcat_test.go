@@ -389,6 +389,48 @@ func TestMintingReturnsAPairTheRestOfTheProductCanRead(t *testing.T) {
 	}
 }
 
+// A browser's node key derived from its passkey (ov-779) is a function of
+// the seed and nothing else: the same seed gives the same pair, in a second
+// browser sharing the passkey as in the first, and a different seed gives a
+// different one. The private half comes out clamped, as NewNode's does,
+// because DERP uses it unclamped; the public half is the one it derives, in
+// the spelling the fence accepts, and parseNodePrivate takes the private half
+// back.
+func TestASeedGivesTheSameUsableNodeKeyEveryTime(t *testing.T) {
+	seed := [32]byte{}
+	for i := range seed {
+		seed[i] = 0xff - byte(i)
+	}
+	priv, pub := nodeKeyFromSeed(seed)
+	again, againPub := nodeKeyFromSeed(seed)
+	if priv != again || pub != againPub {
+		t.Fatalf("one seed gave two keys: %s/%s and %s/%s", priv, pub, again, againPub)
+	}
+	other := seed
+	other[1] ^= 1
+	if p, _ := nodeKeyFromSeed(other); p == priv {
+		t.Fatal("two seeds gave one key")
+	}
+	if len(priv) != nodeKeyLen || len(pub) != nodeKeyLen {
+		t.Fatalf("lengths %d and %d, want %d", len(priv), len(pub), nodeKeyLen)
+	}
+	parsed, err := parseNodePrivate(priv)
+	if err != nil {
+		t.Fatalf("dial couldn't take the private half back: %v", err)
+	}
+	public, err := parseNodePublic(pub)
+	if err != nil {
+		t.Fatalf("the fence wouldn't take the public half: %v", err)
+	}
+	if parsed.Public() != public {
+		t.Fatal("the public half is not the one the private half derives")
+	}
+	raw, _ := decodeNodeKey(priv)
+	if raw[0]&7 != 0 || raw[31]&0x80 != 0 || raw[31]&0x40 == 0 {
+		t.Fatalf("the private half isn't clamped: %x … %x", raw[0], raw[31])
+	}
+}
+
 // Each device gets its own identity. A mint that returned a constant would
 // give every phone in a fleet the same route, and every one of them would
 // look enrolled.

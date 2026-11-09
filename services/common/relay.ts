@@ -162,6 +162,16 @@ export class Caller {
     return await this.call(`/v1/ceremony/reply/${ceremony}`, {}, 'GET')
   }
 
+  /// A browser's sealed copies (ov-779): every one its account keeps.
+  async vaults(): Promise<Answer> {
+    return await this.call('/v1/web/vault', {}, 'GET')
+  }
+
+  /// Keep this browser's sealed copy for one passkey (ov-779).
+  async saveVault(body: Record<string, unknown>): Promise<Answer> {
+    return await this.call('/v1/web/vault', body)
+  }
+
   private async call(path: string, body: Record<string, unknown>, method: 'POST' | 'GET' = 'POST'): Promise<Answer> {
     if (this.signedOut) return { kind: 'signed-out' }
     try {
