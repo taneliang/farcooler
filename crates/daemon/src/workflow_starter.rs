@@ -120,7 +120,7 @@ async fn run(git: &Path, repository: &Path, args: &[&str]) -> Option<String> {
 }
 
 /// The URL a landing pushes to for a GitHub origin: https for an https origin, else ssh, as `git@github.com:o/n` is.
-fn landing_url(origin: &str, repository: &str) -> String {
+pub(crate) fn landing_url(origin: &str, repository: &str) -> String {
     if origin.starts_with("https://") { format!("https://github.com/{repository}.git") } else { format!("ssh://git@github.com/{repository}.git") }
 }
 

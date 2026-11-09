@@ -19,19 +19,27 @@ case "$last" in git-receive-pack*) if [ -e "$REFUSE_FILE" ]; then echo 'git@farc
 exec /usr/bin/env -i PATH=/usr/bin:/bin /bin/sh -c "$last"
 "#;
 
-async fn remote(mode: &str) -> Remote {
+async fn remote(mode: &str) -> Remote { remote_at(mode, None).await }
+
+/// A remote reached at `github` (a landing URL and the path it names), which the stand-in ssh answers from the scratch
+/// bare repository: the URL a first draft suggests, taken as it is, with no GitHub behind it.
+async fn remote_at(mode: &str, github: Option<(&str, &str)>) -> Remote {
     let (dir, runtime) = lander(mode).await;
     let bare = dir.path().join("private-remote.git").canonicalize().unwrap();
     let home = dir.path().join("home"); std::fs::create_dir(&home).unwrap();
     let calls = dir.path().join("ssh-calls");
     let ssh = dir.path().join("ssh");
-    std::fs::write(&ssh, SSH.replace("$CALLS_FILE", &calls.to_string_lossy()).replace("$REFUSE_FILE", &dir.path().join("refuse").to_string_lossy())).unwrap();
+    let mut script = SSH.to_string();
+    if let Some((_, path)) = github {
+        script = script.replace("exec /usr/bin/env", &format!("last=$(printf '%s' \"$last\" | sed \"s#'{path}'#'{}'#\")\nexec /usr/bin/env", bare.display()));
+    }
+    std::fs::write(&ssh, script.replace("$CALLS_FILE", &calls.to_string_lossy()).replace("$REFUSE_FILE", &dir.path().join("refuse").to_string_lossy())).unwrap();
     std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
     // The runner user's own global config: their ssh command is theirs to choose.
     std::fs::write(home.join(".gitconfig"), format!("[core]\n\tsshCommand = {}\n", ssh.display())).unwrap();
     let root = runtime.root.clone();
     let mut config = runtime.coding.clone().unwrap();
-    config.landing = Some(CodingLanding { job: "landing-1026".into(), repository: format!("ssh://git@farcooler-test{}", bare.display()).into(),
+    config.landing = Some(CodingLanding { job: "landing-1026".into(), repository: github.map_or_else(|| format!("ssh://git@farcooler-test{}", bare.display()), |(url, _)| url.to_string()).into(),
         target: "refs/heads/main".into(), config_digest: String::new() });
     std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
     drop(runtime);
@@ -81,6 +89,24 @@ async fn a_ticket_lands_on_an_ssh_remote_through_the_users_own_ssh_and_nothing_e
     // A plain fast-forward: no force, no lease, no `+`. The remote refuses anything else on its own.
     let argv: Vec<&str> = process["argv"].as_array().unwrap().iter().filter_map(|a| a.as_str()).collect();
     assert!(!argv.iter().any(|a| a.starts_with("--force") || a.starts_with('+') || *a == "-f"), "{argv:?}");
+}
+
+/// ov-1032: the landing URL a first draft suggests for a GitHub origin, taken exactly as `workflow_starter` writes it,
+/// takes a ticket from its build to landed on a scratch remote. The stand-in ssh answers `github.com` from a scratch
+/// bare repository, so the real origin is never touched.
+#[tokio::test]
+async fn the_landing_url_a_first_draft_suggests_takes_a_ticket_to_landed_on_a_scratch_remote() {
+    let url = crate::workflow_starter::landing_url("git@github.com:scratch/repo.git", "scratch/repo");
+    assert_eq!(url, "ssh://git@github.com/scratch/repo.git");
+    let mut r = remote_at("pass", Some((&url, "/scratch/repo.git"))).await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let first = head(&r.bare).await;
+    at_join(&mut r.runtime, "one", &definition).await;
+    assert!(command(&r.runtime, Command::Queue { item: "one".into() }).result.is_ok());
+    until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert_ne!(head(&r.bare).await, first, "the scratch remote's main moved");
+    let calls = calls(&r);
+    assert!(calls.contains("git-upload-pack '/scratch/repo.git'") && calls.contains("git-receive-pack '/scratch/repo.git'"), "{calls}");
 }
 
 #[tokio::test]
