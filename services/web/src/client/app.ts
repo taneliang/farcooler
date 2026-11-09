@@ -156,7 +156,8 @@ async function notePrf(session: Session, answer: Signed): Promise<void> {
   device.prfUv = prf.uv
   session.vault = { key: keys.vaultKey, uv: prf.uv }
   await saveDevice(device)
-  await keepCopy(session)
+  // Not awaited: this runs inside an SSH login, which mustn't wait on the relay.
+  void keepCopy(session).catch(e => console.error('Far Cooler couldn’t keep the sealed copy', e))
 }
 
 /// Bring the relay's sealed copy up to date with this device, when this tab
