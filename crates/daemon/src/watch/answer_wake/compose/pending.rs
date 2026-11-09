@@ -545,6 +545,10 @@ impl Watcher {
                     if first.elapsed() >= timing.idle_twice {
                         let runtime = Runtime { marks: None, ..self.service.runtime() };
                         let pressed = Instant::now();
+                        #[cfg(test)]
+                        if enter_fails(p.to.id) {
+                            return Err("enter_failed");
+                        }
                         return runtime.send_bytes_hex(p.to.id, "0d").await.map(|_| pressed).map_err(|_| "enter_failed");
                     }
                 }
@@ -689,6 +693,22 @@ static FAULTS: std::sync::Mutex<Option<std::collections::HashMap<Uuid, usize>>> 
 #[cfg(test)]
 pub(crate) fn fail_reads(terminal: Uuid, reads: usize) {
     FAULTS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(terminal, reads);
+}
+
+/// Terminals whose waiting Enter a test has fail, as a tmux that refused
+/// the key does (`enter_fails`).
+#[cfg(test)]
+static ENTER_FAULTS: std::sync::Mutex<Vec<Uuid>> = std::sync::Mutex::new(Vec::new());
+
+/// Have `terminal`'s waiting Enter fail to be pressed.
+#[cfg(test)]
+pub(crate) fn fail_enter(terminal: Uuid) {
+    ENTER_FAULTS.lock().unwrap_or_else(|e| e.into_inner()).push(terminal);
+}
+
+#[cfg(test)]
+fn enter_fails(terminal: Uuid) -> bool {
+    ENTER_FAULTS.lock().unwrap_or_else(|e| e.into_inner()).contains(&terminal)
 }
 
 /// Whether this try's read is to fail (`fail_reads`).

@@ -833,3 +833,16 @@ mod compose_bad_read_tests;
 
 #[path = "compose_parked_tests.rs"]
 mod compose_parked_tests;
+
+/// The Enter of a wait that ends in tmux refusing the key: said in its own
+/// words, with the message still in the box, never as sent.
+#[tokio::test]
+async fn an_enter_tmux_refuses_is_said_so() {
+    let b = board().await;
+    let (agent, si) = waiting_through(&b, "working").await;
+    crate::watch::answer_wake::compose::fail_enter(agent.id);
+    si.show("shells").await;
+    waits_over(&b).await;
+    assert!(enters(&si).is_empty(), "{}", si.log());
+    assert_eq!(not_sent(agent.id), ["“what did they find” is in Claude’s box, but the runner couldn’t press Return. Check the terminal."]);
+}
