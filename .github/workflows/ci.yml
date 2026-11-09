@@ -888,7 +888,10 @@ jobs:
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
-    timeout-minutes: 35
+    # 45: measured 32.7 min (green run 42613759545) and 34.9 min (run
+    # 42662865971, cancelled at 35 two seconds after all 1970 Mac tests passed;
+    # ov-1052). 45 leaves at least 25% over the slower of the two.
+    timeout-minutes: 45
     steps:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
@@ -920,9 +923,11 @@ jobs:
 
       # AgentKit's tests link the Rust client library for the Plan's view
       # (ov-1016), which the package never links itself: the watch and the
-      # widgets compile AgentKit without it.
+      # widgets compile AgentKit without it. The same command as
+      # apps/macos/build-vt.sh, so the Mac step's build is a no-op and this
+      # costs nothing extra (ov-1052: `-p farcooler-client` alone added 2.4 min).
       - name: Build the Rust client library for AgentKit's tests
-        run: cargo build --release -p farcooler-client
+        run: cargo build --release -p farcooler-vt -p farcooler-client
       - name: Test AgentKit
         # Under the same early-exit guard as the Mac's tests (ov-324); a change
         # that adds tests raises the floor in apps/shared/AgentKit/test-floor.txt.
