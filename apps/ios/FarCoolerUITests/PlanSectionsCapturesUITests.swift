@@ -78,11 +78,17 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 let strip = app.buttons["plan-strip"]
                 XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
                 strip.tap()
-                XCTAssertTrue(element(app, "plan-facts").waitForExistence(timeout: 20), "no sheet")
+                // The sheet is up when its bar is: `plan-facts` is a row of the loaded plan, so it is absent
+                // while the runner's link is down and when nothing is planned (the states shot here).
+                XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 20), "no sheet")
                 // The sections sit below the tasks in the sheet: scroll to them, and take the sheet large.
-                XCTAssertTrue(app.reveal(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-empty")), "no \(name)")
-                shoot(name, scheme, expecting: .shows(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-empty")))
-                XCTAssertTrue(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-empty").exists, "no \(name)")
+                // The plan the fixture's "next-empty" case makes no longer says "nothing planned" (`plan-empty` is for
+                // a plan with no themes at all): its empty landing is the glance, "3 waiting, none ranked", over the
+                // sheet's waiting line (ov-1039).
+                let target = element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-footer-waiting")
+                XCTAssertTrue(app.reveal(target), "no \(name)")
+                let glance = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'none ranked'")).firstMatch
+                shoot(name, scheme, expecting: name == "reconnecting" ? .shows(target) : .all(.shows(target), .shows(glance)))
                 app.terminate()
             }
         }
@@ -126,7 +132,18 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         guard let full = shot.cgImage else { return XCUIScreen.main.screenshot().pngRepresentation }
         let top = Int(70 * shot.scale)
         let crop = CGRect(x: 0, y: top, width: full.width, height: full.height - top)
-        return full.cropping(to: crop).flatMap { UIImage(cgImage: $0).pngData() } ?? XCUIScreen.main.screenshot().pngRepresentation
+        guard let body = full.cropping(to: crop) else { return XCUIScreen.main.screenshot().pngRepresentation }
+        // Without the glyph column. A working agent's glyph pulses forever (`symbolEffect(.pulse, .repeating)`), so
+        // any page with one in view was never the same picture twice, and page 2 of the sheet was never "at rest"
+        // (ov-1039). The rest of the page still has to hold still.
+        let size = CGSize(width: body.width, height: body.height)
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
+            UIImage(cgImage: body).draw(in: CGRect(origin: .zero, size: size))
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: Double(body.width) * 0.14, height: Double(body.height)))
+        }
     }
 
     /// The screen once it has stopped moving: two pictures `rest` seconds apart are the same. A swipe leaves
@@ -158,9 +175,12 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                     ?? first ?? .shows(app.navigationBars["Plan"]))
             let here = settled()
             previous = here  // the same cropped picture `.changed` samples, so a clock tick alone is no change
-            app.swipeUp(velocity: .slow)
-            app.swipeUp(velocity: .slow)
-            if settled() == here { break }
+            // The sheet's own list, as `reveal` does: a swipe on the window can land on the sheet's chrome.
+            let list = app.collectionViews.allElementsBoundByIndex.last { $0.exists && $0.isHittable } ?? app.collectionViews.firstMatch
+            list.swipeUp(velocity: .slow)
+            list.swipeUp(velocity: .slow)
+            let after = settled()
+            if after == here { break }
         }
     }
 
