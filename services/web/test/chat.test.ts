@@ -151,11 +151,11 @@ describe('the words', () => {
     expect(shortDuration(65_000.4)).toBe('1:05')
   })
 
-  it('keeps the old answers while the core cannot answer', () => {
+  it('shows the raw type, no time and no notice while the core cannot answer', () => {
     useConversationWords(() => 'null')
     try {
-      expect(agentType('Explore')).toBe('Agent')
-      expect(shortDuration(65_000)).toBe('0:00')
+      expect(agentType('general-purpose')).toBe('general-purpose')
+      expect(shortDuration(65_000)).toBe('')
       expect(isNotice({ origin: 'System' })).toBe(false)
     } finally {
       useConversationWords(golden)

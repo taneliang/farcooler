@@ -5,13 +5,10 @@ import com.farcooler.core.coreIsAvailable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The conversation view of a terminal-mode claude or codex pane on a phone (ov-374, ov-416):
@@ -349,21 +346,21 @@ object AgentConversation {
     fun gap(gap: AgentRow.Gap): String = ConversationWords.phrase(if (gap.count > 1) "gap" else "gap_one")
 
     /** "0:04", "1:12", "2:03:09": the core's `conversation_words::short`. */
-    fun short(ms: Long): String = ConversationWords.item("ms", JsonPrimitive(ms))?.contentOrNull ?: "0:00"
+    fun short(ms: Long): String = ConversationWords.item("ms", "$ms").orEmpty()
 
     /** What a subagent row says of its work: "1 tool", "14 tools", or null while the count is unknown (0 is how a missing count reads; ov-490). */
     fun toolsLabel(count: Int): String? =
         if (count <= 0) null else ConversationWords.phrase(if (count == 1) "tools_one" else "tools", fill = mapOf("n" to "$count"))
 
     /** A subagent's type as words: `general-purpose` reads "General purpose". */
-    fun agentType(raw: String): String = ConversationWords.item("agent_type", JsonPrimitive(raw))?.contentOrNull ?: "Agent"
+    fun agentType(raw: String): String = ConversationWords.item("agent_type", JsonPrimitive(raw).toString()) ?: raw
 
     /**
      * A turn nobody typed: a background task finishing, or claude waking itself
      * (`TurnOrigin::Notification`, `System`). Drawn as a notice, never as the
      * person's message.
      */
-    fun isNotice(turn: AgentRow.Turn): Boolean = ConversationWords.item("origin", JsonPrimitive(turn.origin))?.booleanOrNull ?: false
+    fun isNotice(turn: AgentRow.Turn): Boolean = ConversationWords.item("origin", JsonPrimitive(turn.origin).toString()) == "true"
 
     /** The lines a report or a message shows before Show more (ov-474). */
     const val HARNESS_LINES = 4
@@ -694,12 +691,11 @@ object ConversationWords {
         table
     }
 
-    /** The core's answer for one item (`conversation_words::item`): [field] ("agent_type", "ms", "origin") comes back under its own name; null while the bridge can't answer. */
-    internal fun item(field: String, value: JsonElement): JsonPrimitive? {
-        val request = buildJsonObject { put("schema", 1); put("item", buildJsonObject { put(field, value) }) }
-        val answer = bridge(request.toString()) ?: return null
+    /** The core's answer for one item (`conversation_words::item`): [field] ("agent_type", "ms", "origin") goes in as [json] and comes back under its own name; null while the bridge can't answer. */
+    internal fun item(field: String, json: String): String? {
+        val answer = bridge("""{"schema":1,"item":{"$field":$json}}""") ?: return null
         return try {
-            json.parseToJsonElement(answer).jsonObject["item"]?.jsonObject?.get(field) as? JsonPrimitive
+            this.json.parseToJsonElement(answer).jsonObject["item"]?.jsonObject?.get(field)?.jsonPrimitive?.contentOrNull
         } catch (_: IllegalArgumentException) {
             null
         }

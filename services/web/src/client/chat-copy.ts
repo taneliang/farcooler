@@ -38,7 +38,7 @@ function phrase(name: string, fill: Record<string, string | number> = {}, by?: s
   return Object.entries(fill).reduce((line, [key, value]) => line.replaceAll(`{${key}}`, String(value)), words)
 }
 
-/// One item's logic, asked of the core (`conversation_words::item`); blank while nothing can answer.
+/// One item's logic, asked of the core (`conversation_words::item`); empty while nothing can answer.
 function item(asked: Record<string, string | number>): any {
   try {
     return JSON.parse(asker?.(JSON.stringify({ schema: 1, item: asked })) ?? 'null')?.item ?? {}
@@ -48,7 +48,7 @@ function item(asked: Record<string, string | number>): any {
 }
 
 /// Minutes and seconds, "1:05", or with hours, "1:02:03".
-export const shortDuration = (ms: number): string => item({ ms: Math.round(ms) }).ms ?? '0:00'
+export const shortDuration = (ms: number): string => item({ ms: Math.round(ms) }).ms ?? ''
 
 /// How a finished turn ended, or null while it is open (`outcome`).
 export function outcomeLine(turn: any): string | null {
@@ -93,7 +93,7 @@ export function askTitle(ask: any, agent = 'Claude'): string {
 }
 
 /// A subagent's type as words: `general-purpose` reads "General purpose".
-export const agentType = (raw: string): string => item({ agent_type: raw }).agent_type ?? 'Agent'
+export const agentType = (raw: string): string => item({ agent_type: raw }).agent_type ?? raw
 
 /// "1 tool", "14 tools", or nothing while the count is unknown.
 export function toolsLabel(count: number): string | null {

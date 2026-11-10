@@ -322,7 +322,7 @@ extension AgentConversation {
 
     /// A subagent's type as words: `general-purpose` reads "General purpose".
     public static func agentType(_ raw: String) -> String {
-        ConversationWords.item("agent_type", raw) as? String ?? "Agent"
+        ConversationWords.item("agent_type", raw) as? String ?? raw
     }
 
     /// A turn nobody typed: a background task finishing, or claude waking
