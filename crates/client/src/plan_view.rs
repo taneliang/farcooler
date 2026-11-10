@@ -450,6 +450,15 @@ struct SpanAsked {
     span: i64,
 }
 
+/// `{"schema":1,"usage":{…}}`: a task's spend with the lines it says
+/// (`usage_json`), for a harness that fakes `usage.task` (ov-1048).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UsageRequest {
+    schema: u32,
+    usage: farcooler_core::usage_words::TaskSpend,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WordsStyle {
@@ -475,6 +484,11 @@ pub fn json(request: &str) -> String {
         let span = (asked.schema == SCHEMA).then(|| farcooler_core::session_log::projector::words::short(asked.span));
         let error = span.is_none().then_some("invalid");
         return serde_json::json!({ "schema": SCHEMA, "span": span, "error": error }).to_string();
+    }
+    if let Ok(asked) = serde_json::from_str::<UsageRequest>(request) {
+        let error = (asked.schema != SCHEMA).then_some("invalid");
+        let shown = error.is_none().then(|| crate::usage_json::Shown { said: crate::usage_json::said(&asked.usage), spend: asked.usage });
+        return serde_json::json!({ "schema": SCHEMA, "usage": shown, "error": error }).to_string();
     }
     if let Ok(asked) = serde_json::from_str::<WordsRequest>(request) {
         let words = (asked.schema == SCHEMA).then(|| words::Words::new(asked.words.style));

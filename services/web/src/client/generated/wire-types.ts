@@ -723,3 +723,28 @@ export interface Presentation {
 	landingGroups?: LandingGroup[] | null;
 }
 
+/** One harness and model's line in the breakdown. */
+export interface UsageRowSaid {
+	/** Unique within a task: the runner keys rows by harness and model. */
+	id: string;
+	/** "claude · Claude Opus 5", or the harness alone for an unnamed model. */
+	title: string;
+	/** The recorded model id, for assistive technology. */
+	model: string;
+	detail: string;
+}
+
+/** What a Usage section says. With nothing recorded it says `nothing` alone. */
+export interface UsageSaid {
+	/** "No agent usage recorded yet." with nothing recorded; otherwise none. */
+	nothing?: string | null;
+	tokens: string;
+	tokenDetail?: string | null;
+	cost: string;
+	/** The cost has a dollar figure, so the API-equivalent note goes under it. */
+	priced: boolean;
+	time?: string | null;
+	/** Most tokens first, then by title. */
+	rows: UsageRowSaid[];
+}
+

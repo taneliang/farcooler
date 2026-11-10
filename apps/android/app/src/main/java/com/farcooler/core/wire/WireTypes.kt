@@ -854,3 +854,30 @@ data class Presentation (
 	val landingGroups: List<LandingGroup>? = null
 )
 
+/// One harness and model's line in the breakdown.
+@Serializable
+data class UsageRowSaid (
+	/// Unique within a task: the runner keys rows by harness and model.
+	val id: String,
+	/// "claude · Claude Opus 5", or the harness alone for an unnamed model.
+	val title: String,
+	/// The recorded model id, for assistive technology.
+	val model: String,
+	val detail: String
+)
+
+/// What a Usage section says. With nothing recorded it says `nothing` alone.
+@Serializable
+data class UsageSaid (
+	/// "No agent usage recorded yet." with nothing recorded; otherwise none.
+	val nothing: String? = null,
+	val tokens: String,
+	val tokenDetail: String? = null,
+	val cost: String,
+	/// The cost has a dollar figure, so the API-equivalent note goes under it.
+	val priced: Boolean,
+	val time: String? = null,
+	/// Most tokens first, then by title.
+	val rows: List<UsageRowSaid>
+)
+

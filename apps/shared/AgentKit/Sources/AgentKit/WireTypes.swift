@@ -1109,3 +1109,45 @@ public struct WirePresentation: Codable, Equatable, Sendable {
 		self.landingGroups = landingGroups
 	}
 }
+
+/// One harness and model's line in the breakdown.
+public struct WireUsageRowSaid: Codable, Equatable, Sendable {
+	/// Unique within a task: the runner keys rows by harness and model.
+	public var id: String
+	/// "claude · Claude Opus 5", or the harness alone for an unnamed model.
+	public var title: String
+	/// The recorded model id, for assistive technology.
+	public var model: String
+	public var detail: String
+
+	public init(id: String, title: String, model: String, detail: String) {
+		self.id = id
+		self.title = title
+		self.model = model
+		self.detail = detail
+	}
+}
+
+/// What a Usage section says. With nothing recorded it says `nothing` alone.
+public struct WireUsageSaid: Codable, Equatable, Sendable {
+	/// "No agent usage recorded yet." with nothing recorded; otherwise none.
+	public var nothing: String?
+	public var tokens: String
+	public var tokenDetail: String?
+	public var cost: String
+	/// The cost has a dollar figure, so the API-equivalent note goes under it.
+	public var priced: Bool
+	public var time: String?
+	/// Most tokens first, then by title.
+	public var rows: [WireUsageRowSaid]
+
+	public init(nothing: String?, tokens: String, tokenDetail: String?, cost: String, priced: Bool, time: String?, rows: [WireUsageRowSaid]) {
+		self.nothing = nothing
+		self.tokens = tokens
+		self.tokenDetail = tokenDetail
+		self.cost = cost
+		self.priced = priced
+		self.time = time
+		self.rows = rows
+	}
+}

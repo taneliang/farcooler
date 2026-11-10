@@ -1,12 +1,12 @@
 //! `farcooler task usage`: what agents spent on one task (ov-195).
 //!
-//! `--json` prints `farcooler_core::usage_words::TaskSpend`, the shape the
-//! Mac's Usage section decodes; otherwise the same words that section says,
+//! `--json` prints `farcooler_core::usage_words::TaskSpend` with the lines it
+//! says (`usage_json::Shown`), which the Mac's Usage section draws; otherwise the same words that section says,
 //! from the same `usage_words`.
 
 use std::error::Error;
 
-use farcooler_client::usage_json::task_spend;
+use farcooler_client::usage_json::{Shown, said, task_spend};
 use farcooler_core::usage_words::{NOTHING_YET, TaskSpend};
 use farcooler_protocol::v1::{self as pb, request, result};
 
@@ -40,7 +40,7 @@ pub(crate) async fn task_usage<L: DispatchLink>(
     };
     let spend = task_spend(&usage);
     if json {
-        return Ok(serde_json::to_string(&spend)?);
+        return Ok(serde_json::to_string(&Shown { said: said(&spend), spend })?);
     }
     Ok(render(&task.key, &task.title, &spend))
 }

@@ -92,6 +92,11 @@ impl Spend {
         self.turns == 0 && self.subagent_runs == 0
     }
 
+    /// Whether a cost line has a dollar figure, and so wants `API_EQUIVALENT` beneath it.
+    pub fn is_priced(&self) -> bool {
+        self.priced_micros() > 0
+    }
+
     fn priced_micros(&self) -> i64 {
         self.cost_reported_micros + self.cost_estimated_micros
     }
