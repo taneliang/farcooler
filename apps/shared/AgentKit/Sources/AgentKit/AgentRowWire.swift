@@ -86,6 +86,10 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// reminder. `prompt` then holds its clean words. Nil for a turn a
         /// person (or a schedule) started.
         public var harness: Harness? = nil
+        /// Nobody typed it: a task's notice or claude waking itself. The core says.
+        public var notice: Bool? = nil
+        /// `durationMs` as the timer reads it, "1:05"; the core says.
+        public var took: String? = nil
 
         public enum Outcome: Sendable, Equatable, Codable {
             case finished, interrupted, unrecorded
@@ -201,6 +205,8 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// The tokens its newest model call used, as claude's agent panel
         /// counts them (ov-453); nil until its transcript says.
         public var tokens: Int? = nil
+        /// `agentType` as words, "General purpose"; the core says.
+        public var typeWords: String? = nil
     }
 
     public struct Ask: Sendable, Equatable, Codable {
@@ -458,7 +464,8 @@ extension AgentRow {
                         kind: AgentRowJSON.tag(h["kind"])?.name ?? "Note", title: h["title"] as? String ?? "",
                         body: h["body"] as? String ?? "", agentId: id("agent_id"), source: id("source"),
                         agentRow: id("agent_row"))
-                }))
+                },
+                notice: p["notice"] as? Bool, took: p["took"] as? String))
         case "Prose":
             return .prose(Prose(text: text("text"), conclusion: p["conclusion"] as? Bool ?? false, atMs: AgentRowJSON.ms(p["at_ms"])))
         case "Thinking":
@@ -482,7 +489,7 @@ extension AgentRow {
                 startedMs: AgentRowJSON.ms(p["started_ms"]), endedMs: AgentRowJSON.ms(p["ended_ms"]),
                 toolCount: AgentRowJSON.int(p["tool_count"]), currentAction: text("current_action"),
                 lastMs: AgentRowJSON.ms(p["last_ms"]), agentId: (p["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-                tokens: (p["tokens"] as? NSNumber)?.intValue))
+                tokens: (p["tokens"] as? NSNumber)?.intValue, typeWords: p["type_words"] as? String))
         case "Ask":
             let questions = (p["questions"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { q in
                 Ask.Question(

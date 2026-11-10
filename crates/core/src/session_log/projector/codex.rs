@@ -453,7 +453,7 @@ impl Projection {
             return;
         }
         let turn = self.turn;
-        let thinking = Thinking { started_ms: started, ended_ms: clamp_end(started, ended), ran: None };
+        let thinking = Thinking { started_ms: started, ended_ms: clamp_end(started, ended) };
         self.push(row_id, turn, false, RowKind::Thinking(thinking));
     }
 
@@ -518,7 +518,6 @@ impl Projection {
             file_path,
             input: super::detail::input_text(args),
             result: None,
-            ran: None,
         };
         self.push(row_id, Some(turn), provisional, RowKind::Tool(tool));
         self.link_tool(None, call, &name, &summary, !provisional);

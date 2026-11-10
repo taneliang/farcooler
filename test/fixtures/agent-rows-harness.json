@@ -34,7 +34,6 @@
           "description": "review dead-layer removal",
           "ended_ms": 1791743220000,
           "last_ms": 1791742801000,
-          "ran": "6:59",
           "started_ms": 1791742801000,
           "status": "Completed",
           "tool_count": 14,

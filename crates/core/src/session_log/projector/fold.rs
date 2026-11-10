@@ -891,7 +891,7 @@ impl Projection {
                     }
                     Some("thinking") | Some("redacted_thinking") => {
                         let started = self.turn_clock;
-                        let kind = RowKind::Thinking(Thinking { started_ms: started, ended_ms: clamp_end(started, at), ran: None });
+                        let kind = RowKind::Thinking(Thinking { started_ms: started, ended_ms: clamp_end(started, at) });
                         self.push(format!("think:{uuid}:{n}"), Some(turn), false, kind);
                     }
                     Some("tool_use") => self.tool_use(turn, block, at, false),
@@ -994,7 +994,6 @@ impl Projection {
                     file_path: input.file_path.get().map(str::to_string),
                     input: block.input.raw.as_deref().and_then(super::detail::input_text_of),
                     result: None,
-                    ran: None,
                 };
                 (format!("tool:{id}"), RowKind::Tool(tool))
             }

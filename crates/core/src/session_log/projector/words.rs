@@ -23,10 +23,6 @@ pub fn is_notice(origin: TurnOrigin) -> bool {
     matches!(origin, TurnOrigin::Notification | TurnOrigin::System)
 }
 
-fn span(started: Option<i64>, ended: Option<i64>) -> Option<String> {
-    Some(short(ended? - started?))
-}
-
 /// Fills the words a row's kind carries, from the fields they say.
 pub(super) fn fill(kind: &mut RowKind) {
     match kind {
@@ -36,10 +32,7 @@ pub(super) fn fill(kind: &mut RowKind) {
         }
         RowKind::Subagent(s) => {
             s.type_words = agent_type(&s.agent_type);
-            s.ran = span(s.started_ms, s.ended_ms);
         }
-        RowKind::Tool(t) => t.ran = span(t.started_ms, t.ended_ms),
-        RowKind::Thinking(t) => t.ran = span(t.started_ms, t.ended_ms),
         _ => {}
     }
 }

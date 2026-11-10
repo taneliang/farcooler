@@ -16,15 +16,13 @@ fn the_words_are_said_once() {
 }
 
 #[test]
-fn a_subagent_row_carries_its_type_and_time_on_the_wire() {
+fn a_subagent_row_carries_its_type_words_on_the_wire() {
     let p = fold(QUEUED_NOTIFICATION);
     let row = p.row("sub:toolu_bgq").unwrap();
     let RowKind::Subagent(sub) = &row.kind else { panic!("a subagent") };
     assert_eq!(sub.type_words, agent_type(&sub.agent_type));
-    assert_eq!(sub.ran.as_deref(), Some(short(sub.ended_ms.unwrap() - sub.started_ms.unwrap()).as_str()));
     let wire = serde_json::to_value(row).unwrap();
     assert_eq!(wire["kind"]["Subagent"]["type_words"], sub.type_words);
-    assert_eq!(wire["kind"]["Subagent"]["ran"], "0:11");
 }
 
 #[test]

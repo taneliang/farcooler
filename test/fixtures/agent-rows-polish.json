@@ -31,7 +31,6 @@
           "file_path": null,
           "input": "cron: 4 15 3 10 *\nrecurring: false",
           "name": "CronCreate",
-          "ran": "0:00",
           "result": "Scheduled f56f5668",
           "started_ms": 2000,
           "status": "Done",

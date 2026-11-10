@@ -43,7 +43,6 @@
               "ended_ms": null,
               "file_path": "/w/src/main.rs",
               "name": "Edit",
-              "ran": "0:00",
               "started_ms": 5000,
               "status": "Running",
               "summary": "src/main.rs"
@@ -120,7 +119,6 @@
         "kind": {
           "Thinking": {
             "ended_ms": 4500,
-            "ran": "0:02",
             "started_ms": 2500
           }
         },
@@ -148,7 +146,6 @@
             "ended_ms": 5400,
             "file_path": "/w/src/main.rs",
             "name": "Edit",
-            "ran": "0:00",
             "started_ms": 5000,
             "status": "Done",
             "summary": "src/main.rs"

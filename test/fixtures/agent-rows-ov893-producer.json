@@ -31,7 +31,6 @@
           "file_path": null,
           "input": "command: [\"/bin/zsh\",\"-lc\",\"'/Applications/Far Cooler Canary.app/Contents/Resources/farcooler' task set ov-893 --status in_progress; '/Applications/Far Cooler Canary.app/Contents/Resources/farcooler' task note ov-893 --kind decision --body 'Research native operation rows using actual tool-call/projector data and owner screenshots, after ov-894. Keep exact raw expansion and conservative fallback for shell compounds/dynamic text; semantic recognition never supplies caller authority or success. No product edits/builds.'\"]",
           "name": "Bash",
-          "ran": "0:01",
           "result": "ov-893  in_progress  Agent view: Far Cooler operations get native rows\nov-893  c143ae3d  decision",
           "started_ms": 1793574924733,
           "status": "Done",
@@ -64,7 +63,6 @@
             "target": "ov-893",
             "version": 1
           },
-          "ran": "0:02",
           "result": "ov-893  264ca0f7  decision",
           "started_ms": 1793574957570,
           "status": "Done",
