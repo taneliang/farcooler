@@ -322,7 +322,7 @@ fn reasons() -> Vec<Reason> {
 }
 fn actions() -> Vec<ActionKind> {
     vec![ActionKind::InspectLatestEvidence, ActionKind::InspectUncertainty, ActionKind::Approve,
-        ActionKind::AcceptReview, ActionKind::RequestRework, ActionKind::RejectReview, ActionKind::Cancel]
+        ActionKind::AcceptReview, ActionKind::RequestRework, ActionKind::RejectReview, ActionKind::Cancel, ActionKind::Retry]
 }
 fn phase_slot(p: &Phase) -> usize {
     match p { Phase::Blocked => 0, Phase::WaitingApproval => 1, Phase::WaitingReview => 2, Phase::Running => 3,
@@ -345,7 +345,7 @@ fn reason_slot(r: &Reason) -> usize {
 fn action_slot(a: &ActionKind) -> usize {
     match a { ActionKind::InspectLatestEvidence => 0, ActionKind::InspectUncertainty => 1, ActionKind::Approve => 2,
         ActionKind::AcceptReview => 3, ActionKind::RequestRework => 4, ActionKind::RejectReview => 5,
-        ActionKind::Cancel => 6 }
+        ActionKind::Cancel => 6, ActionKind::Retry => 7 }
 }
 
 #[test]
@@ -358,7 +358,7 @@ fn every_variant_is_listed() {
     filled(&phases(), phase_slot, 11, "Phase");
     filled(&kinds(), kind_slot, 20, "StageKind");
     filled(&reasons(), reason_slot, 12, "Reason");
-    filled(&actions(), action_slot, 7, "ActionKind");
+    filled(&actions(), action_slot, 8, "ActionKind");
 }
 
 fn labels(style: Style) -> Vec<String> {
@@ -370,6 +370,7 @@ fn labels(style: Style) -> Vec<String> {
     out.extend([GateKind::Approval, GateKind::Review].map(|k| display::gate_card(k, "owner", style).label));
     out.extend(reasons.into_iter().map(|r| display::reason_card(r, style).label));
     out.extend(actions.iter().map(|a| display::action_label(a, style)));
+    out.push(display::close_label(style));
     let form = display::rework_form(1, style);
     out.extend([form.label, form.submit_label]);
     out.sort();
@@ -443,9 +444,9 @@ fn a_runs_page_reads_like_a_person_wrote_it() {
     let page = project(&cancelled, &auth(), STYLE).unwrap().runs.remove(0).page;
     assert_eq!((page.ticket.as_str(), page.outcome.as_str()), ("item", "Cancelling"));
     assert!(page.reason.starts_with("This run was cancelled because its board was deleted."));
-    assert_eq!(page.steps[0].label, "Prepare Workspace");
+    assert_eq!(page.steps[0].label, "Prepare workspace");
     assert_eq!(page.steps[0].state, "Stopping");
-    assert_eq!(page.steps[1].state, "Not Started");
+    assert_eq!(page.steps[1].state, "Not started");
     // Nothing a person reads by default carries a machine id.
     let shown: Vec<&str> = std::iter::once(page.reason.as_str()).chain(page.steps.iter().flat_map(|s| [s.label.as_str(), s.state.as_str()])).collect();
     assert!(shown.iter().all(|t| !t.contains("wf1:") && !t.contains("stage-") && !t.contains("Fence")), "{shown:?}");
@@ -480,16 +481,17 @@ fn short_ids_drop_the_scheme_and_keep_the_front() {
 fn a_runs_page_holds_the_gate_every_reason_and_plain_words() {
     let fixtures = fixtures();
     let page = |name: &str| project(&fixtures.iter().find(|(n, _)| *n == name).unwrap().1, &auth(), STYLE).unwrap().runs.remove(0).page;
-    // A gate the viewer decides names them as "you", never the raw principal.
+    // One plain sentence says what the run waits for and names the viewer as "you", never the raw principal.
     let approval = page("approval");
-    let gate = approval.gate.expect("an approval gate");
-    assert_eq!((gate.label.as_str(), gate.text.as_str()), ("Approval Required", "Waiting for you to approve."));
+    assert_eq!(approval.outcome, "Awaiting approval");
+    assert_eq!(approval.reason, "Waiting for your approval to start Prepare workspace.");
     let other = Capabilities { decision_principal: Some("someone".into()), ..auth() };
     let waiting = project(&fixtures.iter().find(|(n, _)| *n == "approval").unwrap().1, &other, STYLE).unwrap().runs.remove(0).page;
-    assert_eq!(waiting.gate.unwrap().text, "Waiting for owner to approve.");
+    assert_eq!(waiting.reason, "Waiting for owner's approval to start Prepare workspace.");
+    assert!(!approval.more.iter().any(|m| m.contains("configured approval")), "{:?}", approval.more);
     // A running run names its stage; an uncertain one names the stage and what to do.
-    assert_eq!(page("automatic").reason, "Running: Prepare Workspace.");
-    assert_eq!(page("uncertain").reason, "Run Checks may or may not have finished. Check it before it continues.");
+    assert_eq!(page("automatic").reason, "Running: Prepare workspace.");
+    assert_eq!(page("uncertain").reason, "Run checks may or may not have finished. Check it before it continues.");
     // Rework and stale evidence stay on the page, with the reworks left in words.
     let rework = page("rework");
     assert!(rework.more.contains(&"This run has entered a rework iteration.".to_owned()), "{:?}", rework.more);
@@ -507,7 +509,6 @@ fn a_landed_runs_page_is_all_done() {
     let page = project(&state, &auth(), STYLE).unwrap().runs.remove(0).page;
     assert_eq!((page.outcome.as_str(), page.reason.as_str()), ("Completed", "All stages have completed."));
     assert!(page.steps.iter().all(|s| s.state == "Done"), "{:?}", page.steps);
-    assert!(page.gate.is_none());
 }
 
 /// A runner's stop explains a run that has no sentence of its own, but never overwrites a kept failure.
@@ -524,6 +525,46 @@ fn a_stop_does_not_replace_a_kept_failure_sentence() {
     let stops = std::collections::BTreeMap::from([("item".to_owned(), Stop { run: running.runs[0].run.clone(), text: "Changes in the worktree.".into() })]);
     add_stops(&mut running, &stops, STYLE);
     assert_eq!(running.runs[0].page.reason, "Changes in the worktree.");
+}
+
+/// A run's actions are the ones the engine accepts for where it stands; a failed run is retried or closed.
+#[test]
+fn actions_follow_the_outcome() {
+    let fixtures = fixtures();
+    let state = |name: &str| fixtures.iter().find(|(n, _)| *n == name).unwrap().1.clone();
+    let labels = |s: &State| project(s, &auth(), STYLE).unwrap().runs.remove(0).actions.iter().map(|a| a.label.clone()).collect::<Vec<_>>();
+    // Nothing offers to cancel a run that has ended.
+    for ended in ["cancelled", "landed"] { assert!(!labels(&state(ended)).iter().any(|l| l.starts_with("Cancel")), "{ended}"); }
+    // A failed run can be tried again or closed, and "Try Again" does what the reducer's retry does.
+    let failed = state("failed");
+    assert_eq!(labels(&failed), ["Try Again", "Close Run"]);
+    let card = project(&failed, &auth(), STYLE).unwrap().runs.remove(0);
+    let retry = card.actions.iter().find(|a| a.kind == ActionKind::Retry).unwrap();
+    let Intent::Command(command) = action(&failed, &auth(), STYLE, "item", retry).unwrap() else { panic!() };
+    assert_eq!(command, Command::Retry { item: "item".into() });
+    assert_ne!(apply(&failed, command, Grant::Controller).items["item"].phase, Phase::Failed);
+    // Retries run out, and only a controller may retry.
+    let mut spent = failed.clone();
+    spent.items.get_mut("item").unwrap().retries = farcooler_workflow::MAX_RETRIES;
+    assert_eq!(labels(&spent), ["Close Run"]);
+    let viewer = Capabilities { controller: false, ..auth() };
+    assert!(project(&failed, &viewer, STYLE).unwrap().runs[0].actions.is_empty());
+}
+
+/// Status words are sentence case on every platform; only buttons and headings follow the platform's case.
+#[test]
+fn status_words_are_sentence_case_on_every_platform() {
+    for style in Style::ALL {
+        for (name, state) in fixtures() {
+            let card = project(&state, &auth(), style).unwrap().runs.remove(0);
+            let words: Vec<&str> = std::iter::once(card.page.outcome.as_str()).chain(card.page.steps.iter().flat_map(|s| [s.label.as_str(), s.state.as_str()])).collect();
+            for word in words {
+                let rest: String = word.chars().skip(1).collect();
+                assert!(rest == rest.to_lowercase() || word.contains("CI"), "{name} {style:?}: {word}");
+            }
+            assert_eq!(card.page.copy_label, style.label("Copy"));
+        }
+    }
 }
 
 #[test]

@@ -47,19 +47,8 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
 const drafts = new WeakMap<WorkflowBoard, Map<string, { value: string; start: number; end: number }>>()
 function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HTMLElement {
   const card = el('article'); card.append(el('h2', run.page.ticket), el('h3', run.page.outcome), el('p', run.page.reason))
-  if (run.page.gate) card.append(el('h3', run.page.gate.label), el('p', run.page.gate.text))
   for (const line of run.page.more) card.append(el('p', line))
-  for (const step of run.page.steps) card.append(el('p', `${step.label} · ${step.state}`))
-  const details = el('details'); details.append(el('summary', run.page.detailsLabel))
-  for (const row of run.page.details) {
-    const line = el('p', `${row.title}: ${row.value}`)
-    const whole = row.whole
-    if (whole) line.append(keyed(button('Copy', () => void navigator.clipboard?.writeText(whole)), `copy:${row.title}`))
-    details.append(line)
-  }
-  card.append(details)
   const actions = el('div'); actions.className = 'actions'
-  for (const history of run.reworkHistory ?? []) card.append(el('p', `${history.principal} · ${history.iteration}`), el('pre', history.reason))
   for (const action of run.actions) {
     const key = JSON.stringify(['action', run.item, run.run, action.kind, action.guard])
     const form = run.forms?.find(f => f.action === action.kind)
@@ -75,7 +64,18 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
         keyed(button(form.submitLabel, () => void board.dispatch(run.item, action, draft.value), !view.ready || view.busy), key))
     } else actions.append(keyed(button(action.label, () => void board.dispatch(run.item, action), !view.ready || view.busy), key))
   }
-  card.append(actions); return card
+  card.append(actions)
+  for (const step of run.page.steps) card.append(el('p', `${step.label} · ${step.state}`))
+  const details = el('details'); details.append(el('summary', run.page.detailsLabel))
+  for (const row of run.page.details) {
+    const line = el('p', `${row.title}: ${row.value}`)
+    const whole = row.whole
+    if (whole) line.append(keyed(button(run.page.copyLabel, () => void navigator.clipboard?.writeText(whole)), `copy:${row.title}`))
+    details.append(line)
+  }
+  card.append(details)
+  for (const history of run.reworkHistory ?? []) card.append(el('p', `${history.principal} · ${history.iteration}`), el('pre', history.reason))
+  return card
 }
 
 // Host installs one getter over the CURRENT authenticated Session. No protocol

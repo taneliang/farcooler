@@ -15,6 +15,7 @@ public enum WireActionKind: String, Codable, Equatable, Sendable {
 	case requestRework = "RequestRework"
 	case rejectReview = "RejectReview"
 	case cancel = "Cancel"
+	case retry = "Retry"
 }
 
 public struct WireAction: Codable, Equatable, Sendable {
@@ -663,16 +664,6 @@ public struct WireLandingCard: Codable, Equatable, Sendable {
 	}
 }
 
-public struct WirePageGate: Codable, Equatable, Sendable {
-	public var label: String
-	public var text: String
-
-	public init(label: String, text: String) {
-		self.label = label
-		self.text = text
-	}
-}
-
 public enum WireSectionKind: String, Codable, Equatable, Sendable {
 	case needsYou = "needs_you"
 	case landing
@@ -928,26 +919,26 @@ public struct WireStepRow: Codable, Equatable, Sendable {
 public struct WireRunPage: Codable, Equatable, Sendable {
 	/// The ticket the run is for.
 	public var ticket: String
-	/// How the run stands or ended: "Cancelled", "Failed", "Running".
+	/// How the run stands or ended, as status text in sentence case: "Cancelled", "Awaiting approval".
 	public var outcome: String
-	/// Why, as a sentence.
+	/// Why, as a sentence; for a run that waits on a person, what it waits for, naming the viewer as "you".
 	public var reason: String
-	/// What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide.
-	public var gate: WirePageGate?
 	/// The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop.
 	public var more: [String]
 	public var steps: [WireStepRow]
 	public var detailsLabel: String
+	/// The label of the control that copies a detail's whole value.
+	public var copyLabel: String
 	public var details: [WireDetailRow]
 
-	public init(ticket: String, outcome: String, reason: String, gate: WirePageGate?, more: [String], steps: [WireStepRow], detailsLabel: String, details: [WireDetailRow]) {
+	public init(ticket: String, outcome: String, reason: String, more: [String], steps: [WireStepRow], detailsLabel: String, copyLabel: String, details: [WireDetailRow]) {
 		self.ticket = ticket
 		self.outcome = outcome
 		self.reason = reason
-		self.gate = gate
 		self.more = more
 		self.steps = steps
 		self.detailsLabel = detailsLabel
+		self.copyLabel = copyLabel
 		self.details = details
 	}
 }

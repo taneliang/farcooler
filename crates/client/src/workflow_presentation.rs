@@ -9,6 +9,7 @@ pub const SCHEMA: u32 = 2;
 mod display;
 mod page;
 pub use page::{DetailRow, RunPage, StepRow};
+use farcooler_workflow::MAX_RETRIES;
 mod style;
 pub use style::Style;
 
@@ -32,7 +33,7 @@ pub enum Reason {
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ActionKind { InspectLatestEvidence, InspectUncertainty, Approve, AcceptReview, RequestRework, RejectReview, Cancel }
+pub enum ActionKind { InspectLatestEvidence, InspectUncertainty, Approve, AcceptReview, RequestRework, RejectReview, Cancel, Retry }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -231,9 +232,14 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             if item.iteration < item.definition.max_reworks { kinds.push(ActionKind::RequestRework); }
             else { kinds.push(ActionKind::RejectReview); }
         }
-        if auth.controller && !matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)
-            && !item.run.starts_with("cancel:")
-        { kinds.push(ActionKind::Cancel); }
+        // Only what the reducer accepts: a follower goes where its lead goes, and a group whose push may be in flight
+        // cannot be called back. A failed run is retried, or closed (that is what cancelling it does).
+        let pushing = !item.members.is_empty() && (item.pushed.is_some()
+            || matches!(item.definition.stages.get(item.stage).map(|s| &s.kind), Some(StageKind::Push)));
+        let ended = matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling) || item.run.starts_with("cancel:");
+        if auth.controller && item.phase == Phase::Failed && item.group_of.is_none() && item.retries < MAX_RETRIES
+        { kinds.push(ActionKind::Retry); }
+        if auth.controller && !ended && !pushing && item.follows.is_none() { kinds.push(ActionKind::Cancel); }
         let page = page::run_page(id, item, &reasons, gate.as_ref(), auth.decision_principal.as_deref(), style);
         runs.push(RunCard { label: display::run_label(style), phase_label: display::phase_label(&item.phase, style),
             item: id.clone(), run: item.run.clone(), definition_pin: item.pin.clone(),
@@ -247,7 +253,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
                 vec![display::rework_form(farcooler_workflow::MAX_REWORK_REASON_BYTES, style)] } else { Vec::new() },
             rework_history: item.rework_history.clone(),
             reasons: reasons.clone(), page,
-            actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind, style), kind, guard: guard.clone() }).collect() });
+            actions: kinds.into_iter().map(|kind| Action { label: if kind == ActionKind::Cancel && item.phase == Phase::Failed { display::close_label(style) } else { display::action_label(&kind, style) }, kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,
         revision: state.revision, runs })
@@ -277,6 +283,7 @@ pub fn action_with_reason(state: &State, auth: &Capabilities, style: Style, item
             item: item.into(), run: card.run.clone(), evidence: card.latest_evidence.clone().ok_or(Error::Unavailable)?,
             passed: requested.kind == ActionKind::AcceptReview, reason: reason.map(str::to_owned) }),
         ActionKind::Cancel => Intent::Command(Command::Cancel { item: item.into() , reason: None }),
+        ActionKind::Retry => Intent::Command(Command::Retry { item: item.into() }),
     })
 }
 

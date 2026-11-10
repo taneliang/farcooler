@@ -3,6 +3,7 @@ package com.farcooler.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -117,31 +118,30 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? =
             Text(run.page.ticket, style = MaterialTheme.typography.titleLarge)
             Text(run.page.outcome, style = MaterialTheme.typography.titleMedium)
             Text(run.page.reason)
-            run.page.gate?.let { Text(it.label, style = MaterialTheme.typography.titleMedium); Text(it.text) }
             run.page.more.forEach { Text(it) }
+            run.actions.forEach { action ->
+                val form = run.forms?.firstOrNull { it.action == action.kind }
+                if (form == null) Button(onClick = { perform(action) }, enabled = enabled) { Text(action.label) }
+                else {
+                    var draft by rememberSaveable(run.item, run.run, action.guard) { mutableStateOf("") }
+                    OutlinedTextField(value = draft, onValueChange = { draft = it }, enabled = enabled,
+                        label = { Text(form.label) })
+                    Text(form.help)
+                    Button(onClick = { performReason(action, draft) }, enabled = enabled) { Text(form.submitLabel) }
+                }
+            }
             if (onWatch != null) Button(onClick = onWatch) { Text("Watch agent") }
             run.page.steps.forEach { step -> Text("${step.label} · ${step.state}") }
             var open by rememberSaveable(run.item, run.run) { mutableStateOf(false) }
-            TextButton(onClick = { open = !open }) { Text(run.page.detailsLabel) }
+            TextButton(onClick = { open = !open }, contentPadding = PaddingValues(0.dp)) { Text(run.page.detailsLabel) }
             if (open) run.page.details.forEach { row ->
                 Text("${row.title}: ${row.value}")
-                row.whole?.let { whole -> TextButton(onClick = { clipboard.setText(AnnotatedString(whole)) }) { Text("Copy") } }
+                row.whole?.let { whole -> TextButton(onClick = { clipboard.setText(AnnotatedString(whole)) }, contentPadding = PaddingValues(0.dp)) { Text(run.page.copyLabel) } }
             }
         }
     }
     run.reworkHistory?.forEach { history ->
         Text(history.principal)
         SelectionContainer { Text(history.reason) }
-    }
-    run.actions.forEach { action ->
-        val form = run.forms?.firstOrNull { it.action == action.kind }
-        if (form == null) Button(onClick = { perform(action) }, enabled = enabled) { Text(action.label) }
-        else {
-            var draft by rememberSaveable(run.item, run.run, action.guard) { mutableStateOf("") }
-            OutlinedTextField(value = draft, onValueChange = { draft = it }, enabled = enabled,
-                label = { Text(form.label) })
-            Text(form.help)
-            Button(onClick = { performReason(action, draft) }, enabled = enabled) { Text(form.submitLabel) }
-        }
     }
 }

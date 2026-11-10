@@ -74,9 +74,11 @@ pub(super) fn action_label(kind: &ActionKind, style: Style) -> String {
         ActionKind::InspectUncertainty => "Inspect uncertain operation…",
         ActionKind::Approve => "Approve", ActionKind::AcceptReview => "Accept review",
         ActionKind::RequestRework => "Request rework", ActionKind::RejectReview => "Reject review",
-        ActionKind::Cancel => "Cancel run",
+        ActionKind::Cancel => "Cancel run", ActionKind::Retry => "Try again",
     })
 }
+/// What cancelling says on a run that has already failed: the engine closes it, and nothing is running to cancel.
+pub(super) fn close_label(style: Style) -> String { style.label("Close run") }
 pub(super) fn run_label(style: Style) -> String { style.label("Workflow run") }
 pub(super) fn rework_form(max_bytes: usize, style: Style) -> ActionForm {
     ActionForm {

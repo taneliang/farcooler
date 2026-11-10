@@ -19,24 +19,20 @@ pub struct DetailRow {
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PageGate { pub label: String, pub text: String }
-#[typeshare]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunPage {
     /// The ticket the run is for.
     pub ticket: String,
-    /// How the run stands or ended: "Cancelled", "Failed", "Running".
+    /// How the run stands or ended, as status text in sentence case: "Cancelled", "Awaiting approval".
     pub outcome: String,
-    /// Why, as a sentence.
+    /// Why, as a sentence; for a run that waits on a person, what it waits for, naming the viewer as "you".
     pub reason: String,
-    /// What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gate: Option<PageGate>,
     /// The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop.
     pub more: Vec<String>,
     pub steps: Vec<StepRow>,
     pub details_label: String,
+    /// The label of the control that copies a detail's whole value.
+    pub copy_label: String,
     pub details: Vec<DetailRow>,
 }
 
@@ -63,26 +59,26 @@ fn step_state(index: usize, current: usize, phase: &Phase) -> &'static str {
 pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[ReasonCard], gate: Option<&GateCard>,
     viewer: Option<&str>, style: Style) -> RunPage
 {
-    let stage = item.definition.stages.get(item.stage).map(|s| style.label(display::stage_label(&s.kind))).unwrap_or_default();
+    let stage = item.definition.stages.get(item.stage).map(|s| display::stage_label(&s.kind)).unwrap_or_default();
     let kept = item.failure.as_deref().map(str::trim).filter(|f| !f.is_empty()).map(str::to_owned);
     let reason = kept.clone().or_else(|| match item.phase {
         Phase::Running => Some(format!("Running: {stage}.")),
         Phase::Uncertain => Some(format!("{stage} may or may not have finished. Check it before it continues.")),
         _ => None,
-    }).or_else(|| reasons.first().map(|r| r.text.clone())).unwrap_or_default();
+    }).or_else(|| gate.map(|g| {
+        let who = if viewer == Some(g.principal.as_str()) { "your".to_owned() } else { format!("{}'s", g.principal) };
+        match g.kind {
+            GateKind::Approval => format!("Waiting for {who} approval to start {stage}."),
+            GateKind::Review => format!("Waiting for {who} review of {stage}."),
+        }
+    })).or_else(|| reasons.first().map(|r| r.text.clone())).unwrap_or_default();
     let mut more: Vec<String> = reasons.iter().skip(1).map(|r| r.text.clone()).collect();
     if item.iteration > 0 {
         let left = item.definition.max_reworks - item.iteration;
         more.push(format!("{left} rework{} left.", if left == 1 { "" } else { "s" }));
     }
-    let gate = gate.map(|g| {
-        let who = if viewer == Some(g.principal.as_str()) { "you".to_owned() } else { g.principal.clone() };
-        let verb = if g.kind == GateKind::Approval { "approve" } else { "review" };
-        PageGate { label: g.label.clone(), text: format!("Waiting for {who} to {verb}.") }
-    });
     let steps = item.definition.stages.iter().enumerate().map(|(i, s)| StepRow {
-        label: style.label(display::stage_label(&s.kind)),
-        state: style.label(step_state(i, item.stage, &item.phase)) }).collect();
+        label: display::stage_label(&s.kind).to_owned(), state: step_state(i, item.stage, &item.phase).to_owned() }).collect();
     let mut details = vec![id_row("Run", &item.run, style), id_row("Workflow", &item.pin, style)];
     if let Some(c) = &item.candidate { details.push(id_row("Candidate", c, style)); }
     if let Some(p) = &item.pending { details.push(id_row("Operation", p, style)); }
@@ -90,6 +86,6 @@ pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[Rea
     if let Some(e) = &item.last_evidence {
         details.push(id_row("Evidence", &e.receipt, style));
     }
-    RunPage { ticket: id.to_owned(), outcome: display::phase_label(&item.phase, style), reason, gate, more, steps,
-        details_label: style.label("Details"), details }
+    RunPage { ticket: id.to_owned(), outcome: display::phase_label(&item.phase, Style::Material), reason, more, steps,
+        details_label: style.label("Details"), copy_label: style.label("Copy"), details }
 }

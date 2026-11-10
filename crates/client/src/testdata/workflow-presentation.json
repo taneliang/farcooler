@@ -156,6 +156,7 @@
             "label": "Workflow Run",
             "latestEvidence": null,
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -180,31 +181,31 @@
               "detailsLabel": "Details",
               "more": [],
               "outcome": "Running",
-              "reason": "Running: Prepare Workspace.",
+              "reason": "Running: Prepare workspace.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
+                  "label": "Prepare workspace",
                   "state": "Running"
                 },
                 {
                   "label": "Build",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Run Checks",
-                  "state": "Not Started"
+                  "label": "Run checks",
+                  "state": "Not started"
                 },
                 {
                   "label": "Review",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Land Changes",
-                  "state": "Not Started"
+                  "label": "Land changes",
+                  "state": "Not started"
                 },
                 {
                   "label": "Check CI",
-                  "state": "Not Started"
+                  "state": "Not started"
                 }
               ],
               "ticket": "item"
@@ -476,6 +477,7 @@
             "label": "Workflow Run",
             "latestEvidence": null,
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -493,37 +495,33 @@
                 }
               ],
               "detailsLabel": "Details",
-              "gate": {
-                "label": "Approval Required",
-                "text": "Waiting for you to approve."
-              },
               "more": [],
-              "outcome": "Awaiting Approval",
-              "reason": "This stage is waiting for its configured approval.",
+              "outcome": "Awaiting approval",
+              "reason": "Waiting for your approval to start Prepare workspace.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
-                  "state": "Awaiting Approval"
+                  "label": "Prepare workspace",
+                  "state": "Awaiting approval"
                 },
                 {
                   "label": "Build",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Run Checks",
-                  "state": "Not Started"
+                  "label": "Run checks",
+                  "state": "Not started"
                 },
                 {
                   "label": "Review",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Land Changes",
-                  "state": "Not Started"
+                  "label": "Land changes",
+                  "state": "Not started"
                 },
                 {
                   "label": "Check CI",
-                  "state": "Not Started"
+                  "state": "Not started"
                 }
               ],
               "ticket": "item"
@@ -808,6 +806,7 @@
               "receipt": "receipt-4"
             },
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -843,7 +842,7 @@
               "reason": "Running: Build.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
+                  "label": "Prepare workspace",
                   "state": "Done"
                 },
                 {
@@ -851,20 +850,20 @@
                   "state": "Running"
                 },
                 {
-                  "label": "Run Checks",
-                  "state": "Not Started"
+                  "label": "Run checks",
+                  "state": "Not started"
                 },
                 {
                   "label": "Review",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Land Changes",
-                  "state": "Not Started"
+                  "label": "Land changes",
+                  "state": "Not started"
                 },
                 {
                   "label": "Check CI",
-                  "state": "Not Started"
+                  "state": "Not started"
                 }
               ],
               "ticket": "item"
@@ -1135,6 +1134,7 @@
               "receipt": "receipt-2"
             },
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -1166,11 +1166,11 @@
               ],
               "detailsLabel": "Details",
               "more": [],
-              "outcome": "Outcome Uncertain",
-              "reason": "Run Checks may or may not have finished. Check it before it continues.",
+              "outcome": "Outcome uncertain",
+              "reason": "Run checks may or may not have finished. Check it before it continues.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
+                  "label": "Prepare workspace",
                   "state": "Done"
                 },
                 {
@@ -1178,20 +1178,20 @@
                   "state": "Done"
                 },
                 {
-                  "label": "Run Checks",
-                  "state": "Outcome Uncertain"
+                  "label": "Run checks",
+                  "state": "Outcome uncertain"
                 },
                 {
                   "label": "Review",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Land Changes",
-                  "state": "Not Started"
+                  "label": "Land changes",
+                  "state": "Not started"
                 },
                 {
                   "label": "Check CI",
-                  "state": "Not Started"
+                  "state": "Not started"
                 }
               ],
               "ticket": "item"
@@ -1449,6 +1449,7 @@
               "receipt": "receipt-2"
             },
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -1485,10 +1486,10 @@
                 "1 rework left."
               ],
               "outcome": "Running",
-              "reason": "Running: Run Checks.",
+              "reason": "Running: Run checks.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
+                  "label": "Prepare workspace",
                   "state": "Done"
                 },
                 {
@@ -1496,20 +1497,20 @@
                   "state": "Done"
                 },
                 {
-                  "label": "Run Checks",
+                  "label": "Run checks",
                   "state": "Running"
                 },
                 {
                   "label": "Review",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Land Changes",
-                  "state": "Not Started"
+                  "label": "Land changes",
+                  "state": "Not started"
                 },
                 {
                   "label": "Check CI",
-                  "state": "Not Started"
+                  "state": "Not started"
                 }
               ],
               "ticket": "item"
@@ -1753,6 +1754,7 @@
             "label": "Workflow Run",
             "latestEvidence": null,
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -1775,28 +1777,28 @@
               "reason": "This run was cancelled because its board was deleted. Nobody can approve it now, and its worktree was left as it was.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
+                  "label": "Prepare workspace",
                   "state": "Cancelled"
                 },
                 {
                   "label": "Build",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Run Checks",
-                  "state": "Not Started"
+                  "label": "Run checks",
+                  "state": "Not started"
                 },
                 {
                   "label": "Review",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Land Changes",
-                  "state": "Not Started"
+                  "label": "Land changes",
+                  "state": "Not started"
                 },
                 {
                   "label": "Check CI",
-                  "state": "Not Started"
+                  "state": "Not started"
                 }
               ],
               "ticket": "item"
@@ -2021,8 +2023,13 @@
             "actions": [
               {
                 "guard": "wf1:d6bb226b6d2520ba74b29a23343efd0fc6c61537488cc106cd820aab936b32bf",
+                "kind": "Retry",
+                "label": "Try Again"
+              },
+              {
+                "guard": "wf1:d6bb226b6d2520ba74b29a23343efd0fc6c61537488cc106cd820aab936b32bf",
                 "kind": "Cancel",
-                "label": "Cancel Run"
+                "label": "Close Run"
               }
             ],
             "attempt": 1,
@@ -2035,6 +2042,7 @@
             "label": "Workflow Run",
             "latestEvidence": null,
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -2057,28 +2065,28 @@
               "reason": "The landing remote's main could not be downloaded in time, so nothing was built. Its worktree was never created; try the ticket again when the remote is reachable.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
+                  "label": "Prepare workspace",
                   "state": "Failed"
                 },
                 {
                   "label": "Build",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Run Checks",
-                  "state": "Not Started"
+                  "label": "Run checks",
+                  "state": "Not started"
                 },
                 {
                   "label": "Review",
-                  "state": "Not Started"
+                  "state": "Not started"
                 },
                 {
-                  "label": "Land Changes",
-                  "state": "Not Started"
+                  "label": "Land changes",
+                  "state": "Not started"
                 },
                 {
                   "label": "Check CI",
-                  "state": "Not Started"
+                  "state": "Not started"
                 }
               ],
               "ticket": "item"
@@ -2310,6 +2318,7 @@
             "label": "Workflow Run",
             "latestEvidence": null,
             "page": {
+              "copyLabel": "Copy",
               "details": [
                 {
                   "title": "Run",
@@ -2332,7 +2341,7 @@
               "reason": "All stages have completed.",
               "steps": [
                 {
-                  "label": "Prepare Workspace",
+                  "label": "Prepare workspace",
                   "state": "Done"
                 },
                 {
@@ -2340,7 +2349,7 @@
                   "state": "Done"
                 },
                 {
-                  "label": "Run Checks",
+                  "label": "Run checks",
                   "state": "Done"
                 },
                 {
@@ -2348,7 +2357,7 @@
                   "state": "Done"
                 },
                 {
-                  "label": "Land Changes",
+                  "label": "Land changes",
                   "state": "Done"
                 },
                 {

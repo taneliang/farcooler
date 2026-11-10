@@ -132,8 +132,17 @@ public struct WorkflowRunsView: View {
             Text(run.page.ticket).font(.title2).accessibilityAddTraits(.isHeader)
             Text(run.page.outcome).font(.headline)
             Text(run.page.reason)
-            if let gate = run.page.gate { Text(gate.label).font(.headline); Text(gate.text) }
             ForEach(Array(run.page.more.enumerated()), id: \.offset) { _, line in Text(line) }
+            ForEach(Array(run.actions.enumerated()), id: \.offset) { _, action in
+                if let form = run.forms?.first(where: { $0.action == action.kind }) {
+                    WorkflowReasonForm(form: form, enabled: model.ready && !model.busy && port != nil) { reason in
+                        Task { await model.perform(item: run.item, action: action, port: port, reason: reason) }
+                    }.id("\(run.item)/\(run.run)/\(action.guardValue)")
+                } else {
+                    Button(action.label) { Task { await model.perform(item: run.item, action: action, port: port) } }
+                        .disabled(!model.ready || model.busy || port == nil)
+                }
+            }
             if run.pendingEffect != nil, watch != nil {
                 Button("Watch Agent") { watching = run.item }
             }
@@ -144,23 +153,13 @@ public struct WorkflowRunsView: View {
                 ForEach(Array(run.page.details.enumerated()), id: \.offset) { _, row in
                     HStack {
                         Text("\(row.title): \(row.value)").textSelection(.enabled)
-                        if let whole = row.whole { Button("Copy") { copy(whole) }.accessibilityLabel("Copy \(row.title)") }
+                        if let whole = row.whole { Button(run.page.copyLabel) { copy(whole) }.accessibilityLabel("\(run.page.copyLabel) \(row.title)") }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             ForEach(Array((run.reworkHistory ?? []).enumerated()), id: \.offset) { _, history in
                 Text("\(history.principal) · \(history.iteration)")
                 Text(history.reason).textSelection(.enabled)
-            }
-            ForEach(Array(run.actions.enumerated()), id: \.offset) { _, action in
-                if let form = run.forms?.first(where: { $0.action == action.kind }) {
-                    WorkflowReasonForm(form: form, enabled: model.ready && !model.busy && port != nil) { reason in
-                        Task { await model.perform(item: run.item, action: action, port: port, reason: reason) }
-                    }.id("\(run.item)/\(run.run)/\(action.guardValue)")
-                } else {
-                    Button(action.label) { Task { await model.perform(item: run.item, action: action, port: port) } }
-                        .disabled(!model.ready || model.busy || port == nil)
-                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)

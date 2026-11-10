@@ -26,6 +26,8 @@ enum class ActionKind(val string: String) {
 	RejectReview("RejectReview"),
 	@SerialName("Cancel")
 	Cancel("Cancel"),
+	@SerialName("Retry")
+	Retry("Retry"),
 }
 
 @Serializable
@@ -533,12 +535,6 @@ data class LandingCard (
 )
 
 @Serializable
-data class PageGate (
-	val label: String,
-	val text: String
-)
-
-@Serializable
 enum class SectionKind(val string: String) {
 	@SerialName("needs_you")
 	NeedsYou("needs_you"),
@@ -747,16 +743,16 @@ data class StepRow (
 data class RunPage (
 	/// The ticket the run is for.
 	val ticket: String,
-	/// How the run stands or ended: "Cancelled", "Failed", "Running".
+	/// How the run stands or ended, as status text in sentence case: "Cancelled", "Awaiting approval".
 	val outcome: String,
-	/// Why, as a sentence.
+	/// Why, as a sentence; for a run that waits on a person, what it waits for, naming the viewer as "you".
 	val reason: String,
-	/// What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide.
-	val gate: PageGate? = null,
 	/// The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop.
 	val more: List<String>,
 	val steps: List<StepRow>,
 	val detailsLabel: String,
+	/// The label of the control that copies a detail's whole value.
+	val copyLabel: String,
 	val details: List<DetailRow>
 )
 

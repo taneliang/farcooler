@@ -13,6 +13,7 @@ export enum ActionKind {
 	RequestRework = "RequestRework",
 	RejectReview = "RejectReview",
 	Cancel = "Cancel",
+	Retry = "Retry",
 }
 
 export interface Action {
@@ -451,11 +452,6 @@ export interface LandingCard {
 	tickets: TicketCard[];
 }
 
-export interface PageGate {
-	label: string;
-	text: string;
-}
-
 export enum SectionKind {
 	NeedsYou = "needs_you",
 	Landing = "landing",
@@ -626,16 +622,16 @@ export interface StepRow {
 export interface RunPage {
 	/** The ticket the run is for. */
 	ticket: string;
-	/** How the run stands or ended: "Cancelled", "Failed", "Running". */
+	/** How the run stands or ended, as status text in sentence case: "Cancelled", "Awaiting approval". */
 	outcome: string;
-	/** Why, as a sentence. */
+	/** Why, as a sentence; for a run that waits on a person, what it waits for, naming the viewer as "you". */
 	reason: string;
-	/** What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide. */
-	gate?: PageGate | null;
 	/** The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop. */
 	more: string[];
 	steps: StepRow[];
 	detailsLabel: string;
+	/** The label of the control that copies a detail's whole value. */
+	copyLabel: string;
 	details: DetailRow[];
 }
 
