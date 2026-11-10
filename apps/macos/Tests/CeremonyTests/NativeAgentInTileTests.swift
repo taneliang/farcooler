@@ -31,6 +31,12 @@ struct NativeAgentInTileTests {
         model.showsNative = true
         model.rich = true
         let agents = NativeAgents.shared
+        // Any suite whose DaemonClient reconnects (`NativeAgents.shared.start()`) finds no daemon on a
+        // runner and, after the retries, drops this faked link: the pane shows the dimmed switch and
+        // nothing is drawn (ov-1043). The faked link is kept through every failure.
+        let keep = agents.keepThroughFailures
+        agents.keepThroughFailures = .max
+        defer { agents.keepThroughFailures = keep }
         agents.pretend(rowsServed: true, core: RunnerCore())
         agents.adopt(model)
         defer { NativePaneModel.remember(false, for: id) }
