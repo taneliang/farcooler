@@ -50,8 +50,14 @@ fn fixtures() -> Vec<(&'static str, State)> {
     // Invalidation of an earlier retained receipt is represented directly in the immutable input.
     let mut invalidated = invalidated;
     invalidated.items.get_mut("item").unwrap().last_evidence = check.items["item"].last_evidence.clone();
+    // A run cancelled with a long reason, about 120 characters, for the captures at the narrowest width (ov-1053).
+    let mut idle = automatic.clone();
+    idle.items.get_mut("item").unwrap().pending = None;
+    let cancelled = apply(&idle, Command::Cancel { item: "item".into(),
+        reason: Some("The board this ran on was deleted, so nobody can approve this run, and its worktree was left as it was.".into()) },
+        Grant::Controller);
     vec![("automatic", automatic), ("approval", approval), ("rework", rework),
-        ("uncertain", uncertain), ("invalidated", invalidated)]
+        ("uncertain", uncertain), ("invalidated", invalidated), ("cancelled", cancelled)]
 }
 
 #[test]
