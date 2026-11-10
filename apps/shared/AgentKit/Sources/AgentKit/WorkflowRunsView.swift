@@ -62,7 +62,9 @@ public struct WorkflowRunsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var model: WorkflowRunsModel
     @AppStorage private var selected: String
-    public init(host: String, workspace: String) {
+    @State private var detailsOpen: Bool
+    public init(host: String, workspace: String, detailsOpen: Bool = false) {
+        _detailsOpen = State(initialValue: detailsOpen)
         _model = StateObject(wrappedValue: WorkflowRunsModel(host: host, workspace: workspace))
         _selected = AppStorage(wrappedValue: "", "workflow.run.\(host).\(workspace)")
     }
@@ -138,12 +140,12 @@ public struct WorkflowRunsView: View {
             ForEach(Array(run.page.steps.enumerated()), id: \.offset) { _, step in
                 Text("\(step.label) · \(step.state)")
             }
-            DisclosureGroup(run.page.detailsLabel) {
+            DisclosureGroup(run.page.detailsLabel, isExpanded: $detailsOpen) {
                 ForEach(Array(run.page.details.enumerated()), id: \.offset) { _, row in
                     HStack {
                         Text("\(row.title): \(row.value)").textSelection(.enabled)
                         if let whole = row.whole { Button("Copy") { copy(whole) }.accessibilityLabel("Copy \(row.title)") }
-                    }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             ForEach(Array((run.reworkHistory ?? []).enumerated()), id: \.offset) { _, history in

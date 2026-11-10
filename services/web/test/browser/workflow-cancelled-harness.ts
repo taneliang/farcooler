@@ -5,7 +5,7 @@ import golden from '../../../../crates/client/src/testdata/workflow-presentation
 import { renderWorkflow } from '../../src/client/workflow-view'
 import type { WorkflowBoard, WorkflowView } from '../../src/client/workflow'
 
-const card = (golden as any[]).find(c => c.name === 'cancelled').response.card
+const card = (golden as any[]).find(c => c.name === ((window as any).__card ?? 'cancelled')).response.card
 const view: WorkflowView = { presentation: card, selected: card.runs[0].item, ready: true, busy: false, notice: '', inspection: '' }
 // The sheet app.ts opens, built as openWorkflow builds it.
 const dialog = document.getElementById('workflow-runs') as HTMLDialogElement
@@ -17,4 +17,5 @@ bar.append(title, close)
 dialog.replaceChildren(bar, root)
 dialog.showModal()
 renderWorkflow(root, view, { select() {}, refresh: async () => null, retry() {} } as unknown as WorkflowBoard)
+if ((window as any).__open) root.querySelector('details')!.open = true
 ;(window as any).done = true

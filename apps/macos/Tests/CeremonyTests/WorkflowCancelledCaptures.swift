@@ -13,24 +13,30 @@ import Testing
 @MainActor
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
 struct WorkflowCancelledCaptures {
-    static func cancelledCard() throws -> String {
+    static func card(_ name: String = "cancelled") throws -> String {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
         let all = try JSONSerialization.jsonObject(
             with: Data(contentsOf: root.appendingPathComponent("crates/client/src/testdata/workflow-presentation.json"))) as! [[String: Any]]
-        let fixture = try #require(all.first { $0["name"] as? String == "cancelled" })
+        let fixture = try #require(all.first { $0["name"] as? String == name })
         let card = (fixture["response"] as! [String: Any])["card"]!
         return String(decoding: try JSONSerialization.data(withJSONObject: card), as: UTF8.self)
     }
 
     @Test("A cancelled run says why, at the narrowest width", arguments: ["light", "dark"])
-    func narrow(scheme: String) async throws {
+    func narrow(scheme: String) async throws { try await shoot("cancelled", open: false, scheme: scheme) }
+
+    /// The failed run with its long kept sentence, Details open (ov-1060).
+    @Test("A failed run, Details open, at the narrowest width", arguments: ["light", "dark"])
+    func failedOpen(scheme: String) async throws { try await shoot("failed", open: true, scheme: scheme) }
+
+    func shoot(_ name: String, open: Bool, scheme: String) async throws {
         let out = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]))
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        let json = try Self.cancelledCard()
+        let json = try Self.card(name)
         let port = WorkflowPort(id: "capture", read: { _, _ in json }, dispatch: { _, _, _, _ in "" })
         UserDefaults.standard.set("item", forKey: "workflow.run.runner.workspace")
-        let view = WorkflowRunsView(host: "runner", workspace: "workspace")
+        let view = WorkflowRunsView(host: "runner", workspace: "workspace", detailsOpen: open)
             .environment(\.workflowPort, port)
             .preferredColorScheme(scheme == "dark" ? .dark : .light)
         let host = NSHostingView(rootView: view)
@@ -45,7 +51,7 @@ struct WorkflowCancelledCaptures {
         // The loaded card is far taller than the empty sheet, so a tall layout is the state; and the window is taller
         // than the card needs, so the whole reason is on screen.
         try await Capture.keep(
-            host, to: out.appendingPathComponent("workflow-cancelled-mac-280-\(scheme).png"),
+            host, to: out.appendingPathComponent("workflow-\(name)\(open ? "-details" : "")-mac-280-\(scheme).png"),
             expecting: "the cancelled run's card with its reason"
         ) {
             host.layoutSubtreeIfNeeded()

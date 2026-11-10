@@ -21,20 +21,20 @@ const html = readFileSync('src/client/index.html', 'utf8')
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
 let failed = false
-async function shoot(name, { colorScheme, width, height, mobile }) {
+async function shoot(name, { colorScheme, width, height, mobile, card = 'cancelled', open = false, phrase = 'cancelled because its board' }) {
   const context = await browser.newContext({ colorScheme, viewport: { width, height } })
   const page = await context.newPage()
   if (mobile) {
     const cdp = await context.newCDPSession(page)
     await cdp.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 3, mobile: true })
   }
-  await page.setContent(html)
+  await page.setContent(html.replace('</body>', `<script>window.__card = ${JSON.stringify(card)}; window.__open = ${open}</script></body>`))
   await page.waitForFunction(() => window.done === true)
-  const m = await page.evaluate(() => {
-    const p = [...document.querySelectorAll('.workflow-runs p')].find(n => n.textContent.includes('cancelled because its board'))
+  const m = await page.evaluate(phrase => {
+    const p = [...document.querySelectorAll('.workflow-runs p')].find(n => n.textContent.includes(phrase))
     const r = p.getBoundingClientRect(); const d = document.getElementById('workflow-runs')
     return { text: p.textContent, right: r.right, vw: document.documentElement.clientWidth, scrollW: document.documentElement.scrollWidth, clipped: p.scrollWidth > p.clientWidth, sheetScrollsSideways: d.scrollWidth > d.clientWidth }
-  })
+  }, phrase)
   console.log(name, JSON.stringify(m))
   if (m.right > m.vw || m.sheetScrollsSideways || m.scrollW > m.vw || m.clipped) { failed = true; console.error(name, 'overflows') }
   await page.locator('#workflow-runs').screenshot({ path: join(out, `${name}.png`) })
@@ -43,6 +43,10 @@ async function shoot(name, { colorScheme, width, height, mobile }) {
 for (const scheme of ['light', 'dark']) {
   await shoot(`workflow-cancelled-phone-320-${scheme}`, { colorScheme: scheme, width: 320, height: 1500, mobile: true })
   await shoot(`workflow-cancelled-desktop-${scheme}`, { colorScheme: scheme, width: 1280, height: 800, mobile: false })
+  // A failed run's long kept sentence, Details open, so the Copy buttons show (ov-1060).
+  const failed = { card: 'failed', open: true, phrase: 'could not be downloaded in time' }
+  await shoot(`workflow-failed-details-phone-320-${scheme}`, { colorScheme: scheme, width: 320, height: 1500, mobile: true, ...failed })
+  await shoot(`workflow-failed-details-desktop-${scheme}`, { colorScheme: scheme, width: 1280, height: 800, mobile: false, ...failed })
 }
 await browser.close()
 process.exit(failed ? 1 : 0)
