@@ -107,32 +107,39 @@ struct WorkspaceCards: View {
     }
 
     private func nowNext(_ strip: PlanStrip) -> some View {
+        // At the accessibility sizes the card keeps Now whole if it fits
+        // the cap, then cut to two lines, then one, each ending in an
+        // ellipsis: never a scroll view cut mid-line by the card's edge
+        // (ov-1007). Next stays on the Plan sheet.
+        let tall = type.isAccessibilitySize
         let glyph = Image(systemName: strip.orchestrator.glyph)
             .foregroundStyle(tone(strip.orchestrator.tone))
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .accessibilityHidden(true)
         let trailing = HStack(spacing: Spacing.group) {
-            if strip.needsYou > 0 { badge(strip.needsYou) }
+            if strip.needsYou > 0 { badge(strip.needsYou).dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
             Image(systemName: "chevron.up")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .accessibilityHidden(true)
         }
-        let words = Group {
+        func words(lines: Int?) -> some View {
+          Group {
             if let band = strip.band {
                 // From `.xLarge` up, Now and Next in full, with no line limit:
                 // cut, they hid what is happening, which matters more than the
                 // one-line look (ov-685). The default size keeps ov-616's one
                 // line each.
-                PhoneGlanceBand(band: band, needsYou: 0, lines: type > .large ? nil : 1)
+                PhoneGlanceBand(band: band, needsYou: 0, lines: tall ? lines : (type > .large ? nil : 1), nowOnly: tall)
             } else if strip.isEmpty {
                 Text("Plan").foregroundStyle(.quietInk)
             } else {
-                self.words(strip).lineLimit(type > .large ? nil : 1).truncationMode(.tail)
+                self.words(strip).lineLimit(tall ? lines : (type > .large ? nil : 1)).truncationMode(.tail)
             }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         return Button { navigator?.openPlan(place) } label: {
             Group {
                 if type.isAccessibilitySize {
@@ -141,23 +148,23 @@ struct WorkspaceCards: View {
                     // card's width (ov-685).
                     // The whole card, row and words and its insets, stays
                     // within a fifth of the screen, as ov-423 held it; the
-                    // words scroll inside it past that. Capping the words
+                    // words are cut with an ellipsis past that (ov-1007). Capping the words
                     // alone at a fifth made the card 29% (the Oct 22 nightly,
                     // DynamicTypeTests). One layout pass, no measured state:
                     // the row takes its height, the words what's left, whole
-                    // if they fit and in a scroll if not, so the first frame
+                    // if they fit, else two lines, else one, so the first frame
                     // is the settled one.
                     VStack(alignment: .leading, spacing: Spacing.group) {
                         HStack(spacing: Spacing.group) { glyph; Spacer(minLength: 0); trailing }
                         ViewThatFits(in: .vertical) {
-                            words
-                            ScrollView(.vertical) { words }
-                                .scrollBounceBehavior(.basedOnSize)
+                            words(lines: nil)
+                            words(lines: 2)
+                            words(lines: 1)
                         }
                     }
                     .frame(maxHeight: cardCap, alignment: .top)
                 } else {
-                    HStack(spacing: Spacing.group) { glyph; words; trailing }
+                    HStack(spacing: Spacing.group) { glyph; words(lines: nil); trailing }
                 }
             }
             .font(.subheadline)
