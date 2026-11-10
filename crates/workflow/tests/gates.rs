@@ -120,3 +120,18 @@ fn an_agent_gate_needs_a_candidate_to_judge() {
     d.stages.swap(1, 2);
     assert_eq!(d.validate(), Err(Refusal::Definition));
 }
+
+#[test]
+fn a_failure_whose_reason_is_refused_still_fails_safely_and_keeps_no_reason() {
+    let state = State::empty("workspace".into(), 1);
+    let enqueue = input(&state, Command::Enqueue { item: "item".into(), definition: three_gates(), policy_pin: "policy-1".into(),
+        resource: "repo/branch".into(), dependencies: BTreeSet::new(), initial_candidate: None }, Grant::Controller);
+    let mut state = step(&state, &enqueue).unwrap().state;
+    // A sentence too long for a ticket, then one with a control character: each is dropped, never the failure itself
+    // (ov-1061). Refusing the answer would leave the run Uncertain, for a person, when it is a plain failure to retry.
+    for reason in ["x".repeat(4097), "line\u{7}".into()] {
+        state = step(&state, &observe(&state, Outcome::SafeFailureBecause(reason))).unwrap().state;
+        assert!(state.items["item"].failure.is_none());
+    }
+    assert_eq!((at(&state), state.items["item"].phase.clone()), ("provision", Phase::Failed));
+}

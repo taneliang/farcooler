@@ -23,6 +23,14 @@ const SEED_WAIT: Duration = Duration::from_secs(8);
 /// Said when Provision couldn't download the landing target's main. Git keeps nothing of a download it stops, so a
 /// new start downloads again; what it already holds of main is offered as had, and only the rest is sent.
 pub(crate) const UNFETCHED_TARGET: &str = "The landing remote answered, but its main couldn’t be downloaded within 15 minutes, so the ticket failed before anything was made. Start it again.";
+/// One remote's first downloads, taken one at a time. `failed` is held for the whole download and says why the last
+/// one failed; `ended` counts the downloads that have ended, so a waiter knows whether the one it read ended while
+/// it waited, or long before it came.
+#[derive(Default)]
+pub(super) struct Seeding {
+    ended: std::sync::atomic::AtomicU64,
+    failed: tokio::sync::Mutex<Option<String>>,
+}
 /// Said when the landing remote's main no longer holds the commit a ticket started from.
 const REWRITTEN_TARGET: &str = "The landing remote’s main was rewritten after this ticket started, so the commit it started from is gone and nothing was made. Start it again.";
 /// Said when Provision couldn't read this repository's own settings for the landing remote.
@@ -315,7 +323,7 @@ impl Exec {
     ///
     /// A failure is the sentence for the ticket. Nothing has been made by then, so it is a plain failure to try again,
     /// never an unknown outcome (ov-1058 review 3). One download per remote runs at a time; a Provision that waited
-    /// for another finds the base already held.
+    /// for another finds the base already held, or fails with it.
     pub(super) async fn ensure_start_objects(&self, base: &str, log: &Path) -> std::result::Result<(), String> {
         let landing = self.start_landing().await.map_err(|error| match error {
             Error::Domain(refused) => refused.to_string(),
@@ -324,11 +332,19 @@ impl Exec {
         let Some((identity, url)) = landing else { return Ok(()) };
         let held = || async { adapters::git(&self.repository(), &["cat-file", "-e", &format!("{base}^{{commit}}")]).await.is_ok() };
         if held().await { return Ok(()); }
-        let gate = self.seeding.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(url.to_string()).or_default().clone();
-        let _one = gate.lock().await;
+        let seed = self.seeding.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(url.to_string()).or_default().clone();
+        let seen = seed.ended.load(std::sync::atomic::Ordering::Acquire);
+        let mut last = seed.failed.lock().await;
+        // A download that ended while this one waited, and failed, is this one's answer too: trying again at once
+        // would cost each waiter the whole limit in turn, each holding an effect slot (ov-1058 review 4).
+        if seed.ended.load(std::sync::atomic::Ordering::Acquire) != seen && let Some(why) = last.as_ref() {
+            return Err(why.clone());
+        }
         if held().await { return Ok(()); }
         self.stage_local_main().await;
         let fetched = self.fetch_target_within(identity, url, log, SEED_WAIT).await;
+        *last = (!matches!(fetched, Ok(Some(_)))).then(|| UNFETCHED_TARGET.to_string());
+        seed.ended.fetch_add(1, std::sync::atomic::Ordering::Release);
         match fetched {
             Ok(Some(_)) if held().await => Ok(()),
             // The remote sent its main, and the start isn't in it: main was rewritten since the Start.

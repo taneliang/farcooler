@@ -150,8 +150,8 @@ pub struct Exec {
     /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
     pub host: Option<WorktreeHost>,
     /// One first download of a landing remote's main at a time, per remote, shared by every copy (ov-1058 review 3):
-    /// four Provisions starting together wait on one download instead of each fetching all of main.
-    seeding: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>>,
+    /// four Provisions starting together wait on one download instead of each fetching all of main, and share its failure.
+    seeding: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<coding_landing::Seeding>>>>,
     /// A test's stand-in for the runner user's home, where git and ssh read their own configuration (ov-1026).
     #[cfg(test)]
     pub(super) user_home: Option<PathBuf>,

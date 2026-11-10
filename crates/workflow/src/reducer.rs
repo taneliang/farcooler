@@ -175,8 +175,9 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         }
                         Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
-                            if let Outcome::SafeFailureBecause(reason) = outcome {
-                                if !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
+                            // A reason that can't go on the ticket is dropped, not the failure: refusing the answer
+                            // would leave a plain failure Uncertain, for a person (ov-1061).
+                            if let Outcome::SafeFailureBecause(reason) = outcome && valid_rework_reason(reason) {
                                 item.failure = Some(reason.clone());
                             }
                             item.pending = None;
