@@ -5,6 +5,13 @@ import com.farcooler.core.coreIsAvailable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /**
  * The conversation view of a terminal-mode claude or codex pane on a phone (ov-374, ov-416):
@@ -341,30 +348,22 @@ object AgentConversation {
 
     fun gap(gap: AgentRow.Gap): String = ConversationWords.phrase(if (gap.count > 1) "gap" else "gap_one")
 
-    /** "0:04", "1:12", "2:03:09": the format a running timer counts in, so a finished time reads like the running one did. */
-    fun short(ms: Long): String {
-        val seconds = maxOf(0L, ms / 1000)
-        val (h, m, s) = Triple(seconds / 3600, (seconds % 3600) / 60, seconds % 60)
-        fun two(n: Long) = n.toString().padStart(2, '0')
-        return if (h > 0) "$h:${two(m)}:${two(s)}" else "$m:${two(s)}"
-    }
+    /** "0:04", "1:12", "2:03:09": the core's `conversation_words::short`. */
+    fun short(ms: Long): String = ConversationWords.item("ms", JsonPrimitive(ms), "short")?.contentOrNull ?: ""
 
     /** What a subagent row says of its work: "1 tool", "14 tools", or null while the count is unknown (0 is how a missing count reads; ov-490). */
     fun toolsLabel(count: Int): String? =
         if (count <= 0) null else ConversationWords.phrase(if (count == 1) "tools_one" else "tools", fill = mapOf("n" to "$count"))
 
     /** A subagent's type as words: `general-purpose` reads "General purpose". */
-    fun agentType(raw: String): String {
-        val words = raw.replace("-", " ").replace("_", " ")
-        return if (words.isEmpty()) "Agent" else words.first().uppercase() + words.drop(1)
-    }
+    fun agentType(raw: String): String = ConversationWords.item("agent_type", JsonPrimitive(raw), "agent_type")?.contentOrNull ?: raw
 
     /**
      * A turn nobody typed: a background task finishing, or claude waking itself
      * (`TurnOrigin::Notification`, `System`). Drawn as a notice, never as the
      * person's message.
      */
-    fun isNotice(turn: AgentRow.Turn): Boolean = turn.origin == "Notification" || turn.origin == "System"
+    fun isNotice(turn: AgentRow.Turn): Boolean = ConversationWords.item("origin", JsonPrimitive(turn.origin), "is_notice")?.booleanOrNull ?: false
 
     /** The lines a report or a message shows before Show more (ov-474). */
     const val HARNESS_LINES = 4
@@ -583,7 +582,7 @@ object AgentConversation {
     fun groupStatus(tools: List<AgentRow.Tool>): AgentRow.Status = when {
         tools.any { it.presentationStatus == AgentRow.Status.Running } -> AgentRow.Status.Running
         tools.any { it.presentationStatus == AgentRow.Status.Failed } -> AgentRow.Status.Failed
-        tools.any { it.operation?.lifecycle == "unconfirmed" } -> AgentRow.Status.Ended("Outcome unconfirmed")
+        tools.any { it.operation?.lifecycle == "unconfirmed" } -> AgentRow.Status.Ended(ConversationWords.phrase("outcome_unconfirmed"))
         else -> AgentRow.Status.Done
     }
 
@@ -593,7 +592,7 @@ object AgentConversation {
             AgentRow.Status.Running -> "Commands running"
             AgentRow.Status.Done -> "Commands completed"
             AgentRow.Status.Failed -> "Command failed or declined"
-            else -> "Outcome unconfirmed"
+            else -> ConversationWords.phrase("outcome_unconfirmed")
         }
         return "Recognized commands · $words"
     }
@@ -693,6 +692,17 @@ object ConversationWords {
         } ?: return null
         asked[agent] = table
         table
+    }
+
+    /** The core's answer for one item (`conversation_words::item`): [field] in ("agent_type", "ms", "origin"), [out] ("agent_type", "short", "is_notice") back; null while the bridge can't answer. */
+    internal fun item(field: String, value: JsonElement, out: String): JsonPrimitive? {
+        val request = buildJsonObject { put("schema", 1); put("item", buildJsonObject { put(field, value) }) }
+        val answer = bridge(request.toString()) ?: return null
+        return try {
+            json.parseToJsonElement(answer).jsonObject["item"]?.jsonObject?.get(out) as? JsonPrimitive
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
 
     /** A phrase with its `{placeholders}` filled: `name_<by>` where the table has one, else `name`. */

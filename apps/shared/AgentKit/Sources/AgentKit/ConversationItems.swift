@@ -118,7 +118,7 @@ extension AgentConversation {
     public static func groupStatus(_ tools: [AgentRow.Tool]) -> AgentRow.Status {
         if tools.contains(where: { $0.presentationStatus == .running }) { return .running }
         if tools.contains(where: { $0.presentationStatus == .failed }) { return .failed }
-        if tools.contains(where: { $0.operation?.lifecycle == .unconfirmed }) { return .ended("Outcome unconfirmed") }
+        if tools.contains(where: { $0.operation?.lifecycle == .unconfirmed }) { return .ended(ConversationWords.phrase("outcome_unconfirmed")) }
         return .done
     }
 

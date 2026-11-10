@@ -21,7 +21,7 @@ public struct LiteralOperation: Sendable, Equatable, Codable {
             case .completed: "Command completed"
             case .failed: "Command failed"
             case .declined: "Command declined"
-            case .unconfirmed: "Outcome unconfirmed"
+            case .unconfirmed: ConversationWords.phrase("outcome_unconfirmed")
             }
         }
     }
@@ -59,7 +59,7 @@ public struct LiteralOperation: Sendable, Equatable, Codable {
         case .running: .running
         case .completed: .done
         case .failed, .declined: .failed
-        case .unconfirmed: .ended("Outcome unconfirmed")
+        case .unconfirmed: .ended(ConversationWords.phrase("outcome_unconfirmed"))
         }
     }
     public var containsControls: Bool {
@@ -104,7 +104,7 @@ extension AgentConversation {
         case .running: words = "Commands running"
         case .done: words = "Commands completed"
         case .failed: words = "Command failed or declined"
-        case .ended: words = "Outcome unconfirmed"
+        case .ended: words = ConversationWords.phrase("outcome_unconfirmed")
         }
         return "Recognized commands · \(words)"
     }

@@ -22,7 +22,7 @@ data class LiteralOperation(
         "completed" -> "Command completed"
         "failed" -> "Command failed"
         "declined" -> "Command declined"
-        else -> "Outcome unconfirmed"
+        else -> ConversationWords.phrase("outcome_unconfirmed")
     }
     val verb: String get() = when {
         kind == "task_show" -> "Read task"
@@ -36,7 +36,7 @@ data class LiteralOperation(
         "running" -> AgentRow.Status.Running
         "completed" -> AgentRow.Status.Done
         "failed", "declined" -> AgentRow.Status.Failed
-        else -> AgentRow.Status.Ended("Outcome unconfirmed")
+        else -> AgentRow.Status.Ended(ConversationWords.phrase("outcome_unconfirmed"))
     }
     val containsControls: Boolean get() = preview?.any { (it.isISOControl() && it != '\n' && it != '\t') || it in '\u202A'..'\u202E' || it in '\u2066'..'\u2069' } ?: false
 

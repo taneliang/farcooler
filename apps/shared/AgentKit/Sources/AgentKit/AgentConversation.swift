@@ -322,16 +322,14 @@ extension AgentConversation {
 
     /// A subagent's type as words: `general-purpose` reads "General purpose".
     public static func agentType(_ raw: String) -> String {
-        let words = raw.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
-        guard let first = words.first else { return "Agent" }
-        return first.uppercased() + words.dropFirst()
+        ConversationWords.item("agent_type", raw) as? String ?? raw
     }
 
     /// A turn nobody typed: a background task finishing, or claude waking
     /// itself (`TurnOrigin::Notification`, `System`). Drawn as a notice,
     /// never as the person's message.
     public static func isNotice(_ turn: AgentRow.Turn) -> Bool {
-        turn.origin == "Notification" || turn.origin == "System"
+        ConversationWords.item("origin", turn.origin) as? Bool ?? false
     }
 
     /// A notice turn's words, without claude's straight quotes.
@@ -505,5 +503,18 @@ public enum ConversationWords {
         let phrases = table(agent)?.phrases
         let words = word.flatMap { phrases?[name + "_" + $0] } ?? phrases?[name] ?? ""
         return fill.reduce(words) { $0.replacingOccurrences(of: "{\($1.key)}", with: $1.value) }
+    }
+}
+
+extension ConversationWords {
+    /// The core's answer for one item (`conversation_words::item`): "agent_type",
+    /// "ms" (as "short") or "origin" (as "is_notice") in, that field out; nil
+    /// while the bridge can't answer.
+    static func item(_ field: String, _ value: Any) -> Any? {
+        guard let request = try? JSONSerialization.data(withJSONObject: ["schema": 1, "item": [field: value]]),
+              let answer = PlanViewPresenter.ask(String(decoding: request, as: UTF8.self)),
+              let reply = try? JSONSerialization.jsonObject(with: Data(answer.utf8)) as? [String: Any]
+        else { return nil }
+        return (reply["item"] as? [String: Any])?[["ms": "short", "origin": "is_notice"][field] ?? field]
     }
 }

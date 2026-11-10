@@ -38,13 +38,17 @@ function phrase(name: string, fill: Record<string, string | number> = {}, by?: s
   return Object.entries(fill).reduce((line, [key, value]) => line.replaceAll(`{${key}}`, String(value)), words)
 }
 
-/// Minutes and seconds, "1:05", or with hours, "1:02:03" (`AgentConversation.short`).
-export function shortDuration(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000))
-  const [h, m, s] = [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60]
-  const two = (n: number) => String(n).padStart(2, '0')
-  return h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`
+/// One item's logic, asked of the core (`conversation_words::item`); blank while nothing can answer.
+function item(asked: Record<string, string | number>): any {
+  try {
+    return JSON.parse(asker?.(JSON.stringify({ schema: 1, item: asked })) ?? 'null')?.item ?? {}
+  } catch {
+    return {}
+  }
 }
+
+/// Minutes and seconds, "1:05", or with hours, "1:02:03".
+export const shortDuration = (ms: number): string => item({ ms }).short ?? ''
 
 /// How a finished turn ended, or null while it is open (`outcome`).
 export function outcomeLine(turn: any): string | null {
@@ -72,9 +76,7 @@ export function originNote(turn: any): string | null {
 }
 
 /// A turn nobody typed: a background task finishing, or claude waking itself.
-export function isNotice(turn: any): boolean {
-  return turn.origin === 'Notification' || turn.origin === 'System'
-}
+export const isNotice = (turn: any): boolean => item({ origin: String(turn.origin) }).is_notice === true
 
 export const scheduledTask = (): string => phrase('scheduled_task')
 
@@ -91,10 +93,7 @@ export function askTitle(ask: any, agent = 'Claude'): string {
 }
 
 /// A subagent's type as words: `general-purpose` reads "General purpose".
-export function agentType(raw: string): string {
-  const words = raw.replace(/[-_]/g, ' ')
-  return words ? words[0].toUpperCase() + words.slice(1) : 'Agent'
-}
+export const agentType = (raw: string): string => item({ agent_type: raw }).agent_type ?? raw
 
 /// "1 tool", "14 tools", or nothing while the count is unknown.
 export function toolsLabel(count: number): string | null {

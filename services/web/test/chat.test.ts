@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
+import items from '../../../test/fixtures/conversation-items.json'
 import words from '../../../test/fixtures/conversation-words.json'
 
 import { agentType, askTitle, useConversationWords, groupPurpose, groupTitle, harnessTitle, outcomeLine, queuedLabel, sendFailure, shortDuration, taskProgress } from '../src/client/chat-copy'
@@ -26,7 +27,13 @@ import { sourceOf } from '../src/client/chat'
 import { blocksOf } from '../src/client/chat-text'
 
 // wasm can't load under vitest's worker pool: the golden answers for the core.
-useConversationWords(request => JSON.stringify((words as any)[`apple_${JSON.parse(request).conversation.agent.toLowerCase()}`]))
+useConversationWords(request => {
+  const asked = JSON.parse(request)
+  if (!asked.item) return JSON.stringify((words as any)[`apple_${asked.conversation.agent.toLowerCase()}`])
+  const [field, value] = Object.entries(asked.item)[0]
+  const key = field === 'ms' ? 'short' : field === 'origin' ? 'is_notice' : field
+  return JSON.stringify({ item: { [key]: (items as any)[key][String(value)] } })
+})
 
 const row = (id: string, ord: number, rev: number, kind: Row['kind'], turn: string | null = null): Row => ({ id, ord, rev, turn, provisional: false, kind })
 const turn = (id: string, ord: number, rev: number, prompt: string, extra: object = {}) =>
