@@ -30,6 +30,7 @@ const GATE: &str = r#"elif stage == 'gate':
         if found != 0: sys.exit(found)
     if mode == 'lane-env':
         seen = {k: os.environ.get(k) for k in ('USER', 'LOGNAME')}
+        seen['python3'] = __import__('shutil').which('python3')
         seen['origin/main'] = subprocess.call(['/usr/bin/git', 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], stdout=subprocess.DEVNULL)
         pathlib.Path(os.environ['MARKER']).write_text(json.dumps(seen))
     assert any(p.read_text().startswith('candidate') for p in pathlib.Path('.').glob('*.txt'))
@@ -669,11 +670,24 @@ async fn a_gate_finds_a_tool_on_a_path_through_its_tree_even_after_an_old_tree()
 }
 
 /// A group's gate runs `scripts/landing-gate` in the fold tree, so it sees what a hand-run lane gate sees there
-/// (ov-1083): the runner's account in USER and LOGNAME, which a test that ssh-es back to this runner reads, and
-/// the repository's own refs, `origin/main` among them, which lane-gate.py diffs against.
+/// (ov-1083): the runner's account in USER and LOGNAME, which a test that ssh-es back to this runner reads; the
+/// account's own tools in ~/.local/bin ahead of the system's, so `python3` is the one a login shell finds and not
+/// macOS's 3.9; and the repository's own refs, `origin/main` among them, which lane-gate.py diffs against.
 #[tokio::test]
 async fn a_gate_in_the_fold_tree_sees_the_account_and_the_refs_a_lane_gate_reads() {
-    let (dir, mut runtime) = lander("lane-env").await;
+    let (dir, runtime) = lander("lane-env").await;
+    let tools = dir.path().join("home/.local/bin");
+    std::fs::create_dir_all(&tools).unwrap();
+    std::fs::write(tools.join("python3"), "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(tools.join("python3"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut config = runtime.coding.clone().unwrap();
+    // As a published workflow pins it: a HOME, and a PATH with the system's python3 on it.
+    config.checks[1].environment.insert("HOME".into(), dir.path().join("home").to_string_lossy().into_owned());
+    config.checks[1].environment.insert("PATH".into(), "/opt/homebrew/bin:/usr/bin:/bin".into());
+    let root = runtime.root.clone();
+    std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
     let repo = runtime.repository();
     adapters::git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]).await.unwrap();
     let definition = batched_push(&runtime, "any", 5000);
@@ -684,5 +698,6 @@ async fn a_gate_in_the_fold_tree_sees_the_account_and_the_refs_a_lane_gate_reads
     let account = super::coding_execute::runner_account().expect("the test runs as an account");
     assert_eq!(seen["USER"], account.as_str(), "the gate sees who the runner is: {seen}");
     assert_eq!(seen["LOGNAME"], account.as_str(), "{seen}");
+    assert_eq!(seen["python3"], tools.join("python3").to_str().unwrap(), "the account's python3 comes first: {seen}");
     assert_eq!(seen["origin/main"], 0, "the fold tree reads the repository's refs: {seen}");
 }

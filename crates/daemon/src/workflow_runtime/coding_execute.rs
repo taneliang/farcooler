@@ -47,6 +47,18 @@ pub(super) fn runner_account() -> Option<String> {
     }
 }
 
+/// A gate finds the account's own tools first, as a login shell does (ov-1083): `~/.local/bin`, under the gate's
+/// pinned HOME, goes to the front of its PATH. That is where a runner's account keeps the `python3` it means,
+/// and without it `/usr/bin/python3` (macOS's 3.9, no tomllib) ran the scripts a hand-run lane gate runs on 3.11+.
+/// Read from the pinned command alone, so a recovery rebuilds the same PATH.
+fn account_tools_first(environment: &mut std::collections::BTreeMap<String, String>) {
+    let Some(home) = environment.get("HOME").filter(|h| h.starts_with('/')) else { return };
+    let tools = format!("{}/.local/bin", home.trim_end_matches('/'));
+    let rest: Vec<&str> = environment.get("PATH").map_or(Vec::new(), |p| p.split(':').filter(|d| !d.is_empty() && *d != tools).collect());
+    let path = std::iter::once(tools.as_str()).chain(rest).collect::<Vec<_>>().join(":");
+    environment.insert("PATH".into(), path);
+}
+
 /// Write an agent gate's verdict where its step reads it (ov-969): `farcooler workflow verdict`, run by the reviewing
 /// agent, whose environment the step pinned. `env` reads that environment. Returns where the receipt went.
 pub fn write_agent_verdict(env: impl Fn(&str) -> Option<String>, passed: bool) -> Result<PathBuf> {
@@ -160,9 +172,13 @@ impl Exec {
                     command
                 }
             },
-            StageKind::Check | StageKind::Run => config.checks.get(operation.arguments.get(1)
-                .and_then(|s| s.parse::<usize>().ok()).ok_or(Error::Refused("missing check index"))?)
-                .ok_or(Error::Refused("foreign check"))?.clone(),
+            StageKind::Check | StageKind::Run => {
+                let mut command = config.checks.get(operation.arguments.get(1)
+                    .and_then(|s| s.parse::<usize>().ok()).ok_or(Error::Refused("missing check index"))?)
+                    .ok_or(Error::Refused("foreign check"))?.clone();
+                account_tools_first(&mut command.environment);
+                command
+            }
             StageKind::Review(_) => config.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.command.clone(),
             StageKind::Ci => config.ci.command.clone(),
             _ => return Err(Error::Refused("not a process operation")),
