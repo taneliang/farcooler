@@ -139,18 +139,28 @@ struct AgentsCornerTests {
         func scrollers(_ view: NSView) -> [NSScrollView] { (view as? NSScrollView).map { [$0] } ?? [] + view.subviews.flatMap(scrollers) }
         let scroller = try #require(window.contentView.flatMap(scrollers)?.max { $0.frame.height < $1.frame.height })
         // As far up as it goes, its top margin included: the clip view keeps
-        // it in bounds. Again until it stays there: the list follows its end
-        // while its rows land, which can take it back down under load.
+        // it in bounds. Again until it stays there: the rows built at the top
+        // replace their estimates, and the bottom anchor moves the clip with
+        // the content, and the scroller's own frames (a width held, a carry)
+        // move it too, as late as a loaded runner shows them (ov-1079). So
+        // not a count of tries, which a slow runner ran out of, but until the
+        // scroller has nothing left to do and the clip is still at the top;
+        // `Settle.limit` only stops a hang.
         var far = scroller.contentView.bounds
         far.origin.y = -10_000
         let top = scroller.contentView.constrainBoundsRect(far).origin
-        for _ in 0..<20 {
+        let driver = try #require(TranscriptScroller.driving(scroller))
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: Settle.limit)
+        func atTop() -> Bool { abs(scroller.contentView.bounds.origin.y - top.y) < 0.5 }
+        repeat {
             scroller.contentView.scroll(to: top)
             scroller.reflectScrolledClipView(scroller.contentView)
             await NativeAgentTests.settle(window, still: frames) // capture-exempt: a layout settle after a scroll, not a capture
-            if abs(scroller.contentView.bounds.origin.y - top.y) < 0.5 { break }
-        }
-        #expect(abs(scroller.contentView.bounds.origin.y - top.y) < 0.5, "scrolled to the top")
+            await Settle.until { !driver.ticking }
+            await NativeAgentTests.settle(window, still: frames) // capture-exempt: a layout settle after a scroll, not a capture
+        } while !(atTop() && !driver.ticking) && clock.now < deadline
+        #expect(atTop(), "scrolled to the top")
         let transcript = try #require(frames.views["native-transcript"], "\(frames.views.keys.sorted())")
         let rows = frames.views.filter { $0.key.hasPrefix("native-row") }.values.map(\.minY).filter { $0 >= transcript.minY - 1 }
         let first = try #require(rows.min(), "\(frames.views.keys.sorted())")
