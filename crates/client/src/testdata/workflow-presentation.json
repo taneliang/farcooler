@@ -1320,7 +1320,7 @@
         "items": {
           "item": {
             "attempt": 1,
-            "cancel_reason": "The board this ran on was deleted, so nobody can approve this run, and its worktree was left as it was.",
+            "cancel_reason": "This run was cancelled because its board was deleted. Nobody can approve it now, and its worktree was left as it was.",
             "candidate": null,
             "definition": {
               "max_reworks": 2,
@@ -1463,7 +1463,7 @@
               {
                 "kind": "Cancelled",
                 "label": "Cancelled",
-                "text": "This run has been cancelled. The board this ran on was deleted, so nobody can approve this run, and its worktree was left as it was."
+                "text": "This run was cancelled because its board was deleted. Nobody can approve it now, and its worktree was left as it was."
               }
             ],
             "reworksRemaining": 2,

@@ -454,7 +454,7 @@ impl Runtime {
             let asks: Vec<(String, Phase)> = state.items.iter().filter(|(id, i)| cancellable_on_deleted_board(i) && !self.cancel_refused.contains(&(workspace.clone(), (*id).clone())))
                 .map(|(id, i)| (id.clone(), i.phase.clone())).collect();
             for (id, phase) in asks {
-                let reason = Some("The board this ran on was deleted.".to_string());
+                let reason = Some("This run was cancelled because its board was deleted.".to_string());
                 match self.internal(workspace, Command::Cancel { item: id.clone(), reason }, Grant::Controller, now_ms) {
                     Ok(Receipt { result: Err(refusal), .. }) => {
                         tracing::warn!(%workspace, item = %id, phase = ?phase, ?refusal, "the engine refused to cancel a run on a deleted board");

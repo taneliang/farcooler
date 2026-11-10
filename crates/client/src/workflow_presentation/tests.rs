@@ -54,7 +54,7 @@ fn fixtures() -> Vec<(&'static str, State)> {
     let mut idle = automatic.clone();
     idle.items.get_mut("item").unwrap().pending = None;
     let cancelled = apply(&idle, Command::Cancel { item: "item".into(),
-        reason: Some("The board this ran on was deleted, so nobody can approve this run, and its worktree was left as it was.".into()) },
+        reason: Some("This run was cancelled because its board was deleted. Nobody can approve it now, and its worktree was left as it was.".into()) },
         Grant::Controller);
     vec![("automatic", automatic), ("approval", approval), ("rework", rework),
         ("uncertain", uncertain), ("invalidated", invalidated), ("cancelled", cancelled)]
@@ -259,16 +259,16 @@ fn a_cancelled_run_says_why() {
     let text = |s: &State| project(s, &auth(), STYLE).unwrap().runs[0].reasons.iter()
         .find(|r| matches!(r.kind, Reason::Cancelled | Reason::Cancelling)).unwrap().text.clone();
     // The fixture's run has an operation in flight, so it is Cancelling until the engine stops it.
-    let stopping = cancel(Some("The board this ran on was deleted."));
+    let stopping = cancel(Some("This run was cancelled because its board was deleted."));
     assert_eq!(stopping.items["item"].phase, Phase::Cancelling);
-    assert_eq!(text(&stopping), "The engine is waiting for the operation to stop. The board this ran on was deleted.");
+    assert_eq!(text(&stopping), "This run was cancelled because its board was deleted. The engine is waiting for the operation to stop.");
     assert_eq!(text(&cancel(None)), "The engine is waiting for the operation to stop.");
     // A run with nothing in flight is Cancelled at once.
     let mut idle = state.clone();
     idle.items.get_mut("item").unwrap().pending = None;
-    let done = apply(&idle, Command::Cancel { item: "item".into(), reason: Some("The board this ran on was deleted.".into()) }, Grant::Controller);
+    let done = apply(&idle, Command::Cancel { item: "item".into(), reason: Some("This run was cancelled because its board was deleted.".into()) }, Grant::Controller);
     assert_eq!(done.items["item"].phase, Phase::Cancelled);
-    assert_eq!(text(&done), "This run has been cancelled. The board this ran on was deleted.");
+    assert_eq!(text(&done), "This run was cancelled because its board was deleted.");
     let blank = apply(&idle, Command::Cancel { item: "item".into(), reason: Some("  ".into()) }, Grant::Controller);
     assert_eq!(text(&blank), "This run has been cancelled.");
 }

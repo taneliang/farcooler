@@ -553,12 +553,12 @@ async fn workflow_runtime_cancels_runs_on_a_deleted_board_with_a_reason() {
     runtime.pump(2).await.unwrap();
     let item = runtime.state(&gone).unwrap().unwrap().items["coding"].clone();
     assert!(matches!(item.phase, Phase::Cancelled | Phase::Cancelling), "{:?}", item.phase);
-    assert_eq!(item.cancel_reason.as_deref(), Some("The board this ran on was deleted."));
+    assert_eq!(item.cancel_reason.as_deref(), Some("This run was cancelled because its board was deleted."));
     let kept = runtime.state(&live).unwrap().unwrap().items["coding"].clone();
     assert!(kept.cancel_reason.is_none() && !matches!(kept.phase, Phase::Cancelled | Phase::Cancelling), "{:?}", kept.phase);
     // A person reads the run through the workflow read, which carries the reason.
     let read = runtime.wire_command(&gone, "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
-    assert_eq!(read["state"]["items"]["coding"]["cancel_reason"], "The board this ran on was deleted.", "{read}");
+    assert_eq!(read["state"]["items"]["coding"]["cancel_reason"], "This run was cancelled because its board was deleted.", "{read}");
     assert!(read["state"]["items"]["coding"].get("cancel_reason").is_some());
     let live_read = runtime.wire_command(&live, "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
     assert!(live_read["state"]["items"]["coding"].get("cancel_reason").is_none(), "{live_read}");
