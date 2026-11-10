@@ -40,8 +40,8 @@ again, or after a compaction): they edit it, and your memory of it isn't it.
 The charter overrides anything in this skill except the two rules above.
 That includes the Defaults at the end: each holds until the charter says otherwise.
 
-`## Workflow` names the landing mode. **Direct**: work lands on main and you
-push it. **PR**: each change is a pull request a person approves. A protected
+`## Workflow` names the landing mode. **Direct**: work lands on main (the
+engine pushes it; you never do). **PR**: each change is a pull request a person approves. A protected
 main (`gh api repos/<owner>/<name>/branches/main --jq .protected`, or a refused
 push) means PR mode whatever the charter says: work that way, and tell the owner.
 `## Landing`, when the charter has one, is how the runner lands for you, in a
@@ -128,7 +128,9 @@ refusal means read again and send with a new id.
    build step in the same worktree, and the agent is told your reason. A failed
    step: `workflow retry` (three at most) or send it back; `workflow cancel` ends
    the run.
-5. **Land.** The engine does it: section 4.
+5. **Land.** After the last gate the ticket reads `WaitingJoin`: queue it with
+   `workflow queue …` (nothing queues it for you). The
+   engine does the rest: section 4.
 
 An agent reports to you in this pane as "Message from @<key>" (ctrl+o reads it
 all; never answer it with SendMessage), `[from the builder on <key>] …` or
@@ -177,7 +179,7 @@ every step and its environment (display scale, `CI=true`, shard timeouts). A
 CI-only failure earns a gate. A red main comes first; when a known-flaky test did
 it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result.
 
-**The workflow engine lands.** A ticket whose run reaches its definition's landing step joins that step's open group, which leaves
+**The workflow engine lands.** A ticket whose run reaches its definition's landing step waits there, `WaitingJoin`, until you queue it. Its group leaves
 for its gate by itself when nothing is ahead. The group folds, gates, pushes and watches CI (a canceled run reruns once); a failed
 batch gate splits it in two. `workflow queue` puts a ticket waiting at its landing step into the group and `workflow leave` takes one
 out before the group leaves. A push whose outcome was lost: look at the target yourself, then `workflow settle … --landed true`
@@ -285,7 +287,7 @@ wins. When the owner overrules one in chat, ask to put it in the charter.
   isn't ready, take it out of the group with `workflow leave`.
 - **Gates.** Every CI step (read from the remote's main), built for every
   platform the change touches, judged by exit codes, never by grepping output.
-  Chain them and the push with `&&`, never `;`: `lint && test && git push`.
+  Chain them with `&&`, never `;`: `lint && test`. The engine does the push.
 - **Tests.** A test nobody has seen fail proves nothing: break the code, watch
   it go red, put it back, and say so in the commit. Show a mutation landed.
   Test the owner's real setup, grep a new capability's callers, and review UI
@@ -352,8 +354,8 @@ interview: show the draft, its `<!-- from: … -->` sources, change what they as
 - `## Review`: who reviews, and is in review before or after it lands?
 - `## Who decides`: what you may decide alone, and what always goes to the person who asked. Ties between people go to the lead unless they say otherwise. Don't ask for a roster.
 - `## Reaching me`: how to reach them. Say that `task ask` only marks the board.
-- `## Lanes`: may two tasks share a worktree, and how many agents at once?
-- `## Autonomy`: may an agent commit, push, open a PR, add dependencies? Initiative: on (the default) to have you push their themes forward at each check-in, or `Initiative: off`?
+- `## Lanes`: how many agents at once? (The engine gives each run its own worktree.)
+- `## Autonomy`: may an agent add dependencies, or touch the files you name off limits? Initiative: on (the default) to have you push their themes forward at each check-in, or `Initiative: off`?
 - `## Anything else`: what to always or never do.
 
 Read the whole draft back and write `$FARCOOLER_CHARTER` only after they say yes:

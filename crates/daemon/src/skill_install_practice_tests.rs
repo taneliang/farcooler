@@ -118,7 +118,7 @@ fn the_orchestrator_drives_the_engine() {
             "`--sequence` (one more than the largest value in `state.source_sequences`, or 1)",
             "`state.items.<key>.run` and `.pin`",
             "A `Stale` refusal means read again and send with a new id",
-            "**Track.**", "**Start.**", "**Review.**", "**Send back.**", "**Land.** The engine does it",
+            "**Track.**", "**Start.**", "**Review.**", "**Send back.**", "**Land.** After the last gate the ticket reads `WaitingJoin`",
             "Read get again: the ticket is `Running` at its build step",
             "the file holding its `last_evidence` exactly as get gives it",
             "A person gate waits for that person in the app: never decide it",
@@ -309,7 +309,7 @@ fn the_owners_conventions_ship_as_defaults() {
             "Each `--option` of an ask is a short name",
             "Ready work never waits for a ticket still building or in a fix",
             "To let a landing go without a ticket that isn't ready, take it out of the group with `workflow leave`",
-            "Chain them and the push with `&&`, never `;`",
+            "Chain them with `&&`, never `;`",
             "judged by exit codes, never by grepping output",
             "A test nobody has seen fail proves nothing",
             "Make a reversible call yourself as a ruling",
@@ -328,7 +328,7 @@ fn the_owners_conventions_ship_as_defaults() {
         let third = section(&body, "3. Start");
         assert!(third.contains("--worktree <key>-<slug> --branch <key>-<slug>"), "{h:?}: a run's branch starts with its key: {third}");
         let land = section(&body, "4. Land");
-        assert!(land.contains("joins that step's open group, which leaves for its gate by itself when nothing is ahead"), "{h:?}: {land}");
+        assert!(land.contains("waits there, `WaitingJoin`, until you queue it. Its group leaves for its gate by itself when nothing is ahead"), "{h:?}: {land}");
         assert!(!body.contains("integ-N>"), "{h:?}: a command still names integ-N");
     }
 }
@@ -451,7 +451,7 @@ fn ready_tickets_fold_into_the_waiting_landing() {
         let body = skill(h);
         let land = section(&body, "4. Land");
         for rule in [
-            "A ticket whose run reaches its definition's landing step joins that step's open group",
+            "A ticket whose run reaches its definition's landing step waits there",
             "when a known-flaky test did it, rerun the failed job once, file a flaky card, and keep landing on the rerun's result",
         ] {
             assert!(land.contains(rule), "{h:?} lacks {rule:?}: {land}");
