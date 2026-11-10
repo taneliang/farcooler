@@ -29,10 +29,10 @@ const html = readFileSync('src/client/index.html', 'utf8')
   .replace('</body>', `<script type="module">${bundle.outputFiles[0].text}</script></body>`)
 
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH })
-async function shoot(name, { colorScheme, metrics, refuse = false, full = true, long = false }) {
+async function shoot(name, { colorScheme, metrics, refuse = false, full = true, long = false, fixture = long ? 'long' : '' }) {
   const context = await browser.newContext({ colorScheme, viewport: { width: metrics.width, height: metrics.height }, deviceScaleFactor: metrics.mobile ? (long ? 2 : 3) : 2, hasTouch: metrics.mobile, isMobile: metrics.mobile })
   const page = await context.newPage()
-  const flags = `${refuse ? 'window.refuse = true;' : ''}${long ? 'window.fixture = "long";' : ''}`
+  const flags = `${refuse ? 'window.refuse = true;' : ''}${fixture ? `window.fixture = "${fixture}";` : ''}`
   const load = async extra => {
     const head = `${flags}${extra}`
     await page.setContent(head ? html.replace('<head>', `<head><script>${head}</script>`) : html)
@@ -67,6 +67,16 @@ async function shoot(name, { colorScheme, metrics, refuse = false, full = true, 
   }
   await page.screenshot({ path: join(out, `${name}.png`), fullPage: false })
   await context.close()
+}
+// `runs`: the plan with the engine's run on three tickets (ov-1040), and the same plan without them, at 320 px.
+if (process.argv[3] === 'runs') {
+  for (const scheme of ['light', 'dark']) {
+    for (const fixture of ['runs', 'runs-before']) {
+      await shoot(`plan-${fixture}-320-${scheme}`, { colorScheme: scheme, metrics: { width: 320, height: 1900, mobile: true }, fixture, full: false })
+    }
+  }
+  await browser.close()
+  process.exit(0)
 }
 for (const scheme of ['light', 'dark']) {
   await shoot(`plan-1440-${scheme}`, { colorScheme: scheme, metrics: { width: 1440, height: 900, mobile: false } })

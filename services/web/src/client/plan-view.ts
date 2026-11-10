@@ -203,7 +203,7 @@ function ticketRow(t: ColumnTicket, stage: string, on: PlanHandlers): HTMLElemen
   const b = make('button', 'plan-ticket')
   b.type = 'button'
   b.dataset.task = t.task
-  b.setAttribute('aria-label', `${t.key}, ${t.title}${t.initiative ? `, for ${t.initiative}` : ''}, ${stage}${t.detail ? `, ${t.detail}` : ''}`)
+  b.setAttribute('aria-label', `${t.key}, ${t.title}${t.initiative ? `, for ${t.initiative}` : ''}, ${stage}${t.run ? `, ${t.run.text}` : ''}${t.detail ? `, ${t.detail}` : ''}`)
   // Its key, in secondary ink at one width so every title starts on one edge;
   // the ticket never reads as progress.
   const key = make('span', 'plan-key', t.key)
@@ -211,6 +211,8 @@ function ticketRow(t: ColumnTicket, stage: string, on: PlanHandlers): HTMLElemen
   b.append(key, make('span', 'plan-ticket-title', t.title))
   if (t.initiative) b.append(make('span', 'plan-ticket-for', t.initiative))
   if (t.detail) b.append(make('span', 'plan-ticket-context', t.detail))
+  // Where its engine run is, in the core's words (ov-1040).
+  if (t.run) b.append(make('span', t.run.attention ? 'plan-ticket-run plan-amber' : 'plan-ticket-run', t.run.text))
   b.onclick = () => on.detail({ task: t.task, key: t.key })
   return b
 }

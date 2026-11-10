@@ -242,6 +242,8 @@ button.danger { color: var(--danger); }
 .plan-ticket-for { font-size: 13px; color: var(--text-2); text-align: right; }
 .plan-agent-roster + .plan-title { margin-top: 28px; }
 .plan-ticket-context { grid-column: 2 / -1; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
+.plan-ticket-run { grid-column: 2 / -1; font-size: 13px; color: var(--text-2); }
+.plan-ticket-run.plan-amber { color: var(--amber); }
 .plan-more { margin: 0; padding: 4px 16px 0 52px; font-size: 13px; color: var(--text-2); }
 .plan-agent > .plan-more:first-child { padding-left: 16px; padding-top: 6px; }
 .plan-footer { margin: 24px auto 0; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }

@@ -356,6 +356,39 @@ final class PhonePlanColumnUITests: XCTestCase {
         }
     }
 
+    // MARK: Engine runs
+
+    /// The Building stage with the engine's run on three tickets (ov-1040), and the same plan without them, light and
+    /// dark, with long titles. Off unless `TEST_RUNNER_FC_CAPTURES=1`; files go to `TEST_RUNNER_FARCOOLER_CAPTURE_OUT`.
+    func testRunsCaptures() throws {
+        let environment = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(environment["FC_CAPTURES"] == "1", "capture-only; set TEST_RUNNER_FC_CAPTURES=1")
+        let out = environment["FARCOOLER_CAPTURE_OUT"].map { URL(fileURLWithPath: $0) }
+        func fixture(_ name: String) -> String {
+            var root = URL(fileURLWithPath: #filePath)
+            for _ in 0..<4 { root.deleteLastPathComponent() }
+            return root.appendingPathComponent("test/fixtures/\(name).json").path
+        }
+        for (scheme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
+            XCUIDevice.shared.appearance = appearance
+            for name in ["plan-runs", "plan-runs-before"] {
+                let app = openPlan(["-phone-appearance", scheme], fixture: fixture(name), ready: "plan-pipeline")
+                reach(app, "plan-ticket-ov-221")
+                Thread.sleep(forTimeInterval: 1)
+                let shot = app.screenshot()
+                if let out {
+                    try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+                    try shot.pngRepresentation.write(to: out.appendingPathComponent("\(name)-ios-\(scheme).png"))
+                }
+                let attachment = XCTAttachment(screenshot: shot)
+                attachment.name = "\(name)-ios-\(scheme)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                app.terminate()
+            }
+        }
+    }
+
     // MARK: Captures
 
     /// Light and dark, kept as attachments and, with `TEST_RUNNER_FARCOOLER_CAPTURE_OUT`, as files.

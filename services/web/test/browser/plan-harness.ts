@@ -8,6 +8,8 @@ import { PlanBoard, type PlanBoardView } from '../../src/client/plan'
 import type { PlanPresenter } from '../../src/client/plan-present'
 import { renderPlan } from '../../src/client/plan-view'
 import longPlan from '../../../../test/fixtures/plan-android-long.json'
+import runsPlan from '../../../../test/fixtures/plan-runs.json'
+import runsBefore from '../../../../test/fixtures/plan-runs-before.json'
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const NOW = 1_800_000_000_000
@@ -86,8 +88,9 @@ const wire = {
   ],
   rulings: [],
 }
-const long = (window as any).fixture === 'long'
-const text = JSON.stringify(long ? longPlan.plan : wire)
+const fixture = (window as any).fixture
+const long = fixture === 'long'
+const text = JSON.stringify(fixture === 'runs' ? runsPlan.plan : fixture === 'runs-before' ? runsBefore.plan : long ? longPlan.plan : wire)
 const refuse = (window as any).refuse === true
 const needs = [
   { id: 'n1', since: NOW - 12 * MIN, question: 'Allow Bash to run the Android unit tests?', task: { key: key(880), title: 'The Android app no longer crashes on a cold start after the Play update' }, terminal: null },
