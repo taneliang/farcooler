@@ -149,6 +149,9 @@ pub struct Exec {
     launched: Option<(i64, std::time::Instant)>,
     /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
     pub host: Option<WorktreeHost>,
+    /// One first download of a landing remote's main at a time, per remote, shared by every copy (ov-1058 review 3):
+    /// four Provisions starting together wait on one download instead of each fetching all of main.
+    seeding: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>>,
     /// A test's stand-in for the runner user's home, where git and ssh read their own configuration (ov-1026).
     #[cfg(test)]
     pub(super) user_home: Option<PathBuf>,
@@ -313,7 +316,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                #[cfg(test)] user_home: None },
+                seeding: Default::default(), #[cfg(test)] user_home: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, cancel_refused: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -614,8 +617,11 @@ impl Runtime {
                         // through the normal admission/observation fence, so Get
                         // exposes Failed rather than silently abandoning the item.
                         if self.store.workflow_admit_effect(&claim, now_ms)? {
+                            // A refusal that is a sentence (an unreadable landing remote, ov-1059) stays on the run.
                             let outcome = if matches!(effect.kind, EffectKind::Stop { .. }) {
                                 Outcome::Uncertain
+                            } else if let Error::Domain(refused) = &error {
+                                Outcome::SafeFailureBecause(refused.to_string())
                             } else { Outcome::SafeFailure };
                             if self.observe(workspace, &effect, outcome, false, now_ms)? { *count += 1; }
                         }

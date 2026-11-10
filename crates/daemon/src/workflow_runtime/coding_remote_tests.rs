@@ -430,6 +430,7 @@ async fn a_remote_that_cant_be_read_at_start_stops_the_ticket_and_says_why() {
         .find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
     assert!(!r.runtime.root.join(format!("base-{}.json", digest(&("w", &provision.effect.item)))).exists(), "no base was pinned");
     assert!(!r.runtime.root.join(format!("tree-{}", digest(&("w", &provision.effect.item)))).exists(), "no tree was made");
+    assert_eq!(r.runtime.state("w").unwrap().unwrap().items["one"].failure.as_deref(), Some(super::coding_landing::UNREAD_TARGET), "the ticket says why");
 }
 
 /// ov-1058 review (F7): a network landing never writes a ref in the shared repository, whose main is its owner's.
@@ -541,6 +542,46 @@ async fn a_slow_download_of_the_remotes_main_does_not_stop_a_ticket_starting() {
     r.runtime.exec.ensure_start_objects(&moved, &log("provision.output")).await.unwrap();
     assert!(fetching.elapsed() >= Duration::from_secs(5), "the stand-in was not slow: {:?}", fetching.elapsed());
     assert!(adapters::git(&config.repository, &["cat-file", "-e", &format!("{moved}^{{commit}}")]).await.is_ok(), "the shared repository holds the base");
+}
+
+/// ov-1058 review 3: a download of the remote's main that outlasts Provision's limit fails the ticket plainly. It
+/// is tried again, then reads Failed with a sentence that says why, and not Uncertain, which would wait on a person;
+/// no tree is made on the stale local main.
+#[tokio::test]
+async fn a_download_that_outlasts_its_limit_fails_the_ticket_with_a_sentence() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let config = r.runtime.coding.clone().unwrap();
+    let (_, moved) = move_remote(&r).await;
+    slow_pack(&r, 30);
+    super::concurrency_tests::enqueue_item(&mut r.runtime, "w", "one", definition);
+    let state = until(&mut r.runtime, |s| matches!(phase_of(s, "one"), Some(Phase::Failed | Phase::Uncertain))).await;
+    assert_eq!(phase_of(&state, "one"), Some(Phase::Failed), "a failed download is a plain failure");
+    assert_eq!(state.items["one"].failure.as_deref(), Some(super::coding_landing::UNFETCHED_TARGET));
+    let provisions: Vec<_> = r.runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .filter(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).collect();
+    assert_eq!(provisions.len(), 2, "tried again before failing");
+    assert_eq!(outbox(&r.runtime, StageKind::Build), 0, "nothing was built");
+    let item = &provisions[0].effect.item;
+    assert_eq!(r.runtime.item_base("w", &provisions[0].effect).unwrap(), moved, "the base was the remote's main");
+    assert!(!r.runtime.root.join(format!("tree-{}", digest(&("w", item)))).exists(), "no tree was made");
+    let branches = adapters::git(&config.repository, &["for-each-ref", "--format=%(refname)", "refs/heads/wf-*"]).await.unwrap();
+    assert!(branches.is_empty(), "no branch was made: {branches}");
+}
+
+/// ov-1058 review 3: Provisions that start together download the remote's main once. The second waits for the
+/// first and finds the base already there.
+#[tokio::test]
+async fn provisions_that_start_together_download_the_remotes_main_once() {
+    let r = remote("pass").await;
+    let (_, moved) = move_remote(&r).await;
+    slow_pack(&r, 2);
+    let log = |n: &str| r.runtime.root.join("receipts").join(n);
+    let (a, b) = (log("a.output"), log("b.output"));
+    let (first, second) = tokio::join!(r.runtime.exec.ensure_start_objects(&moved, &a), r.runtime.exec.ensure_start_objects(&moved, &b));
+    first.unwrap(); second.unwrap();
+    let asked = calls(&r).lines().filter(|l| l.starts_with("git-upload-pack")).count();
+    assert_eq!(asked, 1, "the remote was asked {asked} times: {}", calls(&r));
 }
 
 /// ov-1058 re-review: the fetch carries only what is new. The local main is staged into the private repository first,

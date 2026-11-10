@@ -17,6 +17,10 @@ struct ProcessFact {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GitSettlement { binding: Binding }
+/// A Provision that failed before it made anything: its binding, and the sentence for the ticket.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Unstarted { binding: Binding, why: String }
 
 /// Output of the configured trusted reviewer hook, never parsed from agent prose.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,6 +81,10 @@ impl Exec {
     }
     pub(super) fn process_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.output", digest(&binding.effect)))
+    }
+    /// A Provision that failed before it made anything, and why (ov-1058 review 3).
+    fn unstarted_path(&self, binding: &Binding) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
     fn git_settlement(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.git-settled.json", digest(&binding.effect)))
@@ -335,8 +343,12 @@ impl Exec {
         match kind {
             StageKind::Provision => {
                 // The pinned base is a hash the remote answered at Start; its objects are fetched here, in the effect (ov-1058).
+                // A download that fails has made nothing: the step fails with the sentence, kept so a restart reads it.
                 let log = self.root.join("receipts").join(format!("{}.provision.fetch.output", digest(&binding.effect)));
-                self.ensure_start_objects(&binding.base, &log).await?;
+                if let Err(why) = self.ensure_start_objects(&binding.base, &log).await {
+                    durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why })?)?;
+                    return self.reconcile_coding(binding).await;
+                }
                 match &binding.effect.tree {
                 Some(named) => self.provision_named(workspace, binding, named).await?,
                 None => {
@@ -449,6 +461,11 @@ impl Exec {
         if super::coding_verbs::is_verb(kind) { return self.reconcile_verb(binding, kind).await; }
         if matches!(kind, StageKind::Run) { return self.reconcile_run(binding).await; }
         let mut facts = Vec::new();
+        if matches!(kind, StageKind::Provision) && !self.git_settlement(binding).try_exists()? && self.unstarted_path(binding).try_exists()? {
+            let unstarted: Unstarted = serde_json::from_slice(&self.bytes(&self.unstarted_path(binding))?)?;
+            if unstarted.binding != *binding { return Err(Error::Refused("foreign Provision refusal")); }
+            return Ok(Outcome::SafeFailureBecause(unstarted.why));
+        }
         if matches!(kind, StageKind::Provision | StageKind::Land) {
             let raw = self.bytes(&self.git_settlement(binding))?;
             let settlement: GitSettlement = serde_json::from_slice(&raw)?;

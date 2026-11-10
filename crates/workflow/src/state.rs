@@ -88,6 +88,10 @@ pub struct Item {
     /// Why the run was cancelled, when the cancel gave a reason (ov-1047): the board it ran on was deleted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_reason: Option<String>,
+    /// Why the step's last attempt failed, when it failed before doing anything and said so (ov-1058): the landing
+    /// remote's main couldn't be downloaded, say. Kept on a Failed run so the ticket reads why; the next answer clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
 }
 /// One send-back: who asked (the input), when (the revision), from which step to which, on which run, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,7 +229,10 @@ pub struct Evidence {
     pub policy_pin: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Outcome { Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure, Interrupted, Uncertain, Stopped { operation: String, receipt: String } }
+pub enum Outcome { Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure,
+    /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
+    SafeFailureBecause(String),
+    Interrupted, Uncertain, Stopped { operation: String, receipt: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectKind { Execute(StageKind), Stop { operation: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -45,7 +45,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, rework_history: Vec::new(),
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, failure: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
@@ -71,7 +71,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             let mut record = Item { definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, rework_history: Vec::new(),
+                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, failure: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
@@ -142,6 +142,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     }
                     // Whatever the answer, the wait's first deadline is spent unless a restart cut it short.
                     let wait_since = item.wait_since.take();
+                    // Each answer replaces the last attempt's reason; only a failure that says why sets one.
+                    item.failure = None;
                     match outcome {
                         Outcome::Uncertain => { item.phase = Phase::Uncertain; }
                         Outcome::Stopped { operation, receipt } => {
@@ -171,8 +173,12 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             evidence_matches(&item, evidence)?;
                             finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
-                        Outcome::SafeFailure => {
+                        Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
+                            if let Outcome::SafeFailureBecause(reason) = outcome {
+                                if !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
+                                item.failure = Some(reason.clone());
+                            }
                             item.pending = None;
                             if item.attempt >= item.definition.stages[item.stage].max_attempts {
                                 item.phase = Phase::Failed;
@@ -247,7 +253,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, cancel_reason: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, cancel_reason: None, failure: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -269,6 +275,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     if item.retries >= MAX_RETRIES { return Err(Refusal::Limit); }
                     item.retries += 1;
                     item.attempt = 1;
+                    item.failure = None;
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     item.phase = Phase::Blocked;
                 }
@@ -343,6 +350,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     item.sent_back.push(SendBack { id: input.id.clone(), revision: input.expected_revision, run: item.run.clone(),
                         from: item.definition.stages[item.stage].id.clone(), to: item.definition.stages[to].id.clone(), reason: reason.clone() });
                     item.brief = Some(reason.clone());
+                    item.failure = None;
                     // It builds anew in the same tree, and queues for its resource like new work.
                     item.stage = to; item.attempt = 1; item.candidate = None; item.pending = None;
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
@@ -693,6 +701,7 @@ fn valid_state(state: &State) -> bool {
                 && item.sent_back.len() <= usize::from(MAX_SEND_BACKS)
                 && item.sent_back.iter().all(|b| valid_id(&b.id) && valid_rework_reason(&b.reason))
                 && item.brief.as_deref().is_none_or(valid_rework_reason)
+                && item.failure.as_deref().is_none_or(valid_rework_reason)
                 && item.followers.len() <= usize::from(MAX_GROUP_MEMBERS)
                 // A live lead's tickets follow it and no other; a closed one's list is history, as they've let go.
                 && (matches!(item.phase, Phase::Done | Phase::Cancelled)

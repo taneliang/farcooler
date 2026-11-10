@@ -16,9 +16,17 @@ const FETCH_WAIT: Duration = Duration::from_secs(120);
 /// How long Provision may take to bring a Start's base over, when the shared repository doesn't hold it yet. A
 /// first download of a large main took 98 s on one host, so this is long. It runs in the effect, off the
 /// dispatch loop (ov-1058 re-review).
+#[cfg(not(test))]
 const SEED_WAIT: Duration = Duration::from_secs(900);
-/// Said when Provision couldn't download the landing target's main.
-pub(crate) const UNFETCHED_TARGET: &str = "The landing remote’s main couldn’t be downloaded in time, so the ticket failed before it started. Start it again; the download carries on from what arrived.";
+#[cfg(test)]
+const SEED_WAIT: Duration = Duration::from_secs(8);
+/// Said when Provision couldn't download the landing target's main. Git keeps nothing of a download it stops, so a
+/// new start downloads again; what it already holds of main is offered as had, and only the rest is sent.
+pub(crate) const UNFETCHED_TARGET: &str = "The landing remote answered, but its main couldn’t be downloaded within 15 minutes, so the ticket failed before anything was made. Start it again.";
+/// Said when the landing remote's main no longer holds the commit a ticket started from.
+const REWRITTEN_TARGET: &str = "The landing remote’s main was rewritten after this ticket started, so the commit it started from is gone and nothing was made. Start it again.";
+/// Said when Provision couldn't read this repository's own settings for the landing remote.
+const UNREAD_SETTINGS: &str = "This repository’s Git settings couldn’t be read, so the ticket failed before anything was made. Start it again.";
 /// Said when a shared repository's config would send the landing remote's calls somewhere else.
 const REDIRECTED_TRANSPORT: &str = "This repository’s Git config redirects the landing remote’s address, so the ticket wasn’t started. Remove the URL rewrite or include from that config, then start it again.";
 fn unread_target() -> Error { Error::Domain(farcooler_core::error::DomainError::refused(UNREAD_TARGET.into())) }
@@ -304,14 +312,29 @@ impl Exec {
     /// Make sure the shared repository holds `base`, a Start's pinned base, for the worktree to be made at. A
     /// landing on this machine always does. Otherwise the target is fetched with the long limit, after the local
     /// main is staged into the private repository so the transfer carries only what is new, and imported by hash.
-    pub(super) async fn ensure_start_objects(&self, base: &str, log: &Path) -> Result<()> {
-        let Some((identity, url)) = self.start_landing().await? else { return Ok(()) };
+    ///
+    /// A failure is the sentence for the ticket. Nothing has been made by then, so it is a plain failure to try again,
+    /// never an unknown outcome (ov-1058 review 3). One download per remote runs at a time; a Provision that waited
+    /// for another finds the base already held.
+    pub(super) async fn ensure_start_objects(&self, base: &str, log: &Path) -> std::result::Result<(), String> {
+        let landing = self.start_landing().await.map_err(|error| match error {
+            Error::Domain(refused) => refused.to_string(),
+            _ => UNREAD_SETTINGS.to_string(),
+        })?;
+        let Some((identity, url)) = landing else { return Ok(()) };
         let held = || async { adapters::git(&self.repository(), &["cat-file", "-e", &format!("{base}^{{commit}}")]).await.is_ok() };
+        if held().await { return Ok(()); }
+        let gate = self.seeding.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(url.to_string()).or_default().clone();
+        let _one = gate.lock().await;
         if held().await { return Ok(()); }
         self.stage_local_main().await;
         let fetched = self.fetch_target_within(identity, url, log, SEED_WAIT).await;
-        if matches!(fetched, Ok(Some(_))) && held().await { return Ok(()); }
-        Err(Error::Domain(farcooler_core::error::DomainError::refused(UNFETCHED_TARGET.into())))
+        match fetched {
+            Ok(Some(_)) if held().await => Ok(()),
+            // The remote sent its main, and the start isn't in it: main was rewritten since the Start.
+            Ok(Some(_)) => Err(REWRITTEN_TARGET.to_string()),
+            _ => Err(UNFETCHED_TARGET.to_string()),
+        }
     }
     /// Put the shared repository's own landing ref in the private one, as objects it already holds, so that a fetch
     /// from the network offers them as already had.
