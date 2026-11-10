@@ -785,6 +785,8 @@ pub struct Watcher {
 
     /// The plan's glance the relay last took (ov-310). See `plan_moved`.
     last_plan: std::sync::Mutex<Option<Vec<crate::plan_glance::BoardGlance>>>,
+    /// What each board's runs last said on the plan (`plan_run::signature`), so a run that moved is announced once.
+    pub(crate) runs_told: std::sync::Mutex<HashMap<String, u64>>,
     /// How long each wait lasts: `Timing::PRODUCTION`, or a test's own.
     timing: std::sync::Mutex<Timing>,
     /// Per terminal whose last notice that LANDED was `blocked`, the id of the
@@ -2761,6 +2763,11 @@ impl Watcher {
         watcher.service.store.set_workflow_board_listener(Some(Arc::new(move |moves| {
             if let Some(watcher) = weak.upgrade() { watcher.announce_engine_moves(moves); }
         })));
+        // A run moved (ov-1040): the plan carries each ticket's engine step, so open plans read it again.
+        let weak = Arc::downgrade(&watcher);
+        watcher.service.store.set_workflow_commit_listener(Some(Arc::new(move |workspace| {
+            if let Some(watcher) = weak.upgrade() { watcher.announce_run_moves(workspace); }
+        })));
         // A cursor pane's turn ends: its `stop` hook takes a message waiting
         // for it (`answer_wake::followup`).
         let weak = Arc::downgrade(&watcher);
@@ -2793,6 +2800,7 @@ impl Watcher {
             inventory_ack: crate::push::InventoryAck::default(),
             last_count: std::sync::Mutex::new(None),
             last_plan: std::sync::Mutex::new(None),
+            runs_told: std::sync::Mutex::new(HashMap::new()),
             timing: std::sync::Mutex::new(Timing::PRODUCTION),
             asks_told: std::sync::Mutex::new(HashMap::new()),
             ask_sync: tokio::sync::Mutex::new(()),

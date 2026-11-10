@@ -222,6 +222,15 @@ impl Store {
     pub fn set_workflow_board_listener(&self, listener: Option<crate::workflow_projection::BoardListener>) {
         *self.workflow_board_listener.lock().unwrap_or_else(|e| e.into_inner()) = listener;
     }
+    /// The daemon's hook for every accepted workflow command: called after the commit with the workspace, so a
+    /// run that moved can tell open plans to re-read (ov-1040).
+    pub fn set_workflow_commit_listener(&self, listener: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
+        *self.workflow_commit_listener.lock().unwrap_or_else(|e| e.into_inner()) = listener;
+    }
+    pub(crate) fn announce_commit(&self, workspace: &str) {
+        let listener = self.workflow_commit_listener.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(listener) = listener { listener(workspace); }
+    }
     pub(crate) fn announce_board_moves(&self, moved: &[crate::workflow_projection::BoardMove]) {
         if moved.is_empty() { return; }
         let listener = self.workflow_board_listener.lock().unwrap_or_else(|e| e.into_inner()).clone();

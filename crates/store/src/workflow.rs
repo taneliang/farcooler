@@ -108,6 +108,7 @@ impl Store {
         tx.commit()?;
         drop(conn);
         self.announce_board_moves(&moved);
+        if applied.0.result.is_ok() { self.announce_commit(&input.workspace); }
         Ok(applied)
     }
 

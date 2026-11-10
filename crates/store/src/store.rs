@@ -43,12 +43,13 @@ pub struct Store {
     _owner: Option<std::fs::File>,
     pub(crate) workflow_notice_waker: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
     pub(crate) workflow_board_listener: std::sync::Mutex<Option<crate::workflow_projection::BoardListener>>,
+    pub(crate) workflow_commit_listener: std::sync::Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>>,
 }
 
 impl Store {
     pub(crate) fn from_engine_cutover_connection(conn: Connection, owner: Option<std::fs::File>) -> Result<Self> {
         let engine_incarnation = crate::engine_cutover::authority(&conn).map_err(|_|DomainError::OperationFailed)?.incarnation;
-        Ok(Self { db:std::sync::Mutex::new(conn),engine_incarnation,workflow_notice_waker:Default::default(),workflow_board_listener:Default::default(),_owner:owner })
+        Ok(Self { db:std::sync::Mutex::new(conn),engine_incarnation,workflow_notice_waker:Default::default(),workflow_board_listener:Default::default(),workflow_commit_listener:Default::default(),_owner:owner })
     }
 
     /// The connection, locked.
@@ -94,7 +95,7 @@ impl Store {
         let mut conn = Connection::open(path).map_err(map_err)?;
         Self::init(&mut conn, existed.then_some(path))?;
         let engine_incarnation = crate::engine_cutover::authority(&conn).map_err(|e| { tracing::warn!(error=%e,"cutover authority read failed"); DomainError::OperationFailed })?.incarnation;
-        Ok(Store { db: std::sync::Mutex::new(conn), engine_incarnation, workflow_notice_waker: Default::default(), workflow_board_listener: Default::default(), _owner: None })
+        Ok(Store { db: std::sync::Mutex::new(conn), engine_incarnation, workflow_notice_waker: Default::default(), workflow_board_listener: Default::default(), workflow_commit_listener: Default::default(), _owner: None })
     }
 
     /// This database's schema, as `read_schema` reads a file's: what
@@ -113,7 +114,7 @@ impl Store {
         let mut conn = Connection::open_in_memory().map_err(map_err)?;
         Self::init(&mut conn, None)?;
         let engine_incarnation = crate::engine_cutover::authority(&conn).map_err(|e| { tracing::warn!(error=%e,"cutover authority read failed"); DomainError::OperationFailed })?.incarnation;
-        Ok(Store { db: std::sync::Mutex::new(conn), engine_incarnation, workflow_notice_waker: Default::default(), workflow_board_listener: Default::default(), _owner: None })
+        Ok(Store { db: std::sync::Mutex::new(conn), engine_incarnation, workflow_notice_waker: Default::default(), workflow_board_listener: Default::default(), workflow_commit_listener: Default::default(), _owner: None })
     }
 
     fn init(conn: &mut Connection, backup_source: Option<&Path>) -> Result<()> {
