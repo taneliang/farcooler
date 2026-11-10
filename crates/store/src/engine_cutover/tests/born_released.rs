@@ -13,7 +13,7 @@ fn bound(store: &Store, note: uuid::Uuid) -> bool {
 #[test]
 fn a_new_install_is_released_and_delivers_through_the_bound_path() {
     let tmp = tempfile::tempdir().unwrap();
-    let store = Store::open(&tmp.path().join("db.sqlite")).unwrap();
+    let store = Store::open(tmp.path().join("db.sqlite")).unwrap();
     let a = authority(&store.conn()).unwrap();
     assert_eq!((a.phase.as_str(), a.incarnation, a.manifest), ("released", 0, None), "born released");
     assert!(!store.legacy_authority(), "the legacy loops stay off");
