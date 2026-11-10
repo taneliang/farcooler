@@ -52,7 +52,7 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
   for (const row of run.page.details) {
     const line = el('p', `${row.title}: ${row.value}`)
     const whole = row.whole
-    if (whole) line.append(button('Copy', () => void navigator.clipboard?.writeText(whole)))
+    if (whole) line.append(keyed(button('Copy', () => void navigator.clipboard?.writeText(whole)), `copy:${row.title}`))
     details.append(line)
   }
   card.append(details)

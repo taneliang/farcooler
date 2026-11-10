@@ -91,13 +91,13 @@ await test('lost action reply does not auto-retry; overlapping refresh cannot un
 })
 await test('lossless u64 identity and unknown shared copy use existing text slots', async () => {
   const p = clone(fixtures[0].response.card)
-  p.runs[0].fence = 18446744073709551615n
-  p.runs[0].reasons = [{ kind: 'FutureSharedReason', label: 'Shared label '.repeat(100), text: 'Shared text '.repeat(100) }]
+  p.runs[0].page.details = [{ title: 'Run', value: '18446744073709551615' }]
+  p.runs[0].page.reason = 'Shared text '.repeat(100)
   let view
   const board = new WorkflowBoard(p.workspace, () => ({ read: async () => p }), v => { view = v })
   await board.refresh(); board.select(p.runs[0].item)
   const root = new Element('div'); renderWorkflow(root, view, board)
-  assert(allText(root).includes('18446744073709551615')); assert(allText(root).includes(p.runs[0].reasons[0].text))
+  assert(allText(root).includes('18446744073709551615')); assert(allText(root).includes(p.runs[0].page.reason))
 })
 await test('late inspection is fenced by selection while cleanup and refresh still finish', async () => {
   for (const target of [null, 'item-b', fixtures[0].response.card.runs[0].item]) {
