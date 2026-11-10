@@ -84,7 +84,7 @@
             },
             "phase": "WaitingApproval",
             "phaseLabel": "Awaiting Approval",
-            "run": "wf1:9238042ca1b351c53cd9dd92300e5dfb09100425d25ee6640868239dd3ae1d21",
+            "run": "run-1",
             "step": "Prepare Workspace"
           },
           "second": "Building · ov-310 · Builder · sonnet · 380K · 1 h",
@@ -1629,6 +1629,13 @@
           "plan_rank": null,
           "pr_number": null,
           "reason": "",
+          "run": {
+            "gate": "approval",
+            "gate_principal": "owner",
+            "phase": "WaitingApproval",
+            "run": "run-1",
+            "stage_kind": "\"Provision\""
+          },
           "same_branch": null,
           "spend": {
             "cache_read_tokens": 0,
@@ -2097,167 +2104,6 @@
         }
       ]
     },
-    "schema": 1,
-    "workflow": {
-      "epoch": 1,
-      "revision": 1,
-      "runs": [
-        {
-          "actions": [
-            {
-              "guard": "wf1:b313ded3e4f9c7790c839d29e258d47e6e967e6a6c76f1dcd727ec753217319e",
-              "kind": "Approve",
-              "label": "Approve"
-            },
-            {
-              "guard": "wf1:b313ded3e4f9c7790c839d29e258d47e6e967e6a6c76f1dcd727ec753217319e",
-              "kind": "Cancel",
-              "label": "Cancel Run"
-            }
-          ],
-          "attempt": 1,
-          "candidate": null,
-          "definitionPin": "wf1:afc4d08b5e8e49351ff4d086bea36cd268d4b3318c92613948d0d1ffb62abb9e",
-          "fence": 1,
-          "gate": {
-            "kind": "Approval",
-            "label": "Approval Required",
-            "principal": "owner",
-            "text": "Waiting for approval from owner."
-          },
-          "item": "ov-310",
-          "iteration": 0,
-          "label": "Workflow Run",
-          "latestEvidence": null,
-          "page": {
-            "copyLabel": "Copy",
-            "details": [
-              {
-                "title": "Run",
-                "value": "9238042c",
-                "whole": "wf1:9238042ca1b351c53cd9dd92300e5dfb09100425d25ee6640868239dd3ae1d21"
-              },
-              {
-                "title": "Workflow",
-                "value": "afc4d08b",
-                "whole": "wf1:afc4d08b5e8e49351ff4d086bea36cd268d4b3318c92613948d0d1ffb62abb9e"
-              },
-              {
-                "title": "Attempt",
-                "value": "1"
-              }
-            ],
-            "detailsLabel": "Details",
-            "more": [],
-            "outcome": "Awaiting approval",
-            "reason": "Waiting for your approval to start Prepare workspace.",
-            "retryLabel": "Try Again",
-            "steps": [
-              {
-                "label": "Prepare workspace",
-                "state": "Awaiting approval"
-              },
-              {
-                "label": "Build",
-                "state": "Not started"
-              },
-              {
-                "label": "Run checks",
-                "state": "Not started"
-              },
-              {
-                "label": "Review",
-                "state": "Not started"
-              },
-              {
-                "label": "Land changes",
-                "state": "Not started"
-              },
-              {
-                "label": "Check CI",
-                "state": "Not started"
-              }
-            ],
-            "ticket": "ov-310"
-          },
-          "pendingEffect": null,
-          "phase": "WaitingApproval",
-          "phaseLabel": "Awaiting Approval",
-          "policyPin": "policy",
-          "reasons": [
-            {
-              "kind": "ApprovalRequired",
-              "label": "Approval Required",
-              "text": "This stage is waiting for its configured approval."
-            }
-          ],
-          "reworksRemaining": 2,
-          "run": "wf1:9238042ca1b351c53cd9dd92300e5dfb09100425d25ee6640868239dd3ae1d21",
-          "stage": {
-            "id": "stage-0",
-            "kind": "Provision",
-            "label": "Prepare Workspace",
-            "progression": {
-              "AwaitApproval": {
-                "principal": "owner"
-              }
-            },
-            "progressionLabel": "Approval from owner"
-          },
-          "stages": [
-            {
-              "id": "stage-0",
-              "kind": "Provision",
-              "label": "Prepare Workspace",
-              "progression": {
-                "AwaitApproval": {
-                  "principal": "owner"
-                }
-              },
-              "progressionLabel": "Approval from owner"
-            },
-            {
-              "id": "stage-1",
-              "kind": "Build",
-              "label": "Build",
-              "progression": "Automatic",
-              "progressionLabel": "Automatic"
-            },
-            {
-              "id": "stage-2",
-              "kind": "Check",
-              "label": "Run Checks",
-              "progression": "Automatic",
-              "progressionLabel": "Automatic"
-            },
-            {
-              "id": "stage-3",
-              "kind": {
-                "Review": "Dispatch"
-              },
-              "label": "Review",
-              "progression": "Automatic",
-              "progressionLabel": "Automatic"
-            },
-            {
-              "id": "stage-4",
-              "kind": "Land",
-              "label": "Land Changes",
-              "progression": "Automatic",
-              "progressionLabel": "Automatic"
-            },
-            {
-              "id": "stage-5",
-              "kind": "Ci",
-              "label": "Check CI",
-              "progression": "Automatic",
-              "progressionLabel": "Automatic"
-            }
-          ]
-        }
-      ],
-      "schema": 2,
-      "workspace": "workspace"
-    }
+    "schema": 1
   }
 }

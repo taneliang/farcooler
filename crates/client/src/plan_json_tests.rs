@@ -426,3 +426,21 @@ async fn workflow_enrichment_keeps_compatibility_without_hiding_read_failures() 
     let malformed = std::future::ready(Ok(result::Value::Plan(Default::default())));
     assert!(matches!(with_workflow(&plan, workspace, Some(malformed)).await, Err(SessionError::Protocol(_))));
 }
+
+/// A ticket's engine run (ov-1040) reaches the JSON the plan view reads, and is left out when the runner said nothing.
+#[test]
+fn a_ticket_s_engine_run_reaches_the_json_and_is_left_out_when_unsaid() {
+    let mut plan = the_plan();
+    let at = 0;
+    plan.lines[at].run = Some(pb::TicketRun {
+        run: "run-1".into(),
+        phase: "WaitingApproval".into(),
+        stage_kind: "\"Build\"".into(),
+        gate: "approval".into(),
+        gate_principal: "owner".into(),
+    });
+    let json = plan_json(&plan);
+    assert_eq!(json["lines"][at]["run"]["phase"], "WaitingApproval");
+    assert_eq!(json["lines"][at]["run"]["gate_principal"], "owner");
+    assert!(json["lines"][(at + 1) % plan.lines.len()].get("run").is_none());
+}

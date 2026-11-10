@@ -12,6 +12,10 @@ pub use page::{DetailRow, RunPage, StepRow};
 use farcooler_workflow::MAX_RETRIES;
 mod style;
 pub use style::Style;
+// The plan's run note words itself from the same labels (ov-1040).
+pub(crate) fn phase_label(phase: &Phase, style: Style) -> String { display::phase_label(phase, style) }
+pub(crate) fn stage_label(kind: &StageKind) -> &'static str { display::stage_label(kind) }
+pub(crate) fn gate_card(kind: GateKind, principal: &str, style: Style) -> GateCard { display::gate_card(kind, principal, style) }
 
 /// This is an explicit trusted input, not a credential or a transport grant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

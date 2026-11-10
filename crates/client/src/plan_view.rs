@@ -4,7 +4,8 @@
 //! `PlanSections.kt`, `plan.ts`); this is the one copy. It decides which
 //! ticket is in which section, the order of the landings, every word a
 //! section header, a ticket card, a landing card, an agent row and a theme
-//! tile says, and which run of the workspace's workflow engine a card shows.
+//! tile says, and the note a ticket's engine run gets (the run comes in the
+//! plan itself, ov-1040).
 //! The apps lay it out.
 //!
 //! Pure: no I/O, no clock (the plan carries the runner's `now_ms`) and no
@@ -20,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use typeshare::typeshare;
 
-use crate::workflow_presentation::{Presentation, RunCard};
+use crate::workflow_presentation::Presentation;
 
 mod build;
 mod landing_queue;
@@ -132,7 +133,7 @@ pub struct AgentRef {
     pub model: String,
 }
 
-/// The engine's run of a ticket, from the workspace's workflow presentation:
+/// The engine's run of a ticket, from the plan's line for it (ov-1040):
 /// the step it is on, the gate it waits at, and the phase.
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

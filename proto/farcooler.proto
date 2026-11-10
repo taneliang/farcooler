@@ -4861,6 +4861,25 @@ message TicketLine {
   optional PrStage pr_stage = 21;
   // The number of the live landing it is on.
   optional uint32 landing = 22;
+  // The workflow engine's run for it (ov-1040): where it is and what it waits
+  // on. Absent when the workspace publishes no workflow or the engine has no
+  // run of this ticket's key. Facts only; the core words the note.
+  optional TicketRun run = 23;
+}
+
+// A ticket's engine run, as the plan carries it (ov-1040).
+message TicketRun {
+  string run = 1;
+  // The run's phase by its engine name: `Running`, `WaitingApproval`,
+  // `WaitingReview`, `Failed` and so on.
+  string phase = 2;
+  // The stage it is on, as the engine's JSON for a stage kind (`"Build"`,
+  // `{"Review":{"Person":"owner"}}`); empty after the last stage.
+  string stage_kind = 3;
+  // `approval` or `review` while a person's decision is awaited; else empty.
+  string gate = 4;
+  // Who decides, with a gate.
+  string gate_principal = 5;
 }
 
 // A ticket an agent works now.

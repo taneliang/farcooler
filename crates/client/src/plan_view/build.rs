@@ -218,7 +218,6 @@ pub(super) struct Reader<'a> {
     pub(super) context: &'a input::Context,
     pub(super) style: Style,
     statuses: BTreeMap<&'a str, Status>,
-    runs: Vec<&'a RunCard>,
 }
 
 impl<'a> Reader<'a> {
@@ -319,20 +318,30 @@ impl<'a> Reader<'a> {
         self.plan.themes.iter().find(|t| t.state != "dropped" && t.cards.iter().any(|c| c.task == task))
     }
 
-    fn run_of(&self, key: &str) -> Option<RunStep> {
-        let card = self.runs.iter().find(|r| r.item.eq_ignore_ascii_case(key))?;
+    /// The engine run `line` carries (ov-1040), in the plan's words. The engine's labels
+    /// come in Title Case, as `workflow_presentation` writes them; `from_title` sets them
+    /// in the viewer's case.
+    fn run_of(&self, line: &Line) -> Option<RunStep> {
+        use crate::workflow_presentation::{gate_card, phase_label, stage_label, GateKind, Style as Engine};
+        let run = line.run.as_ref()?;
+        let phase: Phase = serde_json::from_value(serde_json::Value::String(run.phase.clone())).ok()?;
         let style = self.style;
-        let gate = card.gate.as_ref().map(|g| Gate {
-            label: style.from_title(&g.label),
-            text: g.text.clone(),
-            principal: g.principal.clone(),
-        });
-        let attention = gate.is_some() || matches!(card.phase, Phase::Failed | Phase::Uncertain);
+        let step = serde_json::from_str::<farcooler_workflow::StageKind>(&run.stage_kind)
+            .ok()
+            .map(|kind| style.from_title(&Engine::Apple.label(stage_label(&kind))));
+        let gate = match run.gate.as_str() {
+            "approval" => Some(GateKind::Approval),
+            "review" => Some(GateKind::Review),
+            _ => None,
+        }
+        .map(|kind| gate_card(kind, &run.gate_principal, Engine::Apple))
+        .map(|g| Gate { label: style.from_title(&g.label), text: g.text, principal: g.principal });
+        let attention = gate.is_some() || matches!(phase, Phase::Failed | Phase::Uncertain);
         Some(RunStep {
-            run: card.run.clone(),
-            phase: card.phase.clone(),
-            phase_label: style.from_title(&card.phase_label),
-            step: card.stage.as_ref().map(|s| style.from_title(&s.label)),
+            run: run.run.clone(),
+            phase_label: style.from_title(&phase_label(&phase, Engine::Apple)),
+            phase,
+            step,
             gate,
             attention,
         })
@@ -508,7 +517,7 @@ impl Reader<'_> {
         let warning = if waits { Some("Needs you".to_string()) } else { self.stale(line) };
         let over = self.over_budget(line);
         let shown = self.shown_stage(line);
-        let run = self.run_of(&line.key);
+        let run = self.run_of(line);
         let heading = self.heading(line);
 
         let second = if rank.is_some() {
@@ -845,7 +854,6 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         context,
         style,
         statuses: context.statuses.iter().filter_map(|(task, word)| Some((task.as_str(), Status::of(word)?))).collect(),
-        runs: workflow.map(|w| w.runs.iter().collect()).unwrap_or_default(),
     };
     let row = |line: &Line, rank: Option<u64>| {
         r.card(line, rank, r.agent_of(line), r.landed_landing(line).map(|l| format!("Landing {}", l.number)))

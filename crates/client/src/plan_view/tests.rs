@@ -183,46 +183,15 @@ fn title_and_sentence_case() {
     assert_eq!(sentence_case("Open Pull Request"), "Open pull request");
 }
 
-/// A workspace's workflow presentation with one run for `item`, as `workflow.snapshot` answers it.
-fn presentation(item: &str, approval: bool) -> crate::workflow_presentation::Presentation {
-    use farcooler_workflow::{Command, Definition, Grant, Input, Progression, State, step};
-    let mut definition = Definition::coding();
-    if approval {
-        definition.stages[0].progression = Progression::AwaitApproval { principal: "owner".into() };
-    }
-    let state = step(
-        &State::empty("workspace".into(), 1),
-        &Input {
-            schema: 1,
-            id: "event-0".into(),
-            workspace: "workspace".into(),
-            expected_revision: 0,
-            epoch: 1,
-            source: "fixture".into(),
-            source_sequence: 1,
-            now_ms: 1,
-            grant: Grant::Controller,
-            command: Command::Enqueue {
-                item: item.into(),
-                definition,
-                policy_pin: "policy".into(),
-                resource: "resource".into(),
-                dependencies: Default::default(),
-                initial_candidate: None,
-            },
-            busy_resources: Default::default(),
-        },
-    )
-    .unwrap()
-    .state;
-    let auth = crate::workflow_presentation::Capabilities {
-        workspace: "workspace".into(),
-        epoch: 1,
-        inspect: true,
-        controller: true,
-        decision_principal: Some("owner".into()),
+/// `plan.get`'s run for `item` (ov-1040): the first stage, running, or waiting on `owner`'s approval.
+fn with_run(req: &mut Value, item: &str, approval: bool) {
+    let run = if approval {
+        json!({ "run": "run-1", "phase": "WaitingApproval", "stage_kind": "\"Provision\"", "gate": "approval", "gate_principal": "owner" })
+    } else {
+        json!({ "run": "run-1", "phase": "Running", "stage_kind": "\"Provision\"", "gate": "", "gate_principal": "" })
     };
-    crate::workflow_presentation::project(&state, &auth, crate::workflow_presentation::Style::Apple).unwrap()
+    let line = req["plan"]["lines"].as_array_mut().unwrap().iter_mut().find(|l| l["key"] == item).unwrap();
+    line["run"] = run;
 }
 
 #[test]
@@ -230,7 +199,7 @@ fn a_ticket_card_carries_its_engine_run() {
     let case = cases().into_iter().find(|c| c["name"] == "board-with-phases").unwrap();
     for (approval, gated) in [(false, false), (true, true)] {
         let mut req = request(&case, "apple");
-        req["workflow"] = serde_json::to_value(presentation("OV-310", approval)).unwrap();
+        with_run(&mut req, "ov-310", approval);
         let view = view_of(req);
         let card = view.building.iter().find(|c| c.key == "ov-310").unwrap();
         let run = card.run.as_ref().expect("the run on ov-310's card");
@@ -253,7 +222,7 @@ fn a_ticket_card_carries_its_engine_run() {
 
         let material = {
             let mut req = request(&case, "material");
-            req["workflow"] = serde_json::to_value(presentation("ov-310", approval)).unwrap();
+            with_run(&mut req, "ov-310", approval);
             view_of(req)
         };
         let run = material.building.iter().find(|c| c.key == "ov-310").unwrap().run.clone().unwrap();
@@ -295,7 +264,7 @@ fn the_view_golden_is_current() {
     let case = cases().into_iter().find(|c| c["name"] == "board-with-phases").unwrap();
     for style in ["apple", "material"] {
         let mut req = request(&case, style);
-        req["workflow"] = serde_json::to_value(presentation("ov-310", true)).unwrap();
+        with_run(&mut req, "ov-310", true);
         let answer: Value = serde_json::from_str(&json(&req.to_string())).unwrap();
         let actual = serde_json::to_string_pretty(&json!({ "request": req, "answer": answer })).unwrap() + "\n";
         let path = format!("{}/../../test/fixtures/plan-view-{style}.json", env!("CARGO_MANIFEST_DIR"));

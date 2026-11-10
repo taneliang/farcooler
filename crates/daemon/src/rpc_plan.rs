@@ -356,6 +356,7 @@ pub(crate) async fn read_plan(
         agent.doing_now = doing_now(svc, watcher, view).await;
     }
     crate::plan_stage::annotate(svc, &plan, &mut wire);
+    crate::plan_run::annotate(svc, workspace, &mut wire);
     if control {
         crate::plan_stage::annotate_waits(svc, workspace, &plan, &mut wire);
         crate::pr_suggest::annotate(svc, &plan, &mut wire);
@@ -557,6 +558,7 @@ pub(crate) fn pb_line(v: &LineView, admin: bool) -> pb::TicketLine {
         budget_tokens: v.budget_tokens,
         pr_stage: None,
         landing: v.landing,
+        run: None,
     }
 }
 

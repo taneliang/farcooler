@@ -120,6 +120,21 @@ pub struct Line {
     pub work: Vec<Work>,
     pub spend: Spend,
     pub pr_stage: Option<PrStage>,
+    /// The workflow engine's run for it (ov-1040).
+    pub run: Option<Run>,
+}
+
+/// A ticket's engine run as `plan.get` carries it: facts, not words.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Run {
+    pub run: String,
+    pub phase: String,
+    /// The stage kind as the engine's JSON; empty past the last stage.
+    pub stage_kind: String,
+    /// `approval` or `review` while a person's decision is awaited.
+    pub gate: String,
+    pub gate_principal: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

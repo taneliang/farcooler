@@ -116,6 +116,7 @@ pub(crate) mod rpc_landings;
 pub mod ci_canary;
 pub mod ci_watch;
 pub(crate) mod pr_stage;
+pub(crate) mod plan_run;
 pub(crate) mod plan_stage;
 pub mod pr_review;
 pub mod pr_nudge;

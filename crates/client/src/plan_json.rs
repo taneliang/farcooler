@@ -225,6 +225,18 @@ pub fn with_stage(mut record: Value, stage: &Option<pb::PrStage>) -> Value {
     record
 }
 
+/// A ticket's engine run (ov-1040): the facts the core words the note from.
+/// Left out of the record when the runner said nothing, as `pr_stage` is.
+pub fn with_run(mut record: Value, run: &Option<pb::TicketRun>) -> Value {
+    if let (Some(run), Some(map)) = (run, record.as_object_mut()) {
+        map.insert(
+            "run".into(),
+            json!({ "run": run.run, "phase": run.phase, "stage_kind": run.stage_kind, "gate": run.gate, "gate_principal": run.gate_principal }),
+        );
+    }
+    record
+}
+
 /// A card named by a ticket, a landing or an agent: its id and its key.
 fn card_ref(plan: &pb::Plan, task: &[u8]) -> Value {
     json!({ "task": id_text(task), "key": key_of(plan, task) })
@@ -234,7 +246,7 @@ fn card_ref(plan: &pb::Plan, task: &[u8]) -> Value {
 /// worked it, and its pull request stage when the runner had one to say.
 fn line_json(plan: &pb::Plan, l: &pb::TicketLine) -> Value {
     let card = plan.cards.iter().find(|c| c.task_id == l.task_id);
-    with_stage(json!({
+    with_run(with_stage(json!({
         "task": id_text(&l.task_id),
         "key": key_of(plan, &l.task_id),
         "title": card.map(|c| c.title.clone()).unwrap_or_default(),
@@ -259,7 +271,7 @@ fn line_json(plan: &pb::Plan, l: &pb::TicketLine) -> Value {
             "ended_at": w.ended_at, "verdict": w.verdict, "linked_by_description": w.linked_by_description,
         })).collect::<Vec<_>>(),
         "spend": spend_json(&l.spend.unwrap_or_default()),
-    }), &l.pr_stage)
+    }), &l.pr_stage), &l.run)
 }
 
 fn ruling_state_word(state: i32) -> &'static str {
