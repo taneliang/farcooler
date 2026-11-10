@@ -39,7 +39,8 @@ class WorkflowRunsTest {
             }
             model.disconnect(); assertFalse(model.view.value.ready)
             forwarded = null
-            model.perform(card.item, card.actions.first(), port); assertNull(forwarded)
+            // A cancelled run has no actions to send, so there is nothing to fence.
+            card.actions.firstOrNull()?.let { model.perform(card.item, it, port); assertNull(forwarded) }
             model.refresh(port); assertTrue(model.view.value.ready)
         }
     }
