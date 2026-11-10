@@ -31,7 +31,7 @@ async function shoot(name, { colorScheme, width, height, mobile }) {
   await page.setContent(html)
   await page.waitForFunction(() => window.done === true)
   const m = await page.evaluate(() => {
-    const p = [...document.querySelectorAll('.workflow-runs p')].find(n => n.textContent.includes('The board this ran on'))
+    const p = [...document.querySelectorAll('.workflow-runs p')].find(n => n.textContent.includes('cancelled because its board'))
     const r = p.getBoundingClientRect(); const d = document.getElementById('workflow-runs')
     return { text: p.textContent, right: r.right, vw: document.documentElement.clientWidth, scrollW: document.documentElement.scrollWidth, clipped: p.scrollWidth > p.clientWidth, sheetScrollsSideways: d.scrollWidth > d.clientWidth }
   })
