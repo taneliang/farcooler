@@ -104,9 +104,10 @@ CI_JOBS_NOT_RUN = {
 
 # Steps that set up a CI runner rather than check anything.
 SETUP = re.compile(r"apt-get|brew install|sdkmanager|ci-install-tmux\.sh|Install git-lfs|Install fish|sshd -V")
-# What the web job downloads for Linux x86 (wasm-bindgen, binaryen, Chromium).
+# What the web job downloads for Linux x86 (wasm-bindgen, binaryen, Chromium),
+# through scripts/gh-download.sh since ov-1030 (curl before it).
 WEB_LINUX_ONLY = re.compile(
-    r"curl -fsSL|playwright|WASM_BINDGEN|WASM_OPT|wasm-stable|wasm-canary|size-gate\.mjs dist|fake_daemon|crates/web/build\.sh|\./build\.sh"
+    r"gh-download\.sh|curl -fsSL|playwright|WASM_BINDGEN|WASM_OPT|wasm-stable|wasm-canary|size-gate\.mjs dist|fake_daemon|crates/web/build\.sh|\./build\.sh"
 )
 # The ios job's own steps build an archive; its plan job's checks are the cheap half.
 IOS_KEEP = re.compile(r"import-ios-certificate-test|generator-test|ios-ui-shards\.py|ios-ui-pick-simulator\.py|ios-ui-plan\.py --self-test")
@@ -908,7 +909,7 @@ def _self_test():
     expect("the Android gradle steps run in apps/android", all(s.cwd == "apps/android" for s in plans["android"] if "gradlew" in s.run), True)
     expect("a ${{ }} is filled in", any("${{" in s.run for s in plans["web"]), False)
     expect("Android's JDK 21 reaches the capture step", any(s.env.get("CAPTURE_JDK") == ctx["steps.jdk21.outputs.path"] for s in plans["android"]), True)
-    expect("the web job leaves the Linux downloads to CI", any(s.skip and "curl" in s.run for s in plans["web"]), True)
+    expect("the web job leaves the Linux downloads to CI", any(s.skip and "gh-download.sh" in s.run for s in plans["web"]), True)
 
     # The real CI producers and consumers must stay paired by channel. A skipped
     # producer cannot supply dist, even if a stale dist happens to exist locally.
