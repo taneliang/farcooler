@@ -47,6 +47,8 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
 const drafts = new WeakMap<WorkflowBoard, Map<string, { value: string; start: number; end: number }>>()
 function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HTMLElement {
   const card = el('article'); card.append(el('h2', run.page.ticket), el('h3', run.page.outcome), el('p', run.page.reason))
+  if (run.page.gate) card.append(el('h3', run.page.gate.label), el('p', run.page.gate.text))
+  for (const line of run.page.more) card.append(el('p', line))
   for (const step of run.page.steps) card.append(el('p', `${step.label} · ${step.state}`))
   const details = el('details'); details.append(el('summary', run.page.detailsLabel))
   for (const row of run.page.details) {
@@ -56,7 +58,6 @@ function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HT
     details.append(line)
   }
   card.append(details)
-  if (run.gate) card.append(el('h3', run.gate.label), el('p', run.gate.text), el('p', run.gate.principal))
   const actions = el('div'); actions.className = 'actions'
   for (const history of run.reworkHistory ?? []) card.append(el('p', `${history.principal} · ${history.iteration}`), el('pre', history.reason))
   for (const action of run.actions) {

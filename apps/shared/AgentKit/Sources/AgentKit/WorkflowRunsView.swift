@@ -130,6 +130,8 @@ public struct WorkflowRunsView: View {
             Text(run.page.ticket).font(.title2).accessibilityAddTraits(.isHeader)
             Text(run.page.outcome).font(.headline)
             Text(run.page.reason)
+            if let gate = run.page.gate { Text(gate.label).font(.headline); Text(gate.text) }
+            ForEach(Array(run.page.more.enumerated()), id: \.offset) { _, line in Text(line) }
             if run.pendingEffect != nil, watch != nil {
                 Button("Watch Agent") { watching = run.item }
             }
@@ -144,7 +146,6 @@ public struct WorkflowRunsView: View {
                     }
                 }
             }
-            if let gate = run.gate { Text(gate.label).font(.headline); Text(gate.text); Text(gate.principal) }
             ForEach(Array((run.reworkHistory ?? []).enumerated()), id: \.offset) { _, history in
                 Text("\(history.principal) · \(history.iteration)")
                 Text(history.reason).textSelection(.enabled)

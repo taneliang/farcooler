@@ -117,15 +117,16 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? =
             Text(run.page.ticket, style = MaterialTheme.typography.titleLarge)
             Text(run.page.outcome, style = MaterialTheme.typography.titleMedium)
             Text(run.page.reason)
+            run.page.gate?.let { Text(it.label, style = MaterialTheme.typography.titleMedium); Text(it.text) }
+            run.page.more.forEach { Text(it) }
             if (onWatch != null) Button(onClick = onWatch) { Text("Watch agent") }
             run.page.steps.forEach { step -> Text("${step.label} · ${step.state}") }
             var open by rememberSaveable(run.item, run.run) { mutableStateOf(false) }
             TextButton(onClick = { open = !open }) { Text(run.page.detailsLabel) }
             if (open) run.page.details.forEach { row ->
                 Text("${row.title}: ${row.value}")
-                row.whole?.let { whole -> TextButton(onClick = { clipboard.setText(AnnotatedString(whole)) }) { Text("Copy ${row.title}") } }
+                row.whole?.let { whole -> TextButton(onClick = { clipboard.setText(AnnotatedString(whole)) }) { Text("Copy") } }
             }
-            run.gate?.let { listOf(it.label, it.text, it.principal).forEach { slot -> Text(slot) } }
         }
     }
     run.reworkHistory?.forEach { history ->
