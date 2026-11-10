@@ -863,7 +863,7 @@ final class HarnessRunner {
                     "task": args["task"] as? String ?? "", "price_table": "2026-09-25",
                     "totals": [String: Any](), "by_harness_model": [Any](),
                 ]
-                return try TaskUsage.shown(spend: json(nothing)) ?? json(nothing)
+                return try usageAnswer(nothing)
             }
             let claude: [String: Any] = [
                 "turns": 9, "turns_partial": 1, "active_ms": 7_800_000, "input_tokens": 41_000, "output_tokens": 18_400,
@@ -885,7 +885,7 @@ final class HarnessRunner {
                     ["harness": "codex", "model": "gpt-5.5", "totals": codex] as [String: Any],
                 ],
             ]
-            return try TaskUsage.shown(spend: json(spent)) ?? json(spent)
+            return try usageAnswer(spent)
         case "task.note":
             // An answer to bil-7, written as an answer, with words in it.
             guard args["task"] as? String == Self.decisionTask,
@@ -1192,6 +1192,16 @@ final class HarnessRunner {
 
     private func json(_ object: Any) throws -> Data {
         try JSONSerialization.data(withJSONObject: object)
+    }
+
+    /// `usage.task`'s answer for `spend`, with the lines the client core adds.
+    /// The raw spend alone no longer decodes, so a missing bridge stops the run
+    /// here rather than drawing "couldn't read" as if the runner had failed.
+    private func usageAnswer(_ spend: [String: Any]) throws -> Data {
+        guard let shown = TaskUsage.shown(spend: try json(spend)) else {
+            preconditionFailure()
+        }
+        return shown
     }
 
     private var question: [String: Any] {
