@@ -314,3 +314,23 @@ fn native_operation_capture_fixture_is_projected_producer_and_preserves_excerpts
     let fixture: Value = serde_json::from_str(include_str!("../../../../test/fixtures/agent-rows-ov893-producer.json")).unwrap();
     assert_eq!(fixture, written, "fixture differs from actual projector/client boundary output:\n{}", serde_json::to_string_pretty(&written).unwrap());
 }
+
+/// An older daemon's rows say no `notice`, `took` or `type_words`; the boundary writes them from what the row does say, so
+/// every app and the browser read them whatever the daemon's age (ov-1062).
+#[test]
+fn a_row_from_an_older_daemon_gets_its_words_at_the_boundary() {
+    let old = |id: &str, json: Value| WireRow { id: id.into(), ord: 0, rev: 1, row_json: json.to_string() };
+    let turn = json!({ "id": "turn:a", "kind": { "Turn": { "prompt": "\"build\" finished", "origin": "Notification", "duration_ms": 65_000 } } });
+    let typed = json!({ "id": "turn:b", "kind": { "Turn": { "prompt": "go", "origin": "Typed" } } });
+    let sub = json!({ "id": "sub:c", "kind": { "Subagent": { "tool_use_id": "c", "agent_type": "general-purpose" } } });
+    let page = AgentRowPage {
+        terminal_id: Default::default(), epoch: 1, rev: 1, more_before: false,
+        rows: vec![old("turn:a", turn), old("turn:b", typed), old("sub:c", sub)],
+    };
+    let rows = super::rows_args::page_of(&page)["rows"].clone();
+    assert_eq!(rows[0]["kind"]["Turn"]["notice"], true);
+    assert_eq!(rows[0]["kind"]["Turn"]["took"], "1:05");
+    assert_eq!(rows[1]["kind"]["Turn"].get("notice"), None, "a typed turn is not a notice, and says no time it didn't have");
+    assert_eq!(rows[1]["kind"]["Turn"].get("took"), None);
+    assert_eq!(rows[2]["kind"]["Subagent"]["type_words"], "General purpose");
+}

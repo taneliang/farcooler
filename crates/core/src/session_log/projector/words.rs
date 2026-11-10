@@ -23,6 +23,28 @@ pub fn is_notice(origin: TurnOrigin) -> bool {
     matches!(origin, TurnOrigin::Notification | TurnOrigin::System)
 }
 
+/// Writes the words an older daemon's row doesn't carry, from the fields it does, so a client reads one shape
+/// whatever the daemon's age (ov-1062). A field the row already has stays as it is.
+pub fn backfill(row: &mut serde_json::Value) {
+    let Some(kind) = row.get_mut("kind").and_then(|k| k.as_object_mut()) else { return };
+    if let Some(turn) = kind.get_mut("Turn").and_then(|t| t.as_object_mut()) {
+        let notice = matches!(turn.get("origin").and_then(|o| o.as_str()), Some("Notification" | "System"));
+        if notice && !turn.contains_key("notice") {
+            turn.insert("notice".into(), true.into());
+        }
+        let took = turn.get("duration_ms").and_then(|d| d.as_i64()).map(short);
+        if let (Some(took), false) = (took, turn.contains_key("took")) {
+            turn.insert("took".into(), took.into());
+        }
+    }
+    if let Some(sub) = kind.get_mut("Subagent").and_then(|s| s.as_object_mut()) {
+        let words = sub.get("agent_type").and_then(|t| t.as_str()).map(agent_type);
+        if let (Some(words), false) = (words, sub.contains_key("type_words")) {
+            sub.insert("type_words".into(), words.into());
+        }
+    }
+}
+
 /// Fills the words a row's kind carries, from the fields they say.
 pub(super) fn fill(kind: &mut RowKind) {
     match kind {

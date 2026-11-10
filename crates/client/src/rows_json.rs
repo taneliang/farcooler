@@ -9,7 +9,9 @@
 use serde_json::{Value, json};
 
 fn row_json(row: &farcooler_protocol::v1::AgentRow) -> Value {
-    serde_json::from_str(&row.row_json).unwrap_or_else(|_| json!({ "id": row.id, "ord": row.ord, "rev": row.rev }))
+    let mut out = serde_json::from_str(&row.row_json).unwrap_or_else(|_| json!({ "id": row.id, "ord": row.ord, "rev": row.rev }));
+    farcooler_core::session_log::projector::words::backfill(&mut out);
+    out
 }
 
 /// A page as an app reads it: `{epoch, rev, moreBefore, rows: [row]}`.

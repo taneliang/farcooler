@@ -112,7 +112,7 @@ private struct TurnBody: View {
             }
             // A notice's own turn says no time of its own: it's the line
             // above, not a message the person sent. Nor does a report's.
-            if !turn.notice == true, !AgentConversation.isScheduled(turn), !AgentConversation.isHarness(turn) { status }
+            if turn.notice != true, !AgentConversation.isScheduled(turn), !AgentConversation.isHarness(turn) { status }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
