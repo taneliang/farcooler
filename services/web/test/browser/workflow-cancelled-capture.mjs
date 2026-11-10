@@ -45,6 +45,10 @@ for (const scheme of ['light', 'dark']) {
   await shoot(`workflow-cancelled-desktop-${scheme}`, { colorScheme: scheme, width: 1280, height: 800, mobile: false })
   // A failed run's long kept sentence, Details open, so the Copy buttons show (ov-1060).
   const failed = { card: 'failed', open: true, phrase: 'could not be downloaded in time' }
+  // A run waiting on the viewer: one sentence, its button right under it (ov-1060).
+  const approval = { card: 'approval', phrase: 'Waiting for your approval' }
+  await shoot(`workflow-approval-phone-320-${scheme}`, { colorScheme: scheme, width: 320, height: 1500, mobile: true, ...approval })
+  await shoot(`workflow-approval-desktop-${scheme}`, { colorScheme: scheme, width: 1280, height: 800, mobile: false, ...approval })
   await shoot(`workflow-failed-details-phone-320-${scheme}`, { colorScheme: scheme, width: 320, height: 1500, mobile: true, ...failed })
   await shoot(`workflow-failed-details-desktop-${scheme}`, { colorScheme: scheme, width: 1280, height: 800, mobile: false, ...failed })
 }

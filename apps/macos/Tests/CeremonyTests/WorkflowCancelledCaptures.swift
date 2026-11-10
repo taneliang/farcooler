@@ -30,6 +30,10 @@ struct WorkflowCancelledCaptures {
     @Test("A failed run, Details open, at the narrowest width", arguments: ["light", "dark"])
     func failedOpen(scheme: String) async throws { try await shoot("failed", open: true, scheme: scheme) }
 
+    /// A run waiting on the viewer: one sentence with its button right under it (ov-1060).
+    @Test("An approval, at the narrowest width", arguments: ["light", "dark"])
+    func approval(scheme: String) async throws { try await shoot("approval", open: false, scheme: scheme) }
+
     func shoot(_ name: String, open: Bool, scheme: String) async throws {
         let out = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]))
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)

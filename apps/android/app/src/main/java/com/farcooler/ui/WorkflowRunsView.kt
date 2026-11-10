@@ -1,9 +1,9 @@
 package com.farcooler.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -26,6 +26,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
@@ -110,7 +111,7 @@ fun WorkflowRunsView(host: String, workspace: String, close: () -> Unit) {
     }
 }
 @Composable
-fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? = null, performReason: (WorkflowAction, String) -> Unit = { _, _ -> }, perform: (WorkflowAction) -> Unit) {
+fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, detailsOpen: Boolean = false, onWatch: (() -> Unit)? = null, performReason: (WorkflowAction, String) -> Unit = { _, _ -> }, perform: (WorkflowAction) -> Unit) {
     // Finite identity slots, content wrapping without ellipsis.
     SelectionContainer {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -132,11 +133,11 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? =
             }
             if (onWatch != null) Button(onClick = onWatch) { Text("Watch agent") }
             run.page.steps.forEach { step -> Text("${step.label} · ${step.state}") }
-            var open by rememberSaveable(run.item, run.run) { mutableStateOf(false) }
-            TextButton(onClick = { open = !open }, contentPadding = PaddingValues(0.dp)) { Text(run.page.detailsLabel) }
+            var open by rememberSaveable(run.item, run.run) { mutableStateOf(detailsOpen) }
+            Text(run.page.detailsLabel, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable(role = Role.Button) { open = !open })
             if (open) run.page.details.forEach { row ->
                 Text("${row.title}: ${row.value}")
-                row.whole?.let { whole -> TextButton(onClick = { clipboard.setText(AnnotatedString(whole)) }, contentPadding = PaddingValues(0.dp)) { Text(run.page.copyLabel) } }
+                row.whole?.let { whole -> Text(run.page.copyLabel, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable(role = Role.Button) { clipboard.setText(AnnotatedString(whole)) }) }
             }
         }
     }

@@ -22,18 +22,23 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [37], qualifiers = "w320dp-h1200dp-xxhdpi")
 class WorkflowCancelledCaptureTest {
-    private fun card(): String {
+    private fun card(name: String): String {
         val root = generateSequence(File("").absoluteFile) { it.parentFile }
             .first { File(it, "crates/client/src/testdata/workflow-presentation.json").exists() }
         val all = Json.parseToJsonElement(File(root, "crates/client/src/testdata/workflow-presentation.json").readText()) as JsonArray
-        return all.first { it.jsonObject.getValue("name").jsonPrimitive.content == "cancelled" }
+        return all.first { it.jsonObject.getValue("name").jsonPrimitive.content == name }
             .jsonObject.getValue("response").jsonObject.getValue("card").toString()
     }
 
-    @Test fun `a cancelled run says why, narrow`() {
-        val run = WorkflowPresentations.decode(card(), "workspace").runs.single()
-        Capture.both("workflow-cancelled-narrow") {
-            FarCoolerTheme { Surface { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) { WorkflowRunCard(run, enabled = true) {} } } }
+    private fun shoot(name: String, open: Boolean, file: String) {
+        val run = WorkflowPresentations.decode(card(name), "workspace").runs.single()
+        Capture.both(file) {
+            FarCoolerTheme { Surface { androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) { WorkflowRunCard(run, enabled = true, detailsOpen = open) {} } } }
         }
     }
+
+    @Test fun `a cancelled run says why, narrow`() = shoot("cancelled", false, "workflow-cancelled-narrow")
+    /** A run that waits on the viewer: one sentence and its button, above the steps (ov-1060). */
+    @Test fun `an approval is one block with its button, narrow`() = shoot("approval", false, "workflow-approval-narrow")
+    @Test fun `a failed run with Details open, narrow`() = shoot("failed", true, "workflow-failed-details-narrow")
 }

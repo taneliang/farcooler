@@ -268,3 +268,4 @@ button.danger { color: var(--danger); }
 .workflow-runs dd, .workflow-runs p, .workflow-runs h2, .workflow-runs h3,
 .workflow-runs button, .workflow-runs pre { overflow-wrap: anywhere; white-space: pre-wrap; }
 .workflow-runs .actions { flex-wrap: wrap; }
+.workflow-runs details p button { margin-inline-start: .5rem; }
