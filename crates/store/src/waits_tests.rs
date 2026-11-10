@@ -229,7 +229,7 @@ fn opening_sweeps_what_an_older_build_left() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("store.db");
     let (task, kept) = {
-        let store = Store::open(&path).unwrap();
+        let store = Store::open(&path).unwrap().legacy_for_tests();
         let repo = store.register_repository_for_test("overnight");
         let main = store.ensure_main_workspace(repo).unwrap().id;
         let task = store.create_task(main, "held", Actor::Manager).unwrap();

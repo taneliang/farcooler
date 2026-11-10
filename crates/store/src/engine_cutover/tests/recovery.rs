@@ -8,8 +8,8 @@ use startup::{artifact_dir, open_recovery, ordinary_admission, readonly_admissio
 fn owner_lock_any_open_store_blocks_the_proof_and_the_proof_blocks_ordinary_opens() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    let first = Store::open(&path).unwrap();
-    let second = Store::open(&path).unwrap();
+    let first = Store::open(&path).unwrap().legacy_for_tests();
+    let second = Store::open(&path).unwrap().legacy_for_tests();
     assert!(JoinedOwners::acquire(&path, "a").is_err(), "an open Store is an owner");
     drop(first);
     assert!(JoinedOwners::acquire(&path, "a").is_err(), "the other Store still is");
@@ -18,7 +18,7 @@ fn owner_lock_any_open_store_blocks_the_proof_and_the_proof_blocks_ordinary_open
     assert!(Store::open(&path).is_err(), "recovery owns the file");
     assert!(JoinedOwners::acquire(&path, "b").is_err(), "one proof at a time; none can be minted beside it");
     drop(held);
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
 }
 #[test]
 fn owner_lock_proof_refuses_a_replaced_file_and_a_stage_of_another_attempt() {
@@ -80,7 +80,7 @@ fn recover_returns_a_frozen_attempt_to_the_original_bytes_and_a_new_attempt_can_
 fn recover_returns_a_legacy_current_database_to_ordinary_service() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     let original = bytes(&path);
     transfer::hold(&path, "held").unwrap();
     assert!(Store::open(&path).is_err(), "a hold refuses ordinary startup");
@@ -88,16 +88,16 @@ fn recover_returns_a_legacy_current_database_to_ordinary_service() {
     drop(transfer::begin(&path, join_db(&path, "held")).unwrap());
     assert!(transfer::recover(&path, join_db(&path, "out")).unwrap().restored);
     assert_eq!(bytes(&path), original);
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
 }
 #[test]
 fn recover_retires_a_hold_or_attempt_that_never_upgraded() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     transfer::hold(&path, "held").unwrap();
     assert!(!transfer::recover(&path, join_db(&path, "out")).unwrap().restored);
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     let tmp = tempfile::tempdir().unwrap();
     let path = source65(tmp.path());
     // A colliding object fails the upgrade after the intent is durable.
@@ -200,7 +200,7 @@ fn baseline_of_another_attempt_is_not_this_databases() {
 /// A crash image: the database and journal as a writer left them mid-transaction.
 fn crashed(dir: &std::path::Path) -> (std::path::PathBuf, i64) {
     let live = dir.join("live.sqlite");
-    drop(Store::open(&live).unwrap());
+    drop(Store::open(&live).unwrap().legacy_for_tests());
     let conn = Connection::open(&live).unwrap();
     conn.execute_batch("PRAGMA cache_size=1; CREATE TABLE IF NOT EXISTS bulk(x); BEGIN IMMEDIATE;").unwrap();
     let committed: i64 = conn.query_row("SELECT count(*) FROM meta", [], |r| r.get(0)).unwrap();
@@ -221,7 +221,7 @@ fn hot_journal_is_rolled_back_by_ordinary_admission_and_only_reported_by_inspect
     assert!(startup::crash_journal(&path));
     assert_eq!(ordinary_admission(&path).unwrap(), startup::Admission::Existing);
     assert!(!journal.exists());
-    let store = Store::open(&path).unwrap();
+    let store = Store::open(&path).unwrap().legacy_for_tests();
     let rows: i64 = store.conn().query_row("SELECT count(*) FROM meta", [], |r| r.get(0)).unwrap();
     assert_eq!(rows, committed, "the crashed transaction is gone");
 }
@@ -270,7 +270,7 @@ fn hot_journal_never_lands_on_restored_bytes() {
 fn hold_refuses_a_database_that_is_not_legacy_and_recover_retires_a_stranded_hold() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     Connection::open(&path).unwrap().execute("UPDATE engine_cutover_authority SET phase='released'", []).unwrap();
     assert!(transfer::hold(&path, "held").is_err(), "a released database is not held");
     assert!(!artifact_dir(&path).exists(), "a refused hold leaves no mark");

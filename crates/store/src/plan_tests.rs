@@ -11,7 +11,8 @@ use crate::ticket_work::{LinkedBy as WorkLinkedBy, WorkRole};
 use crate::workers::{LinkedBy, WorkerRecord};
 
 fn board(n: usize) -> (Store, Uuid, Vec<Task>) {
-    let store = Store::open_in_memory().unwrap();
+    // Legacy: `populated` writes old landing rows, which release fences.
+    let store = Store::open_in_memory().unwrap().legacy_for_tests();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
     let tasks = (0..n).map(|i| store.create_task(main, &format!("task {i}"), Actor::Manager).unwrap()).collect();

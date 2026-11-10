@@ -10,7 +10,7 @@ use transfer::begin;
 fn frozen_with_a_task(dir: &std::path::Path, attempt: &str) -> std::path::PathBuf {
     let path = dir.join("db.sqlite");
     {
-        let store = Store::open(&path).unwrap();
+        let store = Store::open(&path).unwrap().legacy_for_tests();
         let repo = store.register_repository_for_test("Safety");
         let workspace = store.ensure_main_workspace(repo).unwrap();
         store.create_task(workspace.id, "kept", Actor::User).unwrap();
@@ -83,7 +83,7 @@ fn a_file_that_fails_its_integrity_check_is_never_backed_up_or_committed() {
 fn an_inert_journal_is_moved_aside_whole_not_deleted() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     let journal = tmp.path().join("db.sqlite-journal");
     let mut torn = vec![0u8; 512];
     torn[100..108].copy_from_slice(b"evidence");

@@ -11,7 +11,7 @@ use crate::models::uuid_blob;
 /// An explicit legacy-fixture open: normalizes an old-schema file the way the
 /// pre-cutover build did. Behind the `testing` feature only; production has no
 /// flag, environment variable or argument that reaches this.
-pub fn open_legacy_fixture(path: &Path) -> farcooler_core::Result<crate::Store> { crate::Store::open_normalizing(path) }
+pub fn open_legacy_fixture(path: &Path) -> farcooler_core::Result<crate::Store> { crate::Store::open_fixture(path) }
 
 /// Writes a database file at `path` exactly as a schema-11 runner left it:
 /// one repository, `repository`, named `overnight`, registered before the

@@ -70,7 +70,8 @@ fn ci_on_the_pushed_commit_moves_the_phase_and_the_stored_state_word() {
 }
 
 fn board_with_group(item: Item, members: &[&str]) -> (Store, Uuid, Vec<crate::models::Task>) {
-    let store = Store::open_in_memory().unwrap();
+    // Legacy: the last case moves a card the engine's group holds by hand.
+    let store = Store::open_in_memory().unwrap().legacy_for_tests();
     let repo = store.register_repository_for_test("Overlay");
     let ws = store.ensure_main_workspace(repo).unwrap().id;
     let tasks: Vec<_> = members.iter().map(|m| store.create_task(ws, m, Actor::User).unwrap()).collect();

@@ -8,7 +8,7 @@ use crate::testing::old_landing;
 use crate::ticket_lines::{LineUpdate, NewTicketLine, Stage};
 
 fn board() -> (Store, Uuid, Uuid) {
-    let store = Store::open_in_memory().unwrap();
+    let store = Store::open_in_memory().unwrap().legacy_for_tests();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
     let task = store.create_task(main, "Bring the CI chip back", Actor::Manager).unwrap().id;

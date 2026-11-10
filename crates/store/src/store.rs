@@ -70,9 +70,24 @@ impl Store {
     }
 
     /// Test-only: the pre-gate open, for fixtures that deliberately start from
-    /// legacy, frozen or committed state. Production has no such entry.
-    #[cfg(test)]
-    pub(crate) fn open_fixture(path: impl AsRef<Path>) -> Result<Store> { Self::open_normalizing(path.as_ref()) }
+    /// legacy, frozen or committed state. A file it creates starts `legacy`.
+    /// Production has no such entry.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn open_fixture(path: impl AsRef<Path>) -> Result<Store> {
+        let fresh = !path.as_ref().exists();
+        Self::open_normalizing(path.as_ref()).map(|s| if fresh { s.legacy_for_tests() } else { s })
+    }
+
+    /// Test-only: a store created fresh, put back to `legacy` as every
+    /// database was before new installs were born released (ov-1024), for a
+    /// test of pre-cutover behavior or of the cutover itself. Changes nothing
+    /// on a file that was cut over or is already legacy, so a fixture may call
+    /// it on every open.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn legacy_for_tests(self) -> Store {
+        self.conn().execute("UPDATE engine_cutover_authority SET phase='legacy' WHERE singleton=1 AND phase='released' AND incarnation=0 AND manifest IS NULL", []).unwrap();
+        self
+    }
 
     pub(crate) fn open_normalizing(path: &Path) -> Result<Store> {
         let existed = path.exists();

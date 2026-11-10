@@ -12,7 +12,7 @@ struct Released { _tmp: tempfile::TempDir, store: Store, ws: uuid::Uuid, free: u
 fn released() -> Released {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    let store = Store::open(&path).unwrap();
+    let store = Store::open(&path).unwrap().legacy_for_tests();
     let repo = store.register_repository_for_test("Board");
     let ws = store.ensure_main_workspace(repo).unwrap();
     let free = store.create_task(ws.id, "free", Actor::User).unwrap().id;
@@ -28,13 +28,13 @@ fn released() -> Released {
         SELECT x'01010101010101010101010101010101', workspace_id, task_id, generation, eligibility_epoch, authorizer_source, authorized_at, template_version, next_due, 'claimed', 'fixture' FROM check_in_schedules", []).unwrap();
     store.conn().execute("INSERT INTO landings(id,workspace_id,number,route,base,pushed_sha,state,state_since,title,collecting,actor,created_at,resource_version) VALUES(x'02020202020202020202020202020202',?1,2,'push','main','exact-sha','pushed',2,'t',0,'user',1,7)", [ws.id.as_bytes().as_slice()]).unwrap();
     drop(store);
-    let store = Store::open(&path).unwrap();
+    let store = Store::open(&path).unwrap().legacy_for_tests();
     let plan = preflight(&store.conn()).unwrap();
     store.engine_quiesce(joined(&store)).unwrap();
     store.engine_commit_for_test(&plan, &proof(&store), "board").unwrap();
     store.engine_release(&plan, joined(&store)).unwrap();
     drop(store);
-    let store = Store::open(&path).unwrap();
+    let store = Store::open(&path).unwrap().legacy_for_tests();
     let definition = farcooler_workflow::Definition::tracker("owner");
     let input = farcooler_workflow::Input { schema: 1, id: "e".into(), workspace: ws.id.to_string(), expected_revision: 0, epoch: 1,
         source: "controller".into(), source_sequence: 1, now_ms: 0, grant: farcooler_workflow::Grant::Controller, busy_resources: Default::default(),

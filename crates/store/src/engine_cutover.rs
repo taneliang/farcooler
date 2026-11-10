@@ -120,6 +120,14 @@ pub(crate) fn engine_allowed(conn: &Connection, incarnation: u64) -> rusqlite::R
     conn.query_row("SELECT incarnation=?1 AND phase IN ('legacy','released') FROM engine_cutover_authority WHERE singleton=1",
         [incarnation], |r| r.get(0))
 }
+/// A brand-new database is released at incarnation 0: nothing was ever
+/// delivered or landed the legacy way, so there is nothing to cut over. Runs
+/// after every migration, in the same transaction, only for a file migrated
+/// from version 0.
+pub(crate) fn born_released(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute("UPDATE engine_cutover_authority SET phase='released' WHERE singleton=1 AND phase='legacy' AND incarnation=0", [])?;
+    Ok(())
+}
 pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     tx.execute_batch("CREATE TABLE engine_cutover_authority(singleton INTEGER PRIMARY KEY CHECK(singleton=1),phase TEXT NOT NULL CHECK(phase IN ('legacy','quiesced','committed','released')),incarnation INTEGER NOT NULL,manifest TEXT);
         INSERT INTO engine_cutover_authority VALUES(1,'legacy',0,NULL);

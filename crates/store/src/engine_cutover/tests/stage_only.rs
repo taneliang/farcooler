@@ -41,7 +41,7 @@ impl Board {
 fn board(phase: Phase) -> Board {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    let store = Store::open(&path).unwrap();
+    let store = Store::open(&path).unwrap().legacy_for_tests();
     let repo = store.register_repository_for_test("Stage");
     let ws = store.ensure_main_workspace(repo).unwrap().id;
     let other = store.create_task(ws, "other", Actor::User).unwrap().id;
@@ -49,13 +49,13 @@ fn board(phase: Phase) -> Board {
     let ticket = store.create_task(ws, "ticket", Actor::User).unwrap();
     let store = if phase == Phase::Released {
         drop(store);
-        let store = Store::open(&path).unwrap();
+        let store = Store::open(&path).unwrap().legacy_for_tests();
         let plan = preflight(&store.conn()).unwrap();
         store.engine_quiesce(joined(&store)).unwrap();
         store.engine_commit_for_test(&plan, &proof(&store), "stage").unwrap();
         store.engine_release(&plan, joined(&store)).unwrap();
         drop(store);
-        Store::open(&path).unwrap()
+        Store::open(&path).unwrap().legacy_for_tests()
     } else { store };
     let b = Board { _tmp: tmp, store, ws, other, run: run.id, ticket, sequence: Default::default() };
     let tracker = Definition::tracker("owner");
@@ -228,7 +228,7 @@ fn registry68_catalog_is_pinned_and_narrows_only_the_four_guards() {
     c65.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
     crate::migrate::migrate_only_to(&mut c65, 65);
     let m65 = Manifest::capture(&c65).unwrap();
-    let store = Store::open_in_memory().unwrap();
+    let store = Store::open_in_memory().unwrap().legacy_for_tests();
     let plan = preflight(&store.conn()).unwrap();
     assert_eq!(plan.registry, 68);
     assert_eq!(catalog_hash(&plan.raw), SOURCE68_SCHEMA_HASH, "the composed registry-68 catalog");
@@ -322,7 +322,7 @@ fn a_legacy_67_source_cuts_over_through_the_named_delta_only() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("db.sqlite");
         {
-            let store = Store::open(&path).unwrap();
+            let store = Store::open(&path).unwrap().legacy_for_tests();
             let repo = store.register_repository_for_test("Sixty-seven");
             let ws = store.ensure_main_workspace(repo).unwrap().id;
             store.create_task(ws, "history", Actor::User).unwrap();
@@ -337,7 +337,7 @@ fn a_legacy_67_source_cuts_over_through_the_named_delta_only() {
         if tampered { assert!(matches!(&done, Err(Error::Refused(why)) if why.contains("source changed")), "refused at the commit: {done:?}"); }
         else { assert!(matches!(done, Ok(Ok(()))), "{done:?}"); }
         if !tampered {
-            let store = Store::open(&path).unwrap();
+            let store = Store::open(&path).unwrap().legacy_for_tests();
             assert_eq!(store.schema().unwrap().version, 68);
             assert_eq!(store.engine_authority().unwrap().phase, "released");
         }
@@ -412,7 +412,7 @@ fn a_legacy_67_file_prepares_and_commits_through_the_real_path() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
     {
-        let store = Store::open(&path).unwrap();
+        let store = Store::open(&path).unwrap().legacy_for_tests();
         let repo = store.register_repository_for_test("Sixty-seven");
         let ws = store.ensure_main_workspace(repo).unwrap().id;
         store.create_task(ws, "history", Actor::User).unwrap();

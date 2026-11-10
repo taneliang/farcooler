@@ -13,7 +13,7 @@ pub(super) fn joined(_store:&Store) -> JoinedOwners { JoinedOwners::unit("unit")
 /// The real proof: every Store on `path` must already be closed.
 pub(super) fn join_db(path:&std::path::Path,attempt:&str) -> JoinedOwners { JoinedOwners::acquire(path,attempt).unwrap() }
 fn fixture() -> Store {
-    let store=Store::open_in_memory().unwrap();
+    let store=Store::open_in_memory().unwrap().legacy_for_tests();
     let repo=store.register_repository_for_test("Conservation");
     let workspace=store.ensure_main_workspace(repo).unwrap();
     store.create_task(workspace.id,"history",Actor::User).unwrap();
@@ -202,3 +202,4 @@ mod source60;
 mod lift;
 mod safety_steps;
 mod stage_only;
+mod born_released;

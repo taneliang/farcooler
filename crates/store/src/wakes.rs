@@ -340,7 +340,7 @@ mod tests {
     use crate::models::TaskStatus;
 
     fn board() -> (Store, Uuid) {
-        let store = Store::open_in_memory().unwrap();
+        let store = Store::open_in_memory().unwrap().legacy_for_tests();
         let repo = store.register_repository_for_test("Far Cooler");
         let main = store.ensure_main_workspace(repo).unwrap().id;
         let task = store.create_task(main, "Drill-in layout", Actor::Manager).unwrap().id;

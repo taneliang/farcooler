@@ -11,7 +11,7 @@ struct World { _tmp: tempfile::TempDir, path: std::path::PathBuf, task: uuid::Uu
 fn released_file() -> World {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    let store = Store::open(&path).unwrap();
+    let store = Store::open(&path).unwrap().legacy_for_tests();
     let repo = store.register_repository_for_test("Delivery");
     let ws = store.ensure_main_workspace(repo).unwrap();
     let task = store.create_task(ws.id, "asks", Actor::User).unwrap();
@@ -37,7 +37,7 @@ fn hold_due(store: &Store, task: uuid::Uuid) {
 #[test]
 fn an_answer_after_release_is_told_exactly_once_and_old_answers_stay_history() {
     let w = released_file();
-    let store = Store::open(&w.path).unwrap();
+    let store = Store::open(&w.path).unwrap().legacy_for_tests();
     assert!(store.pending_answer_wakes().unwrap().is_empty(), "the pre-cutover answer is inert history");
     assert!(store.conn().execute("INSERT INTO answer_wakes(note_id,task_id,enqueued_at) VALUES(x'0102',?1,1)", [w.task.as_bytes().as_slice()]).is_err(), "an unbound row is still fenced");
     let (note, queued) = store.add_note_waking(w.task, NoteKind::Answer, Actor::User, "yes, ship it", serde_json::json!({}), None, false).unwrap();
@@ -58,7 +58,7 @@ fn an_answer_after_release_is_told_exactly_once_and_old_answers_stay_history() {
 #[test]
 fn a_hold_that_ends_after_release_wakes_the_orchestrator_once() {
     let w = released_file();
-    let store = Store::open(&w.path).unwrap();
+    let store = Store::open(&w.path).unwrap().legacy_for_tests();
     hold_due(&store, w.held);
     assert!(store.pending_hold_wakes().unwrap().is_empty(), "the hold wake from before cutover is inert history");
     let released = store.release_due_holds(crate::tasks::now_millis()).unwrap();
@@ -76,7 +76,7 @@ fn a_hold_that_ends_after_release_wakes_the_orchestrator_once() {
 #[test]
 fn a_runner_notice_after_release_is_told_once_and_folds_into_the_one_waiting() {
     let w = released_file();
-    let store = Store::open(&w.path).unwrap();
+    let store = Store::open(&w.path).unwrap().legacy_for_tests();
     assert!(store.pending_message_wakes().unwrap().is_empty(), "the legacy notice is inert history");
     let first = store.send_runner_notice(w.task, "Agent 2 ended.", serde_json::json!({})).unwrap();
     assert_eq!(store.pending_message_wakes().unwrap().len(), 1);
@@ -95,7 +95,7 @@ fn a_runner_notice_after_release_is_told_once_and_folds_into_the_one_waiting() {
 #[test]
 fn nothing_is_queued_while_the_engine_is_not_released() {
     let tmp = tempfile::tempdir().unwrap();
-    let store = Store::open(tmp.path().join("db.sqlite")).unwrap();
+    let store = Store::open(tmp.path().join("db.sqlite")).unwrap().legacy_for_tests();
     let repo = store.register_repository_for_test("Window");
     let ws = store.ensure_main_workspace(repo).unwrap();
     let task = store.create_task(ws.id, "t", Actor::User).unwrap();

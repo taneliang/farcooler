@@ -135,6 +135,13 @@ pub(crate) fn migrate(conn: &mut Connection, from_version: u32) -> farcooler_cor
 
     let tx = conn.transaction().map_err(map_err)?;
     apply_remaining(&tx, from_version)?;
+    if from_version == 0 {
+        // A database created here has no pre-cutover history to protect, so
+        // it starts with the engine in charge (ov-1024). A file from before
+        // the cutover arrives with a version above zero and stays `legacy`
+        // until the cutover releases it.
+        crate::engine_cutover::born_released(&tx).map_err(map_err)?;
+    }
     tx.commit().map_err(map_err)?;
     Ok(())
 }

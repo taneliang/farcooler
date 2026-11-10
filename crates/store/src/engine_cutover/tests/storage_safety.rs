@@ -33,7 +33,7 @@ fn replace(path: &Path, kind: &str, outside: &Path) {
 fn engine_cutover_storage_metadata_restore_and_reconcile_refuse_unsafe_leaves() {
     for kind in ["symlink","fifo","hardlink","oversized"] {
         let tmp=tempfile::tempdir().unwrap();let private=PrivateRehearsal::create(tmp.path(),"metadata").unwrap();
-        let store=Store::open(private.live().join("db.sqlite")).unwrap();drop(store);
+        let store=Store::open(private.live().join("db.sqlite")).unwrap().legacy_for_tests();drop(store);
         let snapshot=private.backup("backup").unwrap();
         private.retain_effect(&fact()).unwrap();
         assert!(!private.reconcile(&fact(),None).unwrap());
@@ -56,7 +56,7 @@ fn engine_cutover_storage_metadata_restore_and_reconcile_refuse_unsafe_leaves() 
 fn engine_cutover_storage_restore_refuses_replaced_journal_and_effect_leaves() {
     for kind in ["journal","symlink","fifo","hardlink","oversized"] {
         let tmp=tempfile::tempdir().unwrap();let private=PrivateRehearsal::create(tmp.path(),"journal").unwrap();
-        drop(Store::open(private.live().join("db.sqlite")).unwrap());
+        drop(Store::open(private.live().join("db.sqlite")).unwrap().legacy_for_tests());
         let snapshot=private.backup("backup").unwrap();private.retain_effect(&fact()).unwrap();
         let outside=tmp.path().join("outside");fs::create_dir(&outside).unwrap();
         let outside_effect=outside.join(journal_path(&private).file_name().unwrap());let bytes=serde_json::to_vec(&fact()).unwrap();fs::write(&outside_effect,&bytes).unwrap();
@@ -100,7 +100,7 @@ fn engine_cutover_storage_unknown_effects_preserve_raw_and_never_claim_or_admit(
     for dispatch in ["pending","claimed","admitted"] {
         for mutation in ["effect","operation","item","id","hash"] {
             let tmp=tempfile::tempdir().unwrap();let path=tmp.path().join("effect.sqlite");
-            let store=Store::open(&path).unwrap();let repo=store.register_repository_for_test("Effect");let ws=store.ensure_main_workspace(repo).unwrap();
+            let store=Store::open(&path).unwrap().legacy_for_tests();let repo=store.register_repository_for_test("Effect");let ws=store.ensure_main_workspace(repo).unwrap();
             let command=enqueue(ws.id.to_string());let receipt=store.workflow_apply(&command).unwrap();let id=&receipt.effects[0];
             let claim=store.workflow_claim_effect(&command.workspace,id,"worker",1,7,100,200).unwrap().unwrap();
             if dispatch=="admitted" {assert!(store.workflow_admit_effect(&claim,101).unwrap());}
@@ -116,7 +116,7 @@ fn engine_cutover_storage_unknown_effects_preserve_raw_and_never_claim_or_admit(
             assert!(plan.quarantines.iter().any(|q|q.resource==format!("workspace:{}",command.workspace)),"preflight must quarantine {dispatch}/{mutation}");
             assert!(plan.quarantines.iter().any(|q|q.resource=="resource"));
             store.engine_quiesce(joined(&store)).unwrap();store.engine_commit_for_test(&plan,&proof(&store),"storage").unwrap();store.engine_release(&plan,joined(&store)).unwrap();drop(store);
-            let store=Store::open(&path).unwrap();
+            let store=Store::open(&path).unwrap().legacy_for_tests();
             assert!(store.workflow_claim_effect(&command.workspace,id,"new",1,7,300,400).unwrap().is_none());
             assert!(!store.workflow_admit_effect(&claim,102).unwrap());
             assert_eq!(store.conn().query_row("SELECT payload FROM workflow_outbox",[],|r|r.get::<_,String>(0)).unwrap(),raw);
@@ -127,7 +127,7 @@ fn engine_cutover_storage_unknown_effects_preserve_raw_and_never_claim_or_admit(
 }
 #[test]
 fn engine_cutover_storage_settled_unknown_effect_remains_inert_history() {
-    let store=Store::open_in_memory().unwrap();let command=enqueue("workspace".into());store.workflow_apply(&command).unwrap();
+    let store=Store::open_in_memory().unwrap().legacy_for_tests();let command=enqueue("workspace".into());store.workflow_apply(&command).unwrap();
     let raw=corrupt_effect(&store,"operation");store.conn().execute("UPDATE workflow_outbox SET active=0,dispatch_state='settled'",[]).unwrap();
     let plan=preflight(&store.conn()).unwrap();
     assert!(!plan.quarantines.iter().any(|q|q.reason.contains("Effect")));
@@ -135,7 +135,7 @@ fn engine_cutover_storage_settled_unknown_effect_remains_inert_history() {
 }
 #[test]
 fn engine_cutover_storage_preflight_quarantines_pending_lossy_effect() {
-    let store=Store::open_in_memory().unwrap();let command=enqueue("workspace".into());store.workflow_apply(&command).unwrap();
+    let store=Store::open_in_memory().unwrap().legacy_for_tests();let command=enqueue("workspace".into());store.workflow_apply(&command).unwrap();
     let raw=corrupt_effect(&store,"operation");let plan=preflight(&store.conn()).unwrap();
     assert!(plan.quarantines.iter().any(|q|q.resource=="workspace:workspace"),"lossy pending Effect requires workspace quarantine");
     assert!(plan.quarantines.iter().any(|q|q.resource=="resource"));
@@ -143,7 +143,7 @@ fn engine_cutover_storage_preflight_quarantines_pending_lossy_effect() {
 }
 #[test]
 fn engine_cutover_storage_admit_rechecks_payload_after_valid_claim() {
-    let store=Store::open_in_memory().unwrap();let command=enqueue("workspace".into());let receipt=store.workflow_apply(&command).unwrap();
+    let store=Store::open_in_memory().unwrap().legacy_for_tests();let command=enqueue("workspace".into());let receipt=store.workflow_apply(&command).unwrap();
     let claim=store.workflow_claim_effect(&command.workspace,&receipt.effects[0],"worker",1,7,100,200).unwrap().unwrap();
     corrupt_effect(&store,"operation");
     assert!(!store.workflow_admit_effect(&claim,101).unwrap(),"admit must recheck immutable source payload");

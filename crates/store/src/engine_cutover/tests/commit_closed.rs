@@ -7,7 +7,7 @@ use transfer::begin;
 
 fn frozen(dir: &std::path::Path, attempt: &str) -> std::path::PathBuf {
     let path = dir.join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     drop(begin(&path, join_db(&path, attempt)).unwrap());
     path
 }
@@ -31,7 +31,7 @@ fn opened(child: &mut std::process::Child) {
 fn a_journal_with_no_header_is_inert() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     let journal = tmp.path().join("db.sqlite-journal");
     std::fs::write(&journal, vec![0u8; 4096]).unwrap();
     transfer::clear_inert_journal(&path).unwrap();
@@ -80,7 +80,7 @@ fn commit_refuses_another_attempts_proof_and_a_database_that_is_not_frozen() {
     assert!(!artifact_dir(&path).join("closed-1").exists());
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     transfer::hold(&path, "a").unwrap();
     assert!(closing::commit(&path, join_db(&path, "a")).is_err(), "a hold has no baseline to commit");
 }
@@ -88,7 +88,7 @@ fn commit_refuses_another_attempts_proof_and_a_database_that_is_not_frozen() {
 fn commit_a_schema_release_would_refuse_stays_frozen_where_recover_still_works() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("db.sqlite");
-    drop(Store::open(&path).unwrap());
+    drop(Store::open(&path).unwrap().legacy_for_tests());
     let original = {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch("CREATE TABLE owner_added(x);").unwrap();
