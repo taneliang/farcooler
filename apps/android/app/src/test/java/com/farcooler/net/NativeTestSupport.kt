@@ -111,8 +111,9 @@ object RowJson {
         obj(
             "prompt" to text(prompt), "origin" to text(origin),
             "started_ms" to JsonPrimitive(startedMs), "ended_ms" to JsonPrimitive(startedMs + 4_000), "duration_ms" to JsonPrimitive(4_000),
-            "background_running" to JsonPrimitive(0),
-        ).let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) }
+            "background_running" to JsonPrimitive(0), "took" to text("0:04"),
+        ).let { base -> if (origin == "Notification" || origin == "System") JsonObject(base + ("notice" to JsonPrimitive(true))) else base }
+            .let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) }
             .let { base -> if (activity == null) base else JsonObject(base + ("activity" to text(activity))) }
             .let { base -> if (suggestion == null) base else JsonObject(base + ("suggestion" to text(suggestion))) }
             .let { base ->
@@ -180,7 +181,7 @@ object RowJson {
     ) = row(
         "sub:$call", ord, "Subagent",
         obj(
-            "tool_use_id" to text(call), "agent_type" to text(type), "description" to text(description), "background" to JsonPrimitive(true),
+            "tool_use_id" to text(call), "agent_type" to text(type), "type_words" to text(type.replace('-', ' ').replaceFirstChar { it.uppercase() }), "description" to text(description), "background" to JsonPrimitive(true),
             "status" to text(status), "started_ms" to JsonPrimitive(startedMs), "tool_count" to JsonPrimitive(3),
             "current_action" to text("Read x"), "last_ms" to JsonPrimitive(2_000),
         ).let { base -> if (agentId == null) base else JsonObject(base + ("agent_id" to text(agentId))) },
