@@ -1128,8 +1128,8 @@ mod tests {
         // 367 once the orchestrator drives the engine (ov-1012): the five steps
         // a ticket takes, which fields of `workflow get` each write names, and
         // drafting through `workflow-draft`, for the dispatch and hand landing
-        // they replace: twelve lines net. 370 once the pressure test added the queue step (ov-1012).
-        assert!(lines <= 370, "{lines} lines");
+        // they replace: twelve lines net. 373 once the pressure test added the queue, track and move commands, --adopt and ask (ov-1012).
+        assert!(lines <= 373, "{lines} lines");
     }
 
     #[test]

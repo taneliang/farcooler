@@ -76,7 +76,12 @@ fn commands_the_skill_names() -> Vec<String> {
             while let Some(open) = rest.find('<') {
                 let close = rest[open..].find('>').expect("an unclosed placeholder") + open;
                 filled.push_str(&rest[..open]);
-                filled.push('x');
+                // A word clap will take: a workspace is a Uuid and the engine's counters are numbers.
+                filled.push_str(match &rest[open + 1..close] {
+                    "ws" => "00000000-0000-0000-0000-000000000001",
+                    "r" | "e" | "n" => "1",
+                    _ => "x",
+                });
                 rest = &rest[close + 1..];
             }
             filled.push_str(rest);
@@ -109,14 +114,11 @@ fn every_command_the_manager_skill_names_parses() {
             panic!("the manager skill writes a value the CLI refuses:\n  {line}\n{e}");
         }
     }
-    // Dispatch is the one verb that starts an agent, so the skill has to
-    // name it, both ways into a worktree.
-    let dispatches: Vec<&String> = commands
-        .iter()
-        .filter(|c| c.starts_with("farcooler task dispatch ") || c.starts_with("farcooler agent dispatch "))
-        .collect();
-    assert!(dispatches.iter().any(|c| c.contains("--new")), "{commands:?}");
-    assert!(dispatches.iter().any(|c| c.contains("--worktree")), "{commands:?}");
+    // The engine flow's writes are commands too: each one the skill teaches is held to the clap tree.
+    for verb in ["track", "move", "start", "review", "send-back", "queue"] {
+        let prefix = format!("farcooler workflow {verb} ");
+        assert!(commands.iter().any(|c| c.starts_with(&prefix)), "the skill never shows {prefix:?}: {commands:?}");
+    }
     // Splitting a workstream off, and finding the board from the home,
     // are commands too, and are held to the same parse.
     for verb in [

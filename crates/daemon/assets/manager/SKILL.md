@@ -20,8 +20,8 @@ isn't a note didn't happen, so write the note before you reply.
 
 Every command below is `{{cli}}`. Every write (`task create`, `task set`,
 `task note`, `task ask`, `task block`, `task wait`, `task line`, `task worker`,
-`task move`, `plan`, `agent`, `page set`, `message`) carries `--actor manager`,
-since this pane may be named as an agent. No other command takes it: `workflow` and `workspace` don't.
+`task move`, `plan`, `agent`, `landing`, `page set`, `message`) carries `--actor manager`,
+since this pane may be named as an agent. No other command takes it; the workflow and workspace commands don't.
 
 ## 1. Read the charter
 
@@ -116,7 +116,8 @@ refusal means read again and send with a new id.
    move … --to <column>` moves one at rest (`done` or `cancelled` closes it).
 2. **Start.** `workflow start` with `--start-pin` (`configuration.pin`), a
    `--worktree` and `--branch` named for the ticket, `--with <key>` for each other
-   ticket the same agent takes, and `--model <step>=<model>` from
+   ticket the same agent takes, `--adopt` when the branch already has the work
+   (it carries on from it), and `--model <step>=<model>` from
    `configuration.definition.models`. Read get again: the ticket is `Running`
    at its build step, or the refusal in the receipt says why.
 3. **Review.** An agent gate's agent records its own verdict. At an orchestrator
@@ -158,8 +159,11 @@ work nobody plans to do.
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
 {{cli}} --json workspace show "$FARCOOLER_WORKSPACE"
 {{cli}} workflow get <ws> --json
+{{cli}} workflow track <ws> <key> --column todo --command-id <key>-track-1 --revision <r> --epoch <e> --sequence <n>
+{{cli}} workflow move <ws> <key> --to todo --run <run> --pin <pin> --command-id <key>-move-1 --revision <r> --epoch <e> --sequence <n>
 {{cli}} workflow start <ws> <key> --start-pin <pin> --run <run> --pin <pin> --worktree <key>-<slug> --branch <key>-<slug> --command-id <key>-start-1 --revision <r> --epoch <e> --sequence <n>
 {{cli}} workflow review <ws> <key> --run <run> --pin <pin> --passed --evidence <file> --command-id <key>-review-1 --revision <r> --epoch <e> --sequence <n>
+{{cli}} workflow queue <ws> <key> --run <run> --pin <pin> --command-id <key>-queue-1 --revision <r> --epoch <e> --sequence <n>
 {{cli}} workflow send-back <ws> <key> --run <run> --pin <pin> --reason "<what to change>" --command-id <key>-back-1 --revision <r> --epoch <e> --sequence <n>
 {{cli}} message <key> "<one line>" --repo <repo> --actor manager
 {{cli}} agent record --role reviewer --subagent <agentId> --ticket <key> --title "<what it does>" --repo <repo> --actor manager
@@ -191,7 +195,7 @@ out before the group leaves. A push whose outcome was lost: look at the target y
 owner's words>"` files one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) and asks the owner to approve
 it on the board. A gate is a command (`--gate`, the whole list each time; `--gate-env NAME=value`), an agent the engine starts
 (`--agent-gate`), you (`--orchestrator-gate`) or the owner (`--person-gate owner`); each holds the ticket for its verdict.
-`--route 'site/**=ask'` routes by changed paths. PR templates aren't live: in PR mode draft none and tell the owner the engine
+`--route 'site/**=ask'` routes by changed paths, and `ask` holds those tickets for the owner's word. PR templates aren't live: in PR mode draft none and tell the owner the engine
 can't land this workspace yet. `import-landing` reads the charter's `## Landing` once (path rules become a `route` step, `Gate: none` a gate that passes):
 ```
 ## Landing
