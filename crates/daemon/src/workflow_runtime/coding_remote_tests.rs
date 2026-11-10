@@ -567,6 +567,10 @@ async fn a_download_that_outlasts_its_limit_fails_the_ticket_with_a_sentence() {
     assert!(!r.runtime.root.join(format!("tree-{}", digest(&("w", item)))).exists(), "no tree was made");
     let branches = adapters::git(&config.repository, &["for-each-ref", "--format=%(refname)", "refs/heads/wf-*"]).await.unwrap();
     assert!(branches.is_empty(), "no branch was made: {branches}");
+    // A restart reads the same answer from what the failed step kept, without downloading again.
+    let last = provisions.last().unwrap();
+    let binding = Binding::new("w", &last.effect, last.resource_generation.unwrap(), state.items["one"].iteration, &moved);
+    assert_eq!(r.runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailureBecause(super::coding_landing::UNFETCHED_TARGET.into()));
 }
 
 /// ov-1058 review 3: Provisions that start together download the remote's main once. The second waits for the
