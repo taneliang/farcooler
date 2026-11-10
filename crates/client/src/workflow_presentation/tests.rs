@@ -61,8 +61,14 @@ fn fixtures() -> Vec<(&'static str, State)> {
     let item = failed.items.get_mut("item").unwrap();
     item.phase = Phase::Failed;
     item.failure = Some("The landing remote's main could not be downloaded in time, so nothing was built. Its worktree was never created; try the ticket again when the remote is reachable.".into());
+    // A landed run: every step done (ov-1060).
+    let mut landed = idle.clone();
+    let item = landed.items.get_mut("item").unwrap();
+    item.phase = Phase::Done;
+    item.stage = item.definition.stages.len();
     vec![("automatic", automatic), ("approval", approval), ("rework", rework),
-        ("uncertain", uncertain), ("invalidated", invalidated), ("cancelled", cancelled), ("failed", failed)]
+        ("uncertain", uncertain), ("invalidated", invalidated), ("cancelled", cancelled), ("failed", failed),
+        ("landed", landed)]
 }
 
 #[test]
@@ -467,4 +473,60 @@ fn a_failed_runs_page_leads_with_its_sentence() {
 fn short_ids_drop_the_scheme_and_keep_the_front() {
     assert_eq!(page::short("wf1:0123456789abcdef0123456789abcdef"), "01234567");
     assert_eq!(page::short("item"), "item");
+}
+
+/// ov-1060 fix round: the page carries what a person must act on, every reason, and plain words for a live run.
+#[test]
+fn a_runs_page_holds_the_gate_every_reason_and_plain_words() {
+    let fixtures = fixtures();
+    let page = |name: &str| project(&fixtures.iter().find(|(n, _)| *n == name).unwrap().1, &auth(), STYLE).unwrap().runs.remove(0).page;
+    // A gate the viewer decides names them as "you", never the raw principal.
+    let approval = page("approval");
+    let gate = approval.gate.expect("an approval gate");
+    assert_eq!((gate.label.as_str(), gate.text.as_str()), ("Approval Required", "Waiting for you to approve."));
+    let other = Capabilities { decision_principal: Some("someone".into()), ..auth() };
+    let waiting = project(&fixtures.iter().find(|(n, _)| *n == "approval").unwrap().1, &other, STYLE).unwrap().runs.remove(0).page;
+    assert_eq!(waiting.gate.unwrap().text, "Waiting for owner to approve.");
+    // A running run names its stage; an uncertain one names the stage and what to do.
+    assert_eq!(page("automatic").reason, "Running: Prepare Workspace.");
+    assert_eq!(page("uncertain").reason, "Run Checks may or may not have finished. Check it before it continues.");
+    // Rework and stale evidence stay on the page, with the reworks left in words.
+    let rework = page("rework");
+    assert!(rework.more.contains(&"This run has entered a rework iteration.".to_owned()), "{:?}", rework.more);
+    assert!(rework.more.iter().any(|m| m.ends_with("reworks left.") || m.ends_with("rework left.")), "{:?}", rework.more);
+    assert!(page("invalidated").more.iter().any(|m| m.contains("no longer matches")));
+}
+
+/// A run that landed reads "Completed" with every step done.
+#[test]
+fn a_landed_runs_page_is_all_done() {
+    let mut state = enqueue(Definition::coding());
+    let item = state.items.get_mut("item").unwrap();
+    item.phase = Phase::Done;
+    item.stage = item.definition.stages.len();
+    let page = project(&state, &auth(), STYLE).unwrap().runs.remove(0).page;
+    assert_eq!((page.outcome.as_str(), page.reason.as_str()), ("Completed", "All stages have completed."));
+    assert!(page.steps.iter().all(|s| s.state == "Done"), "{:?}", page.steps);
+    assert!(page.gate.is_none());
+}
+
+/// A runner's stop explains a run that has no sentence of its own, but never overwrites a kept failure.
+#[test]
+fn a_stop_does_not_replace_a_kept_failure_sentence() {
+    let fixtures = fixtures();
+    let mut view = project(&fixtures.iter().find(|(n, _)| *n == "failed").unwrap().1, &auth(), STYLE).unwrap();
+    let kept = view.runs[0].page.reason.clone();
+    let stops = std::collections::BTreeMap::from([("item".to_owned(), Stop { run: view.runs[0].run.clone(), text: "Changes in the worktree.".into() })]);
+    add_stops(&mut view, &stops, STYLE);
+    assert_eq!(view.runs[0].page.reason, kept);
+    assert!(view.runs[0].page.more.contains(&"Changes in the worktree.".to_owned()));
+    let mut running = project(&fixtures.iter().find(|(n, _)| *n == "automatic").unwrap().1, &auth(), STYLE).unwrap();
+    let stops = std::collections::BTreeMap::from([("item".to_owned(), Stop { run: running.runs[0].run.clone(), text: "Changes in the worktree.".into() })]);
+    add_stops(&mut running, &stops, STYLE);
+    assert_eq!(running.runs[0].page.reason, "Changes in the worktree.");
+}
+
+#[test]
+fn short_leaves_a_name_alone() {
+    assert_eq!(page::short("new-candidate"), "new-candidate");
 }

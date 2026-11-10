@@ -19,6 +19,9 @@ pub struct DetailRow {
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PageGate { pub label: String, pub text: String }
+#[typeshare]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunPage {
     /// The ticket the run is for.
@@ -27,6 +30,11 @@ pub struct RunPage {
     pub outcome: String,
     /// Why, as a sentence.
     pub reason: String,
+    /// What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate: Option<PageGate>,
+    /// The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop.
+    pub more: Vec<String>,
     pub steps: Vec<StepRow>,
     pub details_label: String,
     pub details: Vec<DetailRow>,
@@ -35,7 +43,7 @@ pub struct RunPage {
 /// An id without its scheme ("wf1:") and cut to eight characters; a short value is left as it is.
 pub(super) fn short(id: &str) -> String {
     let bare = id.rsplit(':').next().unwrap_or(id);
-    if bare.chars().count() > 12 { bare.chars().take(8).collect() } else { bare.to_owned() }
+    if bare.chars().count() > 12 && bare.chars().all(|c| c.is_ascii_hexdigit()) { bare.chars().take(8).collect() } else { bare.to_owned() }
 }
 fn id_row(title: &str, id: &str, style: Style) -> DetailRow {
     let value = short(id);
@@ -52,9 +60,26 @@ fn step_state(index: usize, current: usize, phase: &Phase) -> &'static str {
         Phase::Done => "Done",
     }
 }
-pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[ReasonCard], style: Style) -> RunPage {
-    let reason = item.failure.as_deref().map(str::trim).filter(|f| !f.is_empty()).map(str::to_owned)
-        .or_else(|| reasons.first().map(|r| r.text.clone())).unwrap_or_default();
+pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[ReasonCard], gate: Option<&GateCard>,
+    viewer: Option<&str>, style: Style) -> RunPage
+{
+    let stage = item.definition.stages.get(item.stage).map(|s| style.label(display::stage_label(&s.kind))).unwrap_or_default();
+    let kept = item.failure.as_deref().map(str::trim).filter(|f| !f.is_empty()).map(str::to_owned);
+    let reason = kept.clone().or_else(|| match item.phase {
+        Phase::Running => Some(format!("Running: {stage}.")),
+        Phase::Uncertain => Some(format!("{stage} may or may not have finished. Check it before it continues.")),
+        _ => None,
+    }).or_else(|| reasons.first().map(|r| r.text.clone())).unwrap_or_default();
+    let mut more: Vec<String> = reasons.iter().skip(1).map(|r| r.text.clone()).collect();
+    if item.iteration > 0 {
+        let left = item.definition.max_reworks - item.iteration;
+        more.push(format!("{left} rework{} left.", if left == 1 { "" } else { "s" }));
+    }
+    let gate = gate.map(|g| {
+        let who = if viewer == Some(g.principal.as_str()) { "you".to_owned() } else { g.principal.clone() };
+        let verb = if g.kind == GateKind::Approval { "approve" } else { "review" };
+        PageGate { label: g.label.clone(), text: format!("Waiting for {who} to {verb}.") }
+    });
     let steps = item.definition.stages.iter().enumerate().map(|(i, s)| StepRow {
         label: style.label(display::stage_label(&s.kind)),
         state: style.label(step_state(i, item.stage, &item.phase)) }).collect();
@@ -65,6 +90,6 @@ pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[Rea
     if let Some(e) = &item.last_evidence {
         details.push(id_row("Evidence", &e.receipt, style));
     }
-    RunPage { ticket: id.to_owned(), outcome: display::phase_label(&item.phase, style), reason, steps,
+    RunPage { ticket: id.to_owned(), outcome: display::phase_label(&item.phase, style), reason, gate, more, steps,
         details_label: style.label("Details"), details }
 }

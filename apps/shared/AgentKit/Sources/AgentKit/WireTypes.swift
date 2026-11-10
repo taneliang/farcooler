@@ -663,6 +663,16 @@ public struct WireLandingCard: Codable, Equatable, Sendable {
 	}
 }
 
+public struct WirePageGate: Codable, Equatable, Sendable {
+	public var label: String
+	public var text: String
+
+	public init(label: String, text: String) {
+		self.label = label
+		self.text = text
+	}
+}
+
 public enum WireSectionKind: String, Codable, Equatable, Sendable {
 	case needsYou = "needs_you"
 	case landing
@@ -922,14 +932,20 @@ public struct WireRunPage: Codable, Equatable, Sendable {
 	public var outcome: String
 	/// Why, as a sentence.
 	public var reason: String
+	/// What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide.
+	public var gate: WirePageGate?
+	/// The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop.
+	public var more: [String]
 	public var steps: [WireStepRow]
 	public var detailsLabel: String
 	public var details: [WireDetailRow]
 
-	public init(ticket: String, outcome: String, reason: String, steps: [WireStepRow], detailsLabel: String, details: [WireDetailRow]) {
+	public init(ticket: String, outcome: String, reason: String, gate: WirePageGate?, more: [String], steps: [WireStepRow], detailsLabel: String, details: [WireDetailRow]) {
 		self.ticket = ticket
 		self.outcome = outcome
 		self.reason = reason
+		self.gate = gate
+		self.more = more
 		self.steps = steps
 		self.detailsLabel = detailsLabel
 		self.details = details

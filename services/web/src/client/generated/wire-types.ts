@@ -451,6 +451,11 @@ export interface LandingCard {
 	tickets: TicketCard[];
 }
 
+export interface PageGate {
+	label: string;
+	text: string;
+}
+
 export enum SectionKind {
 	NeedsYou = "needs_you",
 	Landing = "landing",
@@ -625,6 +630,10 @@ export interface RunPage {
 	outcome: string;
 	/** Why, as a sentence. */
 	reason: string;
+	/** What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide. */
+	gate?: PageGate | null;
+	/** The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop. */
+	more: string[];
 	steps: StepRow[];
 	detailsLabel: string;
 	details: DetailRow[];

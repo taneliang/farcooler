@@ -160,7 +160,9 @@ pub fn add_stops(view: &mut Presentation, stops: &std::collections::BTreeMap<Str
         let Some(stop) = stops.get(&card.item).filter(|s| s.run == card.run) else { continue };
         let mut reason = display::reason_card(Reason::WorktreeChanged, style);
         reason.text = stop.text.clone();
-        card.page.reason = reason.text.clone();
+        // A run's own kept sentence is the better answer; the stop goes under it.
+        let kept = card.phase == Phase::Failed && card.reasons.first().is_some_and(|r| r.text != card.page.reason);
+        if kept { card.page.more.push(reason.text.clone()); } else { card.page.reason = reason.text.clone(); }
         card.reasons.push(reason);
     }
 }
@@ -232,6 +234,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
         if auth.controller && !matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)
             && !item.run.starts_with("cancel:")
         { kinds.push(ActionKind::Cancel); }
+        let page = page::run_page(id, item, &reasons, gate.as_ref(), auth.decision_principal.as_deref(), style);
         runs.push(RunCard { label: display::run_label(style), phase_label: display::phase_label(&item.phase, style),
             item: id.clone(), run: item.run.clone(), definition_pin: item.pin.clone(),
             policy_pin: item.policy_pin.clone(), phase: item.phase.clone(),
@@ -243,7 +246,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             forms: if kinds.contains(&ActionKind::RequestRework) {
                 vec![display::rework_form(farcooler_workflow::MAX_REWORK_REASON_BYTES, style)] } else { Vec::new() },
             rework_history: item.rework_history.clone(),
-            reasons: reasons.clone(), page: page::run_page(id, item, &reasons, style),
+            reasons: reasons.clone(), page,
             actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind, style), kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,

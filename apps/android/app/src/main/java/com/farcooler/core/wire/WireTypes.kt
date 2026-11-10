@@ -533,6 +533,12 @@ data class LandingCard (
 )
 
 @Serializable
+data class PageGate (
+	val label: String,
+	val text: String
+)
+
+@Serializable
 enum class SectionKind(val string: String) {
 	@SerialName("needs_you")
 	NeedsYou("needs_you"),
@@ -745,6 +751,10 @@ data class RunPage (
 	val outcome: String,
 	/// Why, as a sentence.
 	val reason: String,
+	/// What a person must decide, when the run waits on a gate; "you" when the viewer is the one to decide.
+	val gate: PageGate? = null,
+	/// The other reasons, as sentences: a rework, stale evidence, the reworks left, a runner's stop.
+	val more: List<String>,
 	val steps: List<StepRow>,
 	val detailsLabel: String,
 	val details: List<DetailRow>
