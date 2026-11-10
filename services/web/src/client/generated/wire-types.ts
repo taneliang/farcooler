@@ -383,7 +383,7 @@ export enum Phase {
 }
 
 /**
- * The engine's run of a ticket, from the workspace's workflow presentation:
+ * The engine's run of a ticket, from the plan's line for it (ov-1040):
  * the step it is on, the gate it waits at, and the phase.
  */
 export interface RunStep {

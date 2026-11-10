@@ -567,7 +567,7 @@ public enum WirePhase: String, Codable, Equatable, Sendable {
 	case joined = "Joined"
 }
 
-/// The engine's run of a ticket, from the workspace's workflow presentation:
+/// The engine's run of a ticket, from the plan's line for it (ov-1040):
 /// the step it is on, the gate it waits at, and the phase.
 public struct WireRunStep: Codable, Equatable, Sendable {
 	public var run: String
