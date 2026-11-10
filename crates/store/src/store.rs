@@ -43,7 +43,7 @@ pub struct Store {
     _owner: Option<std::fs::File>,
     pub(crate) workflow_notice_waker: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
     pub(crate) workflow_board_listener: std::sync::Mutex<Option<crate::workflow_projection::BoardListener>>,
-    pub(crate) workflow_commit_listener: std::sync::Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>>,
+    pub(crate) workflow_commit_listener: std::sync::Mutex<Option<crate::workflow_projection::CommitListener>>,
 }
 
 impl Store {

@@ -157,6 +157,8 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State, by: 
 }
 /// What the daemon registers to hear of engine moves.
 pub type BoardListener = std::sync::Arc<dyn Fn(&[BoardMove]) + Send + Sync>;
+/// Called with the workspace after every accepted workflow command (ov-1040).
+pub type CommitListener = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 /// A card the engine moved: what the board must tell its open clients.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoardMove { pub task: uuid::Uuid, pub from: Option<TaskStatus>, pub to: TaskStatus }
