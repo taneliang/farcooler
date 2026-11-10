@@ -499,6 +499,22 @@ fn a_runs_page_holds_the_gate_every_reason_and_plain_words() {
     assert!(page("invalidated").more.iter().any(|m| m.contains("no longer matches")));
 }
 
+/// A schema 2 run counts its back edges in `iteration` while `max_reworks` stays 0: the page must not
+/// subtract one from the other, and has no run-wide count to show.
+#[test]
+fn a_sent_back_run_with_no_rework_budget_has_no_reworks_left_line() {
+    let state = enqueue(Definition::coding());
+    let mut item = state.items["item"].clone();
+    item.definition.max_reworks = 0;
+    item.iteration = 1;
+    let page = page::run_page("item", &item, &[], None, None, STYLE);
+    assert!(!page.more.iter().any(|m| m.contains("left")), "{:?}", page.more);
+    item.definition.max_reworks = 3;
+    item.iteration = 3;
+    let page = page::run_page("item", &item, &[], None, None, STYLE);
+    assert!(page.more.contains(&"0 reworks left.".to_owned()), "{:?}", page.more);
+}
+
 /// A run that landed reads "Completed" with every step done.
 #[test]
 fn a_landed_runs_page_is_all_done() {

@@ -73,8 +73,10 @@ pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[Rea
         }
     })).or_else(|| reasons.first().map(|r| r.text.clone())).unwrap_or_default();
     let mut more: Vec<String> = reasons.iter().skip(1).map(|r| r.text.clone()).collect();
-    if item.iteration > 0 {
-        let left = item.definition.max_reworks - item.iteration;
+    // A schema 2 run keeps max_reworks at 0 and counts its back edges in `iteration`, so there is no
+    // run-wide count to show; only a run that declares one gets the line.
+    if item.iteration > 0 && item.definition.max_reworks > 0 {
+        let left = item.definition.max_reworks.saturating_sub(item.iteration);
         more.push(format!("{left} rework{} left.", if left == 1 { "" } else { "s" }));
     }
     let steps = item.definition.stages.iter().enumerate().map(|(i, s)| StepRow {
