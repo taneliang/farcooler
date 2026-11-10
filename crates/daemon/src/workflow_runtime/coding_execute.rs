@@ -354,14 +354,17 @@ impl Exec {
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;
                 let candidate = binding.effect.candidate.as_deref().ok_or(Error::Refused("missing landing candidate"))?;
-                // A direct land records itself by moving the local landing ref on from the base. A ticket that started
-                // on the remote's main (ov-1059) above a stale local one can't, so it is refused before anything is sent.
-                if adapters::git(&self.repository(), &["rev-parse", self.landing_ref()]).await? != binding.base {
+                // A direct land on this machine records itself by moving the local landing ref on from the base. A network
+                // landing writes no ref in the shared repository, whose main is its owner's (ov-1058 review).
+                let local = self.coding.as_ref().and_then(|c| c.landing.as_ref()).is_none_or(|l| super::coding::landing_url(l).is_none());
+                if local && adapters::git(&self.repository(), &["rev-parse", self.landing_ref()]).await? != binding.base {
                     return Err(Error::Refused("the local landing branch isn't at the ticket's base"));
                 }
                 self.land_remote(binding, cancel).await?;
-                self.git_recorded(binding, &self.repository(), &["update-ref", "-m", &format!("workflow:{}", digest(binding)),
-                    self.landing_ref(), candidate, &binding.base]).await?;
+                if local {
+                    self.git_recorded(binding, &self.repository(), &["update-ref", "-m", &format!("workflow:{}", digest(binding)),
+                        self.landing_ref(), candidate, &binding.base]).await?;
+                }
             }
             _ => return Err(Error::Refused("unsupported configured stage")),
         }
@@ -422,6 +425,9 @@ impl Exec {
     }
     async fn verify_landing(&self, binding: &Binding) -> Result<()> {
         self.verify_remote_landing(binding).await?;
+        // A network landing is read at the remote, which `verify_remote_landing` just did. The shared repository's
+        // own main is its owner's and is not moved by a landing, so it says nothing about this one (ov-1058 review).
+        if self.coding.as_ref().and_then(|c| c.landing.as_ref()).is_some_and(|l| super::coding::landing_url(l).is_some()) { return Ok(()); }
         // Another item may have landed on top since; this item's candidate only has to be in
         // the ref's history, not be its tip.
         let candidate = binding.effect.candidate.as_deref().unwrap_or("");
@@ -471,11 +477,17 @@ impl Exec {
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;
                 self.verify_landing(binding).await?;
-                let receipt = self.git_recorded(binding, &self.repository(), &["reflog", "show", "-1", "--format=%H:%gs", self.landing_ref()]).await?;
-                if receipt != format!("{}:workflow:{}", candidate, digest(binding)) {
-                    return Err(Error::Refused("landing lacks matching Git acceptance fact"));
+                if self.coding.as_ref().and_then(|c| c.landing.as_ref()).is_some_and(|l| super::coding::landing_url(l).is_some()) {
+                    // A network landing's acceptance fact is its settlement file, which `verify_landing` just matched
+                    // to this binding. No ref in the shared repository records it (ov-1058 review).
+                    facts = self.bytes(&self.remote_fact(binding))?;
+                } else {
+                    let receipt = self.git_recorded(binding, &self.repository(), &["reflog", "show", "-1", "--format=%H:%gs", self.landing_ref()]).await?;
+                    if receipt != format!("{}:workflow:{}", candidate, digest(binding)) {
+                        return Err(Error::Refused("landing lacks matching Git acceptance fact"));
+                    }
+                    facts = receipt.into_bytes();
                 }
-                facts = receipt.into_bytes();
             }
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
                 if matches!(kind, StageKind::Build) {

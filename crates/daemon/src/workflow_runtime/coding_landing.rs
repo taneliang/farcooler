@@ -5,6 +5,18 @@ use super::*;
 /// Said when a ticket can't start because the landing remote didn't answer (ov-1059).
 pub(crate) const UNREAD_TARGET: &str = "The landing remote couldn’t be read, so the ticket wasn’t started: it would have started from this repository’s own main, which may be far behind. Check that this runner can reach the remote, then start it again.";
 
+/// How long a Start's read of the remote may take. Under the dispatch loop's 30 s claim lease, so a remote that
+/// hangs (a host-key prompt, a dead agent) can't stall every workspace's dispatch for long (ov-1058 review).
+#[cfg(not(test))]
+const START_READ: Duration = Duration::from_secs(25);
+#[cfg(test)]
+const START_READ: Duration = Duration::from_secs(3);
+/// How long a landing poll's fetch may take.
+const FETCH_WAIT: Duration = Duration::from_secs(120);
+/// Said when a shared repository's config would send the landing remote's calls somewhere else.
+const REDIRECTED_TRANSPORT: &str = "This repository’s Git config redirects the landing remote’s address, so the ticket wasn’t started. Remove the URL rewrite or include from that config, then start it again.";
+fn unread_target() -> Error { Error::Domain(farcooler_core::error::DomainError::refused(UNREAD_TARGET.into())) }
+
 /// A push refspec: the candidate commit onto the target ref.
 pub(crate) fn push_target(candidate: &str, target: &str) -> String {
     format!("{candidate}:{target}")
@@ -19,7 +31,7 @@ struct LandingFact {
     log_digest: String,
 }
 impl Exec {
-    fn remote_fact(&self, binding: &Binding) -> PathBuf {
+    pub(super) fn remote_fact(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.landing.json", digest(&binding.effect)))
     }
     pub(super) fn remote_log(&self, binding: &Binding) -> PathBuf {
@@ -66,7 +78,14 @@ impl Exec {
             let (program, environment) = self.git_environment().await?;
             let output = tokio::process::Command::new(program).current_dir(&self.root).env_clear().envs(&environment)
                 .args(["init", "--bare", "--quiet", "--template="]).arg(&path).stdin(std::process::Stdio::null()).output().await?;
-            if !output.status.success() { return Err(Error::Refused("the private landing repository could not be made")); }
+            // Another read starting at the same moment may be making it: wait for it to finish, which is as good.
+            if !output.status.success() {
+                for _ in 0..40 {
+                    if path.join("HEAD").is_file() && path.join("config").is_file() { break; }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                if !path.join("HEAD").is_file() { return Err(Error::Refused("the private landing repository could not be made")); }
+            }
         }
         if path.symlink_metadata()?.file_type().is_symlink() || path.canonicalize()? != path {
             return Err(Error::Refused("the private landing repository is an alias"));
@@ -255,7 +274,7 @@ impl Exec {
         let Some(url) = super::coding::landing_url(identity) else {
             return super::coding_verbs::on_remote(&identity.repository, &identity.target, candidate).await;
         };
-        let head = self.fetch_private(identity, url, log).await?.ok_or(Error::Refused("the landing remote cannot be read"))?;
+        let head = self.fetch_private(identity, url, log, FETCH_WAIT).await?.ok_or(Error::Refused("the landing remote cannot be read"))?;
         if head == candidate { return Ok(true); }
         // Read in the private repository, where the shared one's replace refs and rewrites don't reach. The candidate
         // is there if this runner pushed it; if not, it is staged first, and one it can't stage was not pushed from here.
@@ -269,38 +288,65 @@ impl Exec {
     /// that nobody pulls, weeks behind. `None` for a landing on this machine, whose tickets start at the local
     /// landing ref as before. A remote that can't be read refuses the start: never the stale local main instead.
     pub(super) async fn start_head(&self, log: &Path) -> Result<Option<String>> {
-        let Some(identity) = self.coding.as_ref().and_then(|c| c.landing.as_ref()) else { return Ok(None) };
-        let Some(url) = super::coding::landing_url(identity) else { return Ok(None) };
-        // As every other read of the remote: a shared config that redirects transport stops it first.
-        let config = adapters::git(&self.repository(), &["config", "--list"]).await?;
-        if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
-            return Err(Error::Refused("local landing config redirects transport"));
-        }
-        match self.fetch_target(identity, url, log).await {
+        let Some((identity, url)) = self.start_landing().await? else { return Ok(None) };
+        match self.fetch_target_within(identity, url, log, START_READ).await {
             Ok(Some(head)) => Ok(Some(head)),
-            _ => Err(Error::Domain(farcooler_core::error::DomainError::refused(UNREAD_TARGET.into()))),
+            _ => Err(unread_target()),
         }
     }
-    /// The private ref a landing target's head is fetched into.
+    /// Whether the landing remote answers now, for a Start that makes no tree: a plain ask for the target's head,
+    /// not the fetch and import Provision will do again (ov-1058 review). `Ok` for a landing on this machine.
+    pub(super) async fn start_reachable(&self, log: &Path) -> Result<()> {
+        let Some((identity, url)) = self.start_landing().await? else { return Ok(()) };
+        let (_hold, cancel) = tokio::sync::watch::channel(false);
+        let (_, _, exit) = self.remote_git(url, &["ls-remote".into(), "--refs".into(), url.into(), identity.target.clone()],
+            log, START_READ, cancel).await.map_err(|_| unread_target())?;
+        let answered = exit == Some(0) && String::from_utf8_lossy(&self.bytes(log)?).lines().any(|l| l.split_once('\t')
+            .is_some_and(|(sha, name)| name == identity.target && super::coding::sha(sha)));
+        if answered { Ok(()) } else { Err(unread_target()) }
+    }
+    /// The landing a Start reads, after the guard every read of the remote passes: a shared config that redirects
+    /// transport stops it first. `None` for a landing on this machine.
+    async fn start_landing(&self) -> Result<Option<(&CodingLanding, &str)>> {
+        let Some(identity) = self.coding.as_ref().and_then(|c| c.landing.as_ref()) else { return Ok(None) };
+        let Some(url) = super::coding::landing_url(identity) else { return Ok(None) };
+        let config = adapters::git(&self.repository(), &["config", "--list"]).await?;
+        if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
+            return Err(Error::Domain(farcooler_core::error::DomainError::refused(REDIRECTED_TRANSPORT.into())));
+        }
+        Ok(Some((identity, url)))
+    }
+    /// The private ref a landing target's head is fetched into, for a landing on this machine.
     pub(super) fn base_ref(identity: &CodingLanding) -> String {
         format!("refs/farcooler/base/{}", &digest(&(&identity.repository, &identity.target))[4..20])
     }
+    /// The private ref one read of a network remote lands in: its own, apart from the one `base_ref` names.
+    pub(super) fn read_ref(identity: &CodingLanding, log: &Path) -> String {
+        format!("refs/farcooler/read/{}-{}", &digest(&(&identity.repository, &identity.target))[4..12], &digest(&log.to_string_lossy().to_string())[4..16])
+    }
     /// Fetch the target's head of the network remote `url` into the private landing repository, bring it into the
-    /// shared one under the private base ref, and read it. `None` when the fetch failed.
+    /// shared one by its hash, and read it. `None` when the fetch failed.
     pub(super) async fn fetch_target(&self, identity: &CodingLanding, url: &str, log: &Path) -> Result<Option<String>> {
-        let Some(head) = self.fetch_private(identity, url, log).await? else { return Ok(None) };
+        self.fetch_target_within(identity, url, log, FETCH_WAIT).await
+    }
+    async fn fetch_target_within(&self, identity: &CodingLanding, url: &str, log: &Path, wait: Duration) -> Result<Option<String>> {
+        let Some(head) = self.fetch_private(identity, url, log, wait).await? else { return Ok(None) };
         // The shared repository gets the commit for the fold to build on, by its hash, and no ref.
         let (program, environment) = self.transfer_environment().await?;
         Ok(self.import(&head, &environment, &program).await?.then_some(head))
     }
-    /// Fetch the target's head into the private landing repository only, and read it there.
-    async fn fetch_private(&self, identity: &CodingLanding, url: &str, log: &Path) -> Result<Option<String>> {
-        let local = Self::base_ref(identity);
+    /// Fetch the target's head into the private landing repository only, and read it there. Each fetch has a ref of
+    /// its own, named for its log and dropped once read: a Provision and a poll fetching together would otherwise
+    /// take the same ref's lock, and one would fail for nothing (ov-1058 review).
+    async fn fetch_private(&self, identity: &CodingLanding, url: &str, log: &Path, wait: Duration) -> Result<Option<String>> {
+        let local = Self::read_ref(identity, log);
         let (_hold, cancel) = tokio::sync::watch::channel(false);
         let (_, _, exit) = self.remote_git(url, &["fetch".into(), "--quiet".into(), "--no-tags".into(), "--no-recurse-submodules".into(),
-            "--no-write-fetch-head".into(), url.into(), format!("+{}:{local}", identity.target)], log, Duration::from_secs(120), cancel).await?;
+            "--no-write-fetch-head".into(), url.into(), format!("+{}:{local}", identity.target)], log, wait, cancel).await?;
         if exit != Some(0) { return Ok(None); }
-        Ok(self.landing_git(&["rev-parse", "--verify", "--quiet", &local]).await?.filter(|h| super::coding::sha(h)))
+        let head = self.landing_git(&["rev-parse", "--verify", "--quiet", &local]).await?.filter(|h| super::coding::sha(h));
+        let _ = self.landing_git(&["update-ref", "-d", &local]).await;
+        Ok(head)
     }
     pub(super) async fn land_remote(&self, binding: &Binding, cancelled: tokio::sync::watch::Receiver<bool>) -> Result<()> {
         let Some(identity) = self.coding.as_ref().and_then(|c| c.landing.as_ref()) else { return Ok(()) };

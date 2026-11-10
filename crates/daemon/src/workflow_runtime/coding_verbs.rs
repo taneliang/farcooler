@@ -425,7 +425,9 @@ impl Exec {
             PushVerdict::Landed => {
                 self.write_fact(binding, "passed", &candidate, serde_json::json!({ "base": base, "log": digest(&output) }))?;
                 // The local copy of the target follows, when it was where this push started. Best effort: the remote is the record.
-                let local = adapters::git(&self.repository(), &["rev-parse", self.landing_ref()]).await.ok();
+                // Only for a landing on this machine: a network landing never writes a ref in the shared repository, whose
+                // main belongs to its owner (ov-1058 review).
+                let local = if url.is_none() { adapters::git(&self.repository(), &["rev-parse", self.landing_ref()]).await.ok() } else { None };
                 if local.as_deref() == Some(base.as_str()) {
                     let _ = self.try_git(binding, &self.repository(), &["update-ref", "-m", &format!("workflow:{}", digest(binding)),
                         self.landing_ref(), &candidate, &base]).await;

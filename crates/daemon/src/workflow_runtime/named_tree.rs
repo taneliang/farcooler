@@ -43,11 +43,12 @@ impl Runtime {
         if self.store.workflow_wire_receipt(workspace, &id, &serde_json::to_string(&(principal, action))?)?.is_some() { return Ok(None); }
         let Some(configuration) = self.store.workflow_configuration(workspace)?.filter(|c| &c.pin == start_pin) else { return Ok(None) };
         let log = self.root.join("receipts").join(format!("start-{}.fetch.output", digest(&(workspace, &id))));
-        // Read with this workspace's own settings: the runtime holds whichever item it launched last.
-        let start_head = |config: &CodingConfig| { let mut exec = self.exec.clone(); exec.coding = Some(config.clone()); let log = log.clone(); async move { exec.start_head(&log).await } };
         let Some(named) = worktree else {
             // A private tree is made at Provision, which reads the remote again; a remote that can't be read now is said now.
-            if let Some(AdapterConfiguration::Coding(config)) = &configuration.adapter { start_head(config).await?; }
+            if let Some(AdapterConfiguration::Coding(config)) = &configuration.adapter {
+                let mut exec = self.exec.clone(); exec.coding = Some(config.clone());
+                exec.start_reachable(&log).await?;
+            }
             return Ok(None);
         };
         let host = self.host.as_ref().ok_or(Error::Refused("this runner can't make a named worktree for a run"))?;
@@ -96,10 +97,7 @@ impl Runtime {
         });
         if !named.adopt && clash { return Err(Error::Domain(DomainError::BranchExists)); }
         // Main as the landing remote has it now, else (a landing on this machine) the local landing ref (ov-1059).
-        let base = match start_head(&config).await? {
-            Some(head) => head,
-            None => adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await?,
-        };
+        let base = self.named_base(&config, &log).await?;
         let tree = RunTree { name: named.name.clone(), branch: named.branch.clone(), path: path.to_string_lossy().into_owned(), base,
             adopted: named.adopt };
         if !tree.valid() { return Err(Error::Refused("invalid worktree")); }
@@ -108,6 +106,15 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Where a named tree starts: main as the landing remote has it now, else (a landing on this machine) the local
+    /// landing ref (ov-1059). Read with this workspace's own settings: the runtime holds whichever item it launched last.
+    pub(super) async fn named_base(&self, config: &CodingConfig, log: &Path) -> Result<String> {
+        let mut exec = self.exec.clone(); exec.coding = Some(config.clone());
+        match exec.start_head(log).await? {
+            Some(head) => Ok(head),
+            None => adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await,
+        }
+    }
     /// What may be adopted (ov-968 review): a plain local branch that is nobody's but the work's. Never the landing
     /// branch or a remote's default, which a build would commit straight onto; never a remote-tracking name; never
     /// the engine's own `wf-` branches or a tree under its root, which are another run's; and only a worktree the

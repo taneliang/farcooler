@@ -431,3 +431,81 @@ async fn a_remote_that_cant_be_read_at_start_stops_the_ticket_and_says_why() {
     assert!(!r.runtime.root.join(format!("base-{}.json", digest(&("w", &provision.effect.item)))).exists(), "no base was pinned");
     assert!(!r.runtime.root.join(format!("tree-{}", digest(&("w", &provision.effect.item)))).exists(), "no tree was made");
 }
+
+/// ov-1058 review (F7): a network landing never writes a ref in the shared repository, whose main is its owner's.
+/// Here the owner is up to date, so the local main sits at the base the push started from; the push still leaves it.
+#[tokio::test]
+async fn a_batched_push_to_a_remote_leaves_the_shared_repositorys_main_alone() {
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let config = r.runtime.coding.clone().unwrap();
+    let before = adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap();
+    assert_eq!(before, head(&r.bare).await, "the owner's main is level with the remote's");
+    at_join(&mut r.runtime, "one", &definition).await;
+    assert!(command(&r.runtime, Command::Queue { item: "one".into() }).result.is_ok());
+    until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert_ne!(head(&r.bare).await, before, "the batch landed");
+    assert_eq!(adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap(), before, "the owner's main stayed where it was");
+}
+
+/// ov-1058 review (F4, F7): a ticket landed directly (no group) onto a remote, from a stale local main, lands. It
+/// is not refused for the local main being elsewhere, and it moves no ref in the shared repository.
+#[tokio::test]
+async fn a_direct_land_on_a_remote_needs_no_local_main_and_moves_none() {
+    let mut r = remote("pass").await;
+    let config = r.runtime.coding.clone().unwrap();
+    let definition = config.definition().unwrap();
+    let (local, moved) = move_remote(&r).await;
+    super::concurrency_tests::enqueue_item(&mut r.runtime, "w", "one", definition);
+    until(&mut r.runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    let pushed = head(&r.bare).await;
+    assert_eq!(adapters::git(&r.bare, &["rev-parse", &format!("{pushed}^")]).await.unwrap(), moved, "it landed on the remote's main");
+    assert_eq!(adapters::git(&config.repository, &["rev-parse", &config.landing_ref]).await.unwrap(), local, "the shared repository's main is untouched");
+}
+
+/// ov-1058 review (F1): a read of the remote takes a ref of its own in the private repository, so a Provision and
+/// a wait's poll reading together can't fail for each other's lock on one shared ref. Here that shared ref is
+/// locked, as a read in progress would hold it, and another read must not mind; and none is left behind.
+#[tokio::test]
+async fn a_read_of_the_remote_does_not_need_the_ref_another_read_holds() {
+    let r = remote("pass").await;
+    let identity = r.runtime.coding.as_ref().unwrap().landing.clone().unwrap();
+    let url = super::coding::landing_url(&identity).unwrap().to_string();
+    let expected = head(&r.bare).await;
+    let log = |name: &str| r.runtime.root.join("receipts").join(name);
+    assert_eq!(r.runtime.fetch_target(&identity, &url, &log("first.output")).await.unwrap().as_deref(), Some(expected.as_str()));
+    let private = r.runtime.landing_repository().await.unwrap();
+    let held = private.join(format!("{}.lock", Exec::base_ref(&identity)));
+    std::fs::create_dir_all(held.parent().unwrap()).unwrap();
+    std::fs::write(&held, b"").unwrap();
+    let (log_a, log_b) = (log("a.output"), log("b.output"));
+    let (a, b) = tokio::join!(r.runtime.fetch_target(&identity, &url, &log_a), r.runtime.fetch_target(&identity, &url, &log_b));
+    assert_eq!(a.unwrap().as_deref(), Some(expected.as_str()));
+    assert_eq!(b.unwrap().as_deref(), Some(expected.as_str()));
+    let left = adapters::git(&private, &["for-each-ref", "refs/farcooler/read", "refs/farcooler/base"]).await.unwrap();
+    assert!(left.is_empty(), "reads left refs behind: {left}");
+}
+
+/// ov-1058 review (F2): a remote that never answers ends a Start's read in seconds, not minutes.
+#[tokio::test]
+async fn a_remote_that_hangs_is_given_up_on_at_start_well_inside_the_dispatch_lease() {
+    let r = remote("pass").await;
+    // The stand-in ssh sleeps instead of answering.
+    let ssh = r._dir.path().join("ssh");
+    let script = std::fs::read_to_string(&ssh).unwrap().replace("exec /usr/bin/env", "exec sleep 600 #");
+    std::fs::write(&ssh, script).unwrap();
+    let log = r.runtime.root.join("receipts").join("hang.output");
+    let started = std::time::Instant::now();
+    assert!(r.runtime.start_head(&log).await.is_err());
+    assert!(started.elapsed() < Duration::from_secs(10), "gave up after {:?}", started.elapsed());
+}
+
+/// ov-1058 review (F3): a named tree starts at the remote's main too, not at the stale local one.
+#[tokio::test]
+async fn a_named_tree_starts_at_the_remotes_main_when_the_local_main_is_stale() {
+    let r = remote("pass").await;
+    let config = r.runtime.coding.clone().unwrap();
+    let (_, moved) = move_remote(&r).await;
+    let log = r.runtime.root.join("receipts").join("named.output");
+    assert_eq!(r.runtime.named_base(&config, &log).await.unwrap(), moved);
+}
