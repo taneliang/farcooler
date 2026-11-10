@@ -135,3 +135,19 @@ fn a_failure_whose_reason_is_refused_still_fails_safely_and_keeps_no_reason() {
     }
     assert_eq!((at(&state), state.items["item"].phase.clone()), ("provision", Phase::Failed));
 }
+
+#[test]
+fn a_persons_resolve_with_a_refused_reason_is_refused_not_dropped() {
+    let state = State::empty("workspace".into(), 1);
+    let enqueue = input(&state, Command::Enqueue { item: "item".into(), definition: three_gates(), policy_pin: "policy-1".into(),
+        resource: "repo/branch".into(), dependencies: BTreeSet::new(), initial_candidate: None }, Grant::Controller);
+    let state = step(&state, &enqueue).unwrap().state;
+    let state = step(&state, &observe(&state, Outcome::Uncertain)).unwrap().state;
+    let mut resolve = observe(&state, Outcome::SafeFailureBecause("x".repeat(4097)));
+    resolve.command = match resolve.command {
+        Command::Observe { item, effect, run, fence, outcome } => Command::Resolve { item, effect, run, fence, outcome },
+        _ => unreachable!(),
+    };
+    resolve.grant = Grant::Controller;
+    assert_eq!(step(&state, &resolve), Err(Refusal::Invalid));
+}
