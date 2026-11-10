@@ -231,7 +231,7 @@ class RunningAgentsTest {
         fun row(id: String, call: String, status: AgentRow.Status) = AgentRow(
             id = id, ord = 1, rev = 1,
             kind = AgentRow.Kind.OfSubagent(
-                AgentRow.Subagent(toolUseId = call, agentType = "general-purpose", description = "Review ov-616", background = true, status = status, startedMs = 9L),
+                AgentRow.Subagent(toolUseId = call, agentType = "general-purpose", typeWords = "General purpose", description = "Review ov-616", background = true, status = status, startedMs = 9L),
             ),
         )
         val entries = SubagentEntry.of(listOf(row("sub:a", "toolu_r", AgentRow.Status.Running), row("sub:b", "toolu_s", AgentRow.Status.Done)))
