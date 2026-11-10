@@ -916,10 +916,12 @@ jobs:
           # resolved version exactly leaves nothing here for a future bump to
           # quietly drift out of.
           SPARKLE_VERSION: "2.9.5"
+          # Sparkle-2.9.5.tar.xz: GitHub release metadata and a local download agree.
+          SPARKLE_SHA256: 015336b601493e05c237964954bff6191370003d94edefe663724c88840d73cc
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          "$GITHUB_WORKSPACE/scripts/gh-download.sh" sparkle-project/Sparkle "$SPARKLE_VERSION" "Sparkle-$SPARKLE_VERSION.tar.xz" sparkle.tar.xz
+          "$GITHUB_WORKSPACE/scripts/gh-download.sh" sparkle-project/Sparkle "$SPARKLE_VERSION" "Sparkle-$SPARKLE_VERSION.tar.xz" sparkle.tar.xz "$SPARKLE_SHA256"
           tar -xJf sparkle.tar.xz ./bin/sign_update
           chmod +x ./bin/sign_update
           echo "SIGN_UPDATE=$(pwd)/bin/sign_update" >> "$GITHUB_ENV"
