@@ -13,6 +13,12 @@ const START_READ: Duration = Duration::from_secs(25);
 const START_READ: Duration = Duration::from_secs(3);
 /// How long a landing poll's fetch may take.
 const FETCH_WAIT: Duration = Duration::from_secs(120);
+/// How long Provision may take to bring a Start's base over, when the shared repository doesn't hold it yet. A
+/// first download of a large main took 98 s on one host, so this is long. It runs in the effect, off the
+/// dispatch loop (ov-1058 re-review).
+const SEED_WAIT: Duration = Duration::from_secs(900);
+/// Said when Provision couldn't download the landing target's main.
+pub(crate) const UNFETCHED_TARGET: &str = "The landing remote’s main couldn’t be downloaded in time, so the ticket failed before it started. Start it again; the download carries on from what arrived.";
 /// Said when a shared repository's config would send the landing remote's calls somewhere else.
 const REDIRECTED_TRANSPORT: &str = "This repository’s Git config redirects the landing remote’s address, so the ticket wasn’t started. Remove the URL rewrite or include from that config, then start it again.";
 fn unread_target() -> Error { Error::Domain(farcooler_core::error::DomainError::refused(UNREAD_TARGET.into())) }
@@ -154,9 +160,7 @@ impl Exec {
     /// imported before. True when the commit arrived.
     pub(super) async fn import(&self, head: &str, environment: &std::collections::BTreeMap<String, String>, program: &str) -> Result<bool> {
         if !super::coding::sha(head) { return Ok(false); }
-        let local = adapters::git(&self.repository(), &["rev-parse", "--verify", "--quiet", self.landing_ref()]).await.ok()
-            .filter(|l| super::coding::sha(l));
-        if let Some(local) = local { let _ = self.stage(&local, "refs/farcooler/shared/local").await; }
+        self.stage_local_main().await;
         let known = self.landing_git(&["for-each-ref", "--format=%(objectname)", "refs/farcooler/push", "refs/farcooler/check", "refs/farcooler/shared"])
             .await?.unwrap_or_default();
         let revisions: String = std::iter::once(head.to_string()).chain(known.lines().filter(|l| super::coding::sha(l)).map(|l| format!("^{l}")))
@@ -283,27 +287,38 @@ impl Exec {
         }
         Ok(self.landing_git(&["merge-base", "--is-ancestor", candidate, &head]).await?.is_some())
     }
-    /// Where a ticket starts on a network landing (ov-1059): the target's head as the remote has it now, brought
-    /// into the shared repository by its hash. The shared repository's own landing branch may be a checkout's main
-    /// that nobody pulls, weeks behind. `None` for a landing on this machine, whose tickets start at the local
-    /// landing ref as before. A remote that can't be read refuses the start: never the stale local main instead.
+    /// Where a ticket starts on a network landing (ov-1059): the hash of the target's head as the remote has it now,
+    /// by a plain ask that takes a moment. The objects behind it are brought over by Provision (`ensure_start_objects`),
+    /// not here: this runs on the dispatch loop under a claim lease, and a first download of main is far longer
+    /// (ov-1058 re-review). `None` for a landing on this machine, whose tickets start at the local landing ref as
+    /// before. A remote that can't be asked refuses the start: never the stale local main instead.
     pub(super) async fn start_head(&self, log: &Path) -> Result<Option<String>> {
         let Some((identity, url)) = self.start_landing().await? else { return Ok(None) };
-        match self.fetch_target_within(identity, url, log, START_READ).await {
-            Ok(Some(head)) => Ok(Some(head)),
-            _ => Err(unread_target()),
-        }
-    }
-    /// Whether the landing remote answers now, for a Start that makes no tree: a plain ask for the target's head,
-    /// not the fetch and import Provision will do again (ov-1058 review). `Ok` for a landing on this machine.
-    pub(super) async fn start_reachable(&self, log: &Path) -> Result<()> {
-        let Some((identity, url)) = self.start_landing().await? else { return Ok(()) };
         let (_hold, cancel) = tokio::sync::watch::channel(false);
         let (_, _, exit) = self.remote_git(url, &["ls-remote".into(), "--refs".into(), url.into(), identity.target.clone()],
             log, START_READ, cancel).await.map_err(|_| unread_target())?;
-        let answered = exit == Some(0) && String::from_utf8_lossy(&self.bytes(log)?).lines().any(|l| l.split_once('\t')
-            .is_some_and(|(sha, name)| name == identity.target && super::coding::sha(sha)));
-        if answered { Ok(()) } else { Err(unread_target()) }
+        let head = (exit == Some(0)).then(|| String::from_utf8_lossy(&self.bytes(log).unwrap_or_default()).lines().find_map(|l| l.split_once('\t')
+            .filter(|(sha, name)| *name == identity.target && super::coding::sha(sha)).map(|(sha, _)| sha.to_string()))).flatten();
+        head.map(Some).ok_or_else(unread_target)
+    }
+    /// Make sure the shared repository holds `base`, a Start's pinned base, for the worktree to be made at. A
+    /// landing on this machine always does. Otherwise the target is fetched with the long limit, after the local
+    /// main is staged into the private repository so the transfer carries only what is new, and imported by hash.
+    pub(super) async fn ensure_start_objects(&self, base: &str, log: &Path) -> Result<()> {
+        let Some((identity, url)) = self.start_landing().await? else { return Ok(()) };
+        let held = || async { adapters::git(&self.repository(), &["cat-file", "-e", &format!("{base}^{{commit}}")]).await.is_ok() };
+        if held().await { return Ok(()); }
+        self.stage_local_main().await;
+        let fetched = self.fetch_target_within(identity, url, log, SEED_WAIT).await;
+        if matches!(fetched, Ok(Some(_))) && held().await { return Ok(()); }
+        Err(Error::Domain(farcooler_core::error::DomainError::refused(UNFETCHED_TARGET.into())))
+    }
+    /// Put the shared repository's own landing ref in the private one, as objects it already holds, so that a fetch
+    /// from the network offers them as already had.
+    async fn stage_local_main(&self) {
+        let local = adapters::git(&self.repository(), &["rev-parse", "--verify", "--quiet", self.landing_ref()]).await.ok()
+            .filter(|l| super::coding::sha(l));
+        if let Some(local) = local { let _ = self.stage(&local, "refs/farcooler/shared/local").await; }
     }
     /// The landing a Start reads, after the guard every read of the remote passes: a shared config that redirects
     /// transport stops it first. `None` for a landing on this machine.

@@ -509,3 +509,79 @@ async fn a_named_tree_starts_at_the_remotes_main_when_the_local_main_is_stale() 
     let log = r.runtime.root.join("receipts").join("named.output");
     assert_eq!(r.runtime.named_base(&config, &log).await.unwrap(), moved);
 }
+
+/// Slow the stand-in remote's pack step only: it answers a head question at once, and takes `seconds` to send objects.
+fn slow_pack(r: &Remote, seconds: u64) {
+    let hook = r._dir.path().join("slow-pack.sh");
+    std::fs::write(&hook, format!("#!/bin/sh\nsleep {seconds}\ntee '{}' | \"$@\"\n", r._dir.path().join("pack-request").display())).unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let global = r._dir.path().join("remote-global.gitconfig");
+    std::fs::write(&global, format!("[uploadpack]\n\tpackObjectsHook = {}\n", hook.display())).unwrap();
+    let ssh = r._dir.path().join("ssh");
+    let script = std::fs::read_to_string(&ssh).unwrap().replace("-i PATH=", &format!("-i GIT_CONFIG_GLOBAL={} PATH=", global.display()));
+    std::fs::write(&ssh, script).unwrap();
+}
+
+/// ov-1058 re-review: a download that outlasts a Start's cap must not stop Main starting tickets. A Start asks the
+/// remote only for its head's hash, which a slow download doesn't delay; the objects are fetched by Provision, with
+/// the long limit, and the worktree is made on them.
+#[tokio::test]
+async fn a_slow_download_of_the_remotes_main_does_not_stop_a_ticket_starting() {
+    let r = remote("pass").await;
+    let config = r.runtime.coding.clone().unwrap();
+    let (_, moved) = move_remote(&r).await;
+    slow_pack(&r, 5);
+    let log = |n: &str| r.runtime.root.join("receipts").join(n);
+    let started = std::time::Instant::now();
+    assert_eq!(r.runtime.start_head(&log("start.output")).await.unwrap().as_deref(), Some(moved.as_str()), "a Start learns the head");
+    assert!(started.elapsed() < Duration::from_secs(3), "the Start waited {:?} for the download", started.elapsed());
+    assert_eq!(r.runtime.named_base(&config, &log("named.output")).await.unwrap(), moved);
+    // Provision then brings the objects, taking longer than a Start may.
+    let fetching = std::time::Instant::now();
+    r.runtime.exec.ensure_start_objects(&moved, &log("provision.output")).await.unwrap();
+    assert!(fetching.elapsed() >= Duration::from_secs(5), "the stand-in was not slow: {:?}", fetching.elapsed());
+    assert!(adapters::git(&config.repository, &["cat-file", "-e", &format!("{moved}^{{commit}}")]).await.is_ok(), "the shared repository holds the base");
+}
+
+/// ov-1058 re-review: the fetch carries only what is new. The local main is staged into the private repository first,
+/// so the remote is asked for the commits past it and not for all of main.
+#[tokio::test]
+async fn the_first_download_is_seeded_from_the_shared_repositorys_own_main() {
+    let r = remote("pass").await;
+    let (local, moved) = move_remote(&r).await;
+    let log = r.runtime.root.join("receipts").join("seed.output");
+    slow_pack(&r, 0);
+    r.runtime.exec.ensure_start_objects(&moved, &log).await.unwrap();
+    let asked = std::fs::read_to_string(r._dir.path().join("pack-request")).expect("the remote was asked for a pack");
+    assert!(asked.lines().any(|l| l == local), "the fetch did not offer the local main as already held: {asked}");
+    let private = r.runtime.exec.landing_repository().await.unwrap();
+    assert!(adapters::git(&private, &["cat-file", "-e", &format!("{local}^{{commit}}")]).await.is_ok(), "the local main is already in the private repository");
+    let staged = adapters::git(&private, &["for-each-ref", "--format=%(objectname)", "refs/farcooler/shared/local"]).await.unwrap();
+    assert_eq!(staged, local);
+}
+
+/// ov-1058 re-review (F3): a Start that names a worktree is prepared through `prepare_start`, which pins the remote's
+/// main as the tree's base and not the stale local one.
+#[tokio::test]
+async fn a_start_that_names_a_worktree_pins_the_remotes_main_not_the_stale_one() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation, NamedTree}, workflow_config::AdapterConfiguration};
+    let mut r = remote("pass").await;
+    let definition = batched_push(&r.runtime, "any", 5000);
+    let config = r.runtime.coding.clone().unwrap();
+    let (_, moved) = move_remote(&r).await;
+    let host_id = Uuid::now_v7();
+    let root = r.runtime.store.create_repository_root(host_id, config.repository.to_str().unwrap(), 0).unwrap();
+    let repository = r.runtime.store.create_repository(host_id, root.id, "demo", config.repository.join(".git").to_str().unwrap(), "").unwrap();
+    let board = r.runtime.store.create_workspace(repository.id, "Demo", "dem").unwrap().id.to_string();
+    r.runtime.host = Some(WorktreeHost { dir: r._dir.path().join("trees"), install_id: "i".into(), locks: Default::default() });
+    let adapter = Some(Box::new(AdapterConfiguration::Coding(config.clone())));
+    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
+    let published = r.runtime.wire_command(&board, "owner", Action::Publish { notifications: None, adapter, expected_pin: None,
+        mutation: Mutation { id: "publish".into(), revision: 0, epoch: 1, sequence: 1 }, definition: definition.clone() }).unwrap();
+    assert!(published.pointer("/receipt/result/Ok").is_some(), "{published}");
+    let start = Action::Start { mutation: Mutation { id: "named".into(), revision: 1, epoch: 1, sequence: 2 }, item: "ov-7".into(),
+        run: "r".into(), pin: "p".into(), start_pin: pin, models: Default::default(),
+        worktree: Some(NamedTree { name: "ov-7".into(), branch: "ov-7-work".into(), adopt: false }), with: vec![] };
+    let tree = r.runtime.prepare_start(&board, "orchestrator", &start).await.unwrap().expect("a named tree");
+    assert_eq!(tree.base, moved, "the tree's base is the remote's main");
+}

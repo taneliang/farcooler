@@ -47,7 +47,7 @@ impl Runtime {
             // A private tree is made at Provision, which reads the remote again; a remote that can't be read now is said now.
             if let Some(AdapterConfiguration::Coding(config)) = &configuration.adapter {
                 let mut exec = self.exec.clone(); exec.coding = Some(config.clone());
-                exec.start_reachable(&log).await?;
+                exec.start_head(&log).await?;
             }
             return Ok(None);
         };
