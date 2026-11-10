@@ -48,6 +48,20 @@ fn snapshot() -> Result<crate::foreground::Foreground> {
     Ok(crate::foreground::parse(&raw))
 }
 
+/// The user on the other end of a hook's connection. A hook that isn't gating has hung up by the time it is read
+/// (crates/cli/src/hook.rs, `first_contact`). On macOS tokio's `peer_cred` also asks for the peer's pid, which the
+/// kernel refuses with ENOTCONN once the peer has closed, and that ended every real build at its first hook
+/// (ov-1075). `getpeereid` keeps the uid the socket was connected with.
+#[cfg(target_os = "macos")]
+fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let (mut uid, mut gid) = (0, 0);
+    (unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0).then_some(uid)
+}
+/// Linux's `SO_PEERCRED` is kept from connect, so it answers after the peer has closed.
+#[cfg(not(target_os = "macos"))]
+fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> { stream.peer_cred().ok().map(|cred| cred.uid()) }
+
 /// No such process, or one that has exited and is only waiting to be reaped.
 fn gone(pid: i32) -> bool {
     if unsafe { libc::kill(pid, 0) } != 0 { return true; }
@@ -186,7 +200,7 @@ impl Exec {
         let mut hooks = Vec::new();
         loop {
             let (stream, _) = listener.accept().await?;
-            if stream.peer_cred()?.uid() != unsafe { libc::getuid() } { continue; }
+            if peer_uid(&stream) != Some(unsafe { libc::getuid() }) { continue; }
             let mut stream = tokio::io::BufReader::new(stream);
             let mut raw = Vec::new();
             // Bounded by the overall turn deadline as well as this connection.
@@ -194,8 +208,10 @@ impl Exec {
             let n = tokio::time::timeout(Duration::from_secs(1), (&mut stream).take(65537).read_until(b'\n', &mut raw)).await;
             if !matches!(n, Ok(Ok(_))) || raw.len() > 65536 || raw.last() != Some(&b'\n') { continue; }
             let Ok(line) = serde_json::from_slice::<HookLine>(&raw) else { continue };
-            // Never grant permissions or tool-fence bypass from this host.
-            stream.get_mut().write_all(b"{}\n").await?;
+            // Never grant permissions or tool-fence bypass from this host. A hook that isn't gating has hung up
+            // before this answer (crates/cli/src/hook.rs, `first_contact`), so a failed write is its news, not ours:
+            // failing the turn on it ended every real build at its first hook, with none recorded (ov-1075).
+            let _ = stream.get_mut().write_all(b"{}\n").await;
             let fact = facts(line.agent, &line.payload);
             if line.agent != agent || fact.cwd.as_deref() != Some(self.tree(binding).as_path()) { continue; }
             let Some(sid) = &fact.session_id else { continue };
@@ -247,7 +263,11 @@ impl Exec {
         let _watchable = crate::watch_view::publish(&binding.workspace, &binding.effect.item, tmux.clone(), pane.clone());
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
         let result = tokio::select! {
-            result = tokio::time::timeout(Duration::from_millis(command.timeout_ms), self.native_turn(&listener, binding)) => result.ok().and_then(|r| r.ok()),
+            result = tokio::time::timeout(Duration::from_millis(command.timeout_ms), self.native_turn(&listener, binding)) => match result {
+                Ok(Ok(turn)) => Some(turn),
+                Ok(Err(error)) => { tracing::warn!(effect = %binding.effect.id, %error, "the native build's turn could not be read"); None }
+                Err(_) => { tracing::warn!(effect = %binding.effect.id, "the native build's turn did not end in time"); None }
+            },
             _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { break; } } } => None,
         };
         // Capture actual PTY output before closing it; never parse it as success.
@@ -323,11 +343,12 @@ assert os.environ['TERM'] == 'xterm-256color'
 mode = sys.argv[1]
 agent = sys.argv[2]
 session = os.environ['FARCOOLER_NATIVE_SESSION']
+# As `farcooler hook` does (crates/cli/src/hook.rs, first_contact): a hook that isn't gating writes its
+# line and hangs up at once, without reading the daemon's answer (ov-1075).
 def hook(event, sid=session, cwd=os.getcwd(), **extra):
     with socket.socket(socket.AF_UNIX) as s:
         s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
         s.sendall((json.dumps(dict(agent=agent, event=event, payload=dict(session_id=sid,cwd=cwd,workspace_roots=[cwd],**extra)))+'\n').encode())
-        assert s.recv(64).strip() == b'{}'
 hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=os.environ['TEST_LAUNCHED_PROMPT'])
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
