@@ -100,7 +100,7 @@ private struct TurnBody: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("native-scheduled-turn")
-            } else if AgentConversation.isNotice(turn), !turn.prompt.isEmpty {
+            } else if turn.notice == true, !turn.prompt.isEmpty {
                 FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
                     .font(.caption)
                     .foregroundStyle(.quietInk)
@@ -112,7 +112,7 @@ private struct TurnBody: View {
             }
             // A notice's own turn says no time of its own: it's the line
             // above, not a message the person sent. Nor does a report's.
-            if !AgentConversation.isNotice(turn), !AgentConversation.isScheduled(turn), !AgentConversation.isHarness(turn) { status }
+            if !turn.notice == true, !AgentConversation.isScheduled(turn), !AgentConversation.isHarness(turn) { status }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
@@ -196,7 +196,7 @@ private struct SubagentRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 NativeStatusMark(status: subagent.status)
-                Text(AgentConversation.agentType(subagent.agentType)).fontWeight(.medium)
+                Text(subagent.typeWords ?? subagent.agentType).fontWeight(.medium)
                 Spacer(minLength: Spacing.group)
                 // At the accessibility sizes the count and the time take a line
                 // of their own: beside the name they left it a column one

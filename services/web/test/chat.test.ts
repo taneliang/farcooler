@@ -5,10 +5,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import items from '../../../test/fixtures/conversation-items.json'
 import words from '../../../test/fixtures/conversation-words.json'
 
-import { agentType, askTitle, useConversationWords, groupPurpose, groupTitle, harnessTitle, outcomeLine, queuedLabel, sendFailure, shortDuration, taskProgress, isNotice } from '../src/client/chat-copy'
+import { askTitle, useConversationWords, groupPurpose, groupTitle, harnessTitle, outcomeLine, queuedLabel, sendFailure, taskProgress } from '../src/client/chat-copy'
 import {
   type Delta,
   FOLLOW_WAIT_MS,
@@ -25,14 +24,10 @@ import {
 import { Outbox, type Speaker } from '../src/client/chat-send'
 import { sourceOf } from '../src/client/chat'
 import { blocksOf } from '../src/client/chat-text'
+import { closesWithLine } from '../src/client/chat-draw'
 
 // wasm can't load under vitest's worker pool: the golden answers for the core.
-const golden = (request: string) => {
-  const asked = JSON.parse(request)
-  if (!asked.item) return JSON.stringify((words as any)[`apple_${asked.conversation.agent.toLowerCase()}`])
-  const [field, value] = Object.entries(asked.item)[0]
-  return JSON.stringify({ item: { [field]: (items as any)[field][String(value)] } })
-}
+const golden = (request: string) => JSON.stringify((words as any)[`apple_${JSON.parse(request).conversation.agent.toLowerCase()}`])
 useConversationWords(golden)
 
 const row = (id: string, ord: number, rev: number, kind: Row['kind'], turn: string | null = null): Row => ({ id, ord, rev, turn, provisional: false, kind })
@@ -141,32 +136,24 @@ describe('the words', () => {
     expect(groupPurpose([t('Read', 'Done', '/a/b/main.rs'), t('Bash', 'Done', 'Map the code'), t('Bash', 'Done', 'Map the code'), t('Bash', 'Done', 'README check')])).toBe('main.rs, map the code, README check')
   })
 
+  it('ends a turn with a line unless the core says nobody typed it', () => {
+    const ended = { outcome: 'Finished', took: '0:05' }
+    expect(closesWithLine(turn('turn:a', 0, 1, 'go', ended))).toBe(true)
+    expect(closesWithLine(turn('turn:b', 1, 1, 'Agent finished', { ...ended, notice: true }))).toBe(false)
+  })
+
   it('says how a turn ended', () => {
-    expect(outcomeLine({ outcome: 'Finished', duration_ms: 65_000 })).toBe('Took 1:05')
+    expect(outcomeLine({ outcome: 'Finished', took: '1:05' })).toBe('Took 1:05')
     expect(outcomeLine({ outcome: 'Finished' })).toBe('Done')
     expect(outcomeLine({ outcome: 'Interrupted' })).toBe('Interrupted')
     expect(outcomeLine({ outcome: { Failed: { detail: 'rate limit' } } })).toBe('Failed: rate limit')
     expect(outcomeLine({ outcome: null })).toBeNull()
-    expect(shortDuration(3_723_000)).toBe('1:02:03')
-    expect(shortDuration(65_000.4)).toBe('1:05')
-  })
-
-  it('shows the raw type, no time and no notice while the core cannot answer', () => {
-    useConversationWords(() => 'null')
-    try {
-      expect(agentType('general-purpose')).toBe('general-purpose')
-      expect(shortDuration(65_000)).toBe('')
-      expect(isNotice({ origin: 'System' })).toBe(false)
-    } finally {
-      useConversationWords(golden)
-    }
   })
 
   it('titles asks, queued messages, subagents, reports and task lists as the Mac does', () => {
     expect(askTitle({ kind: 'Permission' })).toBe('Claude is asking for permission')
     expect(askTitle({ kind: 'Question', answered: true, answered_by: 'iPhone' })).toBe('Answered on iPhone')
     expect(queuedLabel('InBox')).toBe('Waiting to send')
-    expect(agentType('general-purpose')).toBe('General purpose')
     expect(harnessTitle({ kind: 'Report', source: 'Map the code' })).toBe('Report from Map the code')
     expect(taskProgress([{ status: 'Completed' }, { status: 'Pending' }])).toBe('1 of 2 done')
   })

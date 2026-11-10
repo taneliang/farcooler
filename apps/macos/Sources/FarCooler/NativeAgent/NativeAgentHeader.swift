@@ -18,7 +18,7 @@ struct NativeAgentHeader: View {
             .identified("native-agent-back")
             if let subagent {
                 NativeStatusMark(status: subagent.status)
-                Text(AgentConversation.agentType(subagent.agentType))
+                Text(subagent.typeWords ?? subagent.agentType)
                     .fontWeight(.medium)
                     .fixedSize()
                 Text(subagent.description)

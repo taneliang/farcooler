@@ -36,6 +36,8 @@ class AgentRowWireTest {
         assertEquals(1, turn.backgroundRunning)
         assertEquals(1_000L, turn.startedMs)
         assertEquals(60_000L, turn.durationMs)
+        assertEquals("1:00", turn.took)
+        assertFalse(turn.notice)
         assertEquals(AgentRow.Turn.Outcome.Failed("API error"), turn.outcome)
         assertEquals("run the tests again", turn.suggestion)
         assertNull(page.rows[0].turn)
@@ -52,6 +54,7 @@ class AgentRowWireTest {
 
         val sub = (page.rows[4].kind as AgentRow.Kind.OfSubagent).subagent
         assertEquals("Explore", sub.agentType)
+        assertEquals("Explore", sub.typeWords)
         assertEquals("Find the callers", sub.description)
         assertTrue(sub.background)
         assertEquals(AgentRow.Status.Ended("Killed"), sub.status)

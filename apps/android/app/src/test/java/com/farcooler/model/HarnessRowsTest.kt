@@ -22,6 +22,7 @@ class HarnessRowsTest {
     fun `a hand-back is a report named by its agent's call, with its body clean`() {
         val turn = turns.getValue("turn:p2")
         val harness = turn.harness!!
+        assertTrue(turn.notice)
         assertTrue(AgentConversation.isHarness(turn))
         assertEquals("Report", harness.kind)
         assertEquals("Report from review dead-layer removal", AgentConversation.harnessTitle(harness))

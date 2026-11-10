@@ -74,7 +74,6 @@ struct ConversationItemsTests {
         #expect(AgentConversation.originNote(turn("Queued")) == "Queued during the last turn")
         #expect(AgentConversation.originNote(turn("Typed")) == nil)
         #expect(AgentConversation.isScheduled(turn("Scheduled")))
-        #expect(!AgentConversation.isNotice(turn("Scheduled")), "a scheduled task is drawn as one, not as a notice")
         #expect(AgentConversation.queuedLabel("Sent") == "Sent mid-turn")
         #expect(AgentConversation.queuedLabel("InBox") == "Waiting to send", "ov-827: in the box until the turn ends")
         #expect(AgentConversation.queuedLabel("Waiting") == "Queued")

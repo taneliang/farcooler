@@ -5,10 +5,6 @@ import com.farcooler.core.coreIsAvailable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The conversation view of a terminal-mode claude or codex pane on a phone (ov-374, ov-416):
@@ -345,22 +341,17 @@ object AgentConversation {
 
     fun gap(gap: AgentRow.Gap): String = ConversationWords.phrase(if (gap.count > 1) "gap" else "gap_one")
 
-    /** "0:04", "1:12", "2:03:09": the core's `conversation_words::short`. */
-    fun short(ms: Long): String = ConversationWords.item("ms", "$ms").orEmpty()
+    /** "0:04", "1:12", "2:03:09": a timer's format, for the live time the core can't say. */
+    fun short(ms: Long): String {
+        val seconds = maxOf(0L, ms / 1000)
+        val (h, m, s) = Triple(seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+        fun two(n: Long) = n.toString().padStart(2, '0')
+        return if (h > 0) "$h:${two(m)}:${two(s)}" else "$m:${two(s)}"
+    }
 
     /** What a subagent row says of its work: "1 tool", "14 tools", or null while the count is unknown (0 is how a missing count reads; ov-490). */
     fun toolsLabel(count: Int): String? =
         if (count <= 0) null else ConversationWords.phrase(if (count == 1) "tools_one" else "tools", fill = mapOf("n" to "$count"))
-
-    /** A subagent's type as words: `general-purpose` reads "General purpose". */
-    fun agentType(raw: String): String = ConversationWords.item("agent_type", JsonPrimitive(raw).toString()) ?: raw
-
-    /**
-     * A turn nobody typed: a background task finishing, or claude waking itself
-     * (`TurnOrigin::Notification`, `System`). Drawn as a notice, never as the
-     * person's message.
-     */
-    fun isNotice(turn: AgentRow.Turn): Boolean = ConversationWords.item("origin", JsonPrimitive(turn.origin).toString()) == "true"
 
     /** The lines a report or a message shows before Show more (ov-474). */
     const val HARNESS_LINES = 4
@@ -390,7 +381,7 @@ object AgentConversation {
         fun say(name: String, fill: Map<String, String> = emptyMap()) = ConversationWords.phrase("outcome_$name", fill = fill)
         return when (val outcome = turn.outcome) {
             null -> null
-            AgentRow.Turn.Outcome.Finished -> turn.durationMs?.let { say("took", mapOf("time" to short(it))) } ?: say("done")
+            AgentRow.Turn.Outcome.Finished -> turn.took?.let { say("took", mapOf("time" to it)) } ?: say("done")
             AgentRow.Turn.Outcome.Interrupted -> say("interrupted")
             AgentRow.Turn.Outcome.Unrecorded -> say("unrecorded")
             is AgentRow.Turn.Outcome.Failed -> if (outcome.detail.isEmpty()) say("failed") else say("failed_detail", mapOf("detail" to outcome.detail))
@@ -689,16 +680,6 @@ object ConversationWords {
         } ?: return null
         asked[agent] = table
         table
-    }
-
-    /** The core's answer for one item (`conversation_words::item`): [field] ("agent_type", "ms", "origin") goes in as [json] and comes back under its own name; null while the bridge can't answer. */
-    internal fun item(field: String, json: String): String? {
-        val answer = bridge("""{"schema":1,"item":{"$field":$json}}""") ?: return null
-        return try {
-            this.json.parseToJsonElement(answer).jsonObject["item"]?.jsonObject?.get(field)?.jsonPrimitive?.contentOrNull
-        } catch (_: IllegalArgumentException) {
-            null
-        }
     }
 
     /** A phrase with its `{placeholders}` filled: `name_<by>` where the table has one, else `name`. */

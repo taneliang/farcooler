@@ -159,7 +159,7 @@ private struct TurnRow: View {
                 HarnessTurn(harness: harness)
             } else if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
                 ScheduledPrompt(prompt: turn.prompt)
-            } else if AgentConversation.isNotice(turn), !turn.prompt.isEmpty {
+            } else if turn.notice == true, !turn.prompt.isEmpty {
                 FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
                     .font(.caption)
                     .foregroundStyle(.quietInk)
@@ -255,7 +255,7 @@ private struct SubagentRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 NativeStatusMark(status: subagent.status)
-                Text(AgentConversation.agentType(subagent.agentType)).fontWeight(.medium)
+                Text(subagent.typeWords ?? subagent.agentType).fontWeight(.medium)
                 Text(subagent.description).lineLimit(1).layoutPriority(-1)
                 Spacer(minLength: Spacing.group)
                 if let tools = AgentConversation.toolsLabel(subagent.toolCount) {

@@ -205,10 +205,6 @@ class AgentConversationTest {
     @Test
     fun `a turn nobody typed is a notice`() {
         fun turn(origin: String) = AgentRow.Turn("\"build\" finished", origin)
-        assertTrue(AgentConversation.isNotice(turn("Notification")))
-        assertTrue(AgentConversation.isNotice(turn("System")))
-        assertFalse(AgentConversation.isNotice(turn("Typed")))
-        assertFalse(AgentConversation.isNotice(turn("Queued")))
         assertEquals("build finished", AgentConversation.noticeText(turn("Notification")))
     }
 
@@ -217,14 +213,12 @@ class AgentConversationTest {
         assertEquals("0:04", AgentConversation.short(4_000))
         assertEquals("1:12", AgentConversation.short(72_000))
         assertEquals("2:03:09", AgentConversation.short(7_389_000))
-        assertEquals("General purpose", AgentConversation.agentType("general-purpose"))
-        assertEquals("Agent", AgentConversation.agentType(""))
         assertEquals("14 tools", AgentConversation.toolsLabel(14))
         assertEquals("1 tool", AgentConversation.toolsLabel(1))
         assertNull(AgentConversation.toolsLabel(0))
-        fun outcome(o: AgentRow.Turn.Outcome?, ms: Long? = null) =
-            AgentConversation.outcome(AgentRow.Turn("p", "Typed", durationMs = ms, outcome = o))
-        assertEquals("Took 1:00", outcome(AgentRow.Turn.Outcome.Finished, 60_000))
+        fun outcome(o: AgentRow.Turn.Outcome?, ms: String? = null) =
+            AgentConversation.outcome(AgentRow.Turn("p", "Typed", took = ms, outcome = o))
+        assertEquals("Took 1:00", outcome(AgentRow.Turn.Outcome.Finished, "1:00"))
         assertEquals("Done", outcome(AgentRow.Turn.Outcome.Finished))
         assertEquals("Failed: API error", outcome(AgentRow.Turn.Outcome.Failed("API error")))
         assertEquals("Failed", outcome(AgentRow.Turn.Outcome.Failed("")))
@@ -382,7 +376,6 @@ class AgentConversationTest {
         assertEquals("Queued during the last turn", AgentConversation.originNote(turn("Queued")))
         assertNull(AgentConversation.originNote(turn("Typed")))
         assertTrue(AgentConversation.isScheduled(turn("Scheduled")))
-        assertFalse("a scheduled task is drawn as one, not as a notice", AgentConversation.isNotice(turn("Scheduled")))
         assertEquals("Sent mid-turn", AgentConversation.queuedLabel("Sent"))
     }
 
@@ -409,21 +402,5 @@ class AgentConversationTest {
         assertTrue(AgentConversation.images(build(Capability.AGENT_IMAGES)))
         assertFalse(AgentConversation.images(build(Capability.AGENT_ROWS)))
         assertFalse(AgentConversation.images(null))
-    }
-
-    @Test
-    fun `item logic is the core's, and reads raw or blank while the core cannot answer`() {
-        ConversationWords.bridge = { """{"schema":1,"item":{"ms":"1:05","agent_type":"General purpose","origin":true}}""" }
-        try {
-            assertEquals("1:05", AgentConversation.short(65_000))
-            assertEquals("General purpose", AgentConversation.agentType("general-purpose"))
-            assertTrue(AgentConversation.isNotice(AgentRow.Turn(prompt = "", origin = "System")))
-            ConversationWords.bridge = { null }
-            assertEquals("", AgentConversation.short(65_000))
-            assertEquals("general-purpose", AgentConversation.agentType("general-purpose"))
-            assertFalse(AgentConversation.isNotice(AgentRow.Turn(prompt = "", origin = "System")))
-        } finally {
-            ConversationWords.reset()
-        }
     }
 }

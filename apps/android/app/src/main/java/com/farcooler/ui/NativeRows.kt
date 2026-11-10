@@ -137,7 +137,7 @@ private fun TurnRow(row: String, turn: AgentRow.Turn) {
                 }
                 FoldedText(prompt, lines = 3, style = MaterialTheme.typography.bodyMedium.copy(color = quiet))
             }
-        } else if (AgentConversation.isNotice(turn) && prompt.isNotEmpty()) {
+        } else if (turn.notice && prompt.isNotEmpty()) {
             FoldedText(
                 AgentConversation.noticeText(turn),
                 lines = 3,
@@ -151,7 +151,7 @@ private fun TurnRow(row: String, turn: AgentRow.Turn) {
         // A notice's own turn says no time of its own: it's the line above, not
         // a message the person sent. Nor does a scheduled task's.
         // Nor does a report's (a hook's turn for one is `Typed` until the transcript says).
-        if (!AgentConversation.isNotice(turn) && !AgentConversation.isScheduled(turn) && !AgentConversation.isHarness(turn)) TurnStatus(turn)
+        if (!turn.notice && !AgentConversation.isScheduled(turn) && !AgentConversation.isHarness(turn)) TurnStatus(turn)
     }
 }
 
@@ -274,7 +274,7 @@ private fun SubagentRow(row: String, subagent: AgentRow.Subagent) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusMark(subagent.status)
-            Text(AgentConversation.agentType(subagent.agentType), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(subagent.typeWords ?: subagent.agentType, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             AgentConversation.toolsLabel(subagent.toolCount)?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("native-subagent-tools"))
             }

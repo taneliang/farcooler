@@ -5,7 +5,6 @@
 /// is one line that opens; asks, subagents and task lists are cards.
 
 import {
-  agentType,
   askTitle,
   gapLine,
   groupPurpose,
@@ -13,7 +12,6 @@ import {
   groupTitle,
   handoffLine,
   harnessTitle,
-  isNotice,
   isWorking,
   noticeLine,
   noticeText,
@@ -217,7 +215,7 @@ function turnRow(row: Row, memory: Memory): HTMLElement | null {
     card.append(folded(prose(String(turn.prompt ?? '')), memory.open.has(`fold:${row.id}`), o => toggle(memory, `fold:${row.id}`, o)))
     return card
   }
-  if (isNotice(turn)) return el('p', 'notice', noticeText(turn))
+  if (turn.notice) return el('p', 'notice', noticeText(turn))
   const wrap = el('div', 'bubble-row')
   const bubble = el('div', `bubble${row.provisional ? ' provisional' : ''}`)
   bubble.append(folded(el('p', 'bubble-text', String(turn.prompt ?? '')), memory.open.has(`fold:${row.id}`), o => toggle(memory, `fold:${row.id}`, o)))
@@ -237,7 +235,7 @@ function subagentRow(row: Row): HTMLElement {
   const agent = bodyOf(row)
   const card = el('div', 'card subagent')
   const head = el('p', 'card-title')
-  head.append(dot(agent.status === 'Running' ? 'Running' : agent.status === 'Completed' ? 'Done' : 'Failed'), document.createTextNode(` ${agentType(agent.agent_type ?? '')}`))
+  head.append(dot(agent.status === 'Running' ? 'Running' : agent.status === 'Completed' ? 'Done' : 'Failed'), document.createTextNode(` ${agent.type_words ?? agent.agent_type ?? ''}`))
   card.append(head)
   if (agent.description) card.append(el('p', 'card-body', agent.description))
   const meta = [subagentState(agent.status), toolsLabel(agent.tool_count ?? 0), agent.status === 'Running' ? agent.current_action : ''].filter(Boolean)
@@ -331,5 +329,5 @@ export function drawEnd(turn: Row): HTMLElement | null {
 /// a turn claude wrote for itself, not a notice.
 export function closesWithLine(turn: Row): boolean {
   const body = bodyOf(turn)
-  return !body.harness && !isNotice(body) && !isWorking(body) && outcomeLine(body) !== null
+  return !body.harness && !body.notice && !isWorking(body) && outcomeLine(body) !== null
 }

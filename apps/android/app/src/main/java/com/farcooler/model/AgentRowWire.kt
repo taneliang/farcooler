@@ -84,6 +84,10 @@ data class AgentRow(
          * holds its clean words. Null for a turn a person (or a schedule) started.
          */
         val harness: Harness? = null,
+        /** Nobody typed it: a task's notice or claude waking itself. The core says. */
+        val notice: Boolean = false,
+        /** [durationMs] as the timer reads it, "1:05"; the core says. */
+        val took: String? = null,
     ) {
         sealed interface Outcome {
             data object Finished : Outcome
@@ -189,6 +193,8 @@ data class AgentRow(
          * agent, and from a runner before it.
          */
         val agentId: String? = null,
+        /** [agentType] as words, "General purpose"; the core says. */
+        val typeWords: String? = null,
     )
 
     data class Ask(
@@ -412,6 +418,8 @@ internal object AgentRowJson {
                             agentRow = named("agent_row"),
                         )
                     },
+                    notice = bool(p["notice"]) ?: false,
+                    took = string(p["took"]),
                 ),
             )
             "Prose" -> AgentRow.Kind.OfProse(
@@ -453,6 +461,7 @@ internal object AgentRowJson {
                     currentAction = text("current_action"),
                     lastMs = ms(p["last_ms"]),
                     agentId = string(p["agent_id"])?.takeIf { it.isNotEmpty() },
+                    typeWords = string(p["type_words"]),
                 ),
             )
             "Ask" -> AgentRow.Kind.OfAsk(

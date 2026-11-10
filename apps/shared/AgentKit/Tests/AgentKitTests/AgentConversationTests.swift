@@ -114,16 +114,11 @@ import Testing
         let turn = { (origin: String) in
             AgentRow.Turn(
                 prompt: "Agent \"Count\" finished", origin: origin, startedMs: nil, endedMs: nil, durationMs: 65_000,
-                outcome: .finished, backgroundRunning: 0, activity: nil)
+                outcome: .finished, backgroundRunning: 0, activity: nil, took: "1:05")
         }
-        #expect(AgentConversation.isNotice(turn("Notification")))
-        #expect(AgentConversation.isNotice(turn("System")))
-        #expect(!AgentConversation.isNotice(turn("Typed")))
-        #expect(!AgentConversation.isNotice(turn("Queued")))
         #expect(AgentConversation.noticeText(turn("Notification")) == "Agent Count finished")
         #expect(AgentConversation.outcome(turn("Typed")) == "Took 1:05")
         #expect(AgentConversation.short(ms: 7_384_000) == "2:03:04")
-        #expect(AgentConversation.agentType("general-purpose") == "General purpose")
         #expect(AgentConversation.toolsLabel(14) == "14 tools" && AgentConversation.toolsLabel(1) == "1 tool")
         #expect(AgentConversation.toolsLabel(0) == nil, "an unknown count is hidden, not '0 tools'")
         #expect(AgentConversation.queuedLabel("Waiting") == "Queued")

@@ -317,11 +317,10 @@ struct NativeAgentTests {
         let window = Self.window(Probe(seen: seen, content: NativeAgentView(model: model, isFocused: true, showTerminal: {})))
         defer { window.close() }
         model.store.apply(try await model.store.ledger.page(Self.page([
-            Self.row(0, "turn:n1", ["Turn": ["prompt": "Agent \"Count the lines\" finished", "origin": "Notification", "started_ms": 1, "ended_ms": 2, "duration_ms": 1, "outcome": "Finished", "background_running": 0, "activity": NSNull()]]),
+            Self.row(0, "turn:n1", ["Turn": ["prompt": "Agent \"Count the lines\" finished", "origin": "Notification", "notice": true, "started_ms": 1, "ended_ms": 2, "duration_ms": 1, "outcome": "Finished", "background_running": 0, "activity": NSNull()]]),
         ])))
         await Self.settle(window)
         #expect(seen.ids.contains("native-notice-turn"))
-        #expect(AgentConversation.agentType("general-purpose") == "General purpose")
         #expect(AgentConversation.short(ms: 42_000) == "0:42" && AgentConversation.short(ms: 220_000) == "3:40")
     }
 

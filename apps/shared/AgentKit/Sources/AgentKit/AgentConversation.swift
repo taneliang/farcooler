@@ -320,18 +320,6 @@ extension AgentConversation {
         count <= 0 ? nil : ConversationWords.phrase(count == 1 ? "tools_one" : "tools", ["n": "\(count)"])
     }
 
-    /// A subagent's type as words: `general-purpose` reads "General purpose".
-    public static func agentType(_ raw: String) -> String {
-        ConversationWords.item("agent_type", raw) as? String ?? raw
-    }
-
-    /// A turn nobody typed: a background task finishing, or claude waking
-    /// itself (`TurnOrigin::Notification`, `System`). Drawn as a notice,
-    /// never as the person's message.
-    public static func isNotice(_ turn: AgentRow.Turn) -> Bool {
-        ConversationWords.item("origin", turn.origin) as? Bool ?? false
-    }
-
     /// A notice turn's words, without claude's straight quotes.
     public static func noticeText(_ turn: AgentRow.Turn) -> String {
         turn.prompt.replacingOccurrences(of: "\"", with: "")
@@ -341,7 +329,7 @@ extension AgentConversation {
         let say = { (name: String, fill: [String: String]) in ConversationWords.phrase("outcome_" + name, fill) }
         switch turn.outcome {
         case nil: return nil
-        case .finished?: return turn.durationMs.map { say("took", ["time": short(ms: $0)]) } ?? say("done", [:])
+        case .finished?: return turn.took.map { say("took", ["time": $0]) } ?? say("done", [:])
         case .interrupted?: return say("interrupted", [:])
         case .unrecorded?: return say("unrecorded", [:])
         case .failed(let detail)?: return detail.isEmpty ? say("failed", [:]) : say("failed_detail", ["detail": detail])
@@ -503,18 +491,5 @@ public enum ConversationWords {
         let phrases = table(agent)?.phrases
         let words = word.flatMap { phrases?[name + "_" + $0] } ?? phrases?[name] ?? ""
         return fill.reduce(words) { $0.replacingOccurrences(of: "{\($1.key)}", with: $1.value) }
-    }
-}
-
-extension ConversationWords {
-    /// The core's answer for one item (`conversation_words::item`): the field
-    /// asked ("agent_type", "ms", "origin") comes back under its own name; nil
-    /// while the bridge can't answer.
-    static func item(_ field: String, _ value: Any) -> Any? {
-        guard let request = try? JSONSerialization.data(withJSONObject: ["schema": 1, "item": [field: value]]),
-              let answer = PlanViewPresenter.ask(String(decoding: request, as: UTF8.self)),
-              let reply = try? JSONSerialization.jsonObject(with: Data(answer.utf8)) as? [String: Any]
-        else { return nil }
-        return (reply["item"] as? [String: Any])?[field]
     }
 }
