@@ -66,6 +66,9 @@
 # Mode `trust` draws the screen in the file STAND_IN_TRUST names, claude's
 # folder-trust prompt as captured (ov-493), and nothing else; Enter there
 # logs `TRUSTED` and turns the mode to working, as claude starts its turn.
+# STAND_IN_TRUST_PAUSE: its first draw sends the last line (the footer) that
+# many milliseconds after the rest, as a pty read can split one write and
+# tmux show the half it has (ov-1066).
 # Mode `trust-menu` is a permission dialog whose command quotes that prompt's
 # every line, which must never be taken for it.
 #
@@ -308,7 +311,17 @@ sub draw {
         my $screen = <$f>;
         close $f;
         $screen =~ s/\s+\z//;
-        print "\e[H\e[2J" . join("\r\n", split(/\n/, $screen));
+        my @lines = split(/\n/, $screen);
+        my $pause = $ENV{STAND_IN_TRUST_PAUSE} || 0;
+        $ENV{STAND_IN_TRUST_PAUSE} = 0;
+        if ($pause > 0 && @lines > 1) {
+            my $last = pop @lines;
+            print "\e[H\e[2J" . join("\r\n", @lines);
+            Time::HiRes::sleep($pause / 1000);
+            print "\r\n" . $last;
+            return;
+        }
+        print "\e[H\e[2J" . join("\r\n", @lines);
         return;
     }
     my @rows;

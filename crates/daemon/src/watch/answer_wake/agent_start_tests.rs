@@ -29,7 +29,7 @@ impl Board {
         std::fs::write(&si.control, "trust").unwrap();
         let q = |p: &std::path::Path| format!("'{}'", p.display());
         let command = format!(
-            "env STAND_IN_TRUST='{GATE}' CLAUDE_CONFIG_DIR={} {} {} claude {} {}",
+            "env STAND_IN_TRUST='{GATE}' STAND_IN_TRUST_PAUSE=500 CLAUDE_CONFIG_DIR={} {} {} claude {} {}",
             q(&dir.join("config")),
             q(&program),
             q(&dir.join("stand_in.pl")),
@@ -37,9 +37,17 @@ impl Board {
             q(&si.log)
         );
         self.run_unfollowed(&pane, &command).await;
-        let screen = self.screen_with(pane.id, "Yes, I trust this folder").await;
-        assert!(farcooler_core::activity::trust::yes_selected(&screen), "{screen}");
-        (pane, si)
+        // The whole prompt, not its first line to show: tmux can show a
+        // screen half drawn, as CI did (ov-1066).
+        let mut screen = String::new();
+        for _ in 0..300 {
+            screen = self.screen_with(pane.id, "Yes, I trust this folder").await;
+            if farcooler_core::activity::trust::yes_selected(&screen) {
+                return (pane, si);
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("never the trust prompt with Yes selected:\n{screen}");
     }
 
     /// Sample until a notice is filed, up to about ten seconds.
