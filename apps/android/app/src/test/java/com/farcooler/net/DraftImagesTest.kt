@@ -141,10 +141,12 @@ class DraftImagesTest {
         val store = drafts()
         val memory = PhotoMemory(store)
         val first = model(memory)
+        first.awaitRestored()
         first.attach(listOf(image(first.nextImageId(), 12)))
         store.flush()
         val second = model(memory)
-        eventually("the photo came back") { second.images.size == 1 }
+        second.awaitRestored()
+        assertEquals("the photo came back", 1, second.images.size)
         assertEquals(12, second.images.single().data.size)
         assertTrue("a new photo's id is never a restored one", second.nextImageId() != second.images.single().id)
         second.onDraft("what is this")
@@ -153,7 +155,7 @@ class DraftImagesTest {
         assertEquals("what is this" to 1, sent.single())
         store.flush()
         val third = model(memory)
-        Thread.sleep(200)
+        third.awaitRestored()
         assertTrue("a sent photo came back", third.images.isEmpty())
     }
 
@@ -162,12 +164,13 @@ class DraftImagesTest {
         val store = drafts()
         val memory = PhotoMemory(store)
         val first = model(memory)
+        first.awaitRestored()
         val id = first.nextImageId()
         first.attach(listOf(image(id, 12)))
         first.detach(id)
         store.flush()
         val second = model(memory)
-        Thread.sleep(200)
+        second.awaitRestored()
         assertTrue(second.images.isEmpty())
     }
 
@@ -176,12 +179,14 @@ class DraftImagesTest {
         val store = drafts()
         val memory = PhotoMemory(store)
         val first = model(memory)
+        first.awaitRestored()
         first.attach(listOf(image(first.nextImageId(), 12)))
         store.flush()
         first.offer(rich = false, interrupts = false)
         assertTrue(first.images.isEmpty())
         first.offer(rich = true, interrupts = false)
-        eventually("the photo came back once the runner took photos again") { first.images.size == 1 }
+        first.awaitRestored()
+        assertEquals("the photo came back once the runner took photos again", 1, first.images.size)
     }
 
     @Test
@@ -299,6 +304,7 @@ class DraftImagesTest {
     fun `photos are not restored into a composer that has sent since`() = runBlocking {
         val store = drafts()
         val first = model(PhotoMemory(store))
+        first.awaitRestored()
         first.attach(listOf(image(first.nextImageId(), 12)))
         store.flush()
         val release = java.util.concurrent.CountDownLatch(1)
@@ -313,7 +319,7 @@ class DraftImagesTest {
         second.send()
         eventually("the send") { second.sent == 1 }
         release.countDown()
-        Thread.sleep(300)
+        second.awaitRestored()
         assertTrue("a photo was restored into a composer that had sent", second.images.isEmpty())
     }
 }

@@ -751,6 +751,12 @@ class NativePaneModel(
     }
 
     private var imagesRestored = false
+    private var restoring: kotlinx.coroutines.Job? = null
+
+    /** Returns once the restore [restoreImages] started has landed or been dropped. For tests, in place of a sleep (ov-1064). */
+    suspend fun awaitRestored() {
+        restoring?.join()
+    }
 
     /** The photos the last launch left in this pane's draft, back in the composer once the runner takes photos (ov-622). */
     fun restoreImages() {
@@ -758,7 +764,7 @@ class NativePaneModel(
         if (!rich || imagesRestored) return
         imagesRestored = true
         val sentBefore = sent
-        scope.launch {
+        restoring = scope.launch {
             val back = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { kept.restored(terminal) }
             // Not into a composer that has sent since: it is a new message. Nor into one that stopped taking photos while
             // the files were being read: they wait on disk for the next time it does.
