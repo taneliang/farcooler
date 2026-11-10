@@ -201,8 +201,6 @@ data class Plan(
     val agentsSpend: PlanSpend? = null,
     /** The plan as the runner sent it, which the shared core builds the Plan view from ([PlanViews]); null for a plan built by hand. */
     val wire: String? = null,
-    /** The workspace's workflow presentation (`workflow.snapshot`), read beside the plan, for the engine runs the cards show; null without one. */
-    val workflow: String? = null,
 ) {
     /** Nothing planned: no theme and no ticket. Rulings don't count: they never switch a board's layout (review 1005a F1). */
     val isEmpty: Boolean get() = themes.isEmpty() && tickets.isEmpty()

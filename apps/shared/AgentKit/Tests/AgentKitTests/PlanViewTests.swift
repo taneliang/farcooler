@@ -61,10 +61,8 @@ struct PlanViewTests {
         let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(request["plan"])))
         let context = try #require(request["context"] as? [String: Any])
         let statuses = (context["statuses"] as? [String: String] ?? [:]).compactMapValues { TaskStatus(rawValue: $0) }
-        let workflow = try JSONSerialization.data(withJSONObject: try #require(request["workflow"]))
         let built = WirePlanView.build(
-            plan: plan, context: PlanViewContext(needsYou: context["needs_you"] as? Int ?? 0, statuses: statuses, utcOffset: 0),
-            workflow: workflow)
+            plan: plan, context: PlanViewContext(needsYou: context["needs_you"] as? Int ?? 0, statuses: statuses, utcOffset: 0))
         #expect(built == (try Self.view()))
     }
 

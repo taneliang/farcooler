@@ -83,17 +83,15 @@ class PlanViewTest {
     }
 
     @Test
-    fun `the request is the plan as the runner sent it, the board's context in Material's style, and the workflow when there is one`() {
+    fun `the request is the plan as the runner sent it, the board's context in Material's style`() {
         val request = golden.getValue("request").jsonObject
-        val plan = Plan.decode(request.getValue("plan").toString()).copy(workflow = request.getValue("workflow").toString())
+        val plan = Plan.decode(request.getValue("plan").toString())
         val statuses = mapOf("t-ov-300" to TaskStatus.NEEDS_DECISION)
-        val sent = Json.parseToJsonElement(PlanViews.request(plan, 2, statuses, emptyMap(), withWorkflow = true)!!).jsonObject
+        val sent = Json.parseToJsonElement(PlanViews.request(plan, 2, statuses, emptyMap())!!).jsonObject
         assertEquals(request.getValue("plan"), sent.getValue("plan"))
-        assertEquals(request.getValue("workflow"), sent.getValue("workflow"))
         assertEquals("material", sent.getValue("context").jsonObject.getValue("style").jsonPrimitive.content)
         assertEquals(request.getValue("context"), sent.getValue("context").jsonObject.let { JsonObject(it - "agents_supported" - "activity" - "utc_offset") })
-        assertFalse("no workflow when not asked", "workflow" in Json.parseToJsonElement(PlanViews.request(plan, 2, statuses, emptyMap(), withWorkflow = false)!!).jsonObject)
-        assertNull("a plan built by hand has no wire to send", PlanViews.request(Plan(), 0, emptyMap(), emptyMap(), withWorkflow = false))
+        assertNull("a plan built by hand has no wire to send", PlanViews.request(Plan(), 0, emptyMap(), emptyMap()))
     }
 
     @Test
@@ -111,19 +109,6 @@ class PlanViewTest {
         PlanViews.reset()
         PlanViews.bridge = { """{"schema":1,"view":null,"error":"invalid"}""" }
         assertNull(PlanViews.of(plan, 2))
-    }
-
-    @Test
-    fun `a workflow the core cannot read does not take the plan with it`() {
-        val plan = Plan.decode(golden.getValue("request").jsonObject.getValue("plan").toString()).copy(workflow = "{\"schema\":9}")
-        val requests = mutableListOf<String>()
-        PlanViews.bridge = { request ->
-            requests += request
-            if ("\"workflow\"" in request) """{"schema":1,"view":null,"error":"invalid"}""" else golden.getValue("answer").toString()
-        }
-        assertNotNull(PlanViews.of(plan, 2))
-        assertEquals(2, requests.size)
-        assertFalse("\"workflow\"" in requests.last())
     }
 
     // The glance band and the strip, over the core's view (the host JNI build).

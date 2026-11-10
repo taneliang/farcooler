@@ -61,8 +61,7 @@ fun PlanViewTicketDetails.ticket(task: String): PlanViewTicketDetail? = tickets.
 
 /**
  * Asks the shared core for the Plan's view. The request is the plan exactly as the runner sent it ([Plan.wire]), the
- * board's Needs You count and card statuses, and the workspace's workflow presentation when the app has it
- * ([Plan.workflow]). Null where the plan has no wire text (one built by hand), the core isn't in this build, or the core
+ * board's Needs You count and card statuses (each ticket's engine run is in the plan itself). Null where the plan has no wire text (one built by hand), the core isn't in this build, or the core
  * says the request is invalid; the Plan then says it couldn't be read.
  */
 object PlanViews {
@@ -110,13 +109,12 @@ object PlanViews {
         put("style", "material")
     }
 
-    /** The request for [plan] with the workflow presentation [workflow], or none. */
-    internal fun request(plan: Plan, needsYou: Int, statuses: Map<String, TaskStatus>, activity: Map<String, Long>, withWorkflow: Boolean): String? {
+    /** The request for [plan], or none. */
+    internal fun request(plan: Plan, needsYou: Int, statuses: Map<String, TaskStatus>, activity: Map<String, Long>): String? {
         val wire = plan.wire ?: return null
         return buildString {
             append("{\"schema\":1,\"plan\":").append(wire)
             append(",\"context\":").append(context(needsYou, statuses, activity))
-            plan.workflow?.takeIf { withWorkflow }?.let { append(",\"workflow\":").append(it) }
             append('}')
         }
     }
@@ -136,15 +134,13 @@ object PlanViews {
     ): PlanView? {
         val key = Key(plan, needsYou, statuses, activity)
         if (cache.containsKey(key)) return cache[key]
-        val view = ask(plan, needsYou, statuses, activity, withWorkflow = true)
-            // A workflow presentation the core can't read must not take the plan with it.
-            ?: if (plan.workflow != null) ask(plan, needsYou, statuses, activity, withWorkflow = false) else null
+        val view = ask(plan, needsYou, statuses, activity)
         cache[key] = view
         return view
     }
 
-    private fun ask(plan: Plan, needsYou: Int, statuses: Map<String, TaskStatus>, activity: Map<String, Long>, withWorkflow: Boolean): PlanView? {
-        val request = request(plan, needsYou, statuses, activity, withWorkflow) ?: return null
+    private fun ask(plan: Plan, needsYou: Int, statuses: Map<String, TaskStatus>, activity: Map<String, Long>): PlanView? {
+        val request = request(plan, needsYou, statuses, activity) ?: return null
         return decode(runCatching { bridge(request) }.getOrNull())
     }
 }

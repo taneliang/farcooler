@@ -51,7 +51,7 @@ declare module 'fc-web' {
   ): Promise<WebRunner>
   export function build(): string
   /// The plan's view model (crates/client's `plan_view`): a request as JSON
-  /// ({schema, plan, context, workflow}), the answer as JSON ({schema, view,
+  /// ({schema, plan, context}), the answer as JSON ({schema, view,
   /// error}). Pure; no I/O.
   export function recoveryView(count: number, current: boolean): string
   export function planView(request: string): string

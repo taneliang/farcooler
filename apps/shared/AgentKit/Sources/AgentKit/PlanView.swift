@@ -127,11 +127,9 @@ public struct PlanViewContext: Equatable, Sendable {
 extension WirePlanView {
     /// The view of `plan` as read from the runner, or nil when it has no wire
     /// form (a plan made in code) or no presenter answers.
-    /// - Parameter workflow: `workflow.snapshot`'s presentation, as JSON, when
-    ///   the workspace has a published workflow.
-    public static func build(plan: PlanModel, context: PlanViewContext = PlanViewContext(), workflow: Data? = nil) -> WirePlanView? {
+    public static func build(plan: PlanModel, context: PlanViewContext = PlanViewContext()) -> WirePlanView? {
         guard let wire = plan.wire else { return nil }
-        return PlanViewPresenter.view(wire: wire, context: context, workflow: workflow)
+        return PlanViewPresenter.view(wire: wire, context: context)
     }
 
     /// The same, from the separate reads the screens hold.
@@ -161,7 +159,6 @@ public enum PlanViewPresenter {
     struct Key: Equatable {
         var wire: Data
         var context: PlanViewContext
-        var workflow: Data?
     }
 
     private static let state = State()
@@ -183,8 +180,8 @@ public enum PlanViewPresenter {
         return present?(request)
     }
 
-    static func view(wire: Data, context: PlanViewContext, workflow: Data?) -> WirePlanView? {
-        let key = Key(wire: wire, context: context, workflow: workflow)
+    static func view(wire: Data, context: PlanViewContext) -> WirePlanView? {
+        let key = Key(wire: wire, context: context)
         state.lock.lock()
         if let hit = state.recent.firstIndex(where: { $0.key == key }) {
             let found = state.recent.remove(at: hit)
@@ -199,10 +196,6 @@ public enum PlanViewPresenter {
         request.append(wire)
         request.append(Data(#","context":"#.utf8))
         request.append(context.json)
-        if let workflow {
-            request.append(Data(#","workflow":"#.utf8))
-            request.append(workflow)
-        }
         request.append(Data("}".utf8))
         let answer = present?(String(decoding: request, as: UTF8.self))
         let view = answer.flatMap { WirePlanView.decode(answer: Data($0.utf8)) }
