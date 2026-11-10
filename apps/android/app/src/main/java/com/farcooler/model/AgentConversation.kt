@@ -681,11 +681,8 @@ object ConversationWords {
     }
 
     /** [ms] in a timer's format, from the core's bridge; blank while it can't answer. */
-    internal fun span(ms: Long): String = try {
-        bridge("""{"schema":1,"span":$ms}""")?.let { json.parseToJsonElement(it).jsonObject["span"]?.jsonPrimitive?.contentOrNull }.orEmpty()
-    } catch (_: IllegalArgumentException) {
-        ""
-    }
+    internal fun span(ms: Long): String =
+        runCatching { bridge("""{"schema":1,"span":$ms}""")?.let { json.parseToJsonElement(it).jsonObject["span"]?.jsonPrimitive?.contentOrNull } }.getOrNull().orEmpty()
 
     /** A phrase with its `{placeholders}` filled: `name_<by>` where the table has one, else `name`. */
     fun phrase(name: String, agent: String = "Claude", by: String? = null, fill: Map<String, String> = emptyMap()): String {
