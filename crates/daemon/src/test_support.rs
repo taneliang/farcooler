@@ -57,10 +57,17 @@ impl Drop for ScratchDir {
 /// hand-written fixture would only prove the author can copy it. Sharing it
 /// with `service.rs`'s tests means both get a worktree row that came from
 /// the same adoption path a live daemon uses.
-pub(crate) async fn fixture() -> (ScratchDir, Arc<Service>, Uuid) {
+pub(crate) async fn fixture() -> (ScratchDir, Arc<Service>, Uuid) { fixture_at(false).await }
+
+/// `fixture` over a database from before the cutover, at `legacy`: for a test
+/// of the cutover itself or of pre-cutover behavior (ov-1024).
+pub(crate) async fn legacy_fixture() -> (ScratchDir, Arc<Service>, Uuid) { fixture_at(true).await }
+
+async fn fixture_at(legacy: bool) -> (ScratchDir, Arc<Service>, Uuid) {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state");
     std::fs::create_dir_all(&state).unwrap();
+    if legacy { farcooler_store::testing::legacy_database_for_tests(&state.join("farcooler.db")); }
     let repo = dir.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
 

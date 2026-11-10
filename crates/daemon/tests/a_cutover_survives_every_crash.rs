@@ -66,6 +66,7 @@ impl Runner {
             Source::Raw60 => farcooler_store::testing::write_source60(&db),
             Source::Below(registry) => farcooler_store::testing::write_source_below_60(&db, registry),
             Source::Legacy => {
+                farcooler_store::testing::legacy_database_for_tests(&db);
                 let store = Store::open(&db).unwrap();
                 let host = uuid::Uuid::now_v7();
                 let root = store.create_repository_root(host, "resources/synthetic", 0).unwrap();

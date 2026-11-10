@@ -23,7 +23,8 @@ struct Runner {
 }
 
 async fn runner() -> Runner {
-    let (dir, svc, repo) = crate::test_support::fixture().await;
+    // Legacy: `write_the_plan` writes an old landing row, which release fences.
+    let (dir, svc, repo) = crate::test_support::legacy_fixture().await;
     let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
     svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
     svc.store.set_member("carol", "Carol", &["phone-c".to_string()]).unwrap();

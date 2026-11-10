@@ -145,11 +145,25 @@ pub fn break_revoked_marks(store: &crate::Store) {
 /// Fixture-only: run one statement on the store's connection (no params).
 pub fn exec_for_tests(store: &crate::Store, sql: &str) { store.conn().execute(sql, []).unwrap(); }
 
+/// Fixture-only: the database at `db` as a pre-cutover build left it, at
+/// `legacy` (ov-1024). Creates it when absent; puts a file born released back
+/// to `legacy`; changes nothing on a file that was cut over. For a test of the
+/// cutover, before the service opens the file.
+pub fn legacy_database_for_tests(db: &Path) {
+    if db.exists() {
+        Connection::open(db).unwrap().execute("UPDATE engine_cutover_authority SET phase='legacy' WHERE singleton=1 AND phase='released' AND incarnation=0 AND manifest IS NULL", []).unwrap();
+    } else {
+        if let Some(dir) = db.parent() { std::fs::create_dir_all(dir).unwrap(); }
+        drop(crate::Store::open_fixture(db).unwrap());
+    }
+}
+
 /// Fixture-only: a transfer driven to a released engine, for a daemon fixture
 /// whose background tasks outlive its Service and so keep the owner lock. A
 /// test of what follows a cutover, not of who may start one.
 pub fn released_transfer_for_tests(db: &std::path::Path, attempt: &str) {
     use crate::engine_cutover::{JoinedOwners, transfer};
+    legacy_database_for_tests(db);
     let (store, _plan) = transfer::begin(db, JoinedOwners::unit(attempt)).unwrap();
     exec_for_tests(&store, "UPDATE engine_cutover_authority SET phase='released', incarnation=1");
     transfer::finish(db, &store, JoinedOwners::unit(attempt)).unwrap();

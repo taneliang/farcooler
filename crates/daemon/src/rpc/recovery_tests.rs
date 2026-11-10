@@ -46,7 +46,7 @@ async fn prepare(handler: &RecoveryHandler) -> std::result::Result<serde_json::V
 }
 async fn closed_root() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let service = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
+    let service = { farcooler_store::testing::legacy_database_for_tests(&dir.path().join("state/farcooler.db")); crate::service::Service::open_in(dir.path().join("state")).await.unwrap() };
     let root = service.root_dir().to_path_buf();
     drop(service);
     released(&root).await;
@@ -162,13 +162,13 @@ async fn recovery_verify_release_and_finish_run_from_the_baseline_after_a_commit
 #[tokio::test]
 async fn live_hold_drains_marks_the_attempt_and_a_caller_lost_during_the_drain_marks_nothing() {
     let dir = tempfile::tempdir().unwrap();
-    let service = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
+    let service = { farcooler_store::testing::legacy_database_for_tests(&dir.path().join("state/farcooler.db")); crate::service::Service::open_in(dir.path().join("state")).await.unwrap() };
     let db = crate::cutover_admin::database(service.root_dir());
     let refused = crate::cutover_admin::hold(&service, "a-1", || Err(crate::cutover_admin::Refused("revoked".into()))).await;
     assert!(refused.is_err());
     assert!(!startup::artifact_dir(&db).exists(), "a caller revoked during the drain leaves no mark");
     let dir = tempfile::tempdir().unwrap();
-    let service = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
+    let service = { farcooler_store::testing::legacy_database_for_tests(&dir.path().join("state/farcooler.db")); crate::service::Service::open_in(dir.path().join("state")).await.unwrap() };
     let db = crate::cutover_admin::database(service.root_dir());
     let held = crate::cutover_admin::hold(&service, "a-1", || Ok(())).await.unwrap();
     assert_eq!(held["held"], "a-1");
@@ -280,7 +280,7 @@ async fn live_prepare_refuses_the_owners_orchestrator_without_the_owners_grant()
 /// root process; a person's Prepare after it pins nobody.
 #[tokio::test]
 async fn live_prepare_holds_for_the_owners_orchestrator_and_pins_its_pane() {
-    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let (_dir, svc, repo) = crate::test_support::legacy_fixture().await;
     let (pane, pid) = a_pane(&svc, repo, farcooler_store::models::TerminalRole::Orchestrator).await;
     let answer = granted(&svc, pane);
     let workspace = svc.store.get_terminal(pane).unwrap().workspace_id.unwrap();
@@ -298,7 +298,7 @@ async fn live_prepare_holds_for_the_owners_orchestrator_and_pins_its_pane() {
 /// is forgotten, so it never outlives the attempt it was pinned for.
 #[tokio::test]
 async fn live_prepare_holds_for_a_person_and_forgets_any_pinned_pane() {
-    let (_dir, svc, _) = crate::test_support::fixture().await;
+    let (_dir, svc, _) = crate::test_support::legacy_fixture().await;
     std::fs::write(svc.root_dir().join(crate::cutover_delegate::FILE), "an earlier pane").unwrap();
     let (said, stopped) = live_prepare(&svc, None).await;
     assert_eq!(said.unwrap()["held"], "a-1");

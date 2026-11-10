@@ -31,7 +31,7 @@ fn only_a_process_inside_the_pinned_pane_is_the_orchestrator() {
 /// The owner's orchestrator in a scratch runner's main workspace, by the
 /// database: the pane, its workspace, and the database.
 async fn the_owners_orchestrator() -> (crate::test_support::ScratchDir, std::sync::Arc<crate::service::Service>, Uuid, Uuid) {
-    let (dir, svc, repo) = crate::test_support::fixture().await;
+    let (dir, svc, repo) = crate::test_support::legacy_fixture().await;
     let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
     let worktree = svc.store.list_worktrees_for_repository(repo).unwrap()[0].id;
     let pane = svc.store.create_terminal_for_test(worktree, workspace);
