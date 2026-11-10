@@ -17,7 +17,7 @@ enum TrayRows {
 
     static func sub(_ ord: Int, _ id: String, status: String = "Running", agent: String? = nil, type: String = "general-purpose", tokens: Int? = nil) -> [String: Any] {
         var sub: [String: Any] = [
-            "tool_use_id": id, "agent_type": type, "description": "ov-\(ord) the work", "background": true, "status": status,
+            "tool_use_id": id, "agent_type": type, "type_words": type == "general-purpose" ? "General purpose" : type, "description": "ov-\(ord) the work", "background": true, "status": status,
             "started_ms": 2_000 + ord, "tool_count": 3, "current_action": "Bash Run the tests", "last_ms": 3_000,
         ]
         sub["agent_id"] = agent
