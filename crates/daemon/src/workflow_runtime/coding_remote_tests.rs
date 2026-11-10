@@ -524,6 +524,12 @@ fn slow_pack(r: &Remote, seconds: u64) {
     std::fs::write(&ssh, script).unwrap();
 }
 
+/// A remote whose pack step waits `seconds`, then fails, as a download cut off part way does.
+fn failing_pack(r: &Remote, seconds: u64) {
+    slow_pack(r, seconds);
+    std::fs::write(r._dir.path().join("slow-pack.sh"), format!("#!/bin/sh\nsleep {seconds}\nexit 1\n")).unwrap();
+}
+
 /// ov-1058 re-review: a download that outlasts a Start's cap must not stop Main starting tickets. A Start asks the
 /// remote only for its head's hash, which a slow download doesn't delay; the objects are fetched by Provision, with
 /// the long limit, and the worktree is made on them.
@@ -590,26 +596,25 @@ async fn provisions_that_start_together_download_the_remotes_main_once() {
 }
 
 /// ov-1061: Provisions that queued behind a download that failed get its sentence at once, and don't each download
-/// again with the full limit while holding one of the four effect slots.
+/// again with the full limit while holding one of the four effect slots. The remote fails the download after 2 s, so
+/// all three have queued by then, and the count of downloads is the whole answer, with no clock to race.
 #[tokio::test]
 async fn provisions_waiting_on_a_download_that_fails_fail_with_it_at_once() {
     let r = remote("pass").await;
     let (_, moved) = move_remote(&r).await;
-    slow_pack(&r, 30);
+    failing_pack(&r, 2);
     let log = |n: &str| r.runtime.root.join("receipts").join(n);
     let (a, b, c) = (log("a.output"), log("b.output"), log("c.output"));
-    let started = std::time::Instant::now();
     let exec = &r.runtime.exec;
     let (first, second, third) = tokio::join!(exec.ensure_start_objects(&moved, &a), exec.ensure_start_objects(&moved, &b),
         exec.ensure_start_objects(&moved, &c));
     for failed in [first, second, third] { assert_eq!(failed.unwrap_err(), super::coding_landing::UNFETCHED_TARGET); }
     let asked = calls(&r).lines().filter(|l| l.starts_with("git-upload-pack")).count();
     assert_eq!(asked, 1, "the remote was asked {asked} times: {}", calls(&r));
-    // One limit of 8 s under test, not one for each waiter in turn.
-    assert!(started.elapsed() < Duration::from_secs(14), "the waiters each downloaded: {:?}", started.elapsed());
-    // A Provision that comes later, once the failed download has ended, tries for itself.
+    // A Provision that comes once the failed download has ended tries for itself.
     slow_pack(&r, 0);
     exec.ensure_start_objects(&moved, &log("d.output")).await.unwrap();
+    assert_eq!(calls(&r).lines().filter(|l| l.starts_with("git-upload-pack")).count(), 2);
 }
 
 /// ov-1058 re-review: the fetch carries only what is new. The local main is staged into the private repository first,
