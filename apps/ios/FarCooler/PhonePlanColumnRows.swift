@@ -277,6 +277,7 @@ struct PhoneTicketRow: View {
 
     let ticket: WireColumnTicket
     let open: (String) -> Void
+    @Environment(\.colorScheme) private var scheme
     #if DEBUG
         /// How wide its key is drawn, which a test reads off `plan-ticket-key-<key>`
         /// to tell monospace from the system font; the row itself is one element.
@@ -304,6 +305,11 @@ struct PhoneTicketRow: View {
                     if let initiative = ticket.initiative {
                         Text(initiative).font(.footnote).foregroundStyle(.secondary)
                     }
+                    // Where its engine run is, in the core's words (ov-1040).
+                    if let run = ticket.run {
+                        Text(run.text).font(.footnote)
+                            .foregroundStyle(run.attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -313,7 +319,7 @@ struct PhoneTicketRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(ticket.key), \(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title), \(ticket.detail ?? "")")
+        .accessibilityLabel("\(ticket.key), \(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title)\(ticket.run.map { ", \($0.text)" } ?? ""), \(ticket.detail ?? "")")
         .accessibilityHint("Opens the ticket")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("plan-ticket-\(ticket.key)")

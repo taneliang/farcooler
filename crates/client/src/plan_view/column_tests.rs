@@ -291,3 +291,20 @@ fn ov895_next_landing_and_pipeline_share_status_eligibility() {
     assert_eq!(c.pipeline[0].count, 1);
     assert_eq!(facts(&c), ["Next landing: 1 ticket, 1 min"]);
 }
+
+/// A ticket's engine run is said under it in the pipeline (ov-1040), in the plan's words, and a ticket with none says nothing.
+#[test]
+fn a_pipeline_ticket_carries_its_engine_run_note() {
+    let gated = json!({ "run": "r1", "phase": "WaitingApproval", "stage_kind": "\"Provision\"", "gate": "approval", "gate_principal": "owner" });
+    let c = column(
+        json!({
+            "lines": [with(line("t1", "building"), json!({ "run": gated })), line("t2", "building")],
+            "agents": [agent("b", "builder", &["t1", "t2"], "", 30)],
+        }),
+        json!({}),
+    );
+    let tickets = &c.pipeline[0].assigned;
+    let note = tickets[0].run.as_ref().expect("the run's note on ov-1");
+    assert_eq!((note.text.as_str(), note.attention), ("Prepare Workspace · Approval Required", true));
+    assert!(tickets[1].run.is_none(), "no run, no note");
+}

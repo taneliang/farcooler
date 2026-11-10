@@ -21,6 +21,7 @@ use typeshare::typeshare;
 use super::build::{LandingPhase, Reader, Stage, Status};
 use super::input::Line;
 use super::words;
+use super::Note;
 
 /// One run of a fact's text: the number is strong.
 #[typeshare]
@@ -140,6 +141,8 @@ pub struct ColumnTicket {
     pub since: i64,
     /// Assignment and stage age are ticket context, never execution or liveness.
     pub detail: Option<String>,
+    /// Where its engine run is, in the plan's words (ov-1040); none without a run.
+    pub run: Option<Note>,
 }
 
 #[typeshare]
@@ -468,6 +471,7 @@ fn pipeline(r: &Reader) -> (Vec<Group>, Vec<ColumnAgent>) {
             task: line.task.clone(), key: line.key.clone(), title: r.heading(line),
             initiative: theme.map(|t| t.name.clone()), initiative_id: theme.map(|t| t.id.clone()),
             stage: stage_of(line), since: line.stage_since, detail,
+            run: r.run_of(line).map(|run| super::build::run_note(&run)),
         }
     };
 

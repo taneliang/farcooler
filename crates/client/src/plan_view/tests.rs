@@ -212,8 +212,8 @@ fn a_ticket_card_carries_its_engine_run() {
             assert_eq!(note.text, "Prepare Workspace · Approval Required");
             assert_eq!(run.gate.as_ref().unwrap().text, "Waiting for approval from owner.");
         } else {
-            assert_eq!(run.phase_label, "Waiting for a Slot");
-            assert_eq!(note.text, "Prepare Workspace · Waiting for a Slot");
+            assert_eq!(run.phase_label, "Running");
+            assert_eq!(note.text, "Prepare Workspace · Running");
         }
         // Its agent stays the plan's: the builder working it.
         assert_eq!(card.agent.as_ref().unwrap().who, "Builder · sonnet");

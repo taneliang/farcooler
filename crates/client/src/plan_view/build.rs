@@ -321,7 +321,7 @@ impl<'a> Reader<'a> {
     /// The engine run `line` carries (ov-1040), in the plan's words. The engine's labels
     /// come in Title Case, as `workflow_presentation` writes them; `from_title` sets them
     /// in the viewer's case.
-    fn run_of(&self, line: &Line) -> Option<RunStep> {
+    pub(super) fn run_of(&self, line: &Line) -> Option<RunStep> {
         use crate::workflow_presentation::{gate_card, phase_label, stage_label, GateKind, Style as Engine};
         let run = line.run.as_ref()?;
         let phase: Phase = serde_json::from_value(serde_json::Value::String(run.phase.clone())).ok()?;
@@ -652,7 +652,7 @@ impl Reader<'_> {
 }
 
 /// "Build · Running", "Review · Review Required": the step and what it waits on.
-fn run_note(run: &RunStep) -> Note {
+pub(super) fn run_note(run: &RunStep) -> Note {
     let waits = run.gate.as_ref().map_or(run.phase_label.as_str(), |g| g.label.as_str());
     let text = match &run.step {
         Some(step) => format!("{step}{DOT}{waits}"),

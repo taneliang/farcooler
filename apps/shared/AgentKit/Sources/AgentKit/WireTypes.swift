@@ -198,6 +198,33 @@ public enum WireRole: String, Codable, Equatable, Sendable {
 	case agent
 }
 
+public enum WireNoteKind: String, Codable, Equatable, Sendable {
+	/// The pull request's stage.
+	case stage
+	/// The engine run's step and gate.
+	case run
+	/// Waits on the owner, or hasn't moved.
+	case warning
+	case overBudget = "over_budget"
+}
+
+/// A line under a ticket's second line.
+public struct WireNote: Codable, Equatable, Sendable {
+	public var kind: WireNoteKind
+	public var text: String
+	/// Drawn in amber.
+	public var attention: Bool
+	/// Every word of it, for a hover or a long press.
+	public var help: String?
+
+	public init(kind: WireNoteKind, text: String, attention: Bool, help: String?) {
+		self.kind = kind
+		self.text = text
+		self.attention = attention
+		self.help = help
+	}
+}
+
 public struct WireColumnTicket: Codable, Equatable, Sendable {
 	public var task: String
 	public var key: String
@@ -211,8 +238,10 @@ public struct WireColumnTicket: Codable, Equatable, Sendable {
 	public var since: Int64
 	/// Assignment and stage age are ticket context, never execution or liveness.
 	public var detail: String?
+	/// Where its engine run is, in the plan's words (ov-1040); none without a run.
+	public var run: WireNote?
 
-	public init(task: String, key: String, title: String, initiative: String?, initiativeId: String?, stage: WirePipeStage, since: Int64, detail: String?) {
+	public init(task: String, key: String, title: String, initiative: String?, initiativeId: String?, stage: WirePipeStage, since: Int64, detail: String?, run: WireNote?) {
 		self.task = task
 		self.key = key
 		self.title = title
@@ -221,6 +250,7 @@ public struct WireColumnTicket: Codable, Equatable, Sendable {
 		self.stage = stage
 		self.since = since
 		self.detail = detail
+		self.run = run
 	}
 }
 
@@ -520,33 +550,6 @@ public enum WireMark: String, Codable, Equatable, Sendable {
 	case landed
 	case dropped
 	case unknown
-}
-
-public enum WireNoteKind: String, Codable, Equatable, Sendable {
-	/// The pull request's stage.
-	case stage
-	/// The engine run's step and gate.
-	case run
-	/// Waits on the owner, or hasn't moved.
-	case warning
-	case overBudget = "over_budget"
-}
-
-/// A line under a ticket's second line.
-public struct WireNote: Codable, Equatable, Sendable {
-	public var kind: WireNoteKind
-	public var text: String
-	/// Drawn in amber.
-	public var attention: Bool
-	/// Every word of it, for a hover or a long press.
-	public var help: String?
-
-	public init(kind: WireNoteKind, text: String, attention: Bool, help: String?) {
-		self.kind = kind
-		self.text = text
-		self.attention = attention
-		self.help = help
-	}
 }
 
 public enum WirePhase: String, Codable, Equatable, Sendable {

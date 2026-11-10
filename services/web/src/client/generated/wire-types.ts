@@ -136,6 +136,26 @@ export enum Role {
 	Agent = "agent",
 }
 
+export enum NoteKind {
+	/** The pull request's stage. */
+	Stage = "stage",
+	/** The engine run's step and gate. */
+	Run = "run",
+	/** Waits on the owner, or hasn't moved. */
+	Warning = "warning",
+	OverBudget = "over_budget",
+}
+
+/** A line under a ticket's second line. */
+export interface Note {
+	kind: NoteKind;
+	text: string;
+	/** Drawn in amber. */
+	attention: boolean;
+	/** Every word of it, for a hover or a long press. */
+	help?: string | null;
+}
+
 export interface ColumnTicket {
 	task: string;
 	key: string;
@@ -149,6 +169,8 @@ export interface ColumnTicket {
 	since: number;
 	/** Assignment and stage age are ticket context, never execution or liveness. */
 	detail?: string | null;
+	/** Where its engine run is, in the plan's words (ov-1040); none without a run. */
+	run?: Note | null;
 }
 
 export interface ColumnAgent {
@@ -342,26 +364,6 @@ export enum Mark {
 	Landed = "landed",
 	Dropped = "dropped",
 	Unknown = "unknown",
-}
-
-export enum NoteKind {
-	/** The pull request's stage. */
-	Stage = "stage",
-	/** The engine run's step and gate. */
-	Run = "run",
-	/** Waits on the owner, or hasn't moved. */
-	Warning = "warning",
-	OverBudget = "over_budget",
-}
-
-/** A line under a ticket's second line. */
-export interface Note {
-	kind: NoteKind;
-	text: string;
-	/** Drawn in amber. */
-	attention: boolean;
-	/** Every word of it, for a hover or a long press. */
-	help?: string | null;
 }
 
 export enum Phase {

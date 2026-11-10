@@ -168,6 +168,32 @@ enum class Role(val string: String) {
 }
 
 @Serializable
+enum class NoteKind(val string: String) {
+	/// The pull request's stage.
+	@SerialName("stage")
+	Stage("stage"),
+	/// The engine run's step and gate.
+	@SerialName("run")
+	Run("run"),
+	/// Waits on the owner, or hasn't moved.
+	@SerialName("warning")
+	Warning("warning"),
+	@SerialName("over_budget")
+	OverBudget("over_budget"),
+}
+
+/// A line under a ticket's second line.
+@Serializable
+data class Note (
+	val kind: NoteKind,
+	val text: String,
+	/// Drawn in amber.
+	val attention: Boolean,
+	/// Every word of it, for a hover or a long press.
+	val help: String? = null
+)
+
+@Serializable
 data class ColumnTicket (
 	val task: String,
 	val key: String,
@@ -180,7 +206,9 @@ data class ColumnTicket (
 	/// When it entered its stage, in ms; 0 when nothing says.
 	val since: Long,
 	/// Assignment and stage age are ticket context, never execution or liveness.
-	val detail: String? = null
+	val detail: String? = null,
+	/// Where its engine run is, in the plan's words (ov-1040); none without a run.
+	val run: Note? = null
 )
 
 @Serializable
@@ -415,32 +443,6 @@ enum class Mark(val string: String) {
 	@SerialName("unknown")
 	Unknown("unknown"),
 }
-
-@Serializable
-enum class NoteKind(val string: String) {
-	/// The pull request's stage.
-	@SerialName("stage")
-	Stage("stage"),
-	/// The engine run's step and gate.
-	@SerialName("run")
-	Run("run"),
-	/// Waits on the owner, or hasn't moved.
-	@SerialName("warning")
-	Warning("warning"),
-	@SerialName("over_budget")
-	OverBudget("over_budget"),
-}
-
-/// A line under a ticket's second line.
-@Serializable
-data class Note (
-	val kind: NoteKind,
-	val text: String,
-	/// Drawn in amber.
-	val attention: Boolean,
-	/// Every word of it, for a hover or a long press.
-	val help: String? = null
-)
 
 @Serializable
 enum class Phase(val string: String) {
