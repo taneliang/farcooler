@@ -22,6 +22,12 @@ const GATE: &str = r#"elif stage == 'gate':
         subprocess.check_call(['/usr/bin/git', 'clone', '-q', '-b', 'main', os.environ['REMOTE'], d])
         pathlib.Path(d, 'other.txt').write_text('other lander')
         g('add', 'other.txt'); g('-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'other lander'); g('push', '-q', 'origin', 'HEAD:refs/heads/main')
+    if mode == 'path-join':
+        tools = pathlib.Path.cwd() / 'node_modules' / '.bin'
+        tools.mkdir(parents=True); (tools / 'tool').write_text('#!/bin/sh\nexit 0\n'); (tools / 'tool').chmod(0o755)
+        found = subprocess.call('tool', shell=True, env={'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'})
+        __import__('shutil').rmtree(tools.parent)
+        if found != 0: sys.exit(found)
     assert any(p.read_text().startswith('candidate') for p in pathlib.Path('.').glob('*.txt'))
 "#;
 
@@ -637,4 +643,23 @@ async fn the_wire_settles_a_lost_push_for_the_exact_run_and_refuses_a_stale_one(
     let settled = runtime.settle_wire("w", &group, &item.run, &item.pin, true, state.epoch).await.unwrap();
     assert!(settled.pointer("/receipt/result/Ok").is_some(), "{settled}");
     until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+}
+
+/// The gate runs a tool from `node_modules/.bin`, found through PATH as npm finds it. A group that was mid-flight in a
+/// tree under the old `tree-wf1:<hex>` name is folded again under the new one, so its gate can find it (ov-1081).
+#[tokio::test]
+async fn a_gate_finds_a_tool_on_a_path_through_its_tree_even_after_an_old_tree() {
+    let (_dir, mut runtime) = lander("path-join").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    let first = remote_head(&runtime).await;
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    let state = until(&mut runtime, |s| s.items.values().any(|i| i.group_of.is_some())).await;
+    let group = group_id(&state);
+    let legacy = runtime.root.join(format!("tree-{}", digest(&("w", &group))));
+    assert!(!legacy.exists() && !runtime.item_tree("w", &group).exists(), "planted before the fold ran");
+    adapters::git(&runtime.repository(), &["worktree", "add", "--detach", legacy.to_str().unwrap(), &first]).await.unwrap();
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert_ne!(remote_head(&runtime).await, first, "the gate passed and the group landed");
+    assert!(!legacy.exists(), "the fold removed the tree under the old name");
 }

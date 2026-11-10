@@ -430,7 +430,7 @@ async fn a_remote_that_cant_be_read_at_start_stops_the_ticket_and_says_why() {
     let provision = r.runtime.store.workflow_outbox("w").unwrap().into_iter()
         .find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
     assert!(!r.runtime.root.join(format!("base-{}.json", digest(&("w", &provision.effect.item)))).exists(), "no base was pinned");
-    assert!(!r.runtime.root.join(format!("tree-{}", digest(&("w", &provision.effect.item)))).exists(), "no tree was made");
+    assert!(!r.runtime.item_tree("w", &provision.effect.item).exists(), "no tree was made");
     assert_eq!(r.runtime.state("w").unwrap().unwrap().items["one"].failure.as_deref(), Some(super::coding_landing::UNREAD_TARGET), "the ticket says why");
 }
 
@@ -573,7 +573,7 @@ async fn a_download_that_outlasts_its_limit_fails_the_ticket_with_a_sentence() {
     assert_eq!(outbox(&r.runtime, StageKind::Build), 0, "nothing was built");
     let item = &provisions[0].effect.item;
     assert_eq!(r.runtime.item_base("w", &provisions[0].effect).unwrap(), moved, "the base was the remote's main");
-    assert!(!r.runtime.root.join(format!("tree-{}", digest(&("w", item)))).exists(), "no tree was made");
+    assert!(!r.runtime.item_tree("w", item).exists(), "no tree was made");
     let branches = adapters::git(&config.repository, &["for-each-ref", "--format=%(refname)", "refs/heads/wf-*"]).await.unwrap();
     assert!(branches.is_empty(), "no branch was made: {branches}");
     // A restart reads the same answer from what the failed step kept, without downloading again.

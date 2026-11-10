@@ -254,7 +254,7 @@ async fn workflow_coding_landing_cas_refuses_changed_base_and_retains_uncertaint
     let (_dir, mut runtime) = configured(false, "pass").await;
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     for time in 2..6 { runtime.pump(time).await.unwrap(); }
-    let tree = runtime.root.join(format!("tree-{}", digest(&("w", "one"))));
+    let tree = runtime.item_tree("w", "one");
     let candidate = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
     // An unrelated actor has already moved the target; no CAS acceptance belongs
     // to this operation, even when the current target happens to equal candidate.

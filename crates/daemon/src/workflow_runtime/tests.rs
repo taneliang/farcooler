@@ -619,3 +619,43 @@ async fn the_sweep_skips_refused_runs_and_asks_once_about_the_rest() {
     assert!(items["follower"].cancel_reason.is_none() && items["pushed"].cancel_reason.is_none());
     assert_eq!(after - before, 1, "four sweeps: the refused run is asked about once, the follower and the pushed group never");
 }
+
+/// Tools join a tree's folders into PATH-like lists: cargo puts `<tree>/target/debug/deps` in
+/// DYLD_FALLBACK_LIBRARY_PATH, npm puts `<tree>/node_modules/.bin` on PATH. A `:` in any folder the engine
+/// makes splits that entry in two, and every gate run there failed (ov-1081).
+#[tokio::test]
+async fn workflow_runtime_engine_folders_join_into_a_path_list() {
+    let (_dir, mut runtime) = fixture().await;
+    enqueue(&mut runtime, "w", "coding", coding_definition(true));
+    assert_eq!(finish(&mut runtime, "w").await.items["coding"].phase, Phase::Done);
+    let tree = runtime.item_tree("w", "coding");
+    assert!(tree.is_dir(), "the run made its tree");
+    let deps = tree.join("target/debug/deps");
+    let joined = std::env::join_paths([deps.clone(), PathBuf::from("/usr/lib")]).expect("cargo's join of the tree's deps");
+    assert_eq!(std::env::split_paths(&joined).next(), Some(deps));
+    let mut folders = vec![runtime.root.clone()];
+    while let Some(folder) = folders.pop() {
+        assert!(!folder.to_string_lossy().contains(':'), "{} holds a PATH separator", folder.display());
+        // Inside a repository or worktree, the names are git's and the project's.
+        if folder.join(".git").exists() || folder.join("HEAD").is_file() { continue; }
+        for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+            if entry.file_type().unwrap().is_dir() { folders.push(entry.path()); }
+        }
+    }
+}
+
+/// A tree made before ov-1081 still answers to its old name: an agent or gate already running in it reports
+/// and reads that path, so the run finishes there rather than in a second, empty tree.
+#[tokio::test]
+async fn workflow_runtime_a_tree_made_under_the_old_name_is_kept_until_made_again() {
+    let (_dir, mut runtime) = fixture().await;
+    enqueue(&mut runtime, "w", "coding", coding_definition(true));
+    runtime.pump(2).await.unwrap(); // provision
+    let tree = runtime.item_tree("w", "coding");
+    let legacy = runtime.root.join(format!("tree-{}", digest(&("w", "coding"))));
+    assert_ne!(tree, legacy, "a new tree has the new name");
+    adapters::git(&runtime.root.join("repo"), &["worktree", "move", tree.to_str().unwrap(), legacy.to_str().unwrap()]).await.unwrap();
+    assert_eq!(runtime.item_tree("w", "coding"), legacy);
+    assert_eq!(finish(&mut runtime, "w").await.items["coding"].phase, Phase::Done);
+    assert!(!tree.exists(), "no second tree was made");
+}

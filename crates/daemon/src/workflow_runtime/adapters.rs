@@ -58,6 +58,10 @@ pub(super) async fn git(tree: &Path, args: &[&str]) -> Result<String> {
     if !output.ok { return Err(Error::Refused("git refused fixture operation")); }
     Ok(output.stdout.trim().into())
 }
+/// A digest as part of a folder the engine makes: `wf1-<hex>`, not `wf1:<hex>`. Tools join a tree's folders into
+/// PATH, DYLD_FALLBACK_LIBRARY_PATH and lists like them, where `:` splits the entry in two: cargo refused to build
+/// and npm couldn't find `node_modules/.bin` in every gate (ov-1081).
+pub(super) fn folder_name(digest: &str) -> String { digest.replace(':', "-") }
 impl Exec {
     fn base_path(&self, workspace: &str, effect: &Effect) -> PathBuf {
         self.root.join(format!("base-{}.json", digest(&(workspace, &effect.item))))
@@ -137,7 +141,16 @@ impl Exec {
     pub(super) fn tree(&self, binding: &Binding) -> PathBuf {
         // A worktree the orchestrator named at Start (ov-967), or the run's private one.
         if let Some(tree) = &binding.effect.tree { return PathBuf::from(&tree.path); }
-        self.root.join(format!("tree-{}", digest(&(&binding.workspace, &binding.effect.item))))
+        self.item_tree(&binding.workspace, &binding.effect.item)
+    }
+    /// A run's private tree, `tree-wf1-<hex>`. One made before ov-1081 as `tree-wf1:<hex>` keeps that name while it
+    /// stands: an agent or gate already running there reports and reads that path. A fold makes its tree anew, so a
+    /// group's next fold moves it to the new name (`coding_verbs::fold`).
+    pub(super) fn item_tree(&self, workspace: &str, item: &str) -> PathBuf {
+        let key = digest(&(workspace, item));
+        let tree = self.root.join(format!("tree-{}", folder_name(&key)));
+        let legacy = self.root.join(format!("tree-{key}"));
+        if !tree.exists() && legacy.exists() { legacy } else { tree }
     }
     pub(super) async fn git_recorded(&self, binding: &Binding, tree: &Path, args: &[&str]) -> Result<String> {
         let result = crate::git::git(tree, args).await;

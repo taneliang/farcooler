@@ -280,13 +280,15 @@ impl Exec {
         let base = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("fold needs the base to build on"))?;
         let members = &binding.effect.members;
         if members.is_empty() || members.iter().any(|m| !sha(&m.candidate)) { return Err(Error::Refused("fold needs pinned members")); }
-        let (repo, tree) = (self.repository(), self.tree(binding));
-        let tree_path = tree.to_string_lossy().into_owned();
+        let (repo, mut tree) = (self.repository(), self.tree(binding));
         let branch = format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]);
-        if tree.try_exists()? {
-            self.try_git(binding, &repo, &["worktree", "remove", "--force", &tree_path]).await?;
+        // Until none is left: a tree under its name before ov-1081 goes too, so this one is made under the new name.
+        while tree.try_exists()? {
+            self.try_git(binding, &repo, &["worktree", "remove", "--force", &tree.to_string_lossy()]).await?;
             if tree.try_exists()? { std::fs::remove_dir_all(&tree)?; }
+            tree = self.tree(binding);
         }
+        let tree_path = tree.to_string_lossy().into_owned();
         self.try_git(binding, &repo, &["worktree", "prune"]).await?;
         if self.try_git(binding, &repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await?.0 {
             self.git_recorded(binding, &repo, &["branch", "-D", &branch]).await?;
