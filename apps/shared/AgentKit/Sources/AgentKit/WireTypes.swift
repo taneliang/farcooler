@@ -353,6 +353,19 @@ public struct WireColumn: Codable, Equatable, Sendable {
 	}
 }
 
+/// One line under "Details". `whole` is the whole value when `value` is a shortened id.
+public struct WireDetailRow: Codable, Equatable, Sendable {
+	public var title: String
+	public var value: String
+	public var whole: String?
+
+	public init(title: String, value: String, whole: String?) {
+		self.title = title
+		self.value = value
+		self.whole = whole
+	}
+}
+
 /// A pull request's stage on a ticket's page.
 public struct WireDetailStage: Codable, Equatable, Sendable {
 	/// The stage in the Plan's words, leading with the problem when a person has to act.
@@ -892,6 +905,37 @@ public struct WireReasonCard: Codable, Equatable, Sendable {
 	}
 }
 
+public struct WireStepRow: Codable, Equatable, Sendable {
+	public var label: String
+	public var state: String
+
+	public init(label: String, state: String) {
+		self.label = label
+		self.state = state
+	}
+}
+
+public struct WireRunPage: Codable, Equatable, Sendable {
+	/// The ticket the run is for.
+	public var ticket: String
+	/// How the run stands or ended: "Cancelled", "Failed", "Running".
+	public var outcome: String
+	/// Why, as a sentence.
+	public var reason: String
+	public var steps: [WireStepRow]
+	public var detailsLabel: String
+	public var details: [WireDetailRow]
+
+	public init(ticket: String, outcome: String, reason: String, steps: [WireStepRow], detailsLabel: String, details: [WireDetailRow]) {
+		self.ticket = ticket
+		self.outcome = outcome
+		self.reason = reason
+		self.steps = steps
+		self.detailsLabel = detailsLabel
+		self.details = details
+	}
+}
+
 /// Accepted borrowed text and the exact authenticated observation it describes.
 public struct WireReworkDecision: Codable, Equatable, Sendable {
 	public var id: String
@@ -935,11 +979,13 @@ public struct WireRunCard: Codable, Equatable, Sendable {
 	public var attempt: UInt8
 	public var fence: Int64
 	public var reasons: [WireReasonCard]
+	/// What the run's page shows by default; the fields above stay for the actions and the stops.
+	public var page: WireRunPage
 	public var actions: [WireAction]
 	public var forms: [WireActionForm]?
 	public var reworkHistory: [WireReworkDecision]?
 
-	public init(label: String, phaseLabel: String, item: String, run: String, definitionPin: String, policyPin: String, phase: WirePhase, stages: [WireStageCard], stage: WireStageCard?, gate: WireGateCard?, candidate: String?, latestEvidence: WireEvidence?, pendingEffect: String?, iteration: UInt8, reworksRemaining: UInt8, attempt: UInt8, fence: Int64, reasons: [WireReasonCard], actions: [WireAction], forms: [WireActionForm]?, reworkHistory: [WireReworkDecision]?) {
+	public init(label: String, phaseLabel: String, item: String, run: String, definitionPin: String, policyPin: String, phase: WirePhase, stages: [WireStageCard], stage: WireStageCard?, gate: WireGateCard?, candidate: String?, latestEvidence: WireEvidence?, pendingEffect: String?, iteration: UInt8, reworksRemaining: UInt8, attempt: UInt8, fence: Int64, reasons: [WireReasonCard], page: WireRunPage, actions: [WireAction], forms: [WireActionForm]?, reworkHistory: [WireReworkDecision]?) {
 		self.label = label
 		self.phaseLabel = phaseLabel
 		self.item = item
@@ -958,6 +1004,7 @@ public struct WireRunCard: Codable, Equatable, Sendable {
 		self.attempt = attempt
 		self.fence = fence
 		self.reasons = reasons
+		self.page = page
 		self.actions = actions
 		self.forms = forms
 		self.reworkHistory = reworkHistory

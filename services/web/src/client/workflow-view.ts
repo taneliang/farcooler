@@ -46,21 +46,17 @@ export function renderWorkflow(root: HTMLElement, view: WorkflowView, board: Wor
 }
 const drafts = new WeakMap<WorkflowBoard, Map<string, { value: string; start: number; end: number }>>()
 function runCard(run: WorkflowRun, view: WorkflowView, board: WorkflowBoard): HTMLElement {
-  const card = el('article'); card.append(el('h2', run.label), el('p', run.phaseLabel))
-  const fields = el('dl')
-  // An absent optional field is left out of the JSON, so it is undefined here, never null.
-  const field = (name: string, value: string | number | bigint | null | undefined) => {
-    if (value != null) fields.append(el('dt', name), el('dd', String(value)))
+  const card = el('article'); card.append(el('h2', run.page.ticket), el('h3', run.page.outcome), el('p', run.page.reason))
+  for (const step of run.page.steps) card.append(el('p', `${step.label} · ${step.state}`))
+  const details = el('details'); details.append(el('summary', run.page.detailsLabel))
+  for (const row of run.page.details) {
+    const line = el('p', `${row.title}: ${row.value}`)
+    const whole = row.whole
+    if (whole) line.append(button('Copy', () => void navigator.clipboard?.writeText(whole)))
+    details.append(line)
   }
-  field('Item', run.item); field('Run', run.run); field('Definition', run.definitionPin); field('Policy', run.policyPin)
-  field('Candidate', run.candidate); field('Pending Effect', run.pendingEffect)
-  field('Iteration', run.iteration); field('Attempt', run.attempt); field('Fence', run.fence); field('Reworks Remaining', run.reworksRemaining)
-  for (const [name, value] of Object.entries(run.latestEvidence ?? {})) field(`Evidence ${name}`, value as string)
-  card.append(fields)
-  if (run.stage) card.append(el('h3', run.stage.label), el('p', run.stage.progressionLabel))
+  card.append(details)
   if (run.gate) card.append(el('h3', run.gate.label), el('p', run.gate.text), el('p', run.gate.principal))
-  for (const stage of run.stages) card.append(el('p', `${stage.id} · ${stage.label} · ${stage.progressionLabel}`))
-  for (const reason of run.reasons) card.append(el('h3', reason.label), el('p', reason.text))
   const actions = el('div'); actions.className = 'actions'
   for (const history of run.reworkHistory ?? []) card.append(el('p', `${history.principal} · ${history.iteration}`), el('pre', history.reason))
   for (const action of run.actions) {

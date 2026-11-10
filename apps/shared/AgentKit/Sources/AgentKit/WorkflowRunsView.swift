@@ -1,5 +1,10 @@
 #if canImport(SwiftUI)
 import SwiftUI
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 private struct WorkflowPortKey: EnvironmentKey {
     static let defaultValue: WorkflowPort? = nil
@@ -112,40 +117,34 @@ public struct WorkflowRunsView: View {
             else { model.disconnect() }
         }
     }
-    private func field(_ title: String, _ value: String?) -> some View {
-        Group {
-            if let value {
-                VStack(alignment: .leading) {
-                    Text(title).font(.caption).foregroundStyle(.quietInk)
-                    Text(value).textSelection(.enabled)
-                }
-            }
-        }
+    private func copy(_ text: String) {
+        #if os(macOS)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        #elseif os(iOS)
+            UIPasteboard.general.string = text
+        #endif
     }
     private func card(_ run: WireRunCard) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(run.label).font(.title2).accessibilityAddTraits(.isHeader)
-            Text(run.phaseLabel)
-            field("Item", run.item); field("Run", run.run)
-            field("Definition", run.definitionPin); field("Policy", run.policyPin)
-            field("Candidate", run.candidate); field("Pending Effect", run.pendingEffect)
+            Text(run.page.ticket).font(.title2).accessibilityAddTraits(.isHeader)
+            Text(run.page.outcome).font(.headline)
+            Text(run.page.reason)
             if run.pendingEffect != nil, watch != nil {
                 Button("Watch Agent") { watching = run.item }
             }
-            field("Iteration", String(run.iteration)); field("Attempt", String(run.attempt))
-            field("Fence", String(run.fence)); field("Reworks Remaining", String(run.reworksRemaining))
-            if let evidence = run.latestEvidence {
-                field("Evidence Candidate", evidence.candidate); field("Evidence Manifest", evidence.manifest)
-                field("Evidence Receipt", evidence.receipt); field("Evidence Policy", evidence.policy_pin)
+            ForEach(Array(run.page.steps.enumerated()), id: \.offset) { _, step in
+                Text("\(step.label) · \(step.state)")
             }
-            if let stage = run.stage { Text(stage.label).font(.headline); Text(stage.progressionLabel) }
-            if let gate = run.gate { Text(gate.label).font(.headline); Text(gate.text); field("Principal", gate.principal) }
-            ForEach(Array(run.stages.enumerated()), id: \.offset) { _, stage in
-                Text("\(stage.id) · \(stage.label) · \(stage.progressionLabel)")
+            DisclosureGroup(run.page.detailsLabel) {
+                ForEach(Array(run.page.details.enumerated()), id: \.offset) { _, row in
+                    HStack {
+                        Text("\(row.title): \(row.value)").textSelection(.enabled)
+                        if let whole = row.whole { Button("Copy") { copy(whole) }.accessibilityLabel("Copy \(row.title)") }
+                    }
+                }
             }
-            ForEach(Array(run.reasons.enumerated()), id: \.offset) { _, reason in
-                Text(reason.label).font(.headline); Text(reason.text)
-            }
+            if let gate = run.gate { Text(gate.label).font(.headline); Text(gate.text); Text(gate.principal) }
             ForEach(Array((run.reworkHistory ?? []).enumerated()), id: \.offset) { _, history in
                 Text("\(history.principal) · \(history.iteration)")
                 Text(history.reason).textSelection(.enabled)

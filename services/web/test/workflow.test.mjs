@@ -38,8 +38,10 @@ for (const fixture of fixtures) await test(`Rust ${fixture.name} renders shared 
   await board.refresh(); board.select(presentation.runs[0].item)
   const root = new Element('div'); renderWorkflow(root, view, board)
   const run = presentation.runs[0]; const text = allText(root)
-  for (const value of [run.label, run.phaseLabel, run.run, run.definitionPin, run.policyPin, ...run.reasons.flatMap(r => [r.label, r.text])]) assert(text.includes(value))
-  for (const value of Object.values(run.latest_evidence ?? {})) assert(text.includes(value))
+  const { page } = run
+  for (const value of [page.ticket, page.outcome, page.reason, page.detailsLabel, ...page.steps.flatMap(s => [s.label, s.state])]) assert(text.includes(value))
+  for (const value of [run.definitionPin, run.policyPin, `Fence ${run.fence}`, 'Iteration']) assert(!text.includes(value), `${value} is not shown by default`)
+  for (const row of page.details) assert(text.includes(`${row.title}: ${row.value}`))
   for (const action of run.actions) {
     await board.dispatch(run.item, action)
     assert.strictEqual(sent.at(-1)[2], action)

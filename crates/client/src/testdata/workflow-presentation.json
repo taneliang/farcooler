@@ -155,6 +155,59 @@
             "iteration": 0,
             "label": "Workflow Run",
             "latestEvidence": null,
+            "page": {
+              "details": [
+                {
+                  "title": "Run",
+                  "value": "ba5b9a98",
+                  "whole": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad"
+                },
+                {
+                  "title": "Workflow",
+                  "value": "25734e5f",
+                  "whole": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4"
+                },
+                {
+                  "title": "Operation",
+                  "value": "953e6303",
+                  "whole": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c"
+                },
+                {
+                  "title": "Attempt",
+                  "value": "1"
+                }
+              ],
+              "detailsLabel": "Details",
+              "outcome": "Running",
+              "reason": "The engine is executing this stage.",
+              "steps": [
+                {
+                  "label": "Prepare Workspace",
+                  "state": "Running"
+                },
+                {
+                  "label": "Build",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Run Checks",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Review",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Land Changes",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Check CI",
+                  "state": "Not Started"
+                }
+              ],
+              "ticket": "item"
+            },
             "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
             "phase": "Running",
             "phaseLabel": "Running",
@@ -421,6 +474,54 @@
             "iteration": 0,
             "label": "Workflow Run",
             "latestEvidence": null,
+            "page": {
+              "details": [
+                {
+                  "title": "Run",
+                  "value": "44c33962",
+                  "whole": "wf1:44c33962a5e1c3994dd7cf9ee3b33c7fd4bc7dba64a8d229360dcf782ca8370a"
+                },
+                {
+                  "title": "Workflow",
+                  "value": "f97b17e1",
+                  "whole": "wf1:f97b17e10cb183f0ee3e9d8bf1fde8b0142d9f669baa54c22a033e6e4ab42010"
+                },
+                {
+                  "title": "Attempt",
+                  "value": "1"
+                }
+              ],
+              "detailsLabel": "Details",
+              "outcome": "Awaiting Approval",
+              "reason": "This stage is waiting for its configured approval.",
+              "steps": [
+                {
+                  "label": "Prepare Workspace",
+                  "state": "Awaiting Approval"
+                },
+                {
+                  "label": "Build",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Run Checks",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Review",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Land Changes",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Check CI",
+                  "state": "Not Started"
+                }
+              ],
+              "ticket": "item"
+            },
             "pendingEffect": null,
             "phase": "WaitingApproval",
             "phaseLabel": "Awaiting Approval",
@@ -700,6 +801,63 @@
               "policy_pin": "policy",
               "receipt": "receipt-4"
             },
+            "page": {
+              "details": [
+                {
+                  "title": "Run",
+                  "value": "58a37a47",
+                  "whole": "wf1:58a37a47d788ba6e03b25f93f23a3076ac12c0e825248b24e7b4de118ffb9dd2"
+                },
+                {
+                  "title": "Workflow",
+                  "value": "25734e5f",
+                  "whole": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4"
+                },
+                {
+                  "title": "Operation",
+                  "value": "26d7d6a4",
+                  "whole": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94"
+                },
+                {
+                  "title": "Attempt",
+                  "value": "1"
+                },
+                {
+                  "title": "Evidence",
+                  "value": "receipt-4"
+                }
+              ],
+              "detailsLabel": "Details",
+              "outcome": "Running",
+              "reason": "The engine is executing this stage.",
+              "steps": [
+                {
+                  "label": "Prepare Workspace",
+                  "state": "Done"
+                },
+                {
+                  "label": "Build",
+                  "state": "Running"
+                },
+                {
+                  "label": "Run Checks",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Review",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Land Changes",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Check CI",
+                  "state": "Not Started"
+                }
+              ],
+              "ticket": "item"
+            },
             "pendingEffect": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94",
             "phase": "Running",
             "phaseLabel": "Running",
@@ -965,6 +1123,67 @@
               "policy_pin": "policy",
               "receipt": "receipt-2"
             },
+            "page": {
+              "details": [
+                {
+                  "title": "Run",
+                  "value": "19540cdd",
+                  "whole": "wf1:19540cdd3703a146d6c1fb8cf9a1f62f8ba501e1504383196170f71c554350bb"
+                },
+                {
+                  "title": "Workflow",
+                  "value": "25734e5f",
+                  "whole": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4"
+                },
+                {
+                  "title": "Candidate",
+                  "value": "candidate"
+                },
+                {
+                  "title": "Operation",
+                  "value": "da4c770b",
+                  "whole": "wf1:da4c770b650e0ee3c7f59e5de7a9b5da8bf6acced6d71a3644ca7eef303c7b46"
+                },
+                {
+                  "title": "Attempt",
+                  "value": "1"
+                },
+                {
+                  "title": "Evidence",
+                  "value": "receipt-2"
+                }
+              ],
+              "detailsLabel": "Details",
+              "outcome": "Outcome Uncertain",
+              "reason": "The operation outcome needs inspection before execution can continue.",
+              "steps": [
+                {
+                  "label": "Prepare Workspace",
+                  "state": "Done"
+                },
+                {
+                  "label": "Build",
+                  "state": "Done"
+                },
+                {
+                  "label": "Run Checks",
+                  "state": "Outcome Uncertain"
+                },
+                {
+                  "label": "Review",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Land Changes",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Check CI",
+                  "state": "Not Started"
+                }
+              ],
+              "ticket": "item"
+            },
             "pendingEffect": "wf1:da4c770b650e0ee3c7f59e5de7a9b5da8bf6acced6d71a3644ca7eef303c7b46",
             "phase": "Uncertain",
             "phaseLabel": "Outcome Uncertain",
@@ -1217,6 +1436,68 @@
               "policy_pin": "policy",
               "receipt": "receipt-2"
             },
+            "page": {
+              "details": [
+                {
+                  "title": "Run",
+                  "value": "7badf976",
+                  "whole": "wf1:7badf97655f38b541eff64d4b27b5b9d09f83d87f7549b9f66d02cfecca13679"
+                },
+                {
+                  "title": "Workflow",
+                  "value": "25734e5f",
+                  "whole": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4"
+                },
+                {
+                  "title": "Candidate",
+                  "value": "new-cand",
+                  "whole": "new-candidate"
+                },
+                {
+                  "title": "Operation",
+                  "value": "03f9d84c",
+                  "whole": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d"
+                },
+                {
+                  "title": "Attempt",
+                  "value": "1"
+                },
+                {
+                  "title": "Evidence",
+                  "value": "receipt-2"
+                }
+              ],
+              "detailsLabel": "Details",
+              "outcome": "Running",
+              "reason": "The engine is executing this stage.",
+              "steps": [
+                {
+                  "label": "Prepare Workspace",
+                  "state": "Done"
+                },
+                {
+                  "label": "Build",
+                  "state": "Done"
+                },
+                {
+                  "label": "Run Checks",
+                  "state": "Running"
+                },
+                {
+                  "label": "Review",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Land Changes",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Check CI",
+                  "state": "Not Started"
+                }
+              ],
+              "ticket": "item"
+            },
             "pendingEffect": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d",
             "phase": "Running",
             "phaseLabel": "Running",
@@ -1455,6 +1736,54 @@
             "iteration": 0,
             "label": "Workflow Run",
             "latestEvidence": null,
+            "page": {
+              "details": [
+                {
+                  "title": "Run",
+                  "value": "ba5b9a98",
+                  "whole": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad"
+                },
+                {
+                  "title": "Workflow",
+                  "value": "25734e5f",
+                  "whole": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4"
+                },
+                {
+                  "title": "Attempt",
+                  "value": "1"
+                }
+              ],
+              "detailsLabel": "Details",
+              "outcome": "Cancelled",
+              "reason": "This run was cancelled because its board was deleted. Nobody can approve it now, and its worktree was left as it was.",
+              "steps": [
+                {
+                  "label": "Prepare Workspace",
+                  "state": "Cancelled"
+                },
+                {
+                  "label": "Build",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Run Checks",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Review",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Land Changes",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Check CI",
+                  "state": "Not Started"
+                }
+              ],
+              "ticket": "item"
+            },
             "pendingEffect": null,
             "phase": "Cancelled",
             "phaseLabel": "Cancelled",

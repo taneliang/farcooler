@@ -423,3 +423,43 @@ fn a_request_without_a_style_is_refused() {
     let refused: Response = serde_json::from_str(&json(&request.to_string())).unwrap();
     assert_eq!(refused.error, Some(Error::Invalid));
 }
+
+/// ov-1060: a run's page leads with the ticket, the outcome and the reason, and shows no hash, stage id or counter by default.
+#[test]
+fn a_runs_page_reads_like_a_person_wrote_it() {
+    let state = enqueue(Definition::coding());
+    let cancelled = apply(&state, Command::Cancel { item: "item".into(), reason: Some("This run was cancelled because its board was deleted.".into()) }, Grant::Controller);
+    let page = project(&cancelled, &auth(), STYLE).unwrap().runs.remove(0).page;
+    assert_eq!((page.ticket.as_str(), page.outcome.as_str()), ("item", "Cancelling"));
+    assert!(page.reason.starts_with("This run was cancelled because its board was deleted."));
+    assert_eq!(page.steps[0].label, "Prepare Workspace");
+    assert_eq!(page.steps[0].state, "Stopping");
+    assert_eq!(page.steps[1].state, "Not Started");
+    // Nothing a person reads by default carries a machine id.
+    let shown: Vec<&str> = std::iter::once(page.reason.as_str()).chain(page.steps.iter().flat_map(|s| [s.label.as_str(), s.state.as_str()])).collect();
+    assert!(shown.iter().all(|t| !t.contains("wf1:") && !t.contains("stage-") && !t.contains("Fence")), "{shown:?}");
+    // The ids sit under Details, shortened, with the whole value to copy.
+    let run = page.details.iter().find(|d| d.title == "Run").unwrap();
+    let full = &cancelled.items["item"].run;
+    if full.chars().count() > 12 { assert!(run.value.chars().count() <= 8 && run.whole.as_deref() == Some(full.as_str())); }
+    assert!(page.details.iter().all(|d| !d.value.contains("wf1:")), "{:?}", page.details);
+    assert!(!page.details.iter().any(|d| d.title.contains("Fence") || d.title.contains("Iteration") || d.title.contains("Policy")));
+}
+
+/// A failed run says why in the sentence it kept (ov-1058), not the generic "This run has failed."
+#[test]
+fn a_failed_runs_page_leads_with_its_sentence() {
+    let mut state = enqueue(Definition::coding());
+    let item = state.items.get_mut("item").unwrap();
+    item.phase = Phase::Failed;
+    item.failure = Some("The landing remote could not be reached.".into());
+    let page = project(&state, &auth(), STYLE).unwrap().runs.remove(0).page;
+    assert_eq!((page.outcome.as_str(), page.reason.as_str()), ("Failed", "The landing remote could not be reached."));
+    assert_eq!(page.steps[0].state, "Failed");
+}
+
+#[test]
+fn short_ids_drop_the_scheme_and_keep_the_front() {
+    assert_eq!(page::short("wf1:0123456789abcdef0123456789abcdef"), "01234567");
+    assert_eq!(page::short("item"), "item");
+}

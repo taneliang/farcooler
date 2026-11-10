@@ -7,6 +7,8 @@ use typeshare::typeshare;
 pub const SCHEMA: u32 = 2;
 
 mod display;
+mod page;
+pub use page::{DetailRow, RunPage, StepRow};
 mod style;
 pub use style::Style;
 
@@ -116,6 +118,8 @@ pub struct RunCard {
     #[typeshare(serialized_as = "I54")]
     pub fence: u64,
     pub reasons: Vec<ReasonCard>,
+    /// What the run's page shows by default; the fields above stay for the actions and the stops.
+    pub page: RunPage,
     pub actions: Vec<Action>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forms: Vec<ActionForm>,
@@ -156,6 +160,7 @@ pub fn add_stops(view: &mut Presentation, stops: &std::collections::BTreeMap<Str
         let Some(stop) = stops.get(&card.item).filter(|s| s.run == card.run) else { continue };
         let mut reason = display::reason_card(Reason::WorktreeChanged, style);
         reason.text = stop.text.clone();
+        card.page.reason = reason.text.clone();
         card.reasons.push(reason);
     }
 }
@@ -191,7 +196,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             },
             _ => None,
         };
-        let mut reasons = vec![match item.phase {
+        let mut kinds_of_reason = vec![match item.phase {
             Phase::Blocked | Phase::WaitingJoin | Phase::Joined => Reason::DependenciesOrResource,
             Phase::WaitingApproval => Reason::ApprovalRequired,
             Phase::WaitingReview => Reason::ReviewRequired,
@@ -204,8 +209,10 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
         }];
         let evidence_valid = item.last_evidence.as_ref().is_some_and(|e|
             item.candidate.as_ref() == Some(&e.candidate) && item.policy_pin == e.policy_pin);
-        if item.iteration > 0 { reasons.push(Reason::Reworking); }
-        if item.last_evidence.is_some() && !evidence_valid { reasons.push(Reason::EvidenceInvalidated); }
+        if item.iteration > 0 { kinds_of_reason.push(Reason::Reworking); }
+        if item.last_evidence.is_some() && !evidence_valid { kinds_of_reason.push(Reason::EvidenceInvalidated); }
+        let reasons: Vec<ReasonCard> = kinds_of_reason.into_iter().map(|r| display::reason_card(r, style))
+            .map(|card| display::with_cancel_reason(card, item.cancel_reason.as_deref())).collect();
         let mut kinds = Vec::new();
         // Inspection returns the retained evidence identity even when it no longer authorizes action.
         if item.last_evidence.is_some() { kinds.push(ActionKind::InspectLatestEvidence); }
@@ -236,8 +243,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             forms: if kinds.contains(&ActionKind::RequestRework) {
                 vec![display::rework_form(farcooler_workflow::MAX_REWORK_REASON_BYTES, style)] } else { Vec::new() },
             rework_history: item.rework_history.clone(),
-            reasons: reasons.into_iter().map(|r| display::reason_card(r, style))
-                .map(|card| display::with_cancel_reason(card, item.cancel_reason.as_deref())).collect(),
+            reasons: reasons.clone(), page: page::run_page(id, item, &reasons, style),
             actions: kinds.into_iter().map(|kind| Action { label: display::action_label(&kind, style), kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,

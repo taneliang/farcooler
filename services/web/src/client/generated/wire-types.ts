@@ -231,6 +231,13 @@ export interface Column {
 	waiting: WaitingTicket[];
 }
 
+/** One line under "Details". `whole` is the whole value when `value` is a shortened id. */
+export interface DetailRow {
+	title: string;
+	value: string;
+	whole?: string | null;
+}
+
 /** A pull request's stage on a ticket's page. */
 export interface DetailStage {
 	/** The stage in the Plan's words, leading with the problem when a person has to act. */
@@ -606,6 +613,23 @@ export interface ReasonCard {
 	text: string;
 }
 
+export interface StepRow {
+	label: string;
+	state: string;
+}
+
+export interface RunPage {
+	/** The ticket the run is for. */
+	ticket: string;
+	/** How the run stands or ended: "Cancelled", "Failed", "Running". */
+	outcome: string;
+	/** Why, as a sentence. */
+	reason: string;
+	steps: StepRow[];
+	detailsLabel: string;
+	details: DetailRow[];
+}
+
 /** Accepted borrowed text and the exact authenticated observation it describes. */
 export interface ReworkDecision {
 	id: string;
@@ -638,6 +662,8 @@ export interface RunCard {
 	attempt: number;
 	fence: number;
 	reasons: ReasonCard[];
+	/** What the run's page shows by default; the fields above stay for the actions and the stops. */
+	page: RunPage;
 	actions: Action[];
 	forms?: ActionForm[] | null;
 	reworkHistory?: ReworkDecision[] | null;

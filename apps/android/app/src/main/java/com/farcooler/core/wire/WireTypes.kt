@@ -269,6 +269,14 @@ data class Column (
 	val waiting: List<WaitingTicket>
 )
 
+/// One line under "Details". `whole` is the whole value when `value` is a shortened id.
+@Serializable
+data class DetailRow (
+	val title: String,
+	val value: String,
+	val whole: String? = null
+)
+
 /// A pull request's stage on a ticket's page.
 @Serializable
 data class DetailStage (
@@ -723,6 +731,25 @@ data class ReasonCard (
 	val text: String
 )
 
+@Serializable
+data class StepRow (
+	val label: String,
+	val state: String
+)
+
+@Serializable
+data class RunPage (
+	/// The ticket the run is for.
+	val ticket: String,
+	/// How the run stands or ended: "Cancelled", "Failed", "Running".
+	val outcome: String,
+	/// Why, as a sentence.
+	val reason: String,
+	val steps: List<StepRow>,
+	val detailsLabel: String,
+	val details: List<DetailRow>
+)
+
 /// Accepted borrowed text and the exact authenticated observation it describes.
 @Serializable
 data class ReworkDecision (
@@ -757,6 +784,8 @@ data class RunCard (
 	val attempt: UByte,
 	val fence: Long,
 	val reasons: List<ReasonCard>,
+	/// What the run's page shows by default; the fields above stay for the actions and the stops.
+	val page: RunPage,
 	val actions: List<Action>,
 	val forms: List<ActionForm>? = null,
 	val reworkHistory: List<ReworkDecision>? = null

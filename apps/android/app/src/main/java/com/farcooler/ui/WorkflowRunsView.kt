@@ -24,7 +24,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -111,25 +113,19 @@ fun WorkflowRunCard(run: WorkflowRun, enabled: Boolean, onWatch: (() -> Unit)? =
     // Finite identity slots, content wrapping without ellipsis.
     SelectionContainer {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(run.label, style = MaterialTheme.typography.titleLarge)
-            Text(run.phaseLabel)
-            listOf(
-                "item" to run.item, "run" to run.run, "definition_pin" to run.definitionPin, "policy_pin" to run.policyPin,
-                "candidate" to run.candidate, "pending_effect" to run.pendingEffect, "iteration" to run.iteration.toString(),
-                "attempt" to run.attempt.toString(), "fence" to run.fence.toString(), "reworks_remaining" to run.reworksRemaining.toString(),
-            ).forEach { (key, value) -> value?.let { Text("$key: $it") } }
+            val clipboard = LocalClipboardManager.current
+            Text(run.page.ticket, style = MaterialTheme.typography.titleLarge)
+            Text(run.page.outcome, style = MaterialTheme.typography.titleMedium)
+            Text(run.page.reason)
             if (onWatch != null) Button(onClick = onWatch) { Text("Watch agent") }
-            run.latestEvidence?.let { e ->
-                listOf("candidate" to e.candidate, "manifest" to e.manifest, "receipt" to e.receipt, "policy_pin" to e.policy_pin)
-                    .forEach { (key, value) -> Text("Evidence $key: $value") }
+            run.page.steps.forEach { step -> Text("${step.label} · ${step.state}") }
+            var open by rememberSaveable(run.item, run.run) { mutableStateOf(false) }
+            TextButton(onClick = { open = !open }) { Text(run.page.detailsLabel) }
+            if (open) run.page.details.forEach { row ->
+                Text("${row.title}: ${row.value}")
+                row.whole?.let { whole -> TextButton(onClick = { clipboard.setText(AnnotatedString(whole)) }) { Text("Copy ${row.title}") } }
             }
-            run.stage?.let { listOf(it.label, it.progressionLabel).forEach { slot -> Text(slot) } }
             run.gate?.let { listOf(it.label, it.text, it.principal).forEach { slot -> Text(slot) } }
-            run.stages.forEach { stage -> Text(listOf(stage.id, stage.label, stage.progressionLabel).joinToString(" · ")) }
-            run.reasons.forEach { reason ->
-                Text(reason.label, style = MaterialTheme.typography.titleMedium)
-                Text(reason.text)
-            }
         }
     }
     run.reworkHistory?.forEach { history ->
