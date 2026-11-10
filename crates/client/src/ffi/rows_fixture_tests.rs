@@ -37,9 +37,11 @@ fn rows() -> Vec<Row> {
             source: None,
             tokens: 52_100,
             harness: None,
+            notice: false,
+            took: Some("1:00".into()),
         })),
         row(1, 2, "prose:1", t, RowKind::Prose(Prose { text: "Looking at **main.rs**.".into(), conclusion: false, at_ms: Some(2_000) })),
-        row(2, 3, "think:1", t, RowKind::Thinking(Thinking { started_ms: Some(2_500), ended_ms: Some(4_500) })),
+        row(2, 3, "think:1", t, RowKind::Thinking(Thinking { started_ms: Some(2_500), ended_ms: Some(4_500), ran: Some("0:02".into()) })),
         row(3, 4, "tool:toolu_1", t, RowKind::Tool(Tool {
             name: "Edit".into(),
             summary: "src/main.rs".into(),
@@ -51,11 +53,14 @@ fn rows() -> Vec<Row> {
             input: None,
             result: None,
             operation: None,
+            ran: Some("0:00".into()),
         })),
         row(4, 8, "sub:toolu_2", t, RowKind::Subagent(Subagent {
             tool_use_id: "toolu_2".into(),
             agent_id: Some("a1".into()),
             agent_type: "Explore".into(),
+            type_words: "Explore".into(),
+            ran: None,
             description: "Find the callers".into(),
             background: true,
             status: SubagentState::Killed,
@@ -197,6 +202,8 @@ fn polish_written() -> Value {
             source: None,
             tokens: 0,
             harness: None,
+            notice: false,
+            took: None,
         })),
         row(1, 2, "tool:toolu_c", t, RowKind::Tool(Tool {
             name: "CronCreate".into(),
@@ -209,6 +216,7 @@ fn polish_written() -> Value {
             input: Some("cron: 4 15 3 10 *\nrecurring: false".into()),
             result: Some("Scheduled f56f5668".into()),
             operation: None,
+            ran: Some("0:00".into()),
         })),
         row(2, 4, "tasks:turn:p2", t, RowKind::Tasks(Tasks {
             items: vec![

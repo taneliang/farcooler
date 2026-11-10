@@ -296,6 +296,7 @@ impl Projection {
     }
 
     pub(super) fn touch(&mut self, i: usize) {
+        super::words::fill(&mut self.rows[i].kind);
         self.revision += 1;
         self.rows[i].rev = self.revision;
         if !self.marked[i] {
@@ -600,6 +601,8 @@ impl Projection {
             source: None,
             tokens: 0,
             harness: reading.harness,
+            notice: false,
+            took: None,
         };
         let i = self.push(id, None, provisional, RowKind::Turn(turn));
         self.note_report(i);
@@ -888,7 +891,7 @@ impl Projection {
                     }
                     Some("thinking") | Some("redacted_thinking") => {
                         let started = self.turn_clock;
-                        let kind = RowKind::Thinking(Thinking { started_ms: started, ended_ms: clamp_end(started, at) });
+                        let kind = RowKind::Thinking(Thinking { started_ms: started, ended_ms: clamp_end(started, at), ran: None });
                         self.push(format!("think:{uuid}:{n}"), Some(turn), false, kind);
                     }
                     Some("tool_use") => self.tool_use(turn, block, at, false),
@@ -991,6 +994,7 @@ impl Projection {
                     file_path: input.file_path.get().map(str::to_string),
                     input: block.input.raw.as_deref().and_then(super::detail::input_text_of),
                     result: None,
+                    ran: None,
                 };
                 (format!("tool:{id}"), RowKind::Tool(tool))
             }

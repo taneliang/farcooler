@@ -133,6 +133,12 @@ pub struct Turn {
     /// words, and a view draws the kind's own row (ov-474).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub harness: Option<super::harness::Harness>,
+    /// Nobody typed it (`words::is_notice`): drawn as a notice, never as the person's message.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub notice: bool,
+    /// `duration_ms` as the timer reads it, "1:05" (`words::short`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub took: Option<String>,
 }
 
 fn is_zero(n: &u64) -> bool {
@@ -212,6 +218,9 @@ pub struct Prose {
 pub struct Thinking {
     pub started_ms: Option<i64>,
     pub ended_ms: Option<i64>,
+    /// How long it took, once it has ended, "0:04" (`words::short`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ran: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -237,6 +246,9 @@ pub struct Tool {
     /// answer with no text (an image).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
+    /// How long it took, once it has ended, "0:04" (`words::short`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ran: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -263,6 +275,11 @@ pub struct Subagent {
     /// `agentId`, once the launch result or the meta file names it.
     pub agent_id: Option<String>,
     pub agent_type: String,
+    /// `agent_type` as words, "General purpose" (`words::agent_type`).
+    pub type_words: String,
+    /// How long it took, once it has ended, "1:05" (`words::short`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ran: Option<String>,
     pub description: String,
     pub background: bool,
     pub status: SubagentState,

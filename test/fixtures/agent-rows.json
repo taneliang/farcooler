@@ -43,6 +43,7 @@
               "ended_ms": null,
               "file_path": "/w/src/main.rs",
               "name": "Edit",
+              "ran": "0:00",
               "started_ms": 5000,
               "status": "Running",
               "summary": "src/main.rs"
@@ -91,7 +92,8 @@
             "prompt": "Fix the build\nand the tests",
             "started_ms": 1000,
             "suggestion": "run the tests again",
-            "tokens": 52100
+            "tokens": 52100,
+            "took": "1:00"
           }
         },
         "ord": 0,
@@ -118,6 +120,7 @@
         "kind": {
           "Thinking": {
             "ended_ms": 4500,
+            "ran": "0:02",
             "started_ms": 2500
           }
         },
@@ -145,6 +148,7 @@
             "ended_ms": 5400,
             "file_path": "/w/src/main.rs",
             "name": "Edit",
+            "ran": "0:00",
             "started_ms": 5000,
             "status": "Done",
             "summary": "src/main.rs"
@@ -170,7 +174,8 @@
             "status": "Killed",
             "tokens": 87200,
             "tool_count": 7,
-            "tool_use_id": "toolu_2"
+            "tool_use_id": "toolu_2",
+            "type_words": "Explore"
           }
         },
         "ord": 4,

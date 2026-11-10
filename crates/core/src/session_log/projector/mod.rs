@@ -43,6 +43,7 @@ pub mod record;
 mod record_types;
 pub mod rows;
 mod tasks;
+pub mod words;
 
 pub use files::{LineReader, SessionProjector, subagent_transcript};
 pub use fold::{FoldStats, Projection};
@@ -53,6 +54,8 @@ pub use rows::*;
 
 #[cfg(test)]
 mod fixtures;
+#[cfg(test)]
+mod words_tests;
 #[cfg(test)]
 mod fold_tests;
 #[cfg(test)]

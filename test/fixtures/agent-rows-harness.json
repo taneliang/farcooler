@@ -14,7 +14,8 @@
           "origin": "Typed",
           "outcome": "Finished",
           "prompt": "Review the board.",
-          "started_ms": 1791742800000
+          "started_ms": 1791742800000,
+          "took": "0:05"
         }
       },
       "ord": 0,
@@ -33,10 +34,12 @@
           "description": "review dead-layer removal",
           "ended_ms": 1791743220000,
           "last_ms": 1791742801000,
+          "ran": "6:59",
           "started_ms": 1791742801000,
           "status": "Completed",
           "tool_count": 14,
-          "tool_use_id": "toolu_017mbUTSqSamcXYDTCPmop2m"
+          "tool_use_id": "toolu_017mbUTSqSamcXYDTCPmop2m",
+          "type_words": "General purpose"
         }
       },
       "ord": 1,
@@ -74,10 +77,12 @@
             "source": "review dead-layer removal",
             "title": ""
           },
+          "notice": true,
           "origin": "System",
           "outcome": "Finished",
           "prompt": "**Verdict: ready.** I found nothing that needs fixing.\n\n**Still used, still there**\n- **Eval harness:** the apple row and the merge judge call the model service directly.\n- **Rescore:** it reads the result types, which this commit doesn't touch.\n- **Privacy choke point:** unchanged.\n\n**Gates**\n- Build and the full suite pass.\n- Nothing of mine is still running.",
-          "started_ms": 1791743161360
+          "started_ms": 1791743161360,
+          "took": "0:48"
         }
       },
       "ord": 3,
@@ -112,10 +117,12 @@
             "kind": "Status",
             "title": "Agent finished: review dead-layer removal"
           },
+          "notice": true,
           "origin": "Notification",
           "outcome": "Finished",
           "prompt": "Agent finished: review dead-layer removal",
-          "started_ms": 1791743220000
+          "started_ms": 1791743220000,
+          "took": "0:03"
         }
       },
       "ord": 5,
@@ -150,10 +157,12 @@
             "kind": "Status",
             "title": "Background command finished: gh run watch 123456 --exit-status (exit 0)"
           },
+          "notice": true,
           "origin": "Notification",
           "outcome": "Finished",
           "prompt": "Background command finished: gh run watch 123456 --exit-status (exit 0)",
-          "started_ms": 1791743280000
+          "started_ms": 1791743280000,
+          "took": "0:02"
         }
       },
       "ord": 7,
@@ -189,10 +198,12 @@
             "kind": "Message",
             "title": ""
           },
+          "notice": true,
           "origin": "System",
           "outcome": "Finished",
           "prompt": "CI stub-race fix is committed on branch test-hygiene.\n\nIt touches only two files.",
-          "started_ms": 1791743340000
+          "started_ms": 1791743340000,
+          "took": "0:02"
         }
       },
       "ord": 9,
@@ -227,10 +238,12 @@
             "kind": "Note",
             "title": ""
           },
+          "notice": true,
           "origin": "System",
           "outcome": "Finished",
           "prompt": "The user hasn't heard from you in a while — say in a few words what you're doing, then continue.",
-          "started_ms": 1791743400000
+          "started_ms": 1791743400000,
+          "took": "0:02"
         }
       },
       "ord": 11,

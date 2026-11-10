@@ -436,14 +436,6 @@ struct ConversationRequest {
     conversation: crate::conversation_words::Request,
 }
 
-/// `{"schema":1,"item":{"agent_type":"general-purpose"}}`: one conversation item's logic (`conversation_words::item`).
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ItemAsked {
-    schema: u32,
-    item: crate::conversation_words::ItemRequest,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WordsStyle {
@@ -464,11 +456,6 @@ pub fn json(request: &str) -> String {
         let words = (asked.schema == SCHEMA).then(|| crate::conversation_words::words(asked.conversation.style, &asked.conversation.agent));
         let error = words.is_none().then_some("invalid");
         return serde_json::json!({ "schema": SCHEMA, "conversation": words, "error": error }).to_string();
-    }
-    if let Ok(asked) = serde_json::from_str::<ItemAsked>(request) {
-        let item = (asked.schema == SCHEMA).then(|| crate::conversation_words::item(&asked.item));
-        let error = item.is_none().then_some("invalid");
-        return serde_json::json!({ "schema": SCHEMA, "item": item, "error": error }).to_string();
     }
     if let Ok(asked) = serde_json::from_str::<WordsRequest>(request) {
         let words = (asked.schema == SCHEMA).then(|| words::Words::new(asked.words.style));

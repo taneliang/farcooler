@@ -184,55 +184,6 @@ pub fn words(style: Style, agent: &str) -> Words {
     Words { send, stop: key(true), send_now: key(false), answer, phrases: BTreeMap::from(phrases), groups }
 }
 
-/// What an app asks of one conversation item (ov-1054): any of the three,
-/// `{"agent_type":"general-purpose"}`, `{"ms":65000}`, `{"origin":"System"}`.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ItemRequest {
-    pub agent_type: Option<String>,
-    pub ms: Option<i64>,
-    pub origin: Option<String>,
-}
-
-/// The answers under the names they were asked by, each present only when asked:
-/// `agent_type` and `ms` come back as words ("General purpose", "1:05"), `origin` as whether it is a notice.
-#[derive(Debug, PartialEq, Eq, Serialize)]
-pub struct Item {
-    pub agent_type: Option<String>,
-    pub ms: Option<String>,
-    pub origin: Option<bool>,
-}
-
-pub fn item(asked: &ItemRequest) -> Item {
-    Item {
-        agent_type: asked.agent_type.as_deref().map(agent_type),
-        ms: asked.ms.map(short),
-        origin: asked.origin.as_deref().map(is_notice),
-    }
-}
-
-/// A subagent's type as words: `general-purpose` reads "General purpose".
-pub fn agent_type(raw: &str) -> String {
-    let words = raw.replace(['-', '_'], " ");
-    let mut chars = words.chars();
-    chars.next().map_or_else(|| "Agent".into(), |first| first.to_uppercase().chain(chars).collect())
-}
-
-/// "0:04", "1:12", "2:03:09": the format a running timer counts in, so a
-/// finished time reads like the running one did.
-pub fn short(ms: i64) -> String {
-    let seconds = (ms / 1000).max(0);
-    let (h, m, s) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
-}
-
-/// A turn nobody typed: a background task finishing, or claude waking itself
-/// (`TurnOrigin::Notification`, `System`). Drawn as a notice, never as the
-/// person's message.
-pub fn is_notice(origin: &str) -> bool {
-    matches!(origin, "Notification" | "System")
-}
-
 #[cfg(test)]
 #[path = "conversation_words/tests.rs"]
 mod tests;
