@@ -60,6 +60,59 @@ struct MotionProgress: ViewModifier, Animatable {
     func body(content: Content) -> some View { content }
 }
 
+/// A clock for `WorkspaceView`'s walks that stands still until a test moves
+/// it: a wait ends when `advance` passes its deadline, and never because the
+/// runner was slow (ov-1079).
+@MainActor
+final class ManualSettleClock {
+    private(set) var now: Duration = .zero
+    private struct Waiting {
+        let id: Int
+        let deadline: Duration
+        let wake: CheckedContinuation<Void, any Error>
+    }
+    private var waiting: [Waiting] = []
+    private var next = 0
+
+    var clock: SettleClock {
+        SettleClock(now: { self.now }, sleep: { duration in try await self.sleep(duration) })
+    }
+
+    /// Moves the clock on, ending each wait whose deadline it reaches.
+    func advance(by duration: Duration) {
+        now += duration
+        let due = waiting.filter { $0.deadline <= now }
+        waiting.removeAll { $0.deadline <= now }
+        for each in due { each.wake.resume() }
+    }
+
+    private func sleep(_ duration: Duration) async throws {
+        next += 1
+        let id = next
+        let deadline = now + duration
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (wake: CheckedContinuation<Void, any Error>) in
+                self.wait(Waiting(id: id, deadline: deadline, wake: wake))
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancel(id) }
+        }
+    }
+
+    private func wait(_ each: Waiting) {
+        if Task.isCancelled {
+            each.wake.resume(throwing: CancellationError())
+        } else {
+            waiting.append(each)
+        }
+    }
+
+    private func cancel(_ id: Int) {
+        guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+        waiting.remove(at: index).wake.resume(throwing: CancellationError())
+    }
+}
+
 /// Opening a task in the main area, glancing through others and closing it
 /// (ov-85, ov-89): neither the board nor the orchestrator is ever taken down
 /// or rebuilt, each task's view is made once while it's open, and what takes
@@ -84,6 +137,7 @@ struct WorkspaceMotionTests {
     final class Harness {
         let level = Level()
         let tally = MotionTally()
+        let settle = ManualSettleClock()
         let host: NSHostingView<Hosted>
         let window: NSWindow
 
@@ -91,6 +145,7 @@ struct WorkspaceMotionTests {
             @ObservedObject var level: Level
             let tally: MotionTally
             let width: CGFloat
+            let settle: SettleClock
             var body: some View {
                 WorkspaceView(
                     opened: level.opened, hasConversation: true, cell: WorkspaceColumns.defaultCell,
@@ -108,7 +163,7 @@ struct WorkspaceMotionTests {
                                     .task { tally.fetches[item, default: 0] += 1 }
                             }
                         }
-                    }, motion: level.motion, swap: level.motion)
+                    }, motion: level.motion, swap: level.motion, settleClock: settle)
                 .frame(width: width, height: 400)
                 .overlay(
                     Color.clear.modifier(MotionProgress(progress: level.target))
@@ -120,7 +175,7 @@ struct WorkspaceMotionTests {
             MotionTally.current = tally
             level.motion = motion
             MotionProbe.progress.value = 0
-            host = NSHostingView(rootView: Hosted(level: level, tally: tally, width: width))
+            host = NSHostingView(rootView: Hosted(level: level, tally: tally, width: width, settle: settle.clock))
             window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: width, height: 400), styleMask: [.borderless],
                 backing: .buffered, defer: false)
@@ -292,11 +347,13 @@ struct WorkspaceMotionTests {
 
     /// Ten quick steps through the list, as a held arrow takes them: every
     /// one is drawn at once, the first settles at once as a click does
-    /// (ov-293), and of the rest only the last, so two terminals are
-    /// mounted and two records read for the whole walk. A step a loaded
-    /// runner held up past `WorkspaceMotion.settle` is a click of its own,
-    /// and may mount too. (Fails with `settle` setting `settled` at once on
-    /// every switch.)
+    /// (ov-293), and of the rest only the last, once it has stayed put for
+    /// `WorkspaceMotion.settle`, so two terminals are mounted and two
+    /// records read for the whole walk. The walk's time is the harness's
+    /// clock, which stands still between steps however slow the runner is
+    /// (ov-1079: a wall-clock bound here failed on a loaded CI runner).
+    /// (Fails with `settle` setting `settled` at once on every switch, or
+    /// never settling a walk's last step.)
     @Test("Ten quick steps mount two terminals and read two records")
     func tenQuickStepsSettleOnce() async {
         let harness = Harness(motion: Self.quick)
@@ -304,27 +361,49 @@ struct WorkspaceMotionTests {
         harness.level.opened = "t0"
         await harness.until("t0 settled") { harness.tally.fetches["t0"] == 1 }
         let start = harness.tally.fetches.values.reduce(0, +)
-        let clock = ContinuousClock()
-        var last = clock.now
-        // The steps that came long enough after the last to be clicks.
-        var late = 0
         for index in 1...10 {
-            if index > 1, last.duration(to: clock.now) > .milliseconds(130) { late += 1 }
-            last = clock.now
+            // Quick, but not at once: each step comes a good part of
+            // `settle` after the last.
+            harness.settle.advance(by: WorkspaceMotion.settle / 2)
             harness.level.opened = "t\(index)"
-            await harness.frame()
+            await harness.until("t\(index) drawn") { harness.tally.made["t\(index)"] == 1 }
         }
         // Whether the header is up before the work mounts is a race on a
         // loaded runner (it failed in a full run), so it is not asserted; the
         // work mounting once, below, is what pins the settling.
-        await harness.until("t10 drawn") { harness.tally.made["t10"] == 1 }
+        let waiting = (1...10).map { harness.tally.made["work-t\($0)"] ?? 0 }
+        harness.settle.advance(by: WorkspaceMotion.settle)
         await harness.until("t10 settled") { harness.tally.made["work-t10"] == 1 }
+        await harness.until("t10 read") { harness.tally.fetches["t10"] == 1 }
         let mounted = (1...10).map { harness.tally.made["work-t\($0)"] ?? 0 }
         let fetched = harness.tally.fetches.values.reduce(0, +) - start
         harness.close()
-        #expect(mounted.first == 1 && mounted.last == 1, "mounted \(mounted)")
-        #expect(mounted.dropFirst().dropLast().reduce(0, +) <= late, "mounted \(mounted), \(late) steps late")
-        #expect(fetched == mounted.reduce(0, +), "read \(fetched) records, mounted \(mounted)")
+        #expect(waiting == [1, 0, 0, 0, 0, 0, 0, 0, 0, 0], "mounted \(waiting) before the walk stayed put")
+        #expect(mounted == [1, 0, 0, 0, 0, 0, 0, 0, 0, 1], "mounted \(mounted)")
+        #expect(fetched == 2, "read \(fetched) records, mounted \(mounted)")
+    }
+
+    /// A step held past `WorkspaceMotion.settle` settles where it is, and
+    /// the next is a click of its own, settling at once. (Fails with a held
+    /// step left unsettled, or the step after it taken as part of the walk.)
+    @Test("A step held up in a walk settles, and the next is a click")
+    func aHeldStepSettles() async {
+        let harness = Harness(motion: Self.quick)
+        await harness.until("the orchestrator") { harness.hit(400) == "conversation" }
+        harness.level.opened = "t0"
+        await harness.until("t0 settled") { harness.tally.fetches["t0"] == 1 }
+        for index in 1...3 {
+            harness.settle.advance(by: WorkspaceMotion.settle / 2)
+            harness.level.opened = "t\(index)"
+            await harness.until("t\(index) drawn") { harness.tally.made["t\(index)"] == 1 }
+        }
+        harness.settle.advance(by: WorkspaceMotion.settle)
+        await harness.until("t3 settled") { harness.tally.made["work-t3"] == 1 }
+        harness.level.opened = "t4"
+        await harness.until("t4 settled") { harness.tally.made["work-t4"] == 1 }
+        let mounted = (1...4).map { harness.tally.made["work-t\($0)"] ?? 0 }
+        harness.close()
+        #expect(mounted == [1, 0, 1, 1], "mounted \(mounted)")
     }
 
     /// The orchestrator is the main area's one width with nothing open, and

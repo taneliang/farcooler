@@ -88,6 +88,9 @@ struct WorkspaceView<
     var cards: (_ canvas: Bool) -> AnyView = { _ in AnyView(EmptyView()) }
     var peek: () -> AnyView = { AnyView(EmptyView()) }
     var peeking: Binding<Bool> = .constant(false)
+    /// What times a walk through the list (`WorkspaceMotion.settle`): the
+    /// continuous clock, or a test's, which moves only when it says so.
+    var settleClock: SettleClock = .live
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -101,7 +104,7 @@ struct WorkspaceView<
     @State private var settling: Task<Void, Never>?
     /// When the last switch from one opened item to another came: one
     /// sooner than `WorkspaceMotion.settle` after it is a step in a walk.
-    @State private var lastSwitch: ContinuousClock.Instant?
+    @State private var lastSwitch: Duration?
     /// The navigator's width while its trailing edge is dragged.
     @State private var dragging: CGFloat?
     /// The navigator's width when the drag began.
@@ -122,7 +125,8 @@ struct WorkspaceView<
         chatColumns: Binding<Double> = .constant(Double(WorkspaceColumns.chatColumnsDefault)),
         boardExists: Bool = true, navigatorFloating: Binding<Bool> = .constant(false),
         cards: @escaping (_ canvas: Bool) -> AnyView = { _ in AnyView(EmptyView()) },
-        peek: @escaping () -> AnyView = { AnyView(EmptyView()) }, peeking: Binding<Bool> = .constant(false)
+        peek: @escaping () -> AnyView = { AnyView(EmptyView()) }, peeking: Binding<Bool> = .constant(false),
+        settleClock: SettleClock = .live
     ) {
         self.opened = opened
         self.hasConversation = hasConversation
@@ -144,6 +148,7 @@ struct WorkspaceView<
         self.cards = cards
         self.peek = peek
         self.peeking = peeking
+        self.settleClock = settleClock
         // Drawn as it is from the first frame: a window reopening on a task
         // doesn't fade the orchestrator out.
         _stage = State(initialValue: WorkspaceStage(open: opened, focused: focused))
@@ -365,15 +370,16 @@ struct WorkspaceView<
     /// the last, only once it has stayed put that long.
     private func settle(_ next: Item?, switching: Bool) {
         settling?.cancel()
-        let now = ContinuousClock.now
-        let walking = switching && lastSwitch.map { $0.duration(to: now) < WorkspaceMotion.settle } == true
+        let now = settleClock.now()
+        let walking = switching && lastSwitch.map { now - $0 < WorkspaceMotion.settle } == true
         lastSwitch = switching ? now : nil
         guard walking else {
             settled = next
             return
         }
+        let clock = settleClock
         settling = Task { @MainActor in
-            try? await Task.sleep(for: WorkspaceMotion.settle)
+            try? await clock.sleep(WorkspaceMotion.settle)
             guard !Task.isCancelled else { return }
             settled = next
         }
@@ -479,6 +485,25 @@ enum WorkspaceMotion {
     /// such a step stays put before it's settled, and its terminal is
     /// mounted and its record read. A lone click settles at once.
     static let settle: Duration = .milliseconds(150)
+}
+
+/// The clock a walk through the list is timed by: when a switch came, and a
+/// wait for a step to stay put. `live` is the continuous clock; a test gives
+/// one that moves only when the test moves it, so what counts as a step in a
+/// walk is the test's say, not a loaded runner's (ov-1079).
+struct SettleClock {
+    /// How long since a fixed start.
+    var now: @MainActor () -> Duration
+    /// Returns once `duration` has passed, or throws once cancelled.
+    var sleep: @MainActor (Duration) async throws -> Void
+
+    static let live: SettleClock = {
+        let clock = ContinuousClock()
+        let start = clock.now
+        return SettleClock(
+            now: { start.duration(to: clock.now) },
+            sleep: { try await clock.sleep(for: $0) })
+    }()
 }
 
 /// What a workspace's detail draws, as the window opens a task, switches to
