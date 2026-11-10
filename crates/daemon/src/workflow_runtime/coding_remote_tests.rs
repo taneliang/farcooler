@@ -524,10 +524,12 @@ fn slow_pack(r: &Remote, seconds: u64) {
     std::fs::write(&ssh, script).unwrap();
 }
 
-/// A remote whose pack step waits `seconds`, then fails, as a download cut off part way does.
-fn failing_pack(r: &Remote, seconds: u64) {
-    slow_pack(r, seconds);
-    std::fs::write(r._dir.path().join("slow-pack.sh"), format!("#!/bin/sh\nsleep {seconds}\nexit 1\n")).unwrap();
+/// A remote whose pack step waits until the test writes `pack-release`, then fails, as a download cut off part way
+/// does. The test decides when, so no clock is raced.
+fn failing_pack(r: &Remote) {
+    slow_pack(r, 0);
+    let release = r._dir.path().join("pack-release");
+    std::fs::write(r._dir.path().join("slow-pack.sh"), format!("#!/bin/sh\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nexit 1\n", release.display())).unwrap();
 }
 
 /// ov-1058 re-review: a download that outlasts a Start's cap must not stop Main starting tickets. A Start asks the
@@ -596,18 +598,28 @@ async fn provisions_that_start_together_download_the_remotes_main_once() {
 }
 
 /// ov-1061: Provisions that queued behind a download that failed get its sentence at once, and don't each download
-/// again with the full limit while holding one of the four effect slots. The remote fails the download after 2 s, so
-/// all three have queued by then, and the count of downloads is the whole answer, with no clock to race.
+/// again with the full limit while holding one of the four effect slots. The remote holds the download until the test
+/// sees all three Provisions hold the remote's record (the leader's and two waiters', queued in the same step on this
+/// single thread), then fails it. The count of downloads is the whole answer, with no clock to race.
 #[tokio::test]
 async fn provisions_waiting_on_a_download_that_fails_fail_with_it_at_once() {
     let r = remote("pass").await;
     let (_, moved) = move_remote(&r).await;
-    failing_pack(&r, 2);
+    failing_pack(&r);
     let log = |n: &str| r.runtime.root.join("receipts").join(n);
     let (a, b, c) = (log("a.output"), log("b.output"), log("c.output"));
     let exec = &r.runtime.exec;
-    let (first, second, third) = tokio::join!(exec.ensure_start_objects(&moved, &a), exec.ensure_start_objects(&moved, &b),
-        exec.ensure_start_objects(&moved, &c));
+    let release = async {
+        // The map's own handle and one per Provision: all three are in the queue when the count reaches 4.
+        while exec.seeding.lock().unwrap().values().map(std::sync::Arc::strong_count).max() != Some(4) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        std::fs::write(r._dir.path().join("pack-release"), "").unwrap();
+    };
+    let (first, second, third, ()) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(exec.ensure_start_objects(&moved, &a), exec.ensure_start_objects(&moved, &b),
+            exec.ensure_start_objects(&moved, &c), release)
+    }).await.expect("the three Provisions never queued behind one download");
     for failed in [first, second, third] { assert_eq!(failed.unwrap_err(), super::coding_landing::UNFETCHED_TARGET); }
     let asked = calls(&r).lines().filter(|l| l.starts_with("git-upload-pack")).count();
     assert_eq!(asked, 1, "the remote was asked {asked} times: {}", calls(&r));
