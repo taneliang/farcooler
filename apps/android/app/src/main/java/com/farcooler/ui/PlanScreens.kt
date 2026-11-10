@@ -348,8 +348,9 @@ private fun PlanCardNote(key: String, note: PlanViewNote) {
                 color = if (note.attention) amber else LocalContentColor.current,
                 modifier = Modifier.testTag("plan-ticket-$key-stage${if (note.attention) "-attention" else ""}"),
             )
+            // Two lines, not one: at the narrowest width "Approval required" is the part that must not be cut.
             PlanViewNoteKind.Run -> Text(
-                note.text, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
+                note.text, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
                 color = if (note.attention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("plan-ticket-$key-run"),
             )
