@@ -160,14 +160,13 @@ jobs:
       - name: Install the musl cross toolchain
         env:
           MUSL_CROSS_TAG: '20260823'
+          GH_TOKEN: ${{ github.token }}
           TRIPLE: ${{ matrix.target }}
           MUSL_SHA256: ${{ matrix.musl_sha256 }}
           CC_NAME: ${{ matrix.arch }}-linux-musl-gcc
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/musl-cross.tar.xz \
-            "https://github.com/musl-cross/musl-cross/releases/download/$MUSL_CROSS_TAG/$TRIPLE.tar.xz"
-          echo "$MUSL_SHA256  /tmp/musl-cross.tar.xz" | sha256sum -c -
+          "$GITHUB_WORKSPACE/scripts/gh-download.sh" musl-cross/musl-cross "$MUSL_CROSS_TAG" "$TRIPLE.tar.xz" /tmp/musl-cross.tar.xz "$MUSL_SHA256"
           sudo mkdir -p /opt/musl-cross
           sudo tar -xJf /tmp/musl-cross.tar.xz -C /opt/musl-cross
           # The toolchain names its binaries for the Rust triple

@@ -765,6 +765,20 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # SwiftPM's downloads (ov-1030): Sparkle's release zip is a binary target
+      # fetched from github.com, and an anonymous download of it 504ed in
+      # GitHub's Nov 9 incident. Keyed by Package.resolved, so a warm run
+      # resolves from disk and makes no network request for it.
+      - name: Cache SwiftPM downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            apps/macos/.build/artifacts
+            apps/macos/.build/checkouts
+            apps/macos/.build/repositories
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
 
       # Go, for the tunnel archive `build-app.sh` links into `farcoolerd`.
       # This job runs the whole bundle assembly, which is the point of it —
@@ -872,6 +886,8 @@ jobs:
       # and is rejected on every client instead. Here rather than in `wire` for
       # the same reason as the icon test: CryptoKit is macOS-only.
       - run: ./scripts/sparkle-key-test.sh
+      # The release downloader retries and checks sums (ov-1030).
+      - run: ./scripts/gh-download-test.sh
 
       # Hardened Runtime blocks camera access before macOS can show the consent
       # prompt unless the final app signature carries the camera entitlement.
@@ -907,6 +923,20 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # SwiftPM's downloads (ov-1030): Sparkle's release zip is a binary target
+      # fetched from github.com, and an anonymous download of it 504ed in
+      # GitHub's Nov 9 incident. Keyed by Package.resolved, so a warm run
+      # resolves from disk and makes no network request for it.
+      - name: Cache SwiftPM downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+            apps/macos/.build/artifacts
+            apps/macos/.build/checkouts
+            apps/macos/.build/repositories
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
 
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
@@ -1445,17 +1475,32 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: services/web/package-lock.json
+      # Cached by version and checksum, and fetched with `gh release download`,
+      # which is authenticated (GITHUB_TOKEN) where a bare curl of the release
+      # URL is anonymous and was the first thing throttled in GitHub's Nov 9
+      # incident (ov-1030). scripts/gh-download.sh retries with a growing wait
+      # and checks the sha256 before anything is unpacked.
+      - name: Cache wasm-bindgen and wasm-opt
+        id: wasm-tools
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/wasm-tools
+          key: wasm-tools-${{ env.WASM_BINDGEN_VERSION }}-${{ env.BINARYEN_VERSION }}-${{ env.WASM_BINDGEN_SHA256 }}-${{ env.BINARYEN_SHA256 }}
       - name: Install wasm-bindgen and wasm-opt
+        if: steps.wasm-tools.outputs.cache-hit != 'true'
         working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL -o wb.tgz "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl.tar.gz"
-          echo "$WASM_BINDGEN_SHA256  wb.tgz" | sha256sum -c -
-          tar xzf wb.tgz
-          curl -fsSL -o bn.tgz "https://github.com/WebAssembly/binaryen/releases/download/$BINARYEN_VERSION/binaryen-$BINARYEN_VERSION-x86_64-linux.tar.gz"
-          echo "$BINARYEN_SHA256  bn.tgz" | sha256sum -c -
-          tar xzf bn.tgz
-          echo "WASM_BINDGEN=$PWD/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
-          echo "WASM_OPT=$PWD/binaryen-$BINARYEN_VERSION/bin/wasm-opt" >> "$GITHUB_ENV"
+          mkdir -p wasm-tools
+          "$GITHUB_WORKSPACE/scripts/gh-download.sh" wasm-bindgen/wasm-bindgen "$WASM_BINDGEN_VERSION" "wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl.tar.gz" wb.tgz "$WASM_BINDGEN_SHA256"
+          tar xzf wb.tgz -C wasm-tools
+          "$GITHUB_WORKSPACE/scripts/gh-download.sh" WebAssembly/binaryen "$BINARYEN_VERSION" "binaryen-$BINARYEN_VERSION-x86_64-linux.tar.gz" bn.tgz "$BINARYEN_SHA256"
+          tar xzf bn.tgz -C wasm-tools
+      - name: Point the build at the wasm tools
+        run: |
+          echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-tools/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
+          echo "WASM_OPT=$RUNNER_TEMP/wasm-tools/binaryen-$BINARYEN_VERSION/bin/wasm-opt" >> "$GITHUB_ENV"
       # The client core a browser runs (ov-768): farcooler-client at its web
       # feature, russh on ring, for the browser's target. Then its resolved
       # tree, held to neither aws-lc (C a page cannot build) nor mio (tokio's
