@@ -56,8 +56,13 @@ fn fixtures() -> Vec<(&'static str, State)> {
     let cancelled = apply(&idle, Command::Cancel { item: "item".into(),
         reason: Some("This run was cancelled because its board was deleted. Nobody can approve it now, and its worktree was left as it was.".into()) },
         Grant::Controller);
+    // A failed run with the sentence its Provision kept (ov-1058), long, for the captures (ov-1060).
+    let mut failed = idle.clone();
+    let item = failed.items.get_mut("item").unwrap();
+    item.phase = Phase::Failed;
+    item.failure = Some("The landing remote's main could not be downloaded in time, so nothing was built. Its worktree was never created; try the ticket again when the remote is reachable.".into());
     vec![("automatic", automatic), ("approval", approval), ("rework", rework),
-        ("uncertain", uncertain), ("invalidated", invalidated), ("cancelled", cancelled)]
+        ("uncertain", uncertain), ("invalidated", invalidated), ("cancelled", cancelled), ("failed", failed)]
 }
 
 #[test]

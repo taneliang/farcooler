@@ -1859,5 +1859,286 @@
       "intent": null,
       "schema": 2
     }
+  },
+  {
+    "name": "failed",
+    "request": {
+      "capabilities": {
+        "controller": true,
+        "decision_principal": "owner",
+        "epoch": 1,
+        "inspect": true,
+        "workspace": "workspace"
+      },
+      "schema": 2,
+      "selection": null,
+      "snapshot": {
+        "epoch": 1,
+        "items": {
+          "item": {
+            "attempt": 1,
+            "candidate": null,
+            "definition": {
+              "max_reworks": 2,
+              "rework_target": "stage-1",
+              "schema": 1,
+              "source": "coding/v1",
+              "stages": [
+                {
+                  "id": "stage-0",
+                  "kind": "Provision",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-0"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-1",
+                  "kind": "Build",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-1"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-2",
+                  "kind": "Check",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "cargo",
+                      "test",
+                      "--locked"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-3",
+                  "kind": {
+                    "Review": "Dispatch"
+                  },
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-3"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-4",
+                  "kind": "Land",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-4"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                },
+                {
+                  "id": "stage-5",
+                  "kind": "Ci",
+                  "max_attempts": 2,
+                  "operation": {
+                    "adapter_version": "fixture/v1",
+                    "arguments": [
+                      "coding-operation-5"
+                    ],
+                    "environment": {}
+                  },
+                  "progression": "Automatic"
+                }
+              ]
+            },
+            "dependencies": [],
+            "failure": "The landing remote's main could not be downloaded in time, so nothing was built. Its worktree was never created; try the ticket again when the remote is reachable.",
+            "fence": 1,
+            "iteration": 0,
+            "last_evidence": null,
+            "pending": null,
+            "phase": "Failed",
+            "pin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "policy_pin": "policy",
+            "resource": "resource",
+            "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+            "stage": 0,
+            "stopping": null
+          }
+        },
+        "revision": 1,
+        "schema": 1,
+        "seen": [
+          "event-0"
+        ],
+        "source_sequences": {
+          "fixture": 1
+        },
+        "workspace": "workspace"
+      },
+      "style": "apple"
+    },
+    "response": {
+      "card": {
+        "epoch": 1,
+        "revision": 1,
+        "runs": [
+          {
+            "actions": [
+              {
+                "guard": "wf1:d6bb226b6d2520ba74b29a23343efd0fc6c61537488cc106cd820aab936b32bf",
+                "kind": "Cancel",
+                "label": "Cancel Run"
+              }
+            ],
+            "attempt": 1,
+            "candidate": null,
+            "definitionPin": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4",
+            "fence": 1,
+            "gate": null,
+            "item": "item",
+            "iteration": 0,
+            "label": "Workflow Run",
+            "latestEvidence": null,
+            "page": {
+              "details": [
+                {
+                  "title": "Run",
+                  "value": "ba5b9a98",
+                  "whole": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad"
+                },
+                {
+                  "title": "Workflow",
+                  "value": "25734e5f",
+                  "whole": "wf1:25734e5f86665b36583002c68160dd4969a40cf29a6d5aa3fbc6f08feba2ffa4"
+                },
+                {
+                  "title": "Attempt",
+                  "value": "1"
+                }
+              ],
+              "detailsLabel": "Details",
+              "outcome": "Failed",
+              "reason": "The landing remote's main could not be downloaded in time, so nothing was built. Its worktree was never created; try the ticket again when the remote is reachable.",
+              "steps": [
+                {
+                  "label": "Prepare Workspace",
+                  "state": "Failed"
+                },
+                {
+                  "label": "Build",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Run Checks",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Review",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Land Changes",
+                  "state": "Not Started"
+                },
+                {
+                  "label": "Check CI",
+                  "state": "Not Started"
+                }
+              ],
+              "ticket": "item"
+            },
+            "pendingEffect": null,
+            "phase": "Failed",
+            "phaseLabel": "Failed",
+            "policyPin": "policy",
+            "reasons": [
+              {
+                "kind": "Failed",
+                "label": "Failed",
+                "text": "This run has failed."
+              }
+            ],
+            "reworksRemaining": 2,
+            "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+            "stage": {
+              "id": "stage-0",
+              "kind": "Provision",
+              "label": "Prepare Workspace",
+              "progression": "Automatic",
+              "progressionLabel": "Automatic"
+            },
+            "stages": [
+              {
+                "id": "stage-0",
+                "kind": "Provision",
+                "label": "Prepare Workspace",
+                "progression": "Automatic",
+                "progressionLabel": "Automatic"
+              },
+              {
+                "id": "stage-1",
+                "kind": "Build",
+                "label": "Build",
+                "progression": "Automatic",
+                "progressionLabel": "Automatic"
+              },
+              {
+                "id": "stage-2",
+                "kind": "Check",
+                "label": "Run Checks",
+                "progression": "Automatic",
+                "progressionLabel": "Automatic"
+              },
+              {
+                "id": "stage-3",
+                "kind": {
+                  "Review": "Dispatch"
+                },
+                "label": "Review",
+                "progression": "Automatic",
+                "progressionLabel": "Automatic"
+              },
+              {
+                "id": "stage-4",
+                "kind": "Land",
+                "label": "Land Changes",
+                "progression": "Automatic",
+                "progressionLabel": "Automatic"
+              },
+              {
+                "id": "stage-5",
+                "kind": "Ci",
+                "label": "Check CI",
+                "progression": "Automatic",
+                "progressionLabel": "Automatic"
+              }
+            ]
+          }
+        ],
+        "schema": 2,
+        "workspace": "workspace"
+      },
+      "error": null,
+      "intent": null,
+      "schema": 2
+    }
   }
 ]
