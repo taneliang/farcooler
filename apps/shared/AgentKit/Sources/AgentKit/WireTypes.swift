@@ -929,9 +929,11 @@ public struct WireRunPage: Codable, Equatable, Sendable {
 	public var detailsLabel: String
 	/// The label of the control that copies a detail's whole value.
 	public var copyLabel: String
+	/// The label of the control that retries a failed run. It is sent here, not kept in the shared label list.
+	public var retryLabel: String
 	public var details: [WireDetailRow]
 
-	public init(ticket: String, outcome: String, reason: String, more: [String], steps: [WireStepRow], detailsLabel: String, copyLabel: String, details: [WireDetailRow]) {
+	public init(ticket: String, outcome: String, reason: String, more: [String], steps: [WireStepRow], detailsLabel: String, copyLabel: String, retryLabel: String, details: [WireDetailRow]) {
 		self.ticket = ticket
 		self.outcome = outcome
 		self.reason = reason
@@ -939,6 +941,7 @@ public struct WireRunPage: Codable, Equatable, Sendable {
 		self.steps = steps
 		self.detailsLabel = detailsLabel
 		self.copyLabel = copyLabel
+		self.retryLabel = retryLabel
 		self.details = details
 	}
 }

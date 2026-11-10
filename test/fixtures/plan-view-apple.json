@@ -2109,6 +2109,57 @@
           "iteration": 0,
           "label": "Workflow Run",
           "latestEvidence": null,
+          "page": {
+            "copyLabel": "Copy",
+            "details": [
+              {
+                "title": "Run",
+                "value": "9238042c",
+                "whole": "wf1:9238042ca1b351c53cd9dd92300e5dfb09100425d25ee6640868239dd3ae1d21"
+              },
+              {
+                "title": "Workflow",
+                "value": "afc4d08b",
+                "whole": "wf1:afc4d08b5e8e49351ff4d086bea36cd268d4b3318c92613948d0d1ffb62abb9e"
+              },
+              {
+                "title": "Attempt",
+                "value": "1"
+              }
+            ],
+            "detailsLabel": "Details",
+            "more": [],
+            "outcome": "Awaiting approval",
+            "reason": "Waiting for your approval to start Prepare workspace.",
+            "retryLabel": "Try Again",
+            "steps": [
+              {
+                "label": "Prepare workspace",
+                "state": "Awaiting approval"
+              },
+              {
+                "label": "Build",
+                "state": "Not started"
+              },
+              {
+                "label": "Run checks",
+                "state": "Not started"
+              },
+              {
+                "label": "Review",
+                "state": "Not started"
+              },
+              {
+                "label": "Land changes",
+                "state": "Not started"
+              },
+              {
+                "label": "Check CI",
+                "state": "Not started"
+              }
+            ],
+            "ticket": "ov-310"
+          },
           "pendingEffect": null,
           "phase": "WaitingApproval",
           "phaseLabel": "Awaiting Approval",

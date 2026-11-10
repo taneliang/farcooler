@@ -182,6 +182,7 @@
               "more": [],
               "outcome": "Running",
               "reason": "Running: Prepare workspace.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
@@ -498,6 +499,7 @@
               "more": [],
               "outcome": "Awaiting approval",
               "reason": "Waiting for your approval to start Prepare workspace.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
@@ -840,6 +842,7 @@
               ],
               "outcome": "Running",
               "reason": "Running: Build.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
@@ -1168,6 +1171,7 @@
               "more": [],
               "outcome": "Outcome uncertain",
               "reason": "Run checks may or may not have finished. Check it before it continues.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
@@ -1487,6 +1491,7 @@
               ],
               "outcome": "Running",
               "reason": "Running: Run checks.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
@@ -1775,6 +1780,7 @@
               "more": [],
               "outcome": "Cancelled",
               "reason": "This run was cancelled because its board was deleted. Nobody can approve it now, and its worktree was left as it was.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
@@ -2063,6 +2069,7 @@
               "more": [],
               "outcome": "Failed",
               "reason": "The landing remote's main could not be downloaded in time, so nothing was built. Its worktree was never created; try the ticket again when the remote is reachable.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
@@ -2339,6 +2346,7 @@
               "more": [],
               "outcome": "Completed",
               "reason": "All stages have completed.",
+              "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",

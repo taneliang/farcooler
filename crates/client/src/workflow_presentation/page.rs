@@ -33,6 +33,8 @@ pub struct RunPage {
     pub details_label: String,
     /// The label of the control that copies a detail's whole value.
     pub copy_label: String,
+    /// The label of the control that retries a failed run. It is sent here, not kept in the shared label list.
+    pub retry_label: String,
     pub details: Vec<DetailRow>,
 }
 
@@ -89,5 +91,6 @@ pub(super) fn run_page(id: &str, item: &farcooler_workflow::Item, reasons: &[Rea
         details.push(id_row("Evidence", &e.receipt, style));
     }
     RunPage { ticket: id.to_owned(), outcome: display::phase_label(&item.phase, Style::Material), reason, more, steps,
-        details_label: style.label("Details"), copy_label: style.label("Copy"), details }
+        details_label: style.label("Details"), copy_label: style.label("Copy"),
+        retry_label: display::action_label(&ActionKind::Retry, style), details }
 }

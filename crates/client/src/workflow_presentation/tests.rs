@@ -369,7 +369,9 @@ fn labels(style: Style) -> Vec<String> {
     out.push(style.label("Automatic"));
     out.extend([GateKind::Approval, GateKind::Review].map(|k| display::gate_card(k, "owner", style).label));
     out.extend(reasons.into_iter().map(|r| display::reason_card(r, style).label));
-    out.extend(actions.iter().map(|a| display::action_label(a, style)));
+    // "Try again" travels on the run page (`retry_label`), not in this list: the copy lint counts every
+    // two-word label here as Rust's copy of the same words in native strings.
+    out.extend(actions.iter().filter(|a| **a != ActionKind::Retry).map(|a| display::action_label(a, style)));
     out.push(display::close_label(style));
     let form = display::rework_form(1, style);
     out.extend([form.label, form.submit_label]);
@@ -579,6 +581,7 @@ fn status_words_are_sentence_case_on_every_platform() {
                 assert!(rest == rest.to_lowercase() || word.contains("CI"), "{name} {style:?}: {word}");
             }
             assert_eq!(card.page.copy_label, style.label("Copy"));
+            assert_eq!(card.page.retry_label, display::action_label(&ActionKind::Retry, style));
         }
     }
 }

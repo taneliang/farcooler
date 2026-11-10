@@ -632,6 +632,8 @@ export interface RunPage {
 	detailsLabel: string;
 	/** The label of the control that copies a detail's whole value. */
 	copyLabel: string;
+	/** The label of the control that retries a failed run. It is sent here, not kept in the shared label list. */
+	retryLabel: string;
 	details: DetailRow[];
 }
 

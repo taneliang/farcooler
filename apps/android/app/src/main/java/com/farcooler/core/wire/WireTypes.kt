@@ -753,6 +753,8 @@ data class RunPage (
 	val detailsLabel: String,
 	/// The label of the control that copies a detail's whole value.
 	val copyLabel: String,
+	/// The label of the control that retries a failed run. It is sent here, not kept in the shared label list.
+	val retryLabel: String,
 	val details: List<DetailRow>
 )
 
