@@ -348,7 +348,8 @@ async fn an_alternate_refs_command_in_the_shared_config_runs_on_no_fetch_into_it
 async fn move_remote(r: &Remote) -> (String, String) {
     let config = r.runtime.coding.clone().unwrap();
     let other = r._dir.path().join("elsewhere");
-    plain_git(r._dir.path(), &["clone", "--quiet", r.bare.to_str().unwrap(), other.to_str().unwrap()]);
+    // The bare's HEAD names whatever branch git defaults to (`master` on CI's runners), not `main`: clone `main` by name.
+    plain_git(r._dir.path(), &["clone", "--quiet", "--branch", "main", r.bare.to_str().unwrap(), other.to_str().unwrap()]);
     std::fs::write(other.join("landed-elsewhere.txt"), "newer main\n").unwrap();
     plain_git(&other, &["add", "landed-elsewhere.txt"]);
     plain_git(&other, &["-c", "user.name=T", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "newer main"]);
