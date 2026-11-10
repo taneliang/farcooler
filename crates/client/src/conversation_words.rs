@@ -139,7 +139,6 @@ pub fn words(style: Style, agent: &str) -> Words {
         ("panel", format!("This opens a panel in {agent}, so it’s for the terminal.")),
         // A turn's ending.
         ("outcome_done", "Done".into()),
-        ("outcome_unconfirmed", "Outcome unconfirmed".into()),
         ("outcome_took", "Took {time}".into()),
         ("outcome_interrupted", "Interrupted".into()),
         ("outcome_unrecorded", "Not recorded".into()),
@@ -195,19 +194,20 @@ pub struct ItemRequest {
     pub origin: Option<String>,
 }
 
-/// The answers, each present only when asked.
+/// The answers under the names they were asked by, each present only when asked:
+/// `agent_type` and `ms` come back as words ("General purpose", "1:05"), `origin` as whether it is a notice.
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Item {
     pub agent_type: Option<String>,
-    pub short: Option<String>,
-    pub is_notice: Option<bool>,
+    pub ms: Option<String>,
+    pub origin: Option<bool>,
 }
 
 pub fn item(asked: &ItemRequest) -> Item {
     Item {
         agent_type: asked.agent_type.as_deref().map(agent_type),
-        short: asked.ms.map(short),
-        is_notice: asked.origin.as_deref().map(is_notice),
+        ms: asked.ms.map(short),
+        origin: asked.origin.as_deref().map(is_notice),
     }
 }
 

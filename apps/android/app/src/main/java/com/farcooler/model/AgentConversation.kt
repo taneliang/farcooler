@@ -349,21 +349,21 @@ object AgentConversation {
     fun gap(gap: AgentRow.Gap): String = ConversationWords.phrase(if (gap.count > 1) "gap" else "gap_one")
 
     /** "0:04", "1:12", "2:03:09": the core's `conversation_words::short`. */
-    fun short(ms: Long): String = ConversationWords.item("ms", JsonPrimitive(ms), "short")?.contentOrNull ?: ""
+    fun short(ms: Long): String = ConversationWords.item("ms", JsonPrimitive(ms))?.contentOrNull ?: "0:00"
 
     /** What a subagent row says of its work: "1 tool", "14 tools", or null while the count is unknown (0 is how a missing count reads; ov-490). */
     fun toolsLabel(count: Int): String? =
         if (count <= 0) null else ConversationWords.phrase(if (count == 1) "tools_one" else "tools", fill = mapOf("n" to "$count"))
 
     /** A subagent's type as words: `general-purpose` reads "General purpose". */
-    fun agentType(raw: String): String = ConversationWords.item("agent_type", JsonPrimitive(raw), "agent_type")?.contentOrNull ?: raw
+    fun agentType(raw: String): String = ConversationWords.item("agent_type", JsonPrimitive(raw))?.contentOrNull ?: "Agent"
 
     /**
      * A turn nobody typed: a background task finishing, or claude waking itself
      * (`TurnOrigin::Notification`, `System`). Drawn as a notice, never as the
      * person's message.
      */
-    fun isNotice(turn: AgentRow.Turn): Boolean = ConversationWords.item("origin", JsonPrimitive(turn.origin), "is_notice")?.booleanOrNull ?: false
+    fun isNotice(turn: AgentRow.Turn): Boolean = ConversationWords.item("origin", JsonPrimitive(turn.origin))?.booleanOrNull ?: false
 
     /** The lines a report or a message shows before Show more (ov-474). */
     const val HARNESS_LINES = 4
@@ -582,7 +582,7 @@ object AgentConversation {
     fun groupStatus(tools: List<AgentRow.Tool>): AgentRow.Status = when {
         tools.any { it.presentationStatus == AgentRow.Status.Running } -> AgentRow.Status.Running
         tools.any { it.presentationStatus == AgentRow.Status.Failed } -> AgentRow.Status.Failed
-        tools.any { it.operation?.lifecycle == "unconfirmed" } -> AgentRow.Status.Ended(ConversationWords.phrase("outcome_unconfirmed"))
+        tools.any { it.operation?.lifecycle == "unconfirmed" } -> AgentRow.Status.Ended("Outcome unconfirmed")
         else -> AgentRow.Status.Done
     }
 
@@ -592,7 +592,7 @@ object AgentConversation {
             AgentRow.Status.Running -> "Commands running"
             AgentRow.Status.Done -> "Commands completed"
             AgentRow.Status.Failed -> "Command failed or declined"
-            else -> ConversationWords.phrase("outcome_unconfirmed")
+            else -> "Outcome unconfirmed"
         }
         return "Recognized commands · $words"
     }
@@ -694,12 +694,12 @@ object ConversationWords {
         table
     }
 
-    /** The core's answer for one item (`conversation_words::item`): [field] in ("agent_type", "ms", "origin"), [out] ("agent_type", "short", "is_notice") back; null while the bridge can't answer. */
-    internal fun item(field: String, value: JsonElement, out: String): JsonPrimitive? {
+    /** The core's answer for one item (`conversation_words::item`): [field] ("agent_type", "ms", "origin") comes back under its own name; null while the bridge can't answer. */
+    internal fun item(field: String, value: JsonElement): JsonPrimitive? {
         val request = buildJsonObject { put("schema", 1); put("item", buildJsonObject { put(field, value) }) }
         val answer = bridge(request.toString()) ?: return null
         return try {
-            json.parseToJsonElement(answer).jsonObject["item"]?.jsonObject?.get(out) as? JsonPrimitive
+            json.parseToJsonElement(answer).jsonObject["item"]?.jsonObject?.get(field) as? JsonPrimitive
         } catch (_: IllegalArgumentException) {
             null
         }

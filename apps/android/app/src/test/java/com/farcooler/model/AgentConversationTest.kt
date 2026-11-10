@@ -410,4 +410,20 @@ class AgentConversationTest {
         assertFalse(AgentConversation.images(build(Capability.AGENT_ROWS)))
         assertFalse(AgentConversation.images(null))
     }
+
+    @Test
+    fun `item logic is the core's, and reads as before while the core cannot answer`() {
+        ConversationWords.bridge = { """{"schema":1,"item":{"ms":"1:05","agent_type":"General purpose","origin":true}}""" }
+        try {
+            assertEquals("1:05", AgentConversation.short(65_000))
+            assertEquals("General purpose", AgentConversation.agentType("general-purpose"))
+            assertTrue(AgentConversation.isNotice(AgentRow.Turn(prompt = "", origin = "System")))
+            ConversationWords.bridge = { null }
+            assertEquals("0:00", AgentConversation.short(65_000))
+            assertEquals("Agent", AgentConversation.agentType("general-purpose"))
+            assertFalse(AgentConversation.isNotice(AgentRow.Turn(prompt = "", origin = "System")))
+        } finally {
+            ConversationWords.reset()
+        }
+    }
 }

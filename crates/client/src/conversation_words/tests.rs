@@ -70,10 +70,10 @@ fn an_items_logic_is_asked_of_the_core() {
     assert_eq!(ask_item(json!({ "agent_type": "general-purpose" }))["agent_type"], "General purpose");
     assert_eq!(ask_item(json!({ "agent_type": "" }))["agent_type"], "Agent");
     assert_eq!(ask_item(json!({ "agent_type": "éclair_x" }))["agent_type"], "Éclair x");
-    assert_eq!(ask_item(json!({ "ms": 7_384_000 }))["short"], "2:03:04");
-    assert_eq!(ask_item(json!({ "ms": -5 }))["short"], "0:00");
-    assert_eq!(ask_item(json!({ "origin": "System" }))["is_notice"], true);
-    assert_eq!(ask_item(json!({ "origin": "Scheduled" }))["is_notice"], false);
+    assert_eq!(ask_item(json!({ "ms": 7_384_000 }))["ms"], "2:03:04");
+    assert_eq!(ask_item(json!({ "ms": -5 }))["ms"], "0:00");
+    assert_eq!(ask_item(json!({ "origin": "System" }))["origin"], true);
+    assert_eq!(ask_item(json!({ "origin": "Scheduled" }))["origin"], false);
     assert_eq!(ask_item(json!({ "ms": 1 }))["agent_type"], Value::Null, "only what is asked");
 }
 
@@ -81,15 +81,15 @@ fn an_items_logic_is_asked_of_the_core() {
 /// Rewrite with UPDATE_PLAN_VIEW_GOLDEN=1.
 #[test]
 fn the_item_answers_are_pinned() {
-    let mut out = json!({ "agent_type": {}, "short": {}, "is_notice": {} });
+    let mut out = json!({ "agent_type": {}, "ms": {}, "origin": {} });
     for raw in ["general-purpose", "Explore", "web_search", ""] {
         out["agent_type"][raw] = ask_item(json!({ "agent_type": raw }))["agent_type"].clone();
     }
     for ms in [0i64, 42_000, 65_000, 220_000, 3_723_000, 7_384_000, -5] {
-        out["short"][ms.to_string()] = ask_item(json!({ "ms": ms }))["short"].clone();
+        out["ms"][ms.to_string()] = ask_item(json!({ "ms": ms }))["ms"].clone();
     }
     for origin in ["Notification", "System", "Typed", "Queued", "Scheduled"] {
-        out["is_notice"][origin] = ask_item(json!({ "origin": origin }))["is_notice"].clone();
+        out["origin"][origin] = ask_item(json!({ "origin": origin }))["origin"].clone();
     }
     let actual = serde_json::to_string_pretty(&out).unwrap() + "\n";
     let path = format!("{}/../../test/fixtures/conversation-items.json", env!("CARGO_MANIFEST_DIR"));

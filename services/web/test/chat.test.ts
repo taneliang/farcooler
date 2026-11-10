@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import items from '../../../test/fixtures/conversation-items.json'
 import words from '../../../test/fixtures/conversation-words.json'
 
-import { agentType, askTitle, useConversationWords, groupPurpose, groupTitle, harnessTitle, outcomeLine, queuedLabel, sendFailure, shortDuration, taskProgress } from '../src/client/chat-copy'
+import { agentType, askTitle, useConversationWords, groupPurpose, groupTitle, harnessTitle, outcomeLine, queuedLabel, sendFailure, shortDuration, taskProgress, isNotice } from '../src/client/chat-copy'
 import {
   type Delta,
   FOLLOW_WAIT_MS,
@@ -27,13 +27,13 @@ import { sourceOf } from '../src/client/chat'
 import { blocksOf } from '../src/client/chat-text'
 
 // wasm can't load under vitest's worker pool: the golden answers for the core.
-useConversationWords(request => {
+const golden = (request: string) => {
   const asked = JSON.parse(request)
   if (!asked.item) return JSON.stringify((words as any)[`apple_${asked.conversation.agent.toLowerCase()}`])
   const [field, value] = Object.entries(asked.item)[0]
-  const key = field === 'ms' ? 'short' : field === 'origin' ? 'is_notice' : field
-  return JSON.stringify({ item: { [key]: (items as any)[key][String(value)] } })
-})
+  return JSON.stringify({ item: { [field]: (items as any)[field][String(value)] } })
+}
+useConversationWords(golden)
 
 const row = (id: string, ord: number, rev: number, kind: Row['kind'], turn: string | null = null): Row => ({ id, ord, rev, turn, provisional: false, kind })
 const turn = (id: string, ord: number, rev: number, prompt: string, extra: object = {}) =>
@@ -148,6 +148,18 @@ describe('the words', () => {
     expect(outcomeLine({ outcome: { Failed: { detail: 'rate limit' } } })).toBe('Failed: rate limit')
     expect(outcomeLine({ outcome: null })).toBeNull()
     expect(shortDuration(3_723_000)).toBe('1:02:03')
+    expect(shortDuration(65_000.4)).toBe('1:05')
+  })
+
+  it('keeps the old answers while the core cannot answer', () => {
+    useConversationWords(() => 'null')
+    try {
+      expect(agentType('Explore')).toBe('Agent')
+      expect(shortDuration(65_000)).toBe('0:00')
+      expect(isNotice({ origin: 'System' })).toBe(false)
+    } finally {
+      useConversationWords(golden)
+    }
   })
 
   it('titles asks, queued messages, subagents, reports and task lists as the Mac does', () => {

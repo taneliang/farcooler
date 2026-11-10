@@ -322,7 +322,7 @@ extension AgentConversation {
 
     /// A subagent's type as words: `general-purpose` reads "General purpose".
     public static func agentType(_ raw: String) -> String {
-        ConversationWords.item("agent_type", raw) as? String ?? raw
+        ConversationWords.item("agent_type", raw) as? String ?? "Agent"
     }
 
     /// A turn nobody typed: a background task finishing, or claude waking
@@ -507,14 +507,14 @@ public enum ConversationWords {
 }
 
 extension ConversationWords {
-    /// The core's answer for one item (`conversation_words::item`): "agent_type",
-    /// "ms" (as "short") or "origin" (as "is_notice") in, that field out; nil
+    /// The core's answer for one item (`conversation_words::item`): the field
+    /// asked ("agent_type", "ms", "origin") comes back under its own name; nil
     /// while the bridge can't answer.
     static func item(_ field: String, _ value: Any) -> Any? {
         guard let request = try? JSONSerialization.data(withJSONObject: ["schema": 1, "item": [field: value]]),
               let answer = PlanViewPresenter.ask(String(decoding: request, as: UTF8.self)),
               let reply = try? JSONSerialization.jsonObject(with: Data(answer.utf8)) as? [String: Any]
         else { return nil }
-        return (reply["item"] as? [String: Any])?[["ms": "short", "origin": "is_notice"][field] ?? field]
+        return (reply["item"] as? [String: Any])?[field]
     }
 }

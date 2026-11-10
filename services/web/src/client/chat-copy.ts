@@ -48,7 +48,7 @@ function item(asked: Record<string, string | number>): any {
 }
 
 /// Minutes and seconds, "1:05", or with hours, "1:02:03".
-export const shortDuration = (ms: number): string => item({ ms }).short ?? ''
+export const shortDuration = (ms: number): string => item({ ms: Math.round(ms) }).ms ?? '0:00'
 
 /// How a finished turn ended, or null while it is open (`outcome`).
 export function outcomeLine(turn: any): string | null {
@@ -76,7 +76,7 @@ export function originNote(turn: any): string | null {
 }
 
 /// A turn nobody typed: a background task finishing, or claude waking itself.
-export const isNotice = (turn: any): boolean => item({ origin: String(turn.origin) }).is_notice === true
+export const isNotice = (turn: any): boolean => item({ origin: String(turn.origin) }).origin === true
 
 export const scheduledTask = (): string => phrase('scheduled_task')
 
@@ -93,7 +93,7 @@ export function askTitle(ask: any, agent = 'Claude'): string {
 }
 
 /// A subagent's type as words: `general-purpose` reads "General purpose".
-export const agentType = (raw: string): string => item({ agent_type: raw }).agent_type ?? raw
+export const agentType = (raw: string): string => item({ agent_type: raw }).agent_type ?? 'Agent'
 
 /// "1 tool", "14 tools", or nothing while the count is unknown.
 export function toolsLabel(count: number): string | null {
