@@ -25,6 +25,14 @@ struct NativeSettlement {
     completed: Option<bool>,
 }
 
+/// How long a reviewer that has recorded its verdict may stay quiet before its turn is taken as over (ov-1082): a
+/// Stop lost on the way, under load, must not hold a decided review for the turn's three hours. Measured from the
+/// verdict or the reviewer's last hook, whichever is later, so one that is still writing its summary finishes it.
+#[cfg(not(test))]
+const VERDICT_QUIET: Duration = Duration::from_secs(60);
+#[cfg(test)]
+const VERDICT_QUIET: Duration = Duration::from_secs(1);
+
 // Each effect has its own retained server, never the installed daemon's socket.
 // A cancelled future tears down its server but cannot publish quiescence/success.
 struct Host(TmuxServer);
@@ -192,14 +200,38 @@ impl Exec {
         }
         Err(Error::Refused("native descendants not quiescent"))
     }
+    /// An agent review whose verdict for this very step is recorded (ov-1082). The verdict is the review: what the
+    /// reviewer's turn does after it decides nothing (`reviewing`).
+    pub(super) fn recorded_verdict(&self, binding: &Binding) -> bool {
+        matches!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent)))
+            && self.bytes(&self.provider_path(binding)).ok()
+                .and_then(|raw| serde_json::from_slice::<CodingReviewReceipt>(&raw).ok())
+                .is_some_and(|r| r.binding == digest(binding) && r.identity == AGENT_REVIEWER
+                    && binding.effect.candidate.as_ref() == Some(&r.candidate))
+    }
     async fn native_turn(&self, listener: &tokio::net::UnixListener, binding: &Binding) -> Result<(bool, Vec<HookLine>)> {
         let agent = self.native_agent(binding)?;
+        let tree = self.tree(binding);
         let mut assembler = MessageAssembler::new();
         let mut session = (agent == Agent::Claude).then(|| terminal(binding).to_string());
         let mut prompted = false;
         let mut hooks = Vec::new();
+        // A reviewer's recorded verdict ends its turn once it has gone quiet, if its Stop never arrives (ov-1082).
+        let mut look = tokio::time::interval(Duration::from_millis(250));
+        let mut heard = tokio::time::Instant::now();
+        let mut verdict = None;
         loop {
-            let (stream, _) = listener.accept().await?;
+            let stream = tokio::select! {
+                accepted = listener.accept() => accepted?.0,
+                _ = look.tick() => {
+                    if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(tokio::time::Instant::now()); }
+                    if verdict.is_some_and(|at: tokio::time::Instant| at.max(heard).elapsed() >= VERDICT_QUIET) {
+                        tracing::warn!(effect = %binding.effect.id, "the reviewer recorded its verdict and went quiet without its turn's end being heard; the verdict ends it");
+                        return Ok((true, hooks));
+                    }
+                    continue;
+                }
+            };
             if peer_uid(&stream) != Some(unsafe { libc::getuid() }) { continue; }
             let mut stream = tokio::io::BufReader::new(stream);
             let mut raw = Vec::new();
@@ -213,12 +245,15 @@ impl Exec {
             // failing the turn on it ended every real build at its first hook, with none recorded (ov-1075).
             let _ = stream.get_mut().write_all(b"{}\n").await;
             let fact = facts(line.agent, &line.payload);
-            if line.agent != agent || fact.cwd.as_deref() != Some(self.tree(binding).as_path()) { continue; }
+            // An agent's hooks name the directory it is in now, which is wherever it last moved to: ov-1064's reviewer
+            // ended its turn in `apps/android`, and a hook that had to name the worktree itself was never heard (ov-1082).
+            if line.agent != agent || !fact.cwd.as_deref().is_some_and(|cwd| cwd.starts_with(&tree)) { continue; }
             let Some(sid) = &fact.session_id else { continue };
             if session.is_none() && matches!(line.event.as_str(), "SessionStart" | "sessionStart") {
                 session = Some(sid.clone());
             }
             if session.as_ref() != Some(sid) { continue; }
+            heard = tokio::time::Instant::now();
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
                 if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(self.native_prompt(binding)?.as_str()) { prompted = true; }
@@ -274,27 +309,39 @@ impl Exec {
         let output = tmux.capture_scrollback(&window.pane_id).await.map_err(|_| Error::Refused("native PTY output unavailable"))?;
         std::fs::write(self.process_log(binding), output)?;
         self.quiesce_native(&owner).await?;
-        let (completed, hooks) = result.map_or((None, Vec::new()), |(passed, hooks)| (Some(passed), hooks));
+        let (mut completed, hooks) = result.map_or((None, Vec::new()), |(passed, hooks)| (Some(passed), hooks));
+        // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
+        // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
+        if self.recorded_verdict(binding) { completed = Some(true); }
         durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement { owner, hooks, completed })?)?;
         drop(listener);
         std::fs::remove_file(socket)?;
         Ok(completed.map(|passed| if passed { 0 } else { 1 }))
     }
-    /// Only an admitted Stop may terminate an interrupted native owner. Ordinary
-    /// reconciliation never launches, sends input, or kills a discovered process.
-    pub(super) async fn cancel_interrupted_native(&self, binding: &Binding) -> Result<()> {
+    /// Only an admitted Stop, or a reviewer's own recorded verdict (ov-1082), may terminate an interrupted native
+    /// owner. Ordinary reconciliation never launches, sends input, or kills a discovered process. `completed` is what
+    /// the settlement says of the turn; a settlement already written (the daemon died after it) is kept, and what it
+    /// says is returned.
+    pub(super) async fn cancel_interrupted_native(&self, binding: &Binding, completed: Option<bool>) -> Result<Option<bool>> {
         let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
         if owner.binding != *binding { return Err(Error::Refused("foreign interrupted native owner")); }
-        let tmux = server(&self.root, binding);
-        let output = tmux.capture_scrollback(&owner.pane).await.map_err(|_| Error::Refused("interrupted native output unavailable"))?;
-        std::fs::write(self.process_log(binding), output)?;
-        self.quiesce_native(&owner).await?;
-        durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement {
-            owner, hooks: Vec::new(), completed: None })?)?;
+        let settled = self.native_path(binding, "settled");
+        let completed = if settled.try_exists()? {
+            let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&settled)?)?;
+            if settlement.owner.binding != *binding { return Err(Error::Refused("foreign native settlement")); }
+            settlement.completed
+        } else {
+            let tmux = server(&self.root, binding);
+            let output = tmux.capture_scrollback(&owner.pane).await.map_err(|_| Error::Refused("interrupted native output unavailable"))?;
+            std::fs::write(self.process_log(binding), output)?;
+            self.quiesce_native(&owner).await?;
+            durable(&settled, &serde_json::to_vec(&NativeSettlement { owner, hooks: Vec::new(), completed })?)?;
+            completed
+        };
         // The socket is this build's alone, so a leftover one is stale by construction.
         let socket = self.native_socket(binding);
         if socket.try_exists()? { std::fs::remove_file(socket)?; }
-        Ok(())
+        Ok(completed)
     }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<()> {
         let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&self.native_path(binding, "settled"))?)?;
@@ -581,5 +628,33 @@ mod recovery_tests {
             assert!(!dir.path().join("started").exists(),"recovery launched an adapter");
         }
     }
-
+    /// ov-1082: the daemon died while a reviewer that had recorded its verdict was still in its pane. The restart
+    /// settles the review from that verdict and ends the reviewer, instead of leaving the run uncertain.
+    #[tokio::test]
+    async fn workflow_native_review_recovers_from_its_recorded_verdict_after_a_crash() {
+        use super::super::gate_tests::{three_gates, definition, at};
+        let (dir, mut runtime, _fake) = three_gates("never").await;
+        let definition = definition(&runtime); enqueue(&mut runtime, "w", "one", definition);
+        for time in 2..20 {
+            if at(&runtime.state("w").unwrap().unwrap()).0 == "agent-review" { break; }
+            runtime.pump(time).await.unwrap();
+        }
+        let binding = admitted(&runtime).await;
+        let root = runtime.root.clone();
+        let host = Host(server(&root, &binding)); let id = terminal(&binding);
+        let window = host.0.create_terminal_window(id, id, "crash fixture", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
+        let panes = host.0.list_tagged_panes().await.unwrap();
+        let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
+        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
+        durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
+        let command = runtime.coding_command(&binding).unwrap();
+        super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), true).unwrap();
+        drop(runtime);
+        let mut runtime = Runtime::open(&root).unwrap();
+        runtime.pump(200).await.unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(at(&state), ("orchestrator-review".into(), Phase::WaitingReview));
+        assert!(!dir.path().join("reviews").exists(), "recovery launched a reviewer");
+        assert_ne!(host.0.pane_life(&owner.pane, id).await.ok(), Some(farcooler_tmux::PaneLife::Live), "the reviewer was left running");
+    }
 }

@@ -20,9 +20,17 @@ hook('UserPromptSubmit', prompt=prompt)
 if prompt.startswith('You are reviewing'):
     log = pathlib.Path(os.environ['STARTED']).parent / 'reviews'
     with log.open('a') as f: f.write(os.environ.get('FARCOOLER_WORKFLOW_MODEL', '-') + '\n')
-    if len(log.read_text().splitlines()) > 1 and mode != 'never':
+    # 'subdir' and 'nostop' review well the first time: one ends its turn from a directory it moved into, as ov-1064's
+    # reviewer did after a `cd apps/android`, and one records its verdict and never ends its turn (ov-1082).
+    first = mode in ('subdir', 'nostop')
+    if (first or len(log.read_text().splitlines()) > 1) and mode != 'never':
         pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'],
             identity='agent', candidate=os.environ['FARCOOLER_CANDIDATE'], passed=mode != 'reject')))
+    if mode == 'subdir':
+        os.makedirs('apps/android', exist_ok=True)
+        os.chdir('apps/android')
+    if mode == 'nostop':
+        time.sleep(30)
 else:
     pathlib.Path('result.txt').write_text('candidate native PTY')
     subprocess.check_call(['/usr/bin/git','add','--','result.txt'])
@@ -31,7 +39,7 @@ hook('Stop')
 time.sleep(30)
 "#;
 
-async fn three_gates(mode: &str) -> (tempfile::TempDir, Runtime, super::coding_native::tests::Fake) {
+pub(super) async fn three_gates(mode: &str) -> (tempfile::TempDir, Runtime, super::coding_native::tests::Fake) {
     let (dir, runtime, fake) = native("pass").await;
     let script = dir.path().join("gates.py");
     std::fs::write(&script, AGENT).unwrap();
@@ -40,7 +48,7 @@ async fn three_gates(mode: &str) -> (tempfile::TempDir, Runtime, super::coding_n
     (dir, runtime, fake)
 }
 /// The configured steps, with the three gates after the checks and before landing.
-fn definition(runtime: &Runtime) -> Definition {
+pub(super) fn definition(runtime: &Runtime) -> Definition {
     let mut definition = runtime.configured_definition().unwrap();
     let operation = |argument: &str| runtime.coding.as_ref().unwrap().operation("coding-review/v1", argument);
     let gate = |id: &str, reviewer: Reviewer, argument: &str| Stage { id: id.into(), kind: StageKind::Review(reviewer),
@@ -52,7 +60,7 @@ fn definition(runtime: &Runtime) -> Definition {
     definition.models = BTreeMap::from([("agent-review".into(), vec!["claude:sonnet".into()])]);
     definition
 }
-fn at(state: &State) -> (String, Phase) {
+pub(super) fn at(state: &State) -> (String, Phase) {
     let item = &state.items["one"];
     (item.definition.stages.get(item.stage).map_or("end".into(), |s| s.id.clone()), item.phase.clone())
 }
@@ -156,4 +164,65 @@ async fn on_a_runner_that_starts_agents_a_drafted_agent_gate_is_one_the_engine_s
     let draft = crate::landing_templates::template("ticket-pr", config, &["make check".into()],
         &[crate::landing_templates::Extra::Agent], &crate::landing_templates::Options::default()).unwrap();
     assert!(draft.definition.stages.iter().any(|s| s.kind == StageKind::Review(Reviewer::Agent)), "{:?}", draft.definition.stages);
+}
+
+/// ov-1082: ov-1064's reviewer recorded its verdict, moved into `apps/android` and ended its turn there. Its Stop
+/// named that directory, not the worktree, so the turn was never seen to end.
+#[tokio::test]
+async fn a_reviewer_that_ends_its_turn_in_a_subdirectory_settles_from_its_verdict() {
+    let (dir, mut runtime, _fake) = three_gates("subdir").await;
+    let definition = definition(&runtime);
+    enqueue(&mut runtime, "w", "one", definition);
+    let state = settle(&mut runtime, 2).await;
+    assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:sonnet\n", "it reviewed once");
+    assert_eq!(at(&state), ("orchestrator-review".into(), Phase::WaitingReview));
+    // Its Stop ended the turn, not the quiet after its verdict.
+    let heard = std::fs::read_dir(runtime.root.join("receipts")).unwrap().map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().ends_with(".native-settled.json"))
+        .flat_map(|p| serde_json::from_slice::<serde_json::Value>(&std::fs::read(p).unwrap()).unwrap()["hooks"].as_array().unwrap().clone())
+        .any(|hook| hook["event"] == "Stop" && hook["payload"]["cwd"].as_str().unwrap().ends_with("/apps/android"));
+    assert!(heard, "the Stop from apps/android was not heard");
+}
+
+/// The review effect, admitted and not yet run.
+async fn held_review(runtime: &mut Runtime) -> Binding {
+    let definition = definition(runtime);
+    enqueue(runtime, "w", "one", definition);
+    for time in 2..20 {
+        if at(&runtime.state("w").unwrap().unwrap()).0 == "agent-review" { break; }
+        runtime.pump(time).await.unwrap();
+    }
+    super::coding_tests::admitted(runtime).await
+}
+
+/// ov-1082: a Stop that never arrives (a hook lost under load) doesn't hold a recorded verdict for the turn's
+/// three hours. Once the reviewer has gone quiet, the verdict ends the turn.
+#[tokio::test]
+async fn a_recorded_verdict_settles_a_turn_whose_end_never_arrives() {
+    let (_dir, mut runtime, _fake) = three_gates("nostop").await;
+    let binding = held_review(&mut runtime).await;
+    let started = std::time::Instant::now();
+    let (_hold, cancelled) = tokio::sync::watch::channel(false);
+    assert!(matches!(runtime.execute_coding("w", &binding, cancelled).await.unwrap(), Outcome::Passed(_)));
+    // Not the fixture's five-second turn limit: the quiet after the verdict.
+    assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
+}
+
+/// ov-1082: a daemon that stops (an install) while a reviewer that has given its verdict is still in its turn
+/// keeps the verdict, rather than counting the review as never done.
+#[tokio::test]
+async fn a_verdict_survives_the_daemon_stopping_before_the_turn_ends() {
+    let (_dir, mut runtime, _fake) = three_gates("nostop").await;
+    let binding = held_review(&mut runtime).await;
+    let receipt = PathBuf::from(runtime.coding_command(&binding).unwrap().environment["FARCOOLER_RECEIPT"].clone());
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    let stop = async {
+        for _ in 0..500 {
+            if receipt.exists() { cancel.send_replace(true); return; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the reviewer gave no verdict");
+    };
+    let (outcome, ()) = tokio::join!(runtime.execute_coding("w", &binding, cancelled), stop);
+    assert!(matches!(outcome.unwrap(), Outcome::Passed(_)));
 }

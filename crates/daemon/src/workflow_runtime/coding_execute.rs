@@ -67,7 +67,7 @@ impl Exec {
     pub(super) fn owner_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.owner.json", digest(&binding.effect)))
     }
-    fn provider_path(&self, binding: &Binding) -> PathBuf {
+    pub(super) fn provider_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provider.json", digest(&binding.effect)))
     }
     /// The Run gate's ledger of what it changed in a named tree (ov-979). Kept per tree, so the gate that runs
@@ -317,12 +317,7 @@ impl Exec {
             original.resource_generation.ok_or(Error::Refused("missing original generation"))?,
             binding.iteration, &binding.base);
         if self.is_native_agent(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
-            self.cancel_interrupted_native(&original_binding).await?;
-            let command = self.bound_command(&original_binding, false)?;
-            let fact = ProcessFact { binding: original_binding.clone(), argv: command.argv,
-                environment: command.environment, exit: None,
-                log_digest: digest(&self.bytes(&self.process_log(&original_binding))?) };
-            durable(&self.fact_path(&original_binding), &serde_json::to_vec(&fact)?)?;
+            self.settle_interrupted_native(&original_binding, None).await?;
         }
         // Reconcile the original facts even if Cancel fenced its Observe or a
         // crash lost its journal. Never execute it, and never infer that external
@@ -331,6 +326,15 @@ impl Exec {
         let outcome = Box::pin(self.reconcile_coding(&original_binding)).await?;
         if outcome == Outcome::Uncertain { return Err(Error::Refused("original coding acceptance remains unknown")); }
         Ok(Outcome::Stopped { operation: operation.into(), receipt: digest(&("coding-quiescent/v1", binding, &original_binding, outcome)) })
+    }
+    /// End a native agent whose turn was never settled, and write the process fact its settlement implies.
+    async fn settle_interrupted_native(&self, binding: &Binding, completed: Option<bool>) -> Result<()> {
+        let completed = self.cancel_interrupted_native(binding, completed).await?;
+        let command = self.bound_command(binding, false)?;
+        let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
+            environment: command.environment, exit: completed.map(|passed| if passed { 0 } else { 1 }),
+            log_digest: digest(&self.bytes(&self.process_log(binding))?) };
+        durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
     }
     pub(super) async fn execute_coding(&self, workspace: &str, binding: &Binding,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
@@ -485,6 +489,11 @@ impl Exec {
             facts.extend(raw);
         }
         if matches!(kind, StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci) {
+            // A reviewer whose verdict is recorded but whose turn never settled: the daemon died before its end was
+            // seen (ov-1082). The verdict is the review, so the reviewer is ended and the step settles from it.
+            if self.is_native_agent(binding) && !self.fact_path(binding).try_exists()? && self.recorded_verdict(binding) {
+                self.settle_interrupted_native(binding, Some(true)).await?;
+            }
             let raw = self.bytes(&self.fact_path(binding))?;
             let fact: ProcessFact = serde_json::from_slice(&raw)?;
             let command = self.bound_command(binding, false)?;
