@@ -37,39 +37,33 @@ class TaskUsageTest {
         }
     }
 
+    /** `test/fixtures/task-usage-shown.json`: the client core's own answer for each case. */
+    private val shown = Json.parseToJsonElement(repositoryFile("test/fixtures/task-usage-shown.json")).jsonArray
+        .associate { it.jsonObject.string("case") to TaskUsage.decode(it.jsonObject["shown"]!!.jsonObject) }
+
     @Test
-    fun `each case's lines, provenance and breakdown read as the shared fixture says`() {
+    fun `the client core's answer for each case decodes to the lines the shared fixture says`() {
         val cases = fixture["cases"]!!.jsonArray.map { it.jsonObject }
         assertTrue("the fixture has its cases", cases.size >= 9)
         for (case in cases) {
             val name = case.string("case")
-            val usage = TaskUsage.decode(case["usage"]!!.jsonObject)
-            val t = usage.totals
-            assertEquals("$name: empty", case["empty"]!!.jsonPrimitive.boolean, t.isEmpty)
-            if (t.isEmpty) {
-                assertTrue(name, usage.rows.isEmpty())
-                continue
-            }
-            assertEquals("$name: tokens", case.maybe("tokens"), TaskUsageFormat.tokensLine(t, locale))
-            assertEquals("$name: detail", case.maybe("token_detail"), TaskUsageFormat.tokenDetail(t, locale))
-            assertEquals("$name: cost", case.maybe("cost"), TaskUsageFormat.cost(t, locale))
-            assertEquals("$name: time", case.maybe("time"), TaskUsageFormat.time(t))
+            val said = shown[name]!!.said
+            assertEquals("$name: empty", case["empty"]!!.jsonPrimitive.boolean, said.nothing != null)
+            if (said.nothing != null) continue
+            assertEquals("$name: tokens", case.maybe("tokens"), said.tokens)
+            assertEquals("$name: detail", case.maybe("token_detail"), said.tokenDetail)
+            assertEquals("$name: cost", case.maybe("cost"), said.cost)
+            assertEquals("$name: time", case.maybe("time"), said.time)
             val expected = case["rows"]!!.jsonArray.map { it.jsonObject.let { r -> r.string("title") to r.string("detail") } }
-            assertEquals("$name: rows", expected, usage.rows.map { it.title to TaskUsageFormat.detail(it, locale) })
+                .map { (title, detail) -> title.split(" · ", limit = 2).let { if (it.size == 2) "${it[0]} · ${PlanWords.model(it[1])}" else title } to detail }
+            assertEquals("$name: rows", expected, said.rows.map { it.title to it.detail })
         }
-    }
-
-    @Test
-    fun `the empty state has its sentence`() {
-        val usage = TaskUsage.decode("""{"task":"t","price_table":"2026-09-25","totals":{},"by_harness_model":[]}""")
-        assertTrue(usage.totals.isEmpty)
-        assertEquals("No agent usage recorded yet.", TaskUsageFormat.NOTHING_YET)
     }
 
     @Test
     fun `the section's sentences are the shared fixture's`() {
         val words = fixture["words"]!!.jsonObject
-        assertEquals(words.string("nothing_yet"), TaskUsageFormat.NOTHING_YET)
+        assertEquals(words.string("nothing_yet"), shown["nothing recorded"]!!.said.nothing)
         assertEquals(words.string("needs_update"), TaskUsageFormat.NEEDS_UPDATE)
         assertEquals(words.string("couldnt_read"), TaskUsageFormat.COULDNT_READ)
         assertEquals(words.string("api_equivalent"), TaskUsageFormat.API_EQUIVALENT)
@@ -79,7 +73,7 @@ class TaskUsageTest {
 
     @Test
     fun `an older runner needs an update, and a read that didn't come back failed`() {
-        val usage = TaskUsage("t", "", TaskSpend(), emptyList())
+        val usage = shown["nothing recorded"]!!
         assertEquals(TaskUsageState.NeedsUpdate, TaskUsageState.after(null, runnerCan = false))
         assertEquals(TaskUsageState.NeedsUpdate, TaskUsageState.after(usage, runnerCan = false))
         assertEquals(TaskUsageState.Failed, TaskUsageState.after(null, runnerCan = true))

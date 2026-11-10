@@ -1,12 +1,9 @@
 package com.farcooler.model
 
+import com.farcooler.core.wire.UsageSaid
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
@@ -15,102 +12,22 @@ import kotlin.math.roundToLong
 /**
  * What agents spent on one task (ov-195): its screen's Usage section.
  *
- * The runner's `usage.task` route answers in one shape,
- * `farcooler_core::usage_words::TaskSpend`, which the Mac reads too; this says it in
- * the same words AgentKit's `TaskUsageFormat` and `farcooler report` do. All three
- * are pinned by `test/fixtures/task-usage.json`.
- *
- * Every dollar is API-equivalent: the agent's own figure and the runner's price
- * table are both API list prices, notional on a subscription and what was paid on
- * an API key, and nothing here can tell which. A cost made partly from the table
- * says "estimated" or "partly estimated", one with tokens nobody can price says
- * "partly not reported", and a cost nobody knows is "Not reported", never a guess.
+ * The client core answers `usage.task` with the runner's numbers and `said`, every
+ * line the section draws (`farcooler_client::usage_json`, ov-1048), the same lines
+ * the Mac, iOS and `farcooler task usage` show. This draws them.
  */
-data class TaskSpend(
-    val turns: Long = 0,
-    /** Turns whose tokens are a floor: some model call stated none. */
-    val turnsPartial: Long = 0,
-    /** Turns that stated no usage at all. */
-    val turnsNotReported: Long = 0,
-    val subagentRuns: Long = 0,
-    val activeMs: Long = 0,
-    val inputTokens: Long = 0,
-    val outputTokens: Long = 0,
-    val cacheReadTokens: Long = 0,
-    val cacheWriteTokens: Long = 0,
-    /** Millionths of a dollar the agents reported. */
-    val costReportedMicros: Long = 0,
-    /** Millionths of a dollar from the price table. */
-    val costEstimatedMicros: Long = 0,
-    /** Tokens with no known price. */
-    val unpricedTokens: Long = 0,
-) {
-    val totalTokens: Long get() = inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
-    /** Nothing recorded: no turn, and no subagent run. */
-    val isEmpty: Boolean get() = turns == 0L && subagentRuns == 0L
-    internal val pricedMicros: Long get() = costReportedMicros + costEstimatedMicros
-    internal val partlyUnknown: Boolean get() = unpricedTokens > 0 || turnsPartial > 0 || turnsNotReported > 0
-
+data class TaskUsage(val said: UsageSaid) {
     companion object {
-        fun decode(o: JsonObject?): TaskSpend {
-            fun n(name: String) = o?.get(name)?.jsonPrimitive?.longOrNull ?: 0L
-            return TaskSpend(
-                turns = n("turns"),
-                turnsPartial = n("turns_partial"),
-                turnsNotReported = n("turns_not_reported"),
-                subagentRuns = n("subagent_runs"),
-                activeMs = n("active_ms"),
-                inputTokens = n("input_tokens"),
-                outputTokens = n("output_tokens"),
-                cacheReadTokens = n("cache_read_tokens"),
-                cacheWriteTokens = n("cache_write_tokens"),
-                costReportedMicros = n("cost_reported_micros"),
-                costEstimatedMicros = n("cost_estimated_micros"),
-                unpricedTokens = n("unpriced_tokens"),
-            )
-        }
-    }
-}
-
-/** One harness and model's share. [model] is empty when the harness named none. */
-data class TaskSpendRow(val harness: String, val model: String, val totals: TaskSpend) {
-    val title: String get() = if (model.isEmpty()) harness else "$harness · $model"
-}
-
-/** A task's spend: its totals and the same by harness and model. */
-data class TaskUsage(
-    val task: String,
-    val priceTable: String,
-    val totals: TaskSpend,
-    val byHarnessModel: List<TaskSpendRow>,
-) {
-    /** The breakdown, most tokens first, then by title. */
-    val rows: List<TaskSpendRow>
-        get() = byHarnessModel.sortedWith(compareByDescending<TaskSpendRow> { it.totals.totalTokens }.thenBy { it.title })
-
-    companion object {
-        private val json = Json { ignoreUnknownKeys = true }
+        private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
         fun decode(text: String): TaskUsage = decode(json.parseToJsonElement(text).jsonObject)
 
-        fun decode(o: JsonObject): TaskUsage {
-            fun text(name: String) = o[name]?.jsonPrimitive?.contentOrNull ?: ""
-            val rows = (o["by_harness_model"] as? JsonArray).orEmpty().mapNotNull { element ->
-                val r = element as? JsonObject ?: return@mapNotNull null
-                TaskSpendRow(
-                    harness = r["harness"]?.jsonPrimitive?.contentOrNull ?: "",
-                    model = r["model"]?.jsonPrimitive?.contentOrNull ?: "",
-                    totals = TaskSpend.decode(r["totals"] as? JsonObject),
-                )
-            }
-            return TaskUsage(text("task"), text("price_table"), TaskSpend.decode(o["totals"] as? JsonObject), rows)
-        }
+        fun decode(o: JsonObject): TaskUsage = TaskUsage(json.decodeFromJsonElement(UsageSaid.serializer(), o["said"]!!))
     }
 }
 
 /** The words a Usage section says. */
 object TaskUsageFormat {
-    const val NOTHING_YET = "No agent usage recorded yet."
     const val NOT_REPORTED = "Not reported"
     /** What a runner too old to record spend gets. */
     const val NEEDS_UPDATE = "This runner needs an update to show spend."
@@ -121,9 +38,6 @@ object TaskUsageFormat {
     /** What "API-equivalent" means, said once under the spend total. */
     const val API_EQUIVALENT =
         "API-equivalent: what these tokens would cost at API list prices. On a subscription plan, you pay your plan’s price instead."
-
-    /** Whether a cost line has a dollar figure, and so wants [API_EQUIVALENT] beneath it. */
-    fun isPriced(s: TaskSpend): Boolean = s.pricedMicros > 0
 
     /**
      * A token count, short, in [locale]'s digits: "999", "1.2K", "12K", "1M",
@@ -174,67 +88,6 @@ object TaskUsageFormat {
             minutes < 600 -> if (minutes % 60 == 0L) "${minutes / 60} h" else "${minutes / 60} h ${minutes % 60} min"
             else -> "${minutes / 60} h"
         }
-    }
-
-    /** "1.2M tokens", or "Not reported" when no turn stated any. */
-    fun tokensLine(s: TaskSpend, locale: Locale = Locale.getDefault()): String =
-        if (s.totalTokens == 0L) NOT_REPORTED else "${tokens(s.totalTokens, locale)} tokens"
-
-    /** "12K input · 3.4K output · 1.1M cache", or null with no tokens. */
-    fun tokenDetail(s: TaskSpend, locale: Locale = Locale.getDefault()): String? =
-        if (s.totalTokens == 0L) null
-        else listOf(
-            "${tokens(s.inputTokens, locale)} input",
-            "${tokens(s.outputTokens, locale)} output",
-            "${tokens(s.cacheReadTokens + s.cacheWriteTokens, locale)} cache",
-        ).joinToString(" · ")
-
-    /**
-     * "$3.20 · API-equivalent", with "estimated", "partly estimated" and "partly
-     * not reported" as they apply; "Not reported" with no known cost.
-     */
-    fun cost(s: TaskSpend, locale: Locale = Locale.getDefault()): String {
-        if (s.pricedMicros <= 0) return NOT_REPORTED
-        val line = StringBuilder("${dollars(s.pricedMicros, locale)} · API-equivalent")
-        if (s.costReportedMicros == 0L) line.append(", estimated")
-        else if (s.costEstimatedMicros > 0) line.append(", partly estimated")
-        if (s.partlyUnknown) line.append(", partly not reported")
-        return line.toString()
-    }
-
-    /** "Agent time 3 h 10 min · 12 turns", either half alone, or null. */
-    fun time(s: TaskSpend): String? {
-        val parts = mutableListOf<String>()
-        if (s.activeMs > 0) parts += "Agent time ${duration(s.activeMs)}"
-        when (s.turns) {
-            0L -> {}
-            1L -> parts += "1 turn"
-            else -> parts += "${s.turns} turns"
-        }
-        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
-    }
-
-    /**
-     * "1.2M tokens · $3.20", with "estimated", "partly estimated" and "partly not
-     * reported" as they apply to the row's own part; "Cost not reported"; or "Not
-     * reported" when the row stated nothing.
-     */
-    fun detail(row: TaskSpendRow, locale: Locale = Locale.getDefault()): String {
-        val s = row.totals
-        if (s.totalTokens == 0L && s.pricedMicros <= 0) return NOT_REPORTED
-        val cost = if (s.pricedMicros <= 0) {
-            // A model the price table has no rate for says so by name.
-            if (row.model.isNotEmpty() && s.unpricedTokens > 0) "No price listed for ${row.model}" else "Cost not reported"
-        } else {
-            val words = buildList {
-                if (s.costReportedMicros == 0L) add("estimated")
-                else if (s.costEstimatedMicros > 0) add("partly estimated")
-                if (s.partlyUnknown) add("partly not reported")
-            }
-            val amount = dollars(s.pricedMicros, locale)
-            if (words.isEmpty()) amount else "$amount ${words.joinToString(", ")}"
-        }
-        return "${tokens(s.totalTokens, locale)} tokens · $cost"
     }
 }
 

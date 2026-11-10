@@ -24,7 +24,6 @@ public struct TaskSpend: Decodable, Equatable, Sendable {
     /// Turns that stated no usage at all.
     public var turnsNotReported: UInt64 = 0
     public var subagentRuns: UInt64 = 0
-    public var activeMs: Int64 = 0
     public var inputTokens: UInt64 = 0
     public var outputTokens: UInt64 = 0
     public var cacheReadTokens: UInt64 = 0
@@ -46,7 +45,6 @@ public struct TaskSpend: Decodable, Equatable, Sendable {
         turnsPartial = try n(.turnsPartial)
         turnsNotReported = try n(.turnsNotReported)
         subagentRuns = try n(.subagentRuns)
-        activeMs = try i(.activeMs)
         inputTokens = try n(.inputTokens)
         outputTokens = try n(.outputTokens)
         cacheReadTokens = try n(.cacheReadTokens)
@@ -57,7 +55,7 @@ public struct TaskSpend: Decodable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case turns, turnsPartial, turnsNotReported, subagentRuns, activeMs, inputTokens, outputTokens
+        case turns, turnsPartial, turnsNotReported, subagentRuns, inputTokens, outputTokens
         case cacheReadTokens, cacheWriteTokens, costReportedMicros, costEstimatedMicros, unpricedTokens
     }
 
@@ -68,44 +66,29 @@ public struct TaskSpend: Decodable, Equatable, Sendable {
     var partlyUnknown: Bool { unpricedTokens > 0 || turnsPartial > 0 || turnsNotReported > 0 }
 }
 
-/// One harness and model's share.
-public struct TaskSpendRow: Decodable, Equatable, Sendable, Identifiable {
-    public var harness: String
-    /// Empty when the harness named no model.
-    public var model: String
-    public var totals: TaskSpend
-
-    /// The runner keys a task's rows by harness and model, and files a turn
-    /// that named no model under "", so this is unique within a task.
-    public var id: String { "\(harness)\u{1F}\(model)" }
-}
-
-/// A task's spend: its totals and the same by harness and model.
+/// A task's spend, as the Usage section draws it: the lines the client core
+/// says (`farcooler_client::usage_json`, ov-1048), the same the CLI prints.
 public struct TaskUsage: Decodable, Equatable, Sendable {
-    public var task: String
-    public var priceTable: String
-    public var totals: TaskSpend
-    public var byHarnessModel: [TaskSpendRow]
+    public var said: WireUsageSaid
 
     public static func decode(_ data: Data) throws -> TaskUsage {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(TaskUsage.self, from: data)
+        try JSONDecoder().decode(TaskUsage.self, from: data)
     }
 
-    /// The breakdown, most tokens first, then by title.
-    public var rows: [TaskSpendRow] {
-        byHarnessModel.sorted {
-            let (a, b) = ($0.totals.totalTokens, $1.totals.totalTokens)
-            return a != b ? a > b : ($0.harness, $0.model) < ($1.harness, $1.model)
-        }
+    /// What the client core answers `usage.task` with for `spend`, the runner's
+    /// numbers: for a harness that fakes the route. Nil without the bridge.
+    public static func shown(spend: Data) -> Data? {
+        let answer = PlanViewPresenter.ask(#"{"schema":1,"usage":"# + String(decoding: spend, as: UTF8.self) + "}")
+        let object = answer.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+        guard let usage = object?["usage"] as? [String: Any] else { return nil }
+        return try? JSONSerialization.data(withJSONObject: usage)
     }
 }
+
+extension WireUsageRowSaid: Identifiable {}
 
 /// The words a Usage section says.
 public enum TaskUsageFormat {
-    /// What an empty section says.
-    public static let nothingYet = "No agent usage recorded yet."
     public static let notReported = "Not reported"
     /// What a runner too old to record spend gets.
     public static let needsUpdate = "This runner needs an update to show spend."
@@ -117,10 +100,6 @@ public enum TaskUsageFormat {
     /// What "API-equivalent" means, said once under the spend total.
     public static let apiEquivalent =
         "API-equivalent: what these tokens would cost at API list prices. On a subscription plan, you pay your plan’s price instead."
-
-    /// Whether a cost line has a dollar figure, and so wants `apiEquivalent`
-    /// beneath it.
-    public static func isPriced(_ s: TaskSpend) -> Bool { s.pricedMicros > 0 }
 
     /// A token count, short, in `locale`'s digits: "999", "1.2K", "12K",
     /// "1M", "2.1B". One decimal below ten of a unit, none above; a count
@@ -186,16 +165,6 @@ public enum TaskUsageFormat {
         s.totalTokens == 0 ? notReported : "\(tokens(s.totalTokens, locale: locale)) tokens"
     }
 
-    /// "12K input · 3.4K output · 1.1M cache", or nil with no tokens.
-    public static func tokenDetail(_ s: TaskSpend, locale: Locale = .current) -> String? {
-        guard s.totalTokens > 0 else { return nil }
-        return [
-            "\(tokens(s.inputTokens, locale: locale)) input",
-            "\(tokens(s.outputTokens, locale: locale)) output",
-            "\(tokens(s.cacheReadTokens + s.cacheWriteTokens, locale: locale)) cache",
-        ].joined(separator: " · ")
-    }
-
     /// "$3.20 · API-equivalent", with "estimated", "partly estimated" and
     /// "partly not reported" as they apply; "Not reported" with no known
     /// cost.
@@ -209,47 +178,6 @@ public enum TaskUsageFormat {
         }
         if s.partlyUnknown { line += ", partly not reported" }
         return line
-    }
-
-    /// "Agent time 3 h 10 min · 12 turns", either half alone, or nil.
-    public static func time(_ s: TaskSpend) -> String? {
-        var parts: [String] = []
-        if s.activeMs > 0 { parts.append("Agent time \(duration(ms: s.activeMs))") }
-        switch s.turns {
-        case 0: break
-        case 1: parts.append("1 turn")
-        default: parts.append("\(s.turns) turns")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    /// "claude · claude-opus-5", or the harness alone for an unnamed model.
-    public static func title(_ row: TaskSpendRow) -> String {
-        row.model.isEmpty ? row.harness : "\(row.harness) · \(PlanWords.model(row.model))"
-    }
-
-    /// "1.2M tokens · $3.20", with "estimated", "partly estimated" and
-    /// "partly not reported" as they apply to the row's own part; "Cost not
-    /// reported"; or "Not reported" when the row stated nothing.
-    public static func detail(_ row: TaskSpendRow, locale: Locale = .current) -> String {
-        let s = row.totals
-        guard s.totalTokens > 0 || s.pricedMicros > 0 else { return notReported }
-        let cost: String
-        if s.pricedMicros <= 0 {
-            // A model the price table has no rate for says so by name.
-            cost = !row.model.isEmpty && s.unpricedTokens > 0 ? "No price listed for \(row.model)" : "Cost not reported"
-        } else {
-            var words: [String] = []
-            if s.costReportedMicros == 0 {
-                words.append("estimated")
-            } else if s.costEstimatedMicros > 0 {
-                words.append("partly estimated")
-            }
-            if s.partlyUnknown { words.append("partly not reported") }
-            let amount = dollars(s.pricedMicros, locale: locale)
-            cost = words.isEmpty ? amount : "\(amount) \(words.joined(separator: ", "))"
-        }
-        return "\(tokens(s.totalTokens, locale: locale)) tokens · \(cost)"
     }
 }
 

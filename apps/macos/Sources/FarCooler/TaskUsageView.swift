@@ -5,8 +5,8 @@ import SwiftUI
 /// read from the runner when the task opens.
 ///
 /// Quiet on purpose: secondary text and no color, since nothing here needs
-/// you. The words are AgentKit's `TaskUsageFormat`, the same the phones and
-/// `farcooler report` say; the breakdown by harness and model is the app's
+/// you. The lines are the client core's (`TaskUsage.said`), the same the
+/// phones and `farcooler task usage` say; the breakdown by harness and model is the app's
 /// one disclosure, `CollapsibleSection`, closed until opened and remembered.
 struct TaskUsageView: View {
     let state: TaskUsageState
@@ -41,15 +41,15 @@ struct TaskUsageView: View {
             }
         case .loaded(let usage):
             section {
-                if usage.totals.isEmpty {
-                    Text(TaskUsageFormat.nothingYet)
+                if let nothing = usage.said.nothing {
+                    Text(nothing)
                         .font(TaskTypography.body)
                         .foregroundStyle(.quietInk)
                         .accessibilityIdentifier("task-usage-empty")
                 } else {
-                    totals(usage.totals)
-                    if !usage.byHarnessModel.isEmpty {
-                        breakdown(usage.rows)
+                    totals(usage.said)
+                    if !usage.said.rows.isEmpty {
+                        breakdown(usage.said.rows)
                     }
                 }
             }
@@ -68,20 +68,20 @@ struct TaskUsageView: View {
         .accessibilityIdentifier("task-usage")
     }
 
-    private func totals(_ t: TaskSpend) -> some View {
+    private func totals(_ t: WireUsageSaid) -> some View {
         VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {
-            Text(TaskUsageFormat.tokensLine(t))
+            Text(t.tokens)
                 .font(TaskTypography.body)
-            if let detail = TaskUsageFormat.tokenDetail(t) {
+            if let detail = t.tokenDetail {
                 Text(detail)
                     .font(TaskTypography.meta)
                     .foregroundStyle(.quietInk)
             }
-            Text(TaskUsageFormat.cost(t))
+            Text(t.cost)
                 .font(TaskTypography.meta)
                 .foregroundStyle(.quietInk)
                 .help(TaskUsageFormat.apiEquivalent)
-            if let time = TaskUsageFormat.time(t) {
+            if let time = t.time {
                 Text(time)
                     .font(TaskTypography.meta)
                     .foregroundStyle(.quietInk)
@@ -91,7 +91,7 @@ struct TaskUsageView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func breakdown(_ rows: [TaskSpendRow]) -> some View {
+    private func breakdown(_ rows: [WireUsageRowSaid]) -> some View {
         CollapsibleSection(
             "By Harness and Model", id: "task-usage-breakdown", style: .minor, metrics: .inline, tone: .quiet,
             key: "task.usage.breakdown.open", expandedByDefault: false
@@ -100,8 +100,8 @@ struct TaskUsageView: View {
                 verticalSpacing: ColumnGrid.rhythm / 2) {
                 ForEach(rows) { row in
                     GridRow {
-                        Text(TaskUsageFormat.title(row)).accessibilityValue(row.model)
-                        Text(TaskUsageFormat.detail(row))
+                        Text(row.title).accessibilityValue(row.model)
+                        Text(row.detail)
                             .foregroundStyle(.quietInk)
                     }
                     .font(TaskTypography.meta)

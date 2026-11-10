@@ -863,7 +863,7 @@ final class HarnessRunner {
                     "task": args["task"] as? String ?? "", "price_table": "2026-09-25",
                     "totals": [String: Any](), "by_harness_model": [Any](),
                 ]
-                return try json(nothing)
+                return try TaskUsage.shown(spend: json(nothing)) ?? json(nothing)
             }
             let claude: [String: Any] = [
                 "turns": 9, "turns_partial": 1, "active_ms": 7_800_000, "input_tokens": 41_000, "output_tokens": 18_400,
@@ -885,7 +885,7 @@ final class HarnessRunner {
                     ["harness": "codex", "model": "gpt-5.5", "totals": codex] as [String: Any],
                 ],
             ]
-            return try json(spent)
+            return try TaskUsage.shown(spend: json(spent)) ?? json(spent)
         case "task.note":
             // An answer to bil-7, written as an answer, with words in it.
             guard args["task"] as? String == Self.decisionTask,

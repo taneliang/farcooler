@@ -133,20 +133,19 @@ struct QuietInkSurfaceCaptures {
         ]}
         """
 
-    static let spend = """
-        {"task":"t","price_table":"2026-09-25",
-         "totals":{"turns":12,"turns_partial":1,"active_ms":10200000,"input_tokens":251000,"output_tokens":27400,
-                   "cache_read_tokens":1084000,"cache_write_tokens":62000,"cost_reported_micros":2870000,
-                   "unpriced_tokens":283000},
-         "by_harness_model":[
-           {"harness":"claude","model":"claude-opus-5","totals":{"turns":9,"active_ms":7800000,
-             "input_tokens":41000,"output_tokens":18400,"cache_read_tokens":1020000,"cache_write_tokens":62000,
-             "cost_reported_micros":2870000}}]}
-        """
+    /// The client core's answer for `name` in `test/fixtures/task-usage-shown.json` (ov-1048).
+    static func shown(_ name: String) throws -> TaskUsage {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/task-usage-shown.json"))
+        let entries = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] ?? []
+        let entry = try #require(entries.first { $0["case"] as? String == name })
+        return try TaskUsage.decode(JSONSerialization.data(withJSONObject: entry["shown"] ?? [:]))
+    }
 
     @Test func taskCard() async throws {
         let detail = try TaskDetailModel.decode(Data(Self.record.utf8))
-        let usage = try TaskUsage.decode(Data(Self.spend.utf8))
+        let usage = try Self.shown("specimen: claude alone")
         let row = TaskRow(
             id: "t1", key: "ov-687", title: "Mac: secondary text reads in light appearance", status: .inProgress,
             statusSince: Date(timeIntervalSinceNow: -3 * 86_400),

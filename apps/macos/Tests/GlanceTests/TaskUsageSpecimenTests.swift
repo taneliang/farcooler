@@ -12,18 +12,17 @@ import Testing
 struct TaskUsageSpecimenTests {
     /// bil-7's spend as the iOS harness has it: a claude turn that stated
     /// only part, and codex nobody can price.
-    static let spend = """
-        {"task":"t","price_table":"2026-09-25",
-         "totals":{"turns":12,"turns_partial":1,"active_ms":10200000,"input_tokens":251000,"output_tokens":27400,
-                   "cache_read_tokens":1084000,"cache_write_tokens":62000,"cost_reported_micros":2870000,
-                   "unpriced_tokens":283000},
-         "by_harness_model":[
-           {"harness":"claude","model":"claude-opus-5","totals":{"turns":9,"turns_partial":1,"active_ms":7800000,
-             "input_tokens":41000,"output_tokens":18400,"cache_read_tokens":1020000,"cache_write_tokens":62000,
-             "cost_reported_micros":2870000}},
-           {"harness":"codex","model":"gpt-5.5","totals":{"turns":3,"active_ms":2400000,"input_tokens":210000,
-             "output_tokens":9000,"cache_read_tokens":64000,"unpriced_tokens":283000}}]}
-        """
+    static let spend = "specimen: claude in part, codex unpriced"
+
+    /// The client core's answer for `name` in `test/fixtures/task-usage-shown.json` (ov-1048).
+    static func shown(_ name: String) throws -> TaskUsage {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/task-usage-shown.json"))
+        let entries = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] ?? []
+        let entry = try #require(entries.first { $0["case"] as? String == name })
+        return try TaskUsage.decode(JSONSerialization.data(withJSONObject: entry["shown"] ?? [:]))
+    }
 
     @Test("Write the task usage sheets")
     func writeSheets() throws {
@@ -31,16 +30,16 @@ struct TaskUsageSpecimenTests {
             fileURLWithPath: ProcessInfo.processInfo.environment["FARCOOLER_GLANCE_OUT"]
                 ?? FileManager.default.currentDirectoryPath + "/.build/glance")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let usage = try TaskUsage.decode(Data(Self.spend.utf8))
-        #expect(TaskUsageFormat.detail(usage.rows[0], locale: Locale(identifier: "en_US"))
-            == "1.1M tokens · $2.87 partly not reported")
+        let usage = try Self.shown(Self.spend)
+        #expect(usage.said.rows.first?.detail == "1.1M tokens · $2.87 partly not reported")
+        let nothing = try Self.shown("nothing recorded")
         let key = "task.usage.breakdown.open"
         let was = UserDefaults.standard.object(forKey: key)
         UserDefaults.standard.set(true, forKey: key)
         defer { UserDefaults.standard.set(was, forKey: key) }
         for dark in [false, true] {
             let host = NSHostingView(
-                rootView: Specimen(usage: usage)
+                rootView: Specimen(usage: usage, nothing: nothing)
                     .background(dark ? Color(white: 0.12) : Color.white))
             host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             host.frame = CGRect(origin: .zero, size: host.fittingSize)
@@ -55,6 +54,7 @@ struct TaskUsageSpecimenTests {
 
 private struct Specimen: View {
     let usage: TaskUsage
+    let nothing: TaskUsage
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -65,8 +65,7 @@ private struct Specimen: View {
             caption("A read that didn’t come back")
             TaskUsageView(state: .failed)
             caption("Nothing yet")
-            TaskUsageView(state: .loaded(try! TaskUsage.decode(Data(
-                #"{"task":"t","price_table":"","totals":{},"by_harness_model":[]}"#.utf8))))
+            TaskUsageView(state: .loaded(nothing))
             caption("Reading")
             TaskUsageView(state: .loading)
         }

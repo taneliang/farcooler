@@ -10,9 +10,10 @@ private struct UsageFixture: Decodable {
     struct Money: Decodable { var micros: Int64; var text: String }
     struct Span: Decodable { var ms: Int64; var text: String }
     struct Row: Decodable { var title: String; var detail: String }
+    struct Usage: Decodable { var totals: TaskSpend }
     struct Case: Decodable {
         var `case`: String
-        var usage: TaskUsage
+        var usage: Usage
         var empty: Bool
         var tokens: String?
         var tokenDetail: String?
@@ -28,14 +29,29 @@ private struct UsageFixture: Decodable {
     var durations: [Span]
     var cases: [Case]
 
-    static func load() throws -> UsageFixture {
+    static func data(_ name: String) throws -> Data {
         var root = URL(fileURLWithPath: #filePath)
         // …/apps/shared/AgentKit/Tests/AgentKitTests/<this file>
         for _ in 0..<6 { root.deleteLastPathComponent() }
-        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/task-usage.json"))
+        return try Data(contentsOf: root.appendingPathComponent("test/fixtures/\(name)"))
+    }
+
+    static func load() throws -> UsageFixture {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(UsageFixture.self, from: data)
+        return try decoder.decode(UsageFixture.self, from: data("task-usage.json"))
+    }
+
+    /// `test/fixtures/task-usage-shown.json`: the client core's own answer
+    /// for each case, as the Usage section decodes it.
+    static func shown() throws -> [String: TaskUsage] {
+        let raw = try JSONSerialization.jsonObject(with: data("task-usage-shown.json")) as? [[String: Any]] ?? []
+        var out: [String: TaskUsage] = [:]
+        for entry in raw {
+            let bytes = try JSONSerialization.data(withJSONObject: entry["shown"] ?? [:])
+            out[entry["case"] as? String ?? ""] = try TaskUsage.decode(bytes)
+        }
+        return out
     }
 }
 
@@ -55,45 +71,38 @@ struct TaskUsageTests {
         }
     }
 
-    @Test("Each case's lines, provenance and breakdown read as the shared fixture says")
+    @Test("The client core's answer for each case decodes to the lines the shared fixture says")
     func cases() throws {
         let fixture = try UsageFixture.load()
-        let locale = Locale(identifier: fixture.locale)
+        let shown = try UsageFixture.shown()
         #expect(fixture.cases.count >= 9)
         for each in fixture.cases {
-            let t = each.usage.totals
-            #expect(t.isEmpty == each.empty, "\(each.case): empty")
-            guard !t.isEmpty else {
-                #expect(each.usage.rows.isEmpty, "\(each.case)")
-                continue
-            }
-            #expect(TaskUsageFormat.tokensLine(t, locale: locale) == each.tokens, "\(each.case): tokens")
-            #expect(TaskUsageFormat.tokenDetail(t, locale: locale) == each.tokenDetail, "\(each.case): detail")
-            #expect(TaskUsageFormat.cost(t, locale: locale) == each.cost, "\(each.case): cost")
-            #expect(TaskUsageFormat.time(t) == each.time, "\(each.case): time")
-            let rows = each.usage.rows.map {
-                UsageFixture.Row(
-                    title: TaskUsageFormat.title($0), detail: TaskUsageFormat.detail($0, locale: locale))
-            }
-            #expect(rows.map(\.title) == each.rows.map { $0.title.replacingOccurrences(of: "claude · claude-opus-5", with: "claude · Claude Opus 5").replacingOccurrences(of: "claude · claude-sonnet-5", with: "claude · Claude Sonnet 5") }, "\(each.case): row titles")
-            #expect(rows.map(\.detail) == each.rows.map(\.detail), "\(each.case): row details")
+            let said = try #require(shown[each.case], "\(each.case) is in task-usage-shown.json").said
+            #expect((said.nothing != nil) == each.empty, "\(each.case): empty")
+            guard said.nothing == nil else { continue }
+            #expect(said.tokens == each.tokens, "\(each.case): tokens")
+            #expect(said.tokenDetail == each.tokenDetail, "\(each.case): detail")
+            #expect(said.cost == each.cost, "\(each.case): cost")
+            #expect(said.time == each.time, "\(each.case): time")
+            #expect(said.rows.map(\.title) == each.rows.map { $0.title.replacingOccurrences(of: "claude · claude-opus-5", with: "claude · Claude Opus 5").replacingOccurrences(of: "claude · claude-sonnet-5", with: "claude · Claude Sonnet 5") }, "\(each.case): row titles")
+            #expect(said.rows.map(\.detail) == each.rows.map(\.detail), "\(each.case): row details")
         }
     }
 
-    @Test("The runner's JSON decodes, and the empty state has its sentence")
-    func decodesTheRunnersJSON() throws {
-        let json = """
-            {"task":"t","price_table":"2026-09-25","totals":{"turns":0,"active_ms":0},"by_harness_model":[]}
-            """
-        let usage = try TaskUsage.decode(Data(json.utf8))
-        #expect(usage.totals.isEmpty)
-        #expect(TaskUsageFormat.nothingYet == "No agent usage recorded yet.")
+    @Test("Today's spend in the title panel says the fixture's cost and tokens")
+    func totalsLines() throws {
+        let fixture = try UsageFixture.load()
+        let locale = Locale(identifier: fixture.locale)
+        for each in fixture.cases where !each.empty {
+            #expect(TaskUsageFormat.tokensLine(each.usage.totals, locale: locale) == each.tokens, "\(each.case): tokens")
+            #expect(TaskUsageFormat.cost(each.usage.totals, locale: locale) == each.cost, "\(each.case): cost")
+        }
     }
 
     @Test("The section's sentences are the shared fixture's")
     func sentences() throws {
         let w = try UsageFixture.load().words
-        #expect(TaskUsageFormat.nothingYet == w.nothingYet)
+        #expect(try UsageFixture.shown()["nothing recorded"]?.said.nothing == w.nothingYet)
         #expect(TaskUsageFormat.needsUpdate == w.needsUpdate)
         #expect(TaskUsageFormat.couldntRead == w.couldntRead)
         #expect(TaskUsageFormat.apiEquivalent == w.apiEquivalent)
@@ -102,8 +111,8 @@ struct TaskUsageTests {
     }
 
     @Test("An older runner needs an update; a read that didn't come back failed")
-    func states() {
-        let usage = TaskUsage(task: "t", priceTable: "", totals: TaskSpend(), byHarnessModel: [])
+    func states() throws {
+        let usage = try #require(UsageFixture.shown()["nothing recorded"])
         #expect(TaskUsageState.after(read: nil, runnerCan: false) == .needsUpdate)
         #expect(TaskUsageState.after(read: usage, runnerCan: false) == .needsUpdate)
         #expect(TaskUsageState.after(read: nil, runnerCan: true) == .failed)

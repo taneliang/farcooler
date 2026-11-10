@@ -2,8 +2,8 @@ import SwiftUI
 
 // A task's Usage section (ov-195): what its agents spent, read from the
 // runner when the task opens. Quiet on purpose, all secondary text and no
-// color, since nothing here needs you. The words are `TaskUsageFormat`'s,
-// the same the Mac, Android and `farcooler report` say.
+// color, since nothing here needs you. The lines are the client core's
+// (`TaskUsage.said`), the same the Mac, Android and `farcooler task usage` say.
 
 struct TaskUsageSection: View {
     let state: TaskUsageState
@@ -32,18 +32,18 @@ struct TaskUsageSection: View {
             }
         case .loaded(let usage):
             Section("Usage") {
-                if usage.totals.isEmpty {
-                    quiet(TaskUsageFormat.nothingYet)
+                if let nothing = usage.said.nothing {
+                    quiet(nothing)
                         .accessibilityIdentifier("task-usage-empty")
                 } else {
-                    totals(usage.totals)
-                    if !usage.byHarnessModel.isEmpty {
+                    totals(usage.said)
+                    if !usage.said.rows.isEmpty {
                         DisclosureGroup("By Harness and Model") {
-                            ForEach(usage.rows) { row in
+                            ForEach(usage.said.rows) { row in
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(TaskUsageFormat.title(row)).accessibilityValue(row.model)
+                                    Text(row.title).accessibilityValue(row.model)
                                         .font(.subheadline)
-                                    Text(TaskUsageFormat.detail(row))
+                                    Text(row.detail)
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                 }
@@ -64,24 +64,24 @@ struct TaskUsageSection: View {
             .foregroundStyle(.secondary)
     }
 
-    private func totals(_ t: TaskSpend) -> some View {
+    private func totals(_ t: WireUsageSaid) -> some View {
         VStack(alignment: .leading, spacing: PaneMetrics.tight) {
-            Text(TaskUsageFormat.tokensLine(t))
+            Text(t.tokens)
                 .font(.body)
-            if let detail = TaskUsageFormat.tokenDetail(t) {
+            if let detail = t.tokenDetail {
                 Text(detail)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Text(TaskUsageFormat.cost(t))
+            Text(t.cost)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            if TaskUsageFormat.isPriced(t) {
+            if t.priced {
                 Text(TaskUsageFormat.apiEquivalent)
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
-            if let time = TaskUsageFormat.time(t) {
+            if let time = t.time {
                 Text(time)
                     .font(.footnote)
                     .foregroundStyle(.secondary)

@@ -28,15 +28,16 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
-import com.farcooler.model.TaskSpend
+import com.farcooler.core.wire.UsageRowSaid
+import com.farcooler.core.wire.UsageSaid
 import com.farcooler.model.TaskUsageFormat
 import com.farcooler.model.TaskUsageState
 
 /**
  * A task's Usage section (ov-195): what its agents spent, read when the task
  * opens. Quiet on purpose, secondary text and no color beyond the section's own
- * header, since nothing here needs you. The words are [TaskUsageFormat]'s, the
- * same the Mac, iOS and `farcooler report` say.
+ * header, since nothing here needs you. The lines are the client core's ([TaskUsage.said]), the
+ * same the Mac, iOS and `farcooler task usage` say.
  */
 fun LazyListScope.taskUsageItems(state: TaskUsageState, onRetry: () -> Unit, header: @Composable () -> Unit) {
     when (state) {
@@ -62,41 +63,42 @@ fun LazyListScope.taskUsageItems(state: TaskUsageState, onRetry: () -> Unit, hea
             val usage = state.usage
             item(key = "usage") {
                 header()
-                if (usage.totals.isEmpty) {
-                    Quiet(TaskUsageFormat.NOTHING_YET, Modifier.padding(horizontal = 16.dp).testTag("task-usage-empty"))
+                val nothing = usage.said.nothing
+                if (nothing != null) {
+                    Quiet(nothing, Modifier.padding(horizontal = 16.dp).testTag("task-usage-empty"))
                 } else {
-                    Totals(usage.totals)
+                    Totals(usage.said)
                 }
             }
-            if (!usage.totals.isEmpty && usage.byHarnessModel.isNotEmpty()) {
-                item(key = "usage-breakdown") { Breakdown(usage.rows) }
+            if (usage.said.nothing == null && usage.said.rows.isNotEmpty()) {
+                item(key = "usage-breakdown") { Breakdown(usage.said.rows) }
             }
         }
     }
 }
 
 @Composable
-private fun Totals(t: TaskSpend) {
+private fun Totals(t: UsageSaid) {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("task-usage"),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(TaskUsageFormat.tokensLine(t), style = MaterialTheme.typography.bodyLarge)
-        TaskUsageFormat.tokenDetail(t)?.let { Quiet(it) }
-        Quiet(TaskUsageFormat.cost(t))
-        if (TaskUsageFormat.isPriced(t)) {
+        Text(t.tokens, style = MaterialTheme.typography.bodyLarge)
+        t.tokenDetail?.let { Quiet(it) }
+        Quiet(t.cost)
+        if (t.priced) {
             Text(
                 TaskUsageFormat.API_EQUIVALENT,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        TaskUsageFormat.time(t)?.let { Quiet(it) }
+        t.time?.let { Quiet(it) }
     }
 }
 
 @Composable
-private fun Breakdown(rows: List<com.farcooler.model.TaskSpendRow>) {
+private fun Breakdown(rows: List<UsageRowSaid>) {
     var open by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().testTag("task-usage-breakdown")) {
         ListItem(
@@ -115,8 +117,8 @@ private fun Breakdown(rows: List<com.farcooler.model.TaskSpendRow>) {
         if (open) {
             for (row in rows) {
                 ListItem(
-                    headlineContent = { Text(if (row.model.isEmpty()) row.harness else "${row.harness} · ${com.farcooler.model.PlanWords.model(row.model)}", style = MaterialTheme.typography.bodyMedium) },
-                    supportingContent = { Text(TaskUsageFormat.detail(row)) },
+                    headlineContent = { Text(row.title, style = MaterialTheme.typography.bodyMedium) },
+                    supportingContent = { Text(row.detail) },
                     modifier = Modifier.semantics { if (row.model.isNotEmpty()) contentDescription = "Model ID ${row.model}" },
                 )
             }
