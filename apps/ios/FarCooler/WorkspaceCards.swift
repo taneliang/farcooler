@@ -97,7 +97,7 @@ struct WorkspaceCards: View {
 
     /// The card's content's most height: its share of the screen as the
     /// phone is held now, less its insets, and never less than its top row
-    /// and two lines' room for the words, which scroll. A phone on its side
+    /// and two lines' room for the words, which end in an ellipsis past it. A phone on its side
     /// at the largest size has a fifth of 390 points, which the row alone
     /// nearly fills: without the floor the words ran out of the card.
     private var cardCap: CGFloat {
@@ -125,20 +125,20 @@ struct WorkspaceCards: View {
                 .accessibilityHidden(true)
         }
         func words(lines: Int?) -> some View {
-          Group {
-            if let band = strip.band {
-                // From `.xLarge` up, Now and Next in full, with no line limit:
-                // cut, they hid what is happening, which matters more than the
-                // one-line look (ov-685). The default size keeps ov-616's one
-                // line each.
-                PhoneGlanceBand(band: band, needsYou: 0, lines: tall ? lines : (type > .large ? nil : 1), nowOnly: tall)
-            } else if strip.isEmpty {
-                Text("Plan").foregroundStyle(.quietInk)
-            } else {
-                self.words(strip).lineLimit(tall ? lines : (type > .large ? nil : 1)).truncationMode(.tail)
+            Group {
+                if let band = strip.band {
+                    // From `.xLarge` up, Now and Next in full, with no line limit:
+                    // cut, they hid what is happening, which matters more than the
+                    // one-line look (ov-685). The default size keeps ov-616's one
+                    // line each.
+                    PhoneGlanceBand(band: band, needsYou: 0, lines: tall ? lines : (type > .large ? nil : 1), nowOnly: tall)
+                } else if strip.isEmpty {
+                    Text("Plan").foregroundStyle(.quietInk)
+                } else {
+                    self.words(strip).lineLimit(tall ? lines : (type > .large ? nil : 1)).truncationMode(.tail)
+                }
             }
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         return Button { navigator?.openPlan(place) } label: {
             Group {
