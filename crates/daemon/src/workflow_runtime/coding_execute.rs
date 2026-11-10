@@ -32,6 +32,21 @@ pub struct CodingReviewReceipt {
     pub passed: bool,
 }
 
+/// The account the runner runs as, from the account database rather than the daemon's own environment, so a
+/// recovery rebuilds the same command whoever started the daemon. `None` for a uid with no entry.
+pub(super) fn runner_account() -> Option<String> {
+    // SAFETY: every pointer handed to getpwuid_r is to storage owned here and outliving the call; `pw_name` is
+    // read only once the return code and `found` both say there is an entry.
+    unsafe {
+        let mut record: libc::passwd = std::mem::zeroed();
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        let mut buffer = vec![0 as libc::c_char; 4096];
+        let code = libc::getpwuid_r(libc::geteuid(), &mut record, buffer.as_mut_ptr(), buffer.len(), &mut found);
+        if code != 0 || found.is_null() || record.pw_name.is_null() { return None; }
+        std::ffi::CStr::from_ptr(record.pw_name).to_str().ok().filter(|n| !n.is_empty()).map(str::to_string)
+    }
+}
+
 /// Write an agent gate's verdict where its step reads it (ov-969): `farcooler workflow verdict`, run by the reviewing
 /// agent, whose environment the step pinned. `env` reads that environment. Returns where the receipt went.
 pub fn write_agent_verdict(env: impl Fn(&str) -> Option<String>, passed: bool) -> Result<PathBuf> {
@@ -220,6 +235,12 @@ impl Exec {
             ("FARCOOLER_WORKFLOW_ITEM", effect.item.clone()),
             ("FARCOOLER_WORKSPACE", binding.workspace.clone()),
         ] { command.environment.insert(key.into(), value); }
+        // Who the runner is (ov-1083), as a login shell says it: a hand-run lane gate has USER and LOGNAME, and tests
+        // that ssh back to this account read them. Only the account name passes, from the account database, never the
+        // daemon's environment, which carries the owner's tokens and agent sockets.
+        if let Some(account) = runner_account() {
+            for key in ["USER", "LOGNAME"] { command.environment.insert(key.into(), account.clone()); }
+        }
         // The model the run picked at Start (ov-966); a native harness launches it, a command one is told.
         if let Some(model) = &effect.model { command.environment.insert("FARCOOLER_WORKFLOW_MODEL".into(), model.clone()); }
     }

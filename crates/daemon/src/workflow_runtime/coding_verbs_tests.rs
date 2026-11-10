@@ -28,6 +28,10 @@ const GATE: &str = r#"elif stage == 'gate':
         found = subprocess.call('tool', shell=True, env={'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'})
         __import__('shutil').rmtree(tools.parent)
         if found != 0: sys.exit(found)
+    if mode == 'lane-env':
+        seen = {k: os.environ.get(k) for k in ('USER', 'LOGNAME')}
+        seen['origin/main'] = subprocess.call(['/usr/bin/git', 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], stdout=subprocess.DEVNULL)
+        pathlib.Path(os.environ['MARKER']).write_text(json.dumps(seen))
     assert any(p.read_text().startswith('candidate') for p in pathlib.Path('.').glob('*.txt'))
 "#;
 
@@ -662,4 +666,23 @@ async fn a_gate_finds_a_tool_on_a_path_through_its_tree_even_after_an_old_tree()
     until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
     assert_ne!(remote_head(&runtime).await, first, "the gate passed and the group landed");
     assert!(!legacy.exists(), "the fold removed the tree under the old name");
+}
+
+/// A group's gate runs `scripts/landing-gate` in the fold tree, so it sees what a hand-run lane gate sees there
+/// (ov-1083): the runner's account in USER and LOGNAME, which a test that ssh-es back to this runner reads, and
+/// the repository's own refs, `origin/main` among them, which lane-gate.py diffs against.
+#[tokio::test]
+async fn a_gate_in_the_fold_tree_sees_the_account_and_the_refs_a_lane_gate_reads() {
+    let (dir, mut runtime) = lander("lane-env").await;
+    let repo = runtime.repository();
+    adapters::git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]).await.unwrap();
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    until(&mut runtime, |s| matches!(phase_of(s, "one"), Some(Phase::Done | Phase::Failed))).await;
+    let seen: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.path().join("marker")).expect("the gate ran")).unwrap();
+    let account = super::coding_execute::runner_account().expect("the test runs as an account");
+    assert_eq!(seen["USER"], account.as_str(), "the gate sees who the runner is: {seen}");
+    assert_eq!(seen["LOGNAME"], account.as_str(), "{seen}");
+    assert_eq!(seen["origin/main"], 0, "the fold tree reads the repository's refs: {seen}");
 }
