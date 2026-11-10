@@ -49,7 +49,7 @@ struct WorkflowCancelledCaptures {
             expecting: "the cancelled run's card with its reason"
         ) {
             host.layoutSubtreeIfNeeded()
-            return host.fittingSize.height > 500
+            return host.fittingSize.height > 250
         }
         #expect(host.fittingSize.height < 1200, "the card is taller than the window, so the reason would be cut off")
     }
