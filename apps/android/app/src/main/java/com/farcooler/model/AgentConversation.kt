@@ -5,6 +5,9 @@ import com.farcooler.core.coreIsAvailable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The conversation view of a terminal-mode claude or codex pane on a phone (ov-374, ov-416):
@@ -341,13 +344,8 @@ object AgentConversation {
 
     fun gap(gap: AgentRow.Gap): String = ConversationWords.phrase(if (gap.count > 1) "gap" else "gap_one")
 
-    /** "0:04", "1:12", "2:03:09": a timer's format, for the live time the core can't say. */
-    fun short(ms: Long): String {
-        val seconds = maxOf(0L, ms / 1000)
-        val (h, m, s) = Triple(seconds / 3600, (seconds % 3600) / 60, seconds % 60)
-        fun two(n: Long) = n.toString().padStart(2, '0')
-        return if (h > 0) "$h:${two(m)}:${two(s)}" else "$m:${two(s)}"
-    }
+    /** "0:04", "1:12", "2:03:09": the core's timer format, for the live time a row can't say; blank while the core can't answer. */
+    fun short(ms: Long): String = ConversationWords.span(ms)
 
     /** What a subagent row says of its work: "1 tool", "14 tools", or null while the count is unknown (0 is how a missing count reads; ov-490). */
     fun toolsLabel(count: Int): String? =
@@ -680,6 +678,13 @@ object ConversationWords {
         } ?: return null
         asked[agent] = table
         table
+    }
+
+    /** [ms] in a timer's format, from the core's bridge; blank while it can't answer. */
+    internal fun span(ms: Long): String = try {
+        bridge("""{"schema":1,"span":$ms}""")?.let { json.parseToJsonElement(it).jsonObject["span"]?.jsonPrimitive?.contentOrNull }.orEmpty()
+    } catch (_: IllegalArgumentException) {
+        ""
     }
 
     /** A phrase with its `{placeholders}` filled: `name_<by>` where the table has one, else `name`. */

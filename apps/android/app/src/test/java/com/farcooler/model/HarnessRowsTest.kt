@@ -32,6 +32,17 @@ class HarnessRowsTest {
     }
 
     @Test
+    fun `the core's words ride the rows`() {
+        assertFalse(turns.getValue("turn:p1").notice)
+        assertEquals("0:05", turns.getValue("turn:p1").took)
+        assertTrue(listOf("p2", "p3", "p4", "p5", "p6").all { turns.getValue("turn:$it").notice })
+        assertEquals("0:48", turns.getValue("turn:p2").took)
+        val sub = AgentRowPage.decode(AgentRowFixture.harnessPage).rows.mapNotNull { (it.kind as? AgentRow.Kind.OfSubagent)?.subagent }.first()
+        assertEquals("general-purpose", sub.agentType)
+        assertEquals("General purpose", sub.typeWords)
+    }
+
+    @Test
     fun `a peer no launch names is called by a short id, and with no id a subagent`() {
         val harness = turns.getValue("turn:p5").harness!!
         assertEquals("Message from agent a272e8", AgentConversation.harnessTitle(harness))

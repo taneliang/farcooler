@@ -59,3 +59,11 @@ fn another_schema_is_refused() {
     let bad: Value = serde_json::from_str(&crate::plan_view::json(r#"{"schema":2,"conversation":{"agent":"Claude"}}"#)).unwrap();
     assert_eq!(bad["error"], "invalid");
 }
+
+#[test]
+fn a_span_is_said_in_a_timers_format() {
+    let say = |ms: i64| -> Value { serde_json::from_str::<Value>(&crate::plan_view::json(&json!({ "schema": 1, "span": ms }).to_string())).unwrap()["span"].clone() };
+    assert_eq!([say(-5), say(4_000), say(65_000), say(7_384_000)], ["0:00", "0:04", "1:05", "2:03:04"]);
+    let bad: Value = serde_json::from_str(&crate::plan_view::json(r#"{"schema":2,"span":1}"#)).unwrap();
+    assert_eq!(bad["error"], "invalid");
+}

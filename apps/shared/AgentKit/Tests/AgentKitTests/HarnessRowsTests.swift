@@ -20,6 +20,21 @@ struct HarnessRowsTests {
         return turns
     }
 
+    @Test("The core's words ride the rows: who typed a turn, how long it took, a subagent's type")
+    func wordsRideTheRows() throws {
+        let all = try turns()
+        #expect(all["turn:p1"]?.notice != true, "a typed turn is no notice")
+        #expect(all["turn:p1"]?.took == "0:05")
+        #expect(["turn:p2", "turn:p3", "turn:p4", "turn:p5", "turn:p6"].allSatisfy { all[$0]?.notice == true })
+        #expect(all["turn:p2"]?.took == "0:48")
+        #expect(AgentConversation.outcome(try #require(all["turn:p2"])) == "Took 0:48")
+        let data = try Data(contentsOf: RowFixture.root.appendingPathComponent("test/fixtures/agent-rows-harness.json"))
+        let sub = try #require(try AgentRowPage.decode(data).rows.compactMap { row -> AgentRow.Subagent? in
+            if case .subagent(let sub) = row.kind { return sub } else { return nil }
+        }.first)
+        #expect(sub.agentType == "general-purpose" && sub.typeWords == "General purpose")
+    }
+
     @Test("A hand-back is a report named by its agent's call, with its body clean and its agent's row to open")
     func report() throws {
         let turn = try #require(try turns()["turn:p2"])

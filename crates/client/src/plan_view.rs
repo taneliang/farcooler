@@ -436,6 +436,14 @@ struct ConversationRequest {
     conversation: crate::conversation_words::Request,
 }
 
+/// `{"schema":1,"span":65000}`: a span of milliseconds in a timer's format, "1:05" (ov-1062).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpanAsked {
+    schema: u32,
+    span: i64,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WordsStyle {
@@ -456,6 +464,11 @@ pub fn json(request: &str) -> String {
         let words = (asked.schema == SCHEMA).then(|| crate::conversation_words::words(asked.conversation.style, &asked.conversation.agent));
         let error = words.is_none().then_some("invalid");
         return serde_json::json!({ "schema": SCHEMA, "conversation": words, "error": error }).to_string();
+    }
+    if let Ok(asked) = serde_json::from_str::<SpanAsked>(request) {
+        let span = (asked.schema == SCHEMA).then(|| farcooler_core::session_log::projector::words::short(asked.span));
+        let error = span.is_none().then_some("invalid");
+        return serde_json::json!({ "schema": SCHEMA, "span": span, "error": error }).to_string();
     }
     if let Ok(asked) = serde_json::from_str::<WordsRequest>(request) {
         let words = (asked.schema == SCHEMA).then(|| words::Words::new(asked.words.style));
