@@ -314,11 +314,14 @@ impl Exec {
     }
 }
 
+/// A refusal said as a sentence, for one that comes before anything is changed (ov-1074).
+fn said(sentence: &str) -> Error { Error::Domain(DomainError::refused(sentence.into())) }
+
 /// An adopted tree must be clean (ov-968), so the run is its one writer. Changes in it are a person's, so the run
 /// refuses and leaves them as they are; nothing here resets or cleans (ov-979).
 pub(super) async fn refuse_adopting_changes(tree: &Path) -> Result<()> {
     if crate::git::is_dirty(tree).await.unwrap_or(true) {
-        return Err(Error::Refused("the adopted worktree has changes; commit them to its branch or discard them, then start the run again"));
+        return Err(said("The worktree has changes that aren't committed. Commit them to its branch or discard them, then start the run again."));
     }
     Ok(())
 }
@@ -327,21 +330,23 @@ impl Exec {
     /// An adopted branch (ov-968): carry on in the worktree that has it checked out, or make one on it. The branch
     /// is never made or deleted here. The tree must be clean and have no pane running in it, so the run is the
     /// one writer; it is recorded and claimed for the board if it isn't already.
+    /// A refusal here comes before anything is changed, so it is said as a sentence and the step fails with it
+    /// (ov-1074); only a failure while making the tree is an unknown outcome.
     async fn provision_adopted(&self, board: Uuid, repository: Uuid, install_id: &str, tree: &RunTree) -> Result<()> {
         let path = Path::new(&tree.path);
-        let row = self.store.list_worktrees_for_repository(repository).map_err(Error::Domain)?
+        let row = self.store.list_worktrees_for_repository(repository).map_err(|_| Error::Refused("adopted worktrees unreadable"))?
             .into_iter().find(|w| same_path(Path::new(&w.worktree_path), path));
         if path.try_exists()? {
             let head = adapters::git(path, &["symbolic-ref", "HEAD"]).await?;
-            if head != format!("refs/heads/{}", tree.branch) { return Err(Error::Refused("the adopted worktree has moved to another branch")); }
+            if head != format!("refs/heads/{}", tree.branch) { return Err(said("The worktree has moved to another branch. Check out the run's branch there, then start the run again.")); }
             refuse_adopting_changes(path).await?;
             // Start refused a tree the app doesn't list; one that lost its row since is refused here too.
-            let Some(row) = &row else { return Err(Error::Refused("the adopted worktree isn't one the app lists")) };
+            let Some(row) = &row else { return Err(said("The worktree isn't one Far Cooler lists, so the run can't use it.")) };
             {
-                if row.workspace_id.is_some_and(|w| w != board) { return Err(Error::Refused("the adopted worktree belongs to another board")); }
-                let live = self.store.list_terminals_for_worktree(row.id).map_err(Error::Domain)?
+                if row.workspace_id.is_some_and(|w| w != board) { return Err(said("The worktree belongs to another board, so the run can't use it.")); }
+                let live = self.store.list_terminals_for_worktree(row.id).map_err(|_| Error::Refused("adopted worktree panes unreadable"))?
                     .iter().any(|t| t.exit_code.is_none() && t.exit_signal.is_none());
-                if live { return Err(Error::Refused("a pane is still running in the adopted worktree; close it so the run is its one writer")); }
+                if live { return Err(said("A pane is still running in the worktree. Close it so the run is the only one writing there, then start the run again.")); }
             }
         } else {
             if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }

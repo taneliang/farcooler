@@ -244,9 +244,21 @@ impl Exec {
     pub(super) async fn verify_candidate(&self, binding: &Binding, tree: &Path) -> Result<()> {
         let candidate = binding.effect.candidate.as_ref().ok_or(Error::Refused("missing candidate"))?;
         if self.git_recorded(binding, tree, &["rev-parse", "HEAD"]).await? != *candidate
-            || !self.git_recorded(binding, tree, &["status", "--porcelain"]).await?.is_empty()
+            || !self.tree_changes(binding, tree).await?.is_empty()
         { return Err(Error::Refused("candidate changed or dirty")); }
         Ok(())
+    }
+    /// The paths `git status` finds changed in a run's tree, past Far Cooler's own untracked hooks files. The app
+    /// writes those into every worktree it opens a pane in, and a commit never holds them, so they say nothing
+    /// about the candidate (ov-1074). Anything else is somebody's change.
+    pub(super) async fn tree_changes(&self, binding: &Binding, tree: &Path) -> Result<Vec<String>> {
+        let status = self.git_recorded(binding, tree, &["status", "--porcelain", "--untracked-files=all"]).await?;
+        // `git_recorded` trims the answer, so the first record may have lost the space its status starts with.
+        Ok(status.lines()
+            .filter(|line| !line.strip_prefix("?? ").is_some_and(|path| crate::hook_install::PROJECT_HOOK_FILES.contains(&path)
+                || crate::hook_install::is_our_leftover(path)))
+            .map(|line| line.get(2..).unwrap_or(line).trim().to_string())
+            .collect())
     }
     pub(super) fn stop(&self, workspace: &str, binding: &Binding, operation: &str) -> Result<Outcome> {
         let effects = self.store.workflow_outbox(workspace)?;

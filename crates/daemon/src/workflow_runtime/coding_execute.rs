@@ -350,7 +350,15 @@ impl Exec {
                     return self.reconcile_coding(binding).await;
                 }
                 match &binding.effect.tree {
-                Some(named) => self.provision_named(workspace, binding, named).await?,
+                Some(named) => match self.provision_named(workspace, binding, named).await {
+                    // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
+                    // a pane still in it): the step fails with it, kept so a restart reads it (ov-1074).
+                    Err(Error::Domain(refused)) => {
+                        durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why: refused.to_string() })?)?;
+                        return self.reconcile_coding(binding).await;
+                    }
+                    other => other?,
+                },
                 None => {
                     let branch = format!("wf-{}", &digest(&(workspace, &binding.effect.item))[4..]);
                     crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await
@@ -427,8 +435,12 @@ impl Exec {
         if Path::new(&common).canonicalize()? != self.repository().join(".git").canonicalize()? {
             return Err(Error::Refused("worktree belongs to another repository"));
         }
-        if !self.git_recorded(binding, &tree, &["status", "--porcelain", "--untracked-files=all"]).await?.is_empty() {
-            return Err(Error::Refused("configured candidate is dirty"));
+        let changed = self.tree_changes(binding, &tree).await?;
+        if !changed.is_empty() {
+            let shown = changed.iter().take(3).map(String::as_str).collect::<Vec<_>>().join(", ");
+            let more = if changed.len() > 3 { format!(" and {} more", changed.len() - 3) } else { String::new() };
+            return Err(Error::Domain(farcooler_core::error::DomainError::refused(format!(
+                "The worktree has changes that aren't committed: {shown}{more}. Commit them to its branch or discard them, then start the run again."))));
         }
         let candidate = self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
         if !sha(&candidate) { return Err(Error::Refused("invalid candidate SHA")); }
@@ -487,7 +499,12 @@ impl Exec {
             facts.extend(raw);
         }
         let tree = self.tree(binding);
-        let mut candidate = self.verify_tree(binding).await?;
+        let mut candidate = match self.verify_tree(binding).await {
+            // A provisioned tree with someone's changes in it fails the step with the sentence, never Uncertain (ov-1074).
+            Err(Error::Domain(refused)) if matches!(kind, StageKind::Provision) =>
+                return Ok(Outcome::SafeFailureBecause(refused.to_string())),
+            other => other?,
+        };
         let mut passed = true;
         match kind {
             StageKind::Provision => {

@@ -203,7 +203,7 @@ pub fn hide_our_untracked(tree: &mut crate::change_set::WorkingTree) -> Vec<crat
 /// (`codex_trust::temporary_beside`), exactly: three runs of digits, nothing
 /// else. The rename moves it into place, so one is only still there after a
 /// crash between the two.
-fn is_our_leftover(path: &str) -> bool {
+pub(crate) fn is_our_leftover(path: &str) -> bool {
     PROJECT_HOOK_FILES.iter().any(|file| {
         let Some((dir, name)) = file.rsplit_once('/') else { return false };
         let Some(rest) = path.strip_prefix(&format!("{dir}/.{name}.farcooler-")) else { return false };

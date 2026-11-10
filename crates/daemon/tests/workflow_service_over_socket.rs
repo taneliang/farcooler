@@ -580,6 +580,8 @@ async fn workflow_service_unmakes_a_named_tree_it_could_not_record() {
 
 #[path = "workflow_service/safety.rs"]
 mod safety;
+#[path = "workflow_service/adopt.rs"]
+mod adopt;
 
 /// ov-968: a ticket started on a branch that already has work adopts it: the run works in the worktree that has
 /// it checked out, carries on from its commits, and the app lists that worktree, claimed for the workspace. A
