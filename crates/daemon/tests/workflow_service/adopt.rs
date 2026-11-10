@@ -17,6 +17,7 @@ async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_on
     let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
     let mut sequence=1;
     let mut tickets=Vec::new();
+    let settled=|phase:&Phase| matches!(phase,Phase::Done|Phase::Failed|Phase::Uncertain);
     for (name,theirs) in [("hooks-only",false),("changed",true)] {
         let ticket=host.service.store.create_task(workspace,name,farcooler_store::models::Actor::User).unwrap();
         host.service.track_tickets(Some(ticket.id)).await;
@@ -38,18 +39,17 @@ async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_on
         accepted(&call(&mut link,workspace,Action::Start { mutation:mutation(name,snapshot["state"]["revision"].as_u64().unwrap(),sequence),
             item:ticket.key.clone(),run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),start_pin:pin.clone(),
             models:Default::default(),worktree:Some(NamedTree { name:name.into(),branch,adopt:true }),with:vec![] }).await);
-        tickets.push((ticket,tree));
+        // The next write reads the revision, so the run just started has to settle first; reading while it moves is Stale.
+        // A closed ticket is archived soon after, so what it settled as is kept here.
+        let item=tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
+            let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+            if let Some(item)=state.items.get(&ticket.key).filter(|i| settled(&i.phase)) { break item.clone(); }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }}).await.expect("the run settles");
+        tickets.push((item,tree));
     }
-    let settled=|phase:&Phase| matches!(phase,Phase::Done|Phase::Failed|Phase::Uncertain);
-    tokio::time::timeout(std::time::Duration::from_secs(30),async { loop {
-        let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
-        if tickets.iter().all(|(t,_)| state.items.get(&t.key).is_some_and(|i| settled(&i.phase))) { break; }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }}).await.expect("both runs settle");
-    let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
-    let ((clean,_),(changed,tree))=(&tickets[0],&tickets[1]);
-    assert_eq!(state.items[&clean.key].phase,Phase::Done,"only our hooks files: the run carries on and lands: {:?}",state.items[&clean.key]);
-    let item=&state.items[&changed.key];
+    let ((clean,_),(item,tree))=(&tickets[0],&tickets[1]);
+    assert_eq!(clean.phase,Phase::Done,"only our hooks files: the run carries on and lands: {clean:?}");
     assert_eq!((&item.phase,item.stage),(&Phase::Failed,0),"a person's change fails the Provision, never Uncertain: {item:?}");
     let said=item.failure.as_deref().unwrap_or_default();
     assert!(said.contains("changes") && said.contains("Commit them") && said.contains("discard them"),"said as a sentence with what to do: {said}");

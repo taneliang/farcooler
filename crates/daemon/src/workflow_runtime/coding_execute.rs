@@ -86,7 +86,7 @@ impl Exec {
     fn unstarted_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
-    fn git_settlement(&self, binding: &Binding) -> PathBuf {
+    pub(super) fn git_settlement(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.git-settled.json", digest(&binding.effect)))
     }
     pub(super) fn bytes(&self, path: &Path) -> Result<Vec<u8>> {

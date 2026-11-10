@@ -500,3 +500,25 @@ async fn workflow_coding_publish_refuses_a_model_whose_harness_is_not_set_up() {
     assert!(listing(&config, &["claude:opus", "codex:gpt-5.5"]).is_err(), "Codex's hooks aren't pinned");
     assert!(listing(&config, &["cursor"]).is_err(), "nor Cursor's");
 }
+
+/// ov-1074 review L1: a tree made by Provision that someone changes before the step is read back again fails with the
+/// sentence. The tree was made, so what happened is known, and a retry stops at the branch that exists.
+#[tokio::test]
+async fn workflow_coding_a_provisioned_tree_changed_before_its_reconcile_fails_the_step_with_the_sentence() {
+    let (_dir, mut runtime) = configured(false, "pass").await;
+    let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+    let mut found = None;
+    for time in 2..12 {
+        runtime.pump(time).await.unwrap();
+        let provision = runtime.store.workflow_outbox("w").unwrap().into_iter()
+            .find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision));
+        if let Some(stored) = provision {
+            let binding = Binding::new("w", &stored.effect, stored.resource_generation.unwrap(), 0, &runtime.item_base("w", &stored.effect).unwrap());
+            if runtime.git_settlement(&binding).exists() { found = Some(binding); break; }
+        }
+    }
+    let binding = found.expect("Provision made its tree");
+    std::fs::write(runtime.tree(&binding).join("mine.txt"), "someone's work").unwrap();
+    let Outcome::SafeFailureBecause(said) = runtime.reconcile_coding(&binding).await.unwrap() else { panic!("not a sentence") };
+    assert!(said.contains("mine.txt") && said.contains("Commit them"), "{said}");
+}
