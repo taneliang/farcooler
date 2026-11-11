@@ -37,7 +37,7 @@ async fn plan(link: &mut Link, workspace: Uuid) -> pb::Plan {
 /// still can't write.
 #[tokio::test]
 async fn a_landing_left_waiting_for_ci_reads_as_landed() {
-    let h = start(Scope::Read).await;
+    let h = start_legacy(Scope::Read).await;
     let repo = a_repository(&h);
     let task = h.service.store.create_task(repo.workspace, "Bring the CI chip back", Actor::Manager).unwrap();
     let now = farcooler_store::testing::now_millis();

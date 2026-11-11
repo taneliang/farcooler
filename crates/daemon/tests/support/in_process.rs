@@ -42,12 +42,21 @@ pub async fn start(scope: Scope) -> Harness {
 
 /// A runner whose every connection is `peer`: a device a test may bind to a
 /// member (ov-633).
-pub async fn start_as(peer: Peer) -> Harness {
+pub async fn start_as(peer: Peer) -> Harness { start_with(peer, false).await }
+
+/// As `start`, on a database from before the cutover (ov-1024): a test that
+/// seeds the old landing rows a released store refuses.
+pub async fn start_legacy(scope: Scope) -> Harness {
+    start_with(Peer { client_id: None, scope }, true).await
+}
+
+async fn start_with(peer: Peer, legacy: bool) -> Harness {
     let dir = tempfile::Builder::new().prefix("ny").tempdir_in(short_tmp()).unwrap();
     let socket = dir.path().join("d.sock");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
     farcooler_daemon::service::stub_agents_in_this_process();
+    if legacy { farcooler_store::testing::legacy_database_for_tests(&farcooler_daemon::cutover_admin::database(dir.path())); }
     let service = Arc::new(
         Service::open_in(dir.path().to_path_buf())
             .await

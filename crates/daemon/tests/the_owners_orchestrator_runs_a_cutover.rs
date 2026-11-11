@@ -56,6 +56,8 @@ impl Runner {
             assert!(std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap().success());
         }
         farcooler_daemon::service::stub_agents_in_this_process();
+        // A file from before the cutover: a new one is born released and holds none.
+        farcooler_store::testing::legacy_database_for_tests(&farcooler_daemon::cutover_admin::database(&home));
         let service = farcooler_daemon::service::Service::open_in(home.clone()).await.expect("service");
         assert_eq!(service.root_dir(), home);
         service.add_root(repo.parent().unwrap()).await.expect("root");
