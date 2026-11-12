@@ -163,9 +163,27 @@ async fn a_run_that_moves_announces_the_plan_changed() {
     let before = svc.store.workflow_state(&workspace).unwrap().unwrap();
     assert_eq!(before.items["ov-310"].phase, Phase::WaitingApproval);
 
-    let receipt = apply(2, before.revision, Grant::Decision { principal: "owner".into() }, Command::Approve { item: "ov-310".into(), run: before.items["ov-310"].run.clone(), pin: before.items["ov-310"].pin.clone(), candidate: None });
+    // An app's Approve arrives through `workflow.command`, which writes through the wire path, not `workflow_apply`.
+    let input = Input {
+        schema: 1,
+        id: "event-2".into(),
+        workspace: workspace.clone(),
+        expected_revision: before.revision,
+        epoch: 1,
+        source: "fixture".into(),
+        source_sequence: 2,
+        now_ms: 2,
+        grant: Grant::Decision { principal: "owner".into() },
+        command: Command::Approve { item: "ov-310".into(), run: before.items["ov-310"].run.clone(), pin: before.items["ov-310"].pin.clone(), candidate: None },
+        busy_resources: Default::default(),
+    };
+    let payload = serde_json::to_string(&input).unwrap();
+    let receipt = svc.store.workflow_wire_write_by(&workspace, "wire-approve", &payload, None, farcooler_store::workflow_publication::Write::Apply(&input)).unwrap();
     assert!(receipt.result.is_ok(), "{:?}", receipt.result);
     let after = svc.store.workflow_state(&workspace).unwrap().unwrap();
     assert_ne!(after.items["ov-310"].phase, Phase::WaitingApproval, "the approval moved the run");
     assert_eq!(changed(&mut events), 1, "a run that moved while the plan did not is news");
+    let again = svc.store.workflow_wire_write_by(&workspace, "wire-approve", &payload, None, farcooler_store::workflow_publication::Write::Apply(&input)).unwrap();
+    assert!(again.result.is_ok());
+    assert_eq!(changed(&mut events), 0, "a receipt answered from the cache is not news");
 }

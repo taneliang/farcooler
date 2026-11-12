@@ -254,6 +254,7 @@ impl Store {
         if let Some(receipt) = cached(&tx, workspace, id, payload)? { return Ok(receipt); }
         let mut moved = Vec::new();
         let mut change = None;
+        let applied = if let Write::Apply(input) = &write { Some(input.workspace.clone()) } else { None };
         let mut receipt = match write {
             Write::PublicationGrant { enabled, revision } => {
                 change = Some(serde_json::json!({"kind":"grant","enabled":enabled,"at":crate::tasks::now_millis()}));
@@ -301,6 +302,9 @@ impl Store {
         tx.commit()?;
         drop(conn);
         self.announce_board_moves(&moved);
+        // An app's command (Approve, Retry, Cancel...) arrives here, not through `workflow_apply_by`, and moves
+        // the run the plan card shows (ov-1040). A receipt answered from the cache returned above: no news.
+        if let Some(workspace) = applied { if receipt.result.is_ok() { self.announce_commit(&workspace); } }
         Ok(receipt)
     }
 }
