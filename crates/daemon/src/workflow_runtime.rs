@@ -20,6 +20,7 @@ mod coding_landing;
 mod coding_verbs;
 mod coding_settle;
 mod coding_pr;
+mod fold_trees;
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict};
 mod wire_commands;
@@ -195,6 +196,8 @@ pub struct Runtime {
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     instance: Uuid,
     last_occupancy: Option<String>,
+    /// Whether a sweep has cleared the trees an earlier daemon left half deleted (ov-1084).
+    trees_recovered: bool,
     /// Runs on a deleted board whose cancel the engine refused, so the sweep asks once and not on every pass: each
     /// refusal is a permanent receipt (ov-1047 review).
     cancel_refused: std::collections::BTreeSet<(String, String)>,
@@ -317,7 +320,7 @@ impl Runtime {
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), #[cfg(test)] user_home: None },
-            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, cancel_refused: Default::default(),
+            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -436,6 +439,9 @@ impl Runtime {
                 }
             }
         }
+        // A group that ended since the last sweep leaves its tree; the first sweep also clears what a stopped daemon left (ov-1084).
+        self.exec.prune_trees(&workspaces, !self.trees_recovered).await;
+        self.trees_recovered = true;
         let fingerprint = digest(&occupancy);
         let released_or_recovered = self.last_occupancy.as_ref() != Some(&fingerprint);
         self.last_occupancy = Some(fingerprint);
@@ -495,6 +501,8 @@ impl Runtime {
                 Event::Message(message) => {
                     if let Some(message) = message {
                         self.receive(message).await;
+                        // A cancel may have ended a group.
+                        self.exec.prune_trees(&workspaces, false).await;
                         // A command may have started work, and a long wait must not hold it back.
                         scan = scan || self.continuous;
                         for job in running.iter() {
@@ -531,6 +539,8 @@ impl Runtime {
                         self.observe(&workspace, &effect, outcome, false, now_ms)?;
                     }
                     count += 1;
+                    // Not at the end of the sweep, which a long gate elsewhere may hold for hours.
+                    self.exec.prune_trees(&workspaces, false).await;
                     scan = scan || self.continuous;
                     if stopping { scan = false; }
                 }
@@ -856,3 +866,5 @@ mod coding_pr_tests;
 mod gate_tests;
 #[cfg(test)]
 mod send_back_tests;
+#[cfg(test)]
+mod fold_trees_tests;

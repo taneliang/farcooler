@@ -28,6 +28,10 @@ const GATE: &str = r#"elif stage == 'gate':
         found = subprocess.call('tool', shell=True, env={'PATH': str(tools) + os.pathsep + '/usr/bin:/bin'})
         __import__('shutil').rmtree(tools.parent)
         if found != 0: sys.exit(found)
+    if mode == 'build':
+        warm = pathlib.Path('target', 'built').exists()
+        pathlib.Path('target').mkdir(exist_ok=True); pathlib.Path('target', 'built').write_text('x')
+        with open(os.environ['MARKER'], 'a') as f: f.write('warm\n' if warm else 'cold\n')
     if mode == 'lane-env':
         seen = {k: os.environ.get(k) for k in ('USER', 'LOGNAME')}
         seen['python3'] = __import__('shutil').which('python3')
@@ -229,10 +233,10 @@ async fn a_conflict_fails_the_group_and_frees_the_target() {
     assert_eq!(outbox(&runtime, StageKind::Run), 0, "the fold stopped the group; the gate never ran on a half-folded tree");
     let group = state.items.iter().find(|(_, i)| i.group_of.is_some()).map(|(_, i)| i.phase.clone());
     assert_eq!(group, Some(Phase::Failed));
-    // The conflicted tree was cleaned up by the abort, not left mid-pick.
+    // The conflicted tree isn't left mid-pick: the failed group's tree is gone (ov-1084).
     let tree = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.effect.kind == EffectKind::Execute(StageKind::Fold)).unwrap();
     let tree = runtime.tree(&Binding::new("w", &tree.effect, 1, 0, &runtime.base));
-    assert!(adapters::git(&tree, &["status", "--porcelain"]).await.unwrap().is_empty());
+    assert!(!tree.exists(), "{}", tree.display());
 }
 
 #[tokio::test]

@@ -20,6 +20,10 @@ for a in "$@"; do
   case "$a" in --dry-run|--self-test|-h|--help) exec python3 "${gate[@]}" "$@" ;; esac
 done
 
+# Under the engine the fold tree's target/ stays after a green gate: the engine hands it to the next group's fold
+# when this tree goes, so that gate rebuilds what changed, not every dependency (ov-1084). The 20 GB ceiling still holds.
+if [ -n "${FARCOOLER_WORKFLOW_RUN:-}" ]; then set -- --keep-target "$@"; fi
+
 plan="$(python3 "${gate[@]}" --dry-run "$@")" || { printf '%s\n' "$plan"; echo "landing-gate: could not plan the change" >&2; exit 2; }
 jobs_line="$(printf '%s\n' "$plan" | sed -n 's/^lane-gate: .* jobs: //p' | head -1)"
 if [ -z "$jobs_line" ]; then

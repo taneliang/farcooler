@@ -81,7 +81,7 @@ impl Exec {
         Ok(())
     }
     /// Git in `dir`, recorded like `git_recorded`, but a refusal is an answer and not an error.
-    async fn try_git(&self, binding: &Binding, dir: &Path, args: &[&str]) -> Result<(bool, String, String)> {
+    pub(super) async fn try_git(&self, binding: &Binding, dir: &Path, args: &[&str]) -> Result<(bool, String, String)> {
         let result = crate::git::git(dir, args).await;
         let raw = match &result {
             Ok(output) => serde_json::json!({ "args": args, "ok": output.ok, "stdout": output.stdout, "stderr": output.stderr }),
@@ -283,7 +283,9 @@ impl Exec {
         let (repo, mut tree) = (self.repository(), self.tree(binding));
         let branch = format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]);
         // Until none is left: a tree under its name before ov-1081 goes too, so this one is made under the new name.
+        // Its build output stays for the new tree (ov-1084).
         while tree.try_exists()? {
+            self.park_build(&tree, &repo);
             self.try_git(binding, &repo, &["worktree", "remove", "--force", &tree.to_string_lossy()]).await?;
             if tree.try_exists()? { std::fs::remove_dir_all(&tree)?; }
             tree = self.tree(binding);
@@ -294,6 +296,7 @@ impl Exec {
             self.git_recorded(binding, &repo, &["branch", "-D", &branch]).await?;
         }
         self.git_recorded(binding, &repo, &["worktree", "add", "-b", &branch, &tree_path, &base]).await?;
+        self.unpark_build(binding, &tree, &repo).await?;
         for member in members {
             if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
             let range = format!("{base}..{}", member.candidate);
