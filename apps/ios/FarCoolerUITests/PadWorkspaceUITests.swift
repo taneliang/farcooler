@@ -206,6 +206,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertEqual(mount.value as? String, before, "turning built the chat again")
         XCUIDevice.shared.orientation = .landscapeLeft
         layout(app, is: "threeColumns", "landscape again")
+        XCTAssertTrue(chatIsShown(app), "the chat went turning back to landscape")
         XCTAssertEqual(mount.value as? String, before, "turning back built the chat again")
     }
 

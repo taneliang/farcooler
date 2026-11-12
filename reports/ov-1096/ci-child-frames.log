@@ -1,0 +1,32 @@
+Nightly 43252796734, job 131307587775, commit 4bacc02d16f4d16fdc78a859cc8a51cad6c29b8b
+https://github.com/taneliang/farcooler/actions/runs/43252796734/job/131307587775
+Includes diagnostic commit b484be421. Excerpt of the unmodified job log:
+
+2026-11-12T16:17:08.5148040Z CHAT: iPadOS 27.2
+2026-11-12T16:17:08.5214100Z header (393.0, 97.75, 170.79998779296875, 20.5) hittable true pane (375.5, 97.75, 476.0, 1112.25) window (0.0, 0.0, 834.0, 1210.0)
+2026-11-12T16:17:08.5318530Z CHAT children:
+2026-11-12T16:17:08.5534620Z Attributes: Other, 0x10922c3c0, {{375.5, 97.8}, {476.0, 1112.2}}, identifier: 'pad-chat'
+2026-11-12T16:17:08.5690510Z Element subtree:
+2026-11-12T16:17:08.8844140Z  →Other, 0x10922c3c0, {{375.5, 97.8}, {476.0, 1112.2}}, identifier: 'pad-chat'
+2026-11-12T16:17:08.8845400Z     StaticText, 0x10922c500, {{393.0, 97.8}, {170.8, 20.5}}, identifier: 'pad-chat-header', label: 'Orchestrator · Idle'
+2026-11-12T16:17:08.8848820Z       Image, 0x10922c640, {{393.0, 99.5}, {17.0, 17.0}}, identifier: 'pause.circle', label: 'Pause'
+2026-11-12T16:17:08.8955070Z       StaticText, 0x10922c780, {{419.3, 97.8}, {144.5, 20.5}}, label: 'Orchestrator · Idle'
+2026-11-12T16:17:08.9105110Z     Button, 0x10922c8c0, {{395.5, 138.0}, {456.0, 34.0}}, identifier: 'agents-card', label: '1 agent', value: 1
+2026-11-12T16:17:08.9206820Z       Button, 0x10922ca00, {{395.5, 138.0}, {418.5, 34.0}}, label: '1 agent'
+2026-11-12T16:17:08.9308640Z         StaticText, 0x10922cb40, {{395.5, 138.0}, {418.5, 34.0}}, label: '1 agent'
+2026-11-12T16:17:08.9411070Z         Other, 0x10922cc80, {{407.5, 151.0}, {8.0, 8.0}}
+2026-11-12T16:17:08.9512580Z     Other, 0x10922cdc0, {{375.5, 180.0}, {458.5, 1030.0}}, identifier: 'orchestrator-pane'
+2026-11-12T16:17:08.9739660Z       Image, 0x10922cf00, {{583.5, 595.0}, {42.5, 39.0}}, identifier: 'exclamationmark.triangle', label: 'Warning'
+2026-11-12T16:17:09.0298820Z       StaticText, 0x10922d040, {{484.1, 659.2}, {241.0, 26.5}}, identifier: 'empty-state-title', label: 'Couldn’t Load This Pane'
+2026-11-12T16:17:09.0306450Z       StaticText, 0x10922d180, {{484.9, 693.8}, {239.5, 40.5}}, identifier: 'empty-state-message', label: 'The request that reads this pane didn’t finish.'
+2026-11-12T16:17:09.0307300Z       ScrollView, 0x10922d2c0, {{444.5, 748.5}, {320.0, 30.5}}
+2026-11-12T16:17:09.0307850Z         Other, 0x10922d400, {{444.5, 748.5}, {320.0, 30.5}}
+2026-11-12T16:17:09.0308360Z           StaticText, 0x10922d540, {{452.5, 756.5}, {134.0, 14.5}}, label: 'not in the harness'
+2026-11-12T16:17:09.0309040Z         Other, 0x10922d680, {{731.5, 748.5}, {30.0, 30.5}}, label: 'Vertical scroll bar, 1 page', value: 0%
+2026-11-12T16:17:09.0309920Z           Other, 0x10922d7c0, {{758.5, 769.0}, {3.0, 7.0}}
+2026-11-12T16:17:09.0310480Z         Other, 0x10922d900, {{731.5, 748.5}, {30.0, 30.5}}, label: 'Vertical scroll bar, 1 page', value: 0%
+2026-11-12T16:17:09.0310980Z           Other, 0x10922da40, {{758.5, 769.0}, {3.0, 7.0}}
+2026-11-12T16:17:09.0311620Z       Other, 0x10922db80, {{375.5, 1189.0}, {1.0, 1.0}}, identifier: 'terminal-ask', value: blocked=0 ask=- re...
+2026-11-12T16:17:09.0312350Z       Other, 0x10922dcc0, {{375.5, 1189.0}, {1.0, 1.0}}, identifier: 'native-terminal-mount', value: mount=1
+2026-11-12T16:17:09.0313090Z       Other, 0x10922de00, {{833.0, 1189.0}, {1.0, 1.0}}, identifier: 'native-showing', value: terminal-only left...
+2026-11-12T16:17:09.0313700Z     Other, 0x10922df40, {{833.0, 180.0}, {1.0, 1.0}}, identifier: 'orchestrator-mount', value: mount=1
