@@ -58,6 +58,10 @@
 # cloning a shut-down device (simctl clone) while fewer than N are booted; the
 # clone is deleted on exit. Leases live in IOS_UI_LEASE_DIR (default
 # $TMPDIR/farcooler-sim-leases) and die with the run; see lease_take below.
+# Local runs also join scripts/heavy's machine queue. IOS_UI_BOOT_MAX caps
+# booted simulators across ALL models/runtimes (default 1); a pre-existing
+# device can be reused, but is never stopped. Devices booted here shut down
+# on exit. Raising the clone cap also requires raising this boot budget.
 #
 # SKIP_TESTING is a space-separated list passed to -skip-testing, for a method
 # inside a class that is otherwise runnable — CI runs the runnerless classes
@@ -72,6 +76,17 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+# Device leases prevent sharing a UDID, but not three different models booting
+# together (ov-1119). Direct agent runs must join the landing gate's machine
+# queue BEFORE project generation or simctl. The parent gate already owns it;
+# heavy propagates HEAVY_LOCK_HELD so this never queues behind itself. CI has
+# a separate machine per job. Keep the device lease as well.
+if [ "${CI:-}" != true ] && [ "${HEAVY_LOCK_HELD:-}" != 1 ]; then
+    # heavy treats any nonempty CI as CI; this runner deliberately recognizes
+    # only CI=true. Drop false/1 here so they cannot cause a re-exec loop.
+    exec env -u CI ./scripts/heavy -- ./scripts/ios-ui-tests.sh "$@"
+fi
 
 SIMULATOR="${SIMULATOR:-iPhone 17}"
 SIMULATOR_OS="${SIMULATOR_OS:-}"
@@ -107,8 +122,13 @@ LEASE_DIR="${IOS_UI_LEASE_DIR:-${TMPDIR:-/tmp}/farcooler-sim-leases}"
 LEASE_TIMEOUT="${IOS_UI_LEASE_TIMEOUT:-3600}"
 LEASE_POLL="${IOS_UI_LEASE_POLL:-5}"
 CLONE_MAX="${IOS_UI_CLONE_MAX:-0}"
+BOOT_MAX="${IOS_UI_BOOT_MAX:-1}"
+if ! [[ "$BOOT_MAX" =~ ^0*[1-9][0-9]*$ ]]; then
+    echo "IOS_UI_BOOT_MAX must be a positive integer" >&2; exit 2
+fi
 LEASED=""
 CLONED=""
+BOOTED_BY_RUN=""
 
 # ONE SIMULATOR PER RUN (ov-679). Three or four lanes and the train gate share
 # the few simulators that are booted, and two runs on one device kill each
@@ -142,6 +162,11 @@ lease_take() {
 }
 
 lease_release() {
+    # Only shut down a device this run booted. A pre-existing simulator belongs
+    # to someone else, even when it was free to lease; never stop that work.
+    if [ -n "$BOOTED_BY_RUN" ]; then
+        xcrun simctl shutdown "$BOOTED_BY_RUN" >/dev/null 2>&1 || true
+    fi
     if [ -n "$LEASED" ] && [ "$(readlink "$LEASE_DIR/$LEASED" 2>/dev/null)" = "$$" ]; then
         rm -f "$LEASE_DIR/$LEASED"
     fi
@@ -238,8 +263,34 @@ for _, udid, state in found:
     lease_pick_device
 fi
 if [ -n "$BOOT_ID" ]; then
-    xcrun simctl boot "$BOOT_ID" 2>/dev/null || true  # already booted is fine
+    # A shut-down iPad must not boot beside an idle iPhone just because the
+    # models differ. Count ALL booted devices, including other runtimes and
+    # models. Never shut those down to make space. The machine queue makes
+    # this check + boot atomic among our callers; leases still protect UDIDs.
+    if [ "${CI:-}" != true ]; then
+        boot_wait=$SECONDS
+        while ! xcrun simctl list devices available -j | python3 -c '
+import json, sys
+target, maximum = sys.argv[1], int(sys.argv[2])
+devices = [d for ds in json.load(sys.stdin)["devices"].values() for d in ds]
+booted = [d["udid"] for d in devices if d.get("state") == "Booted"]
+sys.exit(0 if target in booted or len(booted) < maximum else 1)
+' "$BOOT_ID" "$BOOT_MAX"; do
+            if [ $((SECONDS - boot_wait)) -ge "$LEASE_TIMEOUT" ]; then
+                echo "ios-ui-tests: simulator boot budget exhausted (limit ${IOS_UI_BOOT_MAX:-1}); leave existing devices running and try later" >&2
+                exit 1
+            fi
+            echo "ios-ui-tests: waiting for simulator boot budget (limit ${IOS_UI_BOOT_MAX:-1})" >&2
+            sleep "$LEASE_POLL"
+        done
+    fi
+    if xcrun simctl boot "$BOOT_ID" 2>/dev/null; then
+        BOOTED_BY_RUN="$BOOT_ID"
+    fi  # an already-booted device is not ours to shut down
     xcrun simctl bootstatus "$BOOT_ID" -b >/dev/null 2>&1 || true
+elif [ "${CI:-}" != true ]; then
+    echo "ios-ui-tests: no simulator resolved; refusing an unleased automatic boot" >&2
+    exit 1
 fi
 
 if [ -n "$BOOT_ID" ]; then

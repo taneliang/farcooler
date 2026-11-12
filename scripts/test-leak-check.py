@@ -161,7 +161,9 @@ def new_system_entries(folder, before):
 
 
 def is_swift(command):
-    return any(os.path.basename(word) == "swift" for word in command)
+    # The partition experiment launches Swift in child processes; snapshot
+    # system temp once around their union, not once per overlapping child.
+    return any(os.path.basename(word) in ("swift", "macos-test-partitions.py") for word in command)
 
 
 def is_strict():
@@ -385,6 +387,8 @@ def self_test():
     os.environ["FC_LEAK_SYSTEM_TEMP"] = system_dir
     uuid = "0A1B2C3D-0000-4000-8000-000000000001"
     failures = []
+    if not is_swift([sys.executable, "/repo/scripts/macos-test-partitions.py", "--out", "/tmp/result"]):
+        failures.append("the partition runner must snapshot Swift's system temp folder")
 
     def case(name, script, expect_rc):
         rc = run([sys.executable, "-c", script], grace=0.5)

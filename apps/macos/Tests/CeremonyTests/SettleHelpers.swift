@@ -1,4 +1,5 @@
 import AppKit
+import Testing
 
 /// Waits that end when the thing waited for has happened, not after a fixed
 /// time (ov-537). A fixed sleep is both too long on a fast Mac, where it was
@@ -37,12 +38,29 @@ enum Settle {
         var held = 0
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: limit)
+        let measuring = ProcessInfo.processInfo.environment["FARCOOLER_LAYOUT_TIMING"] == "1"
+        var layout = Duration.zero
+        var suspended = Duration.zero
+        var polls = 0
+        defer {
+            if measuring {
+                // Suspension includes the requested timer and the queue back
+                // onto MainActor. It is NOT CPU time or pure actor wait.
+                print("layout-timing test=\(Test.current?.name ?? "unknown") polls=\(polls) layout=\(layout) suspension=\(suspended)")
+            }
+        }
         while held < passes, clock.now < deadline {
+            let began = clock.now
             view?.layoutSubtreeIfNeeded()
             let now = reading()
+            if measuring { layout += began.duration(to: clock.now); polls += 1 }
             held = now == last ? held + 1 : 0
             last = now
-            if held < passes { try? await Task.sleep(for: step) }
+            if held < passes {
+                let began = clock.now
+                try? await Task.sleep(for: step)
+                if measuring { suspended += began.duration(to: clock.now) }
+            }
         }
     }
 

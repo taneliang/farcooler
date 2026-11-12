@@ -70,8 +70,19 @@ if [ -z "$summary" ]; then
   exit 1
 fi
 count="$(sed -E 's/.*Test run with ([0-9]+) tests?.*/\1/' <<<"$summary")"
+# A partition spans multiple Swift Testing bundles (ov-1119). SwiftPM emits
+# one final summary per bundle, including zero-test filtered bundles. Its last
+# one alone cannot prove the union ran. Default callers keep their historical
+# CeremonyTests floor; the partition experiment supplies an exact total floor.
+if [ "${SWIFT_TEST_SUM_ALL:-}" = 1 ]; then
+  count="$(grep -E 'Test run with [0-9]+ tests? .*(passed|failed)' "$log" | sed -E 's/.*Test run with ([0-9]+) tests?.*/\1/' | awk '{n += $1} END {print n+0}')"
+fi
 if [ "$count" -lt "$floor" ]; then
   echo "swift-test-guard: the run counted $count tests, below the floor of $floor in $floor_file. Tests went unrun. If tests were deleted on purpose, lower the floor in the same commit; if you added tests, raise it to the new count." >&2
+  exit 1
+fi
+if [ "${SWIFT_TEST_EXACT:-}" = 1 ] && [ "$count" -ne "$floor" ]; then
+  echo "swift-test-guard: $count tests ran, but the exact partition inventory requires $floor. A filter selected extra tests." >&2
   exit 1
 fi
 echo "swift-test-guard: $count tests ran (floor $floor)."

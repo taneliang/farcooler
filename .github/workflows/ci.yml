@@ -974,6 +974,8 @@ jobs:
       # (ov-324): a test that exited the process once ended `swift test` with
       # exit 0 and left every later test unrun.
       - run: ./scripts/swift-test-guard-test.sh
+      # Only the stand-in checks, not the opt-in process experiment (ov-1119).
+      - run: ./scripts/macos-test-partitions.py --self-test
       # A run that leaves a plist in ~/Library/Preferences or a farcooler-* entry
       # in TMPDIR fails (ov-541); both Swift test runs below are wrapped in it.
       - run: ./scripts/test-leak-check.py --self-test

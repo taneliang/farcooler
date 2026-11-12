@@ -41,6 +41,7 @@ cat >"$scratch/bin/xcrun" <<'STUB'
 echo "$*" >>"$SCRATCH/xcrun.calls"
 if [ "$1 $2" = "simctl list" ]; then cat "$SCRATCH/devices.json"
 elif [ "$1 $2" = "simctl clone" ]; then echo CLONE-UDID
+elif [ "$1 $2" = "simctl boot" ] && [ "${BOOT_ALREADY:-}" = 1 ]; then exit 149
 fi
 exit 0
 STUB
@@ -67,7 +68,7 @@ holding() { until_file "$scratch/xcodebuild.pid.$1" || fail "no run ever held $1
 # launch <outfile> [env...]: one run in the background; its pid in $PID.
 launch() {
     local out="$1"; shift
-    env -u CI SCRATCH="$scratch" PATH="$scratch/bin:$PATH" XCTESTRUN="$scratch/x.xctestrun" DEMO_USER=u DEMO_HOST=h \
+    env -u CI HEAVY_LOCK_HELD=1 SCRATCH="$scratch" PATH="$scratch/bin:$PATH" XCTESTRUN="$scratch/x.xctestrun" DEMO_USER=u DEMO_HOST=h \
         DIAGNOSE_GRACE=1000 IOS_UI_LEASE_DIR="$scratch/leases" IOS_UI_LEASE_POLL=0.2 "$@" \
         "$scratch/scripts/ios-ui-tests.sh" >"$out" 2>&1 &
     PID=$!
@@ -141,7 +142,7 @@ grep -q "held by pid $holder" "$scratch/out.2" || fail "the timeout did not name
 # clone from, IOS_UI_CLONE_MAX=2 makes a clone; the default (above) never does.
 reset; devices AAA:Booted SPARE:Shutdown
 launch "$scratch/out.1" RELEASE="$scratch/release"; p1=$PID; holding AAA
-launch "$scratch/out.2" HOLD=0 IOS_UI_CLONE_MAX=2; wait "$PID" || fail "the clone run failed: $(cat "$scratch/out.2")"
+launch "$scratch/out.2" HOLD=0 IOS_UI_CLONE_MAX=2 IOS_UI_BOOT_MAX=2; wait "$PID" || fail "the clone run failed: $(cat "$scratch/out.2")"
 touch "$scratch/release"; wait "$p1" || fail "the holder failed"
 grep -q 'start CLONE-UDID' "$scratch/events" || fail "no clone was used: $(cat "$scratch/events")"
 grep -q 'simctl delete CLONE-UDID' "$scratch/xcrun.calls" || fail "the clone was not deleted"
@@ -170,5 +171,46 @@ launch "$scratch/out.2" HOLD=1 SIMULATOR_ID=AAA CI=true; p2=$PID
 for p in $p1 $p2; do wait "$p" || fail "a CI run failed"; done
 [ ! -e "$scratch/leases" ] || fail "a CI=true run took a lease"
 grep -qx 'start AAA' "$scratch/events" || fail "SIMULATOR_ID was not the destination"
+
+# 7. The boot budget counts other models too, and never stops their work.
+reset
+echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"name":"iPad Pro","udid":"OTHER","state":"Booted"}]}}' >"$scratch/devices.json"
+launch "$scratch/out.1" HOLD=0 SIMULATOR_ID=NEW IOS_UI_LEASE_TIMEOUT=1; code=0; wait "$PID" || code=$?
+[ "$code" -eq 1 ] || fail "booted a new device past the machine budget"
+grep -q 'boot budget exhausted' "$scratch/out.1" || fail "missing budget diagnostic"
+! grep -q '^simctl boot NEW' "$scratch/xcrun.calls" || fail "booted despite exhausted budget"
+! grep -q '^simctl shutdown OTHER' "$scratch/xcrun.calls" || fail "stopped another owner's device"
+
+# Reusing a booted device at the limit never stops it; a device this run
+# successfully booted is stopped on exit and its lease released.
+reset; devices AAA:Booted
+launch "$scratch/out.1" HOLD=0 SIMULATOR_ID=AAA BOOT_ALREADY=1; wait "$PID" || fail "reuse failed"
+! grep -q '^simctl shutdown AAA' "$scratch/xcrun.calls" || fail "stopped a pre-existing device"
+reset; devices AAA:Shutdown
+launch "$scratch/out.1" HOLD=0 SIMULATOR_ID=AAA; wait "$PID" || fail "owned boot failed"
+grep -q '^simctl shutdown AAA' "$scratch/xcrun.calls" || fail "left own simulator running"
+
+# 8. Direct callers join the global queue before any project or device work.
+cat >"$scratch/scripts/heavy" <<'STUB'
+#!/bin/bash
+[ -z "${CI:-}" ] || exit 38
+echo "$*" >"$SCRATCH/heavy.calls"
+exit 37
+STUB
+chmod +x "$scratch/scripts/heavy"
+code=0
+env -u CI -u HEAVY_LOCK_HELD SCRATCH="$scratch" "$scratch/scripts/ios-ui-tests.sh" SomeTest >"$scratch/queue.out" 2>&1 || code=$?
+[ "$code" -eq 37 ] || fail "direct run did not enter heavy"
+grep -qx -- '-- ./scripts/ios-ui-tests.sh SomeTest' "$scratch/heavy.calls" || fail "queue lost arguments"
+for ci in false 1; do
+    code=0
+    env -u HEAVY_LOCK_HELD CI="$ci" SCRATCH="$scratch" "$scratch/scripts/ios-ui-tests.sh" SomeTest >"$scratch/queue.out" 2>&1 || code=$?
+    [ "$code" -eq 37 ] || fail "CI=$ci bypassed the local queue or retained CI"
+done
+
+for maximum in 0 00 bad; do
+    launch "$scratch/out.invalid" IOS_UI_BOOT_MAX="$maximum"; code=0; wait "$PID" || code=$?
+    [ "$code" -eq 2 ] || fail "invalid boot budget $maximum did not fail immediately"
+done
 
 echo "ok: ios-ui-tests.sh gives each run its own booted simulator (SIMULATOR_ID too, except under CI=true), frees a killed run's lease, waits and times out when none is free, and clones only when asked"

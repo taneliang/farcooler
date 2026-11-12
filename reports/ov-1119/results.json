@@ -1,0 +1,757 @@
+{
+  "summary": {
+    "before_samples": 3,
+    "after_samples": 2,
+    "median_before_wall": 171.256166667,
+    "median_after_wall": 119.31477120849999,
+    "median_before_runner": 171.256166667,
+    "median_after_runner": 181.947028625,
+    "critical_path_reduction_percent": 30.329649710948946,
+    "runner_time_change_percent": 6.242614304679561
+  },
+  "runs": [
+    {
+      "processes": 1,
+      "wall_seconds": 20.671617458,
+      "elapsed_including_load_wait": 20.675532959,
+      "runner_seconds": 20.671617458,
+      "suite": "CeremonyTests.NativeAgentInTileTests",
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 20.671617458,
+          "load_start": [
+            15.865234375,
+            19.58056640625,
+            18.53076171875
+          ],
+          "load_end": [
+            13.5029296875,
+            18.7978515625,
+            18.27392578125
+          ],
+          "load_peak": [
+            15.865234375,
+            19.58056640625,
+            18.53076171875
+          ],
+          "valid_measurement": true,
+          "definitions": 2,
+          "summary_definitions": 2,
+          "swift_execution_seconds": 14.23
+        }
+      ],
+      "name": "ov1119-final-tile-alone",
+      "inventory_sha256": "e268d1ab6c93e23e803e5b74874369d906eeffd7bb2300c861b20186c6486c53",
+      "definitions": 2,
+      "layout_timing": {
+        "theBoxStaysInsideTheVisibleCard()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 1.2454980409999998,
+          "suspension_seconds": 3.637383331
+        },
+        "theBoxStaysInsideTheLonePane()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 0.9251890869999998,
+          "suspension_seconds": 3.8086338320000004
+        }
+      },
+      "test_durations": {
+        "\"In a tiled pane the message box keeps its bottom margin at every window height\"": 6.598,
+        "\"In a lone pane, in a window with a toolbar, it keeps it too\"": 7.631
+      }
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 10.269791416,
+      "elapsed_including_load_wait": 10.275122750000001,
+      "runner_seconds": 10.269791416,
+      "suite": "CeremonyTests.TerminalKeyHoverTests",
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 10.269791416,
+          "load_start": [
+            13.14208984375,
+            18.634765625,
+            18.21923828125
+          ],
+          "load_end": [
+            12.7255859375,
+            18.3662109375,
+            18.12841796875
+          ],
+          "load_peak": [
+            13.14208984375,
+            18.634765625,
+            18.21923828125
+          ],
+          "valid_measurement": true,
+          "definitions": 6,
+          "summary_definitions": 6,
+          "swift_execution_seconds": 2.568
+        }
+      ],
+      "name": "ov1119-final-hover-alone",
+      "inventory_sha256": "70f763395ea22a0213ee4a60e931dddd854fc2083d9756ef7a149cb2dea47ea0",
+      "definitions": 6,
+      "layout_timing": {},
+      "test_durations": {
+        "\"The card waits for the hover delay, and moving off first cancels the wait\"": 2.568
+      }
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 16.324836750000003,
+      "elapsed_including_load_wait": 16.330404875,
+      "runner_seconds": 16.324836750000003,
+      "suite": "CeremonyTests.TitleStatusButtonTests",
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 16.324836750000003,
+          "load_start": [
+            12.02685546875,
+            18.12744140625,
+            18.04541015625
+          ],
+          "load_end": [
+            11.80859375,
+            17.77783203125,
+            17.921875
+          ],
+          "load_peak": [
+            12.140625,
+            18.12744140625,
+            18.04541015625
+          ],
+          "valid_measurement": true,
+          "definitions": 1,
+          "summary_definitions": 1,
+          "swift_execution_seconds": 9.084
+        }
+      ],
+      "name": "ov1119-final-button-alone",
+      "inventory_sha256": "b94b87111d5dfff74d5f4e2d2b3220c3a7bf82f11c5e0bde24f9bc61191cf6c3",
+      "definitions": 1,
+      "layout_timing": {},
+      "test_durations": {
+        "\"A hover or pressed plate holds the icon and the count with even room, on every button\"": 9.084
+      }
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 10.482777792,
+      "elapsed_including_load_wait": 10.487328875,
+      "runner_seconds": 10.482777792,
+      "suite": "CeremonyTests.NativeComposerTextLineTests",
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 10.482777792,
+          "load_start": [
+            12.06396484375,
+            17.7314453125,
+            17.904296875
+          ],
+          "load_end": [
+            11.6982421875,
+            17.46142578125,
+            17.80615234375
+          ],
+          "load_peak": [
+            12.06396484375,
+            17.7314453125,
+            17.904296875
+          ],
+          "valid_measurement": true,
+          "definitions": 2,
+          "summary_definitions": 2,
+          "swift_execution_seconds": 4.133
+        }
+      ],
+      "name": "ov1119-final-composer-alone",
+      "inventory_sha256": "eb5f78b8517c238b8a9671a0968b68fffa849b6b1928968ef55664d5388314f1",
+      "definitions": 2,
+      "layout_timing": {},
+      "test_durations": {
+        "\"One line, empty or typed, is centered in the box with the paperclip, within 1 pt; two lines leave equal room above and below (ov-470)\"": 2.266
+      }
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 130.98912224999998,
+      "elapsed_including_load_wait": 130.996564166,
+      "runner_seconds": 130.98912224999998,
+      "suite": "CeremonyTests.NativeSelectionTests/TranscriptScrollerTests",
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 130.98912224999998,
+          "load_start": [
+            15.78466796875,
+            19.8125,
+            20.30908203125
+          ],
+          "load_end": [
+            7.6591796875,
+            15.7158203125,
+            18.61767578125
+          ],
+          "load_peak": [
+            15.78466796875,
+            19.8125,
+            20.30908203125
+          ],
+          "valid_measurement": true,
+          "definitions": 30,
+          "summary_definitions": 30,
+          "swift_execution_seconds": 124.414
+        }
+      ],
+      "name": "ov1119-compare-transcript-alone-1",
+      "inventory_sha256": "5200ca235b8390e22a9e3522db47344ed02797283c682ab6d566eb67ef969aa0",
+      "definitions": 30,
+      "layout_timing": {},
+      "test_durations": {}
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 171.256166667,
+      "load_criterion": "five-minute average below 20 throughout (scripts/heavy)",
+      "elapsed_including_load_wait": 171.258051083,
+      "runner_seconds": 171.256166667,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 171.256166667,
+          "load_start": [
+            3.21826171875,
+            5.09228515625,
+            7.45751953125
+          ],
+          "load_end": [
+            2.814453125,
+            4.18017578125,
+            6.65625
+          ],
+          "load_peak": [
+            4.48193359375,
+            5.32275390625,
+            7.52490234375
+          ],
+          "valid_measurement": true,
+          "definitions": 2035,
+          "summary_definitions": 2035,
+          "swift_execution_seconds": 167.157
+        }
+      ],
+      "name": "ov1119-policy-one-process-1-1",
+      "inventory_sha256": "1290eb051c8ff04aa0712cfdb3980631034fb30d259ae2d0fa612ab43a396e09",
+      "definitions": 2035,
+      "layout_timing": {
+        "theBoxStaysInsideTheVisibleCard()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 1.028987957,
+          "suspension_seconds": 30.971683289999994
+        },
+        "theBoxStaysInsideTheLonePane()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 0.573262327,
+          "suspension_seconds": 4.5025149990000015
+        }
+      },
+      "test_durations": {
+        "\"One line, empty or typed, is centered in the box with the paperclip, within 1 pt; two lines leave equal room above and below (ov-470)\"": 32.569,
+        "\"A hover or pressed plate holds the icon and the count with even room, on every button\"": 37.657,
+        "\"In a tiled pane the message box keeps its bottom margin at every window height\"": 41.174,
+        "\"The card waits for the hover delay, and moving off first cancels the wait\"": 41.514,
+        "\"In a lone pane, in a window with a toolbar, it keeps it too\"": 6.745
+      }
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 171.088261417,
+      "driver": "built Swift Testing helpers (no SwiftPM workspace lock)",
+      "load_criterion": "five-minute average below 20 throughout (scripts/heavy)",
+      "elapsed_including_load_wait": 171.09058725,
+      "runner_seconds": 171.088261417,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 171.088261417,
+          "load_start": [
+            3.2685546875,
+            3.64013671875,
+            5.7880859375
+          ],
+          "load_end": [
+            2.798828125,
+            3.41552734375,
+            5.30224609375
+          ],
+          "load_peak": [
+            4.04833984375,
+            3.7705078125,
+            5.7880859375
+          ],
+          "valid_measurement": true,
+          "definitions": 2035,
+          "summary_definitions": 2035,
+          "swift_execution_seconds": 167.008
+        }
+      ],
+      "name": "ov1119-policy-one-process-2-1/run-1",
+      "inventory_sha256": "1290eb051c8ff04aa0712cfdb3980631034fb30d259ae2d0fa612ab43a396e09",
+      "definitions": 2035,
+      "layout_timing": {
+        "theBoxStaysInsideTheVisibleCard()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 1.0484059589999999,
+          "suspension_seconds": 26.960010536000013
+        },
+        "theBoxStaysInsideTheLonePane()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 0.6201193290000001,
+          "suspension_seconds": 4.526074157
+        }
+      },
+      "test_durations": {
+        "\"One line, empty or typed, is centered in the box with the paperclip, within 1 pt; two lines leave equal room above and below (ov-470)\"": 32.194,
+        "\"A hover or pressed plate holds the icon and the count with even room, on every button\"": 37.188,
+        "\"In a tiled pane the message box keeps its bottom margin at every window height\"": 40.904,
+        "\"The card waits for the hover delay, and moving off first cancels the wait\"": 41.281,
+        "\"In a lone pane, in a window with a toolbar, it keeps it too\"": 6.927
+      }
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 171.593712167,
+      "driver": "built Swift Testing helpers (no SwiftPM workspace lock)",
+      "load_criterion": "five-minute average below 20 throughout (scripts/heavy)",
+      "elapsed_including_load_wait": 171.59446462499997,
+      "runner_seconds": 171.593712167,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 171.593712167,
+          "load_start": [
+            2.798828125,
+            3.41552734375,
+            5.30224609375
+          ],
+          "load_end": [
+            2.31787109375,
+            3.0576171875,
+            4.81884765625
+          ],
+          "load_peak": [
+            3.5654296875,
+            3.51416015625,
+            5.30224609375
+          ],
+          "valid_measurement": true,
+          "definitions": 2035,
+          "summary_definitions": 2035,
+          "swift_execution_seconds": 167.48
+        }
+      ],
+      "name": "ov1119-policy-one-process-2-1/run-2",
+      "inventory_sha256": "1290eb051c8ff04aa0712cfdb3980631034fb30d259ae2d0fa612ab43a396e09",
+      "definitions": 2035,
+      "layout_timing": {
+        "theBoxStaysInsideTheVisibleCard()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 1.0457015859999998,
+          "suspension_seconds": 28.143944916999995
+        },
+        "theBoxStaysInsideTheLonePane()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 0.5481656970000002,
+          "suspension_seconds": 4.491359839
+        }
+      },
+      "test_durations": {
+        "\"One line, empty or typed, is centered in the box with the paperclip, within 1 pt; two lines leave equal room above and below (ov-470)\"": 32.772,
+        "\"A hover or pressed plate holds the icon and the count with even room, on every button\"": 37.719,
+        "\"In a tiled pane the message box keeps its bottom margin at every window height\"": 41.161,
+        "\"The card waits for the hover delay, and moving off first cancels the wait\"": 41.717,
+        "\"In a lone pane, in a window with a toolbar, it keeps it too\"": 6.773
+      }
+    },
+    {
+      "processes": 2,
+      "wall_seconds": 119.412148917,
+      "driver": "built Swift Testing helpers (no SwiftPM workspace lock)",
+      "load_criterion": "five-minute average below 20 throughout (scripts/heavy)",
+      "elapsed_including_load_wait": 119.4160585,
+      "runner_seconds": 182.241191667,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 119.412101833,
+          "load_start": [
+            2.6689453125,
+            4.126953125,
+            6.623046875
+          ],
+          "load_end": [
+            3.03369140625,
+            3.84716796875,
+            6.18359375
+          ],
+          "load_peak": [
+            4.107421875,
+            4.18359375,
+            6.623046875
+          ],
+          "valid_measurement": true,
+          "definitions": 30,
+          "summary_definitions": 30,
+          "swift_execution_seconds": 115.962
+        },
+        {
+          "shard": 1,
+          "rc": 0,
+          "seconds": 62.829089834,
+          "load_start": [
+            2.6689453125,
+            4.126953125,
+            6.623046875
+          ],
+          "load_end": [
+            4.107421875,
+            4.18359375,
+            6.46728515625
+          ],
+          "load_peak": [
+            4.107421875,
+            4.18359375,
+            6.623046875
+          ],
+          "valid_measurement": true,
+          "definitions": 2005,
+          "summary_definitions": 2005,
+          "swift_execution_seconds": 58.647999999999996
+        }
+      ],
+      "name": "ov1119-policy-two-process-2-1/run-1",
+      "inventory_sha256": "1290eb051c8ff04aa0712cfdb3980631034fb30d259ae2d0fa612ab43a396e09",
+      "definitions": 2035,
+      "layout_timing": {
+        "theBoxStaysInsideTheVisibleCard()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 1.052396158,
+          "suspension_seconds": 25.432289995
+        },
+        "theBoxStaysInsideTheLonePane()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 0.523136013,
+          "suspension_seconds": 4.347916377
+        }
+      },
+      "test_durations": {
+        "\"One line, empty or typed, is centered in the box with the paperclip, within 1 pt; two lines leave equal room above and below (ov-470)\"": 33.265,
+        "\"A hover or pressed plate holds the icon and the count with even room, on every button\"": 38.421,
+        "\"In a tiled pane the message box keeps its bottom margin at every window height\"": 40.89,
+        "\"The card waits for the hover delay, and moving off first cancels the wait\"": 41.246,
+        "\"In a lone pane, in a window with a toolbar, it keeps it too\"": 6.636
+      }
+    },
+    {
+      "processes": 2,
+      "wall_seconds": 119.2173935,
+      "driver": "built Swift Testing helpers (no SwiftPM workspace lock)",
+      "load_criterion": "five-minute average below 20 throughout (scripts/heavy)",
+      "elapsed_including_load_wait": 119.219845708,
+      "runner_seconds": 181.652865583,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 119.2173935,
+          "load_start": [
+            3.03369140625,
+            3.84716796875,
+            6.18359375
+          ],
+          "load_end": [
+            3.2685546875,
+            3.64013671875,
+            5.7880859375
+          ],
+          "load_peak": [
+            3.64599609375,
+            3.86865234375,
+            6.18359375
+          ],
+          "valid_measurement": true,
+          "definitions": 30,
+          "summary_definitions": 30,
+          "swift_execution_seconds": 115.808
+        },
+        {
+          "shard": 1,
+          "rc": 0,
+          "seconds": 62.43547208299999,
+          "load_start": [
+            3.03369140625,
+            3.84716796875,
+            6.18359375
+          ],
+          "load_end": [
+            2.72119140625,
+            3.61328125,
+            5.92333984375
+          ],
+          "load_peak": [
+            3.26806640625,
+            3.86865234375,
+            6.18359375
+          ],
+          "valid_measurement": true,
+          "definitions": 2005,
+          "summary_definitions": 2005,
+          "swift_execution_seconds": 58.302
+        }
+      ],
+      "name": "ov1119-policy-two-process-2-1/run-2",
+      "inventory_sha256": "1290eb051c8ff04aa0712cfdb3980631034fb30d259ae2d0fa612ab43a396e09",
+      "definitions": 2035,
+      "layout_timing": {
+        "theBoxStaysInsideTheVisibleCard()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 1.108348629,
+          "suspension_seconds": 25.782456176999997
+        },
+        "theBoxStaysInsideTheLonePane()": {
+          "windows": 58,
+          "polls": 348,
+          "layout_seconds": 0.5279893320000002,
+          "suspension_seconds": 4.233835235999999
+        }
+      },
+      "test_durations": {
+        "\"One line, empty or typed, is centered in the box with the paperclip, within 1 pt; two lines leave equal room above and below (ov-470)\"": 33.117,
+        "\"A hover or pressed plate holds the icon and the count with even room, on every button\"": 38.245,
+        "\"In a tiled pane the message box keeps its bottom margin at every window height\"": 40.99,
+        "\"The card waits for the hover delay, and moving off first cancels the wait\"": 41.308,
+        "\"In a lone pane, in a window with a toolbar, it keeps it too\"": 6.52
+      }
+    }
+  ],
+  "excluded_runs": [
+    {
+      "processes": 1,
+      "wall_seconds": 215.20734341600001,
+      "elapsed_including_load_wait": 215.209461833,
+      "runner_seconds": 215.20734341600001,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 215.20734341600001,
+          "load_start": [
+            7.6591796875,
+            15.7158203125,
+            18.61767578125
+          ],
+          "load_end": [
+            33.28271484375,
+            20.2197265625,
+            19.64990234375
+          ],
+          "load_peak": [
+            33.28271484375,
+            20.2197265625,
+            19.64990234375
+          ],
+          "valid_measurement": false,
+          "definitions": 2035
+        }
+      ],
+      "name": "ov1119-compare-one-process-1-1",
+      "reason": "excluded exploratory run under the stricter one- and five-minute criterion"
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 197.902406167,
+      "elapsed_including_load_wait": 292.982644167,
+      "runner_seconds": 197.902406167,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 197.902406167,
+          "load_start": [
+            19.59130859375,
+            19.7080078125,
+            19.55419921875
+          ],
+          "load_end": [
+            5.505859375,
+            14.55029296875,
+            17.57373046875
+          ],
+          "load_peak": [
+            26.33642578125,
+            21.21337890625,
+            20.1025390625
+          ],
+          "valid_measurement": false,
+          "definitions": 2035
+        }
+      ],
+      "name": "ov1119-compare-one-process-1-2",
+      "reason": "excluded exploratory run under the stricter one- and five-minute criterion"
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 189.719563375,
+      "elapsed_including_load_wait": 189.72184687499998,
+      "runner_seconds": 189.719563375,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 189.719563375,
+          "load_start": [
+            5.126953125,
+            14.169921875,
+            17.4033203125
+          ],
+          "load_end": [
+            26.10546875,
+            19.18310546875,
+            18.70849609375
+          ],
+          "load_peak": [
+            33.9345703125,
+            19.6591796875,
+            18.85498046875
+          ],
+          "valid_measurement": false,
+          "definitions": 2035
+        }
+      ],
+      "name": "ov1119-compare-one-process-1-3",
+      "reason": "excluded exploratory run under the stricter one- and five-minute criterion"
+    },
+    {
+      "processes": 1,
+      "wall_seconds": 221.23132216699997,
+      "elapsed_including_load_wait": 296.29498933400004,
+      "runner_seconds": 221.23132216699997,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 221.23132216699997,
+          "load_start": [
+            19.35205078125,
+            18.70556640625,
+            18.56640625
+          ],
+          "load_end": [
+            40.13525390625,
+            28.07958984375,
+            22.61572265625
+          ],
+          "load_peak": [
+            46.21875,
+            28.4189453125,
+            22.7021484375
+          ],
+          "valid_measurement": false,
+          "definitions": 2035
+        }
+      ],
+      "name": "ov1119-compare-one-process-1-4",
+      "reason": "excluded exploratory run under the stricter one- and five-minute criterion"
+    },
+    {
+      "processes": 2,
+      "wall_seconds": 186.023230917,
+      "load_criterion": "five-minute average below 20 throughout (scripts/heavy)",
+      "elapsed_including_load_wait": 186.026196,
+      "runner_seconds": 253.476925292,
+      "suite": null,
+      "shards": [
+        {
+          "shard": 0,
+          "rc": 0,
+          "seconds": 186.023230917,
+          "load_start": [
+            3.86572265625,
+            4.96484375,
+            7.88720703125
+          ],
+          "load_end": [
+            3.21826171875,
+            5.09228515625,
+            7.45751953125
+          ],
+          "load_peak": [
+            9.9609375,
+            6.5439453125,
+            8.26513671875
+          ],
+          "valid_measurement": true,
+          "definitions": 30
+        },
+        {
+          "shard": 1,
+          "rc": 0,
+          "seconds": 67.453694375,
+          "load_start": [
+            3.86572265625,
+            4.96484375,
+            7.88720703125
+          ],
+          "load_end": [
+            9.9609375,
+            6.5439453125,
+            8.26513671875
+          ],
+          "load_peak": [
+            9.9609375,
+            6.5439453125,
+            8.26513671875
+          ],
+          "valid_measurement": true,
+          "definitions": 2005
+        }
+      ],
+      "reason": "SwiftPM workspace lock serialized the pilot; direct-helper comparisons exclude it"
+    }
+  ]
+}

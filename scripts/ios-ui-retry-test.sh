@@ -93,7 +93,7 @@ run() {
         printf '%s\n' "$1" >"$scratch/log.$n"; echo "$2" >"$scratch/status.$n"; shift 2; n=$((n + 1))
     done
     CODE=0
-    OUT="$(env SCRATCH="$scratch" PATH="$scratch/bin:$PATH" XCTESTRUN="$scratch/x.xctestrun" \
+    OUT="$(env HEAVY_LOCK_HELD=1 SCRATCH="$scratch" PATH="$scratch/bin:$PATH" XCTESTRUN="$scratch/x.xctestrun" \
         DEMO_USER=u DEMO_HOST=h GITHUB_STEP_SUMMARY="$scratch/summary" DIAGNOSE_GRACE=1000 \
         IOS_UI_RETRY_INFRA="$retry" \
         "$scratch/scripts/ios-ui-tests.sh" 2>&1)" || CODE=$?

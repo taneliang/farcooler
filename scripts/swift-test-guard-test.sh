@@ -26,6 +26,11 @@ case "$MODE" in
   full) echo "✔ Test run with 150 tests in 20 suites passed after 3.1 seconds." ;;
   few) echo "✔ Test run with 99 tests in 20 suites passed after 3.1 seconds." ;;
   failed) echo "✘ Test run with 150 tests in 20 suites failed after 3.1 seconds."; exit 1 ;;
+  bundles) echo "✔ Test run with 40 tests passed after 1 seconds."
+    echo "✔ Test run with 60 tests passed after 1 seconds."
+    echo "✔ Test run with 0 tests passed after 1 seconds." ;;
+  missing-bundle) echo "✔ Test run with 40 tests passed after 1 seconds."
+    echo "✔ Test run with 0 tests passed after 1 seconds." ;;
 esac
 STUB
 chmod +x "$scratch/bin/swift"
@@ -48,6 +53,12 @@ grep -q "below the floor of 100" <<<"$out" || fail "the floor's message is missi
 grep -q "raise it" <<<"$out" || fail "the message does not say how to raise the floor: $out"
 
 if run failed >/dev/null; then fail "a failing run passed"; fi
+
+out="$(SWIFT_TEST_SUM_ALL=1 run bundles)" || fail "bundle union did not meet its floor: $out"
+grep -q '100 tests ran' <<<"$out" || fail "bundle counts were not summed: $out"
+if SWIFT_TEST_SUM_ALL=1 run missing-bundle >/dev/null; then fail "a missing bundle passed its union floor"; fi
+out="$(SWIFT_TEST_SUM_ALL=1 SWIFT_TEST_EXACT=1 run bundles)" || fail "exact bundle union failed: $out"
+if SWIFT_TEST_EXACT=1 run full >/dev/null; then fail "an exact partition accepted extra tests"; fi
 
 # The display's state, from the power log: off when the run began, or
 # turned off during it, is said; on throughout is not (ov-742).
