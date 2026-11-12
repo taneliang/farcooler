@@ -23,7 +23,8 @@ with the public SDK/toolchain paths the reviewed declaration needs. The engine
 supplies candidate, resolved base, definition pin, policy pin, workspace and
 invocation binding. An invocation outside that engine contract is refused.
 Use the script from the candidate checkout; ov-903 checks that runner bytes
-equal checkout bytes. Publication's existing definition/configuration pins bind
+equal checkout bytes, and the adapter refuses execution from another path.
+Publication's existing definition/configuration pins bind
 the command argv, timeout and configured environment.
 
 The default executes every required job. Add `--enable-reuse` to the published
@@ -53,6 +54,9 @@ survive a retry of another job. Full hits revalidate the entire evidence chain,
 then resample current scope while holding the capture lock. Full/partial misses
 use the original prospective writer under that same lock. Neither a v1 summary
 nor an engine process exit can supply reusable job coverage.
+The locked scope must still name the engine candidate. The writer also compares
+its run-start scope with that lookup scope before creating an attempt or running
+any job; acquiring the evidence lock does not prevent another process moving HEAD.
 
 All attempts, failures and raw logs remain immutable. When evidence cannot supply
 coverage, the exact previous pointer is quarantined privately with its digest;
@@ -73,8 +77,10 @@ estimate of application build savings or queue time avoided.
 
 The five ov-903 source/doc files were restored from reviewed commit
 `3334a6c6578411ccd38d5687e92c2ca89ef72221`, preserving its v2 protocol and v1
-rejection. The only capture change is passing `changes.families` to the current
-lane planner, matching `lane-gate.py` (the ov-1021 API changed after ov-903).
+rejection. The capture changes pass `changes.families` to the current lane planner,
+matching `lane-gate.py` (the ov-1021 API changed after ov-903), and add an
+optional expected-scope guard for the engine adapter. Standalone capture keeps
+its existing behavior; the v2 schema and checker are unchanged.
 The current CI workflow is preserved, with the original and adapter fixtures
 added to its wire job. Historical Gate4/5 receipts remain ineligible.
 
@@ -113,3 +119,36 @@ source review does not approve this adapter or any new inventory.
 Acceptance 3's real application operational run and independent adapter/input
 review are outstanding; production reuse remains disabled. The fixture result
 is deliberately not represented as that operational acceptance evidence.
+
+## Follow-up audit (2026-11-13)
+
+Three additional real-process regressions exposed provenance gaps: an adapter
+outside the candidate checkout could execute, HEAD could move between the early
+snapshot and locked lookup, and the writer could resample a different scope
+between lookup and execution. Each test failed by assertion on the previous
+implementation. The adapter now enforces its checkout path and locked candidate;
+the prospective writer refuses a different expected run-start scope before
+writing a pointer or executing a job. The original ov-903 checker remains the
+coverage authority.
+
+Validation: eight adapter tests and sixteen original capture/checker tests pass;
+all four original guard mutations still produce assertion failures. The planner
+and summary checker self-tests use invocation-local signing overrides for their
+disposable commits. No global Git configuration is changed.
+
+A real canonical wire/doc gate was attempted with reuse disabled in the clean
+isolated checkout `/private/tmp/ov1117-operational-_skxgmbc/repo` (base
+`bb38bf01b8f1583db1e182d177111dc5febce35d`). It failed: the declared PATH selected
+an x86-only `/usr/local/bin/python3` that child processes could not execute
+(exit 126, “Bad CPU type in executable”). The v2 capture correctly stayed red;
+its private manifests and raw logs remain in the sibling `evidence/` directory.
+This attempt preceded the final writer-scope guard and is diagnostic evidence,
+not validation of the final candidate. Host load rose above 20 during the
+attempt, so its elapsed time and the concurrent fixture timings are excluded
+from the ticket's performance measurements. No repeat or production reuse was
+enabled, and no other task's work was stopped.
+
+Acceptance 3 remains open: no independently reviewed concrete application input
+inventory was supplied, no successful clean application gate has been captured,
+and there is no new valid operational hit-rate/wall-saving measurement under
+load 20. The prior shell-fixture measurements above retain their stated scope.

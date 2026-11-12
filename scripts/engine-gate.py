@@ -33,6 +33,8 @@ def immutable(path, raw):
 
 def run(args):
     repo = pathlib.Path.cwd().resolve()
+    evidence.require(pathlib.Path(__file__).resolve() == repo / "scripts/engine-gate.py",
+                     "adapter must run from candidate checkout")
     lane = evidence.load_lane()
     for key in (*CONTEXT, "FARCOOLER_BASE", "FARCOOLER_CANDIDATE", "FARCOOLER_OPERATION_BINDING"):
         evidence.require(os.environ.get(key), f"missing engine context: {key}")
@@ -69,6 +71,10 @@ def run(args):
     # first-activation writer cannot race a previously absent summary lookup.
     with evidence.capture_lock(lane, repo):
         scope, chosen = evidence.scope_for(lane, repo, base, scoped_inputs)
+        # The unlocked snapshot is only an early refusal. The receipt's actual
+        # run-start source must still be the engine's candidate after locking.
+        evidence.require(scope["source"]["head"] == os.environ["FARCOOLER_CANDIDATE"],
+                         "engine candidate differs from HEAD")
         pointer = lane.summary_path(repo)
         parent, prior = None, {}
         if args.enable_reuse and pointer.is_file():
@@ -102,7 +108,8 @@ def run(args):
                 immutable(archive, previous)
                 evidence.replace_pointer(pointer, "engine-gate retained-history\n"
                                          f"pointer: {archive}\nsha256: {previous_sha}\n")
-            code = evidence._run_capture(lane, repo, base, scoped_inputs, attempt, parent, False)
+            code = evidence._run_capture(lane, repo, base, scoped_inputs, attempt, parent, False,
+                                         expected_scope=scope)
         # Metrics are observational, never an alternate success producer. Full
         # hit saved time is not guessed from wall time of partial captures.
         metrics = {"schema": "engine-gate-metrics/v1", "binding": os.environ["FARCOOLER_OPERATION_BINDING"],

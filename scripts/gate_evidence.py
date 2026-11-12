@@ -484,8 +484,11 @@ def run_capture(lane, repo, base, inputs_path, directory, parent=None, strict_le
         return _run_capture(lane, repo, base, inputs_path, directory, parent, strict_leaks)
 
 
-def _run_capture(lane, repo, base, inputs_path, directory, parent, strict_leaks):
+def _run_capture(lane, repo, base, inputs_path, directory, parent, strict_leaks, expected_scope=None):
     scope, chosen = scope_for(lane, repo, base, inputs_path, strict_leaks)
+    # An engine lookup binds a specific candidate and scope. Do not silently
+    # replace that run-start identity with newly sampled inputs on a miss.
+    require(expected_scope is None or scope == expected_scope, "inputs changed before capture")
     prior = validate_chain(parent["directory"], parent["sha256"], scope) if parent else {}
     selected = [j for j in chosen if not passed(scope["plan"][j], prior.get(j, []))]
     require(selected, "all jobs already passed; no retry to execute")

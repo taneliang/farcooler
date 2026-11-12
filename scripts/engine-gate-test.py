@@ -98,6 +98,54 @@ class EngineGateTest(unittest.TestCase):
         (pathlib.Path(current["directory"]) / "wire-0.log").unlink()
         self.assertEqual(self.metrics()["reused_jobs"], 0)
 
+    def test_adapter_must_run_from_candidate_checkout(self):
+        external = self.f.root / "external-scripts"
+        shutil.copytree(self.f.scripts, external)
+        shutil.copytree(self.f.repo / ".github", self.f.root / ".github")
+        adapter = external / "engine-gate.py"
+        adapter.write_text(adapter.read_text() + "\n# not the candidate's adapter\n")
+        p = subprocess.run([sys.executable, str(adapter), "--inputs", str(self.f.inputs),
+                            "--evidence-root", str(self.root), "--trust-scope", "fixture"],
+                           cwd=self.f.repo, env=self.f.env, text=True, capture_output=True)
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertIn("adapter must run from candidate checkout", p.stderr)
+        self.assertFalse(self.f.pointer.exists())
+        self.assertFalse((self.f.repo / ".fixture/wire-count").exists())
+
+    def test_candidate_is_checked_again_under_capture_lock(self):
+        adapter = self.f.scripts / "engine-gate.py"
+        # Move HEAD after the initial candidate check but before locked preflight.
+        # The instrumented adapter itself is committed before invocation.
+        source = adapter.read_text().replace(
+            "with evidence.capture_lock(lane, repo):",
+            'with evidence.capture_lock(lane, repo):\n'
+            '        (repo / "README.md").write_text("concurrent candidate\\n")\n'
+            '        subprocess.run(["git", "commit", "-qam", "concurrent candidate"], check=True)')
+        adapter.write_text(source)
+        self.f.git("add", ".")
+        self.f.git("commit", "-qm", "instrument candidate race")
+        self.f.env["FARCOOLER_CANDIDATE"] = self.f.git("rev-parse", "HEAD").strip()
+        p = self.invoke(code=1)
+        self.assertIn("engine candidate differs from HEAD", p.stderr)
+        self.assertFalse(self.f.pointer.exists())
+        self.assertFalse((self.f.repo / ".fixture/wire-count").exists())
+
+    def test_capture_cannot_resample_a_different_candidate(self):
+        adapter = self.f.scripts / "engine-gate.py"
+        source = adapter.read_text().replace(
+            'code = evidence._run_capture(',
+            '(repo / "README.md").write_text("candidate changed before capture\\n")\n'
+            '            subprocess.run(["git", "commit", "-qam", "moved before capture"], check=True)\n'
+            '            code = evidence._run_capture(')
+        adapter.write_text(source)
+        self.f.git("add", ".")
+        self.f.git("commit", "-qm", "instrument capture race")
+        self.f.env["FARCOOLER_CANDIDATE"] = self.f.git("rev-parse", "HEAD").strip()
+        p = self.invoke(code=1)
+        self.assertIn("inputs changed before capture", p.stderr)
+        self.assertFalse(self.f.pointer.exists())
+        self.assertFalse((self.f.repo / ".fixture/wire-count").exists())
+
     def test_clean_operational_pair_reports_observed_wall_saving(self):
         # A clean committed source with real tiny CI commands, not mocked
         # receipt producers. This measures the adapter, not application builds.
