@@ -437,3 +437,40 @@ fn a_board_is_deleted_only_when_the_store_has_boards_and_not_this_one() {
     assert!(store.workflow_board_deleted(&unknown).unwrap(), "a board id with no row");
     assert!(!store.workflow_board_deleted("w").unwrap(), "a fixture's key");
 }
+
+#[test]
+fn workflow_join_checks_the_published_landing_resource_in_other_workspaces() {
+    let store = Store::open_in_memory().unwrap();
+    assert!(store.workflow_apply(&enqueue("other", "shared-target")).unwrap().result.is_ok());
+    let mut definition = Definition::coding();
+    definition.schema = 2; definition.max_reworks = 0; definition.rework_target = None;
+    definition.stages.truncate(2);
+    let mut join = definition.stages[0].clone(); join.id = "join".into();
+    join.kind = StageKind::Join { group: "landing".into(), adopt: false };
+    definition.stages.push(join);
+    definition.groups.insert("landing".into(), GroupDef { limit: 0, exclusive: "old-target".into(),
+        steps: vec![definition.stages[0].clone()] });
+    let mut input = enqueue("workspace", "build-resource");
+    if let Command::Enqueue { definition: d, .. } = &mut input.command { *d = definition.clone(); }
+    assert!(store.workflow_apply(&input).unwrap().result.is_ok());
+    loop {
+        let state = store.workflow_state("workspace").unwrap().unwrap();
+        if state.items["item"].phase == Phase::WaitingJoin { break; }
+        admit(&store, &state);
+        let evidence = Evidence { candidate: "candidate".into(), manifest: "manifest".into(), receipt: "receipt".into(), policy_pin: "policy-1".into() };
+        assert!(store.workflow_apply(&observation(&state, Outcome::Passed(evidence))).unwrap().result.is_ok());
+    }
+    definition.groups.get_mut("landing").unwrap().exclusive = "shared-target".into();
+    for command in [Command::RefreshGroups { definition, policy_pin: "published-policy".into() }, Command::Queue { item: "item".into() }] {
+        let state = store.workflow_state("workspace").unwrap().unwrap();
+        input.id = format!("command-{}", state.revision); input.expected_revision = state.revision;
+        input.source_sequence = state.revision + 1; input.command = command;
+        assert!(store.workflow_apply(&input).unwrap().result.is_ok());
+    }
+    let state = store.workflow_state("workspace").unwrap().unwrap();
+    let group = &state.items[state.items["item"].grouped_in.as_ref().unwrap()];
+    assert_eq!(group.resource, "shared-target"); assert_eq!(group.phase, Phase::Blocked);
+    let mut replay = State::empty("workspace".into(), 1);
+    for event in store.workflow_events("workspace").unwrap() { replay = step(&replay, &event).unwrap().state; }
+    assert_eq!(state, replay);
+}

@@ -281,6 +281,15 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             | farcooler_workflow::Command::Reopen { resource, .. } = &input.command {
             relevant.insert(resource.clone());
         }
+        // Queue can create a landing resource not held by any item yet. Include published and pinned
+        // group resources before asking the reducer to acquire one, across workspaces as well.
+        relevant.extend(state.items.values().flat_map(|i| i.definition.groups.values().map(|g| g.exclusive.clone())));
+        if let Some(grouping) = &state.grouping {
+            relevant.extend(grouping.definition.groups.values().map(|g| g.exclusive.clone()));
+        }
+        if let Command::RefreshGroups { definition, .. } = &input.command {
+            relevant.extend(definition.groups.values().map(|g| g.exclusive.clone()));
+        }
         admitted.busy_resources = tx.prepare(
             "SELECT resource FROM workflow_resources WHERE workspace != ?1
              AND resource IN (SELECT value FROM json_each(?2))"
@@ -292,7 +301,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             Command::Enqueue {resource,..} | Command::Start {resource,..} | Command::Reopen {resource,..} => Some(resource.as_str()),
             Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
                 |Command::Decide {item,..}|Command::SendBack {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
-            Command::Advance => None,
+            Command::Advance | Command::RefreshGroups { .. } => None,
         };
         // A Start takes its followers with it (ov-970), so their quarantine holds it back as the lead's does.
         let followers:Vec<&str>=match &input.command { Command::Start {with,..} => with.iter().filter_map(|f|state.items.get(f)).map(|i|i.resource.as_str()).collect(), _ => Vec::new() };

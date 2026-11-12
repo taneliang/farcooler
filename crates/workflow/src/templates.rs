@@ -81,7 +81,7 @@ pub struct Plan {
 }
 impl Plan {
     pub fn new(template: Template, gates: Vec<Gate>) -> Self {
-        Self { template, gates, green_base: true, ci: true, batch: Some(8), every_ms: 60_000,
+        Self { template, gates, green_base: true, ci: true, batch: None, every_ms: 60_000,
             base_patience_ms: 3 * 3_600_000, ci_patience_ms: 3 * 3_600_000, source: format!("landing/{}", template.name()), paths: None }
     }
 }

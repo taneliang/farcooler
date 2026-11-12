@@ -35,7 +35,7 @@ fn every_template_validates_and_a_name_finds_it() {
 #[test]
 fn batched_and_per_ticket_push_differ_by_one_number() {
     let (mut batched, mut single) = (make(&plan(Template::BatchedPush)), make(&plan(Template::TicketPush)));
-    assert_eq!((batched.groups["landing"].limit, single.groups["landing"].limit), (Some(8), Some(1)));
+    assert_eq!((batched.groups["landing"].limit, single.groups["landing"].limit), (None, Some(1)));
     batched.groups.get_mut("landing").unwrap().limit = Some(1);
     batched.source = single.source.clone();
     single.source = batched.source.clone();

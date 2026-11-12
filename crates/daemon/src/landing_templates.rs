@@ -198,7 +198,7 @@ pub fn import_charter(charter: &str, config: &CodingConfig, published: Option<&s
 /// What a template draft can be told besides its gates.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Most tickets in a batch, or zero for every ticket that's ready (ov-1071). Absent keeps the template's eight.
+    /// Most tickets in a batch; zero means unlimited.
     pub batch: Option<u32>,
     /// `NAME=value` settings every command gate runs with.
     pub environment: Vec<String>,

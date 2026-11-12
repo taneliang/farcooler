@@ -27,6 +27,12 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
     let mut notices = Vec::new();
     match &input.command {
         Command::Advance => { controller(input)?; }
+        Command::RefreshGroups { definition, policy_pin } => {
+            controller(input)?;
+            definition.validate()?;
+            if !valid_id(policy_pin) { return Err(Refusal::Invalid); }
+            next.grouping = Some(Grouping { definition: definition.clone(), policy_pin: policy_pin.clone() });
+        }
         Command::Enqueue { item, definition, policy_pin, resource, dependencies, initial_candidate } => {
             controller(input)?;
             definition.validate()?;
@@ -91,7 +97,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 | Command::Queue { item } | Command::Leave { item }
                 | Command::Move { item, .. } | Command::Start { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } => item,
-                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::Reopen { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
             };
             let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
             // Manual moves supersede a read-only decision without needing to stop an operation.
@@ -309,11 +315,15 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     };
                     if item.phase != Phase::WaitingJoin { return Err(Refusal::Phase); }
                     let candidate = item.candidate.clone().ok_or(Refusal::Invalid)?;
-                    let group = item.definition.groups.get(name).ok_or(Refusal::Definition)?;
+                    let (definition, policy_pin) = next.grouping.as_ref()
+                        .filter(|p| p.definition.groups.contains_key(name))
+                        .map_or((&item.definition, &item.policy_pin), |p| (&p.definition, &p.policy_pin));
+                    let pin = definition.pin();
+                    let limit = definition.groups.get(name).ok_or(Refusal::Definition)?.limit;
                     // The first open group of this definition and policy with room, oldest first.
                     let open = next.items.iter().find(|(_, g)| g.phase == Phase::Blocked
-                        && group.has_room(g.members.len()) && g.stage == 0 && g.candidate.is_none() && g.policy_pin == item.policy_pin
-                        && g.group_of.as_ref().is_some_and(|o| &o.name == name && o.pin == item.pin))
+                        && has_room(limit, g.members.len()) && g.stage == 0 && g.candidate.is_none() && g.policy_pin == *policy_pin
+                        && g.group_of.as_ref().is_some_and(|o| &o.name == name && o.pin == pin))
                         .map(|(gid, _)| gid.clone());
                     let gid = match open {
                         Some(gid) => gid,
@@ -321,15 +331,15 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             // The ticket is out of the map while it is worked on, so count it.
                             if next.items.len() + 1 >= MAX_ITEMS { return Err(Refusal::Limit); }
                             let gid = group_id(state, name);
-                            let definition = item.definition.group_definition(name).ok_or(Refusal::Definition)?;
-                            let resource = item.definition.groups[name].exclusive.clone();
+                            let resource = definition.groups[name].exclusive.clone();
+                            let definition = definition.group_definition(name).ok_or(Refusal::Definition)?;
                             next.items.insert(gid.clone(), Item { execution: None, pin: definition.pin(), definition,
-                                policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
+                                policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
                                 stopping: None, cancel_reason: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
-                                group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
+                                group_of: Some(GroupOf { name: name.clone(), pin }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
                             gid
                         }
@@ -446,7 +456,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     item.phase = Phase::Blocked; item.run = String::new();
                 }
-                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::Reopen { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
             }
             next.items.insert(id.clone(), item);
             for (from, members) in spawn.drain(..) {
@@ -535,6 +545,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
         ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
         ticket.follows = None;
     }
+    consolidate_groups(&mut next)?;
     // Completion of a prerequisite can release blocked work without another controller command.
     let ready_ids: Vec<_> = next.items.iter().filter(|(_, i)| i.phase == Phase::Blocked && ready(&next, i, input))
         .map(|(id, _)| id.clone()).collect();
@@ -587,6 +598,49 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
     next.seen.insert(input.id.clone());
     next.source_sequences.insert(input.source.clone(), input.source_sequence);
     Ok(Transition { state: next, effects, notices })
+}
+
+/// Zero is the published spelling of no batch cap. The state envelope still bounds memory.
+fn has_room(limit: Option<u32>, count: usize) -> bool { limit.is_none_or(|n| count < n as usize) }
+fn waiting_group(g: &Item) -> bool {
+    g.group_of.is_some() && g.phase == Phase::Blocked && g.stage == 0
+        && g.pending.is_none() && g.candidate.is_none() && g.pushed.is_none()
+}
+/// Upgrade idle groups and fold their members into the oldest compatible waiting group. The half
+/// already retrying after a split owns the resource and is never folded back into its sibling.
+fn consolidate_groups(state: &mut State) -> Result<(), Refusal> {
+    let ids: Vec<_> = state.items.iter().filter(|(_, g)| waiting_group(g)).map(|(id, _)| id.clone()).collect();
+    let mut open: Vec<(String, Option<u32>)> = Vec::new();
+    for id in ids {
+        let mut group = state.items.remove(&id).ok_or(Refusal::Missing)?;
+        let origin = group.group_of.as_mut().ok_or(Refusal::Invalid)?;
+        let published = state.grouping.as_ref().filter(|p| p.definition.groups.get(&origin.name)
+            .is_some_and(|g| g.exclusive == group.resource));
+        let limit = if let Some(p) = published {
+            origin.pin = p.definition.pin();
+            group.definition = p.definition.group_definition(&origin.name).ok_or(Refusal::Definition)?;
+            group.pin = group.definition.pin(); group.policy_pin = p.policy_pin.clone();
+            p.definition.groups[&origin.name].limit
+        } else {
+            group.members.first().and_then(|m| state.items.get(&m.item))
+                .and_then(|t| t.definition.groups.get(&origin.name)).map_or(Some(1), |g| g.limit)
+        };
+        for (target, cap) in &open {
+            let dest = state.items.get_mut(target).ok_or(Refusal::Missing)?;
+            if dest.group_of != group.group_of || dest.policy_pin != group.policy_pin || dest.resource != group.resource { continue; }
+            let count = if *cap == 0 { group.members.len() } else { usize::from(*cap).saturating_sub(dest.members.len()).min(group.members.len()) };
+            let moved: Vec<_> = group.members.drain(..count).collect();
+            for member in &moved {
+                state.items.get_mut(&member.item).ok_or(Refusal::Missing)?.grouped_in = Some(target.clone());
+            }
+            state.items.get_mut(target).ok_or(Refusal::Missing)?.members.extend(moved);
+            if group.members.is_empty() { break; }
+        }
+        if group.members.is_empty() { group.phase = Phase::Cancelled; }
+        else { open.push((id.clone(), limit)); }
+        state.items.insert(id, group);
+    }
+    Ok(())
 }
 
 pub fn owns_resource(item: &Item) -> bool {
@@ -821,7 +875,9 @@ fn valid_membership(state: &State, id: &str, item: &Item) -> bool {
         (None, Phase::Joined) | (Some(_), _) => false,
         (None, _) => true,
     };
+    // Landing batches use the published GroupDef.limit, independently of the build follower budget.
     let group_ok = item.members.is_empty() || (item.group_of.is_some()
+        && item.members.len() <= MAX_ITEMS
         && item.members.iter().all(|m| valid_id(&m.candidate)
             && state.items.get(&m.item).is_some_and(|t| t.phase == Phase::Joined && t.grouped_in.as_deref() == Some(id))));
     let waiting_ok = item.phase != Phase::WaitingJoin
@@ -830,7 +886,8 @@ fn valid_membership(state: &State, id: &str, item: &Item) -> bool {
 }
 
 fn valid_state(state: &State) -> bool {
-    valid_id(&state.workspace) && state.epoch > 0 && state.items.len() <= MAX_ITEMS
+    state.grouping.as_ref().is_none_or(|p| p.definition.validate().is_ok() && valid_id(&p.policy_pin))
+        && valid_id(&state.workspace) && state.epoch > 0 && state.items.len() <= MAX_ITEMS
         && state.archive.iter().all(|(id, a)| valid_id(id) && !state.items.contains_key(id)
             && matches!(a.phase, Phase::Done | Phase::Failed | Phase::Cancelled)
             && a.candidate.as_deref().is_none_or(valid_id))

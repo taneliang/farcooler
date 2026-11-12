@@ -988,3 +988,92 @@ fn a_script_observes_the_new_ci_result_before_the_builtin_rerun() {
     assert_eq!(result.effects[0].kind, EffectKind::Execute(StageKind::RerunCi));
     assert_eq!(log.replay_digest(), digest(&log.state));
 }
+
+#[test]
+fn unlimited_waiting_group_lands_three_later_tickets_in_one_pass() {
+    let mut log = Log::new();
+    let mut d = ticket(); d.groups.get_mut("landing").unwrap().limit = None;
+    let mut watch = action("watch"); watch.kind = StageKind::Ci;
+    d.groups.get_mut("landing").unwrap().steps.push(watch);
+    assert_eq!(d.validate(), Ok(()));
+    for name in ["a", "b", "c", "d"] {
+        log.enqueue(name, d.clone());
+        while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
+        log.queue(name);
+        if name == "a" { let group = log.group_of(name); pass_group(&mut log, &group, 2); }
+        log.now += 100;
+    }
+    let a = log.group_of("a");
+    let b = log.group_of("b");
+    assert_eq!(b, log.group_of("c")); assert_eq!(b, log.group_of("d"));
+    assert_ne!(a, b);
+    pass_group(&mut log, &a, 2);
+    assert_eq!(log.state.items[&b].members.len(), 3);
+    for stage in ["base", "fold", "gate", "watch"] { assert_eq!(log.stage(&b), stage); log.pass(&b); }
+    assert_eq!(log.state.items[&b].phase, Phase::Done);
+    assert_eq!(log.state.items[&b].handed, ["b", "c", "d"]);
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn publication_merges_existing_waiters_and_new_arrivals_without_repinning_active_work() {
+    let mut log = Log::new();
+    for name in ["a", "b", "c", "d", "e"] { log.join_group(name); log.queue(name); }
+    let active = log.group_of("a");
+    let active_before = log.state.items[&active].clone();
+    let oldest = log.group_of("b");
+    let redundant = log.group_of("d");
+    assert_ne!(oldest, redundant);
+    let old_ticket_pin = log.state.items["b"].pin.clone();
+    let mut published = ticket(); published.groups.get_mut("landing").unwrap().limit = None;
+    let command = Command::RefreshGroups { definition: published.clone(), policy_pin: "policy-2".into() };
+    assert_eq!(log.try_run(command.clone(), Grant::Decision { principal: "owner".into() }).unwrap_err(), Refusal::Unauthorized);
+    log.run(command, Grant::Controller);
+    for name in ["b", "c", "d", "e"] { assert_eq!(log.group_of(name), oldest); }
+    assert_eq!(log.state.items[&redundant].phase, Phase::Cancelled);
+    assert_eq!(log.state.items[&active], active_before);
+    assert_eq!(log.state.items[&oldest].group_of.as_ref().unwrap().pin, published.pin());
+    assert_eq!(log.state.items[&oldest].policy_pin, "policy-2");
+    assert_eq!(log.state.items["b"].pin, old_ticket_pin, "build evidence retains its provenance");
+    log.join_group("later"); log.queue("later");
+    assert_eq!(log.group_of("later"), oldest, "old pinned tickets use the published rules at join");
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn a_split_sibling_rejoins_the_waiter_while_the_suspect_half_retries_alone() {
+    let mut log = Log::new();
+    let mut d = ticket(); d.groups.get_mut("landing").unwrap().limit = None;
+    for name in ["x", "a", "b"] {
+        log.enqueue(name, d.clone());
+        while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
+        log.queue(name);
+    }
+    let ahead = log.group_of("x"); let pair = log.group_of("a");
+    pass_group(&mut log, &ahead, 3);
+    log.enqueue("c", d);
+    while log.state.items["c"].phase != Phase::WaitingJoin { log.pass("c"); }
+    log.queue("c"); let waiting = log.group_of("c");
+    pass_group(&mut log, &pair, 2); log.reject(&pair);
+    assert_eq!(log.group_of("a"), pair);
+    assert_eq!(log.state.items[&pair].members.len(), 1);
+    assert_eq!(log.group_of("b"), waiting);
+    assert_eq!(log.state.items[&waiting].members.iter().map(|m| m.item.as_str()).collect::<Vec<_>>(), ["c", "b"]);
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn unlimited_and_published_finite_limits_can_exceed_the_old_thirty_two_ticket_cap() {
+    let mut log = Log::new();
+    let mut d = ticket(); d.groups.get_mut("landing").unwrap().limit = Some(40);
+    for n in 0..36 {
+        let name = format!("ticket-{n}");
+        log.enqueue(&name, d.clone());
+        while log.state.items[&name].phase != Phase::WaitingJoin { log.pass(&name); }
+        log.queue(&name);
+    }
+    let waiting = log.group_of("ticket-1");
+    assert_eq!(log.state.items[&waiting].members.len(), 35);
+    log.run(Command::Advance, Grant::Controller);
+    assert_eq!(log.group_of("ticket-35"), waiting);
+}

@@ -361,7 +361,7 @@ async fn a_draft_refuses_what_it_cannot_publish_or_what_nobody_can_decide() {
     }
     // ov-1071: no batch is too large, as a split halves any group; zero is no cap at all.
     let limit = |batch| lt::template("batched-push", &config, &gates, &[], &lt::Options { batch, ..Default::default() }).unwrap().definition.groups["landing"].limit;
-    assert_eq!((limit(Some(100)), limit(Some(0)), limit(None)), (Some(100), None, Some(8)));
+    assert_eq!((limit(Some(100)), limit(Some(0)), limit(None)), (Some(100), None, None));
     assert_eq!(lt::import_charter(&charter("- Gate: `x`"), &config, None, &[Extra::Agent], &[]).unwrap_err(), lt::Error::NoReviewer);
     // The branch a push lands on is the target, whatever the local ref is called.
     let on_target = format!("- Gate: `x`\n- Base: {}", config.landing.as_ref().unwrap().target.trim_start_matches("refs/heads/"));
@@ -407,4 +407,47 @@ async fn the_default_gate_path_reaches_cargo_under_the_home_directory() {
     let home = env.get("HOME").expect("HOME is set in tests");
     assert!(env["PATH"].split(':').any(|p| p == format!("{home}/.cargo/bin")), "{}", env["PATH"]);
     assert!(env["PATH"].split(':').any(|p| p == "/opt/homebrew/bin"));
+}
+
+/// Old waiting trains are upgraded before effects are admitted, including the first scan after restart.
+#[tokio::test]
+async fn published_unlimited_batch_merges_old_waiters_on_restart_and_lands_once() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+    let (_dir, mut runtime) = lander("pass").await;
+    let mut p = plan(Template::BatchedPush, vec![Gate::Command(1)]); p.batch = 1;
+    let definition = built(&runtime, &p);
+    for item in ["a", "b", "c", "d"] { at_join(&mut runtime, item, &definition).await; }
+    for item in ["a", "b", "c", "d"] { assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok()); }
+    let before = runtime.state("w").unwrap().unwrap();
+    assert_eq!(before.items.values().filter(|g| g.group_of.is_some() && g.phase == Phase::Blocked).count(), 3);
+    p.batch = 0;
+    let published = built(&runtime, &p);
+    let reply = runtime.wire_command("w", "owner", Action::Publish {
+        mutation: Mutation { id: "unlimited-publication".into(), revision: before.revision, epoch: before.epoch, sequence: 1 },
+        expected_pin: None, definition: published.clone(),
+        adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
+    }).unwrap();
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    until(&mut runtime, |s| ["a", "b", "c", "d"].iter().all(|t| phase_of(s, t) == Some(Phase::Done))).await;
+    assert_eq!(outbox(&runtime, StageKind::Fold), 2, "one active landing, then one merged landing");
+    assert_eq!(outbox(&runtime, StageKind::Run), 2, "one gate per landing");
+    assert_eq!(outbox(&runtime, StageKind::AwaitCi), 2, "one CI watch per landing");
+    assert_eq!(outbox(&runtime, StageKind::Push), 2);
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.grouping.as_ref().unwrap().definition, published);
+    let mut replay = State::empty("w".into(), 1);
+    for event in runtime.events("w").unwrap() { replay = step(&replay, &event).unwrap().state; }
+    assert_eq!(state, replay);
+}
+
+#[tokio::test]
+async fn a_template_accepts_published_large_and_unlimited_batch_sizes() {
+    let (_dir, runtime) = lander("pass").await;
+    for batch in [0, 40] {
+        let bundle = lt::template("batched-push", runtime.coding.as_ref().unwrap(), &["make check".into()], &[],
+            &lt::Options { batch: Some(batch), ..Default::default() }).unwrap();
+        assert_eq!(bundle.definition.groups["landing"].limit, batch);
+    }
 }

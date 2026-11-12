@@ -64,7 +64,7 @@ pub enum WorkspaceCmd {
         /// draft replaces the gates the runner has now, so name the ones to keep.
         #[arg(long = "gate", value_name = "COMMAND")]
         gate: Vec<String>,
-        /// Most tickets in one batch (the batched templates), or 0 for every ticket that's ready. Eight if not given.
+        /// Most tickets in one batch (the batched templates); 0 means unlimited (the default).
         #[arg(long)]
         batch: Option<u32>,
         #[command(flatten)]
@@ -92,7 +92,7 @@ pub enum WorkspaceCmd {
         /// A command gate, run with `sh -c`. Repeat for several; this is the whole list.
         #[arg(long = "gate", value_name = "COMMAND")]
         gate: Vec<String>,
-        /// Most tickets in one batch (the batched templates), or 0 for every ticket that's ready. Eight if not given.
+        /// Most tickets in one batch (the batched templates); 0 means unlimited (the default).
         #[arg(long)]
         batch: Option<u32>,
         #[command(flatten)]

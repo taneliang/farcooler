@@ -415,6 +415,18 @@ impl Runtime {
         self.apply(Request { id: format!("runtime:{}", Uuid::now_v7()), workspace: workspace.into(),
             expected_revision: state.revision, sequence, command }, "runtime", grant, now_ms)
     }
+    /// Rebind only idle landing work; executing effects keep the bundle they were admitted under.
+    fn refresh_groups(&self, workspace: &str, now_ms: i64) -> Result<()> {
+        if let Some(published) = self.store.workflow_configuration(workspace)? {
+            if published.definition.groups.is_empty() { return Ok(()); }
+            let grouping = Grouping { definition: published.definition, policy_pin: published.pin };
+            if self.state(workspace)?.is_some_and(|s| s.grouping.as_ref() != Some(&grouping)) {
+                self.internal(workspace, Command::RefreshGroups { definition: grouping.definition,
+                    policy_pin: grouping.policy_pin }, Grant::Controller, now_ms)?;
+            }
+        }
+        Ok(())
+    }
     /// One owned sweep. This API has no delivery cursor, informational ACK or controller dependency.
     /// Effects run concurrently, within the places of each one's pool. A plain sweep starts what is
     /// ready now and waits for it; the service loop also starts follow-on effects as each ends.
@@ -481,6 +493,7 @@ impl Runtime {
         let released_or_recovered = self.last_occupancy.as_ref() != Some(&fingerprint);
         self.last_occupancy = Some(fingerprint);
         for workspace in &workspaces {
+            self.refresh_groups(workspace, now_ms)?;
             let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
             if released_or_recovered && state.items.values().any(|i| i.phase == Phase::Blocked) {
                 // Store stamps actual cross-workspace occupancy in the same transaction.
@@ -515,6 +528,7 @@ impl Runtime {
             if scan {
                 scan = self.continuous;
                 let current = self.store.workflow_workspaces()?;
+                for workspace in &current { self.refresh_groups(workspace, clock())?; }
                 self.launch_ready(&current, clock(), running, futures, &mut count).await?;
             }
             if running.is_empty() { break; }

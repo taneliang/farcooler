@@ -50,7 +50,7 @@ pub struct Item {
     /// A group item only: the tickets it runs, each pinned to the candidate it joined with.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<Member>,
-    /// A group item only: the join name and the pin of the definition whose tickets it holds.
+    /// A group item only: the join name and definition pin governing its landing steps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_of: Option<GroupOf>,
     /// A group item only: the commit its push put on the target. From here its members' commits are
@@ -143,7 +143,12 @@ pub const MAX_RETRIES: u8 = 3;
 /// Live items a workspace holds; every way of adding one refuses at this count, so a step never commits past it.
 pub const MAX_ITEMS: usize = 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Grouping { pub definition: Definition, pub policy_pin: String }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
+    /// Published landing rules, adopted only by tickets at a join and groups that have not started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grouping: Option<Grouping>,
     pub schema: u32,
     pub workspace: String,
     pub revision: u64,
@@ -176,7 +181,7 @@ pub struct ArchivedGroup {
 }
 impl State {
     pub fn empty(workspace: String, epoch: u64) -> Self {
-        Self { schema: 1, workspace, epoch, revision: 0, items: BTreeMap::new(),
+        Self { grouping: None, schema: 1, workspace, epoch, revision: 0, items: BTreeMap::new(),
             seen: BTreeSet::new(), source_sequences: BTreeMap::new(), archive: BTreeMap::new() }
     }
 }
@@ -208,6 +213,8 @@ pub struct Input {
 pub enum Command {
     Decide { item: String, call: String, fence: u64, policy_pin: String, result: crate::HookResult },
     Advance,
+    /// Refresh waiting landing groups from the owner's published definition. Build evidence keeps its original pin.
+    RefreshGroups { definition: Definition, policy_pin: String },
     Enqueue { item: String, definition: Definition, policy_pin: String,
         resource: String, dependencies: BTreeSet<String>, initial_candidate: Option<String> },
     Approve { item: String, run: String, pin: String, candidate: Option<String> },
