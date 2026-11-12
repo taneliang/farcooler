@@ -15,15 +15,11 @@ use serde_json::{Value, json};
 use super::dispatch;
 use crate::session::Session;
 
-/// `farcoolerd` beside this test binary's directory (see
-/// `tests/against_a_real_daemon.rs`, which finds it the same way).
+#[path = "../../../../test/daemon_binary.rs"]
+mod test_binary;
+
 fn daemon_binary() -> PathBuf {
-    let mut path = std::env::current_exe().expect("test executable path");
-    path.pop();
-    path.pop();
-    path.push("farcoolerd");
-    assert!(path.is_file(), "no farcoolerd at {}: run `cargo build -p farcooler-daemon` first", path.display());
-    path
+    test_binary::daemon_binary().expect("no farcoolerd above the test binary: run `cargo build -p farcooler-daemon` first")
 }
 
 struct Daemon {

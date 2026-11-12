@@ -14,24 +14,11 @@ use std::path::PathBuf;
 
 use farcooler_client::session::Session;
 
-/// Where cargo put `farcoolerd`.
-///
-/// `CARGO_BIN_EXE_*` only covers binaries in the same crate, and the daemon
-/// lives in another one. The test executable sits in `target/<profile>/deps/`,
-/// so the binary is two levels up — which is a cargo layout detail, but a
-/// stable one, and the alternative is a dev-dependency cycle between these two
-/// crates.
+#[path = "../../../test/daemon_binary.rs"]
+mod test_binary;
+
 fn daemon_binary() -> PathBuf {
-    let mut path = std::env::current_exe().expect("test executable path");
-    path.pop(); // deps/
-    path.pop(); // <profile>/
-    path.push("farcoolerd");
-    assert!(
-        path.is_file(),
-        "no farcoolerd at {} — run `cargo build -p farcooler-daemon` first",
-        path.display()
-    );
-    path
+    test_binary::daemon_binary().expect("no farcoolerd above the test binary: run `cargo build -p farcooler-daemon` first")
 }
 
 /// A daemon on a private socket with a private database.

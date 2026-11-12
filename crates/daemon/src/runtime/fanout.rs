@@ -100,15 +100,19 @@ const FANOUT_START: std::time::Duration = std::time::Duration::from_secs(10);
 /// bytes to a daemon on the other side of the isolation — and the fanout
 /// socket it then bound would be one this daemon never looks at.
 ///
-/// A unit test runs from `target/<profile>/deps`, and the daemon cargo built
-/// for the same run sits one directory up, so a test looks there too.
+/// Unit tests use the shared Cargo binary lookup: the depth below the
+/// profile directory changed in Rust 1.100 (ov-1125).
 pub fn fanout_binary() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let found = fanout_binary_beside(&exe);
     #[cfg(test)]
-    let found = found.or_else(|| fanout_binary_beside(&exe.parent()?.parent()?.join("a unit test")));
+    let found = found.or_else(test_binary::daemon_binary);
     found
 }
+
+#[cfg(test)]
+#[path = "../../../../test/daemon_binary.rs"]
+mod test_binary;
 
 /// The choice `fanout_binary` makes, given the executable it is made from, so
 /// it can be tested without one.
