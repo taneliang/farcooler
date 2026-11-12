@@ -1,5 +1,9 @@
 # ov-1096: iPad chat after rotation
 
+Both acceptance items are met: the diagnostic CI log names the overflowing
+Agents card, and the revised layout passes the full subsequent Nightly pad
+shard on iOS 27.2.
+
 ## CI root cause
 
 [Nightly 43252796734, pad job 131307587775](https://github.com/taneliang/farcooler/actions/runs/43252796734/job/131307587775)
@@ -55,6 +59,16 @@ run above is the regression's before evidence.
 
 ## Validation
 
+[Nightly 43286220413, pad job 131427829590](https://github.com/taneliang/farcooler/actions/runs/43286220413/job/131427829590)
+ran fix commit `58745627effde54ebbee32ee622cd059636524d8` on **iPad Pro
+11-inch (M5), iOS 27.2**. The job is **green**: 23 collected, 1 capture-only
+test skipped, **22 actually ran, 0 failures**. The rotation test passed,
+including window containment in portrait and landscape, mount preservation,
+and the resized Agents card's preview and sheet. The sidebar keyboard test
+also passed. The retained log excerpt is [ci-pad-pass.log](ci-pad-pass.log).
+Other Nightly jobs have failures; this is a green pad shard, not a claim
+that the entire workflow is green.
+
 With the strip-identity change, local iOS 27.0: the three methods using
 `chatIsShown` passed (3 ran, 0 skipped, 0 failures), including the added
 post-rotation card interaction. On an iPhone, `GlassUITests/testHoldingAgentsPreviewsThem`
@@ -66,7 +80,6 @@ The separate runs above use the appropriate devices.
 0 failures), covering the column-width changes when the tree is toggled.
 `git diff --check` and `scripts/file-size-budget.py` pass.
 
-CI validation of the fix is in progress. Acceptance requires the subsequent
-Nightly pad shard on iOS 27.2; local success is supplementary only.
-The remaining jobs of the diagnostic Nightly were cancelled after the pad
-result and raw log were saved, freeing the Nightly queue for the fix.
+The superseded diagnostic runs were cancelled after their pad results and
+logs were saved, freeing the Nightly queue for the fix. Local success is
+supplementary; the iOS 27.2 Nightly result above is the acceptance evidence.

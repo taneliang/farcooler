@@ -1,0 +1,16 @@
+Nightly 43286220413, pad job 131427829590, commit 58745627effde54ebbee32ee622cd059636524d8
+https://github.com/taneliang/farcooler/actions/runs/43286220413/job/131427829590
+Job conclusion: success. Excerpt of the unmodified job log:
+
+2026-11-12T20:03:53.8258620Z Simulator: iPad Pro 11-inch (M5) iOS 27.2 (6582E97C-8AA0-4F7B-8337-A78B20700767)
+2026-11-12T20:12:20.1396930Z /Users/runner/work/farcooler/farcooler/apps/ios/FarCoolerUITests/PadWorkspaceUITests.swift:564: -[FarCoolerUITests.PadWorkspaceUITests testCaptures] : Test skipped - capture-only; set TEST_RUNNER_FC_CAPTURES=1 to take the sheets
+2026-11-12T20:20:33.8874080Z     t =    40.37s Waiting 10.0s for "agents-card-preview" Any to exist
+2026-11-12T20:20:36.5914610Z     t =    41.70s Tap "Show All Agents" Button
+2026-11-12T20:20:40.2405070Z     t =    43.22s Waiting 15.0s for "agents-sheet" Any to exist
+2026-11-12T20:20:43.3996130Z Test Case '-[FarCoolerUITests.PadWorkspaceUITests testTheChatIsShownAndSurvivesATurn]' passed (49.552 seconds).
+2026-11-12T20:21:24.6274900Z Test Case '-[FarCoolerUITests.PadWorkspaceUITests testTheKeysShowTheBoardThePlanAndTheTree]' passed (41.724 seconds).
+2026-11-12T20:26:32.0525170Z Test Suite 'PadWorkspaceUITests' passed at 2026-11-12 20:26:31.726.
+2026-11-12T20:26:32.0526610Z 	 Executed 23 tests, with 1 test skipped and 0 failures (0 unexpected) in 1027.341 (1027.421) seconds
+2026-11-12T20:26:48.8472750Z ** TEST EXECUTE SUCCEEDED **
+2026-11-12T20:26:54.1807450Z   23 collected, 1 skipped, 22 actually ran
+2026-11-12T20:26:54.2575530Z OK: 22 test(s) executed.
