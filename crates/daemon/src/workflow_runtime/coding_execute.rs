@@ -438,6 +438,10 @@ impl Exec {
                 if let Err(why) = self.ensure_start_objects(&binding.base, &log).await {
                     return self.refuse_provision(binding, why);
                 }
+                // Git takes locks on the shared repository (its config, refs and worktree list) that a second
+                // `worktree add` fails on rather than waits for, so two Provisions starting together on a busy
+                // host left one Uncertain (ov-1085). One creates its tree at a time; the fetch above stays concurrent.
+                let _one_at_a_time = self.worktree_gate.lock().await;
                 match &binding.effect.tree {
                 Some(named) => match self.provision_named(workspace, binding, named).await {
                     // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
