@@ -527,12 +527,16 @@ async fn workflow_coding_a_provisioned_tree_changed_before_its_reconcile_fails_t
 /// ov-1087: checks the Codex-models bundle the owner publishes, which is read from the file named by
 /// `FARCOOLER_OV1087_BUNDLE` (a draft that lives under `.claude/agent/reports`, outside the tree). Run it by hand:
 /// `FARCOOLER_OV1087_BUNDLE=<workflow-codex.json> cargo test -p farcooler-daemon --lib workflow_codex_bundle -- --ignored`.
-/// It reads the file as `workspace set-workflow --file` does, publishes it to a scratch runtime, then starts a run
-/// with `build=codex:gpt-6.1-sol`, which the live definition refuses.
+/// First the file itself: it reads as `workspace set-workflow --file` reads it, every operation pins its
+/// configuration, and Claude's pinned hooks are the file on disk. Then the same models in a scratch runtime, whose host
+/// differs from the live one (so its hooks are written to its own socket): with no Codex hooks pinned, as in the
+/// live adapter, the definition is refused; with them pinned it publishes, a `build=codex:gpt-6.1-sol` start is
+/// accepted and a model it doesn't list is refused.
 #[tokio::test]
 #[ignore = "checks a draft file the owner has yet to publish; set FARCOOLER_OV1087_BUNDLE"]
 async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
-    use farcooler_protocol::{workflow_commands::{Action, Definition, Mutation}, workflow_config::AdapterConfiguration};
+    use crate::workflow_runtime::coding::FileValidation;
+    use farcooler_protocol::{workflow_commands::{Action, Definition, Mutation}, workflow_config::{AdapterConfiguration, CodingHarness, LaunchFile}};
     let path = std::env::var("FARCOOLER_OV1087_BUNDLE").expect("FARCOOLER_OV1087_BUNDLE names the bundle file");
     let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     #[derive(serde::Deserialize, serde::Serialize)]
@@ -540,15 +544,43 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     struct Bundle { definition: Definition, adapter: Option<AdapterConfiguration> }
     let bundle: Bundle = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(&bundle).unwrap(), value, "the CLI refuses a bundle that doesn't round-trip");
-    let (definition, adapter) = (bundle.definition, bundle.adapter.map(Box::new));
-    assert_eq!(definition.models["build"], ["claude:sonnet", "claude:opus", "claude:haiku", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
-    assert_eq!(definition.models["gate-0"], ["claude:opus", "claude:sonnet", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
-    let (_dir, runtime) = configured(false, "pass").await;
+    let models = bundle.definition.models.clone();
+    assert_eq!(models["build"], ["claude:sonnet", "claude:opus", "claude:haiku", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
+    assert_eq!(models["gate-0"], ["claude:opus", "claude:sonnet", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
+    let AdapterConfiguration::Coding(live) = bundle.adapter.unwrap();
+    let CodingHarness::Native { settings: Some(settings), project_hooks: None, .. } = &live.harness else { panic!("native, with Claude's settings pinned and no project hooks") };
+    // Every operation, in stages and groups, pins this configuration, and Claude's hooks are the file on disk.
+    let operations = bundle.definition.stages.iter().map(|s| &s.operation)
+        .chain(bundle.definition.groups.values().flat_map(|g| g.steps.iter().map(|s| &s.operation)));
+    assert!(operations.clone().count() > 5 && operations.into_iter().all(|o| o.arguments[0] == live.pin()), "operations pin the configuration");
+    settings.verify().unwrap();
+
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let host = runtime.root.join("h.sock");
+    let pinned = |path: std::path::PathBuf, text: String| { std::fs::create_dir_all(path.parent().unwrap()).unwrap(); std::fs::write(&path, &text).unwrap();
+        LaunchFile { path: path.canonicalize().unwrap(), digest: farcooler_workflow::digest(&text.into_bytes()) } };
+    let mut config = runtime.coding.clone().unwrap();
+    config.harness = CodingHarness::Native { preset: "claude".into(), plugin_dir: None, prompt: "p".into(), process: live_process(&live),
+        settings: Some(pinned(dir.path().join("native-settings.json"), serde_json::to_string(&crate::hook_install::claude_settings(&host)).unwrap())),
+        project_hooks: Some(pinned(config.repository.join(".codex/hooks.json"), crate::hook_install::merge_codex("{}", &host))) };
+    runtime.coding = Some(config.clone());
+    let mut definition = runtime.configured_definition().unwrap();
+    definition.models = models.into_iter().filter(|(step, _)| step == "build").collect(); // The scratch definition has no gate-0.
     let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
-    let wire = |principal, action| runtime.wire_command("w", principal, action).unwrap();
     let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
+    // As the live adapter stands, with no Codex hooks pinned, the runtime can't launch a Codex model, and refuses the definition.
+    let mut bare = config.clone();
+    if let CodingHarness::Native { project_hooks, .. } = &mut bare.harness { *project_hooks = None; }
+    runtime.coding = Some(bare.clone());
+    let mut bare_definition = runtime.configured_definition().unwrap();
+    bare_definition.models = definition.models.clone();
+    let refusal = runtime.wire_command("w", "owner", Action::Publish { notifications: None, adapter: Some(Box::new(AdapterConfiguration::Coding(bare))),
+        mutation: m("publish-bare", 0, 1), expected_pin: None, definition: bare_definition });
+    assert!(matches!(refusal, Err(Error::Refused("a listed model's harness isn't set up on this runtime"))), "{refusal:?}");
+    runtime.coding = Some(config.clone());
+    let wire = |principal, action| runtime.wire_command("w", principal, action).unwrap();
+    let adapter = Some(Box::new(AdapterConfiguration::Coding(config)));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    println!("pin {pin}");
     ok(&wire("owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let held = &state.items["ov-7"];
@@ -558,4 +590,7 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");
     ok(&start("codex:gpt-6.1-sol", 3));
     assert_eq!(runtime.state("w").unwrap().unwrap().items["ov-7"].models["build"], "codex:gpt-6.1-sol");
+}
+fn live_process(live: &farcooler_protocol::workflow_config::CodingConfig) -> farcooler_protocol::workflow_config::CodingCommand {
+    match &live.harness { farcooler_protocol::workflow_config::CodingHarness::Native { process, .. } => process.clone(), _ => unreachable!() }
 }
