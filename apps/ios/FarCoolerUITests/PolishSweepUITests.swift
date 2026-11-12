@@ -143,6 +143,9 @@ final class PolishSweepUITests: XCTestCase {
             openPlan(app)
             // In the sheet (c602dfd49) the landing section sits under the
             // tree, below the first screen, and the list is lazy: scrolled to.
+            // The facts row is drawn only when the plan has a fact; the
+            // fixture's board counts give it "0 of 2 done", as a runner's
+            // always do. Without them it was never drawn (ov-1093).
             let landing = app.descendants(matching: .any)["plan-facts"]
             XCTAssertTrue(landing.waitForExistence(timeout: 5) || app.reveal(landing), "no plan")
             shoot("plan", variant, expecting: .shows(landing))
@@ -167,13 +170,29 @@ final class PolishSweepUITests: XCTestCase {
                     withVelocity: .slow, thenHoldForDuration: 0.3)
             }
             shoot("pipeline", variant, expecting: .when("the pipeline on the screen") { inView() })
-            let beforeLower = XCUIScreen.main.screenshot().pngRepresentation
+            // A lower page only when the list runs past the window: on a
+            // 6.3-inch phone this plan ends on the first screen ("New
+            // Worktree…" above the fold), a drag moves nothing, and asking
+            // for a change there could never pass (ov-1093). Narrow and
+            // landscape still run below it, and still must scroll.
+            let list = app.collectionViews.allElementsBoundByIndex.last { $0.exists && $0.isHittable } ?? app.collectionViews.firstMatch
+            let lastCell = list.cells.allElementsBoundByIndex.last { $0.exists }
+            guard let lastCell, lastCell.frame.maxY > window.frame.maxY else {
+                app.terminate()
+                return
+            }
+            // Compared without the glyph column: the Builder's hammer pulses
+            // forever, and in narrow and wide it stands in view after the
+            // drag, so the whole screen never came to rest and the state
+            // never held (ov-1093).
+            let lowerSample = { CaptureState.body(glyphShare: 0.2) }
+            let beforeLower = lowerSample()
             // A drag in the window's own points: `app.swipeUp()` moved
             // nothing in landscape (light-wide, locally).
             origin.withOffset(CGVector(dx: x, dy: height * 0.75)).press(
                 forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: x, dy: height * 0.35)),
                 withVelocity: .slow, thenHoldForDuration: 0.3)
-            shoot("pipeline-lower", variant, expecting: .changed(from: beforeLower, "the pipeline scrolled lower"))
+            shoot("pipeline-lower", variant, expecting: .changed(from: beforeLower, sample: lowerSample, "the pipeline scrolled lower"))
             app.terminate()
         }
     }

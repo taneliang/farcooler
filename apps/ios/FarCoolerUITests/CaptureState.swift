@@ -32,6 +32,39 @@ struct CaptureState {
         }
     }
 
+    /// The screen below the status bar, as pixels, with the left `glyphShare` of its width blacked out: a
+    /// sample for `changed` on a list of agent rows. The clock ticks over a minute boundary in the middle of
+    /// a walk, and a picture that differs only by it is the same page (the sixth page of the light sheet was
+    /// the fifth with the clock a minute on). A working agent's glyph pulses forever
+    /// (`symbolEffect(.pulse, .repeating)`), so a page with one in view was never the same picture twice and
+    /// never "at rest" (ov-1039, and the Builder's hammer in PolishSweep's narrow pipeline, ov-1093). The
+    /// rest of the page still has to hold still.
+    ///
+    /// The column is the screen's leading edge, wherever it lands in the picture: a screenshot is always
+    /// the portrait buffer, so in `.landscapeLeft` the screen's left edge is the picture's top (and in
+    /// `.landscapeRight` its bottom). Blacking out the picture's left there covered the screen's bottom
+    /// and left the hammer pulsing (PolishSweep's wide pipeline, ov-1093).
+    static func body(glyphShare: Double) -> Data {
+        let shot = XCUIScreen.main.screenshot().image
+        guard let full = shot.cgImage else { return XCUIScreen.main.screenshot().pngRepresentation }
+        let top = Int(70 * shot.scale)
+        let crop = CGRect(x: 0, y: top, width: full.width, height: full.height - top)
+        guard let body = full.cropping(to: crop) else { return XCUIScreen.main.screenshot().pngRepresentation }
+        let size = CGSize(width: body.width, height: body.height)
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
+            UIImage(cgImage: body).draw(in: CGRect(origin: .zero, size: size))
+            UIColor.black.setFill()
+            let width = Double(body.width), height = Double(body.height)
+            switch XCUIDevice.shared.orientation {
+            case .landscapeLeft: context.fill(CGRect(x: 0, y: 0, width: width, height: height * glyphShare))
+            case .landscapeRight: context.fill(CGRect(x: 0, y: height * (1 - glyphShare), width: width, height: height * glyphShare))
+            default: context.fill(CGRect(x: 0, y: 0, width: width * glyphShare, height: height))
+            }
+        }
+    }
+
     /// The screen has moved on from `before` (an earlier `XCUIScreen.main.screenshot().pngRepresentation`) and
     /// has come to rest: two samples at least `rest` seconds apart are the same picture. For a capture of a
     /// scrolled or changed screen, where no element names the new state. Differing alone would pass on a tap

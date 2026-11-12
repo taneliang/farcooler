@@ -173,6 +173,7 @@
       }
     ],
     "landings": [],
+    "board_counts": { "backlog": 0, "todo": 0, "needs_decision": 1, "in_progress": 1, "in_review": 0, "done": 0, "cancelled": 0 },
     "agents": [
       {
         "id": "agent:a1b2c3d4",

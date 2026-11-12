@@ -124,30 +124,8 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         }
     }
 
-    /// The share of the screen's width, from the left edge, that holds the glyph column; blacked out in a resting-picture check.
-    private static let glyphColumnShare = 0.14
-
-    /// The screen below the status bar, as pixels: the clock ticks over a minute boundary in the middle of a
-    /// walk, and a picture that differs only by it is the same page (the sixth page of the light sheet was
-    /// the fifth with the clock a minute on, in the first run of this fix).
-    private func bodyPicture() -> Data {
-        let shot = XCUIScreen.main.screenshot().image
-        guard let full = shot.cgImage else { return XCUIScreen.main.screenshot().pngRepresentation }
-        let top = Int(70 * shot.scale)
-        let crop = CGRect(x: 0, y: top, width: full.width, height: full.height - top)
-        guard let body = full.cropping(to: crop) else { return XCUIScreen.main.screenshot().pngRepresentation }
-        // Without the glyph column. A working agent's glyph pulses forever (`symbolEffect(.pulse, .repeating)`), so
-        // any page with one in view was never the same picture twice, and page 2 of the sheet was never "at rest"
-        // (ov-1039). The rest of the page still has to hold still.
-        let size = CGSize(width: body.width, height: body.height)
-        let format = UIGraphicsImageRendererFormat.preferred()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: size, format: format).pngData { context in
-            UIImage(cgImage: body).draw(in: CGRect(origin: .zero, size: size))
-            UIColor.black.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: Double(body.width) * Self.glyphColumnShare, height: Double(body.height)))
-        }
-    }
+    /// The screen below the status bar, without the glyph column (`CaptureState.body`).
+    private func bodyPicture() -> Data { CaptureState.body(glyphShare: 0.14) }
 
     /// The screen once it has stopped moving: two pictures `rest` seconds apart are the same. A swipe leaves
     /// the scroll indicator, or the bounce at the list's end, on screen for about a second, so a picture taken
