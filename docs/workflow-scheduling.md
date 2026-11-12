@@ -33,8 +33,13 @@ manual starts can still select a listed model explicitly.
 
 `budget` also accepts `"Unlimited"`, or `{"Load":{"below_milli":6000}}` to
 start only while the machine's one-minute load average is below 6. Missing load
-samples hold starts. A load-limited scan admits at most one new run from its
-sample, across all boards, so one lagging average cannot start a whole backlog.
+samples hold starts. Load-based admission leaves at least 60 seconds between
+successful starts across all boards, including immediate pump re-entry and
+one-second service scans. Set a different positive gap in the published budget:
+`{"Load":{"below_milli":6000,"min_start_gap_ms":120000}}`. The longest
+published gap applies to the whole runner, alongside the strictest load and
+fixed limits. Failed admissions and queues do not consume the gap. The timer
+is retained for the lifetime of the runtime; republishing does not reset it.
 `{"Fixed":0}` pauses automatic starts. Budgets constrain the whole runner:
 active ticket runs across every board count, including manually started runs,
 reviews, approval waits, and runs whose board no longer has a start policy.

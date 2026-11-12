@@ -83,3 +83,32 @@ Review-return follow-up (Nov 13):
   **14 passed**, one existing private-receipt fixture test ignored.
 - File-size budget, doc-comment check, swallowed-call lint, and staged diff
   whitespace checks passed.
+
+Load-gate review return (`a9ce08a3`):
+
+- Read ov-1106 and the review note using the bundled canary CLI.
+- Reproduced the remaining burst with a repeated-scan fake-clock regression:
+  the old scan-local guard starts a second run at timestamp 100, immediately
+  after the first scan at timestamp 100 (expected one active run, observed two).
+- Successful automatic starts now record a runner-wide timestamp in scheduler
+  state. Load policies hold subsequent starts until their minimum gap elapses,
+  including across board-specific scans and immediate pump re-entry. The longest
+  published gap applies, alongside all existing fixed and load constraints.
+- `Load.min_start_gap_ms` defaults to 60,000 and is owner-configurable through
+  publication. Zero is rejected. The default is omitted from serialization to
+  preserve existing policy encodings and pins. The timer survives republishing
+  for the lifetime of the runtime; it is not persisted across daemon restarts.
+- The regression covers 40 tickets across two boards, repeated scans before the
+  deadline, exactly one new start at the deadline, a republished 120-second gap,
+  and missing/high load at the next deadline. Existing file/dependency/model
+  and combined fixed/load tests now advance the clock by the configured gap.
+- The runner-wide counts, revision cache, and refused-command backoff are retained.
+- Validation: the affected daemon/workflow and full store/workflow library run
+  (`TMPDIR=/tmp cargo nextest run -p farcooler-daemon -p farcooler-store
+  -p farcooler-workflow --lib -E 'package(farcooler-store) |
+  package(farcooler-workflow) | test(workflow)' --no-fail-fast`) passed:
+  **995 passed**, including the repeated-scan regression and earlier three fixes.
+- CLI workflow tests: **14 passed**, one existing private-fixture test ignored.
+- File-size budget, doc-comment check against HEAD, swallowed-call lint, and
+  `git diff --check` passed. Fixture execution needed filesystem sandbox
+  escalation for git operations. No live policy was published.

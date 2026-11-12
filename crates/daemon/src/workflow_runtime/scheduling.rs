@@ -8,6 +8,7 @@ use farcooler_store::workflow_publication::Configuration;
 pub(super) struct Scheduler {
     boards: BTreeMap<String, Board>,
     refused: BTreeMap<(String, String, bool), i64>,
+    last_start_ms: Option<i64>,
     #[cfg(test)]
     state_reads: usize,
 }
@@ -61,8 +62,7 @@ impl Runtime {
         let mut busy = scan.boards.values().filter_map(|b| b.state.as_ref())
             .flat_map(|s| s.items.values()).filter(|i| active(i)).count();
         let budgets: Vec<_> = configs.values().filter_map(|c| c.definition.start_policy.as_ref()).map(|p| &p.budget).collect();
-        let load_limited = budgets.iter().any(|b| matches!(b, farcooler_workflow::scheduling::Budget::Load { .. }));
-        let mut load_used = false;
+        let start_gap_ms = budgets.iter().filter_map(|b| b.start_gap_ms()).max();
         for workspace in workspaces {
             if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
             if self.service_mode && self.store.workflow_board_deleted(workspace)? { continue; }
@@ -83,7 +83,8 @@ impl Runtime {
                     if removed_member || !item.definition.is_ticket() || item.follows.is_some() || item.phase != Phase::WaitingApproval
                         || !policy.columns.contains(&item.definition.stages[item.stage].id) { continue; }
                     // All published machine constraints apply together: fixed capacity cannot bypass a load guard.
-                    if (load_limited && load_used) || !budgets.iter().all(|b| b.permits(busy, load))
+                    if start_gap_ms.is_some_and(|gap| scan.last_start_ms.is_some_and(|last|
+                        now_ms < last || (now_ms.saturating_sub(last) as u64) < gap)) || !budgets.iter().all(|b| b.permits(busy, load))
                         || file_conflict(&scan.boards, &configs, workspace, &key, policy)
                         || !self.dependencies_ready(workspace, &key, policy, state)? { continue; }
                     let ordinal = state.items.values().filter(|i| !i.definition.is_ticket() && i.group_of.is_none()).count() + state.archive.len();
@@ -108,7 +109,7 @@ impl Runtime {
                         board.revision = next.revision;
                         board.state = Some(next);
                         scan.refused.remove(&retry_key);
-                        if !queue { load_used = true; }
+                        if !queue { scan.last_start_ms = Some(now_ms); }
                     }
                     other => {
                         // Refusals do not change revision, and ownership can clear outside workflow state.
@@ -214,7 +215,7 @@ mod tests {
         let mut d = coding_definition(false);
         d.stages.retain(|s| s.kind == StageKind::Build);
         d.models.insert(d.stages[0].id.clone(), vec!["claude:opus".into(), "codex:gpt-5.5".into()]);
-        let mut p = policy(Budget::Load { below_milli: 3000 });
+        let mut p = policy(Budget::Load { below_milli: 3000, min_start_gap_ms: 60_000 });
         p.files.insert("a".into(), ["shared.rs".into()].into());
         p.files.insert("b".into(), ["shared.rs".into()].into());
         p.dependencies.insert("c".into(), ["b".into()].into());
@@ -228,16 +229,16 @@ mod tests {
         runtime.schedule_with_load(&["w".into()], 101, Some(2000)).unwrap();
         let state = runtime.state("w").unwrap().unwrap();
         assert!(active(&state.items["a"]) && state.items["d"].definition.is_ticket());
-        runtime.schedule_with_load(&["w".into()], 102, Some(2000)).unwrap();
+        runtime.schedule_with_load(&["w".into()], 60_101, Some(2000)).unwrap();
         let state = runtime.state("w").unwrap().unwrap();
         assert!(active(&state.items["d"]));
         assert!(state.items["b"].definition.is_ticket() && state.items["c"].definition.is_ticket());
         assert_ne!(state.items["a"].models, state.items["d"].models);
-        complete(&runtime, "a", 102);
-        runtime.schedule_with_load(&["w".into()], 103, Some(2000)).unwrap();
+        complete(&runtime, "a", 60_102);
+        runtime.schedule_with_load(&["w".into()], 120_101, Some(2000)).unwrap();
         assert!(active(&runtime.state("w").unwrap().unwrap().items["b"]));
-        complete(&runtime, "b", 104);
-        runtime.schedule_with_load(&["w".into()], 105, Some(2000)).unwrap();
+        complete(&runtime, "b", 120_102);
+        runtime.schedule_with_load(&["w".into()], 180_101, Some(2000)).unwrap();
         assert!(active(&runtime.state("w").unwrap().unwrap().items["c"]));
     }
     #[tokio::test]
@@ -381,7 +382,7 @@ mod tests {
         let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
         let mut d = coding_definition(false);
         d.stages.retain(|s| s.kind == StageKind::Build);
-        d.start_policy = Some(policy(Budget::Load { below_milli: 6000 }));
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000, min_start_gap_ms: 60_000 }));
         for board in ["w", "other"] {
             publish_on(&runtime, board, d.clone());
             runtime.track_tickets(&(0..20).map(|i| (board.into(), format!("t{i}"), "todo".into())).collect::<Vec<_>>()).unwrap();
@@ -389,6 +390,29 @@ mod tests {
         runtime.schedule_with_load(&["w".into(), "other".into()], 100, Some(2000)).unwrap();
         let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
         assert_eq!(busy, 1);
+        // Immediate pump re-entry and one-second service ticks must share the gate.
+        for time in [100, 101, 1100, 2100, 10_100, 59_100, 60_099] {
+            runtime.schedule_with_load(&["other".into()], time, Some(2000)).unwrap();
+            let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
+            assert_eq!(busy, 1, "load average still lags at {time}");
+        }
+        runtime.schedule_with_load(&["other".into(), "w".into()], 60_100, Some(2000)).unwrap();
+        runtime.schedule_with_load(&["w".into()], 60_101, Some(2000)).unwrap();
+        let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
+        assert_eq!(busy, 2, "exactly one more start at the gap boundary");
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000, min_start_gap_ms: 120_000 }));
+        publish_on(&runtime, "other", d);
+        for time in [60_102, 120_100, 180_099] {
+            runtime.schedule_with_load(&["w".into()], time, Some(2000)).unwrap();
+            let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
+            assert_eq!(busy, 2, "republishing keeps the timer and the longest gap wins");
+        }
+        for load in [None, Some(6000)] {
+            runtime.schedule_with_load(&["w".into()], 180_100, load).unwrap();
+        }
+        runtime.schedule_with_load(&["w".into()], 180_100, Some(2000)).unwrap();
+        let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
+        assert_eq!(busy, 3, "blocked scans do not move the deadline");
     }
 
     #[tokio::test]
@@ -422,20 +446,21 @@ mod tests {
         d.start_policy = Some(policy(Budget::Fixed(3)));
         publish(&runtime, d.clone());
         track(&runtime, &["a", "b", "c", "d"]);
-        d.start_policy = Some(policy(Budget::Load { below_milli: 6000 }));
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000, min_start_gap_ms: 120_000 }));
         publish_on(&runtime, "other", d);
         runtime.track_tickets(&[("other".into(), "z".into(), "todo".into())]).unwrap();
         for load in [None, Some(6000)] {
             runtime.schedule_with_load(&["w".into(), "other".into()], 100, load).unwrap();
             assert!(runtime.state("w").unwrap().unwrap().items.values().all(|i| i.definition.is_ticket()));
         }
-        for time in 101..=104 {
+        for ordinal in 0..4 {
+            let time = 101 + ordinal * 120_000;
             runtime.schedule_with_load(&["w".into(), "other".into()], time, Some(2000)).unwrap();
             let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
-            assert_eq!(busy, usize::try_from(time - 100).unwrap().min(3));
+            assert_eq!(busy, usize::try_from(ordinal + 1).unwrap().min(3));
         }
-        complete(&runtime, "a", 105);
-        runtime.schedule_with_load(&["other".into()], 106, Some(2000)).unwrap();
+        complete(&runtime, "a", 360_102);
+        runtime.schedule_with_load(&["other".into()], 360_103, Some(2000)).unwrap();
         assert!(active(&runtime.state("other").unwrap().unwrap().items["z"]));
     }
 

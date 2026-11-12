@@ -8,14 +8,24 @@ pub enum Budget {
     Fixed(usize),
     Unlimited,
     /// One-minute load average in thousandths, avoiding floating-point policy pins.
-    Load { below_milli: u64 },
+    Load {
+        below_milli: u64,
+        /// Minimum time between runner-wide starts; lets the observed average respond.
+        #[serde(default = "default_start_gap_ms", skip_serializing_if = "is_default_start_gap")]
+        min_start_gap_ms: u64,
+    },
 }
+fn default_start_gap_ms() -> u64 { 60_000 }
+fn is_default_start_gap(gap: &u64) -> bool { *gap == default_start_gap_ms() }
 impl Budget {
+    pub fn start_gap_ms(&self) -> Option<u64> {
+        match self { Self::Load { min_start_gap_ms, .. } => Some(*min_start_gap_ms), _ => None }
+    }
     pub fn permits(&self, active: usize, load_milli: Option<u64>) -> bool {
         match self {
             Self::Fixed(n) => active < *n,
             Self::Unlimited => true,
-            Self::Load { below_milli } => load_milli.is_some_and(|load| load < *below_milli),
+            Self::Load { below_milli, .. } => load_milli.is_some_and(|load| load < *below_milli),
         }
     }
 }
@@ -37,7 +47,7 @@ pub struct StartPolicy {
 }
 impl StartPolicy {
     pub fn valid(&self) -> bool {
-        !self.columns.is_empty() && self.columns.iter().all(|c| crate::TICKET_COLUMNS.contains(&c.as_str()))
+        self.budget.start_gap_ms() != Some(0) && !self.columns.is_empty() && self.columns.iter().all(|c| crate::TICKET_COLUMNS.contains(&c.as_str()))
             && self.files.keys().chain(self.dependencies.keys()).all(|k| crate::valid_id(k))
             && self.dependencies.values().flatten().all(|k| crate::valid_id(k))
             && self.files.values().flatten().all(|p| !p.is_empty() && !p.contains('\0'))
@@ -76,5 +86,28 @@ impl Default for Limits {
         Self { retries: crate::MAX_RETRIES, back_edges: crate::MAX_BACK_EDGE_LIMIT,
             send_backs: crate::MAX_SEND_BACKS, models: crate::MAX_MODELS, reworks: 2,
             attempts: 5, stages: 16, routes: 8, group_members: crate::MAX_GROUP_MEMBERS }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_gap_defaults_preserve_legacy_encoding_and_custom_gaps_are_pinned() {
+        let legacy = r#"{"Load":{"below_milli":6000}}"#;
+        let budget: Budget = serde_json::from_str(legacy).unwrap();
+        assert_eq!(budget.start_gap_ms(), Some(60_000));
+        assert_eq!(serde_json::to_string(&budget).unwrap(), legacy);
+        let mut policy: StartPolicy = serde_json::from_str(
+            r#"{"columns":["todo"],"budget":{"Load":{"below_milli":6000,"min_start_gap_ms":120000}}}"#,
+        ).unwrap();
+        assert!(policy.valid());
+        assert_eq!(policy.budget.start_gap_ms(), Some(120_000));
+        let encoded = serde_json::to_string(&policy).unwrap();
+        assert!(encoded.contains("\"min_start_gap_ms\":120000"));
+        assert_eq!(serde_json::from_str::<StartPolicy>(&encoded).unwrap(), policy);
+        policy.budget = Budget::Load { below_milli: 6000, min_start_gap_ms: 0 };
+        assert!(!policy.valid(), "a load guard must retain a positive gap");
     }
 }
