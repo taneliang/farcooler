@@ -154,12 +154,16 @@ impl Exec {
             StageKind::Build | StageKind::Review(Reviewer::Agent) => match &config.harness {
                 CodingHarness::Command(command) if matches!(kind, StageKind::Build) => command.clone(),
                 CodingHarness::Command(_) => return Err(Error::Refused("an agent's review gate needs a native harness")),
-                CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt: _, process } => {
+                CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt: _, process, codex_hooks } => {
                     // The model the run picked at Start, or the configured preset when the workflow lists none (ov-966).
                     let preset = binding.effect.model.as_deref().unwrap_or(preset);
-                    let claude = preset.split(':').next() == Some("claude");
+                    let agent = preset.split(':').next().unwrap_or("");
+                    let claude = agent == "claude";
                     if let Some(settings) = settings.as_ref().filter(|_| launch && claude) { settings.verify()?; }
-                    if let Some(hooks) = project_hooks.as_ref().filter(|_| launch && !claude) {
+                    // Codex reads the runner's copy of its hooks from the worktree, where `install_codex_hooks` wrote it (ov-1088).
+                    if let Some(hooks) = codex_hooks.as_ref().filter(|_| launch && agent == "codex") {
+                        LaunchFile { path: self.tree(binding).join(crate::hook_install::CODEX_HOOKS), digest: hooks.digest.clone() }.verify()?;
+                    } else if let Some(hooks) = project_hooks.as_ref().filter(|_| launch && !claude) {
                         let relative = hooks.path.strip_prefix(&config.repository)
                             .map_err(|_| Error::Refused("foreign native project hooks"))?;
                         LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
@@ -425,6 +429,7 @@ impl Exec {
                 if matches!(kind, StageKind::Run) && tree.try_exists()? { self.settle_run_tree(binding, &tree).await?; }
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
+                if matches!(kind, StageKind::Build | StageKind::Review(Reviewer::Agent)) { self.install_codex_hooks(binding, &tree).await?; }
                 self.run_coding(binding, self.coding_command(binding)?, cancel).await?;
             }
             StageKind::Land => {

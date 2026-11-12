@@ -292,12 +292,14 @@ fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
     let mut lines = Vec::new();
     match harness {
         CodingHarness::Command(c) => lines.push(format!("The agent runs {}.", exactly(c, "the agent"))),
-        CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process } => {
+        CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process, codex_hooks } => {
             lines.push(format!("The agent is the {} preset. It runs {}.", code(preset), exactly(process, "the agent")));
             let file = |f: &farcooler_protocol::workflow_config::LaunchFile| format!("{} (digest {})", code(&f.path.to_string_lossy()), code(&f.digest));
             lines.push(format!("Its settings: {}. Its project hooks: {}. Its plugins: {}.",
                 settings.as_ref().map_or("none".into(), file), project_hooks.as_ref().map_or("none".into(), file),
                 plugin_dir.as_ref().map_or("none".into(), |p| code(&p.to_string_lossy()))));
+            // Shown only when pinned, so a summary of a configuration from before them reads as it did (ov-1088).
+            if let Some(hooks) = codex_hooks { lines.push(format!("Codex's hooks, copied into each worktree it runs in: {}.", file(hooks))); }
             lines.push(format!("Its prompt: {}.", code(prompt)));
         }
     }
@@ -479,7 +481,7 @@ mod tests {
         let process = CodingCommand { argv: vec!["/opt/native/claude".into()], environment: [("NATIVE_VAR".to_string(), "native-value".to_string())].into(), timeout_ms: 1000 };
         let file = |name: &str| Some(LaunchFile { path: format!("/launch/{name}.json").into(), digest: format!("{name}-digest") });
         for harness in [CodingHarness::Command(CodingCommand { argv: vec!["/opt/agent/bin".into(), "--agent-flag".into()], environment: [("AGENT_VAR".to_string(), "agent-value".to_string())].into(), timeout_ms: 7_200_000 }),
-            CodingHarness::Native { preset: "native-preset".into(), settings: file("settings"), project_hooks: file("hooks"), plugin_dir: Some("/launch/plugins".into()), prompt: "native prompt".into(), process }] {
+            CodingHarness::Native { preset: "native-preset".into(), settings: file("settings"), project_hooks: file("hooks"), codex_hooks: file("codex"), plugin_dir: Some("/launch/plugins".into()), prompt: "native prompt".into(), process }] {
             let config = everything(harness);
             let b = Bundle { definition: bundle("ticket-pr", &["make check"], &[], None).definition, adapter: AdapterConfiguration::Coding(config.clone()) };
             let text = summarize("", &b, None, None);

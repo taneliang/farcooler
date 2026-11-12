@@ -47,7 +47,7 @@ async fn workflow_send_back_builds_again_in_the_same_tree_and_the_agent_is_told_
     let mut config = runtime.coding.clone().unwrap();
     config.harness = CodingHarness::Native { preset: "claude:opus".into(),
         settings: Some(LaunchFile { path: settings.canonicalize().unwrap(), digest: digest(&std::fs::read(&settings).unwrap()) }),
-        project_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
+        project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     runtime.coding = Some(config);
     let command = runtime.coding_command(&binding).unwrap();

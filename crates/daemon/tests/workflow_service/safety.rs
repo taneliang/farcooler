@@ -8,7 +8,7 @@ fn native_config(config: &mut CodingConfig, settings: &Path, socket: &Path) {
     process.argv.clear();
     config.harness = CodingHarness::Native { preset:"claude".into(),
         settings:Some(LaunchFile { path:settings.canonicalize().unwrap(), digest:farcooler_workflow::digest(&std::fs::read(settings).unwrap()) }),
-        project_hooks:None, plugin_dir:None, prompt:"private fixture".into(), process };
+        project_hooks:None, codex_hooks:None, plugin_dir:None, prompt:"private fixture".into(), process };
 }
 async fn publish_waiting(link: &mut Link, workspace: Uuid, config: &CodingConfig) -> String {
     let mut definition = config.definition().unwrap();

@@ -1,6 +1,7 @@
 //! Finite trusted-local configuration. No registry, Service activation or login writes.
 use super::*;
 use std::collections::BTreeMap;
+use crate::hook_install::CODEX_HOOKS;
 
 pub use farcooler_protocol::workflow_config::*;
 trait CommandValidation { fn validate(&self) -> Result<()>; }
@@ -65,7 +66,7 @@ impl CodingConfigExt for CodingConfig {
         }
         match &self.harness {
             CodingHarness::Command(command) => command.validate()?,
-            CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process } => {
+            CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process, codex_hooks } => {
                 if crate::orchestrator::harness_of(preset).is_none() || prompt.len() > 4096
                     || !process.argv.is_empty() || plugin_dir.is_some()
                 { return Err(Error::Refused("native launch requires existing settings; plugins need separate allocation")); }
@@ -80,6 +81,15 @@ impl CodingConfigExt for CodingConfig {
                 if let Some(hooks) = project_hooks {
                     if !["codex", "cursor"].iter().any(|h| project_hooks_path(h).is_some_and(|r| hooks.path == self.repository.join(r))) {
                         return Err(Error::Refused("foreign project hook path"));
+                    }
+                    hooks.verify()?;
+                }
+                // The runner's own copy of Codex's hooks (ov-1088), which the engine writes into each worktree. One
+                // inside the repository is a committed file by another name, and two Codex hooks files can't both be it.
+                if let Some(hooks) = codex_hooks {
+                    if hooks.path.starts_with(&self.repository) { return Err(Error::Refused("codex hooks inside the repository")); }
+                    if project_hooks.as_ref().is_some_and(|h| h.path == self.repository.join(CODEX_HOOKS)) {
+                        return Err(Error::Refused("two codex hooks files"));
                     }
                     hooks.verify()?;
                 }
@@ -272,17 +282,25 @@ impl FileValidation for LaunchFile {
 /// Where Codex and Cursor read a project's hooks, relative to the repository. `None` for Claude, whose hooks
 /// are its settings file.
 pub(super) fn project_hooks_path(harness: &str) -> Option<&'static str> {
-    match harness { "codex" => Some(".codex/hooks.json"), "cursor" => Some(".cursor/hooks.json"), _ => None }
+    match harness { "codex" => Some(CODEX_HOOKS), "cursor" => Some(crate::hook_install::CURSOR_HOOKS), _ => None }
 }
 /// Whether this configuration can launch `preset` (`harness` or `harness:model`): a harness Far Cooler runs
 /// and, for a native one, with that harness's hooks pinned, since its turn is read from them.
 pub(super) fn launchable(config: &CodingConfig, preset: &str) -> bool {
     if crate::orchestrator::harness_of(preset).is_none() { return false; }
-    let CodingHarness::Native { settings, project_hooks, .. } = &config.harness else { return true };
-    match project_hooks_path(preset.split(':').next().unwrap_or("")) {
-        Some(relative) => project_hooks.as_ref().is_some_and(|h| h.path == config.repository.join(relative)),
-        None => settings.is_some(),
+    let CodingHarness::Native { settings, .. } = &config.harness else { return true };
+    match preset.split(':').next().unwrap_or("") {
+        "claude" => settings.is_some(),
+        agent => worktree_hooks(config, agent).is_some(),
     }
+}
+/// The file a Codex or Cursor run's worktree must hold at `project_hooks_path`, as pinned: the runner's own copy of
+/// Codex's hooks (`codex_hooks`, which the engine writes there, ov-1088), else the repository's committed one.
+pub(super) fn worktree_hooks<'a>(config: &'a CodingConfig, agent: &str) -> Option<&'a LaunchFile> {
+    let CodingHarness::Native { project_hooks, codex_hooks, .. } = &config.harness else { return None };
+    let relative = project_hooks_path(agent)?;
+    codex_hooks.as_ref().filter(|_| agent == "codex")
+        .or_else(|| project_hooks.as_ref().filter(|h| h.path == config.repository.join(relative)))
 }
 /// The URL of a landing that is a network remote (ov-1026), or `None` for a local bare repository.
 pub(super) fn landing_url(landing: &CodingLanding) -> Option<&str> {

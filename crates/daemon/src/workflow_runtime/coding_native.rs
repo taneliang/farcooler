@@ -110,6 +110,29 @@ impl Exec {
         let preset = binding.effect.model.as_deref().unwrap_or(preset);
         preset.split(':').next().unwrap_or("").parse().map_err(|_| Error::Refused("unknown native agent"))
     }
+    /// Copy the runner's pinned Codex hooks into a Codex run's worktree, where Codex reads them (ov-1088): the engine
+    /// supplies them, as it hands Claude `--settings`, so no repository commits a file naming this machine's paths.
+    /// Written only when the worktree's copy differs, and never through a link or over a file the repository tracks,
+    /// which is somebody's own. Untracked, it is left out of the candidate's changes like the app's (`tree_changes`).
+    /// Nothing for any other agent, or for a configuration that pins the repository's own file instead.
+    pub(super) async fn install_codex_hooks(&self, binding: &Binding, tree: &Path) -> Result<()> {
+        let Some(CodingConfig { harness: CodingHarness::Native { codex_hooks: Some(hooks), .. }, .. }) = &self.coding else { return Ok(()) };
+        if self.native_agent(binding)? != Agent::Codex { return Ok(()); }
+        hooks.verify()?;
+        let bytes = self.bytes(&hooks.path)?;
+        let text = String::from_utf8(bytes).map_err(|_| Error::Refused("invalid hook text"))?;
+        let dest = tree.join(crate::hook_install::CODEX_HOOKS);
+        let dir = dest.parent().ok_or(Error::Refused("foreign codex hooks path"))?;
+        if std::fs::symlink_metadata(dir).is_ok_and(|m| !m.is_dir()) || std::fs::symlink_metadata(&dest).is_ok_and(|m| !m.is_file()) {
+            return Err(Error::Refused("the worktree's .codex is not a plain directory and file"));
+        }
+        if std::fs::read(&dest).ok().as_deref() == Some(text.as_bytes()) { return Ok(()); }
+        if !self.git_recorded(binding, tree, &["ls-files", "--", crate::hook_install::CODEX_HOOKS]).await?.is_empty() {
+            return Err(Error::Refused("the repository commits its own codex hooks"));
+        }
+        crate::skill_install::write_atomically(&dest, &text)?;
+        Ok(())
+    }
     /// Pin the already-installed endpoint as well as its bytes. No hook writes.
     pub(super) fn validate_native_host(&self) -> Result<()> {
         if let Some(config) = &self.coding { self.validate_native_configuration(config)?; }
@@ -132,10 +155,11 @@ impl Exec {
     /// Every hooks file the configuration pins targets this host, and the configured preset's is one of them:
     /// a run may pick any harness whose hooks are pinned (ov-966).
     fn native_config_hooks(&self, config: &CodingConfig) -> Result<()> {
-        let CodingHarness::Native { preset, settings, project_hooks, .. } = &config.harness else { return Ok(()) };
+        let CodingHarness::Native { preset, settings, project_hooks, codex_hooks, .. } = &config.harness else { return Ok(()) };
         let agent: Agent = preset.split(':').next().unwrap_or("").parse().map_err(|_| Error::Refused("unknown native agent"))?;
         self.native_agent_hooks(config, agent)?;
         if settings.is_some() { self.native_agent_hooks(config, Agent::Claude)?; }
+        if codex_hooks.is_some() { self.native_agent_hooks(config, Agent::Codex)?; }
         if let Some(hooks) = project_hooks {
             let other = [Agent::Codex, Agent::Cursor].into_iter()
                 .find(|a| super::coding::project_hooks_path(a.as_str()).is_some_and(|r| hooks.path == config.repository.join(r)))
@@ -145,10 +169,9 @@ impl Exec {
         Ok(())
     }
     fn native_agent_hooks(&self, config: &CodingConfig, agent: Agent) -> Result<()> {
-        let CodingHarness::Native { settings, project_hooks, .. } = &config.harness else { return Ok(()) };
-        let file = if agent == Agent::Claude { settings.as_ref() } else {
-            project_hooks.as_ref().filter(|h| super::coding::project_hooks_path(agent.as_str()).is_some_and(|r| h.path == config.repository.join(r)))
-        }.ok_or(Error::Refused("missing native hooks"))?;
+        let CodingHarness::Native { settings, .. } = &config.harness else { return Ok(()) };
+        let file = if agent == Agent::Claude { settings.as_ref() } else { super::coding::worktree_hooks(config, agent.as_str()) }
+            .ok_or(Error::Refused("missing native hooks"))?;
         file.verify()?;
         let text = String::from_utf8(self.bytes(&file.path)?).map_err(|_| Error::Refused("invalid hook text"))?;
         let socket = self.root.join("h.sock");
@@ -385,11 +408,17 @@ pub(super) mod tests {
     pub(crate) struct Fake;
     impl Drop for Fake { fn drop(&mut self) { TEST_ARGV.with(|p| *p.borrow_mut() = None); } }
     pub(crate) async fn native(mode: &str) -> (tempfile::TempDir, Runtime, Fake) { native_agent(mode, "claude").await }
+    /// `agent` is `claude`, `codex` or `cursor`, each with its hooks pinned as before ov-1088 (Codex's and Cursor's
+    /// committed in the repository), or `codex-engine`: Codex with the runner's own hooks file, outside the repository,
+    /// which the engine copies into the worktree (ov-1088). That agent checks it finds the copy before it starts.
     async fn native_agent(mode: &str, agent: &str) -> (tempfile::TempDir, Runtime, Fake) {
         assert!(farcooler_core::programs::find("tmux").is_some(), "native ownership proof requires real tmux");
         let (dir, mut runtime) = configured(false, "pass").await;
         let socket = runtime.root.join("h.sock");
+        let engine = agent == "codex-engine";
+        let agent = if engine { "codex" } else { agent };
         let hooks = if agent == "claude" { dir.path().join("native-settings.json") }
+            else if engine { dir.path().join("engine-codex-hooks.json") }
             else { runtime.repository().join(if agent == "codex" { ".codex/hooks.json" } else { ".cursor/hooks.json" }) };
         std::fs::create_dir_all(hooks.parent().unwrap()).unwrap();
         let text = match agent {
@@ -398,7 +427,7 @@ pub(super) mod tests {
             _ => crate::hook_install::merge_cursor("{}", &socket),
         };
         std::fs::write(&hooks, text).unwrap();
-        if agent != "claude" {
+        if agent != "claude" && !engine {
             let repo = runtime.repository();
             adapters::git(&repo, &["add", "--", hooks.to_str().unwrap()]).await.unwrap();
             adapters::git(&repo, &["-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false",
@@ -414,6 +443,9 @@ assert os.environ['TERM'] == 'xterm-256color'
 mode = sys.argv[1]
 agent = sys.argv[2]
 session = os.environ['FARCOOLER_NATIVE_SESSION']
+# Where Codex reads its hooks: the engine's copy of the runner's file, when it supplies them (ov-1088).
+if 'EXPECT_CODEX_HOOKS' in os.environ and pathlib.Path('.codex/hooks.json').read_bytes() != pathlib.Path(os.environ['EXPECT_CODEX_HOOKS']).read_bytes():
+    sys.exit(7)
 # As `farcooler hook` does (crates/cli/src/hook.rs, first_contact): a hook that isn't gating writes its
 # line and hangs up at once, without reading the daemon's answer (ov-1075).
 def hook(event, sid=session, cwd=os.getcwd(), **extra):
@@ -452,12 +484,14 @@ else:
 "#).unwrap();
         let CodingHarness::Command(mut process) = runtime.coding.as_ref().unwrap().harness.clone() else { unreachable!() };
         process.argv.clear(); process.timeout_ms = if mode == "foreign-only" { 300 } else { 5000 };
+        if engine { process.environment.insert("EXPECT_CODEX_HOOKS".into(), hooks.to_string_lossy().into_owned()); }
         TEST_ARGV.with(|p| *p.borrow_mut() = Some(vec!["/usr/bin/python3".into(), script.to_string_lossy().into_owned(), mode.into(), agent.into()]));
         let root = runtime.root.clone();
         let config = runtime.coding.as_mut().unwrap();
         let file = LaunchFile { path: hooks.canonicalize().unwrap(), digest: digest(&std::fs::read(hooks).unwrap()) };
         config.harness = CodingHarness::Native { preset: agent.into(), settings: (agent == "claude").then(|| file.clone()),
-            project_hooks: (agent != "claude").then_some(file), plugin_dir: None, prompt: "implement the selected task".into(), process };
+            project_hooks: (agent != "claude" && !engine).then(|| file.clone()), codex_hooks: engine.then_some(file),
+            plugin_dir: None, prompt: "implement the selected task".into(), process };
         // Persist private trusted config before enqueue, then exercise the public reopen path.
         std::fs::write(root.join("coding.json"), serde_json::to_vec(config).unwrap()).unwrap();
         drop(runtime);
@@ -465,11 +499,16 @@ else:
     }
     #[tokio::test]
     async fn workflow_coding_native_real_pty_normalized_hooks_and_quiescence() {
-        for agent in ["claude", "codex", "cursor"] {
+        for agent in ["claude", "codex", "cursor", "codex-engine"] {
             let (dir, mut runtime, _fake) = native_agent("pass", agent).await;
             let definition = runtime.configured_definition().unwrap();
             enqueue(&mut runtime, "w", "one", definition);
             assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Done, "{agent}");
+            if agent == "codex-engine" {
+                // Codex ran with the hooks, and they stayed the worktree's: what landed holds no hooks file.
+                let landed = adapters::git(&runtime.repository(), &["ls-tree", "-r", "--name-only", runtime.landing_ref()]).await.unwrap();
+                assert!(landed.contains("result.txt") && !landed.contains(".codex"), "{landed}");
+            }
             let pid: i32 = std::fs::read_to_string(dir.path().join("started")).unwrap().parse().unwrap();
             assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "native TUI must be reaped before candidate success");
             let left: Vec<_> = std::fs::read_dir(&runtime.root).unwrap().map(|e| e.unwrap().file_name())
@@ -594,7 +633,7 @@ mod recovery_tests {
         process.argv.clear();
         runtime.coding.as_mut().unwrap().harness = CodingHarness::Native { preset: "claude".into(),
             settings: Some(LaunchFile { path: settings.canonicalize().unwrap(), digest: digest(&std::fs::read(settings).unwrap()) }),
-            project_hooks: None, plugin_dir: None, prompt: "unused crash fixture".into(), process };
+            project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: "unused crash fixture".into(), process };
         let root = runtime.root.clone();
         std::fs::write(root.join("coding.json"), serde_json::to_vec(&runtime.coding.as_ref().unwrap()).unwrap()).unwrap();
         let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
@@ -640,7 +679,7 @@ mod recovery_tests {
             process.argv.clear();
             config.harness = CodingHarness::Native { preset:"claude".into(),
                 settings:Some(LaunchFile { path:settings.canonicalize().unwrap(),digest:digest(&std::fs::read(&settings).unwrap()) }),
-                project_hooks:None,plugin_dir:None,prompt:"unused".into(),process };
+                project_hooks:None, codex_hooks:None,plugin_dir:None,prompt:"unused".into(),process };
             let config = config.clone(); let definition = config.definition().unwrap();
             let adapter = Some(AdapterConfiguration::Coding(config.clone()));
             let pin = farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());

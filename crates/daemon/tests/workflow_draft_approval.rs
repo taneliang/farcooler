@@ -321,6 +321,11 @@ async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion
     assert_eq!((suggested.landing_ref.as_str(), suggested.base.clone()), ("refs/heads/main", git(&repo, &["rev-parse", "HEAD"]).await));
     assert_eq!((suggested.ci.repository.as_str(), suggested.ci.workflow.as_str()), ("example/first-workflow", "CI"));
     assert!(matches!(&suggested.harness, CodingHarness::Native { preset, settings: Some(_), .. } if preset == "claude"), "{:?}", suggested.harness);
+    // ov-1088: Codex's hooks are the runner's own file, outside the repository, reporting to the engine's socket.
+    let CodingHarness::Native { codex_hooks: Some(codex), .. } = &suggested.harness else { panic!("no codex hooks: {:?}", suggested.harness) };
+    assert!(!codex.path.starts_with(&suggested.repository) && !suggested.repository.join(".codex/hooks.json").exists(), "{codex:?}");
+    let engine = host.service.root_dir().join("workflow").canonicalize().unwrap().join("h.sock");
+    assert!(std::fs::read_to_string(&codex.path).unwrap().contains(engine.to_str().unwrap()), "{codex:?}");
 
     // The suggestion's own landing makes every template sound; the owner approves, and they publish with each step's models.
     git(&repo, &["update-ref", "refs/heads/main", &suggested.base]).await;
@@ -342,6 +347,8 @@ async fn a_workspace_with_no_workflow_drafts_its_first_on_the_runners_suggestion
     assert_eq!(published.definition.models.get("build").map(|m| m[0].as_str()), Some("claude:sonnet"));
     let got = call(&mut link, ws, Action::Get).await;
     assert!(got["configuration"].is_object() && got.get("suggested_adapter").is_none() && got.get("suggested_adapter_refused").is_none(), "{got}");
+    // A published workspace is still told the Codex hooks to pin, which is how one adds Codex models (ov-1088).
+    assert_eq!(got["engine_codex_hooks"], serde_json::json!(codex), "{got}");
     drop(link);
     host.close().await;
 }

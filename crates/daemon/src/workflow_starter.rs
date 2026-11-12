@@ -2,10 +2,12 @@
 //!
 //! A draft pins a definition to adapter settings, so a workspace with none had nothing to draft against and
 //! `workspace workflow-draft` refused. The runner knows what a first draft needs: the workspace's checkout, the
-//! branch it lands on, its own Claude hook settings, and the GitHub repository CI runs in. It says them here,
-//! in `workflow get`'s reply, and suggests only. The one thing written is the engine's Claude hook settings file
-//! (`engine_hook_settings`), atomically and only when it differs, even when the suggestion then refuses: it is the
-//! runner's own file, the same for every workspace, and holds nothing of this one. The orchestrator drafts on top of them and
+//! branch it lands on, its own Claude hook settings and Codex hooks, and the GitHub repository CI runs in. It says them
+//! here, in `workflow get`'s reply, and suggests only. The things written are the engine's Claude hook settings file
+//! (`engine_hook_settings`) and its Codex hooks file (`engine_codex_hooks`, ov-1088), atomically and only when they
+//! differ, even when the suggestion then refuses: they are the runner's own files, the same for every workspace, and
+//! hold nothing of this one. Every `workflow get` reply, a published workspace's too, says the Codex one as
+//! `engine_codex_hooks`, which is what a published adapter adds to run Codex models. The orchestrator drafts on top of them and
 //! the owner reads every setting on the draft's card before anything publishes (`workflow_drafts`).
 //!
 //! **It lands on origin.** Every template lands through a group, and a group holds a landing transport. Since the
@@ -43,6 +45,12 @@ printf '%s\n' "$out" > "$FARCOOLER_RECEIPT""#;
 /// draft as `suggested_adapter`, or why it can't as `suggested_adapter_refused`. Only a `get` reply carries a
 /// `configuration`, and a published workspace's isn't null, so every other reply is left alone.
 pub(crate) async fn add_to_get(svc: &Service, workspace: Uuid, mut value: serde_json::Value) -> serde_json::Value {
+    // Every reply, a published workspace's too: Codex's hooks are what a published adapter pins to add Codex models (ov-1088).
+    if value.get("configuration").is_some() {
+        if let (Some(reply), Some(hooks)) = (value.as_object_mut(), engine_codex_hooks(svc)) {
+            reply.insert("engine_codex_hooks".into(), serde_json::json!(hooks));
+        }
+    }
     if value.get("configuration").is_none_or(|c| !c.is_null()) { return value; }
     let said = match settings(svc, workspace).await {
         Ok(config) => ("suggested_adapter", serde_json::json!(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))),
@@ -75,6 +83,7 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
     let settings = engine_hook_settings(svc).ok_or("Far Cooler couldn’t write the engine’s Claude hook settings on this runner.")?;
     let settings = LaunchFile { digest: farcooler_workflow::digest(&std::fs::read(&settings).map_err(|_| "Far Cooler couldn’t read its Claude hook settings.")?),
         path: settings.canonicalize().map_err(|_| "Far Cooler couldn’t read its Claude hook settings.")? };
+    let codex_hooks = engine_codex_hooks(svc).ok_or("Far Cooler couldn’t write the engine’s Codex hooks on this runner.")?;
     let environment = crate::landing_templates::gate_environment(&[]).map_err(|e| e.to_string())?;
     let mut agent = environment.clone();
     if let Some(home) = environment.get("HOME") { agent.insert("PATH".into(), format!("{GATE_PATH}:{home}/.local/bin:{home}/.cargo/bin")); }
@@ -82,7 +91,7 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
     look.extend([("CI_GH".to_string(), gh.to_string_lossy().into_owned()), ("CI_REPOSITORY".into(), ci_repository.clone()),
         ("CI_WORKFLOW".into(), CI_WORKFLOW.into()), ("CI_EVENT".into(), "push".into())]);
     Ok(CodingConfig { repository, base, landing_ref, landing: Some(landing), pull_request: None,
-        harness: CodingHarness::Native { preset: HARNESS.into(), settings: Some(settings), project_hooks: None, plugin_dir: None, prompt: PROMPT.into(),
+        harness: CodingHarness::Native { preset: HARNESS.into(), settings: Some(settings), project_hooks: None, codex_hooks: Some(codex_hooks), plugin_dir: None, prompt: PROMPT.into(),
             process: CodingCommand { argv: Vec::new(), environment: agent, timeout_ms: MAX_COMMAND_MS } },
         checks: Vec::new(), reviewer: None,
         ci: CodingCi { repository: ci_repository, workflow: CI_WORKFLOW.into(), event: "push".into(),
@@ -98,6 +107,17 @@ fn engine_hook_settings(svc: &Service) -> Option<PathBuf> {
     let path = svc.root_dir().join("workflow-claude-hooks.json");
     if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) { crate::skill_install::write_atomically(&path, &text).ok()?; }
     path.canonicalize().ok()
+}
+
+/// Codex's hooks for the agents the engine starts, pinned like Claude's settings and reporting to the same socket. Codex
+/// has no flag for them, so the engine copies this file into each worktree it runs Codex in (`install_codex_hooks`), and
+/// no repository has to commit one (ov-1088). Written as `engine_hook_settings` is, and left as it is after.
+fn engine_codex_hooks(svc: &Service) -> Option<LaunchFile> {
+    let engine = svc.root_dir().join("workflow").canonicalize().ok()?;
+    let text = crate::hook_install::merge_codex("", &engine.join("h.sock"));
+    let path = svc.root_dir().join("workflow-codex-hooks.json");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) { crate::skill_install::write_atomically(&path, &text).ok()?; }
+    Some(LaunchFile { digest: farcooler_workflow::digest(&std::fs::read(&path).ok()?), path: path.canonicalize().ok()? })
 }
 
 /// The checkout a `.git` directory belongs to, when it is a main checkout's own directory.
@@ -166,7 +186,7 @@ mod tests {
         let cmd = || CodingCommand { argv: vec!["/usr/bin/true".into()], environment: Default::default(), timeout_ms: 1000 };
         CodingConfig { repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Native { preset: preset.into(), settings: Some(LaunchFile { path: "/s.json".into(), digest: "wf1:s".into() }),
-                project_hooks: None, plugin_dir: None, prompt: super::PROMPT.into(), process: CodingCommand { argv: vec![], ..cmd() } },
+                project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: super::PROMPT.into(), process: CodingCommand { argv: vec![], ..cmd() } },
             checks: vec![], reviewer: None, ci: CodingCi { repository: "o/r".into(), workflow: "CI".into(), event: "push".into(), command: cmd() } }
     }
     #[test]

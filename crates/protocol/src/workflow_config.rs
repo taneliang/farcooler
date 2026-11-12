@@ -13,13 +13,21 @@ pub struct CodingCommand {
 #[serde(deny_unknown_fields)]
 pub struct LaunchFile { pub path: PathBuf, pub digest: String }
 
+// One per configuration, read once per publication: the size of the native arm costs nothing worth a box.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub enum CodingHarness {
     Command(CodingCommand),
     /// Existing native launch policy, never prepared/installed by this runtime.
     Native { preset: String, settings: Option<LaunchFile>, project_hooks: Option<LaunchFile>, plugin_dir: Option<PathBuf>,
-        prompt: String, process: CodingCommand },
+        prompt: String, process: CodingCommand,
+        /// Codex's hooks, from a file the runner keeps outside the repository, as Claude's `settings` are (ov-1088).
+        /// The engine copies it into `.codex/hooks.json` in each worktree it launches Codex in, so no repository
+        /// commits a file that names this machine's paths. Left out of the pinned bytes when absent, so
+        /// configurations written before it keep their pin.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        codex_hooks: Option<LaunchFile> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

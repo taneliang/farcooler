@@ -294,7 +294,7 @@ async fn workflow_coding_native_launch_pins_existing_hooks_without_installing_or
     let mut config = runtime.coding.clone().unwrap();
     config.harness = CodingHarness::Native { preset: "claude:opus".into(),
         settings: Some(LaunchFile { path: settings.canonicalize().unwrap(), digest: digest(&std::fs::read(&settings).unwrap()) }),
-        project_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
+        project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     config.definition().unwrap();
     runtime.coding = Some(config.clone());
@@ -385,7 +385,7 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
     let mut config = published.clone();
     config.harness = CodingHarness::Native { preset: "claude:opus".into(),
         settings: Some(LaunchFile { path: settings.canonicalize().unwrap(), digest: digest(&std::fs::read(&settings).unwrap()) }),
-        project_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
+        project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     let definition = published.definition().unwrap();
     let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
@@ -469,7 +469,7 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     std::fs::write(runtime.tree(&builds["ov-7"]).join(".codex/hooks.json"), b"{\"hooks\":{}}").unwrap();
     let mut native = published.clone();
     native.harness = CodingHarness::Native { preset: "claude:sonnet".into(), settings: Some(pinned(&dir.path().join("settings.json"))),
-        project_hooks: Some(hooks), plugin_dir: None, prompt: "implement the selected task".into(),
+        project_hooks: Some(hooks), codex_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     runtime.coding = Some(native);
     let codex = runtime.coding_command(&builds["ov-7"]).unwrap().argv[2].clone();
@@ -495,11 +495,69 @@ async fn workflow_coding_publish_refuses_a_model_whose_harness_is_not_set_up() {
     let settings = dir.path().join("settings.json"); std::fs::write(&settings, b"{\"hooks\":{}}").unwrap();
     config.harness = CodingHarness::Native { preset: "claude:sonnet".into(),
         settings: Some(LaunchFile { path: settings.canonicalize().unwrap(), digest: digest(&std::fs::read(&settings).unwrap()) }),
-        project_hooks: None, plugin_dir: None, prompt: "p".into(),
+        project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: "p".into(),
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     assert!(listing(&config, &["claude:opus", "claude"]).is_ok());
     assert!(listing(&config, &["claude:opus", "codex:gpt-5.5"]).is_err(), "Codex's hooks aren't pinned");
     assert!(listing(&config, &["cursor"]).is_err(), "nor Cursor's");
+}
+
+/// ov-1088: Codex's hooks can be the runner's own file, outside the repository, as Claude's settings are. A
+/// definition listing Codex models publishes on it with no `.codex/hooks.json` in the repository; the engine copies it
+/// into the build's worktree before Codex starts, and puts it back if it changed. It never writes over a hooks file the
+/// repository commits, and refuses a copy kept inside the repository, one beside a committed one, or one that reports
+/// anywhere but this host.
+#[tokio::test]
+async fn workflow_coding_codex_runs_on_the_runners_hooks_file_with_none_in_the_repository() {
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
+    let binding = admitted(&runtime).await;
+    let tree = runtime.tree(&binding);
+    let pinned = |path: &Path, text: &str| { std::fs::create_dir_all(path.parent().unwrap()).unwrap(); std::fs::write(path, text).unwrap();
+        LaunchFile { path: path.canonicalize().unwrap(), digest: digest(&text.as_bytes().to_vec()) } };
+    let text = crate::hook_install::merge_codex("", &runtime.root.join("h.sock"));
+    let hooks = pinned(&dir.path().join("engine-codex-hooks.json"), &text);
+    let mut config = runtime.coding.clone().unwrap();
+    let native = |project_hooks: Option<LaunchFile>, codex_hooks: Option<LaunchFile>| CodingHarness::Native { preset: "codex".into(),
+        settings: None, project_hooks, codex_hooks, plugin_dir: None, prompt: "p".into(),
+        process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
+    config.harness = native(None, Some(hooks.clone()));
+    let mut definition = config.definition().unwrap();
+    definition.models.insert("build".into(), vec!["codex:gpt-6.1-sol".into(), "codex".into()]);
+    config.validate_definition(&definition).expect("Codex models publish on the runner's hooks");
+    runtime.validate_native_configuration(&config).expect("which report to this host");
+    assert!(!config.repository.join(".codex").exists() && !tree.join(".codex").exists(), "no hooks file in the repository");
+
+    // Before Codex starts, the engine writes the copy; the launch checks it and runs Codex.
+    runtime.coding = Some(config.clone());
+    assert!(runtime.coding_command(&binding).is_err(), "no copy yet, no launch");
+    runtime.install_codex_hooks(&binding, &tree).await.unwrap();
+    assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), text);
+    let command = runtime.coding_command(&binding).unwrap();
+    assert!(command.argv[2].contains("codex") && !command.argv[2].contains("--settings"), "{}", command.argv[2]);
+    assert!(runtime.tree_changes(&binding, &tree).await.unwrap().is_empty(), "the copy isn't the candidate's change");
+    std::fs::write(tree.join(".codex/hooks.json"), "{}").unwrap();
+    assert!(runtime.coding_command(&binding).is_err(), "a changed copy doesn't launch");
+    runtime.install_codex_hooks(&binding, &tree).await.unwrap();
+    assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), text, "and is put back");
+
+    // Kept in the repository, or beside the repository's own, it is refused; so is one reporting to another host.
+    let committed = pinned(&config.repository.join(".codex/hooks.json"), &text);
+    let refused = |harness| { let mut c = config.clone(); c.harness = harness; c.validate().unwrap_err() };
+    assert!(matches!(refused(native(None, Some(committed.clone()))), Error::Refused("codex hooks inside the repository")));
+    assert!(matches!(refused(native(Some(committed), Some(hooks.clone()))), Error::Refused("two codex hooks files")));
+    let elsewhere = pinned(&dir.path().join("elsewhere.json"), &crate::hook_install::merge_codex("", Path::new("/tmp/other.sock")));
+    let mut foreign = config.clone(); foreign.harness = native(None, Some(elsewhere));
+    assert!(runtime.validate_native_configuration(&foreign).is_err(), "hooks that report elsewhere");
+
+    // A worktree whose branch commits its own `.codex/hooks.json` is the repository's choice, and isn't written over.
+    std::fs::write(tree.join(".codex/hooks.json"), "{\"hooks\":{}}").unwrap();
+    adapters::git(&tree, &["add", "-f", "--", ".codex/hooks.json"]).await.unwrap();
+    adapters::git(&tree, &["-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false",
+        "commit", "--quiet", "-m", "its own hooks"]).await.unwrap();
+    assert!(matches!(runtime.install_codex_hooks(&binding, &tree).await, Err(Error::Refused("the repository commits its own codex hooks"))));
+    assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), "{\"hooks\":{}}");
 }
 
 /// ov-1074 review L1: a tree made by Provision that someone changes before the step is read back again fails with the
@@ -524,36 +582,38 @@ async fn workflow_coding_a_provisioned_tree_changed_before_its_reconcile_fails_t
     assert!(said.contains("mine.txt") && said.contains("Commit them"), "{said}");
 }
 
-/// ov-1087: checks the Codex-models bundle the owner publishes, which is read from the file named by
-/// `FARCOOLER_OV1087_BUNDLE` (a draft that lives under `.claude/agent/reports`, outside the tree). Run it by hand:
+/// ov-1087, on ov-1088's adapter shape: checks the Codex-models bundle the owner publishes, read from the file named by
+/// `FARCOOLER_OV1087_BUNDLE` (`.claude/agent/reports/ov-1087/workflow-codex.json`). Run it by hand:
 /// `FARCOOLER_OV1087_BUNDLE=<workflow-codex.json> cargo test -p farcooler-daemon --lib workflow_codex_bundle -- --ignored`.
-/// First the file itself: it reads as `workspace set-workflow --file` reads it, every operation pins its
-/// configuration, and Claude's pinned hooks are the file on disk. Then the same models in a scratch runtime, whose host
-/// differs from the live one (so its hooks are written to its own socket): with no Codex hooks pinned, as in the
-/// live adapter, the definition is refused; with them pinned it publishes, a `build=codex:gpt-6.1-sol` start is
-/// accepted and a model it doesn't list is refused.
+/// First the file itself: it reads as `workspace set-workflow --file` reads it, every operation pins its configuration,
+/// Claude's pinned hooks are the file on disk, and Codex's are the runner's own file beside them, with exactly the bytes
+/// a daemon with ov-1088 writes there (checked against the file itself once it exists). No project hooks are pinned,
+/// and nothing in the repository. Then the same models in a scratch runtime, whose host differs from the live one (so
+/// its hooks report to its own socket): with no Codex hooks, as in the live adapter today, the definition is refused;
+/// with the runner's Codex hooks file it publishes, a model the step doesn't list is refused, `build=codex:gpt-6.1-sol`
+/// starts, and its build launches Codex with that model once the engine has copied the hooks into its worktree.
 #[tokio::test]
 #[ignore = "checks a draft file the owner has yet to publish; set FARCOOLER_OV1087_BUNDLE"]
 async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     use crate::workflow_runtime::coding::FileValidation;
-    use farcooler_protocol::{workflow_commands::{Action, Definition, Mutation}, workflow_config::{AdapterConfiguration, CodingHarness, LaunchFile}};
-    let path = std::env::var("FARCOOLER_OV1087_BUNDLE").expect("FARCOOLER_OV1087_BUNDLE names the bundle file");
-    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    #[derive(serde::Deserialize, serde::Serialize)]
-    #[serde(deny_unknown_fields)]
-    struct Bundle { definition: Definition, adapter: Option<AdapterConfiguration> }
-    let bundle: Bundle = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(serde_json::to_value(&bundle).unwrap(), value, "the CLI refuses a bundle that doesn't round-trip");
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::{AdapterConfiguration, CodingHarness, LaunchFile}};
+    let (value, bundle) = ov1087_bundle();
     let models = bundle.definition.models.clone();
     assert_eq!(models["build"], ["claude:sonnet", "claude:opus", "claude:haiku", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
     assert_eq!(models["gate-0"], ["claude:opus", "claude:sonnet", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
     let AdapterConfiguration::Coding(live) = bundle.adapter.unwrap();
-    let CodingHarness::Native { settings: Some(settings), project_hooks: None, .. } = &live.harness else { panic!("native, with Claude's settings pinned and no project hooks") };
+    let CodingHarness::Native { settings: Some(settings), project_hooks: None, codex_hooks: Some(codex), .. } = &live.harness
+    else { panic!("native, with Claude's settings and Codex's hooks pinned, and no project hooks: {value}") };
     // Every operation, in stages and groups, pins this configuration, and Claude's hooks are the file on disk.
     let operations = bundle.definition.stages.iter().map(|s| &s.operation)
         .chain(bundle.definition.groups.values().flat_map(|g| g.steps.iter().map(|s| &s.operation)));
     assert!(operations.clone().count() > 5 && operations.into_iter().all(|o| o.arguments[0] == live.pin()), "operations pin the configuration");
     settings.verify().unwrap();
+    // Codex's hooks are the runner's file beside Claude's, outside the repository, as the daemon writes it.
+    assert_eq!(codex.path, settings.path.with_file_name("workflow-codex-hooks.json"));
+    assert!(!codex.path.starts_with(&live.repository));
+    assert_eq!(codex.digest, digest(&live_codex_hooks(&settings.path).into_bytes()), "the bytes a daemon with ov-1088 writes");
+    if codex.path.exists() { codex.verify().unwrap(); }
 
     let (dir, mut runtime) = configured(false, "pass").await;
     let host = runtime.root.join("h.sock");
@@ -562,7 +622,7 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     let mut config = runtime.coding.clone().unwrap();
     config.harness = CodingHarness::Native { preset: "claude".into(), plugin_dir: None, prompt: "p".into(), process: live_process(&live),
         settings: Some(pinned(dir.path().join("native-settings.json"), serde_json::to_string(&crate::hook_install::claude_settings(&host)).unwrap())),
-        project_hooks: Some(pinned(config.repository.join(".codex/hooks.json"), crate::hook_install::merge_codex("{}", &host))) };
+        project_hooks: None, codex_hooks: Some(pinned(dir.path().join("workflow-codex-hooks.json"), crate::hook_install::merge_codex("", &host))) };
     runtime.coding = Some(config.clone());
     let mut definition = runtime.configured_definition().unwrap();
     definition.models = models.into_iter().filter(|(step, _)| step == "build").collect(); // The scratch definition has no gate-0.
@@ -570,7 +630,7 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
     // As the live adapter stands, with no Codex hooks pinned, the runtime can't launch a Codex model, and refuses the definition.
     let mut bare = config.clone();
-    if let CodingHarness::Native { project_hooks, .. } = &mut bare.harness { *project_hooks = None; }
+    if let CodingHarness::Native { codex_hooks, .. } = &mut bare.harness { *codex_hooks = None; }
     runtime.coding = Some(bare.clone());
     let mut bare_definition = runtime.configured_definition().unwrap();
     bare_definition.models = definition.models.clone();
@@ -578,18 +638,47 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
         mutation: m("publish-bare", 0, 1), expected_pin: None, definition: bare_definition });
     assert!(matches!(refusal, Err(Error::Refused("a listed model's harness isn't set up on this runtime"))), "{refusal:?}");
     runtime.coding = Some(config.clone());
-    let wire = |principal, action| runtime.wire_command("w", principal, action).unwrap();
-    let adapter = Some(Box::new(AdapterConfiguration::Coding(config)));
+    let adapter = Some(Box::new(AdapterConfiguration::Coding(config.clone())));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    ok(&wire("owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
+    ok(&runtime.wire_command("w", "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
+    assert!(!config.repository.join(".codex").exists(), "published with no hooks file in the repository");
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let held = &state.items["ov-7"];
-    let start = |model: &str, sequence| wire("orchestrator", Action::Start { mutation: m(&format!("start-{sequence}"), state.revision, sequence), item: "ov-7".into(),
-        run: held.run.clone(), pin: held.pin.clone(), start_pin: pin.clone(), models: [("build".to_string(), model.to_string())].into(), worktree: None, with: vec![] });
+    let start = |model: &str, sequence| runtime.wire_command("w", "orchestrator", Action::Start { mutation: m(&format!("start-{sequence}"), state.revision, sequence), item: "ov-7".into(),
+        run: held.run.clone(), pin: held.pin.clone(), start_pin: pin.clone(), models: [("build".to_string(), model.to_string())].into(), worktree: None, with: vec![] }).unwrap();
     let refused = start("codex:gpt-4", 2);
     assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");
     ok(&start("codex:gpt-6.1-sol", 3));
     assert_eq!(runtime.state("w").unwrap().unwrap().items["ov-7"].models["build"], "codex:gpt-6.1-sol");
+    // Provision, then the build: the engine copies the hooks into the worktree, and Codex launches with the model.
+    runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
+    let binding = admitted(&runtime).await;
+    assert_eq!(binding.effect.model.as_deref(), Some("codex:gpt-6.1-sol"));
+    let tree = runtime.tree(&binding);
+    runtime.install_codex_hooks(&binding, &tree).await.unwrap();
+    assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), crate::hook_install::merge_codex("", &host));
+    let launch = runtime.coding_command(&binding).unwrap().argv[2].clone();
+    assert!(launch.contains("codex") && launch.contains("--model gpt-6.1-sol"), "{launch}");
+}
+/// The bundle at `FARCOOLER_OV1087_BUNDLE`, read as `workspace set-workflow --file` reads it, with its JSON.
+fn ov1087_bundle() -> (serde_json::Value, Ov1087Bundle) {
+    let path = std::env::var("FARCOOLER_OV1087_BUNDLE").expect("FARCOOLER_OV1087_BUNDLE names the bundle file");
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let bundle: Ov1087Bundle = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&bundle).unwrap(), value, "the CLI refuses a bundle that doesn't round-trip");
+    (value, bundle)
+}
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct Ov1087Bundle { definition: farcooler_protocol::workflow_commands::Definition, adapter: Option<farcooler_protocol::workflow_config::AdapterConfiguration> }
+/// What a daemon with ov-1088 writes as `workflow-codex-hooks.json` beside Claude's engine settings at `claude`
+/// (`workflow_starter::engine_codex_hooks`): Codex's hooks reporting to the engine's socket, run by the same
+/// `farcooler` Claude's are. This test's own binary stands in for it, so its path is swapped for that one.
+fn live_codex_hooks(claude: &Path) -> String {
+    let binary = |text: &str| { let at = text.find(" hook --agent ").unwrap(); let start = text[..at].rfind("\"command\": \"").unwrap() + 12; text[start..at].to_string() };
+    let ours = crate::hook_install::merge_codex("", &claude.parent().unwrap().join("workflow/h.sock"));
+    let theirs = serde_json::to_string_pretty(&serde_json::from_slice::<serde_json::Value>(&std::fs::read(claude).unwrap()).unwrap()).unwrap();
+    ours.replace(&binary(&ours), &binary(&theirs))
 }
 fn live_process(live: &farcooler_protocol::workflow_config::CodingConfig) -> farcooler_protocol::workflow_config::CodingCommand {
     match &live.harness { farcooler_protocol::workflow_config::CodingHarness::Native { process, .. } => process.clone(), _ => unreachable!() }

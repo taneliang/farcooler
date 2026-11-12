@@ -1,0 +1,335 @@
+{
+ "adapter": {
+  "config": {
+   "base": "3f78754f936855710dfec920fe3d492f879b610d",
+   "checks": [
+    {
+     "argv": [
+      "/bin/sh",
+      "-c",
+      "scripts/landing-gate"
+     ],
+     "environment": {
+      "ANDROID_HOME": "/Users/e-liang/Library/Android/sdk",
+      "CARGO_BUILD_JOBS": "4",
+      "HEAVY_LOAD_LIMIT": "20",
+      "HOME": "/Users/e-liang",
+      "JAVA_HOME": "/opt/homebrew/opt/openjdk@17",
+      "PATH": "/opt/homebrew/bin:/Users/e-liang/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+     },
+     "timeout_ms": 10800000
+    }
+   ],
+   "ci": {
+    "command": {
+     "argv": [
+      "/bin/sh",
+      "-c",
+      "out=$(\"$CI_GH\" api \"repos/$CI_REPOSITORY/actions/runs?head_sha=$FARCOOLER_CANDIDATE&event=$CI_EVENT&per_page=50\" --jq '[.workflow_runs[] | select(.name == env.CI_WORKFLOW)] | max_by(.id) // empty | {binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}}') || exit 1\n[ -n \"$out\" ] || exit 1\nprintf '%s\\n' \"$out\" > \"$FARCOOLER_RECEIPT\""
+     ],
+     "environment": {
+      "CI_EVENT": "push",
+      "CI_GH": "/opt/homebrew/bin/gh",
+      "CI_REPOSITORY": "taneliang/farcooler",
+      "CI_WORKFLOW": "CI",
+      "HOME": "/Users/e-liang",
+      "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/Users/e-liang/.cargo/bin"
+     },
+     "timeout_ms": 120000
+    },
+    "event": "push",
+    "repository": "taneliang/farcooler",
+    "workflow": "CI"
+   },
+   "harness": {
+    "Native": {
+     "codex_hooks": {
+      "digest": "wf1:2b8957b0ae8c657426f4951a73c5ce271b81d3670597906f82ac5c21041253e2",
+      "path": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow-codex-hooks.json"
+     },
+     "plugin_dir": null,
+     "preset": "claude",
+     "process": {
+      "argv": [],
+      "environment": {
+       "HOME": "/Users/e-liang",
+       "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/Users/e-liang/.local/bin:/Users/e-liang/.cargo/bin"
+      },
+      "timeout_ms": 10800000
+     },
+     "project_hooks": null,
+     "prompt": "Work this ticket to its acceptance items and within its constraints. Run the tests your change can affect. Commit your work on this branch, with a message that names the ticket, then end your turn.",
+     "settings": {
+      "digest": "wf1:71c940a353627bea46c91ad7cc00d14bc4b15a976abfbc4054402715b2097941",
+      "path": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow-claude-hooks.json"
+     }
+    }
+   },
+   "landing": {
+    "config_digest": "",
+    "job": "landing-main",
+    "repository": "ssh://git@github.com/taneliang/farcooler.git",
+    "target": "refs/heads/main"
+   },
+   "landing_ref": "refs/heads/main",
+   "repository": "/Users/e-liang/Dev/overnight",
+   "reviewer": null
+  },
+  "version": "coding/v1"
+ },
+ "definition": {
+  "groups": {
+   "landing": {
+    "exclusive": "wf1:56ecfe65962e6f7819367ba4aec32310c64b305032b8e642c09bc657364f6156",
+    "limit": 8,
+    "steps": [
+     {
+      "id": "base",
+      "kind": "AwaitBase",
+      "max_attempts": 5,
+      "operation": {
+       "adapter_version": "coding-await-base/v1",
+       "arguments": [
+        "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+        "green",
+        "60000",
+        "10800000"
+       ],
+       "environment": {}
+      },
+      "progression": "Automatic",
+      "routes": {
+       "timeout": "Fail"
+      }
+     },
+     {
+      "id": "fold",
+      "kind": "Fold",
+      "limit": 3,
+      "max_attempts": 2,
+      "operation": {
+       "adapter_version": "coding-fold/v1",
+       "arguments": [
+        "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+        ""
+       ],
+       "environment": {}
+      },
+      "progression": "Automatic",
+      "routes": {
+       "conflict": {
+        "Split": {
+         "otherwise": "Fail",
+         "step": "base"
+        }
+       }
+      }
+     },
+     {
+      "id": "gate-0",
+      "kind": "Run",
+      "limit": 3,
+      "max_attempts": 2,
+      "operation": {
+       "adapter_version": "coding-gate/v1",
+       "arguments": [
+        "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+        "0"
+       ],
+       "environment": {}
+      },
+      "progression": "Automatic",
+      "routes": {
+       "rejected": {
+        "Split": {
+         "otherwise": "Fail",
+         "step": "base"
+        }
+       }
+      }
+     },
+     {
+      "id": "push",
+      "kind": "Push",
+      "limit": 2,
+      "max_attempts": 2,
+      "operation": {
+       "adapter_version": "coding-push/v1",
+       "arguments": [
+        "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+        "refs/heads/main"
+       ],
+       "environment": {}
+      },
+      "progression": "Automatic",
+      "routes": {
+       "base_moved": {
+        "Step": "base"
+       }
+      }
+     },
+     {
+      "id": "ci",
+      "kind": "AwaitCi",
+      "max_attempts": 5,
+      "operation": {
+       "adapter_version": "coding-await-ci/v1",
+       "arguments": [
+        "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+        "taneliang/farcooler",
+        "60000",
+        "10800000"
+       ],
+       "environment": {}
+      },
+      "progression": "Automatic"
+     }
+    ]
+   }
+  },
+  "max_reworks": 0,
+  "models": {
+   "build": [
+    "claude:sonnet",
+    "claude:opus",
+    "claude:haiku",
+    "codex:gpt-6.1-sol",
+    "codex:gpt-6.1-terra",
+    "codex:gpt-6.1-luna"
+   ],
+   "gate-0": [
+    "claude:opus",
+    "claude:sonnet",
+    "codex:gpt-6.1-sol",
+    "codex:gpt-6.1-terra",
+    "codex:gpt-6.1-luna"
+   ]
+  },
+  "rework_target": null,
+  "schema": 2,
+  "source": "landing/batched-push",
+  "stages": [
+   {
+    "id": "provision",
+    "kind": "Provision",
+    "max_attempts": 2,
+    "operation": {
+     "adapter_version": "coding-worktree/v1",
+     "arguments": [
+      "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+      ""
+     ],
+     "environment": {}
+    },
+    "progression": "Automatic"
+   },
+   {
+    "id": "build",
+    "kind": "Build",
+    "max_attempts": 2,
+    "operation": {
+     "adapter_version": "coding-harness/v1",
+     "arguments": [
+      "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+      ""
+     ],
+     "environment": {}
+    },
+    "progression": "Automatic"
+   },
+   {
+    "id": "gate-0",
+    "kind": {
+     "Review": "Agent"
+    },
+    "limit": 2,
+    "max_attempts": 2,
+    "operation": {
+     "adapter_version": "coding-review/v1",
+     "arguments": [
+      "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+      "agent"
+     ],
+     "environment": {}
+    },
+    "progression": "Automatic",
+    "routes": {
+     "rejected": {
+      "Step": "build"
+     }
+    }
+   },
+   {
+    "id": "route",
+    "kind": "Route",
+    "max_attempts": 2,
+    "operation": {
+     "adapter_version": "coding-route/v1",
+     "arguments": [
+      "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+      "{\"default\":\"push\",\"rules\":[[\"services/site/public/**\",\"ask\"]]}"
+     ],
+     "environment": {}
+    },
+    "progression": "Automatic",
+    "routes": {
+     "ask": {
+      "Step": "approve"
+     },
+     "push": {
+      "Step": "join"
+     }
+    }
+   },
+   {
+    "id": "approve",
+    "kind": {
+     "Review": {
+      "Person": "owner"
+     }
+    },
+    "limit": 2,
+    "max_attempts": 2,
+    "operation": {
+     "adapter_version": "coding-review/v1",
+     "arguments": [
+      "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+      "person:owner"
+     ],
+     "environment": {}
+    },
+    "progression": "Automatic",
+    "routes": {
+     "rejected": {
+      "Step": "build"
+     }
+    }
+   },
+   {
+    "id": "join",
+    "kind": {
+     "Join": {
+      "adopt": true,
+      "group": "landing"
+     }
+    },
+    "limit": 1,
+    "max_attempts": 1,
+    "operation": {
+     "adapter_version": "coding-join/v1",
+     "arguments": [
+      "wf1:0ee210a585927d33ef2ebee6e4c0ff3ea88ccb0a7e259dea2ec9aa92a3faf2ba",
+      "landing"
+     ],
+     "environment": {}
+    },
+    "progression": "Automatic",
+    "routes": {
+     "rejected": {
+      "Step": "build"
+     }
+    }
+   }
+  ]
+ }
+}
