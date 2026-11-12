@@ -92,11 +92,11 @@ impl Store {
         let Some(item) = state.items.values().find(|i| i.pending.as_deref() == Some(effect)) else {
             return Ok(None);
         };
-        if !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { return Ok(None); }
-        let generation: u64 = tx.query_row(
+        if item.deciding.is_none() && !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { return Ok(None); }
+        let generation: u64 = if item.deciding.is_some() { 0 } else { tx.query_row(
             "SELECT generation FROM workflow_resources WHERE resource = ?1 AND workspace = ?2 AND run = ?3 AND fence = ?4",
             params![item.resource, workspace, item.run, item.fence], |r| r.get(0),
-        )?;
+        )? };
         let n = tx.execute(
             "UPDATE workflow_outbox SET dispatch_state = 'claimed', lease_owner = ?3,
                 lease_generation = lease_generation + 1, lease_until = ?5, resource_generation = ?6
@@ -129,10 +129,11 @@ impl Store {
              AND lease_owner = ?3 AND lease_generation = ?4 AND lease_until > ?5
              AND resource_generation = ?6
              AND EXISTS (SELECT 1 FROM workflow_states s WHERE s.workspace = ?1 AND s.revision = ?7 AND s.epoch = ?8)
-             AND EXISTS (SELECT 1 FROM workflow_resources r WHERE r.workspace = ?1 AND r.generation = ?6
+             AND ((?6 = 0 AND json_type(workflow_outbox.payload, '$.kind.Decide') = 'object')
+                OR EXISTS (SELECT 1 FROM workflow_resources r WHERE r.workspace = ?1 AND r.generation = ?6
                  AND r.resource = json_extract(workflow_outbox.payload, '$.resource')
                  AND r.run = json_extract(workflow_outbox.payload, '$.run')
-                 AND r.fence = json_extract(workflow_outbox.payload, '$.fence'))",
+                 AND r.fence = json_extract(workflow_outbox.payload, '$.fence')))",
             params![claim.workspace, claim.effect, claim.owner, claim.lease_generation, now_ms,
                 claim.resource_generation, claim.revision, claim.epoch],
         )?;

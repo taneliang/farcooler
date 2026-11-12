@@ -2,6 +2,11 @@ use crate::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
+    step_inner(state, input, false)
+}
+#[path = "hook_reducer.rs"]
+mod hook_reducer;
+fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Transition, Refusal> {
     if !valid_state(state) { return Err(Refusal::Invalid); }
     if input.schema != 1 || state.schema != 1 || !valid_id(&input.id)
         || !valid_id(&input.source) || !valid_id(&input.workspace)
@@ -14,6 +19,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
         || input.expected_revision != state.revision
         || input.source_sequence <= *state.source_sequences.get(&input.source).unwrap_or(&0)
     { return Err(Refusal::Stale); }
+    if matches!(input.command, Command::Decide { .. }) { return hook_reducer::decide(state, input); }
     let mut next = state.clone();
     let mut effects = Vec::new();
     // Halves a group split off this step: (group it came from, members that form the new group).
@@ -45,7 +51,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
@@ -71,7 +77,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
@@ -85,9 +91,17 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 | Command::Queue { item } | Command::Leave { item }
                 | Command::Move { item, .. } | Command::Start { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } => item,
-                Command::Enqueue { .. } | Command::Advance | Command::Reopen { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::Reopen { .. } => unreachable!(),
             };
             let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
+            // Manual moves supersede a read-only decision without needing to stop an operation.
+            if item.deciding.is_some() {
+                if matches!(command, Command::Observe { .. } | Command::Resolve { .. }) { return Err(Refusal::Stale); }
+                item.deciding = None; item.pending = None;
+            }
+            if !settling_hook && hook_reducer::ci(&mut item, id, input, &mut effects)? {
+                next.items.insert(id.clone(), item);
+            } else {
             match command {
                 Command::Approve { run, pin, candidate, .. } => {
                     if item.phase != Phase::WaitingApproval { return Err(Refusal::Phase); }
@@ -180,6 +194,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 route(&mut item, id, input, label, Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                             }
                         }
+                        Outcome::Hook(_) => return Err(Refusal::Invalid),
                         Outcome::Uncertain => { item.phase = Phase::Uncertain; }
                         Outcome::Stopped { operation, receipt } => {
                             // A stop receipt is only valid for the cancellation operation, never execution.
@@ -312,7 +327,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, cancel_reason: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -385,6 +400,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     // The run begins from nothing, under the same name; the sweep below starts it once it is ready.
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     item.pin = definition.pin(); item.definition = definition.clone();
+                    item.hook_calls.clear(); item.hook_refused = None;
                     item.policy_pin = policy_pin.clone(); item.resource = resource.clone(); item.dependencies = dependencies.clone();
                     item.candidate = initial_candidate.clone(); item.stage = 0; item.iteration = 0; item.attempt = 1;
                     item.phase = Phase::Blocked; item.run = String::new(); item.pending = None; item.last_evidence = None;
@@ -430,7 +446,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     item.phase = Phase::Blocked; item.run = String::new();
                 }
-                Command::Enqueue { .. } | Command::Advance | Command::Reopen { .. } => unreachable!(),
+                Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::Reopen { .. } => unreachable!(),
             }
             next.items.insert(id.clone(), item);
             for (from, members) in spawn.drain(..) {
@@ -446,10 +462,13 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 rest.phase = Phase::Blocked; rest.run = String::new(); rest.pending = None; rest.candidate = None;
                 rest.last_evidence = None; rest.stopping = None; rest.rework_history = Vec::new();
                 rest.back_edges = BTreeMap::new(); rest.retries = 0;
+                crate::hooks::fire(&mut rest, &gid, input, HookPoint::GroupSplits, None, &mut effects);
                 next.items.insert(gid, rest);
+            }
             }
         }
     }
+    hook_reducer::failed(state, &mut next, input, &mut effects);
     // A failed run stays: cancelling it is the controller's way off the needs-you list.
     // An item that was already finished before this step leaves live state now, so its final
     // phase has been seen by the board and the notices before it goes. The event log keeps all of it.
@@ -466,7 +485,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     }
     // A group that ended hands each member its result, through the member's own join routes.
     let ended: Vec<String> = next.items.iter().filter(|(_, g)| g.group_of.is_some() && !g.members.is_empty()
-        && matches!(g.phase, Phase::Done | Phase::Failed | Phase::Cancelled)).map(|(gid, _)| gid.clone()).collect();
+        && g.deciding.is_none() && matches!(g.phase, Phase::Done | Phase::Failed | Phase::Cancelled)).map(|(gid, _)| gid.clone()).collect();
     for gid in ended {
         let group = next.items.get_mut(&gid).ok_or(Refusal::Missing)?;
         // Once the push landed the members' commits are on the target: the result is `landed`, never
@@ -539,6 +558,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             return Err(Refusal::SendBackRefused(reason.into()));
         }
     }
+    // A group result can fail a member at its join, after the first failure pass.
+    hook_reducer::failed(state, &mut next, input, &mut effects);
     // A group says when it reached the step and phase it is in now.
     for (id, item) in next.items.iter_mut().filter(|(_, i)| i.group_of.is_some()) {
         if state.items.get(id).is_none_or(|old| old.stage != item.stage || old.phase != item.phase) {
@@ -548,6 +569,18 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     for (id, item) in &next.items {
         if state.items.get(id) != Some(item) {
             notices.push(format!("{id}:{:?}", item.phase));
+        }
+    }
+    // Waiting groups are facts of this exact firing revision, never a runtime lookup.
+    for effect in &mut effects {
+        if let EffectKind::Decide { input: document, .. } = &mut effect.kind {
+            let subject = next.items.get(&effect.item).ok_or(Refusal::Missing)?;
+            document.groups = next.items.iter().filter(|(id, g)| *id != &effect.item && g.group_of.is_some()
+                && g.group_of == subject.group_of && g.pin == subject.pin && g.resource == subject.resource)
+                .map(|(id, g)| HookGroup { item: id.clone(), phase: g.phase.clone(), stage: g.stage, members: g.members.clone() }).collect();
+            if let Some(call) = next.items.get_mut(&effect.item).and_then(|i| i.deciding.as_mut()) {
+                call.input = *document.clone();
+            }
         }
     }
     next.revision = next.revision.checked_add(1).ok_or(Refusal::Limit)?;
@@ -581,6 +614,7 @@ fn detach(next: &mut State, id: &str, item: &mut Item) -> Result<(), Refusal> {
     Ok(())
 }
 fn ready(state: &State, item: &Item, input: &Input) -> bool {
+    if item.deciding.is_some() { return false; }
     if input.busy_resources.contains(&item.resource) { return false; }
     item.dependencies.iter().all(|d| dependency_done(state, d))
         && !state.items.values().any(|i| owns_resource(i) && i.resource == item.resource)
@@ -629,8 +663,9 @@ pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, e
     let effect_id = digest(&("effect/v1", &input.workspace, &input.id, effects.len()));
     item.pending = Some(effect_id.clone());
     // A wait looked at again after a restart keeps its first deadline.
-    let created_ms = if is_wait(&item.definition.stages[item.stage].kind)
-        || item.definition.stages[item.stage].kind == StageKind::Push {
+    let created_ms = if !matches!(kind, EffectKind::Decide { .. })
+        && (is_wait(&item.definition.stages[item.stage].kind)
+            || item.definition.stages[item.stage].kind == StageKind::Push) {
         *item.wait_since.get_or_insert(input.now_ms)
     } else { input.now_ms };
     effects.push(Effect { id: effect_id, item: id.into(), run: item.run.clone(),

@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 
 mod adapters;
 mod process_logs;
+mod script_hooks;
 mod coding;
 mod coding_review_policy;
 mod service_owner;
@@ -611,7 +612,9 @@ impl Runtime {
                     let recovered = async {
                         let binding = Binding::new(workspace, &effect, stored.resource_generation
                             .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(workspace, &effect)?);
-                        if self.coding.is_some() {
+                        if matches!(effect.kind, EffectKind::Decide { .. }) {
+                            self.recover_hook(&binding, now_ms).map(Some)
+                        } else if self.coding.is_some() {
                             self.reconcile_coding(&binding).await.map(Some)
                         } else {
                             self.read_journal(&binding).map(|journal| journal.map(|j| j.outcome))
@@ -628,7 +631,7 @@ impl Runtime {
                     if self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", now_ms)? { *count += 1; }
                     continue;
                 }
-                if !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { continue; }
+                if item.deciding.is_none() && !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { continue; }
                 // A stop waits for the effect it stops to end; they must not touch one pane at once.
                 if let EffectKind::Stop { operation } = &effect.kind {
                     if running.iter().any(|j| &j.effect.id == operation && &j.workspace == workspace) { continue; }
@@ -654,6 +657,7 @@ impl Runtime {
                 // or a new repository lock. A fresh launch still validates all of them.
                 let prepared = async {
                     selected?;
+                    if matches!(effect.kind, EffectKind::Decide { .. }) { return self.item_base(workspace, &effect); }
                     if matches!(effect.kind, EffectKind::Stop { .. }) {
                         return self.item_base(workspace, &effect);
                     }
@@ -696,7 +700,8 @@ impl Runtime {
                     let process = exec.coding.is_some() && matches!(run_binding.effect.kind,
                         EffectKind::Execute(StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(Reviewer::Agent)));
                     if !process { activity.session.store(true, std::sync::atomic::Ordering::SeqCst); }
-                    if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
+                    if matches!(run_binding.effect.kind, EffectKind::Decide { .. }) { exec.execute_hook(&run_binding, Some(cancelled)).await }
+                    else if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 }))));
                 running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool });
@@ -727,7 +732,11 @@ impl Runtime {
     fn write_result(&self, workspace: &str, effect: &Effect, outcome: Outcome, resolving: bool, now_ms: i64)
         -> Result<std::result::Result<(), Refusal>>
     {
-        let command = if resolving {
+        let command = if let EffectKind::Decide { input, .. } = &effect.kind {
+            let result = match outcome { Outcome::Hook(result) => result, _ => HookResult::Missing };
+            Command::Decide { item: effect.item.clone(), call: input.call.clone(), fence: effect.fence,
+                policy_pin: effect.policy_pin.clone(), result }
+        } else if resolving {
             Command::Resolve { item: effect.item.clone(), effect: effect.id.clone(), run: effect.run.clone(),
                 fence: effect.fence, outcome }
         } else {
@@ -920,3 +929,6 @@ mod send_back_tests;
 mod fold_trees_tests;
 #[cfg(test)]
 mod main_bundle_tests;
+
+#[cfg(test)]
+mod script_hooks_tests;

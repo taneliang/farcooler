@@ -7,6 +7,8 @@ mod ci;
 pub use ci::*;
 mod execution;
 pub use execution::*;
+pub mod hooks;
+pub use hooks::*;
 pub mod templates;
 pub use definition::*;
 pub use reducer::*;

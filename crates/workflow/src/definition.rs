@@ -118,6 +118,9 @@ pub struct Definition {
     /// Built-in engine rules, pinned with the definition (ov-1113).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub policies: BTreeMap<String, CiPolicy>,
+    /// Pinned, read-only decision scripts at rare engine points (ov-1114).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub script_policies: BTreeMap<String, crate::ScriptPolicy>,
 }
 impl Definition {
     pub fn validate(&self) -> Result<(), Refusal> { self.check(false) }
@@ -127,7 +130,7 @@ impl Definition {
     pub fn group_definition(&self, name: &str) -> Option<Definition> {
         let group = self.groups.get(name)?;
         Some(Definition { schema: 2, source: format!("group/{name}"), stages: group.steps.clone(),
-            max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: self.policies.iter().filter(|(_, p)| group.steps.iter().any(|s| s.id == p.step)).map(|(n,p)| (n.clone(),p.clone())).collect() })
+            max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: self.policies.iter().filter(|(_, p)| group.steps.iter().any(|s| s.id == p.step)).map(|(n,p)| (n.clone(),p.clone())).collect() , script_policies: self.script_policies.clone() })
     }
     /// Every principal a step waits on, a group's steps included, in step order, each once (ov-1002): an
     /// approval step's, and a person's or the orchestrator's review gate's.
@@ -151,6 +154,7 @@ impl Definition {
             || self.stages.is_empty() || self.stages.len() > 16 || self.max_reworks > 2
             || self.send_backs.is_some_and(|n| n > MAX_SEND_BACKS)
         { return Err(Refusal::Definition); }
+        crate::hooks::validate_policies(&self.script_policies)?;
         self.validate_models()?;
         self.validate_ci_policies()?;
         let mut candidate_available = matches!(self.stages[0].kind, StageKind::Tracker);
@@ -403,7 +407,7 @@ impl Definition {
     pub fn coding() -> Self {
         let kinds = [StageKind::Provision, StageKind::Build, StageKind::Check,
             StageKind::Review(Reviewer::Dispatch), StageKind::Land, StageKind::Ci];
-        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: Default::default(),
+        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), policies: Default::default(),
             stages: kinds.into_iter().enumerate().map(|(i, kind)| Stage {
                 id: format!("stage-{i}"), kind, progression: Progression::Automatic,
                 max_attempts: 2, routes: BTreeMap::new(), limit: 0,
@@ -422,7 +426,7 @@ impl Definition {
             progression: Progression::AwaitApproval { principal: "orchestrator".into() },
             max_attempts: 1, routes: BTreeMap::new(), limit: 0,
             operation: OperationSpec { adapter_version: "tracker/v1".into(), arguments: vec![], environment: BTreeMap::new() } };
-        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: Default::default(),
+        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), policies: Default::default(),
             stages: TICKET_COLUMNS.iter().cycle().skip(start).take(TICKET_COLUMNS.len()).map(|id| stage(id)).collect() })
     }
     /// Whether this is the tracker-only template: a ticket with no run, moved by column.
@@ -430,7 +434,7 @@ impl Definition {
         self.source == TICKET_SOURCE && self.stages.iter().all(|s| s.kind == StageKind::Tracker)
     }
     pub fn tracker(principal: &str) -> Self {
-        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: Default::default(),
+        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), policies: Default::default(),
             stages: vec![Stage { id: "checklist".into(), kind: StageKind::Tracker,
                 progression: Progression::AwaitApproval { principal: principal.into() },
                 max_attempts: 1, routes: BTreeMap::new(), limit: 0,

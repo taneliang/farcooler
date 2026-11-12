@@ -252,7 +252,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: O
         let target=match &input.command {
             Command::Enqueue {resource,..} | Command::Start {resource,..} | Command::Reopen {resource,..} => Some(resource.as_str()),
             Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
-                |Command::SendBack {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
+                |Command::Decide {item,..}|Command::SendBack {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::Advance => None,
         };
         // A Start takes its followers with it (ov-970), so their quarantine holds it back as the lead's does.
@@ -279,6 +279,13 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: O
                 } else { "admitted" };
                 if status.as_deref() != Some(required) { result = Err(Refusal::Phase); }
             }
+        }
+        if result.is_ok() && let Command::Decide { item, .. } = &input.command {
+            let effect = state.items.get(item).and_then(|i| i.pending.as_ref());
+            let status: Option<String> = tx.query_row(
+                "SELECT dispatch_state FROM workflow_outbox WHERE workspace=?1 AND id=?2",
+                params![input.workspace, effect], |r| r.get(0)).optional()?;
+            if status.as_deref() != Some("admitted") { result = Err(Refusal::Phase); }
         }
         if let Ok(transition) = &result {
             for item in transition.state.items.values().filter(|i| owns_resource(i)) {

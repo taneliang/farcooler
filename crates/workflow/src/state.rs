@@ -101,7 +101,7 @@ pub struct Item {
     pub failure: Option<String>,
     /// Reruns spent on each CI step. Spent before dispatch and never refunded by a restart or Retry.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub ci_reruns: BTreeMap<String, u8>,
+    pub deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap<String, u8>,
     /// The run being rerun, then watched at a strictly newer attempt on the same commit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ci_retry: Option<CiRetry>,
@@ -200,6 +200,7 @@ pub struct Input {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Command {
+    Decide { item: String, call: String, fence: u64, policy_pin: String, result: crate::HookResult },
     Advance,
     Enqueue { item: String, definition: Definition, policy_pin: String,
         resource: String, dependencies: BTreeSet<String>, initial_candidate: Option<String> },
@@ -243,6 +244,7 @@ pub struct Evidence {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Outcome {
+    Hook(crate::HookResult),
     /// CI facts are authenticated operation input, so the pure rule sees the same facts on replay.
     CiResult { label: String, evidence: Evidence, run: Option<CiRun> },
     /// A fold receipt carries conflict paths into the next build, including after recovery.
@@ -252,7 +254,7 @@ pub enum Outcome {
     SafeFailureBecause(String),
     Interrupted, Uncertain, Stopped { operation: String, receipt: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum EffectKind { Execute(StageKind), Stop { operation: String } }
+pub enum EffectKind { Decide { policy: crate::ScriptPolicy, input: Box<crate::HookInput> }, Execute(StageKind), Stop { operation: String } }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Effect {
     pub id: String,
