@@ -2,6 +2,24 @@
 
 Status: diagnostic change; neither acceptance item is complete yet.
 
+## Follow-up on Nov 12
+
+Re-read ov-1096 and ov-1101 and queried the five most recent Nightly runs.
+The latest is still Nov 11's run 43080833359 at commit
+`57aece5574271f744cc4473e9e3f611a31df3805`; it predates this branch's diagnostic
+commit `b484be421`. There is no newer CI child-frame log to analyze yet.
+The diagnostic must first run on CI before acceptance item 1 can be established;
+acceptance item 2 also requires a subsequent nightly result. Neither is satisfied
+by repeating the successful local test. No production layout or launch-harness
+change is justified by the available evidence.
+
+Re-ran all three methods that use `chatIsShown` through
+`scripts/ios-ui-tests.sh` on iPad Pro 11-inch (M5), iOS 27.0:
+**3 executed, 0 skipped, 0 failures**, including the rotation test. The fresh
+test result is `Test-FarCooler-2026.11.12_22-54-27-+0800.xcresult` (see the
+local recheck log at `/tmp/ov-1096-recheck.log` for the exact result path).
+The installed runtimes remain iOS 26.5, 27.0 and 27.1; CI's 27.2 is unavailable.
+
 ## Evidence
 
 - Read ov-1096 and ov-1101's intent through the Canary CLI.
