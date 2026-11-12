@@ -95,3 +95,21 @@ Fresh verification of this follow-up:
   the Apple card's required status); its final corrected regression passed
   separately as recorded above. The broader run is therefore not reported
   as green. No footer behavior was changed in this ticket.
+
+## Automated web narrow-width regression
+
+The web Plan browser check now also renders the shared landing queue golden
+without themes, line tickets, or pipeline agents. It checks that the workflow
+reaches the presenter and that the current Plan screen draws every group and
+complete line in the supplied order. At 320 px it checks actual text bounds,
+clipping, and nonzero group heights, with the work screen visible and the
+production Plan CSS applied.
+
+Fresh verification: the browser check passed, all 287 web unit tests passed,
+and both Rust queue golden/clock tests passed. Disabling the production queue
+render block made the browser regression fail for the missing Landings section
+and four missing groups; the source was restored afterward. File-size and diff
+whitespace checks passed. The initial sandbox-only Chrome launch and Rust
+dependency build failed; both passed with the local process/compiler access
+their setup requires. Native UI code was unchanged in this follow-up; its
+previous platform verification is recorded above.

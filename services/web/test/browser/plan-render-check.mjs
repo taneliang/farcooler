@@ -74,6 +74,40 @@ try {
     }
     await page.close()
   }
+// ov-1105: the current Plan renderer keeps a queue-only plan reachable and
+// wraps every supplied member/failure line at a narrow phone width.
+const page = await browser.newPage({ viewport: { width: 320, height: 800 } })
+ await page.setContent(html)
+ await page.waitForFunction(() => window.done === true)
+ await page.evaluate(() => { document.getElementById('plan').hidden = true })
+failures.push(...await page.evaluate(() => {
+  const out = []
+  const root = document.getElementById('landing-queue')
+  const golden = window.queueGolden
+  if (JSON.stringify(window.queueRequest.plan.workflow) !== JSON.stringify(golden.request.plan.workflow)) out.push('queue workflow did not reach the presenter')
+  if (root.querySelector('h2')?.textContent !== 'Landings') out.push('queue-only plan has no Landings section')
+  const cards = [...root.querySelectorAll('.plan-landing-group')]
+  if (cards.length !== golden.expected.length) out.push(`queue draws ${cards.length} groups`)
+  golden.expected.forEach((group, index) => {
+    const card = cards[index]
+    if (!card) return
+    if (card.getBoundingClientRect().height === 0) out.push(`${group.id}: group is hidden`)
+    if (card.dataset.testid !== `plan-landing-group-${group.id}` || card.querySelector('h3')?.textContent !== group.title) out.push(`queue group ${index} differs`)
+    const lines = [...card.querySelectorAll('p')]
+    if (JSON.stringify(lines.map(p => p.textContent)) !== JSON.stringify(group.lines)) out.push(`${group.id}: incomplete or reordered lines`)
+    for (const line of lines) {
+      const range = document.createRange()
+      range.selectNodeContents(line)
+      for (const rect of range.getClientRects()) {
+        if (rect.left < 0 || rect.right > innerWidth + 0.5) out.push(`${group.id}: line overflows at 320 px`)
+      }
+      if (line.scrollHeight > line.clientHeight) out.push(`${group.id}: line is clipped`)
+    }
+  })
+  if (document.documentElement.scrollWidth > innerWidth) out.push('queue overflows horizontally at 320 px')
+  return out
+}))
+await page.close()
 } finally { await browser.close() }
 if (failures.length) { console.error(failures.join('\n')); process.exit(1) }
 console.log('plan render check: golden and ov-895 membership, counts, activity and accessibility pass at 360 and 1440 px')
