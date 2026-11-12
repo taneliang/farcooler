@@ -102,14 +102,14 @@ waits on their approval; until it's published, work waits on the board. Plain
 terminals the owner opens for their own scripts are theirs and keep working as
 they always have: never route them through the engine or stop them.
 
-Each `workflow` write names the state it read. `<ws>` is the `id` that
-`--json workspace show` gives. Read `workflow get <ws> --json` before every
-write, since each write moves it, and pass `--revision` (its `state.revision`),
-`--epoch` (`state.epoch`), `--sequence` (one more than the largest value in
-`state.source_sequences`, or 1) and, for a ticket, `--run` and `--pin` (its
-`state.items.<key>.run` and `.pin`). `--command-id` is new for each write
-(`ov-7-start-1`); send one again only to retry a reply that was lost. A `Stale`
-refusal means read again and send with a new id.
+Each `workflow` write names the state it read. `<ws>` is the `id` that `--json workspace show` gives.
+Read `workflow get <ws> --json` before every write, since each write moves it, and pass `--revision`
+(its `state.revision`), `--epoch` (`state.epoch`), `--sequence` (one more than the largest value in
+`state.source_sequences`, or 1) and, for a ticket, `--run` and `--pin` (its `state.items.<key>.run` and
+`.pin`). `--command-id` is new for each write (`ov-7-start-1`); send one again only to retry a reply
+that was lost. A `Stale` refusal means read again and send with a new id. Rebuild with fresh revision,
+epoch, sequence, run, pin and any start pin or review evidence. Try at most five times total; if still
+stale, report it and wait for the next check-in. Inspect other refusals before retrying.
 
 1. **Track.** A card made on a published board is tracked by itself, at rest;
    `workflow track <ws> <key> --column todo` brings one that isn't, and `workflow

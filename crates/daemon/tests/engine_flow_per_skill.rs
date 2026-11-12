@@ -164,6 +164,21 @@ fn at(got: &serde_json::Value, id: &str) -> Mutation {
     Mutation { id: id.into(), revision: got["state"]["revision"].as_u64().unwrap(), epoch: got["state"]["epoch"].as_u64().unwrap(), sequence }
 }
 fn ok(receipt: &serde_json::Value) { assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}"); }
+/// Follow section 3: only Stale is retried, after reading all bindings again and choosing a new id.
+/// A refused id has a durable receipt, so replaying it cannot make progress.
+async fn write(link: &mut Link, ws: Uuid, out: &str, id: &str, mut got: serde_json::Value,
+    build: impl Fn(&serde_json::Value, Mutation) -> Action) {
+    for attempt in 1..=5 {
+        let receipt = call(link, ws, build(&got, at(&got, &format!("{id}-{attempt}")))).await;
+        if receipt.pointer("/receipt/result/Err").and_then(|v| v.as_str()) != Some("Stale") {
+            ok(&receipt);
+            return;
+        }
+        log(out, &format!("stale {id}-{attempt}"));
+        assert!(attempt < 5, "{id} stayed Stale after {attempt} attempts: {receipt}");
+        got = call(link, ws, Action::Get).await;
+    }
+}
 async fn waits_for(link: &mut Link, ws: Uuid, key: &str, what: &str, done: impl Fn(Option<&serde_json::Value>, &serde_json::Value) -> bool) -> serde_json::Value {
     for _ in 0..900 {
         let got = call(link, ws, Action::Get).await;
@@ -214,41 +229,57 @@ async fn the_orchestrator_pane_runs_the_skills_commands() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         got = call(&mut link, ws, Action::Get).await;
     }
-    let start_pin = got["configuration"]["pin"].as_str().expect("the owner's approval never published").to_string();
+    assert!(got["configuration"]["pin"].is_string(), "the owner's approval never published");
     log(&out, "published");
 
     // Section 3: a card made on a published board is tracked by itself. Move it, start it, review it, queue it.
     let item = &got["state"]["items"][&key];
     assert_eq!(item["definition"]["source"], "ticket/v1", "tracked and at rest: {got}");
     command(&skill, "move", &["--to", "--run", "--pin", "--command-id", "--revision", "--epoch", "--sequence"]);
-    ok(&call(&mut link, ws, Action::Move { mutation: at(&got, "move-1"), item: key.clone(),
-        run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into(), to: "todo".into() }).await);
+    // ov-1124: force another write between the read above and the intended move.
+    // The next command must encounter Stale, regardless of machine scheduling.
+    write(&mut link, ws, &out, "intervening-move", got.clone(), |fresh, mutation| {
+        let item = &fresh["state"]["items"][&key];
+        Action::Move { mutation, item: key.clone(), run: item["run"].as_str().unwrap().into(),
+            pin: item["pin"].as_str().unwrap().into(), to: "doing".into() }
+    }).await;
+    write(&mut link, ws, &out, "move", got, |fresh, mutation| {
+        let item = &fresh["state"]["items"][&key];
+        Action::Move { mutation, item: key.clone(), run: item["run"].as_str().unwrap().into(),
+            pin: item["pin"].as_str().unwrap().into(), to: "todo".into() }
+    }).await;
     log(&out, "workflow move");
 
     let got = call(&mut link, ws, Action::Get).await;
-    let item = &got["state"]["items"][&key];
     command(&skill, "start", &["--start-pin", "--run", "--pin", "--worktree", "--branch", "--command-id", "--revision", "--epoch", "--sequence"]);
-    ok(&call(&mut link, ws, Action::Start { mutation: at(&got, "start-1"), item: key.clone(),
-        run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into(), start_pin,
-        models: Default::default(), with: vec![],
-        worktree: Some(farcooler_protocol::workflow_commands::NamedTree { name: format!("{key}-result-file"), branch: format!("{key}-result-file"), adopt: false }) }).await);
+    write(&mut link, ws, &out, "start", got, |fresh, mutation| {
+        let item = &fresh["state"]["items"][&key];
+        Action::Start { mutation, item: key.clone(),
+            run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into(), start_pin: fresh["configuration"]["pin"].as_str().unwrap().into(),
+            models: Default::default(), with: vec![],
+            worktree: Some(farcooler_protocol::workflow_commands::NamedTree { name: format!("{key}-result-file"), branch: format!("{key}-result-file"), adopt: false }) }
+    }).await;
     log(&out, "workflow start");
 
     // The engine builds and gates; the run waits at the orchestrator's gate for a verdict on the evidence `get` shows.
     let got = waits_for(&mut link, ws, &key, "the review", |i, _| i.is_some_and(|i| i["phase"] == "WaitingReview")).await;
-    let item = &got["state"]["items"][&key];
     command(&skill, "review", &["--run", "--pin", "--passed", "--evidence", "--command-id", "--revision", "--epoch", "--sequence"]);
-    ok(&call(&mut link, ws, Action::Review { mutation: at(&got, "review-1"), item: key.clone(),
-        run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into(),
-        evidence: serde_json::from_value(item["last_evidence"].clone()).expect("last_evidence is what get gives"), passed: true, reason: None }).await);
+    write(&mut link, ws, &out, "review", got, |fresh, mutation| {
+        let item = &fresh["state"]["items"][&key];
+        Action::Review { mutation, item: key.clone(),
+            run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into(),
+            evidence: serde_json::from_value(item["last_evidence"].clone()).expect("last_evidence is what get gives"), passed: true, reason: None }
+    }).await;
     log(&out, "workflow review");
 
     // After the last gate the ticket waits to be queued into the landing group; then the engine lands it.
     let got = waits_for(&mut link, ws, &key, "the landing group", |i, _| i.is_some_and(|i| i["phase"] == "WaitingJoin")).await;
-    let item = &got["state"]["items"][&key];
     command(&skill, "queue", &["--run", "--pin", "--command-id", "--revision", "--epoch", "--sequence"]);
-    ok(&call(&mut link, ws, Action::Queue { mutation: at(&got, "queue-1"), item: key.clone(),
-        run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into() }).await);
+    write(&mut link, ws, &out, "queue", got, |fresh, mutation| {
+        let item = &fresh["state"]["items"][&key];
+        Action::Queue { mutation, item: key.clone(),
+            run: item["run"].as_str().unwrap().into(), pin: item["pin"].as_str().unwrap().into() }
+    }).await;
     log(&out, "workflow queue");
     waits_for(&mut link, ws, &key, "landed", |i, g| i.map_or(g["state"]["archive"].get(&key).is_some(), |i| i["phase"] == "Done")).await;
     log(&out, "landed");
@@ -309,7 +340,7 @@ async fn a_ticket_goes_from_draft_to_landed_on_the_commands_the_skill_teaches() 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert!(said("landed"), "the orchestrator stopped short: {:?}\n{}", std::fs::read_to_string(&out), pane_log());
-    for step in ["proposed", "published", "workflow move", "workflow start", "workflow review", "workflow queue"] { assert!(said(step), "{step} never ran"); }
+    for step in ["proposed", "published", "stale move-1", "workflow move", "workflow start", "workflow review", "workflow queue"] { assert!(said(step), "{step} never ran"); }
     let landed = git(&bare, &["rev-parse", "refs/heads/main"]).await;
     assert_ne!(landed, landed_before, "the engine pushed the ticket's commit to the landing repository");
     assert_eq!(git(&bare, &["show", "refs/heads/main:result.txt"]).await, "built");
