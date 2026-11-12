@@ -4,6 +4,15 @@ Measured at source `d986f3083730db7cda3b91caf5e536ba321b7c1e`, 12 November 2026.
 This commit contains research and captured evidence only. No product, profile,
 test inventory, gate or CI behavior changes.
 
+**13 November resume:** [fresh local results](resume-local/summary.md) now include
+another cold/warm Cargo timing pair and a completed 6,928-test local nextest run
+at sampled load below 20 (6,916 passed, 12 failed). The fresh full landing gate
+was interrupted after 464.77 s when load reached 21.37 / 11.70 / 8.65. Its
+completed-step timings are retained, but acceptance 1's complete controlled
+full-gate baseline remains blocked. Earlier sections below retain the original
+research and historical evidence; the resume results supersede their statement
+that no local test execution completed.
+
 ## Findings and recommendation
 
 A fresh default workspace build costs **152.61 s**, while the unchanged warm
@@ -304,3 +313,50 @@ each must fail validation. This protects the distinction between a blocked
 measurement and a passing baseline. The evidence validator, these
 counterexamples, file-size budget, doc-comment check and `git diff --check`
 passed. No product or CI behavior changed.
+
+## Controlled resume, 13 November 2026, 00:57–01:21 Singapore
+
+Read `farcooler task show ov-1110` using the installed Canary CLI. Its latest
+review request leaves acceptance 1 open and permits recording a renewed load
+blocker. Initial `uptime` was 4.50 / 5.25 / 9.42, below 20. The
+[capture driver](resume-measure.py) took the machine-wide lock and checked all
+three averages immediately before each command, waiting in 30-second loops
+when necessary. None of these four command preflights needed to wait. The
+driver sampled every two seconds throughout execution. It used a previously
+nonexistent isolated target, three compile jobs, no dev debug info, the existing
+nextest CI resource groups with three test threads, and both leak wrappers.
+
+The [new summary](resume-local/summary.md) includes the fresh longest compile
+units, slowest 20 local Rust tests, all 12 failed tests, and completed gate-step
+totals by job. Cold build: 146.62 s outer wall, exit 0; warm: 2.00 s outer wall,
+exit 0, with Cargo itself reporting 0.31 s. The outer timer polls at two-second
+intervals, adding up to two seconds of observation latency; do not interpret
+the warm outer time as compilation work. Original Cargo HTML reports are in
+[cold-timing.zip](resume-local/cold-timing.zip) and
+[warm-timing.zip](resume-local/warm-timing.zip).
+
+The nextest command finished all 6,928 tests at sampled load below 20 in
+811.51 s outer wall: Cargo reports 1m47s compilation and nextest 700.841 s
+execution. Its result is **6,916 passed, 12 failed, 33 skipped**, exit 100;
+it is a completed timing observation, not a passing baseline. Failures include
+hook verdict assertions and permission/held-hook integration tests. This spike
+does not change product tests or attribute those failures to a proven cause.
+Both leak wrappers completed; the temp/preferences wrapper reported no leftovers.
+
+The full planned landing-gate command started at 01:13:10 Singapore. Wire,
+doc-comments, relay and tunnel completed; Rust completed workspace/feature
+clippy checks before interruption in the Linux musl cross-target cargo check.
+At **01:20:55 Singapore**, the monitor sampled **21.372 / 11.699 / 8.653** and
+sent SIGINT only to its own newly created process group. It exited 130 after
+464.77 s. No unrelated process was signaled. The blocker and exact timestamps
+are in [results.json](resume-local/results.json); the load later rose to
+35.78 / 16.55 / 10.56. This is an incomplete gate attempt, not full gate latency.
+Swift tests, Mac bundle, iOS, Android and web were not reached. Acceptance 1
+therefore still needs a quiet full-gate run; the new local top-20 test evidence
+and fresh build pair no longer depend on the interrupted earlier nextest run.
+
+[logs.zip](resume-local/logs.zip) preserves the four command logs, including
+the interrupted gate's per-step summary and full nextest durations/failures.
+[gate-step-logs.zip](resume-local/gate-step-logs.zip) preserves the gate's own
+step logs. Reproduce the local summary with `python3 reports/ov-1110/resume-summary.py`.
+No product or CI behavior changed.

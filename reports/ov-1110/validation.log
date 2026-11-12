@@ -2,15 +2,10 @@ PASS: tables regenerate byte-for-byte from captured receipts
 PASS: cold/warm builds exited 0; warm units all fresh/zero-time; sampled load below 20
 PASS: both full-gate preflights remained above the load limit; neither is a gate result
 PASS: failed/interrupted nextest attempts remain excluded from passing baselines
+PASS: resumed build/test observations and blocked gate remain distinct; local top-20 regenerates
 PASS: five CI run IDs and source SHAs match requested runs
 PASS: top-20 observed and Rust rows match timestamped raw extracts
 PASS: historical gate copy matches original receipt hash
 PASS: four follow-up creation receipts have backlog status and acceptance
 PASS: removing Android receipts makes analyzer fail, not report zero cost
 PASS: relative report links resolve
-PASS: green decision accepted by previous validator and rejected by updated validator
-PASS: under-limit sample accepted by previous validator and rejected by updated validator
-PASS: green interrupted test accepted by previous validator and rejected by updated validator
-PASS: /Applications/Xcode.app/Contents/Developer/usr/bin/python3 scripts/file-size-budget.py
-PASS: /Applications/Xcode.app/Contents/Developer/usr/bin/python3 scripts/doc-comment-check.py --base d986f3083730db7cda3b91caf5e536ba321b7c1e --head HEAD
-PASS: git diff --check

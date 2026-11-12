@@ -45,6 +45,36 @@ for name, code in [('test-preflight-failure.json', 126), ('test-results.json', 2
     attempt = json.loads((root / name).read_text())
     assert len(attempt['runs']) == 1 and attempt['runs'][0]['exit'] == code
 print('PASS: failed/interrupted nextest attempts remain excluded from passing baselines')
+local = root / 'resume-local'
+resumed = json.loads((local / 'results.json').read_text())
+assert not resumed['cold_target_existed']
+assert resumed['limit'] == 20
+assert [r['label'] for r in resumed['runs']] == ['cold', 'warm', 'nextest', 'landing-gate']
+assert [r['exit'] for r in resumed['runs']] == [0, 0, 100, 130]
+assert [r['controlled'] for r in resumed['runs']] == [True, True, True, False]
+for run in resumed['runs']:
+    assert max(run['preflight'][-1]['load_1_5_15']) < 20
+    assert run['seconds'] > 0 and run['samples']
+    if run['controlled']:
+        assert all(max(s['load_1_5_15']) < 20 for s in run['samples'] + [run['end']])
+    else:
+        assert max(run['blocker']['load_1_5_15']) >= 20
+        assert run['blocker'] == run['samples'][-1]
+for name in ['cold', 'warm']:
+    with zipfile.ZipFile(local / f'{name}-timing.zip') as archive:
+        units = json.loads(re.search(r'const UNIT_DATA = (\[.*?\]);', archive.read(f'{name}-timing.html').decode(), re.S)[1])
+    assert len(units) > 400 if name == 'cold' else all(u['duration'] == 0 for u in units)
+rendered = subprocess.run([sys.executable, str(root / 'resume-summary.py')], capture_output=True, text=True, check=True)
+assert rendered.stdout == (local / 'summary.md').read_text()
+with zipfile.ZipFile(local / 'logs.zip') as archive:
+    assert set(archive.namelist()) == {'cold.log', 'warm.log', 'nextest.log', 'landing-gate.log'}
+    assert '6928 tests run: 6916 passed, 12 failed, 33 skipped' in archive.read('nextest.log').decode()
+    gate = archive.read('landing-gate.log').decode()
+    assert 'FAIL: KeyboardInterrupt' in gate and 'landing-gate: FAIL (exit 130)' in gate
+with zipfile.ZipFile(local / 'gate-step-logs.zip') as archive:
+    assert len(archive.namelist()) == 73
+    assert archive.testzip() is None
+print('PASS: resumed build/test observations and blocked gate remain distinct; local top-20 regenerates')
 for ref in json.loads((root / 'ci-runs.json').read_text()):
     run = json.loads((root / f"ci-{ref['databaseId']}.json").read_text())
     assert run['headSha'] == ref['headSha'] and str(ref['databaseId']) in run['url']
