@@ -208,6 +208,11 @@ final class PadWorkspaceUITests: XCTestCase {
         layout(app, is: "threeColumns", "landscape again")
         XCTAssertTrue(chatIsShown(app), "the chat went turning back to landscape")
         XCTAssertEqual(mount.value as? String, before, "turning back built the chat again")
+        // The resized glass strip still owns a working context menu (ov-1096).
+        app.buttons["agents-card"].press(forDuration: 1.2)
+        XCTAssertTrue(element(app, "agents-card-preview").waitForExistence(timeout: 10), "the resized Agents card has no preview")
+        app.buttons["Show All Agents"].firstMatch.tap()
+        XCTAssertTrue(element(app, "agents-sheet").waitForExistence(timeout: 15), "the resized Agents card didn't open its sheet")
     }
 
     /// **The chat survives the phone's layout and back**, crossing 700 points

@@ -32,9 +32,6 @@ struct WorkspaceCards: View {
     /// Draw Now/Next. An iPad's chat column has the plan beside it, and
     /// carries the Agents card alone, the row's width (ov-619 review).
     var showsPlan = true
-    /// Rebuild only the card's context-menu host when its column resizes.
-    /// iOS 27.2 otherwise keeps the host's pre-rotation accessibility width.
-    private let columnWidth: Double?
 
     @ObservedObject private var reads: PlanReads
     @Environment(\.phoneNavigator) private var navigator
@@ -52,12 +49,11 @@ struct WorkspaceCards: View {
     /// A line of the card's words at the reader's size, for its floor.
     @ScaledMetric(relativeTo: .subheadline) private var line: CGFloat = 20
 
-    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, showsPlan: Bool = true, columnWidth: Double? = nil) {
+    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, showsPlan: Bool = true) {
         self.connection = connection
         self.summary = summary
         self.place = place
         self.showsPlan = showsPlan
-        self.columnWidth = columnWidth
         reads = connection.plans
     }
 
@@ -272,10 +268,6 @@ struct WorkspaceCards: View {
         .accessibilityHint("Shows the agents")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("agents-card")
-        // The context-menu host caches its accessibility bounds on iOS 27.2
-        // (ov-1096). Give that host a fresh identity at the new column width;
-        // the conversation beside it keeps its session and mount.
-        .id(columnWidth)
     }
 }
 

@@ -208,7 +208,12 @@ struct WorkspaceScreen: View {
                 if !summary.isImplicit {
                     WorkspaceCards(
                         connection: connection, summary: summary, place: place,
-                        showsPlan: false, columnWidth: widths.chat)
+                        showsPlan: false)
+                        // Recreate the glass group and its namespace together
+                        // when the column resizes (ov-1096). Replacing only
+                        // the button leaves its old glass accessibility bounds
+                        // on iOS 27.2. The conversation stays mounted below.
+                        .id(widths.chat)
                         .padding(.top, Spacing.group)
                         .accessibilityHidden(sidebarUp)
                 }
