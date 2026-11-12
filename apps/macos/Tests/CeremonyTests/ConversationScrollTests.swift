@@ -7,15 +7,15 @@ import Testing
 @testable import Far_Cooler
 
 /// The image cache the scroll suites share, in a folder of its own that goes
-/// when the suite's instance does (ov-803). The folder is not left to
-/// `ScratchDirectory`'s exit sweep: a test that forgot to keep this would leave
-/// it for `test-leak-check.py` to fail the run on.
+/// when the suite's instance does (ov-803). `ScratchDirectory`'s exit sweep is
+/// the backstop (ov-1086): the last instance's `deinit` can lose the race with
+/// the test process exiting, and a test that ends early may never release it.
 @MainActor
 final class ScrollImages {
     private let root: URL
 
     init() throws {
-        root = try ScratchDirectory.make("fc-scroll-images", sweptAtExit: false)
+        root = try ScratchDirectory.make("fc-scroll-images")
         PromptImageStore.disk = PromptImageDisk(
             files: PaneImageFiles(
                 root: root, paneCap: 50_000_000, totalCap: 100_000_000, whenFull: .evictOldest, maxAge: 3600))
