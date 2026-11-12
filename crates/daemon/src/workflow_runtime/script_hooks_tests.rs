@@ -35,6 +35,7 @@ fn response(decision: &str) -> String {
 #[tokio::test]
 async fn script_hooks_good_bad_and_illegal_decisions_are_logged_and_replayed() {
     for (body, good) in [(response("retry"), true), ("printf 'broken' > \"$FARCOOLER_RECEIPT\"".into(), false),
+        (response("retry").replace("\"decision\":", "\"decision\":\"leave\",\"decision\":"), false),
         (response("accept"), false), (response("resolve"), false)] {
         let (_dir, mut runtime) = failed(&body).await;
         // With no build slots a decision still runs. A good retry queues its build behind the cap.

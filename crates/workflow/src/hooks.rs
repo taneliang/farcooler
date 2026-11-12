@@ -32,12 +32,29 @@ pub struct HookDecision { pub schema: String, pub call: String, #[serde(flatten)
 impl<'de> Deserialize<'de> for HookDecision {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         use serde::de::Error;
-        let mut value = serde_json::Value::deserialize(deserializer)?;
-        let object = value.as_object_mut().ok_or_else(|| D::Error::custom("expected a decision object"))?;
+        // Value's map deserializer keeps the last duplicate, hiding an ambiguous schema,
+        // call or move before we can validate it. Reject duplicates at the receipt boundary.
+        struct DecisionObject;
+        impl<'de> serde::de::Visitor<'de> for DecisionObject {
+            type Value = serde_json::Map<String, serde_json::Value>;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a decision object with unique fields")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+                let mut object = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if object.contains_key(&key) { return Err(M::Error::custom("duplicate decision field")); }
+                    object.insert(key, map.next_value()?);
+                }
+                Ok(object)
+            }
+        }
+        let mut object = deserializer.deserialize_map(DecisionObject)?;
         let schema = object.remove("schema").and_then(|v| v.as_str().map(str::to_owned))
             .filter(|s| s == "hook-decision/v1").ok_or_else(|| D::Error::custom("unknown decision schema"))?;
         let call = object.remove("call").and_then(|v| v.as_str().map(str::to_owned))
             .filter(|s| valid_id(s)).ok_or_else(|| D::Error::custom("missing call"))?;
+        let value = serde_json::Value::Object(object);
         let choice: HookMove = serde_json::from_value(value.clone()).map_err(D::Error::custom)?;
         // Serde's internally tagged unit variants otherwise ignore extra fields.
         if serde_json::to_value(&choice).map_err(D::Error::custom)? != value {

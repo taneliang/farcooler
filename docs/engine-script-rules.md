@@ -61,8 +61,8 @@ receipt (or the legal replacement label). `Uncertain` is never a rule point.
 There are no agent rules or CI rerun verbs in this slice.
 
 Call and fence freshness are checked before parsing; a superseded call is
-stale. The policy pin must match the call. Unknown schemas, decisions or fields,
-malformed JSON, and moves that are illegal now apply the fallback and leave a
+stale. The policy pin must match the call. Duplicate fields, unknown schemas,
+decisions or fields, malformed JSON, and moves that are illegal now apply the fallback and leave a
 sentence in the run's failure context. The fallback is deliberately limited to
 the point's default action, so it always works when another actor changes the
 state while a script runs.

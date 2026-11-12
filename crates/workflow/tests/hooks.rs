@@ -75,3 +75,22 @@ fn policy_validation_is_closed_and_legacy_definitions_keep_their_bytes() {
     d.script_policies.get_mut("rule").unwrap().timeout_ms = 600_001;
     assert_eq!(d.validate(), Err(Refusal::Definition));
 }
+
+#[test]
+fn ambiguous_receipts_apply_the_fallback_instead_of_choosing_the_last_field() {
+    let s = running_ci();
+    let e = Evidence { candidate: "sha".into(), manifest: "m".into(), receipt: "r".into(), policy_pin: "p".into() };
+    let s = step(&s, &observe(&s, Outcome::Rejected(e))).unwrap().state;
+    for duplicate in [
+        "\"schema\":\"unknown\",", "\"call\":\"another-call\",",
+        "\"decision\":\"retry\",", "\"decision\":\"accept\",",
+    ] {
+        let mut receipt = answer(&s, serde_json::json!({"decision":"accept"}));
+        if let Command::Decide { result: HookResult::Receipt { raw, .. }, .. } = &mut receipt.command {
+            raw.insert_str(1, duplicate);
+        }
+        let done = step(&s, &receipt).unwrap().state;
+        assert_eq!(done.items["a"].phase, Phase::Failed);
+        assert!(done.items["a"].hook_refused.is_some(), "accepted duplicate: {duplicate}");
+    }
+}
