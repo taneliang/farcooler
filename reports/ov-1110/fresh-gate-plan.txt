@@ -1,0 +1,192 @@
+lane-gate: 30 changed file(s) against d986f3083730db7cda3b91caf5e536ba321b7c1e; jobs: wire, doc-comments, relay, tunnel, rust, swift-tests, swift, ios, android, web
+  wire: always
+  doc-comments: always
+  relay: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+  tunnel: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+  rust: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+  swift-tests: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+  swift: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+  ios: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+  android: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+  web: .codex/hooks.json, reports/ov-1110/analyze.py, reports/ov-1110/build-results.json and 27 more
+
+[wire]
+  run  ./scripts/proto-lint.py --self-test
+  run  ./scripts/proto-lint.py --channel preview
+  run  ./scripts/proto-lint.py --channel stable
+  run  ./scripts/proto-lint.py --channel canary
+  run  ./scripts/canary-baseline-test.sh
+  run  ./scripts/canary-shipped.py --self-test
+  run  ./scripts/canary-plan.py --self-test
+  run  ./scripts/device-keys-readiness.py --self-test
+  run  ./scripts/site-proof.py --self-test
+  run  ./scripts/ci-changes.py --self-test
+  run  HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test
+  run  HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test
+  run  ./scripts/notarytool-retry.sh --self-test
+  run  ./scripts/version-test.sh
+  run  ./scripts/workos-test.sh
+  run  ./scripts/appcast-test.sh
+  run  ./scripts/ci-flake-tally-test.sh
+  run  ./scripts/ios-ui-retry-test.sh
+  run  ./scripts/ios-ui-lease-test.sh
+  run  ./scripts/copy-lint.py --self-test
+  run  ./scripts/test-leak-check.py --lint
+  run  ./scripts/copy-lint.py
+  run  ./scripts/shared-core-lint.py --self-test
+  run  ./scripts/shared-core-lint.py
+  run  git fetch --no-tags origin main ...
+  run  ./scripts/capability-names.py --self-test ...
+  run  ./scripts/claude-prices.py --self-test
+  run  ./scripts/openai-prices.py --self-test
+  run  ./scripts/derp-hosts-check.py --self-test
+  run  ./scripts/file-size-budget.py --self-test ...
+  run  ./scripts/plan-layer-lint.py --self-test ...
+  run  ./scripts/page-layer-lint.py --self-test ...
+  run  ./scripts/swallow-lint.py --self-test
+  run  ./scripts/swallow-lint.py
+  run  ./scripts/visual-tokens-lint.py --self-test
+  run  ./scripts/visual-tokens-lint.py
+  run  ./scripts/pixel-scale-lint.py --self-test
+  run  ./scripts/pixel-scale-lint.py
+  run  ./scripts/test-window-lint.py --self-test
+  run  ./scripts/test-window-lint.py
+  run  ./scripts/runloop-spin-lint.py --self-test
+  run  ./scripts/runloop-spin-lint.py
+  run  ./scripts/capture-window-lint.py --self-test
+  run  ./scripts/capture-window-lint.py
+  run  ./scripts/fresh-script-lint.py --self-test
+  run  ./scripts/fresh-script-lint.py
+  run  ./scripts/charter-intercept-lint.py --self-test
+  run  ./scripts/charter-intercept-lint.py
+  run  ./scripts/ios-agentkit-subset-lint.py --self-test
+  run  ./scripts/ios-agentkit-subset-lint.py
+  run  ./scripts/migration-lint.py --self-test
+  run  ./scripts/migration-lint.py
+  run  if [ "$(typeshare --version 2>/dev/null)" != "typeshare 1.13.4" ]; then ...
+  run  ./scripts/gen-wire-types.sh ...
+
+[doc-comments]
+  run  ./scripts/doc-comment-check.py --self-test
+  run  ./scripts/doc-comment-check.py --base d986f3083730db7cda3b91caf5e536ba321b7c1e --head HEAD
+
+[relay]
+  run  npm ci (in services/relay)
+  run  npx tsc --noEmit (in services/relay)
+  run  npm test (in services/relay)
+  run  npx wrangler deploy --dry-run --outdir /tmp/relay-build (in services/relay)
+
+[tunnel]
+  run  unformatted="$(gofmt -l .)" ... (in crates/tailcat/go)
+  run  CGO_ENABLED=1 go vet ./... ... (in crates/tailcat/go)
+  run  CGO_ENABLED=0 go vet ./... ... (in crates/tailcat/go)
+
+[rust]
+  SKIP ./scripts/ci-install-tmux.sh  -- installs a toolchain on a CI runner
+  SKIP if command -v git-lfs >/dev/null 2>&1; then ...  -- installs a toolchain on a CI runner
+  SKIP if ! command -v fish >/dev/null 2>&1; then ...  -- installs a toolchain on a CI runner
+  SKIP if [ ! -x /usr/sbin/sshd ]; then ...  -- installs a toolchain on a CI runner
+  run  cargo clippy --workspace --all-targets -- -D warnings
+  run  cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings
+  run  cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings
+  run  cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings
+  run  cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings
+  run  cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings
+  run  cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings
+  run  cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings
+  run  cargo check -p farcooler-tailcat --features linked
+  run  cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl
+  run  cargo nextest run --profile ci -p farcooler-tailcat --features helper
+  run  cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel
+  run  cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked
+  run  cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
+  run  cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once
+  run  cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel
+  run  cargo check -p farcooler-daemon --features tailcat --all-targets
+  run  cargo build --workspace --bins ...
+  run  ./scripts/tmux-leak-check.py --self-test
+  run  ./scripts/tmux-stale-sockets.py --self-test
+  run  ./scripts/test-leak-check.py --self-test
+  run  ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace
+  run  cargo test --workspace --doc
+
+[swift-tests]
+  run  xcodebuild -version ...
+  run  ./scripts/macos-test-wrapper-test.sh
+  run  ./scripts/wait-for-unlock-test.sh
+  run  ./scripts/swift-test-guard-test.sh
+  run  ./scripts/test-leak-check.py --self-test
+  run  ./scripts/mac-capture-stop-test.sh
+  run  ./scripts/capture-duplicates-test.sh
+  run  cargo build --release -p farcooler-vt -p farcooler-client
+  run  ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit
+  SKIP ./scripts/ci-install-tmux.sh  -- installs a toolchain on a CI runner
+  run  ./apps/macos/test.sh
+
+[swift]
+  run  xcodebuild -version ...
+  run  name="$(scripts/version.sh app-name)" ...
+  run  apps/macos/build-app.sh
+  run  scripts/tunnel-smoke.sh "apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd"
+  run  out="$("apps/macos/build/$APP_NAME.app/Contents/Resources/farcooler" runner mint-node-key)" ...
+  run  app="apps/macos/build/$APP_NAME.app" ...
+  run  app="apps/macos/build/$APP_NAME.app" ...
+  run  ./scripts/icon-test.sh
+  run  ./scripts/sparkle-key-test.sh
+  run  ./scripts/gh-download-test.sh
+  run  ./scripts/macos-entitlements-test.sh "apps/macos/build/$APP_NAME.app"
+
+[ios]
+  run  ./scripts/ios-ui-shards.py --check
+  run  ./scripts/ios-ui-shards.py --self-test
+  run  ./scripts/ios-ui-pick-simulator.py --self-test
+  SKIP if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \ ...  -- decides what CI runs, or builds the iOS archive; see scripts/ios-ui-tests.sh
+  SKIP ./scripts/ios-ui-plan.py  -- decides what CI runs, or builds the iOS archive; see scripts/ios-ui-tests.sh
+  run  ./scripts/ios-ui-plan.py --self-test
+  SKIP xcodebuild -version ...  -- checks the runner, installs the watchOS platform or packages products for CI's UI shards
+  run  ./scripts/build-ios-frameworks.sh
+  run  apps/ios/generate-project.py
+  SKIP xcodebuild -downloadPlatform watchOS  -- checks the runner, installs the watchOS platform or packages products for CI's UI shards
+  run  xcodebuild -project apps/ios/FarCooler.xcodeproj \ ...
+  SKIP runs=("$RUNNER_TEMP"/ios-dd/Build/Products/*.xctestrun) ...  -- checks the runner, installs the watchOS platform or packages products for CI's UI shards
+  run  ./scripts/import-ios-certificate-test.sh
+  run  ./scripts/generator-test.sh
+
+[android]
+  SKIP echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \ ...  -- installs a toolchain on a CI runner
+  run  ./scripts/build-android-libs.sh
+  run  cargo build -p farcooler-jni
+  run  ./gradlew testInstrumentedUnitTest "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug" (in apps/android)
+  run  ./gradlew assembleDebug assembleAndroidTest (in apps/android)
+  run  ./gradlew assembleRelease (in apps/android)
+  run  ./gradlew testInstrumentedUnitTest \ ... (in apps/android)
+  run  python3 - <<'PY' ... (in apps/android/app/build/test-results/testInstrumentedUnitTest)
+
+[web]
+  SKIP mkdir -p wasm-tools ... (in ${{ runner.temp }})  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-tools/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV" ... (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  run  cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown (in .)
+  run  ./scripts/web-client-tree-check.py --self-test (in .)
+  run  ./scripts/web-client-tree-check.py (in .)
+  run  npm ci (in services/web)
+  run  npx tsc --noEmit -p tsconfig.json (in services/web)
+  run  npm test (in services/web)
+  run  npm run test:workflow (in services/web)
+  SKIP if [ ! -x /usr/sbin/sshd ]; then ... (in services/web)  -- installs a toolchain on a CI runner
+  run  cargo test --locked --manifest-path ../../crates/web/Cargo.toml (in services/web)
+  run  GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" . (in crates/tailcat/go)
+  run  node scripts/size-gate.mjs --self-test (in services/web)
+  SKIP ../../crates/web/build.sh --channel stable --out "$RUNNER_TEMP/wasm-stable" (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  run  npx tsc --noEmit -p tsconfig.client.json (in services/web)
+  SKIP WEB_WASM_DIR="$RUNNER_TEMP/wasm-stable" ./build.sh --channel stable --build "$GITHUB_SHA" (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP node scripts/size-gate.mjs dist (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP npx wrangler deploy --dry-run --outdir /tmp/web-build (in services/web)  -- stable web asset build skipped (needs the Linux x86 wasm toolchain CI downloads; left to CI); dry-run left to CI
+  SKIP ../../crates/web/build.sh --channel canary --out "$RUNNER_TEMP/wasm-canary" (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP WEB_WASM_DIR="$RUNNER_TEMP/wasm-canary" ./build.sh --channel canary --build "$GITHUB_SHA" (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP node scripts/size-gate.mjs dist (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary (in services/web)  -- canary web asset build skipped (needs the Linux x86 wasm toolchain CI downloads; left to CI); dry-run left to CI
+  SKIP cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP npx playwright-core install --with-deps --only-shell chromium (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  run  node test/browser/plan-render-check.mjs (in services/web)
+  SKIP node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100 (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI
+  SKIP node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium (in services/web)  -- needs the Linux x86 wasm toolchain CI downloads; left to CI

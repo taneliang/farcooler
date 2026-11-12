@@ -253,3 +253,30 @@ slow-test observations, checks saved CI identities and monotonic durations, and
 checks cold/warm/load receipts. Run `python3 reports/ov-1110/validate.py`; results are in
 [validation.log](validation.log). `analyze.py` fails if expected job families,
 unit inventory, ranked test rows or the historical step total disappear.
+
+## Fresh baseline preflight, 12 November 2026
+
+Re-read the live ticket after research commit `78d559cd5`. Acceptance items 2–4
+are marked met; item 1 explicitly remains open for a fresh controlled local
+full-gate/test baseline. The historical receipt above does not close that gap.
+
+The [fresh gate plan](fresh-gate-plan.txt) was generated with
+`/usr/bin/python3 scripts/lane-gate.py --base d986f3083730db7cda3b91caf5e536ba321b7c1e --keep-target --dry-run`.
+It selects wire, doc-comments, relay, tunnel, Rust, Swift tests, Mac bundle,
+iOS, Android and web; its listed CI-only omissions remain explicit. This is
+planning output, not execution or a passing gate receipt. It includes the
+runner-generated untracked `.codex/hooks.json` among the changed inputs.
+
+The [fresh preflight samples](fresh-gate-preflight.json) record all three host
+load averages every 30 seconds for 150 seconds. Load remained above the ticket's
+limit of 20 throughout, so no heavy baseline was started. No unrelated process
+was signaled. The host needs a quiet measurement window before item 1 can be
+completed; neither historical timings nor a load-rejected preflight establish a
+fresh full-suite result.
+
+Re-ran the evidence validator, file-size budget and doc-comment check successfully.
+No product, CI, build-profile or test-selection behavior changed. To resume,
+use the planned landing-gate command only when the host is below the limit,
+retain its full logs and per-job summary, and monitor load throughout execution.
+If load crosses 20, interrupt only processes started by this measurement and
+exclude the attempt from the baseline, as with the earlier local test attempt.
