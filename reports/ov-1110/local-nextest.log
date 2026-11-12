@@ -1,0 +1,21 @@
+   Compiling tokio v1.53.1
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/crates/store)
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/crates/tmux)
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/crates/tailcat)
+   Compiling hyper v1.11.0
+   Compiling hyper-util v0.1.20
+   Compiling tokio-rustls v0.26.4
+   Compiling tower v0.5.3
+   Compiling tower-http v0.6.11
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.12.28
+   Compiling russh-util v0.52.0
+   Compiling russh v0.62.4
+   Compiling syn v2.0.119
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/crates/daemon)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/crates/client)
+   Compiling farcooler-jni v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/crates/android)
+test-leak-check: the run left nothing in TMPDIR or the preferences folder.

@@ -1,0 +1,156 @@
+lane-gate-summary v1
+head: 5b7a40d4e1a8d5647aba6522b57a70c03ce50904
+verdict: ok
+
+## lane-gate summary
+
+Branch HEAD 5b7a40d4e against origin/main; logs in /tmp/lane-gate-logs-x3dctjda
+
+| Job | Command | Result | Secs | Tests |
+| --- | --- | --- | --- | --- |
+| wire | ./scripts/proto-lint.py --self-test | pass | 1 |  |
+| wire | ./scripts/proto-lint.py --channel preview | pass | 0 |  |
+| wire | ./scripts/proto-lint.py --channel stable | pass | 0 |  |
+| wire | ./scripts/proto-lint.py --channel canary | pass | 0 |  |
+| wire | ./scripts/canary-baseline-test.sh | pass | 10 |  |
+| wire | ./scripts/canary-shipped.py --self-test | pass | 0 |  |
+| wire | ./scripts/canary-plan.py --self-test | pass | 2 |  |
+| wire | ./scripts/device-keys-readiness.py --self-test | pass | 0 |  |
+| wire | ./scripts/site-proof.py --self-test | pass | 0 |  |
+| wire | ./scripts/ci-changes.py --self-test | pass | 1 |  |
+| wire | HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test | pass | 8 |  |
+| wire | HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test | pass | 17 |  |
+| wire | ./scripts/notarytool-retry.sh --self-test | pass | 1 |  |
+| wire | ./scripts/version-test.sh | pass | 5 |  |
+| wire | ./scripts/workos-test.sh | pass | 1 |  |
+| wire | ./scripts/appcast-test.sh | pass | 0 |  |
+| wire | ./scripts/ci-flake-tally-test.sh | pass | 1 |  |
+| wire | ./scripts/ios-ui-retry-test.sh | pass | 56 |  |
+| wire | ./scripts/ios-ui-lease-test.sh | pass | 63 |  |
+| wire | ./scripts/copy-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/test-leak-check.py --lint | pass | 1 |  |
+| wire | ./scripts/copy-lint.py | pass | 1 |  |
+| wire | ./scripts/shared-core-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/shared-core-lint.py | pass | 1 |  |
+| wire | git fetch --no-tags origin main ... | pass | 3 |  |
+| wire | ./scripts/capability-names.py --self-test ... | pass | 0 |  |
+| wire | ./scripts/claude-prices.py --self-test | pass | 0 |  |
+| wire | ./scripts/openai-prices.py --self-test | pass | 0 |  |
+| wire | ./scripts/derp-hosts-check.py --self-test | pass | 0 |  |
+| wire | ./scripts/file-size-budget.py --self-test ... | pass | 0 |  |
+| wire | ./scripts/plan-layer-lint.py --self-test ... | pass | 1 |  |
+| wire | ./scripts/page-layer-lint.py --self-test ... | pass | 16 |  |
+| wire | ./scripts/swallow-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/swallow-lint.py | pass | 0 |  |
+| wire | ./scripts/visual-tokens-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/visual-tokens-lint.py | pass | 1 |  |
+| wire | ./scripts/pixel-scale-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/pixel-scale-lint.py | pass | 0 |  |
+| wire | ./scripts/test-window-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/test-window-lint.py | pass | 0 |  |
+| wire | ./scripts/runloop-spin-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/runloop-spin-lint.py | pass | 0 |  |
+| wire | ./scripts/capture-window-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/capture-window-lint.py | pass | 0 |  |
+| wire | ./scripts/fresh-script-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/fresh-script-lint.py | pass | 0 |  |
+| wire | ./scripts/charter-intercept-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/charter-intercept-lint.py | pass | 0 |  |
+| wire | ./scripts/ios-agentkit-subset-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/ios-agentkit-subset-lint.py | pass | 2 |  |
+| wire | ./scripts/migration-lint.py --self-test | pass | 1 |  |
+| wire | ./scripts/migration-lint.py | pass | 0 |  |
+| wire | if [ "$(typeshare --version 2>/dev/null)" != "typeshare 1.13.4" ]; then ... | pass | 0 |  |
+| wire | ./scripts/gen-wire-types.sh ... | pass | 0 |  |
+| doc-comments | ./scripts/doc-comment-check.py --self-test | pass | 0 |  |
+| doc-comments | ./scripts/doc-comment-check.py --base origin/main --head HEAD | pass | 0 |  |
+| relay | npm ci | pass | 6 |  |
+| relay | npx tsc --noEmit | pass | 1 |  |
+| relay | npm test | pass | 14 |  |
+| relay | npx wrangler deploy --dry-run --outdir /tmp/relay-build | pass | 1 |  |
+| rust | ./scripts/ci-install-tmux.sh | skipped: installs a toolchain on a CI runner |  |  |
+| rust | if command -v git-lfs >/dev/null 2>&1; then ... | skipped: installs a toolchain on a CI runner |  |  |
+| rust | if ! command -v fish >/dev/null 2>&1; then ... | skipped: installs a toolchain on a CI runner |  |  |
+| rust | if [ ! -x /usr/sbin/sshd ]; then ... | skipped: installs a toolchain on a CI runner |  |  |
+| rust | cargo clippy --workspace --all-targets -- -D warnings | pass | 37 |  |
+| rust | cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings | pass | 4 |  |
+| rust | cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings | pass | 0 |  |
+| rust | cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings | pass | 26 |  |
+| rust | cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings | pass | 26 |  |
+| rust | cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings | pass | 19 |  |
+| rust | cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings | pass | 9 |  |
+| rust | cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings | pass | 4 |  |
+| rust | cargo check -p farcooler-tailcat --features linked | pass | 0 |  |
+| rust | cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl | pass | 0 |  |
+| rust | cargo nextest run --profile ci -p farcooler-tailcat --features helper | pass | 6 | 21 nextest |
+| rust | cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel | pass | 24 | 3 nextest |
+| rust | cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked | pass | 5 | 14 nextest |
+| rust | cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel | pass | 1 | 2 nextest |
+| rust | cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once | pass | 2 | 3 nextest |
+| rust | cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel | pass | 1 | 2 nextest |
+| rust | cargo check -p farcooler-daemon --features tailcat --all-targets | pass | 27 |  |
+| rust | cargo build --workspace --bins ... | pass | 21 |  |
+| rust | ./scripts/tmux-leak-check.py --self-test | pass | 22 |  |
+| rust | ./scripts/tmux-stale-sockets.py --self-test | pass | 0 |  |
+| rust | ./scripts/test-leak-check.py --self-test | pass | 8 |  |
+| rust | ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace | pass | 665 | 6931 nextest |
+| rust | cargo test --workspace --doc | pass | 4 | 0 doc/unit |
+| swift-tests | xcodebuild -version ... | pass | 0 |  |
+| swift-tests | ./scripts/macos-test-wrapper-test.sh | pass | 8 |  |
+| swift-tests | ./scripts/wait-for-unlock-test.sh | pass | 4 |  |
+| swift-tests | ./scripts/swift-test-guard-test.sh | pass | 32 |  |
+| swift-tests | ./scripts/test-leak-check.py --self-test | pass | 8 |  |
+| swift-tests | ./scripts/mac-capture-stop-test.sh | pass | 1 |  |
+| swift-tests | ./scripts/capture-duplicates-test.sh | pass | 2 |  |
+| swift-tests | cargo build --release -p farcooler-vt -p farcooler-client | pass | 150 |  |
+| swift-tests | ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit | pass | 88 | 2110 swift-testing, 16 xctest |
+| swift-tests | ./scripts/ci-install-tmux.sh | skipped: installs a toolchain on a CI runner |  |  |
+| swift-tests | ./apps/macos/test.sh | pass; leak note: 1 unattributed new temp/plist entries (siblings or this lane; see the log, or rerun with --strict-leaks) | 429 | 2035 swift-testing, 0 xctest |
+| swift | xcodebuild -version ... | pass | 0 |  |
+| swift | name="$(scripts/version.sh app-name)" ... | pass | 0 |  |
+| swift | apps/macos/build-app.sh | pass | 334 |  |
+| swift | scripts/tunnel-smoke.sh "apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd" | pass | 1 |  |
+| swift | out="$("apps/macos/build/$APP_NAME.app/Contents/Resources/farcooler" runner mint-node-key)" ... | pass | 0 |  |
+| swift | app="apps/macos/build/$APP_NAME.app" ... | pass | 0 |  |
+| swift | app="apps/macos/build/$APP_NAME.app" ... | pass | 0 |  |
+| swift | ./scripts/icon-test.sh | pass | 2 |  |
+| swift | ./scripts/sparkle-key-test.sh | pass | 1 |  |
+| swift | ./scripts/gh-download-test.sh | pass | 3 |  |
+| swift | ./scripts/macos-entitlements-test.sh "apps/macos/build/$APP_NAME.app" | pass | 0 |  |
+| android | echo "y" \| "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \ ... | skipped: installs a toolchain on a CI runner |  |  |
+| android | ./scripts/build-android-libs.sh | pass | 54 |  |
+| android | cargo build -p farcooler-jni | pass | 14 |  |
+| android | ./gradlew testInstrumentedUnitTest "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug" | pass | 30 | gradle ok |
+| android | ./gradlew assembleDebug assembleAndroidTest | pass | 36 | gradle ok |
+| android | ./gradlew assembleRelease | pass | 106 | gradle ok |
+| android | ./gradlew testInstrumentedUnitTest \ ... | pass | 324 | gradle ok |
+| android | python3 - <<'PY' ... | pass | 0 | 259 ui |
+| web | mkdir -p wasm-tools ... | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-tools/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV" ... | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown | pass | 3 |  |
+| web | ./scripts/web-client-tree-check.py --self-test | pass | 0 |  |
+| web | ./scripts/web-client-tree-check.py | pass | 0 |  |
+| web | npm ci | pass | 5 |  |
+| web | npx tsc --noEmit -p tsconfig.json | pass | 0 |  |
+| web | npm test | pass | 2 |  |
+| web | npm run test:workflow | pass | 0 |  |
+| web | if [ ! -x /usr/sbin/sshd ]; then ... | skipped: installs a toolchain on a CI runner |  |  |
+| web | cargo test --locked --manifest-path ../../crates/web/Cargo.toml | pass | 36 | 77 doc/unit |
+| web | GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" . | pass | 5 | 1 go pkgs |
+| web | node scripts/size-gate.mjs --self-test | pass | 0 |  |
+| web | ../../crates/web/build.sh --channel stable --out "$RUNNER_TEMP/wasm-stable" | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | npx tsc --noEmit -p tsconfig.client.json | pass | 1 |  |
+| web | WEB_WASM_DIR="$RUNNER_TEMP/wasm-stable" ./build.sh --channel stable --build "$GITHUB_SHA" | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | node scripts/size-gate.mjs dist | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | npx wrangler deploy --dry-run --outdir /tmp/web-build | skipped: stable web asset build skipped (needs the Linux x86 wasm toolchain CI downloads; left to CI); dry-run left to CI |  |  |
+| web | ../../crates/web/build.sh --channel canary --out "$RUNNER_TEMP/wasm-canary" | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | WEB_WASM_DIR="$RUNNER_TEMP/wasm-canary" ./build.sh --channel canary --build "$GITHUB_SHA" | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | node scripts/size-gate.mjs dist | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary | skipped: canary web asset build skipped (needs the Linux x86 wasm toolchain CI downloads; left to CI); dry-run left to CI |  |  |
+| web | cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | npx playwright-core install --with-deps --only-shell chromium | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | node test/browser/plan-render-check.mjs | pass | 1 |  |
+| web | node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100 | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+| web | node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium | skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI |  |  |
+
+lane-gate: all steps passed

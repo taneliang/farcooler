@@ -1,0 +1,94 @@
+[
+  {
+    "changed": "farcooler-cli",
+    "reached": [
+      "farcooler-cli"
+    ],
+    "tests": 688,
+    "observed_test_seconds": 70.2170000000002,
+    "total_tests": 6973,
+    "total_seconds": 3649.2910000000074
+  },
+  {
+    "changed": "farcooler-review",
+    "reached": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-review"
+    ],
+    "tests": 4764,
+    "observed_test_seconds": 3396.3590000000036,
+    "total_tests": 6973,
+    "total_seconds": 3649.2910000000074
+  },
+  {
+    "changed": "farcooler-store",
+    "reached": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-store"
+    ],
+    "tests": 5375,
+    "observed_test_seconds": 3523.6830000000014,
+    "total_tests": 6973,
+    "total_seconds": 3649.2910000000074
+  },
+  {
+    "changed": "farcooler-core",
+    "reached": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-review",
+      "farcooler-store",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ],
+    "tests": 6355,
+    "observed_test_seconds": 3625.1649999999995,
+    "total_tests": 6973,
+    "total_seconds": 3649.2910000000074
+  },
+  {
+    "changed": "farcooler-protocol",
+    "reached": [
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-jni",
+      "farcooler-protocol",
+      "farcooler-review",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ],
+    "tests": 6640,
+    "observed_test_seconds": 3633.372999999997,
+    "total_tests": 6973,
+    "total_seconds": 3649.2910000000074
+  },
+  {
+    "changed": "farcooler-vt",
+    "reached": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-vt"
+    ],
+    "tests": 4859,
+    "observed_test_seconds": 3397.6560000000113,
+    "total_tests": 6973,
+    "total_seconds": 3649.2910000000074
+  }
+]

@@ -1,0 +1,10 @@
+PASS: tables regenerate byte-for-byte from captured receipts
+PASS: cold/warm builds exited 0; warm units all fresh/zero-time; sampled load below 20
+PASS: five CI run IDs and source SHAs match requested runs
+PASS: top-20 observed and Rust rows match timestamped raw extracts
+PASS: historical gate copy matches original receipt hash
+PASS: four follow-up creation receipts have backlog status and acceptance
+PASS: removing Android receipts makes analyzer fail, not report zero cost
+PASS: relative report links resolve
+PASS: python3 scripts/file-size-budget.py
+PASS: python3 scripts/doc-comment-check.py --base origin/main --head HEAD (baseline; no tracked source changes)

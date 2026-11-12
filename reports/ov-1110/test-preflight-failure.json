@@ -1,0 +1,37 @@
+{
+  "env": {
+    "CARGO_BUILD_JOBS": "3",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_TARGET_DIR": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1110-build-test-speed/target/ov1110"
+  },
+  "runs": [
+    {
+      "label": "local-nextest",
+      "command": [
+        "./scripts/test-leak-check.py",
+        "--",
+        "./scripts/tmux-leak-check.py",
+        "--",
+        "cargo",
+        "nextest",
+        "run",
+        "--workspace",
+        "--locked",
+        "--offline",
+        "--profile",
+        "ci",
+        "--test-threads",
+        "3"
+      ],
+      "seconds": 0.0025229454040527344,
+      "exit": 126,
+      "load_start": [],
+      "load_end": [
+        6.2900390625,
+        11.11474609375,
+        16.73681640625
+      ]
+    }
+  ],
+  "load_samples": []
+}

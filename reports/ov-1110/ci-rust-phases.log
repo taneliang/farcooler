@@ -1,0 +1,46 @@
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:07:39.3470430Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 6.32s
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:07:39.3638230Z     Starting 21 tests across 1 binary
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:07:39.8712128Z      Summary [   0.507s] 21 tests run: 21 passed, 0 skipped
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:20.1768455Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 40.10s
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:20.2094082Z     Starting 3 tests across 1 binary
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:21.3292505Z      Summary [   1.120s] 3 tests run: 3 passed, 0 skipped
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:24.9870484Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 3.46s
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:25.0182769Z     Starting 14 tests across 1 binary
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:29.4360482Z      Summary [   4.418s] 14 tests run: 14 passed, 0 skipped
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:30.4943338Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.86s
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:30.5253534Z     Starting 2 tests across 1 binary
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:32.1195890Z      Summary [   1.595s] 2 tests run: 2 passed, 0 skipped
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:33.4720847Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 1.17s
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:33.5062089Z     Starting 3 tests across 1 binary
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:35.0764243Z      Summary [   1.570s] 3 tests run: 3 passed, 0 skipped
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:36.1998411Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.93s
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:36.2323103Z     Starting 2 tests across 1 binary
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:08:38.1510303Z      Summary [   1.919s] 2 tests run: 2 passed, 0 skipped
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:10:28.2790783Z ##[group]Run ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:14:41.0660284Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 12s
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:14:42.5011357Z     Starting 6905 tests across 139 binaries (33 tests skipped)
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:21:51.6174473Z      Summary [ 429.117s] 6905 tests run: 6905 passed (2 leaky), 33 skipped
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-12T11:21:54.4913409Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:11:23.1823420Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 10.71s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:11:23.2499790Z     Starting 21 tests across 1 binary
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:11:23.9322120Z      Summary [   0.682s] 21 tests run: 21 passed, 0 skipped
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:37.8301490Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 13s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:37.9094540Z     Starting 3 tests across 1 binary
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:38.0357140Z      Summary [   0.126s] 3 tests run: 3 passed, 0 skipped
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:44.1398040Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 4.98s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:44.2078980Z     Starting 14 tests across 1 binary
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:47.9657920Z      Summary [   3.758s] 14 tests run: 14 passed, 0 skipped
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:49.8043580Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 1.25s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:49.8372700Z     Starting 2 tests across 1 binary
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:49.9760870Z      Summary [   0.138s] 2 tests run: 2 passed, 0 skipped
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:51.7278000Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 1.38s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:51.7675350Z     Starting 3 tests across 1 binary
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:52.7110920Z      Summary [   0.943s] 3 tests run: 3 passed, 0 skipped
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:54.3125150Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 1.08s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:54.3438030Z     Starting 2 tests across 1 binary
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:12:54.7335180Z      Summary [   0.390s] 2 tests run: 2 passed, 0 skipped
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:16:31.1877600Z ##[group]Run ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:24:57.3078780Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 8m 24s
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:25:00.0940030Z     Starting 6928 tests across 139 binaries (33 tests skipped)
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:45:16.3442840Z      Summary [1216.270s] 6928 tests run: 6928 passed, 33 skipped
+Rust (macos-latest)	UNKNOWN STEP	2026-11-12T11:45:21.8736380Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 1.92s

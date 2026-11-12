@@ -1,0 +1,6 @@
+{
+  "historical_gate": "/Users/e-liang/Dev/overnight/.git/worktrees/tree-wf1-b61845b58742873cfefdd374d737d584b8db770b46af757cfb54add1a69188f2/lane-gate-summary.txt",
+  "historical_gate_sha256": "f375a36a85b2bf5415fd6e76005844b84b8272cf6f48b992bad2dbcfb09dd393",
+  "ci_log": "/private/tmp/ov-1110/ci-latest.log",
+  "ci_log_sha256": "64f4644450200dc80193b07e333e1f241bc1b579cb65cba2817c8fe46ca69ac1"
+}

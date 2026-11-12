@@ -1,0 +1,162 @@
+[
+  {
+    "acceptance": [
+      {
+        "id": "01a1d043-ba4c-7571-b74f-4ea363fdd22c",
+        "met": false,
+        "text": "Resolve changed crates plus transitive reverse dependencies from metadata including dev/build dependencies and required feature/target variants; compare to last verified green base, not merely previous commit."
+      },
+      {
+        "id": "01a1d043-ba4c-7571-b74f-4ebe39d19a8f",
+        "met": false,
+        "text": "Account for out-of-graph CLI consumers in Mac and daemon tests, fixtures, include files, build scripts, generated protocol and toolchain/config inputs; unknown, deleted, renamed or global inputs select full coverage."
+      },
+      {
+        "id": "01a1d043-ba4c-7571-b74f-4ec52533df7f",
+        "met": false,
+        "text": "Run planner alongside full suites; planted failures in omitted consumers must reject selection. Publish selected/full inventories and measured wall savings before enabling skips. Keep full required main/nightly coverage and doctests."
+      }
+    ],
+    "constraints": [
+      "Follow-up only; no implementation authorized by ov-1110. Measure under load 20 and never kill work not started by this task."
+    ],
+    "created_at": 1794495461967,
+    "id": "01a1d043-ba4f-7321-bdb3-1bdcd3b7f0b1",
+    "intent": "ov-1110 priority 1, estimated 1-2 engineering days. Latest macOS CI: 1216 s Rust test execution; a CLI-only reverse-dependency model selects 688/6973 observed tests and 70/3649 summed test seconds. This is a coverage model, not a measured filtered wall time. Existing ov-1021 path-family selection remains. Build a shadow planner before allowing any gate skip.",
+    "key": "ov-1116",
+    "labels": [],
+    "repository_id": "01a00cb2-b047-72b3-8ed3-c13deb3a94fe",
+    "resource_version": 2,
+    "short": "d3b7f0b1",
+    "stale_for_seconds": 0,
+    "status": "backlog",
+    "status_since": 1794495461967,
+    "title": "Build speed: shadow changed-crate test selection with consumer inputs",
+    "updated_at": 1794495461967,
+    "wait": null,
+    "waiting_on": [],
+    "workers": [],
+    "workspace": "01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571",
+    "worktree_id": null
+  },
+  {
+    "acceptance": [
+      {
+        "id": "01a1d044-06b7-7331-ad53-fd6878c6d43e",
+        "met": false,
+        "text": "Audit and reuse ov-903 reviewed prospective capture/checker; bind run-start exact source tree, resolved base, clean/dirty and untracked inputs, workflow/plan, commands, environment/toolchains/native inputs and trust scope."
+      },
+      {
+        "id": "01a1d044-06b7-7331-ad53-fd70274b38b9",
+        "met": false,
+        "text": "Only complete successful required jobs with matching provenance may be reused. Missing, stale, partial, cross-tree, feature/target or environment-mismatched evidence reruns; preserve immutable failures and raw logs. Never reuse legacy v1 receipts."
+      },
+      {
+        "id": "01a1d044-06b7-7331-ad53-fd8dbcb0cad2",
+        "met": false,
+        "text": "Exercise engine integration with counterexamples and an actual clean operational run; report cache hit rate and saved wall time. Independently validate before enabling."
+      }
+    ],
+    "constraints": [
+      "Follow-up only; no implementation authorized by ov-1110. Measure under load 20 and never kill work not started by this task."
+    ],
+    "created_at": 1794495481528,
+    "id": "01a1d044-06b8-7ec1-a816-c68d126f699a",
+    "intent": "ov-1110 priority 2, estimated 2-3 engineering days pending ov-903 integration. Historical landing steps total 2806 s; exact duplicate full gates could avoid up to that executed work, excluding queue/setup. Reuse frequency is unmeasured. ov-903 already owns prospective evidence/resume source; this ticket owns engine integration, not a duplicate implementation.",
+    "key": "ov-1117",
+    "labels": [],
+    "repository_id": "01a00cb2-b047-72b3-8ed3-c13deb3a94fe",
+    "resource_version": 2,
+    "short": "126f699a",
+    "stale_for_seconds": 17,
+    "status": "backlog",
+    "status_since": 1794495481528,
+    "title": "Build speed: integrate prospective exact-tree gate reuse with ov-903",
+    "updated_at": 1794495481528,
+    "wait": null,
+    "waiting_on": [],
+    "workers": [],
+    "workspace": "01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571",
+    "worktree_id": null
+  },
+  {
+    "acceptance": [
+      {
+        "id": "01a1d044-4a7a-7753-8618-e954391902e9",
+        "met": false,
+        "text": "Measure two fresh worktrees, one edit and branch switching with existing fold handoff versus private sccache; report hit/miss reasons, bytes, cold/warm/edit wall times under load 20. Include feature/target/debug and native compiler inputs."
+      },
+      {
+        "id": "01a1d044-4a7a-7753-8618-e9613595c6db",
+        "met": false,
+        "text": "Keep workspace incremental builds where beneficial; separately evaluate cached dependencies and native C compilation. RUSTC_WRAPPER alone does not cache linker units or native build-script outputs. Never enable one shared mutable target without reproducing and preventing ov-837 freshness failure."
+      },
+      {
+        "id": "01a1d044-4a7a-7753-8618-e9779f34be97",
+        "met": false,
+        "text": "Use trusted private cache writers and bounded retention; compare outputs and run tests from uncached rebuilds, including file-reading proc macros and native-input changes. Publish measured savings, including zero/regressions, before rollout."
+      }
+    ],
+    "constraints": [
+      "Follow-up only; no implementation authorized by ov-1110. Measure under load 20 and never kill work not started by this task."
+    ],
+    "created_at": 1794495498886,
+    "id": "01a1d044-4a86-7543-9faa-3f7b65100dd7",
+    "intent": "ov-1110 priority 3, estimated 0.5-1 engineering day. Cold workspace build 152.6 s versus 0.40 s no-op warm (3 jobs, debug info off, load below 20). aws-lc-sys native build takes 46.59 s. ov-1084 already retains/hands off fold targets; ov-837 rejected one mutable shared target after a cross-worktree freshness failure. Measure remaining misses before changing policy.",
+    "key": "ov-1118",
+    "labels": [],
+    "repository_id": "01a00cb2-b047-72b3-8ed3-c13deb3a94fe",
+    "resource_version": 2,
+    "short": "65100dd7",
+    "stale_for_seconds": 0,
+    "status": "backlog",
+    "status_since": 1794495498886,
+    "title": "Build speed: benchmark compiler cache and fold target handoff",
+    "updated_at": 1794495498886,
+    "wait": null,
+    "waiting_on": [],
+    "workers": [],
+    "workspace": "01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571",
+    "worktree_id": null
+  },
+  {
+    "acceptance": [
+      {
+        "id": "01a1d044-69c3-7f62-95e3-c4b788f5117e",
+        "met": false,
+        "text": "Measure top Mac UI tests alone and in suite at load below 20; distinguish layout sweeps, main-actor waits and build time. Preserve all size and parameter cases."
+      },
+      {
+        "id": "01a1d044-69c3-7f62-95e3-c4cbab2c1ecf",
+        "met": false,
+        "text": "Prototype balanced separate-process test partitions where global AppKit/NativeAgents state permits, with per-shard completion floors, leak checks and union of exact test inventory; never omit slow tests or remove deadline assertions."
+      },
+      {
+        "id": "01a1d044-69c3-7f62-95e3-c4d22c68d801",
+        "met": false,
+        "text": "Compare total runner time and critical path before/after with repeated green runs; retain tmux/file-event exclusivity groups and resource limits. Keep production-clock timeout tests and an end-to-end path for any fake-clock refactor."
+      }
+    ],
+    "constraints": [
+      "Follow-up only; no implementation authorized by ov-1110. Measure under load 20 and never kill work not started by this task."
+    ],
+    "created_at": 1794495506884,
+    "id": "01a1d044-69c4-7952-a0d9-9908c7963088",
+    "intent": "ov-1110 priority 4, estimated 0.5-1 engineering day for isolated measurements. Latest CI Mac suite execution 498 s; top reported individual UI durations 70-103 s overlap on MainActor. Rust longest individual test is 18.1 s and live_tmux already splits 300 rounds into four tests. Avoid assuming summed test seconds are serial savings.",
+    "key": "ov-1119",
+    "labels": [],
+    "repository_id": "01a00cb2-b047-72b3-8ed3-c13deb3a94fe",
+    "resource_version": 2,
+    "short": "c7963088",
+    "stale_for_seconds": 0,
+    "status": "backlog",
+    "status_since": 1794495506884,
+    "title": "Build speed: isolate Mac UI contention and split slow test cases",
+    "updated_at": 1794495506884,
+    "wait": null,
+    "waiting_on": [],
+    "workers": [],
+    "workspace": "01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571",
+    "worktree_id": null
+  }
+]
