@@ -79,7 +79,21 @@ final class PadWorkspaceUITests: XCTestCase {
         else { return false }
         let window = app.windows.firstMatch.frame
         let shown = header.isHittable && pane.frame.width >= 340 && window.contains(pane.frame.insetBy(dx: 1, dy: 1))
-        if !shown { print("CHAT: header \(header.frame) hittable \(header.isHittable) pane \(pane.frame) window \(window)") }
+        if !shown {
+            // Keep the children's names and frames in the CI log (ov-1096):
+            // the column alone cannot say which child refused its width.
+            let report = """
+                CHAT: \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)
+                header \(header.frame) hittable \(header.isHittable) pane \(pane.frame) window \(window)
+                CHAT children:
+                \(pane.debugDescription)
+                """
+            print(report)
+            let attachment = XCTAttachment(string: report)
+            attachment.name = "Chat Layout"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
         return shown
     }
 
