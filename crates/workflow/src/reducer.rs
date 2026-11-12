@@ -273,7 +273,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     };
                     if item.phase != Phase::WaitingJoin { return Err(Refusal::Phase); }
                     let candidate = item.candidate.clone().ok_or(Refusal::Invalid)?;
-                    let limit = usize::from(item.definition.groups.get(name).ok_or(Refusal::Definition)?.limit);
+                    let limit = item.definition.groups.get(name).ok_or(Refusal::Definition)?.cap();
                     // The first open group of this definition and policy with room, oldest first.
                     let open = next.items.iter().find(|(_, g)| g.phase == Phase::Blocked
                         && g.members.len() < limit && g.stage == 0 && g.candidate.is_none() && g.policy_pin == item.policy_pin

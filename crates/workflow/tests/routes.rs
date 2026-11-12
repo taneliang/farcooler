@@ -156,13 +156,19 @@ fn schema_1_definitions_serialize_and_pin_exactly_as_before() {
 #[test]
 fn the_validator_accepts_the_routed_fixture() { assert_eq!(bad(|_| {}), Ok(())); }
 #[test]
+fn a_back_edge_may_be_taken_up_to_five_times() {
+    // ov-1071: reviews have needed four rounds, and a full group of 32 splits down to one in five.
+    assert_eq!(bad(|d| { d.stages[2].limit = MAX_BACK_EDGE_LIMIT; }), Ok(()));
+    assert_eq!(MAX_BACK_EDGE_LIMIT, 5);
+}
+#[test]
 fn the_validator_rejects_bad_routes() {
     type Break = Box<dyn FnOnce(&mut Definition)>;
     let cases: Vec<(&str, Break)> = vec![
         ("route to a missing step", Box::new(|d| { d.stages[2].routes.insert("skip-review".into(), Target::Step("nope".into())); })),
         ("back edge with no limit", Box::new(|d| { d.stages[2].limit = 0; })),
         ("limit with no back edge", Box::new(|d| { d.stages[0].limit = 1; })),
-        ("limit above three", Box::new(|d| { d.stages[2].limit = 4; })),
+        ("limit above five", Box::new(|d| { d.stages[2].limit = 6; })),
         ("custom label on a build", Box::new(|d| { d.stages[1].routes.insert("odd".into(), Target::Done); })),
         ("bad label text", Box::new(|d| { d.stages[2].routes.insert("has space".into(), Target::Done); })),
         ("unreachable steps", Box::new(|d| { d.stages[0].routes.insert("passed".into(), Target::Done); })),

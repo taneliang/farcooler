@@ -42,6 +42,19 @@ fn batched_and_per_ticket_push_differ_by_one_number() {
     assert_eq!(batched, single);
 }
 #[test]
+fn an_uncapped_batch_holds_every_ticket_ready_and_splits_deep_enough_to_find_one() {
+    // ov-1071: zero is no cap of the plan's own. The engine's 32 halves to one in five splits.
+    let mut p = plan(Template::BatchedPush); p.batch = 0;
+    let d = make(&p);
+    let group = &d.groups["landing"];
+    assert_eq!((group.limit, group.cap()), (0, 32));
+    let limits: Vec<(&str, u8)> = group.steps.iter().filter(|s| matches!(s.kind, StageKind::Fold | StageKind::Run))
+        .map(|s| (s.id.as_str(), s.limit)).collect();
+    assert_eq!(limits, vec![("fold", 5), ("gate-0", 5)]);
+    // A batch of eight or fewer keeps the three it always had, so its pin doesn't move.
+    assert_eq!((split_depth(1), split_depth(8), split_depth(9), split_depth(16), split_depth(32), split_depth(0)), (3, 3, 4, 4, 5, 5));
+}
+#[test]
 fn a_push_template_lands_through_base_fold_gate_push_ci() {
     let d = make(&plan(Template::BatchedPush));
     assert_eq!(ids(&d), ["provision", "build", "join"]);

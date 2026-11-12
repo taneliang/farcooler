@@ -69,7 +69,8 @@ pub struct Plan {
     pub green_base: bool,
     /// Whether the pushed commit waits for CI.
     pub ci: bool,
-    /// Most tickets in one batch. A per-ticket template is always one.
+    /// Most tickets in one batch, or zero for no cap of its own: every ticket ready lands together (ov-1071). A
+    /// per-ticket template is always one.
     pub batch: u8,
     pub every_ms: u64,
     pub base_patience_ms: u64,
@@ -103,6 +104,13 @@ fn ending(mut stage: Stage, label: &str, to: Target) -> Stage { stage.routes.ins
 fn step(id: &str) -> Target { Target::Step(id.into()) }
 fn split(to: &str) -> Target { Target::Split { step: to.into(), otherwise: Box::new(Target::Fail) } }
 
+/// How many times a group may split: enough to halve its fullest batch down to one ticket, and never fewer than three,
+/// so templates made before uncapped batches keep their pins.
+pub fn split_depth(batch: u8) -> u8 {
+    let cap = if batch == 0 { crate::MAX_GROUP_MEMBERS } else { batch.min(crate::MAX_GROUP_MEMBERS) };
+    let depth = u8::try_from(u32::from(cap).next_power_of_two().trailing_zeros()).unwrap_or(crate::MAX_BACK_EDGE_LIMIT);
+    depth.clamp(3, crate::MAX_BACK_EDGE_LIMIT)
+}
 /// The definition a plan describes, or a refusal when it would not be sound: a push with no command
 /// gate to stand behind it, or a gate list longer than a definition holds.
 pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
@@ -144,11 +152,12 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
     let (every, base_wait, ci_wait) = (plan.every_ms, plan.base_patience_ms, plan.ci_patience_ms);
     let mode = if plan.green_base { "green" } else { "any" };
     let mut groups = BTreeMap::new();
+    let splits = split_depth(batch);
     let folds = |m: &Maker| -> Vec<Stage> {
         let mut steps = vec![routed(m.wait("base", StageKind::AwaitBase, "coding-await-base/v1", mode, every, base_wait), "timeout", Target::Fail, 0),
-            routed(m.stage("fold", StageKind::Fold, "coding-fold/v1", ""), "conflict", split("base"), 3)];
+            routed(m.stage("fold", StageKind::Fold, "coding-fold/v1", ""), "conflict", split("base"), splits)];
         for (n, i) in commands.iter().enumerate() {
-            steps.push(routed(m.stage(&format!("gate-{n}"), StageKind::Run, "coding-gate/v1", &i.to_string()), "rejected", split("base"), 3));
+            steps.push(routed(m.stage(&format!("gate-{n}"), StageKind::Run, "coding-gate/v1", &i.to_string()), "rejected", split("base"), splits));
         }
         steps
     };

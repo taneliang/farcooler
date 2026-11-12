@@ -83,11 +83,16 @@ pub enum Target {
 /// A batch of tickets run together by an item of its own. Its steps are a definition of their own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupDef {
-    /// Most members one group holds; a later ticket opens a group behind it.
+    /// Most members one group holds; a later ticket opens a group behind it. Zero is no cap of its own: every
+    /// ticket waiting joins, up to `MAX_GROUP_MEMBERS` (ov-1071).
     pub limit: u8,
     /// The resource one group at a time holds, such as a branch on a remote.
     pub exclusive: String,
     pub steps: Vec<Stage>,
+}
+impl GroupDef {
+    /// How many members this group takes before a later ticket opens a group behind it.
+    pub fn cap(&self) -> usize { usize::from(if self.limit == 0 { MAX_GROUP_MEMBERS } else { self.limit.min(MAX_GROUP_MEMBERS) }) }
 }
 /// A finite forward sequence; rejected evaluators may take one bounded, pinned rework edge.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -245,7 +250,7 @@ impl Definition {
         }
         for name in self.groups.keys() {
             let group = &self.groups[name];
-            if !(1..=MAX_GROUP_MEMBERS).contains(&group.limit) || !valid_id(&group.exclusive) { return Err(Refusal::Definition); }
+            if group.limit > MAX_GROUP_MEMBERS || !valid_id(&group.exclusive) { return Err(Refusal::Definition); }
             self.group_definition(name).ok_or(Refusal::Definition)?.validate_group()?;
         }
         Ok(())
@@ -442,8 +447,9 @@ fn finishes_or_goes_on(target: &Target, index: &BTreeMap<&str, usize>, from: usi
 /// The source of the tracker-only template, and its columns in order.
 pub const TICKET_SOURCE: &str = "ticket/v1";
 pub const TICKET_COLUMNS: [&str; 5] = ["backlog", "todo", "doing", "review", "decision"];
-/// Back edges per step are capped so a loop cannot be a polite spelling of forever.
-pub const MAX_BACK_EDGE_LIMIT: u8 = 3;
+/// Back edges per step are capped so a loop cannot be a polite spelling of forever. Five lets a review turn work back
+/// four times, and lets splitting find one failing ticket in a full group: 32 halves to 1 in five (ov-1071).
+pub const MAX_BACK_EDGE_LIMIT: u8 = 5;
 /// A group holds at most this many tickets.
 pub const MAX_GROUP_MEMBERS: u8 = 32;
 /// Labels a step can produce. `passed` and `rejected` come from anything; a label of a

@@ -152,6 +152,24 @@ fn tickets_queued_during_a_wait_accumulate_up_to_the_limit_then_a_new_group_open
     assert!(log.group_of("b") < log.group_of("d"));
 }
 #[test]
+fn an_uncapped_group_takes_every_ticket_waiting_up_to_the_engines_own_bound() {
+    // ov-1071: a limit of zero is no cap of the definition's own. Everything ready lands together.
+    let mut uncapped = ticket(); uncapped.groups.get_mut("landing").unwrap().limit = 0;
+    assert_eq!(uncapped.validate(), Ok(()));
+    assert_eq!(uncapped.groups["landing"].cap(), usize::from(MAX_GROUP_MEMBERS));
+    let mut log = Log::new();
+    let tickets: Vec<String> = (0..12).map(|i| format!("t{i:02}")).collect();
+    for t in &tickets {
+        log.enqueue(t, uncapped.clone());
+        while log.state.items[t].phase != Phase::WaitingJoin { log.pass(t); }
+    }
+    log.queue(&tickets[0]);
+    for t in &tickets[1..] { log.queue(t); }
+    let behind = log.group_of(&tickets[1]);
+    assert!(tickets[1..].iter().all(|t| log.group_of(t) == behind), "every waiting ticket joins the one group");
+    assert_eq!(log.state.items[&behind].members.len(), 11);
+}
+#[test]
 fn a_ticket_without_a_candidate_cannot_be_queued() {
     let mut log = Log::new();
     log.join_group("a");
@@ -480,7 +498,6 @@ fn the_validator_rejects_bad_groups() {
     let cases: Vec<(&str, Break)> = vec![
         ("join names no group", Box::new(|d| { d.groups.clear(); })),
         ("group nobody joins", Box::new(|d| { d.groups.insert("spare".into(), d.groups["landing"].clone()); })),
-        ("limit zero", Box::new(|d| { d.groups.get_mut("landing").unwrap().limit = 0; })),
         ("limit above 32", Box::new(|d| { d.groups.get_mut("landing").unwrap().limit = 33; })),
         ("bad resource", Box::new(|d| { d.groups.get_mut("landing").unwrap().exclusive = "has space".into(); })),
         ("no group steps", Box::new(|d| { d.groups.get_mut("landing").unwrap().steps.clear(); })),
