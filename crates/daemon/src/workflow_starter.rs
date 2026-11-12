@@ -52,9 +52,15 @@ IDS
 out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt" --jq '{binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at, run_attempt}}') || exit 1
 jobs=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "stale") | .name]') || exit 1
 export CI_FAILURE_JOB='' CI_FAILURE_LINE=''
-CI_FAILURE_JOB=$(printf '%s' "$jobs" | python3 -c 'import json,sys; print(next(iter(json.load(sys.stdin)), ""))') || exit 1
-if [ -n "$CI_FAILURE_JOB" ]; then
-  CI_FAILURE_LINE=$("$CI_GH" run view "$run" --attempt "$attempt" --repo "$CI_REPOSITORY" --log-failed | awk 'NF { print; exit }')
+failed=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure")][0] // empty | (.id | tostring) + "|" + .name') || exit 1
+if [ -n "$failed" ]; then
+  CI_FAILURE_JOB=${failed#*|}
+  log=$("$CI_GH" run view "$run" --attempt "$attempt" --repo "$CI_REPOSITORY" --job "${failed%%|*}" --log-failed) || exit 1
+  CI_FAILURE_LINE=$(printf '%s\n' "$log" | awk '
+    { line=$0; sub(/^[^\t]*\t[^\t]*\t/, "", line) }
+    line ~ /[^[:space:]]/ && !first { first=line }
+    !error && tolower(line) ~ /(^|[^[:alnum:]_])(error|failed|failure|fatal|panicked)([^[:alnum:]_]|$)/ { error=line }
+    END { print error ? error : first }')
 fi
 failure=$(python3 -c 'import json,os; j=os.environ["CI_FAILURE_JOB"]; print(json.dumps({"job":j,"firstLine":os.environ["CI_FAILURE_LINE"]} if j else None))') || exit 1
 printf '%s,"failed_jobs":%s,"failure":%s}\n' "${out%?}" "$jobs" "$failure" > "$FARCOOLER_RECEIPT""#;
@@ -265,23 +271,33 @@ else:
         std::fs::write(&gh, r#"#!/bin/sh
 case "$*" in
   *'/actions/runs?'*) printf '19|failure\n' ;;
-  *'/19/jobs'*) printf 'Rust tests\n' ;;
-  *'--log-failed'*) printf 'error: first failed assertion\nerror: later assertion\n' ;;
+  *'/19/jobs'*) case "$*" in
+    *'(.id | tostring)'*) printf '91|Rust tests\n' ;;
+    *) printf 'Rust tests\n' ;;
+  esac ;;
+  *'--job 91 --log-failed'*)
+    [ "${CI_TEST_LOG_UNAVAILABLE:-}" != 1 ] || exit 1
+    printf 'Rust tests\tFailure recovery tests\t2026-11-12T01:00:00Z running tests\nRust tests\tFailure recovery tests\t2026-11-12T01:00:01Z error: first failed assertion\nRust tests\tFailure recovery tests\t2026-11-12T01:00:02Z error: later assertion\n' ;;
+  *'--log-failed'*) printf 'Other job Check 2026-11-12T01:00:00Z error: unrelated failure\n' ;;
   *'/actions/runs/19'*) printf '{"binding":"bound","repository":"owner/repo","run":{"id":19},"failure":{"job":"%s","firstLine":"%s"}}' "$CI_FAILURE_JOB" "$CI_FAILURE_LINE" ;;
   *) exit 1 ;;
 esac
 "#).unwrap();
         std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
         let receipt = dir.path().join("receipt.json");
-        let result = std::process::Command::new("/bin/sh").arg("-c").arg(super::CI_LOOK)
+        let mut look = std::process::Command::new("/bin/sh");
+        look.arg("-c").arg(super::CI_LOOK)
             .env("CI_GH", gh).env("CI_REPOSITORY", "owner/repo").env("CI_WORKFLOW", "CI")
             .env("CI_EVENT", "push").env("FARCOOLER_CANDIDATE", "candidate")
-            .env("FARCOOLER_OPERATION_BINDING", "bound").env("FARCOOLER_RECEIPT", &receipt).status().unwrap();
-        assert!(result.success());
-        let receipt: crate::workflow_runtime::CodingCiReceipt = serde_json::from_slice(&std::fs::read(receipt).unwrap()).unwrap();
-        let failure = receipt.failure.unwrap();
+            .env("FARCOOLER_OPERATION_BINDING", "bound").env("FARCOOLER_RECEIPT", &receipt);
+        assert!(look.status().unwrap().success());
+        let kept: crate::workflow_runtime::CodingCiReceipt = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
+        let failure = kept.failure.unwrap();
         assert_eq!(failure.job, "Rust tests");
-        assert_eq!(failure.first_line, "error: first failed assertion");
+        assert_eq!(failure.first_line, "2026-11-12T01:00:01Z error: first failed assertion");
+        std::fs::remove_file(&receipt).unwrap();
+        assert!(!look.env("CI_TEST_LOG_UNAVAILABLE", "1").status().unwrap().success());
+        assert!(!receipt.exists(), "unavailable logs must be looked at again, not kept as an empty failure");
     }
 
     #[test]

@@ -40,3 +40,18 @@ The queue golden was demonstrated red with the snapshot integration removed at
 its call site, then green after restoration. Native and runtime tests were rerun
 with the local file/socket/process access their setup requires after sandbox-only
 setup failures. No application deployment or workflow publication was performed.
+
+## Follow-up verification
+
+The CI provider now reads the selected failed job's own log, skips setup output,
+and strips gh's job/step prefixes before choosing the first failure line. This
+prevents a different failed job, or a step name containing “Failure,” from
+supplying the diagnostic. A failed log download leaves no receipt and is retried.
+
+The expanded provider regression failed on the prior implementation by retaining
+an unrelated job's failure. The four CI starter/provider tests pass after the fix,
+including setup before two errors and a log download failure. The shared landing
+queue golden and clock tests pass, as do all 38 group/replay tests. Shell syntax,
+file-size budget, swallowed-call and diff whitespace checks also pass. These are
+fresh checks in this follow-up; the platform results above are from the existing
+implementation commit.
