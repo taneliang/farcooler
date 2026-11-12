@@ -174,7 +174,11 @@ impl Exec {
         Ok(Some(journal))
     }
     pub(super) fn write_journal(&self, journal: &Journal) -> Result<()> {
-        durable(&self.journal_path(&journal.binding.effect), &serde_json::to_vec(journal)?)
+        let mut value = serde_json::to_value(journal)?;
+        if let Some(path) = self.effect_log(&journal.binding.effect) {
+            value["log_path"] = serde_json::json!(path);
+        }
+        durable(&self.journal_path(&journal.binding.effect), &serde_json::to_vec(&value)?)
     }
     pub(super) fn tree(&self, binding: &Binding) -> PathBuf {
         // A worktree the orchestrator named at Start (ov-967), or the run's private one.

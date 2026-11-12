@@ -451,7 +451,7 @@ impl Exec {
         });
         // Capture actual PTY output before closing it; never parse it as success.
         let output = tmux.capture_scrollback(&window.pane_id).await.map_err(|_| Error::Refused("native PTY output unavailable"))?;
-        std::fs::write(self.process_log(binding), output)?;
+        crate::effect_runner::save_tail(&self.process_log(binding), output.as_bytes())?;
         self.quiesce_native(&owner).await?;
         if let Some(stopped) = frozen.take() { stopped.quiescent(); }
         let (mut completed, hooks, mut failure) = result.map_or((None, Vec::new(), None),
@@ -507,7 +507,7 @@ impl Exec {
                 self.bytes(&self.process_log(binding))?;
             } else {
                 let output = tmux.capture_scrollback(&owner.pane).await.map_err(|_| Error::Refused("interrupted native output unavailable"))?;
-                std::fs::write(self.process_log(binding), output)?;
+                crate::effect_runner::save_tail(&self.process_log(binding), output.as_bytes())?;
                 self.quiesce_native(&owner).await?;
             }
             durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed, failure: None })?)?;

@@ -1,6 +1,9 @@
 //! A supervised process group for workflow fixtures and configured commands.
 //! A leader exiting is not proof that its background writers have stopped.
 use std::path::Path;
+use std::os::fd::OwnedFd;
+use std::os::unix::fs::OpenOptionsExt;
+use tokio::io::AsyncReadExt;
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
@@ -134,14 +137,61 @@ impl Owner {
     }
 }
 
+/// Keep only the last 2 MiB, shared by command and native terminal capture (ov-1127).
+pub(crate) const LOG_LIMIT: usize = 2 * 1024 * 1024;
+pub(crate) fn save_tail(log: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().write(true).create(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(log)?;
+    use std::os::unix::fs::MetadataExt;
+    if !file.metadata()?.is_file() || file.metadata()?.nlink() != 1 {
+        return Err(std::io::Error::other("nonregular or aliased process log"));
+    }
+    file.set_len(0)?;
+    file.write_all(&bytes[bytes.len().saturating_sub(LOG_LIMIT)..])?;
+    file.sync_data()
+}
+
+/// Drain a merged stdout/stderr stream continuously, with bounded memory and disk. Publish once a
+/// second as well as at EOF, so an interrupted daemon leaves useful output beside its receipt.
+async fn capture(mut reader: tokio::net::UnixStream, log: std::path::PathBuf) -> std::io::Result<()> {
+    let mut tail = std::collections::VecDeque::with_capacity(LOG_LIMIT);
+    let mut chunk = [0u8; 16384];
+    let mut flush = tokio::time::interval(Duration::from_secs(1));
+    let mut dirty = false;
+    loop {
+        tokio::select! {
+            read = reader.read(&mut chunk) => {
+                let count = read?;
+                if count == 0 { return save_tail(&log, tail.make_contiguous()); }
+                let discard = (tail.len() + count).saturating_sub(LOG_LIMIT);
+                tail.drain(..discard);
+                tail.extend(&chunk[..count]);
+                dirty = true;
+            }
+            _ = flush.tick() => {
+                if dirty { save_tail(&log, tail.make_contiguous())?; dirty = false; }
+            }
+        }
+    }
+}
+
 async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duration,
     mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>) -> std::io::Result<Option<i32>>
 {
-    let file = std::fs::OpenOptions::new().append(true).create(true).open(log)?;
+    save_tail(log, b"")?;
+    let (reader, writer) = std::os::unix::net::UnixStream::pair()?;
+    reader.set_nonblocking(true)?;
+    let reader = tokio::net::UnixStream::from_std(reader)?;
+    let stderr = writer.try_clone()?;
     command.current_dir(tree)
-        .stdin(Stdio::null()).stdout(file.try_clone()?).stderr(file).kill_on_drop(true);
+        .stdin(Stdio::null()).stdout(Stdio::from(OwnedFd::from(writer)))
+        .stderr(Stdio::from(OwnedFd::from(stderr))).kill_on_drop(true);
     command.process_group(0);
     let mut child = command.spawn()?;
+    // Command retains its configured stdio handles; release them so EOF follows the child.
+    drop(command);
+    let mut output = tokio::spawn(capture(reader, log.to_path_buf()));
     let pid = child.id().expect("newly spawned child has a pid");
     let presence = crate::workflow_runtime::execution::process(pid);
     let mut group = Group(Some(pid));
@@ -184,6 +234,10 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
         }
         child.wait().await
     }).await.map_err(|_| std::io::Error::other("owned process leader reap unproved"))??;
+    match tokio::time::timeout(Duration::from_secs(1), &mut output).await {
+        Ok(result) => result.map_err(std::io::Error::other)??,
+        Err(_) => { output.abort(); return Err(std::io::Error::other("process output did not close")); }
+    }
     // A surviving group (including unreaped grandchildren) is not quiescence.
     for _ in 0..100 {
         if matches!(Group::gone(pid), Ok(true)) {
@@ -205,6 +259,35 @@ tokio::task_local! { static TEST_SIGNAL_PINNED: std::cell::Cell<bool>; }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn process_output_keeps_the_bounded_tail_of_both_streams() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("failure.output");
+        let passed = supervised(dir.path(),
+            "printf 'discarded prefix'; head -c 3145728 /dev/zero; printf 'stderr at the end\\n' >&2; exit 1",
+            &log, Duration::from_secs(5), None).await.unwrap();
+        assert!(!passed);
+        let bytes = std::fs::read(&log).unwrap();
+        assert_eq!(bytes.len(), LOG_LIMIT);
+        assert!(bytes.starts_with(&[0; 32]));
+        assert!(bytes.ends_with(b"stderr at the end\n"));
+    }
+
+    #[test]
+    fn native_output_uses_the_same_cap_and_refuses_aliased_logs() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("native.output");
+        let bytes = vec![b'x'; LOG_LIMIT + 100];
+        save_tail(&log, &bytes).unwrap();
+        assert_eq!(std::fs::read(&log).unwrap(), bytes[100..]);
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(&log, &alias).unwrap();
+        assert!(save_tail(&alias, b"clobbered").is_err());
+        std::fs::hard_link(&log, dir.path().join("hardlink")).unwrap();
+        assert!(save_tail(&log, b"clobbered").is_err());
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), LOG_LIMIT as u64);
+    }
+
     #[tokio::test]
     async fn workflow_runtime_exited_leader_keeps_group_owned_until_descendant_stops() {
         let dir = tempfile::tempdir().unwrap();

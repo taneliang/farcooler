@@ -12,6 +12,8 @@ struct ProcessFact {
     environment: std::collections::BTreeMap<String, String>,
     exit: Option<i32>,
     log_digest: String,
+    #[serde(default)]
+    log_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -369,7 +371,7 @@ impl Exec {
         if let Some(ledger) = &ledger { named_tree::end_gate(ledger)?; }
         let exit = exit?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
-            environment: command.environment, exit, log_digest: digest(&self.bytes(&log)?) };
+            environment: command.environment, exit, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
     }
     fn check_binding(&self, workspace: &str, binding: &Binding) -> Result<()> {
@@ -446,6 +448,7 @@ impl Exec {
         let command = self.bound_command(binding, false)?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: command.environment, exit: completed.map(|passed| if passed { 0 } else { 1 }),
+            log_path: Some(self.process_log(binding)),
             log_digest: digest(&self.bytes(&self.process_log(binding))?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
     }

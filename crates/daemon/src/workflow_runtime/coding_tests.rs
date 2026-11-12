@@ -28,7 +28,11 @@ if stage == 'build':
     subprocess.check_call(['/usr/bin/git', 'add', '--', 'result.txt'])
     subprocess.check_call(['/usr/bin/git', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'build '+iteration])
 elif stage == 'check':
-    if mode == 'check-fail': sys.exit(7)
+    if mode == 'check-fail':
+        print('gate stdout', flush=True)
+        for line in range(50): print('gate line ' + str(line), flush=True)
+        print('gate stderr', file=sys.stderr, flush=True)
+        sys.exit(1)
     if mode == 'mutate':
         pathlib.Path('result.txt').write_text('changed after candidate')
         sys.exit(0)

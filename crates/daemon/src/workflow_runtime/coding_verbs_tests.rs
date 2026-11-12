@@ -7,7 +7,10 @@ use super::coding_verbs::{classify_push, PushVerdict};
 use std::collections::BTreeMap;
 
 const GATE: &str = r#"elif stage == 'gate':
-    if mode == 'gate-fail': sys.exit(5)
+    if mode == 'gate-fail':
+        print('landing gate stdout', flush=True)
+        print('landing gate stderr', file=sys.stderr, flush=True)
+        sys.exit(1)
     if mode == 'gate-dirty': pathlib.Path('stray.out').write_text('left behind')
     if mode == 'gate-slow':
         pathlib.Path('half-built.out').write_text('left by the gate')
@@ -551,6 +554,15 @@ async fn a_failing_gate_is_rejected_on_the_first_run_and_not_retried_as_a_crash(
     command(&runtime, Command::Queue { item: "one".into() });
     until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
     assert_eq!(outbox(&runtime, StageKind::Run), 1, "a failing exit is the candidate's answer: one run, not one per attempt");
+    let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    let logs = reply["process_logs"].as_array().unwrap();
+    let log = logs.iter().find(|log| log["stage"] == serde_json::json!({"Execute":"Run"})).unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(log["item"], group_id(&state));
+    assert_eq!(log["exit"], 1);
+    let output = std::fs::read_to_string(log["log_path"].as_str().unwrap()).unwrap();
+    assert!(output.contains("landing gate stdout") && output.contains("landing gate stderr"));
+    assert_eq!(log["tail"], output.trim_end());
 }
 
 #[tokio::test]

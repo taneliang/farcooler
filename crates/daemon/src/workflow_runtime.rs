@@ -13,6 +13,7 @@ use uuid::Uuid;
 use tokio::sync::{mpsc, oneshot};
 
 mod adapters;
+mod process_logs;
 mod coding;
 mod coding_review_policy;
 mod service_owner;

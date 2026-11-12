@@ -59,6 +59,9 @@ impl Exec {
     /// Errors are logged, never raised: a tree left behind costs disk, not correctness. `recovering` also deletes what
     /// an earlier daemon was deleting when it stopped.
     pub(super) async fn prune_trees(&self, workspaces: &[String], recovering: bool) {
+        if let Err(error) = self.prune_process_logs(workspaces) {
+            tracing::warn!(%error, "could not prune orphan process logs");
+        }
         if let Err(error) = self.prune_trees_or_fail(workspaces, recovering).await {
             tracing::warn!(%error, "could not prune ended fold trees");
         }
