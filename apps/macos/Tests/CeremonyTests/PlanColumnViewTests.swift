@@ -29,6 +29,35 @@ struct PlanColumnViewTests {
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }), width: width, height: 4000)
     }
 
+    @Test("The current Plan home shows engine groups without themes or line tickets at 320 pt")
+    func landingQueue() async throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let queue = try JSONSerialization.jsonObject(with: Data(contentsOf:
+            root.appendingPathComponent("test/fixtures/landing-queue.json"))) as! [String: Any]
+        let request = queue["request"] as! [String: Any]
+        var plan = request["plan"] as! [String: Any]
+        plan["themes"] = []
+        plan["lines"] = []
+        // The Rust golden omits optional input fields; the runner's Apple card decoder requires status.
+        plan["cards"] = (plan["cards"] as! [[String: Any]]).map { card in
+            card.merging(["status": "In Review"]) { first, _ in first }
+        }
+        let calls = PlanViewTests.Calls()
+        calls.plan = try JSONSerialization.data(withJSONObject: plan)
+        let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
+        await store.plan.reload()
+        let view = try #require(store.plan.columnView())
+        #expect(view.landingGroups?.count == 4)
+        let frames = await PlanThemePageTests.frames(
+            PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }), width: 320, height: 4000)
+        #expect(frames["plan-empty"] == nil)
+        for group in queue["expected"] as! [[String: Any]] {
+            let row = try #require(frames["plan-landing-group-\(group["id"] as! String)"])
+            #expect(row.minX >= 0 && row.maxX <= 320.5)
+        }
+    }
+
     @Test("Facts, Needs You, Initiatives, the pipeline by stage, then the footer, in that order")
     func order() async throws {
         let drawn = try await Self.drawn(width: 720)

@@ -170,7 +170,9 @@ private fun LazyListScope.loaded(
     rulingsShown: Boolean = false,
     band: BandShown = BandShown.ALL,
 ) {
-    if (plan.isEmpty) {
+    // Read before choosing the empty layout: engine groups can outlive the themes and ticket line.
+    val view = PlanViews.of(plan, needsYou = needsYou, statuses = statuses)
+    if (plan.isEmpty && view?.landingGroups.isNullOrEmpty()) {
         // Rulings alone plan nothing (review 1005a F1), but they're something to show.
         if (!rulingsShown) item(key = "plan/empty") {
             PlanNotice(PlanWords.NOTHING_PLANNED, PlanWords.NOTHING_PLANNED_DETAIL, Modifier.testTag("plan-empty"))
@@ -178,8 +180,7 @@ private fun LazyListScope.loaded(
         pages?.let { pageItems(it, plan, onOpen) }
         return
     }
-    // One reading of the plan for the band and every section, so they can't disagree: the shared core's (ov-1016).
-    val view = PlanViews.of(plan, needsYou = needsYou, statuses = statuses)
+    // The same Rust answer supplies the band and every section, so they can't disagree (ov-1016).
     if (view == null) {
         item(key = "plan/unreadable") { PlanNotice(PlanWords.COULDNT_READ, null, Modifier.testTag("plan-unreadable")) }
     } else {

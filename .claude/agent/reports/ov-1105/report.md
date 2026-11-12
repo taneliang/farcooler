@@ -55,3 +55,43 @@ queue golden and clock tests pass, as do all 38 group/replay tests. Shell syntax
 file-size budget, swallowed-call and diff whitespace checks also pass. These are
 fresh checks in this follow-up; the platform results above are from the existing
 implementation commit.
+
+## Current Plan screens
+
+The Mac and iPhone now render the groups in their current Plan columns, which
+previously consumed only `view.column`; the older sections views were insufficient
+to make the queue reachable from today's home screen. Both columns keep the full
+Rust answer and lay out the same shared group row. Queue-only plans also bypass
+the empty notice in the iPad sections view and Android. No group ordering, words,
+member selection, timing, or failure interpretation moved into a renderer.
+
+The native regressions adapt the shared queue golden to the runner's required
+Apple card fields, with no themes or line tickets. The Mac home is checked at
+320 pt; the iPhone test checks every supplied line and its horizontal bounds.
+The existing shared SwiftUI wrapping check now compares long and short titles
+instead of assuming a fixed height across system font metrics. Android's 320 dp
+capture likewise exercises the queue without themes or line tickets.
+
+Fresh verification of this follow-up:
+
+- Rust queue golden and clock tests: 2 passed.
+- Mac Plan column and sections suites, linked against freshly built Rust cores:
+  21 passed. The valid new home regression fails with the original column restored.
+- Android unit suite passed; all 17 Compose Plan section tests passed, including
+  the 320 dp queue with long titles, split details, and gate failure lines. The
+  queue test fails with the old empty-state guard restored. Light and dark
+  captures were generated and the light capture was checked; the Rust JNI library
+  was loaded by absolute path.
+- File-size, visual-token, copy, swallowed-call, doc-comment and diff whitespace
+  checks passed.
+- iPhone queue regression passed on the actual current Plan screen: all four
+  groups, each complete supplied line, and horizontal bounds on a phone. The
+  corrected focused test ran in 18 seconds with no skips.
+- The iPhone Plan class and per-push smoke set were also run. All selected
+  smoke tests passed, as did the other Plan navigation, ordering, ticket/key,
+  and largest-accessibility-type checks. `testEachFooterCountOpensItsTickets`
+  exceeded Xcode's six-minute timeout while searching absent footer counts.
+  The broader run also contained the earlier invalid queue fixture (missing
+  the Apple card's required status); its final corrected regression passed
+  separately as recorded above. The broader run is therefore not reported
+  as green. No footer behavior was changed in this ticket.

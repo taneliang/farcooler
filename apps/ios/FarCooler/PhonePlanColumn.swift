@@ -118,7 +118,24 @@ struct PhonePlanColumn<Top: View>: View {
     @ViewBuilder private func loaded(_ plan: PlanModel) -> some View {
         let asks = asks(plan)
         let items = items
-        if plan.isEmpty && !plan.hasColumnAgents && items.isEmpty && asks.isEmpty {
+        let rows = connection.boards[summary.id]?.rows ?? []
+        let view = PlanViewBridge.columnView(
+            plan: plan, needsYou: items.count + asks.count,
+            statuses: Dictionary(rows.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first }),
+            titles: Dictionary(rows.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first }))
+        let groups = view?.landingGroups ?? []
+        if !groups.isEmpty {
+            Section {
+                ForEach(groups, id: \.id) { group in
+                    PlanLandingGroupView(group: group)
+                        .accessibilityIdentifier("plan-landing-group-\(group.id)")
+                }
+            } header: {
+                Text(view?.section(.landing)?.title ?? "Landings")
+                    .accessibilityIdentifier("plan-landing")
+            }
+        }
+        if plan.isEmpty && !plan.hasColumnAgents && items.isEmpty && asks.isEmpty && groups.isEmpty {
             // Rulings alone plan nothing, but they are something to show.
             if !(connection.keepsRulings && !plan.rulings.isEmpty) {
                 Section {
@@ -127,11 +144,7 @@ struct PhonePlanColumn<Top: View>: View {
                 }
             }
         } else {
-            let rows = connection.boards[summary.id]?.rows ?? []
-            let column = PlanViewBridge.column(
-                plan: plan, needsYou: items.count + asks.count,
-                statuses: Dictionary(rows.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first }),
-                titles: Dictionary(rows.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first }))
+            let column = view?.column
             if let column {
                 PhonePlanFacts(facts: column.facts)
             }

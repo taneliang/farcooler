@@ -51,7 +51,12 @@ struct PlanSectionViewTests {
             selected: nil, keyed: false, defaults: PlanViewTests.defaults(), onOpen: { _ in }), width: 320, height: 3200)
         let group = try #require(frames["plan-landing-group-test-group"])
         #expect(group.minX >= 0 && group.maxX <= 320.5)
-        #expect(group.height > 200, "the complete title wraps vertically")
+        view.landingGroups?[0].lines[2] = "ov-1105 · Short title"
+        let short = await PlanThemePageTests.frames(PlanSectionsView(
+            view: view, model: store.plan.plan, statuses: [:], plan: store.plan,
+            selected: nil, keyed: false, defaults: PlanViewTests.defaults(), onOpen: { _ in }), width: 320, height: 3200)
+        let shortGroup = try #require(short["plan-landing-group-test-group"])
+        #expect(group.height > shortGroup.height + 40, "the complete title wraps vertically")
     }
 
     @Test("Landing, In Review, Building, Waiting, Agents and Themes are drawn in the owner's order")

@@ -20,8 +20,13 @@ extension PlanStore {
 
     /// The plan column for the plan as read (ov-867), from the same view.
     func column(needsYou: Int = 0, statuses: [String: TaskStatus] = [:], titles: [String: String] = [:]) -> WireColumn? {
+        columnView(needsYou: needsYou, statuses: statuses, titles: titles)?.column
+    }
+
+    /// The current Plan home needs the groups alongside the column from the same Rust answer.
+    func columnView(needsYou: Int = 0, statuses: [String: TaskStatus] = [:], titles: [String: String] = [:]) -> WirePlanView? {
         PlanViewBridge.install()
-        return WireColumn.of(plan, needsYou: needsYou, statuses: statuses, titles: titles)
+        return WirePlanView.build(plan: plan, context: PlanViewContext(needsYou: needsYou, statuses: statuses, titles: titles))
     }
 }
 

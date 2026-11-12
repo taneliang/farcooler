@@ -85,14 +85,27 @@ struct PlanColumnView: View {
             } else {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 80)
             }
-        } else if plan.plan.isEmpty && !plan.plan.hasColumnAgents && needsYou.items.isEmpty {
-            PlanEmptyNotice().identified("plan-empty")
-        } else if let column = plan.column(needsYou: needsYou.items.count + asks.count, statuses: statuses, titles: titles) {
-            PlanFactsLine(facts: column.facts)
-            needs
-            PlanInitiativesSection(column: column, onOpen: onOpen)
-            PlanPipelineSection(column: column, actions: actions, onOpen: onOpen)
-            PlanFooterLine(counts: column.footer, open: actions.openList)
+        } else if let view = plan.columnView(needsYou: needsYou.items.count + asks.count, statuses: statuses, titles: titles) {
+            let groups = view.landingGroups ?? []
+            if !groups.isEmpty {
+                PlanColumnHeading(title: view.section(.landing)?.title ?? "Landings", prominent: true)
+                    .identified("plan-landing")
+                ForEach(groups, id: \.id) { group in
+                    PlanLandingGroupView(group: group)
+                        .padding(.vertical, Spacing.group)
+                        .identified("plan-landing-group-\(group.id)")
+                }
+            }
+            if plan.plan.isEmpty && !plan.plan.hasColumnAgents && needsYou.items.isEmpty && groups.isEmpty {
+                PlanEmptyNotice().identified("plan-empty")
+            } else {
+                let column = view.column
+                PlanFactsLine(facts: column.facts)
+                needs
+                PlanInitiativesSection(column: column, onOpen: onOpen)
+                PlanPipelineSection(column: column, actions: actions, onOpen: onOpen)
+                PlanFooterLine(counts: column.footer, open: actions.openList)
+            }
         }
     }
 

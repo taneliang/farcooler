@@ -35,7 +35,7 @@ final class PhonePlanColumnUITests: XCTestCase {
     }
 
     /// Billing's Plan, its screen while it has no orchestrator (ov-616).
-    private func openPlan(_ extra: [String] = [], fixture: String? = nil, ready: String = "plan-facts") -> XCUIApplication {
+    private func openPlan(_ extra: [String] = [], fixture: String? = nil, ready: String = "plan-facts", drags: Int = 40) -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
             ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", fixture ?? Self.fixture]
                 + extra)
@@ -43,8 +43,45 @@ final class PhonePlanColumnUITests: XCTestCase {
         XCTAssertTrue(billing.waitForExistence(timeout: 30) || app.reveal(billing), "no Billing row")
         billing.tap()
         // Under the invitation to start an orchestrator, which at a large type size is a screen tall.
-        XCTAssertTrue(app.reveal(element(app, ready)), "no Plan: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(element(app, ready), drags: drags), "no Plan: \(app.debugDescription)")
         return app
+    }
+
+    /// The current phone column must carry engine groups even when no theme or ticket is on the line.
+    func testLandingQueueWithLongTitles() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let queue = try JSONSerialization.jsonObject(with: Data(contentsOf:
+            root.appendingPathComponent("test/fixtures/landing-queue.json"))) as! [String: Any]
+        let request = queue["request"] as! [String: Any]
+        var plan = request["plan"] as! [String: Any]
+        plan["themes"] = []
+        plan["lines"] = []
+        // The Rust golden omits optional input fields; the runner's Apple card decoder requires status.
+        plan["cards"] = (plan["cards"] as! [[String: Any]]).map { card in
+            card.merging(["status": "In Review"]) { first, _ in first }
+        }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("farcooler-landing-queue-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try JSONSerialization.data(withJSONObject: ["plan": plan]).write(to: file)
+        let first = "plan-landing-group-group-00000000000000000001-landing"
+        let app = openPlan(fixture: file.path, ready: first, drags: 4)
+        defer { app.terminate() }
+        XCTAssertFalse(element(app, "plan-empty").exists, "the engine queue is work in progress")
+        let window = app.windows.firstMatch.frame
+        let expected = queue["expected"] as! [[String: Any]]
+        for group in expected {
+            let row = element(app, "plan-landing-group-\(group["id"] as! String)")
+            XCTAssertTrue(app.reveal(row), "missing engine group")
+            XCTAssertGreaterThanOrEqual(row.frame.minX, window.minX)
+            XCTAssertLessThanOrEqual(row.frame.maxX, window.maxX + 0.5)
+            for line in group["lines"] as! [String] {
+                let text = app.staticTexts.matching(NSPredicate(format: "label == %@", line)).firstMatch
+                XCTAssertTrue(app.reveal(text, drags: 4), "missing complete queue line: \(line)")
+                XCTAssertLessThanOrEqual(text.frame.maxX, window.maxX + 0.5)
+                XCTAssertGreaterThanOrEqual(text.frame.minX, window.minX)
+            }
+        }
     }
 
     private func scrollDown(_ app: XCUIApplication, largeType: Bool = false) {

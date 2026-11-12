@@ -54,6 +54,8 @@ class PlanSectionsViewTest {
         val queuePlan = queue.getValue("request").jsonObject.getValue("plan").jsonObject
         val raw = Json.parseToJsonElement(fixture.plan.wire!!).jsonObject
         val plan = Plan.decode(JsonObject(raw + mapOf(
+            "themes" to JsonArray(emptyList()),
+            "lines" to JsonArray(emptyList()),
             "workflow" to queuePlan.getValue("workflow"),
             "now_ms" to queuePlan.getValue("now_ms"),
             "cards" to JsonArray(raw.getValue("cards").jsonArray + queuePlan.getValue("cards").jsonArray),

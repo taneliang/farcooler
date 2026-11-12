@@ -86,8 +86,15 @@ enum PlanViewBridge {
     static func column(
         plan: PlanModel, needsYou: Int = 0, statuses: [String: TaskStatus], titles: [String: String]
     ) -> WireColumn? {
+        columnView(plan: plan, needsYou: needsYou, statuses: statuses, titles: titles)?.column
+    }
+
+    /// Keep the complete Rust answer for the current phone Plan, including engine landing groups.
+    static func columnView(
+        plan: PlanModel, needsYou: Int = 0, statuses: [String: TaskStatus], titles: [String: String]
+    ) -> WirePlanView? {
         install()
-        return WireColumn.of(plan, needsYou: needsYou, statuses: statuses, titles: titles)
+        return WirePlanView.build(plan: plan, context: PlanViewContext(needsYou: needsYou, statuses: statuses, titles: titles))
     }
 }
 
@@ -178,7 +185,8 @@ struct PlanBoardSections: View {
 
     @ViewBuilder
     private func sections(_ plan: PlanModel) -> some View {
-        if plan.isEmpty {
+        let view = PlanViewBridge.view(plan: plan, facts: hook.facts, statuses: hook.statuses)
+        if plan.isEmpty && (view?.landingGroups ?? []).isEmpty {
             // Rulings alone plan nothing (review 1005a F1), but they're
             // something to show, so the notice stands down for them.
             if !(hook.keepsRulings && !plan.rulings.isEmpty) {
@@ -192,7 +200,6 @@ struct PlanBoardSections: View {
         } else {
             // The Rust core's view decides the sections and their words
             // (ov-1016); a plan the runner sent always has one.
-            let view = PlanViewBridge.view(plan: plan, facts: hook.facts, statuses: hook.statuses)
             if let view {
                 if hook.showsBand {
                     Section {
