@@ -273,10 +273,10 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     };
                     if item.phase != Phase::WaitingJoin { return Err(Refusal::Phase); }
                     let candidate = item.candidate.clone().ok_or(Refusal::Invalid)?;
-                    let limit = item.definition.groups.get(name).ok_or(Refusal::Definition)?.cap();
+                    let group = item.definition.groups.get(name).ok_or(Refusal::Definition)?;
                     // The first open group of this definition and policy with room, oldest first.
                     let open = next.items.iter().find(|(_, g)| g.phase == Phase::Blocked
-                        && g.members.len() < limit && g.stage == 0 && g.candidate.is_none() && g.policy_pin == item.policy_pin
+                        && group.has_room(g.members.len()) && g.stage == 0 && g.candidate.is_none() && g.policy_pin == item.policy_pin
                         && g.group_of.as_ref().is_some_and(|o| &o.name == name && o.pin == item.pin))
                         .map(|(gid, _)| gid.clone());
                     let gid = match open {
@@ -336,7 +336,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     controller(input)?;
                     if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval || item.follows.is_some() { return Err(Refusal::Phase); }
                     // The run's other tickets: each a ticket at rest of its own, named once (ov-970).
-                    if with.len() > usize::from(MAX_GROUP_MEMBERS) || with.iter().any(|f| f == id || !valid_id(f))
+                    if with.len() > MAX_FOLLOWERS || with.iter().any(|f| f == id || !valid_id(f))
                         || with.iter().collect::<BTreeSet<_>>().len() != with.len()
                     { return Err(Refusal::Invalid); }
                     for follower in with {
@@ -691,9 +691,13 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
     }
     let mut target = target_of(item, label);
     let taken = item.back_edges.get(&key).copied().unwrap_or(0);
+    let mut split = false;
     if let Target::Split { step, otherwise } = target {
-        // Two or more members and room to go back: split. Otherwise the fallback decides.
-        target = if item.members.len() >= 2 && taken < limit && out.room {
+        // Two or more members and room for another item: split. Otherwise the fallback decides. A split takes none of
+        // the step's back edges (ov-1071): each one at least halves this group, and the half it hands on starts with
+        // fewer members than this one had, so splitting ends within the group's size however big it is.
+        split = item.members.len() >= 2 && out.room;
+        target = if split {
             let rest = item.members.split_off(item.members.len().div_ceil(2));
             out.spawn.push((id.to_string(), rest));
             Target::Step(step)
@@ -708,7 +712,7 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
         }
         Target::Step(to) => item.definition.stages.iter().position(|s| &s.id == to).ok_or(Refusal::Definition)?,
     };
-    if is_back_edge(item, &target) {
+    if !split && is_back_edge(item, &target) {
         if taken >= limit { item.phase = Phase::Failed; return Ok(()); }
         item.back_edges.insert(key, taken + 1);
         item.iteration = item.iteration.checked_add(1).ok_or(Refusal::Limit)?;
@@ -734,7 +738,6 @@ fn valid_membership(state: &State, id: &str, item: &Item) -> bool {
         (None, _) => true,
     };
     let group_ok = item.members.is_empty() || (item.group_of.is_some()
-        && item.members.len() <= usize::from(MAX_GROUP_MEMBERS)
         && item.members.iter().all(|m| valid_id(&m.candidate)
             && state.items.get(&m.item).is_some_and(|t| t.phase == Phase::Joined && t.grouped_in.as_deref() == Some(id))));
     let waiting_ok = item.phase != Phase::WaitingJoin
@@ -775,7 +778,7 @@ fn valid_state(state: &State) -> bool {
                 && item.sent_back.iter().all(|b| valid_id(&b.id) && valid_rework_reason(&b.reason))
                 && item.brief.as_deref().is_none_or(valid_rework_reason)
                 && item.failure.as_deref().is_none_or(valid_rework_reason)
-                && item.followers.len() <= usize::from(MAX_GROUP_MEMBERS)
+                && item.followers.len() <= MAX_FOLLOWERS
                 // A live lead's tickets follow it and no other; a closed one's list is history, as they've let go.
                 && (matches!(item.phase, Phase::Done | Phase::Cancelled)
                     || item.followers.iter().all(|f| state.items.get(f).is_some_and(|t| t.follows.as_deref() == Some(id.as_str()))))

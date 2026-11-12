@@ -69,9 +69,9 @@ pub struct Plan {
     pub green_base: bool,
     /// Whether the pushed commit waits for CI.
     pub ci: bool,
-    /// Most tickets in one batch, or zero for no cap of its own: every ticket ready lands together (ov-1071). A
-    /// per-ticket template is always one.
-    pub batch: u8,
+    /// Most tickets in one batch, or `None` for no cap: every ticket ready lands together (ov-1071). A per-ticket
+    /// template is always one.
+    pub batch: Option<u32>,
     pub every_ms: u64,
     pub base_patience_ms: u64,
     pub ci_patience_ms: u64,
@@ -81,7 +81,7 @@ pub struct Plan {
 }
 impl Plan {
     pub fn new(template: Template, gates: Vec<Gate>) -> Self {
-        Self { template, gates, green_base: true, ci: true, batch: 8, every_ms: 60_000,
+        Self { template, gates, green_base: true, ci: true, batch: Some(8), every_ms: 60_000,
             base_patience_ms: 3 * 3_600_000, ci_patience_ms: 3 * 3_600_000, source: format!("landing/{}", template.name()), paths: None }
     }
 }
@@ -99,18 +99,11 @@ impl Maker<'_> {
 fn routed(mut stage: Stage, label: &str, to: Target, limit: u8) -> Stage {
     stage.routes.insert(label.into(), to); stage.limit = limit; stage
 }
-/// A route that ends the run: it takes no back-edge budget, so it leaves the step's limit alone.
+/// A route that ends the run, or splits the group: neither takes back-edge budget, so it leaves the step's limit alone.
 fn ending(mut stage: Stage, label: &str, to: Target) -> Stage { stage.routes.insert(label.into(), to); stage }
 fn step(id: &str) -> Target { Target::Step(id.into()) }
 fn split(to: &str) -> Target { Target::Split { step: to.into(), otherwise: Box::new(Target::Fail) } }
 
-/// How many times a group may split: enough to halve its fullest batch down to one ticket, and never fewer than three,
-/// so templates made before uncapped batches keep their pins.
-pub fn split_depth(batch: u8) -> u8 {
-    let cap = if batch == 0 { crate::MAX_GROUP_MEMBERS } else { batch.min(crate::MAX_GROUP_MEMBERS) };
-    let depth = u8::try_from(u32::from(cap).next_power_of_two().trailing_zeros()).unwrap_or(crate::MAX_BACK_EDGE_LIMIT);
-    depth.clamp(3, crate::MAX_BACK_EDGE_LIMIT)
-}
 /// The definition a plan describes, or a refusal when it would not be sound: a push with no command
 /// gate to stand behind it, or a gate list longer than a definition holds.
 pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
@@ -148,16 +141,15 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
     } else if plan.paths.is_some() {
         return Err(Refusal::Definition);
     }
-    let batch = if t.batched() { plan.batch } else { 1 };
+    let batch = if t.batched() { plan.batch } else { Some(1) };
     let (every, base_wait, ci_wait) = (plan.every_ms, plan.base_patience_ms, plan.ci_patience_ms);
     let mode = if plan.green_base { "green" } else { "any" };
     let mut groups = BTreeMap::new();
-    let splits = split_depth(batch);
     let folds = |m: &Maker| -> Vec<Stage> {
         let mut steps = vec![routed(m.wait("base", StageKind::AwaitBase, "coding-await-base/v1", mode, every, base_wait), "timeout", Target::Fail, 0),
-            routed(m.stage("fold", StageKind::Fold, "coding-fold/v1", ""), "conflict", split("base"), splits)];
+            ending(m.stage("fold", StageKind::Fold, "coding-fold/v1", ""), "conflict", split("base"))];
         for (n, i) in commands.iter().enumerate() {
-            steps.push(routed(m.stage(&format!("gate-{n}"), StageKind::Run, "coding-gate/v1", &i.to_string()), "rejected", split("base"), splits));
+            steps.push(ending(m.stage(&format!("gate-{n}"), StageKind::Run, "coding-gate/v1", &i.to_string()), "rejected", split("base")));
         }
         steps
     };

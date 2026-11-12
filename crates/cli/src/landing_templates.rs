@@ -91,7 +91,7 @@ pub fn import(charter: &str, held: &Held, gates: &Gates) -> Result<(Bundle, Vec<
     lt::import_charter(charter, config, held.source.as_deref(), &gates.extras(), &gates.gate_env)
 }
 
-pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, routes: &Routes, batch: Option<u8>) -> Result<Bundle, lt::Error> {
+pub fn template(name: &str, held: &Held, commands: &[String], gates: &Gates, routes: &Routes, batch: Option<u32>) -> Result<Bundle, lt::Error> {
     let config = held.config()?;
     let options = lt::Options { batch, environment: gates.gate_env.clone(), route_default: routes.route_default.clone(), routes: routes.route.clone() };
     lt::template(name, config, commands, &gates.extras(), &options)
@@ -240,7 +240,7 @@ mod tests {
         let held = held(&get(None)).unwrap();
         let gates = Gates { agent_gate: false, orchestrator_gate: true, person_gate: vec!["owner".into()], gate_env: vec![] };
         let bundle = template("batched-push", &held, &["make check".into()], &gates, &Routes::default(), Some(4)).unwrap();
-        assert_eq!(bundle.definition.groups["landing"].limit, 4);
+        assert_eq!(bundle.definition.groups["landing"].limit, Some(4));
         let reviews: Vec<_> = bundle.definition.stages.iter().filter_map(|s| match &s.kind { lt::StageKind::Review(r) => Some(r.clone()), _ => None }).collect();
         assert_eq!(reviews, [lt::Reviewer::Orchestrator("orchestrator".into()), lt::Reviewer::Person("owner".into())]);
         // An agent gate needs an agent to start or a reviewer to run, and this runner has neither.

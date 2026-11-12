@@ -83,16 +83,17 @@ pub enum Target {
 /// A batch of tickets run together by an item of its own. Its steps are a definition of their own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupDef {
-    /// Most members one group holds; a later ticket opens a group behind it. Zero is no cap of its own: every
-    /// ticket waiting joins, up to `MAX_GROUP_MEMBERS` (ov-1071).
-    pub limit: u8,
+    /// Most members one group holds; a later ticket opens a group behind it. Absent is no cap: every ticket waiting
+    /// joins (ov-1071). A failing one is still found, as a split halves the group however big it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
     /// The resource one group at a time holds, such as a branch on a remote.
     pub exclusive: String,
     pub steps: Vec<Stage>,
 }
 impl GroupDef {
-    /// How many members this group takes before a later ticket opens a group behind it.
-    pub fn cap(&self) -> usize { usize::from(if self.limit == 0 { MAX_GROUP_MEMBERS } else { self.limit.min(MAX_GROUP_MEMBERS) }) }
+    /// Whether a group holding `members` tickets has room for one more.
+    pub fn has_room(&self, members: usize) -> bool { self.limit.is_none_or(|l| members < l as usize) }
 }
 /// A finite forward sequence; rejected evaluators may take one bounded, pinned rework edge.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,7 +251,7 @@ impl Definition {
         }
         for name in self.groups.keys() {
             let group = &self.groups[name];
-            if group.limit > MAX_GROUP_MEMBERS || !valid_id(&group.exclusive) { return Err(Refusal::Definition); }
+            if group.limit == Some(0) || !valid_id(&group.exclusive) { return Err(Refusal::Definition); }
             self.group_definition(name).ok_or(Refusal::Definition)?.validate_group()?;
         }
         Ok(())
@@ -266,7 +267,7 @@ impl Definition {
         for (i, stage) in self.stages.iter().enumerate() {
             if stage.limit > MAX_BACK_EDGE_LIMIT || stage.routes.len() > 8 { return Err(Refusal::Definition); }
             if in_group && matches!(stage.kind, StageKind::Join { .. }) { return Err(Refusal::Definition); }
-            let mut back = false;
+            let (mut back, mut splits) = (false, false);
             let mut labels: Vec<&str> = vec!["passed", "rejected"];
             if matches!(stage.kind, StageKind::Join { .. }) { labels.extend(["dropped", "landed"]); }
             for (label, target) in &stage.routes {
@@ -292,16 +293,18 @@ impl Definition {
                         // The second half would run again what the first already landed.
                         if self.stages[..=i].iter().any(|s| lands(&s.kind)) { return Err(Refusal::Definition); }
                         match &**otherwise {
-                            Target::Step(id) if !index.contains_key(id.as_str()) => return Err(Refusal::Definition),
+                            Target::Step(id) => back |= *index.get(id.as_str()).ok_or(Refusal::Definition)? <= i,
                             Target::Split { .. } => return Err(Refusal::Definition),
                             _ => {}
                         }
-                        back = true;
+                        splits = true;
                     }
                     Target::Done | Target::Fail => {}
                 }
             }
-            if back != (stage.limit > 0) { return Err(Refusal::Definition); }
+            // A back edge needs a limit. A split needs none, as halving bounds it, but may keep one it was published
+            // with before ov-1071; a limit on a step with neither bounds nothing.
+            if (back && stage.limit == 0) || (!back && !splits && stage.limit > 0) { return Err(Refusal::Definition); }
             for label in labels {
                 let target = match stage.routes.get(label) {
                     Some(target) => Some(target.clone()),
@@ -448,10 +451,10 @@ fn finishes_or_goes_on(target: &Target, index: &BTreeMap<&str, usize>, from: usi
 pub const TICKET_SOURCE: &str = "ticket/v1";
 pub const TICKET_COLUMNS: [&str; 5] = ["backlog", "todo", "doing", "review", "decision"];
 /// Back edges per step are capped so a loop cannot be a polite spelling of forever. Five lets a review turn work back
-/// four times, and lets splitting find one failing ticket in a full group: 32 halves to 1 in five (ov-1071).
+/// four times (ov-1071). A split isn't counted here: each one halves the group, so the group's size bounds it.
 pub const MAX_BACK_EDGE_LIMIT: u8 = 5;
-/// A group holds at most this many tickets.
-pub const MAX_GROUP_MEMBERS: u8 = 32;
+/// A ticket can carry at most this many followers when it starts.
+pub const MAX_FOLLOWERS: usize = 32;
 /// Labels a step can produce. `passed` and `rejected` come from anything; a label of a
 /// definition's own is only for steps whose binding or command the definition chose.
 pub fn can_emit(kind: &StageKind, label: &str) -> bool {

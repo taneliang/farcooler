@@ -207,8 +207,8 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
     let mut lines = Vec::new();
     let target = config.landing.as_ref().map_or(config.landing_ref.as_str(), |l| l.target.as_str());
     let target = code(target.strip_prefix("refs/heads/").unwrap_or(target));
-    let uncapped = definition.groups.values().any(|g| g.limit == 0);
-    let batch = definition.groups.values().map(|g| g.limit).max().unwrap_or(1);
+    let uncapped = definition.groups.values().any(|g| g.limit.is_none());
+    let batch = definition.groups.values().filter_map(|g| g.limit).max().unwrap_or(1);
     if kinds(|k| matches!(k, StageKind::Push)) {
         if uncapped { lines.push(format!("Every finished ticket that's ready queues together, and one push puts them on {target}.")); }
         else if batch > 1 { lines.push(format!("Finished tickets queue together, up to {batch} at a time, and one push puts them on {target}.")); }
@@ -392,7 +392,7 @@ mod tests {
             harness: CodingHarness::Command(CodingCommand { argv: vec!["/usr/bin/claude".into()], environment: BTreeMap::new(), timeout_ms: 1000 }),
             checks: vec![], reviewer: None, ci: farcooler_protocol::workflow_config::CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd("true") } }
     }
-    fn bundle(template: &str, commands: &[&str], extra: &[Extra], batch: Option<u8>) -> Bundle {
+    fn bundle(template: &str, commands: &[&str], extra: &[Extra], batch: Option<u32>) -> Bundle {
         let commands: Vec<String> = commands.iter().map(|c| c.to_string()).collect();
         lt::template(template, &config(), &commands, extra, &Options { batch, ..Options::default() }).unwrap()
     }

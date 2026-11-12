@@ -141,7 +141,7 @@ fn ticket_definition() -> Definition {
     join.limit = 1;
     d.stages.push(join);
     d.stages.push(act("tidy", StageKind::Ci));
-    d.groups.insert("landing".into(), GroupDef { limit: 2, exclusive: "ref:origin:main".into(), steps: steps() });
+    d.groups.insert("landing".into(), GroupDef { limit: Some(2), exclusive: "ref:origin:main".into(), steps: steps() });
     d
 }
 struct Engine { state: State }

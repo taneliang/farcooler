@@ -242,7 +242,7 @@ async fn an_imported_gate_of_each_kind_can_be_added_by_hand() {
     let (bundle, _) = lt::import_charter(&charter("- Gate: `scripts/g.sh`"), &config, None, &[Extra::Person("owner".into())], &[]).unwrap();
     assert!(bundle.definition.stages.iter().any(|s| matches!(&s.kind, StageKind::Review(Reviewer::Person(_)))));
     let bundle = lt::template("ticket-push", &config, &["scripts/g.sh".into()], &[Extra::Person("owner".into())], &lt::Options::default()).unwrap();
-    assert_eq!(bundle.definition.groups["landing"].limit, 1);
+    assert_eq!(bundle.definition.groups["landing"].limit, Some(1));
     assert_eq!(lt::template("shipping", &config, &[], &[], &lt::Options::default()).unwrap_err(), lt::Error::NoSuchTemplate("shipping".into()));
     assert_eq!(lt::template("batched-push", &config, &[], &[], &lt::Options::default()).unwrap_err(), lt::Error::Unsound, "a push needs a command gate");
 }
@@ -359,8 +359,9 @@ async fn a_draft_refuses_what_it_cannot_publish_or_what_nobody_can_decide() {
     for who in ["owner", "member:alice", "role:maintainer"] {
         assert!(lt::template("ticket-push", &config, &gates, &[Extra::Person(who.into())], &lt::Options::default()).is_ok(), "{who}");
     }
-    assert_eq!(lt::template("batched-push", &config, &gates, &[], &lt::Options { batch: Some(16), ..Default::default() }).unwrap_err(), lt::Error::BatchTooLarge);
-    assert!(lt::template("batched-push", &config, &gates, &[], &lt::Options { batch: Some(8), ..Default::default() }).is_ok());
+    // ov-1071: no batch is too large, as a split halves any group; zero is no cap at all.
+    let limit = |batch| lt::template("batched-push", &config, &gates, &[], &lt::Options { batch, ..Default::default() }).unwrap().definition.groups["landing"].limit;
+    assert_eq!((limit(Some(100)), limit(Some(0)), limit(None)), (Some(100), None, Some(8)));
     assert_eq!(lt::import_charter(&charter("- Gate: `x`"), &config, None, &[Extra::Agent], &[]).unwrap_err(), lt::Error::NoReviewer);
     // The branch a push lands on is the target, whatever the local ref is called.
     let on_target = format!("- Gate: `x`\n- Base: {}", config.landing.as_ref().unwrap().target.trim_start_matches("refs/heads/"));

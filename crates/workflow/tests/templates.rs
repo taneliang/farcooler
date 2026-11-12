@@ -35,24 +35,23 @@ fn every_template_validates_and_a_name_finds_it() {
 #[test]
 fn batched_and_per_ticket_push_differ_by_one_number() {
     let (mut batched, mut single) = (make(&plan(Template::BatchedPush)), make(&plan(Template::TicketPush)));
-    assert_eq!((batched.groups["landing"].limit, single.groups["landing"].limit), (8, 1));
-    batched.groups.get_mut("landing").unwrap().limit = 1;
+    assert_eq!((batched.groups["landing"].limit, single.groups["landing"].limit), (Some(8), Some(1)));
+    batched.groups.get_mut("landing").unwrap().limit = Some(1);
     batched.source = single.source.clone();
     single.source = batched.source.clone();
     assert_eq!(batched, single);
 }
 #[test]
-fn an_uncapped_batch_holds_every_ticket_ready_and_splits_deep_enough_to_find_one() {
-    // ov-1071: zero is no cap of the plan's own. The engine's 32 halves to one in five splits.
-    let mut p = plan(Template::BatchedPush); p.batch = 0;
+fn an_uncapped_batch_holds_every_ticket_ready_and_its_splits_take_no_limit() {
+    // ov-1071: no batch is no cap. A split halves the group, so the fold and gate need no back-edge limit for it.
+    let mut p = plan(Template::BatchedPush); p.batch = None;
     let d = make(&p);
     let group = &d.groups["landing"];
-    assert_eq!((group.limit, group.cap()), (0, 32));
+    assert_eq!(group.limit, None);
+    assert!(group.has_room(10_000));
     let limits: Vec<(&str, u8)> = group.steps.iter().filter(|s| matches!(s.kind, StageKind::Fold | StageKind::Run))
         .map(|s| (s.id.as_str(), s.limit)).collect();
-    assert_eq!(limits, vec![("fold", 5), ("gate-0", 5)]);
-    // A batch of eight or fewer keeps the three it always had, so its pin doesn't move.
-    assert_eq!((split_depth(1), split_depth(8), split_depth(9), split_depth(16), split_depth(32), split_depth(0)), (3, 3, 4, 4, 5, 5));
+    assert_eq!(limits, vec![("fold", 0), ("gate-0", 0)]);
 }
 #[test]
 fn a_push_template_lands_through_base_fold_gate_push_ci() {

@@ -100,7 +100,7 @@ fn followers_must_be_distinct_tickets_at_rest() {
     assert_eq!(log.start("ov-1", &["ov-1"]), Err(Refusal::Invalid), "not itself");
     assert_eq!(log.start("ov-1", &["ov-2", "ov-2"]), Err(Refusal::Invalid), "once each");
     assert_eq!(log.start("ov-1", &["ov-9"]), Err(Refusal::Missing));
-    let many: Vec<String> = (0..=MAX_GROUP_MEMBERS).map(|n| format!("x-{n}")).collect();
+    let many: Vec<String> = (0..=MAX_FOLLOWERS).map(|n| format!("x-{n}")).collect();
     assert_eq!(log.start("ov-1", &many.iter().map(String::as_str).collect::<Vec<_>>()), Err(Refusal::Invalid));
     log.start("ov-1", &["ov-2"]).unwrap();
     assert_eq!(log.start("ov-3", &["ov-2"]), Err(Refusal::Phase), "already following");

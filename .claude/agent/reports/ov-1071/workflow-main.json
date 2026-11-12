@@ -130,7 +130,6 @@
     "rework_target": null,
     "groups": {
       "landing": {
-        "limit": 0,
         "exclusive": "wf1:56ecfe65962e6f7819367ba4aec32310c64b305032b8e642c09bc657364f6156",
         "steps": [
           {
@@ -172,8 +171,7 @@
                   "otherwise": "Fail"
                 }
               }
-            },
-            "limit": 5
+            }
           },
           {
             "id": "gate-0",
@@ -195,8 +193,7 @@
                   "otherwise": "Fail"
                 }
               }
-            },
-            "limit": 5
+            }
           },
           {
             "id": "push",

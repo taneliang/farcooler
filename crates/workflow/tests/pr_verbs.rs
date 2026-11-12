@@ -56,7 +56,7 @@ fn they_are_not_group_steps() {
             step("ci", StageKind::AwaitCi)];
         if let Some(extra) = extra { steps.insert(1, extra); }
         let mut d = definition(vec![step("build", StageKind::Action("build".into())), step("join", StageKind::Join { group: "g".into(), adopt: true })]);
-        d.groups.insert("g".into(), GroupDef { limit: 4, exclusive: "ref:r:main".into(), steps });
+        d.groups.insert("g".into(), GroupDef { limit: Some(4), exclusive: "ref:r:main".into(), steps });
         d
     };
     assert_eq!(group(None).validate(), Ok(()), "the group is sound without it");

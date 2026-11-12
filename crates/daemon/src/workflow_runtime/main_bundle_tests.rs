@@ -33,10 +33,11 @@ fn main_bundle_runs_the_lane_rules() {
     assert!(operations.len() > 5 && operations.iter().all(|o| o.arguments[0] == pin), "every operation pins the configuration {pin}");
     d.validate().unwrap();
 
-    // 1. Everything ready lands together, and a full group still splits down to one ticket.
+    // 1. Everything ready lands together: no limit at all. Its splits take no back-edge limit, as halving bounds them.
     let landing = &d.groups["landing"];
-    assert_eq!((landing.limit, landing.cap()), (0, 32));
-    for id in ["fold", "gate-0"] { assert_eq!(landing.steps.iter().find(|s| s.id == id).unwrap().limit, 5, "{id}"); }
+    assert_eq!(landing.limit, None);
+    assert!(!value["definition"]["groups"]["landing"].as_object().unwrap().contains_key("limit"), "absent, not zero");
+    for id in ["fold", "gate-0"] { assert_eq!(landing.steps.iter().find(|s| s.id == id).unwrap().limit, 0, "{id}"); }
 
     // 2. The build prompt and the review prompt point at the lane rules.
     let CodingHarness::Native { prompt, .. } = &live.harness else { panic!("native harness") };

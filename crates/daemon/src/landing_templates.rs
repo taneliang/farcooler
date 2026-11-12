@@ -64,7 +64,6 @@ pub enum Error {
     NotADecider(String),
     /// An agent gate needs the reviewer the runner is set up with.
     NoReviewer,
-    BatchTooLarge,
     /// A `--route` that isn't `GLOB=push` or `GLOB=ask`.
     BadRoute(String),
     /// A charter that mixes pull requests with other routes: no definition can say that yet.
@@ -87,7 +86,6 @@ impl std::fmt::Display for Error {
             Self::NoReviewer => f.write_str("An agent gate needs an agent to start or a reviewer to run, and this runner isn't set up with either."),
             Self::BadRoute(text) => write!(f, "`{text}` isn't a route. Write it as PATTERN=push or PATTERN=ask."),
             Self::MixedRoutes => f.write_str("This charter sends some paths by pull request and others another way, and a definition can't say that yet. Make them all one route, or wait for the pull request steps."),
-            Self::BatchTooLarge => write!(f, "A batch holds at most {MAX_BATCH} tickets, so a failing one can always be found by splitting."),
         }
     }
 }
@@ -103,9 +101,6 @@ pub enum Extra {
     /// A named person decides.
     Person(String),
 }
-
-/// The most tickets a batch may hold: the split limit halves it down to single tickets.
-pub const MAX_BATCH: u8 = 8;
 
 /// The environment gates run in: `PATH` and the draft host's `HOME`, then each `NAME=value` given, which wins.
 pub fn gate_environment(given: &[String]) -> Result<std::collections::BTreeMap<String, String>, Error> {
@@ -203,8 +198,8 @@ pub fn import_charter(charter: &str, config: &CodingConfig, published: Option<&s
 /// What a template draft can be told besides its gates.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Most tickets in a batch, or zero for every ticket that's ready (ov-1071).
-    pub batch: Option<u8>,
+    /// Most tickets in a batch, or zero for every ticket that's ready (ov-1071). Absent keeps the template's eight.
+    pub batch: Option<u32>,
     /// `NAME=value` settings every command gate runs with.
     pub environment: Vec<String>,
     /// The route a ticket takes when no path rule matches: `push` unless it says `ask`. Only used with `routes`.
@@ -233,7 +228,6 @@ impl Options {
 /// always lists every gate it should have; tickets already in flight keep the bundle they started with.
 pub fn template(name: &str, config: &CodingConfig, commands: &[String], extra: &[Extra], options: &Options) -> Result<Bundle, Error> {
     let template = Template::parse(name).ok_or_else(|| Error::NoSuchTemplate(name.into()))?;
-    if options.batch.is_some_and(|b| b > MAX_BATCH) { return Err(Error::BatchTooLarge); }
     let environment = gate_environment(&options.environment)?;
     let paths = options.routes()?;
     let mut config = config.clone();
@@ -246,7 +240,7 @@ pub fn template(name: &str, config: &CodingConfig, commands: &[String], extra: &
     }
     for e in extra { gates.push(extra_gate(&config, e)?); }
     let mut plan = Plan::new(template, gates);
-    if let Some(batch) = options.batch { plan.batch = batch; }
+    if let Some(batch) = options.batch { plan.batch = (batch > 0).then_some(batch); }
     plan.paths = paths.map(|p| {
         let asks = p.default == "ask" || p.rules.iter().any(|(_, r)| r == "ask");
         PathRoutes { argument: p.argument(), approver: asks.then(|| "owner".into()) }

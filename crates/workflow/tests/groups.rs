@@ -64,9 +64,6 @@ fn action(id: &str) -> Stage {
         operation: OperationSpec { adapter_version: "fixture/v1".into(), arguments: vec![id.into()], environment: BTreeMap::new() },
         routes: BTreeMap::new(), limit: 0 }
 }
-fn split_to_base(mut stage: Stage) -> Stage {
-    stage.limit = 3; stage
-}
 /// provision, build, check, join(landing), tidy. The landing group folds and gates what it holds.
 fn ticket() -> Definition {
     let mut d = Definition::coding();
@@ -79,11 +76,11 @@ fn ticket() -> Definition {
     let mut tidy = action("tidy"); tidy.kind = StageKind::Ci;
     d.stages.push(join); d.stages.push(tidy);
     let base = action("base");
-    let mut fold = split_to_base(action("fold"));
+    let mut fold = action("fold");
     fold.routes.insert("conflict".into(), Target::Split { step: "base".into(), otherwise: Box::new(Target::Fail) });
-    let mut gate = split_to_base(action("gate")); gate.kind = StageKind::Check;
+    let mut gate = action("gate"); gate.kind = StageKind::Check;
     gate.routes.insert("rejected".into(), Target::Split { step: "base".into(), otherwise: Box::new(Target::Fail) });
-    d.groups.insert("landing".into(), GroupDef { limit: 2, exclusive: "ref:origin:main".into(), steps: vec![base, fold, gate] });
+    d.groups.insert("landing".into(), GroupDef { limit: Some(2), exclusive: "ref:origin:main".into(), steps: vec![base, fold, gate] });
     d
 }
 /// Base passes, the fold makes `result`, the gate passes it: the group is done.
@@ -152,13 +149,15 @@ fn tickets_queued_during_a_wait_accumulate_up_to_the_limit_then_a_new_group_open
     assert!(log.group_of("b") < log.group_of("d"));
 }
 #[test]
-fn an_uncapped_group_takes_every_ticket_waiting_up_to_the_engines_own_bound() {
-    // ov-1071: a limit of zero is no cap of the definition's own. Everything ready lands together.
-    let mut uncapped = ticket(); uncapped.groups.get_mut("landing").unwrap().limit = 0;
+fn an_uncapped_group_takes_every_ticket_waiting_and_splits_down_to_the_one_that_fails() {
+    // ov-1071: a group with no limit has no cap, in the definition or the engine. Everything ready lands together.
+    let mut uncapped = ticket(); uncapped.groups.get_mut("landing").unwrap().limit = None;
     assert_eq!(uncapped.validate(), Ok(()));
-    assert_eq!(uncapped.groups["landing"].cap(), usize::from(MAX_GROUP_MEMBERS));
+    let text = serde_json::to_string(&uncapped.groups["landing"]).unwrap();
+    assert!(!text.contains("limit"), "absent, not zero: {text}");
     let mut log = Log::new();
-    let tickets: Vec<String> = (0..12).map(|i| format!("t{i:02}")).collect();
+    // More than the 32 the engine once allowed, and more than five back edges' worth of halving.
+    let tickets: Vec<String> = (0..41).map(|i| format!("t{i:02}")).collect();
     for t in &tickets {
         log.enqueue(t, uncapped.clone());
         while log.state.items[t].phase != Phase::WaitingJoin { log.pass(t); }
@@ -167,7 +166,25 @@ fn an_uncapped_group_takes_every_ticket_waiting_up_to_the_engines_own_bound() {
     for t in &tickets[1..] { log.queue(t); }
     let behind = log.group_of(&tickets[1]);
     assert!(tickets[1..].iter().all(|t| log.group_of(t) == behind), "every waiting ticket joins the one group");
-    assert_eq!(log.state.items[&behind].members.len(), 11);
+    assert_eq!(log.state.items[&behind].members.len(), 40);
+    // The group ahead lands; then every gate run of the big group fails, so it halves until one ticket is left.
+    let ahead = log.group_of(&tickets[0]);
+    pass_group(&mut log, &ahead, 3);
+    let mut splits = 0;
+    while log.state.items[&behind].members.len() >= 2 {
+        pass_group(&mut log, &behind, 2);
+        log.reject(&behind);
+        splits += 1;
+        let kept = &log.state.items[&behind];
+        assert_eq!((log.stage(&behind), kept.iteration, kept.back_edges.len()), ("base".to_string(), 0, 0), "a split takes no back edge");
+    }
+    // 40, 20, 10, 5, 3, 2, 1: six splits, one more than any step's back edges may be taken.
+    assert!(splits > usize::from(MAX_BACK_EDGE_LIMIT));
+    assert_eq!(log.state.items[&behind].members.iter().map(|m| m.item.as_str()).collect::<Vec<_>>(), [tickets[1].as_str()]);
+    pass_group(&mut log, &behind, 2);
+    log.reject(&behind);
+    assert_eq!(log.state.items[&behind].phase, Phase::Failed, "a single ticket takes the split's fallback");
+    assert_eq!(log.replay_digest(), digest(&log.state));
 }
 #[test]
 fn a_ticket_without_a_candidate_cannot_be_queued() {
@@ -266,7 +283,7 @@ fn a_rejected_gate_splits_a_group_of_two_and_the_halves_run_in_order() {
     assert_eq!(kept.members.iter().map(|m| m.item.as_str()).collect::<Vec<_>>(), ["a"], "keeps the first half");
     assert_eq!(log.stage(&pair), "base", "and starts again at the split step");
     assert!(kept.fence > before.fence);
-    assert_eq!(kept.back_edges["gate"], 1);
+    assert_eq!((kept.back_edges.get("gate"), kept.iteration), (None, 0), "halving bounds a split, not the step's limit");
     assert_eq!(transition.effects.iter().find(|e| e.item == pair).unwrap().members.len(), 1);
     let second = log.state.items["b"].grouped_in.clone().unwrap();
     assert_ne!(second, pair);
@@ -493,12 +510,20 @@ fn invalid(edit: impl FnOnce(&mut Definition)) -> bool {
 #[test]
 fn the_validator_accepts_the_grouped_fixture() { assert_eq!(ticket().validate(), Ok(())); }
 #[test]
+fn a_split_needs_no_limit_and_one_published_with_a_limit_still_reads() {
+    // ov-1071: halving bounds a split. A group step published before then kept a limit of three for its splits.
+    let mut d = ticket();
+    assert_eq!(d.groups["landing"].steps[2].limit, 0);
+    for step in &mut d.groups.get_mut("landing").unwrap().steps[1..] { step.limit = 3; }
+    assert_eq!(d.validate(), Ok(()));
+}
+#[test]
 fn the_validator_rejects_bad_groups() {
     type Break = Box<dyn FnOnce(&mut Definition)>;
     let cases: Vec<(&str, Break)> = vec![
         ("join names no group", Box::new(|d| { d.groups.clear(); })),
         ("group nobody joins", Box::new(|d| { d.groups.insert("spare".into(), d.groups["landing"].clone()); })),
-        ("limit above 32", Box::new(|d| { d.groups.get_mut("landing").unwrap().limit = 33; })),
+        ("a limit of zero", Box::new(|d| { d.groups.get_mut("landing").unwrap().limit = Some(0); })),
         ("bad resource", Box::new(|d| { d.groups.get_mut("landing").unwrap().exclusive = "has space".into(); })),
         ("no group steps", Box::new(|d| { d.groups.get_mut("landing").unwrap().steps.clear(); })),
         ("join inside a group", Box::new(|d| {
@@ -508,7 +533,9 @@ fn the_validator_rejects_bad_groups() {
         ("split to a missing step", Box::new(|d| {
             d.groups.get_mut("landing").unwrap().steps[2].routes.insert("rejected".into(),
                 Target::Split { step: "nowhere".into(), otherwise: Box::new(Target::Fail) }); })),
-        ("split without a limit", Box::new(|d| { d.groups.get_mut("landing").unwrap().steps[2].limit = 0; })),
+        ("split falling back to a back edge with no limit", Box::new(|d| {
+            d.groups.get_mut("landing").unwrap().steps[2].routes.insert("rejected".into(),
+                Target::Split { step: "base".into(), otherwise: Box::new(Target::Step("base".into())) }); })),
         ("split inside a ticket", Box::new(|d| {
             d.stages[2].routes.insert("rejected".into(), Target::Split { step: "stage-1".into(), otherwise: Box::new(Target::Fail) }); })),
         ("split that never ends", Box::new(|d| {

@@ -7,10 +7,22 @@ publishes, checked by a hand-run test.
 
 ## What changed in the engine
 
-1. **Batch cap.** A group `limit` of `0` means no cap of its own: every ticket waiting joins, up to the engine's 32
-   (`MAX_GROUP_MEMBERS`). The back-edge cap went from 3 to 5, so a full group of 32 can still split down to the one
-   failing ticket. Templates take `--batch 0`, and split as deep as their batch needs (3 for 8 or fewer, so older pins
-   don't move). The workflow summary says "Every finished ticket that's ready queues together".
+1. **Batch cap.** There's no cap in the engine any more: `MAX_GROUP_MEMBERS` (32) is gone, and a group's `limit` is an
+   optional `u32`. Absent means every ticket waiting joins; `0` is refused. A group can still be no bigger than the
+   engine's item cap (`MAX_ITEMS`, 1024), because each member is an item, but that bounds the whole workspace, not a
+   group. Old definitions read the same and keep their pins: `"limit": 8` reads as `Some(8)` and writes back as `8`.
+   - **Splitting an unbounded group.** A split no longer takes the step's back-edge budget, and doesn't count as an
+     iteration. Each split at least halves the group, and the half it hands on is smaller than the group was, so
+     splitting ends once one ticket is left, however big the group. A test splits a group of 40 six times down to the
+     one ticket, one more split than any back edge allows. A split step needs no `limit` now. One published with a
+     limit (every template before this one wrote 3) still validates, and the limit there bounds nothing. A split whose
+     fallback is a back edge still needs a limit for that edge.
+   - **Templates:** no split limits, and no 8-ticket cap (`MAX_BATCH` and its error are gone, since splitting finds a
+     failing ticket in any batch). `--batch 0` means no cap; no `--batch` keeps the default of 8. Template pins move,
+     because the fold and gate steps lose their `limit: 3`. That only affects new drafts. The workflow summary says
+     "Every finished ticket that's ready queues together".
+   - Followers kept their own cap of 32, renamed `MAX_FOLLOWERS`. That's how many tickets one start can carry along,
+     not a group size.
 2. **Prompts.** The build prompt was already the adapter's `prompt`. An agent's review gate can now pin options as its
    third argument (`ReviewOptions`, `crates/daemon/src/review_agent.rs`): a `prompt` said to the reviewer after the
    engine's brief.
@@ -35,7 +47,7 @@ publishes, checked by a hand-run test.
 
 ## What the bundle changes, against ov-1087's
 
-- `groups.landing.limit` 8 → **0**; `fold` and `gate-0` split limits 3 → **5**.
+- `groups.landing.limit` 8 → **absent** (no cap); `fold` and `gate-0` lose their split limits of 3.
 - `harness.Native.prompt`: points at `/Users/e-liang/Dev/overnight/.claude/agent/reports/lanes/rules.md` and names the rules
   that bite most: no cargo fmt or stash, `scripts/heavy`, CI-like git for tests, captures, net app lines, and the report in
   the last message.

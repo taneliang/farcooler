@@ -157,7 +157,7 @@ fn schema_1_definitions_serialize_and_pin_exactly_as_before() {
 fn the_validator_accepts_the_routed_fixture() { assert_eq!(bad(|_| {}), Ok(())); }
 #[test]
 fn a_back_edge_may_be_taken_up_to_five_times() {
-    // ov-1071: reviews have needed four rounds, and a full group of 32 splits down to one in five.
+    // ov-1071: reviews have needed four rounds of fixes.
     assert_eq!(bad(|d| { d.stages[2].limit = MAX_BACK_EDGE_LIMIT; }), Ok(()));
     assert_eq!(MAX_BACK_EDGE_LIMIT, 5);
 }
