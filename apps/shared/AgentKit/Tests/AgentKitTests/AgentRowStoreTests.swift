@@ -97,7 +97,7 @@ func theSharedRowFixtureDecodes() throws {
 }
 
 @MainActor
-@Test("Follow diffs apply in place: one box per row, kept across updates")
+@Test("Follow diffs apply in place: one box per row, kept across updates", .timeLimit(.minutes(1)))
 func followDiffsApplyInPlace() async throws {
     let fixture = try RowFixture.load()
     let store = AgentRowStore(key: "in-place", cache: nil)
@@ -162,8 +162,72 @@ func anOlderPageGoesAbove() async throws {
     #expect(!older.moreBefore)
 }
 
+/// An actor a test can wait on without a clock: `until` returns when its
+/// condition holds, woken by the actor's own state changing (`changed`) rather
+/// than by polling. A slow machine just takes longer; nothing times out.
+protocol Awaitable: Actor {
+    var watchers: [Watcher<Self>] { get set }
+}
+
+struct Watcher<A: Actor> {
+    let id: UUID
+    let check: @Sendable (isolated A) -> Bool
+    let done: CheckedContinuation<Void, Never>
+}
+
+extension Awaitable {
+    func until(_ condition: @escaping @Sendable (isolated Self) -> Bool) async {
+        if condition(self) { return }
+        let id = UUID()
+        // A cancelled wait (the test's time limit) gives up, so the test can
+        // fail instead of hanging.
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                if Task.isCancelled { done.resume() } else { watchers.append(Watcher(id: id, check: condition, done: done)) }
+            }
+        } onCancel: {
+            Task { await self.abandon(id) }
+        }
+    }
+
+    private func abandon(_ id: UUID) {
+        guard let at = watchers.firstIndex(where: { $0.id == id }) else { return }
+        watchers.remove(at: at).done.resume()
+    }
+
+    /// Call after every change a condition might read.
+    func changed() {
+        let all = watchers
+        watchers = []
+        for watcher in all {
+            if watcher.check(self) { watcher.done.resume() } else { watchers.append(watcher) }
+        }
+    }
+}
+
+actor Flag: Awaitable {
+    var watchers: [Watcher<Flag>] = []
+    var raised = false
+    func raise() {
+        raised = true
+        changed()
+    }
+}
+
+/// Wait for a loop to end, the way `until` waits: no clock, and a cancelled
+/// test stops waiting.
+func ended(_ task: Task<Void, Never>?) async {
+    let flag = Flag()
+    Task {
+        await task?.value
+        await flag.raise()
+    }
+    await flag.until { $0.raised }
+}
+
 /// A runner that answers from a script and records what it was asked.
-actor ScriptedRows: AgentRowSource {
+actor ScriptedRows: AgentRowSource, Awaitable {
+    var watchers: [Watcher<ScriptedRows>] = []
     enum Call: Equatable {
         case page(before: UInt64?)
         case follow(epoch: UInt64, afterRev: UInt64, waitMs: Int)
@@ -190,11 +254,13 @@ actor ScriptedRows: AgentRowSource {
 
     func page(before: UInt64?, limit: Int) async throws -> Data {
         calls.append(.page(before: before))
+        changed()
         return try await answer(pages.isEmpty ? .hang : pages.removeFirst())
     }
 
     func follow(epoch: UInt64, afterRev: UInt64, waitMs: Int) async throws -> Data {
         calls.append(.follow(epoch: epoch, afterRev: afterRev, waitMs: waitMs))
+        changed()
         return try await answer(follows.isEmpty ? .hang : follows.removeFirst())
     }
 
@@ -211,6 +277,9 @@ actor ScriptedRows: AgentRowSource {
     }
 }
 
+/// Polls, with a deadline: only the nightly budget tests still use it, and
+/// they wait on the main thread's own work. The row store's tests wait on
+/// `Awaitable.until` instead.
 @MainActor
 func waitFor(_ what: String, within: Duration = .seconds(30), _ condition: () async -> Bool) async {
     let deadline = ContinuousClock.now + within
@@ -222,7 +291,7 @@ func waitFor(_ what: String, within: Duration = .seconds(30), _ condition: () as
 }
 
 @MainActor
-@Test("The loop pages, follows, and pages again on a reset and after a failed call")
+@Test("The loop pages, follows, and pages again on a reset and after a failed call", .timeLimit(.minutes(1)))
 func theLoopRepagesOnResetAndFailure() async throws {
     let source = ScriptedRows(
         pages: [
@@ -239,7 +308,7 @@ func theLoopRepagesOnResetAndFailure() async throws {
     store.retryDelay = .milliseconds(1)
     store.start(source)
     defer { store.stop() }
-    await waitFor("the third page") { await source.calls.count >= 7 }
+    await source.until { $0.calls.count >= 7 }
     let calls = await source.calls
     #expect(calls == [
         // Just paged, so the first follow waits for news.
@@ -258,18 +327,19 @@ func theLoopRepagesOnResetAndFailure() async throws {
 }
 
 @MainActor
-@Test("A runner without rows ends the loop and says so")
+@Test("A runner without rows ends the loop and says so", .timeLimit(.minutes(1)))
 func aRunnerWithoutRowsIsUnavailable() async {
     let source = ScriptedRows(pages: [.unavailable], follows: [])
     let store = AgentRowStore(key: "unavailable", cache: nil)
     store.start(source)
-    defer { store.stop() }
-    await waitFor("unavailable") { store.phase == .unavailable }
+    // The loop ends on its own, after it has said so.
+    await ended(store.feed)
+    #expect(store.phase == .unavailable)
     #expect(await source.calls == [.page(before: nil)])
 }
 
 @MainActor
-@Test("A returning pane follows from the cached cursor instead of paging")
+@Test("A returning pane follows from the cached cursor instead of paging", .timeLimit(.minutes(1)))
 func aReturningPaneFollowsFromTheCache() async throws {
     let cache = AgentRowCache(directory: nil)
     cache.keep(AgentRowSnapshot(epoch: 7, rev: 40, moreBefore: true, rows: try AgentRowPage.decode(RowFixture.page(epoch: 7, rev: 40, rows: 3)).rows), for: "back")
@@ -279,24 +349,26 @@ func aReturningPaneFollowsFromTheCache() async throws {
     #expect(store.ids == ["prose:0", "prose:1", "prose:2"] && store.phase == .cached)
     store.start(source)
     defer { store.stop() }
-    await waitFor("the catch-up follow") { await source.calls.count >= 2 }
+    await source.until { $0.calls.count >= 2 }
     #expect(await source.calls.first == .follow(epoch: 7, afterRev: 40, waitMs: 0))
 }
 
 @MainActor
-@Test("Starting again replaces the running follow: the first source is asked nothing more")
+@Test("Starting again replaces the running follow: the first source is asked nothing more", .timeLimit(.minutes(1)))
 func startingAgainReplacesTheFollow() async throws {
-    let quick = (0..<400).map { _ in ScriptedRows.Answer.data(RowFixture.follow(rev: 1, [])) }
-    let first = ScriptedRows(pages: [.data(RowFixture.page(rev: 1, rows: 1))], follows: quick, delay: .milliseconds(5))
+    let first = GatedRows(pages: [RowFixture.page(rev: 1, rows: 1)])
     let second = ScriptedRows(pages: [], follows: [.hang])
     let store = AgentRowStore(key: "again", cache: nil)
     store.start(first)
     defer { store.stop() }
-    await waitFor("the first source following") { await first.calls.count >= 4 }
+    await first.until { $0.waiting == 1 }
+    let old = store.feed
     store.start(second)
-    await waitFor("the second source asked") { await second.calls.count >= 1 }
-    let asked = await first.calls.count
-    try await Task.sleep(for: .milliseconds(300))
-    #expect(await first.calls.count <= asked + 1, "the old loop kept following")
+    await second.until { $0.calls.count >= 1 }
+    // The old call answers after the replacement. A loop that was replaced
+    // ends on that answer; one that wasn't asks again, and never ends.
+    await first.answer(RowFixture.follow(rev: 1, []))
+    await ended(old)
+    #expect(await first.followCalls.count == 1, "the old loop kept following")
     #expect(store.isStale == false)
 }

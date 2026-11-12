@@ -92,7 +92,8 @@ public final class AgentRowStore {
     @ObservationIgnored public let ledger = AgentRowLedger()
     @ObservationIgnored private let cache: AgentRowCache?
     @ObservationIgnored private var seeded: AgentRowSnapshot?
-    @ObservationIgnored private var feed: Task<Void, Never>?
+    /// The running loop. Tests await its end instead of a clock.
+    @ObservationIgnored private(set) var feed: Task<Void, Never>?
     /// The first wait after a failed call, doubled on each failure in a row.
     /// Tests set it near zero before `start`.
     @ObservationIgnored var retryDelay: Duration = .milliseconds(500)
