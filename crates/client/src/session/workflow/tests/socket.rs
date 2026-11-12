@@ -11,16 +11,18 @@ struct Harness {
     stop: tokio::sync::watch::Sender<bool>,
 }
 impl Drop for Harness { fn drop(&mut self) { let _=self.stop.send(true);self.server.abort();self.worker.abort(); } }
-async fn start() -> Harness {
+async fn start() -> Harness { start_seeded(|_, _| {}).await }
+async fn start_seeded(seed: impl FnOnce(&std::path::Path, Uuid)) -> Harness {
     let dir=tempfile::Builder::new().prefix("wf927").tempdir_in("/tmp").unwrap();
     let mut runtime=Runtime::create(&dir.path().join("runtime")).await.unwrap();
     let handle=runtime.command_handle(&runtime.controller()).unwrap();
     let (stop,rx)=tokio::sync::watch::channel(false);
-    let worker=tokio::spawn(async move {runtime.run(rx).await.unwrap()});
     let service=Arc::new(Service::open_in(dir.path().join("home")).await.unwrap());
     let root=service.store.create_repository_root(service.host_id,"/fixture",0).unwrap();
     let repo=service.store.create_repository(service.host_id,root.id,"fixture","/fixture/.git","").unwrap();
     let workspace=service.store.ensure_main_workspace(repo.id).unwrap().id;
+    seed(&dir.path().join("runtime/workflow.sqlite"), workspace);
+    let worker=tokio::spawn(async move {runtime.run(rx).await.unwrap()});
     service.store.bind_owner_device("phone",None).unwrap();
     let socket=dir.path().join("d.sock"); let listener=UnixListenerServer::bind(&socket).unwrap();
     let svc=service.clone(); let scope=Arc::new(AtomicI32::new(Scope::Control as i32)); let scope2=scope.clone();
@@ -49,6 +51,79 @@ async fn call(session: &Session, method: &str, args: serde_json::Value) -> serde
     // The same dispatch arm C and JNI use; WASM delegates to workflow_call.
     crate::ffi::workflow_test_dispatch(session,method,&args).await.unwrap()
 }
+
+/// A real queued group's group-only verbs must survive the authenticated Plan read,
+/// not just a hand-built presentation passed straight to the layout golden.
+#[tokio::test]
+async fn landing_group_reaches_the_plan_over_the_socket() {
+    use farcooler_workflow::{GroupDef, StageKind};
+    let mut definition = coding_definition(false);
+    definition.schema = 2;
+    definition.max_reworks = 0;
+    definition.rework_target = None;
+    let template = definition.stages[0].clone();
+    let mut join = template.clone();
+    join.id = "join".into();
+    join.kind = StageKind::Join { group: "landing".into(), adopt: true };
+    let mut build = template.clone();
+    build.kind = StageKind::Build;
+    definition.stages = vec![build, join];
+    let steps = [StageKind::AwaitBase, StageKind::Fold, StageKind::Run, StageKind::Push, StageKind::AwaitCi]
+        .into_iter().enumerate().map(|(index, kind)| {
+            let mut stage = template.clone();
+            stage.id = format!("landing-{index}");
+            stage.kind = kind;
+            // Hold the group before any fixture effect runs so every read sees it open.
+            if index == 0 { stage.progression = Progression::AwaitApproval { principal: "owner".into() }; }
+            stage
+        }).collect();
+    definition.groups.insert("landing".into(), GroupDef { limit: 8, exclusive: "landing-main".into(), steps });
+    definition.validate().unwrap();
+    let group_definition = definition.group_definition("landing").unwrap();
+    group_definition.validate_group().unwrap();
+    assert!(group_definition.validate().is_err(), "the regression needs group-only validation");
+    // Seed before the fixture executor starts: production landing adapters are
+    // outside its allowlist, but the durable reducer and authenticated read are real.
+    let h = start_seeded(|path, workspace| {
+        let store = farcooler_store::Store::open(path).unwrap();
+        for index in 0..3 {
+            let state = store.workflow_state(&workspace.to_string()).unwrap()
+                .unwrap_or_else(|| State::empty(workspace.to_string(), 1));
+            let (command, grant) = match index {
+                0 => (Command::Enqueue { item: "ov-1105".into(), definition: definition.clone(), policy_pin: "policy".into(),
+                    resource: "landing-resource".into(), dependencies: Default::default(), initial_candidate: None }, Grant::Controller),
+                1 => {
+                    let item = &state.items["ov-1105"];
+                    let effect = item.pending.clone().unwrap();
+                    let claim = store.workflow_claim_effect(&workspace.to_string(), &effect, "fixture",
+                        state.revision, state.epoch, 1000, 2000).unwrap().unwrap();
+                    assert!(store.workflow_admit_effect(&claim, 1000).unwrap());
+                    (Command::Observe { item: "ov-1105".into(), effect: effect.clone(), run: item.run.clone(), fence: item.fence,
+                        outcome: farcooler_workflow::Outcome::Passed(farcooler_workflow::Evidence {
+                            candidate: "candidate".into(), manifest: "manifest".into(), receipt: "receipt".into(), policy_pin: "policy".into() }) },
+                        Grant::Operation { effect, run: item.run.clone(), fence: item.fence })
+                },
+                _ => (Command::Queue { item: "ov-1105".into() }, Grant::Controller),
+            };
+            let receipt = store.workflow_apply(&Input { schema: 1, id: format!("seed-group-{index}"),
+                workspace: workspace.to_string(), expected_revision: state.revision, epoch: 1,
+                source: "fixture".into(), source_sequence: index + 1, now_ms: 1000,
+                grant, command, busy_resources: Default::default() }).unwrap();
+            assert!(receipt.result.is_ok(), "{receipt:?}");
+        }
+    }).await;
+    let session = Session::connect_local(&h.socket).await.unwrap();
+    let plan = call(&session, "plan.get", json!({ "workspace": h.workspace })).await;
+    assert_eq!(plan["workflow"]["landingGroups"][0]["members"], json!(["ov-1105"]));
+    let response: serde_json::Value = serde_json::from_str(&crate::plan_view::json(&json!({
+        "schema": 1, "plan": plan, "context": { "style": "apple" }
+    }).to_string())).unwrap();
+    assert!(response["error"].is_null(), "{response}");
+    let group = &response["view"]["landingGroups"][0];
+    assert_eq!(group["lines"][0], "Wait for base · Awaiting approval");
+    assert_eq!(group["lines"][2], "ov-1105");
+}
+
 #[tokio::test]
 async fn workflow_session_socket_lost_reply_reconnect_stale_and_auth_change() {
     let h=start().await; let session=Session::connect_local(&h.socket).await.unwrap();

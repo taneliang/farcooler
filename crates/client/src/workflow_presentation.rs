@@ -201,7 +201,9 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
         }
         let item = &observed;
         let guard = digest(&(&snapshot_guard, id));
-        if item.definition.validate().is_err() || item.pin != item.definition.pin()
+        // Groups have their own legal stages and split routes, just as the reducer validates them.
+        let valid = if item.group_of.is_some() { item.definition.validate_group() } else { item.definition.validate() };
+        if valid.is_err() || item.pin != item.definition.pin()
             || (item.definition.schema == 1 && item.iteration > item.definition.max_reworks)
             || (if item.phase == Phase::Done { item.stage != item.definition.stages.len() }
                 else { item.stage >= item.definition.stages.len() })

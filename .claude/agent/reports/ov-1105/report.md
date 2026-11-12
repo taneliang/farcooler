@@ -113,3 +113,27 @@ whitespace checks passed. The initial sandbox-only Chrome launch and Rust
 dependency build failed; both passed with the local process/compiler access
 their setup requires. Native UI code was unchanged in this follow-up; its
 previous platform verification is recorded above.
+
+## Real landing-group validation
+
+The authenticated Plan read now validates engine groups with `validate_group()`,
+matching the reducer. Ordinary `validate()` rejects their AwaitBase, Fold and
+Push stages, so the optional workflow enrichment previously failed the whole
+Plan request as `workflow Invalid` when an actual landing group existed.
+
+The new socket regression builds a valid landing definition with all five group
+verbs, seeds its member and queue through the durable reducer and effect admission,
+and reads the group through the same authenticated `plan.get` dispatch used by
+the apps. It then feeds that answer into the shared Plan presenter and checks the
+supplied step and member. The test explicitly confirms that the group definition
+requires group validation. It failed with `Protocol("workflow Invalid")` before
+the fix and passed afterward. All application behavior remains in Rust.
+
+Fresh verification: all 351 client unit tests passed (one existing ignored test),
+including the queue golden, real group socket read and workflow session tests;
+all 144 workflow tests passed. The complete client suite totals 435 passing tests
+and one existing ignored test. Its daemon integration target passed all 31 tests
+after building its required CLI binary and removing the parent agent session’s
+`FARCOOLER_NATIVE_HOOK_SOCKET` from the test environment; that variable overrides
+the tests’ private hook sockets. File-size, swallowed-call, copy, staged doc-comment
+and diff whitespace checks passed. No platform layout code changed in this round.
