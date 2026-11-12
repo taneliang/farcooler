@@ -86,6 +86,14 @@ impl Store {
     pub fn workflow_apply(&self, input: &Input) -> Result<Receipt> { self.workflow_apply_by(input, None) }
     /// `workflow_apply`, with the card history naming `by` for any card the command moves (R-108, R-111 L4).
     pub fn workflow_apply_by(&self, input: &Input, by: Option<&crate::models::Actor>) -> Result<Receipt> {
+        self.workflow_apply_snapshot_by(input, by).map(|(receipt, _)| receipt)
+    }
+    /// Apply through ordinary admission and return the committed state for the scheduler's scan snapshot.
+    /// Refusals and receipt replays return no replacement state.
+    pub fn workflow_apply_snapshot(&self, input: &Input) -> Result<(Receipt, Option<State>)> {
+        self.workflow_apply_snapshot_by(input, None)
+    }
+    fn workflow_apply_snapshot_by(&self, input: &Input, by: Option<&crate::models::Actor>) -> Result<(Receipt, Option<State>)> {
         let payload = serde_json::to_string(input)?;
         if payload.len() > 65536 { return Err(WorkflowError::Oversized); }
 
@@ -93,11 +101,11 @@ impl Store {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if !crate::engine_cutover::engine_allowed(&tx, self.engine_incarnation)? { return Err(WorkflowError::Authority); }
         let mut moved = Vec::new();
-        let receipt = apply_in(&tx, input, &payload, by, &mut moved)?;
+        let applied = apply_in_snapshot(&tx, input, &payload, by, &mut moved)?;
         tx.commit()?;
         drop(conn);
         self.announce_board_moves(&moved);
-        Ok(receipt)
+        Ok(applied)
     }
 
     /// Whether `workspace` names a board that was deleted: a key that is a board id with no board behind it.
@@ -115,6 +123,17 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT workspace FROM workflow_states ORDER BY workspace")?;
         Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Cheap cache invalidation without loading the aggregate JSON.
+    pub fn workflow_state_revision(&self, workspace: &str) -> Result<Option<u64>> {
+        Ok(self.conn().query_row("SELECT revision FROM workflow_states WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?)
+    }
+    /// Only needed when classifying a changed board without a start policy. Tracker-only boards can be skipped.
+    pub fn workflow_has_runs(&self, workspace: &str) -> Result<bool> {
+        Ok(self.conn().query_row("SELECT EXISTS(SELECT 1 FROM workflow_states s, json_each(s.state, '$.items') i
+            WHERE s.workspace=?1 AND json_extract(i.value, '$.definition.source') != ?2)",
+            params![workspace, farcooler_workflow::TICKET_SOURCE], |r| r.get(0))?)
     }
 
     pub fn workflow_state(&self, workspace: &str) -> Result<Option<State>> {
@@ -217,13 +236,17 @@ mod tests;
 /// `by` is who the board says moved a card this input moves: a wire command's sender (ov-1001), else the runner.
 pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: Option<&crate::models::Actor>,
     moved: &mut Vec<crate::workflow_projection::BoardMove>) -> Result<Receipt> {
+    apply_in_snapshot(tx, input, payload, by, moved).map(|(receipt, _)| receipt)
+}
+fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Option<&crate::models::Actor>,
+    moved: &mut Vec<crate::workflow_projection::BoardMove>) -> Result<(Receipt, Option<State>)> {
         let previous: Option<(String, String)> = tx.query_row(
             "SELECT payload, receipt FROM workflow_receipts WHERE workspace = ?1 AND id = ?2",
             params![input.workspace, input.id], |r| Ok((r.get(0)?, r.get(1)?)),
         ).optional()?;
         if let Some((original, receipt)) = previous {
             if original != payload { return Err(WorkflowError::IdentityConflict); }
-            return Ok(serde_json::from_str(&receipt)?);
+            return Ok((serde_json::from_str(&receipt)?, None));
         }
         let workspace_frozen:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine WHERE resource=?1)",[format!("workspace:{}",input.workspace)],|r|r.get(0))?;
         if workspace_frozen {return Err(WorkflowError::Authority);}
@@ -299,6 +322,7 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: O
                 }
             }
         }
+        let mut applied = None;
         let receipt = match result {
             Err(reason) => Receipt { id: input.id.clone(), result: Err(reason), effects: vec![], actor: None },
             Ok(transition) => {
@@ -357,8 +381,9 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: O
                      WHERE workspace = ?1 AND active = 0 AND dispatch_state NOT IN ('settled', 'suppressed')",
                     [&input.workspace],
                 )?;
-                Receipt { id: input.id.clone(), result: Ok(revision),
-                    effects: transition.effects.iter().map(|e| e.id.clone()).collect(), actor: None }
+                let effects = transition.effects.iter().map(|e| e.id.clone()).collect();
+                applied = Some(transition.state);
+                Receipt { id: input.id.clone(), result: Ok(revision), effects, actor: None }
             }
         };
         tx.execute(
@@ -366,5 +391,5 @@ pub(crate) fn apply_in(tx: &Transaction<'_>, input: &Input, payload: &str, by: O
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![input.workspace, input.id, payload, digest(input), serde_json::to_string(&receipt)?],
         )?;
-        Ok(receipt)
+        Ok((receipt, applied))
 }

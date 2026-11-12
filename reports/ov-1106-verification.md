@@ -52,3 +52,34 @@ Policy-removal follow-up:
   automatic landing/capacity tests then passed.
 - File-size budget, swallowed-call lint, doc-comment check against HEAD, and
   `git diff --check` passed.
+
+Review-return follow-up (Nov 13):
+
+- Read ticket ov-1106, including finding `28ae8987`, through the bundled CLI.
+- Before changing admission behavior, ran five regression tests and observed
+  all five fail on the reported assertions: one load sample admitted 40 runs
+  across two boards instead of one; the second board started beyond the shared
+  fixed budget; a tracker-only board performed five scheduling state reads
+  instead of zero; refused Start and Queue each grew receipts from two to six
+  during repeated scans instead of holding at two.
+- A load-limited scan now admits one run total. Every published runner budget
+  applies to total active runs across all boards, including runs on boards
+  whose policy was removed. Fixed and load constraints apply together.
+- The scheduler reads each changed board snapshot once and caches it by revision.
+  Tracker-only boards without a policy are skipped. Accepted commands return
+  the store's committed state, so later starts, file conflicts, model rotation,
+  and queues use current state without reloading aggregates per candidate.
+- Refused Starts and Queues back off for one minute. Fake-clock tests verify
+  receipt counts stay flat during the delay and a retry occurs at the deadline.
+- Additional tests cover combined fixed/load limits, snapshot reuse through
+  multiple successful starts, and invalidation after an external completion.
+- No production policy was published and no real agents were launched.
+- Final validation: `TMPDIR=/tmp cargo nextest run -p farcooler-daemon
+  -p farcooler-store -p farcooler-workflow --lib -E
+  'package(farcooler-store) | package(farcooler-workflow) | test(workflow)'
+  --no-fail-fast`: **994 passed**, including all five regressions and the
+  combined fixed/load and cache-invalidation tests.
+- `TMPDIR=/tmp cargo test -p farcooler-cli workflow --no-fail-fast`:
+  **14 passed**, one existing private-receipt fixture test ignored.
+- File-size budget, doc-comment check, swallowed-call lint, and staged diff
+  whitespace checks passed.

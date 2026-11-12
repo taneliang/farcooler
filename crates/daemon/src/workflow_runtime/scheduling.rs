@@ -1,6 +1,21 @@
 //! Owner-published automatic starts. Every transition still passes through the durable reducer.
 use super::*;
 use farcooler_workflow::scheduling::StartPolicy;
+use std::collections::BTreeMap;
+use farcooler_store::workflow_publication::Configuration;
+
+#[derive(Default)]
+pub(super) struct Scheduler {
+    boards: BTreeMap<String, Board>,
+    refused: BTreeMap<(String, String, bool), i64>,
+    #[cfg(test)]
+    state_reads: usize,
+}
+struct Board {
+    revision: u64,
+    policy_enabled: bool,
+    state: Option<State>,
+}
 
 fn active(item: &Item) -> bool {
     !item.definition.is_ticket() && item.group_of.is_none()
@@ -21,63 +36,93 @@ impl Runtime {
         self.schedule_with_load(workspaces, now_ms, load_milli())
     }
     fn schedule_with_load(&self, workspaces: &[String], now_ms: i64, load: Option<u64>) -> Result<()> {
+        let mut scan = self.scheduling.lock().unwrap();
+        // Inventory belongs to the runner, even when this pass was woken for only one board.
+        let all = self.store.workflow_workspaces()?;
+        scan.boards.retain(|w, _| all.contains(w));
+        scan.refused.retain(|(w, _, _), _| all.contains(w));
+        let mut configs = BTreeMap::new();
+        for workspace in &all {
+            let config = self.store.workflow_configuration(workspace)?;
+            let enabled = config.as_ref().is_some_and(|c| c.definition.start_policy.is_some());
+            let revision = self.store.workflow_state_revision(workspace)?.ok_or(Error::Refused("missing scheduling board"))?;
+            if !scan.boards.get(workspace).is_some_and(|b| b.revision == revision && b.policy_enabled == enabled) {
+                let state = if enabled || self.store.workflow_has_runs(workspace)? {
+                    #[cfg(test)] { scan.state_reads += 1; }
+                    self.state(workspace)?
+                } else { None };
+                scan.boards.insert(workspace.clone(), Board { revision, policy_enabled: enabled, state });
+            }
+            // Deleted boards' runs still consume capacity, but their publications cannot hold other boards paused.
+            if !self.service_mode || !self.store.workflow_board_deleted(workspace)? {
+                if let Some(config) = config { configs.insert(workspace.clone(), config); }
+            }
+        }
+        let mut busy = scan.boards.values().filter_map(|b| b.state.as_ref())
+            .flat_map(|s| s.items.values()).filter(|i| active(i)).count();
+        let budgets: Vec<_> = configs.values().filter_map(|c| c.definition.start_policy.as_ref()).map(|p| &p.budget).collect();
+        let load_limited = budgets.iter().any(|b| matches!(b, farcooler_workflow::scheduling::Budget::Load { .. }));
+        let mut load_used = false;
         for workspace in workspaces {
             if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
-            // A removed board must never acquire new work.
             if self.service_mode && self.store.workflow_board_deleted(workspace)? { continue; }
-            let config = self.store.workflow_configuration(workspace)?;
-            let Some(state) = self.state(workspace)? else { continue };
+            let Some(state) = scan.boards.get(workspace).and_then(|b| b.state.as_ref()) else { continue };
             let keys: Vec<_> = state.items.keys().cloned().collect();
+            let config = configs.get(workspace);
+            let policy = config.and_then(|c| c.definition.start_policy.as_ref());
+            let removed_member = config.is_some_and(|c| crate::workflow_deciders::names_a_removed_member(&self.store, &c.definition).is_some());
             for key in keys {
-                let Some(state) = self.state(workspace)? else { continue };
+                let state = scan.boards[workspace].state.as_ref().unwrap();
                 let Some(item) = state.items.get(&key) else { continue };
-                // Queue is idempotent by phase, and uses the admitted run's policy, not a later publication.
-                if item.phase == Phase::WaitingJoin && item.definition.start_policy.as_ref().is_some_and(|p| p.auto_queue) {
-                    self.internal(workspace, Command::Queue { item: key }, Grant::Controller, now_ms)?;
-                    continue;
+                // Queue follows the admitted policy, including after publication removal.
+                let queue = item.phase == Phase::WaitingJoin && item.definition.start_policy.as_ref().is_some_and(|p| p.auto_queue);
+                let retry_key = (workspace.clone(), key.clone(), queue);
+                if scan.refused.get(&retry_key).is_some_and(|until| now_ms < *until) { continue; }
+                let command = if queue { Command::Queue { item: key.clone() } } else {
+                    let (Some(config), Some(policy)) = (config, policy) else { continue };
+                    if removed_member || !item.definition.is_ticket() || item.follows.is_some() || item.phase != Phase::WaitingApproval
+                        || !policy.columns.contains(&item.definition.stages[item.stage].id) { continue; }
+                    // All published machine constraints apply together: fixed capacity cannot bypass a load guard.
+                    if (load_limited && load_used) || !budgets.iter().all(|b| b.permits(busy, load))
+                        || file_conflict(&scan.boards, &configs, workspace, &key, policy)
+                        || !self.dependencies_ready(workspace, &key, policy, state)? { continue; }
+                    let ordinal = state.items.values().filter(|i| !i.definition.is_ticket() && i.group_of.is_none()).count() + state.archive.len();
+                    Command::Start { item: key.clone(), definition: config.definition.clone(), policy_pin: config.pin.clone(),
+                        resource: Exec::item_resource(workspace, &key), dependencies: policy.dependencies.get(&key).cloned().unwrap_or_default(),
+                        initial_candidate: matches!(config.definition.stages[0].kind, StageKind::Tracker).then(|| config.pin.clone()),
+                        models: policy.models(&config.definition, ordinal), tree: None, with: vec![] }
+                };
+                let input = Input { schema: 1, id: format!("runtime:{}", Uuid::now_v7()), workspace: workspace.clone(),
+                    expected_revision: state.revision, epoch: state.epoch, source: "runtime".into(),
+                    source_sequence: state.source_sequences.get("runtime").copied().unwrap_or(0) + 1,
+                    now_ms, grant: Grant::Controller, command, busy_resources: BTreeSet::new() };
+                let before = state.items.values().filter(|i| active(i)).count();
+                // The store supplies the state it committed: no per-item aggregate reload or speculative local reducer.
+                let applied = self.store.workflow_apply_snapshot(&input);
+                if let Some(wake) = &self.notice_wake { wake.notify_one(); }
+                match applied {
+                    Ok((receipt, next)) if receipt.result.is_ok() => {
+                        let next = next.ok_or(Error::Refused("missing committed scheduling state"))?;
+                        busy = busy - before + next.items.values().filter(|i| active(i)).count();
+                        let board = scan.boards.get_mut(workspace).unwrap();
+                        board.revision = next.revision;
+                        board.state = Some(next);
+                        scan.refused.remove(&retry_key);
+                        if !queue { load_used = true; }
+                    }
+                    other => {
+                        // Refusals do not change revision, and ownership can clear outside workflow state.
+                        // Retry after a minute rather than creating 86,400 immutable receipts per day.
+                        scan.refused.insert(retry_key, now_ms.saturating_add(60_000));
+                        match other {
+                            Ok((receipt, _)) => tracing::warn!(%workspace, item = %key, ?receipt.result, "automatic command refused"),
+                            Err(error) => return Err(error.into()),
+                        }
+                    }
                 }
-                let Some(config) = &config else { continue };
-                let Some(policy) = config.definition.start_policy.as_ref() else { continue };
-                if crate::workflow_deciders::names_a_removed_member(&self.store, &config.definition).is_some() { continue; }
-                if !item.definition.is_ticket() || item.follows.is_some() || item.phase != Phase::WaitingApproval
-                    || !policy.columns.contains(&item.definition.stages[item.stage].id) { continue; }
-                let busy = state.items.values().filter(|i| active(i)).count();
-                if !policy.budget.permits(busy, load)
-                    || self.file_conflict(workspace, &key, policy)?
-                    || !self.dependencies_ready(workspace, &key, policy, &state)? { continue; }
-                let ordinal = state.items.values().filter(|i| !i.definition.is_ticket() && i.group_of.is_none()).count()
-                    + state.archive.len();
-                let receipt = self.internal(workspace, Command::Start { item: key.clone(), definition: config.definition.clone(),
-                    policy_pin: config.pin.clone(), resource: Exec::item_resource(workspace, &key),
-                    dependencies: policy.dependencies.get(&key).cloned().unwrap_or_default(),
-                    initial_candidate: matches!(config.definition.stages[0].kind, StageKind::Tracker).then(|| config.pin.clone()),
-                    models: policy.models(&config.definition, ordinal), tree: None, with: vec![] }, Grant::Controller, now_ms)?;
-                if let Err(reason) = receipt.result { tracing::warn!(%workspace, item = %key, ?reason, "automatic start refused"); }
             }
         }
         Ok(())
-    }
-    /// Keep file claims until landing finishes, even though landing releases the agent budget.
-    fn file_conflict(&self, workspace: &str, key: &str, policy: &StartPolicy) -> Result<bool> {
-        let mine = self.store.workflow_configuration(workspace)?;
-        for other_workspace in self.store.workflow_workspaces()? {
-            let other = self.store.workflow_configuration(&other_workspace)?;
-            if workspace != other_workspace && mine.as_ref().and_then(|c| c.adapter.as_ref())
-                .zip(other.as_ref().and_then(|c| c.adapter.as_ref()))
-                .is_some_and(|(a, b)| match (a, b) {
-                    (farcooler_protocol::workflow_config::AdapterConfiguration::Coding(a),
-                     farcooler_protocol::workflow_config::AdapterConfiguration::Coding(b)) => a.repository != b.repository,
-                }) { continue; }
-            let Some(state) = self.state(&other_workspace)? else { continue };
-            for (other_key, item) in &state.items {
-                if item.definition.is_ticket() || item.group_of.is_some()
-                    || matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled) { continue; }
-                if policy.conflicts(key, other_key)
-                    || item.definition.start_policy.as_ref().is_some_and(|p| p.conflicts(key, other_key)
-                        || policy.conflicts_with(key, p, other_key)) { return Ok(true); }
-            }
-        }
-        Ok(false)
     }
     fn dependencies_ready(&self, workspace: &str, key: &str, policy: &StartPolicy, state: &State) -> Result<bool> {
         if policy.dependencies.get(key).is_some_and(|deps| deps.iter().any(|d| !finished(state, d))) { return Ok(false); }
@@ -90,6 +135,25 @@ impl Runtime {
         }
         Ok(true)
     }
+}
+
+/// File claims last through landing, even though landing releases build capacity.
+fn file_conflict(boards: &BTreeMap<String, Board>, configs: &BTreeMap<String, Configuration>, workspace: &str,
+    key: &str, policy: &StartPolicy) -> bool {
+    let mine = configs.get(workspace);
+    boards.iter().any(|(other_workspace, board)| {
+        let other = configs.get(other_workspace);
+        if workspace != other_workspace && mine.and_then(|c| c.adapter.as_ref()).zip(other.and_then(|c| c.adapter.as_ref()))
+            .is_some_and(|(a, b)| match (a, b) {
+                (farcooler_protocol::workflow_config::AdapterConfiguration::Coding(a),
+                 farcooler_protocol::workflow_config::AdapterConfiguration::Coding(b)) => a.repository != b.repository,
+            }) { return false; }
+        board.state.as_ref().is_some_and(|state| state.items.iter().any(|(other_key, item)| {
+            !item.definition.is_ticket() && item.group_of.is_none() && !matches!(item.phase, Phase::Done | Phase::Failed | Phase::Cancelled)
+                && (policy.conflicts(key, other_key) || item.definition.start_policy.as_ref().is_some_and(|p|
+                    p.conflicts(key, other_key) || policy.conflicts_with(key, p, other_key)))
+        }))
+    })
 }
 
 #[cfg(test)]
@@ -163,7 +227,10 @@ mod tests {
         }
         runtime.schedule_with_load(&["w".into()], 101, Some(2000)).unwrap();
         let state = runtime.state("w").unwrap().unwrap();
-        assert!(active(&state.items["a"]) && active(&state.items["d"]));
+        assert!(active(&state.items["a"]) && state.items["d"].definition.is_ticket());
+        runtime.schedule_with_load(&["w".into()], 102, Some(2000)).unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(active(&state.items["d"]));
         assert!(state.items["b"].definition.is_ticket() && state.items["c"].definition.is_ticket());
         assert_ne!(state.items["a"].models, state.items["d"].models);
         complete(&runtime, "a", 102);
@@ -306,6 +373,137 @@ mod tests {
         let state = runtime.state("w").unwrap().unwrap();
         assert!(active(&state.items["d"]));
         assert_eq!(state.items["d"].definition.start_policy.as_ref().unwrap().budget, Budget::Fixed(1));
+    }
+
+    #[tokio::test]
+    async fn regression_load_reading_admits_only_one_run_across_boards() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000 }));
+        for board in ["w", "other"] {
+            publish_on(&runtime, board, d.clone());
+            runtime.track_tickets(&(0..20).map(|i| (board.into(), format!("t{i}"), "todo".into())).collect::<Vec<_>>()).unwrap();
+        }
+        runtime.schedule_with_load(&["w".into(), "other".into()], 100, Some(2000)).unwrap();
+        let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
+        assert_eq!(busy, 1);
+    }
+
+    #[tokio::test]
+    async fn regression_fixed_budget_counts_other_boards_even_without_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Fixed(3)));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a", "b", "c"]);
+        runtime.schedule_with_load(&["w".into()], 100, Some(0)).unwrap();
+        d.start_policy = None;
+        publish(&runtime, d.clone());
+        d.start_policy = Some(policy(Budget::Fixed(3)));
+        publish_on(&runtime, "other", d);
+        runtime.track_tickets(&[("other".into(), "d".into(), "todo".into())]).unwrap();
+        runtime.schedule_with_load(&["other".into()], 101, Some(0)).unwrap();
+        assert!(runtime.state("other").unwrap().unwrap().items["d"].definition.is_ticket());
+        complete(&runtime, "a", 102);
+        runtime.schedule_with_load(&["other".into()], 103, Some(0)).unwrap();
+        assert!(active(&runtime.state("other").unwrap().unwrap().items["d"]));
+    }
+
+    #[tokio::test]
+    async fn fixed_and_load_constraints_apply_together_on_the_runner() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Fixed(3)));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a", "b", "c", "d"]);
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000 }));
+        publish_on(&runtime, "other", d);
+        runtime.track_tickets(&[("other".into(), "z".into(), "todo".into())]).unwrap();
+        for load in [None, Some(6000)] {
+            runtime.schedule_with_load(&["w".into(), "other".into()], 100, load).unwrap();
+            assert!(runtime.state("w").unwrap().unwrap().items.values().all(|i| i.definition.is_ticket()));
+        }
+        for time in 101..=104 {
+            runtime.schedule_with_load(&["w".into(), "other".into()], time, Some(2000)).unwrap();
+            let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
+            assert_eq!(busy, usize::try_from(time - 100).unwrap().min(3));
+        }
+        complete(&runtime, "a", 105);
+        runtime.schedule_with_load(&["other".into()], 106, Some(2000)).unwrap();
+        assert!(active(&runtime.state("other").unwrap().unwrap().items["z"]));
+    }
+
+    #[tokio::test]
+    async fn regression_scan_skips_unconfigured_boards_and_reads_each_state_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        track(&runtime, &["a", "b", "c", "d"]);
+        runtime.schedule_with_load(&["w".into()], 100, Some(0)).unwrap();
+        assert_eq!(runtime.scheduling.lock().unwrap().state_reads, 0, "tracker-only board has no scheduling work");
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Fixed(0)));
+        publish(&runtime, d);
+        runtime.schedule_with_load(&["w".into()], 101, Some(0)).unwrap();
+        assert_eq!(runtime.scheduling.lock().unwrap().state_reads, 1);
+        runtime.schedule_with_load(&["w".into()], 102, Some(0)).unwrap();
+        assert_eq!(runtime.scheduling.lock().unwrap().state_reads, 1, "unchanged idle state stays cached");
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Unlimited));
+        publish(&runtime, d);
+        runtime.schedule_with_load(&["w".into()], 103, Some(0)).unwrap();
+        assert_eq!(runtime.state("w").unwrap().unwrap().items.values().filter(|i| active(i)).count(), 4);
+        assert_eq!(runtime.scheduling.lock().unwrap().state_reads, 1, "starts and file checks reuse the scan snapshot");
+        complete(&runtime, "a", 104);
+        runtime.schedule_with_load(&["w".into()], 105, Some(0)).unwrap();
+        assert_eq!(runtime.scheduling.lock().unwrap().state_reads, 2, "external transitions invalidate the snapshot once");
+    }
+
+    #[tokio::test]
+    async fn regression_refused_start_backs_off_receipts() { refused_backoff(false).await; }
+    #[tokio::test]
+    async fn regression_refused_queue_backs_off_receipts() { refused_backoff(true).await; }
+    async fn refused_backoff(queue: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.start_policy = Some(policy(Budget::Unlimited));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a"]);
+        // Simulate retained state that the reducer cannot admit: a tracker definition cannot Start,
+        // or a WaitingJoin run with no candidate cannot Queue. Both refusals are durable receipts.
+        let mut state = runtime.state("w").unwrap().unwrap();
+        if queue {
+            let item = state.items.get_mut("a").unwrap();
+            item.definition = d;
+            item.phase = Phase::WaitingJoin;
+            item.stage = 0;
+            item.definition.stages[0].kind = StageKind::Join { group: "landing".into(), adopt: false };
+        } else {
+            d = Definition::ticket_at("todo").unwrap();
+            d.start_policy = Some(policy(Budget::Unlimited));
+            publish(&runtime, d);
+            state = runtime.state("w").unwrap().unwrap();
+        }
+        let json = serde_json::to_string(&state).unwrap().replace('\'', "''");
+        farcooler_store::testing::exec_for_tests(&runtime.store, &format!("UPDATE workflow_states SET state='{json}' WHERE workspace='w'"));
+        let count = || farcooler_store::testing::count_rows_for_tests(&runtime.store, "workflow_receipts");
+        let before = count();
+        runtime.schedule_with_load(&["w".into()], 100, Some(0)).unwrap();
+        assert_eq!(count(), before + 1);
+        for time in [1100, 2100, 10_100, 59_100] {
+            runtime.schedule_with_load(&["w".into()], time, Some(0)).unwrap();
+        }
+        assert_eq!(count(), before + 1, "unchanged refusal must not write every second (queue={queue})");
+        runtime.schedule_with_load(&["w".into()], 60_100, Some(0)).unwrap();
+        assert_eq!(count(), before + 2, "retry eventually without a restart");
     }
 
 }

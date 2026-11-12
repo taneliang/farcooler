@@ -33,15 +33,26 @@ manual starts can still select a listed model explicitly.
 
 `budget` also accepts `"Unlimited"`, or `{"Load":{"below_milli":6000}}` to
 start only while the machine's one-minute load average is below 6. Missing load
-samples hold starts. `{"Fixed":0}` pauses automatic starts. The budget counts
-active ticket runs on this board, including reviews and approval waits. Runs
+samples hold starts. A load-limited scan admits at most one new run from its
+sample, across all boards, so one lagging average cannot start a whole backlog.
+`{"Fixed":0}` pauses automatic starts. Budgets constrain the whole runner:
+active ticket runs across every board count, including manually started runs,
+reviews, approval waits, and runs whose board no longer has a start policy.
+All published budgets apply together. For example, a `Fixed(3)` policy and a
+load-below-6 policy allow at most three active runs and require load below 6
+for each new start. Multiple fixed or load policies use the strictest limit;
+a published `Fixed(0)` pauses automatic starts on the runner. Runs
 that fail, finish, cancel, or enter landing release their agent budget. Landing
 groups and gates use their own exclusive landing resource and take no build
 slots. There is no built-in parallel agent count.
 
 The engine checks eligibility when work changes or finishes, and at least once
-per second while idle or waiting. It uses the board's recorded blockers as well
-as the policy's dependencies; a dependency must finish successfully before its
+per second while idle or waiting. Scheduling snapshots are loaded once per
+changed board and cached by revision; tracker-only boards without a policy are
+skipped. A successful admission returns its committed state for subsequent
+checks in that scan. Refused starts and queues retry after one minute, including
+when a block can clear outside workflow state. It uses the board's recorded
+blockers as well as the policy's dependencies; a dependency must finish successfully before its
 dependent starts. A declared file path shared by two tickets holds the second
 until the first finishes landing. These claims also apply across boards in the
 same repository. Paths are exact repository-relative names; list every known

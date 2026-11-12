@@ -215,6 +215,7 @@ pub struct Runtime {
     /// Runs on a deleted board whose cancel the engine refused, so the sweep asks once and not on every pass: each
     /// refusal is a permanent receipt (ov-1047 review).
     cancel_refused: std::collections::BTreeSet<(String, String)>,
+    scheduling: std::sync::Mutex<scheduling::Scheduler>,
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
     next_lease: Option<i64>,
@@ -335,7 +336,7 @@ impl Runtime {
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), #[cfg(test)] user_home: None },
-            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(),
+            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
