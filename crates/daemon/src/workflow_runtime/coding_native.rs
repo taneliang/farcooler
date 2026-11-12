@@ -419,6 +419,13 @@ impl Exec {
             .ok_or(Error::Refused("native PTY tags missing"))?;
         let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
         durable(&self.native_path(binding, "owner"), &serde_json::to_vec(&owner)?)?;
+        // Subscribe before releasing the launch barrier. Share the watcher's fanout, so watching
+        // cannot replace our pipe and screen clears cannot erase the process's earlier output.
+        let runtime = crate::runtime::Runtime { inventory: farcooler_tmux::LiveInventory::new(tmux.clone()),
+            tmux: tmux.clone(), marks: None };
+        let stream = runtime.attach_to_fanout(&owner.pane).await
+            .map_err(|_| Error::Refused("native output stream unavailable"))?;
+        let mut output = tokio::spawn(crate::effect_runner::capture(stream, self.process_log(binding)));
         // Listed for watching only (ov-972); declared after `host`, so it is unlisted before the server is reaped.
         let _watchable = crate::watch_view::publish(&binding.workspace, &binding.effect.item, tmux.clone(), pane.clone());
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
@@ -449,10 +456,13 @@ impl Exec {
             a.settle();
             a.session.store(false, std::sync::atomic::Ordering::SeqCst);
         });
-        // Capture actual PTY output before closing it; never parse it as success.
-        self.capture_native_output(binding, tmux, &window.pane_id).await?;
         self.quiesce_native(&owner).await?;
         if let Some(stopped) = frozen.take() { stopped.quiescent(); }
+        // Closing the pane ends its fanout. Drain it before hashing the log into the receipt.
+        match tokio::time::timeout(Duration::from_secs(5), &mut output).await {
+            Ok(result) => result.map_err(|_| Error::Refused("native output capture failed"))??,
+            Err(_) => { output.abort(); return Err(Error::Refused("native output did not drain")); }
+        }
         let (mut completed, hooks, mut failure) = result.map_or((None, Vec::new(), None),
             |(passed, hooks, failure)| (Some(passed), hooks, failure));
         // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
@@ -517,11 +527,20 @@ impl Exec {
         Ok(completed)
     }
     async fn capture_native_output(&self, binding: &Binding, tmux: &TmuxServer, pane: &str) -> Result<()> {
+        // Recovery has no surviving subscription. Keep the stream already published before the
+        // crash, followed by whatever the retained pane can still tell us about its last moments.
         // Scrollback alone excludes the visible screen, where the final error usually is.
         // Request enough lines to cover the byte cap, then keep the same bounded tail as commands.
         let output = tmux.capture_pane(pane, crate::effect_runner::LOG_LIMIT as u32).await
             .map_err(|_| Error::Refused("native PTY output unavailable"))?;
-        crate::effect_runner::save_tail(&self.process_log(binding), output.as_bytes())?;
+        let log = self.process_log(binding);
+        let mut bytes = match self.bytes(&log) {
+            Ok(bytes) => bytes,
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(error),
+        };
+        bytes.extend_from_slice(output.as_bytes());
+        crate::effect_runner::save_tail(&log, &bytes)?;
         Ok(())
     }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<Option<String>> {
@@ -653,6 +672,8 @@ else:
     subprocess.check_call(['/usr/bin/git','-c','commit.gpgsign=false','commit','--quiet','-m','native build'])
     print('native stdout evidence', flush=True)
     print('native stderr evidence', file=sys.stderr, flush=True)
+    # A terminal UI can erase both the screen and scrollback before its final hook.
+    print('\x1b[2J\x1b[3J\x1b[Hscreen after clearing evidence', flush=True)
     stop = 'stop' if agent == 'cursor' else 'Stop'
     hook(stop, sid='foreign')
     hook(stop, cwd='/foreign')
@@ -830,7 +851,7 @@ else:
         }
     }
     #[tokio::test]
-    async fn workflow_native_failed_build_keeps_output_on_the_visible_screen() {
+    async fn workflow_native_failed_build_keeps_output_even_after_terminal_clears() {
         let (_dir, mut runtime, _fake) = native("failed").await;
         let definition = runtime.configured_definition().unwrap();
         enqueue(&mut runtime, "w", "one", definition);
@@ -1194,11 +1215,14 @@ mod recovery_tests {
         durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
         let command = runtime.coding_command(&binding).unwrap();
         super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), true).unwrap();
+        let log = runtime.process_log(&binding);
+        durable(&log, b"evidence saved before the crash\n").unwrap();
         drop(runtime);
         let mut runtime = Runtime::open(&root).unwrap();
         runtime.pump(200).await.unwrap();
         let state = runtime.state("w").unwrap().unwrap();
         assert_eq!(at(&state), ("orchestrator-review".into(), Phase::WaitingReview));
+        assert!(std::fs::read_to_string(log).unwrap().contains("evidence saved before the crash"));
         assert!(!dir.path().join("reviews").exists(), "recovery launched a reviewer");
         assert_ne!(host.0.pane_life(&owner.pane, id).await.ok(), Some(farcooler_tmux::PaneLife::Live), "the reviewer was left running");
     }

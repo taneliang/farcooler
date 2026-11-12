@@ -154,7 +154,7 @@ pub(crate) fn save_tail(log: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 /// Drain a merged stdout/stderr stream continuously, with bounded memory and disk. Publish once a
 /// second as well as at EOF, so an interrupted daemon leaves useful output beside its receipt.
-async fn capture(mut reader: tokio::net::UnixStream, log: std::path::PathBuf) -> std::io::Result<()> {
+pub(crate) async fn capture(mut reader: tokio::net::UnixStream, log: std::path::PathBuf) -> std::io::Result<()> {
     let mut tail = std::collections::VecDeque::with_capacity(LOG_LIMIT);
     let mut chunk = [0u8; 16384];
     let mut flush = tokio::time::interval(Duration::from_secs(1));
