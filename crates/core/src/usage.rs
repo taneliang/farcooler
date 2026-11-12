@@ -13,7 +13,7 @@
 
 /// Which price table an estimate was made from: the date its rates were
 /// read. Bump it whenever a rate changes or a model is added.
-pub const PRICE_TABLE: &str = "2026-11-09";
+pub const PRICE_TABLE: &str = "2026-11-12";
 
 /// One turn's tokens for one model, in the store's four buckets.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -125,6 +125,8 @@ const fn rate(input: f64, cache_write: f64, cache_write_1h: f64, cache_read: f64
 /// $0.01 cache hit, $0.125 5m and $0.20 1h writes.)
 ///
 const TABLE: &[(&str, Rates)] = &[
+    ("claude-fable-5-2", rate(8.0, 10.0, 16.0, 0.2, 40.0)),
+    ("claude-mythos-5-2", rate(8.0, 10.0, 16.0, 0.2, 40.0)),
     ("claude-fable-5-1", rate(10.0, 12.5, 20.0, 0.25, 50.0)),
     ("claude-mythos-5-1", rate(10.0, 12.5, 20.0, 0.25, 50.0)),
     ("claude-fable-5", rate(10.0, 12.5, 20.0, 1.0, 50.0)),
@@ -195,7 +197,7 @@ const RETIRED: &[(&str, Rates)] = &[
 /// Fast mode shows in a Claude Code transcript as `usage.speed: "fast"` on
 /// each request. A harness that reports no such field (Codex) is priced as
 /// standard, which can be low.
-const FAST_MODE: &[&str] = &["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
+const FAST_MODE: &[&str] = &["claude-fable-5-2", "claude-mythos-5-2", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
 
 /// The rates for `model`, if the table has them.
 ///
@@ -262,11 +264,13 @@ mod tests {
         assert_eq!(estimate(Some("claude-opus-5-5"), &short), Some(16 + 1400 + 10_280 + 149_595));
     }
 
-    /// Every row of the docs table of 2026-10-10 (Haiku 5.5 at its over-100k
+    /// Every row of the docs table of 2026-11-12 (Haiku 5.5 at its over-100k
     /// tier), as the page prints it: input, 5m write, 1h write, hit, output.
     #[test]
     fn every_model_on_the_pricing_page_has_its_listed_rates() {
         let docs: &[(&str, [f64; 5])] = &[
+            ("claude-fable-5-2", [8.0, 10.0, 16.0, 0.2, 40.0]),
+            ("claude-mythos-5-2", [8.0, 10.0, 16.0, 0.2, 40.0]),
             ("claude-fable-5-1", [10.0, 12.5, 20.0, 0.25, 50.0]),
             ("claude-mythos-5-1", [10.0, 12.5, 20.0, 0.25, 50.0]),
             ("claude-fable-5", [10.0, 12.5, 20.0, 1.0, 50.0]),
@@ -298,13 +302,16 @@ mod tests {
         }
     }
 
-    /// Fast mode, from the docs' own table: Opus 5.5 at $8 and $40, Opus 5
-    /// and 4.8 at $10 and $50; the cache multipliers stack on top.
+    /// Fast mode, from the docs' own table: Fable 5.2 and Mythos 5.2 at $16
+    /// and $80, Opus 5.5 at $8 and $40, Opus 5 and 4.8 at $10 and $50; the cache multipliers stack on top.
     #[test]
     fn fast_mode_doubles_the_models_that_offer_it_and_no_others() {
         let million = |fast| TokenCounts { input: 1_000_000, output: 1_000_000, fast, ..Default::default() };
         assert_eq!(estimate(Some("claude-opus-5-5"), &million(true)), Some(48_000_000));
         assert_eq!(estimate(Some("claude-opus-5-5"), &million(false)), Some(24_000_000));
+        assert_eq!(estimate(Some("claude-fable-5-2"), &million(true)), Some(96_000_000));
+        assert_eq!(estimate(Some("claude-mythos-5-2"), &million(true)), Some(96_000_000));
+        assert_eq!(estimate(Some("claude-fable-5-1"), &million(true)), Some(60_000_000));
         assert_eq!(estimate(Some("claude-opus-5"), &million(true)), Some(60_000_000));
         assert_eq!(estimate(Some("claude-opus-4-8[1m]"), &million(true)), Some(60_000_000));
         // Opus 4.6 and Sonnet run at standard speed and rates.
