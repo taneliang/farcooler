@@ -51,7 +51,13 @@ $ids
 IDS
 out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt" --jq '{binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at, run_attempt}}') || exit 1
 jobs=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "stale") | .name]') || exit 1
-printf '%s,"failed_jobs":%s}\n' "${out%?}" "$jobs" > "$FARCOOLER_RECEIPT""#;
+export CI_FAILURE_JOB='' CI_FAILURE_LINE=''
+CI_FAILURE_JOB=$(printf '%s' "$jobs" | python3 -c 'import json,sys; print(next(iter(json.load(sys.stdin)), ""))') || exit 1
+if [ -n "$CI_FAILURE_JOB" ]; then
+  CI_FAILURE_LINE=$("$CI_GH" run view "$run" --attempt "$attempt" --repo "$CI_REPOSITORY" --log-failed | awk 'NF { print; exit }')
+fi
+failure=$(python3 -c 'import json,os; j=os.environ["CI_FAILURE_JOB"]; print(json.dumps({"job":j,"firstLine":os.environ["CI_FAILURE_LINE"]} if j else None))') || exit 1
+printf '%s,"failed_jobs":%s,"failure":%s}\n' "${out%?}" "$jobs" "$failure" > "$FARCOOLER_RECEIPT""#;
 
 /// `workflow get`'s reply, for a workspace that has never published: the settings this runner suggests for its first
 /// draft as `suggested_adapter`, or why it can't as `suggested_adapter_refused`. Only a `get` reply carries a
@@ -251,6 +257,33 @@ else:
             assert_eq!(result.failed_jobs.unwrap(), ["iOS UI tests", "Other failed job"]);
         }
     }
+    #[test]
+    fn the_ci_provider_keeps_the_failed_job_and_first_failed_log_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let gh = dir.path().join("gh");
+        std::fs::write(&gh, r#"#!/bin/sh
+case "$*" in
+  *'/actions/runs?'*) printf '19|failure\n' ;;
+  *'/19/jobs'*) printf 'Rust tests\n' ;;
+  *'--log-failed'*) printf 'error: first failed assertion\nerror: later assertion\n' ;;
+  *'/actions/runs/19'*) printf '{"binding":"bound","repository":"owner/repo","run":{"id":19},"failure":{"job":"%s","firstLine":"%s"}}' "$CI_FAILURE_JOB" "$CI_FAILURE_LINE" ;;
+  *) exit 1 ;;
+esac
+"#).unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let receipt = dir.path().join("receipt.json");
+        let result = std::process::Command::new("/bin/sh").arg("-c").arg(super::CI_LOOK)
+            .env("CI_GH", gh).env("CI_REPOSITORY", "owner/repo").env("CI_WORKFLOW", "CI")
+            .env("CI_EVENT", "push").env("FARCOOLER_CANDIDATE", "candidate")
+            .env("FARCOOLER_OPERATION_BINDING", "bound").env("FARCOOLER_RECEIPT", &receipt).status().unwrap();
+        assert!(result.success());
+        let receipt: crate::workflow_runtime::CodingCiReceipt = serde_json::from_slice(&std::fs::read(receipt).unwrap()).unwrap();
+        let failure = receipt.failure.unwrap();
+        assert_eq!(failure.job, "Rust tests");
+        assert_eq!(failure.first_line, "error: first failed assertion");
+    }
+
     #[test]
     fn the_ci_look_stays_within_a_configured_commands_bounds() {
         assert!(super::CI_LOOK.len() <= 4096 && super::PROMPT.len() <= 4096);

@@ -191,7 +191,8 @@ impl Exec {
         if *kind == StageKind::AwaitCi && (binding.effect.ci_retry.is_some()
             || fact.detail.get("run").is_some_and(|r| !r.is_null())) {
             return Ok(Outcome::CiResult { label: fact.label, evidence,
-                run: fact.detail.get("run").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose()? });
+                run: fact.detail.get("run").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose()?,
+                failure: fact.detail.get("failure").filter(|f| !f.is_null()).map(|f| serde_json::from_value(f.clone())).transpose()? });
         }
         if *kind == StageKind::Fold && fact.label == "conflict" {
             return Ok(Outcome::FoldConflict { evidence,
@@ -200,7 +201,10 @@ impl Exec {
         }
         Ok(match fact.label.as_str() {
             "passed" => Outcome::Passed(evidence),
-            "rejected" => Outcome::Rejected(evidence),
+            "rejected" => match serde_json::from_value::<farcooler_workflow::GroupFailure>(fact.detail["failure"].clone()) {
+                Ok(failure) => Outcome::RejectedWithDetails(evidence, failure),
+                Err(_) => Outcome::Rejected(evidence),
+            },
             other => Outcome::Labeled(other.into(), evidence),
         })
     }
@@ -350,7 +354,18 @@ impl Exec {
                     continue;
                 }
             };
-            self.write_fact(binding, label, &candidate, serde_json::json!({ "polls": poll + 1, "run": run }))?;
+            let mut detail = serde_json::json!({ "polls": poll + 1, "run": run });
+            if label == "rejected" {
+                let path = self.root.join("receipts").join(format!("{}.poll-{poll}.provider.json", digest(&binding.effect)));
+                let receipt: CodingCiReceipt = serde_json::from_slice(&self.bytes(&path)?)?;
+                if let Some(mut failure) = receipt.failure {
+                    failure.job = failure.job.chars().filter(|c| !c.is_control()).take(256).collect();
+                    failure.first_line = failure.first_line.chars().filter(|c| !c.is_control()).take(1000).collect();
+                    failure.split = false;
+                    if !failure.job.is_empty() { detail["failure"] = serde_json::to_value(failure)?; }
+                }
+            }
+            self.write_fact(binding, label, &candidate, detail)?;
             return self.reconcile_verb(binding, &StageKind::AwaitCi).await;
         }
         unreachable!("the poll count is unbounded")

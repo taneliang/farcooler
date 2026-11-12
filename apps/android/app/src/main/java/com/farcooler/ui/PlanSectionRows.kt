@@ -95,6 +95,12 @@ fun LazyListScope.planSections(
                     ExplainedOnLongPress(listOfNotNull(section.help)) { PlanHeader(section.title, count, Modifier.testTag("plan-landing")) }
                 }
                 if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-landing-empty")) }
+                for (group in view.landingGroups.orEmpty()) item(key = "plan/landing-group/${group.id}") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("plan-landing-group-${group.id}")) {
+                        Text(group.title, style = MaterialTheme.typography.titleSmall)
+                        group.lines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                    }
+                }
                 for (card in view.landings) item(key = "plan/landing/${card.id}") {
                     PlanLandingCard(card, plan.landings.firstOrNull { it.id == card.id }?.let(plan::ciOf), now, onOpenTicket = { onOpen(PlanPage.Ticket(it)) }, help = section.help)
                 }

@@ -455,6 +455,18 @@ public struct WireGateCard: Codable, Equatable, Sendable {
 	}
 }
 
+public struct WireGroupFailure: Codable, Equatable, Sendable {
+	public var job: String
+	public var firstLine: String
+	public var split: Bool?
+
+	public init(job: String, firstLine: String, split: Bool?) {
+		self.job = job
+		self.firstLine = firstLine
+		self.split = split
+	}
+}
+
 public struct WireLadderStep: Codable, Equatable, Sendable {
 	public var label: String
 	public var explanation: String
@@ -685,6 +697,39 @@ public struct WireLandingCard: Codable, Equatable, Sendable {
 	}
 }
 
+public struct WireLandingGroup: Codable, Equatable, Sendable {
+	public var id: String
+	public var label: String
+	public var step: String
+	public var since: Int64
+	public var members: [String]
+	public var failure: WireGroupFailure?
+	public var split: Bool
+
+	public init(id: String, label: String, step: String, since: Int64, members: [String], failure: WireGroupFailure?, split: Bool) {
+		self.id = id
+		self.label = label
+		self.step = step
+		self.since = since
+		self.members = members
+		self.failure = failure
+		self.split = split
+	}
+}
+
+public struct WireLandingGroupView: Codable, Equatable, Sendable {
+	public var id: String
+	public var title: String
+	/// Complete lines, in reading order; renderers only wrap and lay them out.
+	public var lines: [String]
+
+	public init(id: String, title: String, lines: [String]) {
+		self.id = id
+		self.title = title
+		self.lines = lines
+	}
+}
+
 public enum WireSectionKind: String, Codable, Equatable, Sendable {
 	case needsYou = "needs_you"
 	case landing
@@ -854,6 +899,7 @@ public struct WirePlanView: Codable, Equatable, Sendable {
 	public var needsYou: Int64
 	/// Live landings, furthest along first.
 	public var landings: [WireLandingCard]
+	public var landingGroups: [WireLandingGroupView]?
 	public var inReview: [WireTicketCard]
 	public var building: [WireTicketCard]
 	/// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
@@ -869,12 +915,13 @@ public struct WirePlanView: Codable, Equatable, Sendable {
 	/// What ticket details and theme tracks say (ov-1038).
 	public var details: WireTicketDetails
 
-	public init(schema: UInt32, now: Int64, sections: [WireSection], needsYou: Int64, landings: [WireLandingCard], inReview: [WireTicketCard], building: [WireTicketCard], waiting: [WireWaitingGroup], onLandedLanding: [WireTicketCard], landedToday: [WireTicketCard], agents: WireAgents, themes: WireThemes, column: WireColumn, details: WireTicketDetails) {
+	public init(schema: UInt32, now: Int64, sections: [WireSection], needsYou: Int64, landings: [WireLandingCard], landingGroups: [WireLandingGroupView]?, inReview: [WireTicketCard], building: [WireTicketCard], waiting: [WireWaitingGroup], onLandedLanding: [WireTicketCard], landedToday: [WireTicketCard], agents: WireAgents, themes: WireThemes, column: WireColumn, details: WireTicketDetails) {
 		self.schema = schema
 		self.now = now
 		self.sections = sections
 		self.needsYou = needsYou
 		self.landings = landings
+		self.landingGroups = landingGroups
 		self.inReview = inReview
 		self.building = building
 		self.waiting = waiting
@@ -1048,12 +1095,15 @@ public struct WirePresentation: Codable, Equatable, Sendable {
 	public var epoch: Int64
 	public var revision: Int64
 	public var runs: [WireRunCard]
+	/// Engine groups, including failed groups whose members have been handed back.
+	public var landingGroups: [WireLandingGroup]?
 
-	public init(schema: UInt32, workspace: String, epoch: Int64, revision: Int64, runs: [WireRunCard]) {
+	public init(schema: UInt32, workspace: String, epoch: Int64, revision: Int64, runs: [WireRunCard], landingGroups: [WireLandingGroup]?) {
 		self.schema = schema
 		self.workspace = workspace
 		self.epoch = epoch
 		self.revision = revision
 		self.runs = runs
+		self.landingGroups = landingGroups
 	}
 }

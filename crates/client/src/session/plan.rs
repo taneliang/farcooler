@@ -19,6 +19,23 @@ impl Session {
         }
     }
 
+    /// The apps' plan read includes the authenticated engine presentation. Keeping this here
+    /// makes Mac, phone and wasm use the same source and avoids platform snapshot parsing.
+    pub async fn plan_with_workflow(&self, workspace: Uuid) -> Result<serde_json::Value, SessionError> {
+        let mut value = crate::plan_json::plan_json(&self.plan(workspace).await?);
+        if self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS) {
+            match self.workflow_snapshot(workspace, crate::workflow_presentation::Style::Apple).await {
+                Ok(snapshot) => value["workflow"] = serde_json::to_value(snapshot.presentation).expect("presentation serializes"),
+                // Workflow inspection requires control on older runners. Its optional enrichment
+                // must not remove a read-only connection's plan, or a pre-engine board's plan.
+                Err(SessionError::Refused { code, .. }) if matches!(farcooler_protocol::v1::ErrorCode::try_from(code),
+                    Ok(farcooler_protocol::v1::ErrorCode::ScopeDenied | farcooler_protocol::v1::ErrorCode::CapabilityUnsupported)) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(value)
+    }
+
     /// The owner keeps one ruling (`ruling.set` to confirmed, as `user`,
     /// ov-333). Refused without a round trip on a runner without
     /// `board_ruling_actions`. A phone offers no other move: reversing is a

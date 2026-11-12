@@ -340,6 +340,13 @@ data class GateCard (
 )
 
 @Serializable
+data class GroupFailure (
+	val job: String,
+	val firstLine: String,
+	val split: Boolean? = null
+)
+
+@Serializable
 data class LadderStep (
 	val label: String,
 	val explanation: String
@@ -551,6 +558,25 @@ data class LandingCard (
 )
 
 @Serializable
+data class LandingGroup (
+	val id: String,
+	val label: String,
+	val step: String,
+	val since: Long,
+	val members: List<String>,
+	val failure: GroupFailure? = null,
+	val split: Boolean
+)
+
+@Serializable
+data class LandingGroupView (
+	val id: String,
+	val title: String,
+	/// Complete lines, in reading order; renderers only wrap and lay them out.
+	val lines: List<String>
+)
+
+@Serializable
 enum class SectionKind(val string: String) {
 	@SerialName("needs_you")
 	NeedsYou("needs_you"),
@@ -690,6 +716,7 @@ data class PlanView (
 	val needsYou: Long,
 	/// Live landings, furthest along first.
 	val landings: List<LandingCard>,
+	val landingGroups: List<LandingGroupView>? = null,
 	val inReview: List<TicketCard>,
 	val building: List<TicketCard>,
 	/// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
@@ -821,6 +848,8 @@ data class Presentation (
 	val workspace: String,
 	val epoch: Long,
 	val revision: Long,
-	val runs: List<RunCard>
+	val runs: List<RunCard>,
+	/// Engine groups, including failed groups whose members have been handed back.
+	val landingGroups: List<LandingGroup>? = null
 )
 

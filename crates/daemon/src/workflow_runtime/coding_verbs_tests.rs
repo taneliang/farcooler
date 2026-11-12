@@ -10,7 +10,8 @@ const GATE: &str = r#"elif stage == 'gate':
     if mode == 'gate-fail':
         print('landing gate stdout', flush=True)
         print('landing gate stderr', file=sys.stderr, flush=True)
-        sys.exit(1)
+        print('starting gate\nerror: first gate failure\nerror: later gate failure')
+        sys.exit(5)
     if mode == 'gate-dirty': pathlib.Path('stray.out').write_text('left behind')
     if mode == 'gate-slow':
         pathlib.Path('half-built.out').write_text('left by the gate')
@@ -552,7 +553,11 @@ async fn a_failing_gate_is_rejected_on_the_first_run_and_not_retried_as_a_crash(
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "one", &definition).await;
     command(&runtime, Command::Queue { item: "one".into() });
-    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    let failure = state.items.values().find(|i| i.group_of.is_some()).unwrap().group_failure.as_ref().unwrap();
+    assert!(failure.job.contains("gate"), "the configured gate command is the job");
+    assert_eq!(failure.first_line, "error: first gate failure");
+    assert!(!failure.split, "a one-member fallback failed without splitting");
     assert_eq!(outbox(&runtime, StageKind::Run), 1, "a failing exit is the candidate's answer: one run, not one per attempt");
     let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
     let logs = reply["process_logs"].as_array().unwrap();

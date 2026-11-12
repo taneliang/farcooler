@@ -27,6 +27,20 @@ class PlanViewTest {
     @Before @After fun reset() = PlanViews.reset()
 
     @Test
+    fun `the engine landing queue uses the shared golden including long titles and failures`() {
+        val fixture = Json.parseToJsonElement(repositoryFile("test/fixtures/landing-queue.json")).jsonObject
+        val request = fixture.getValue("request").jsonObject
+        val plan = Plan.decode(request.getValue("plan").toString())
+        val view = PlanViews.of(plan)!!
+        val groups = view.landingGroups!!
+        assertEquals(4, groups.size)
+        assertTrue(groups[0].lines.any { it.contains("complete long ticket title") })
+        assertTrue(groups[2].lines.contains("Split after a gate failed"))
+        assertTrue(groups[2].lines.contains("Failed job: cargo test --workspace"))
+        assertTrue(groups[3].lines.contains("error: expected a passing gate"))
+    }
+
+    @Test
     fun `the golden answer decodes into every slot the phone draws`() {
         val view = PlanViews.decode(golden.getValue("answer").toString())!!
         assertEquals(

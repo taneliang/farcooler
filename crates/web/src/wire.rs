@@ -228,7 +228,7 @@ impl Runner {
 
     /// A workspace's plan, in the phones' shape (`plan_json`).
     pub async fn plan(&self, workspace: Uuid) -> Result<serde_json::Value, WebError> {
-        Ok(farcooler_client::plan_json::plan_json(&self.session.plan(workspace).await?))
+        Ok(self.session.plan_with_workflow(workspace).await?)
     }
 
     /// The runner's workspaces, in the shape the phones and the Mac read

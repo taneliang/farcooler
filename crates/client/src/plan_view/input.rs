@@ -11,6 +11,7 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Plan {
     pub now_ms: i64,
+    pub workflow: Option<crate::workflow_presentation::Presentation>,
     pub themes: Vec<Theme>,
     pub lines: Vec<Line>,
     pub cards: Vec<Card>,

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // The Plan's sections and ticket cards as the Rust core builds them (ov-1016,
 // ruling R-112): `crates/client/src/plan_view.rs` decides which ticket is in
@@ -256,5 +257,22 @@ extension WireMark {
         case .dropped: .dropped
         case .rank, .unknown: .unknown
         }
+    }
+}
+
+/// The same wrapping layout on Mac and iPhone; the shared Rust presenter supplies every line.
+public struct PlanLandingGroupView: View {
+    public let group: WireLandingGroupView
+
+    public init(group: WireLandingGroupView) { self.group = group }
+
+    public var body: some View {
+        VStack(alignment: .leading) {
+            Text(group.title).font(.headline)
+            ForEach(Array(group.lines.enumerated()), id: \.offset) { _, line in
+                Text(line).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

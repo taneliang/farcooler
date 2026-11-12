@@ -851,6 +851,8 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         r.card(line, rank, r.agent_of(line), r.landed_landing(line).map(|l| format!("Landing {}", l.number)))
     };
 
+    let landing_groups = super::landing_queue::groups(plan, context, workflow);
+
     // Landings, furthest along first; the plan's order breaks a tie.
     let mut live: Vec<&Landing> = plan.landings.iter().filter(|l| l.state != "landed" && l.state != "dropped").collect();
     live.sort_by_key(|l| std::cmp::Reverse(r.phase(l).progress()));
@@ -978,7 +980,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
     let waiting_count: usize = waiting.iter().map(|g| g.cards.len()).sum();
     let kinds: [(SectionKind, &str, bool, usize, Option<String>); 9] = [
         (SectionKind::NeedsYou, "needs you", context.needs_you > 0, context.needs_you as usize, None),
-        (SectionKind::Landing, "landing", true, landings.len(), Some("Nothing is landing right now.".into())),
+        (SectionKind::Landing, "landing", true, landings.len() + landing_groups.len(), Some("Nothing is landing right now.".into())),
         (SectionKind::InReview, "in review", !in_review.is_empty(), in_review.len(), None),
         (
             SectionKind::Building,
@@ -1015,6 +1017,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         sections,
         needs_you: context.needs_you,
         landings,
+        landing_groups,
         in_review,
         building,
         waiting,

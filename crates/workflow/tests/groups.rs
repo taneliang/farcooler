@@ -743,7 +743,7 @@ fn flaky_definition() -> Definition {
 fn ci_answer(log: &mut Log, group: &str, label: &str, attempt: u32, jobs: &[&str]) -> Transition {
     let evidence = log.evidence(group);
     log.outcome(group, Outcome::CiResult { label: label.into(), evidence,
-        run: Some(CiRun { id: 73, attempt, failed_jobs: jobs.iter().map(|j| (*j).into()).collect() }) })
+        run: Some(CiRun { id: 73, attempt, failed_jobs: jobs.iter().map(|j| (*j).into()).collect() }), failure: None })
 }
 #[test]
 fn a_listed_ci_failure_reruns_once_then_green_lands_or_second_red_routes_rejected() {
@@ -768,7 +768,7 @@ fn a_listed_ci_failure_reruns_once_then_green_lands_or_second_red_routes_rejecte
         // A stale red/green from attempt 1 cannot finish the look at attempt 2.
         let evidence = log.evidence(&group);
         assert_eq!(log.try_outcome(&group, Outcome::CiResult { label: "passed".into(), evidence,
-            run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec![] }) }), Err(Refusal::Evidence));
+            run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec![] }), failure: None }), Err(Refusal::Evidence));
         let result = ci_answer(&mut log, &group, if green { "passed" } else { "rejected" }, 2,
             if green { &[] } else { &["iOS UI tests"] });
         assert_eq!(result.state.items[&group].phase, if green { Phase::Done } else { Phase::Failed });
@@ -838,7 +838,7 @@ fn a_ci_receipt_can_resolve_uncertainty_without_firing_a_rerun_policy() {
         let command = Command::Resolve { item: group.clone(), effect: item.pending.clone().unwrap(),
             run: item.run.clone(), fence: item.fence,
             outcome: Outcome::CiResult { label: label.into(), evidence: log.evidence(&group),
-                run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec!["iOS UI tests".into()] }) } };
+                run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec!["iOS UI tests".into()] }), failure: None } };
         let result = log.run(command, Grant::Controller);
         assert_eq!(result.state.items[&group].phase, if label == "passed" { Phase::Done } else { Phase::Failed });
         assert!(result.effects.iter().all(|e| e.kind != EffectKind::Execute(StageKind::RerunCi)));
@@ -1228,4 +1228,37 @@ fn every_new_split_group_gets_its_own_script_call_budget() {
     assert_eq!(item.phase, Phase::Blocked);
     assert!(split.effects.iter().any(|e| e.item == grandchild && matches!(e.kind, EffectKind::Decide { .. })));
     assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn gate_diagnostics_survive_both_halves_and_replay() {
+    let mut log = Log::new();
+    for t in ["x", "a", "b"] { log.join_group(t); }
+    log.queue("x");
+    let ahead = log.group_of("x");
+    log.queue("a"); log.queue("b");
+    let pair = log.group_of("a");
+    pass_group(&mut log, &ahead, 3);
+    pass_group(&mut log, &pair, 2);
+    let evidence = log.evidence(&pair);
+    log.outcome(&pair, Outcome::RejectedWithDetails(evidence, GroupFailure {
+        job: "cargo test".into(), first_line: "error: gate assertion failed".into(), split: false,
+    }));
+    let second = log.group_of("b");
+    for id in [&pair, &second] {
+        let failure = log.state.items[id].group_failure.as_ref().unwrap();
+        assert_eq!(failure.job, "cargo test");
+        assert_eq!(failure.first_line, "error: gate assertion failed");
+        assert!(failure.split);
+    }
+    log.pass(&pair);
+    assert!(log.state.items[&pair].group_failure.is_some(), "a later step must not erase why it split");
+    assert_eq!(log.replay_digest(), digest(&log.state));
+    // Missing optional state fields retain the old serialized identity.
+    let mut old = serde_json::to_value(&log.state).unwrap();
+    for item in old["items"].as_object_mut().unwrap().values_mut() {
+        item.as_object_mut().unwrap().remove("group_failure");
+    }
+    let decoded: State = serde_json::from_value(old.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), old);
 }

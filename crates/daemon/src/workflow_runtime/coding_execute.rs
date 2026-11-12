@@ -89,6 +89,9 @@ pub struct CodingCiReceipt {
     pub run: serde_json::Value,
     #[serde(default)]
     pub failed_jobs: Option<Vec<String>>,
+    /// A provider may retain the failed job and its first failed-log line beside the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<farcooler_workflow::GroupFailure>,
 }
 
 impl Exec {
@@ -563,7 +566,21 @@ impl Exec {
         let manifest = digest(&(binding, &candidate, &raw, unchanged));
         let evidence = Evidence { candidate, manifest: manifest.clone(), receipt: digest(&("coding-receipt/v1", manifest)),
             policy_pin: binding.effect.policy_pin.clone() };
-        Ok(if unchanged { Outcome::Passed(evidence) } else { Outcome::Rejected(evidence) })
+        Ok(if unchanged { Outcome::Passed(evidence) } else {
+            // Read the digest-verified log, never a renderer's guess at a receipt path. The command
+            // gate is the job; the earliest error line is its failure context.
+            let log = self.bytes(&self.process_log(binding))?;
+            let output = String::from_utf8_lossy(&log);
+            let first = output.lines().find(|line| {
+                let lower = line.to_ascii_lowercase();
+                lower.contains("error") || lower.contains("failed") || lower.contains("failure")
+            }).or_else(|| output.lines().find(|l| !l.trim().is_empty()))
+                .unwrap_or("The gate changed its candidate or exited unsuccessfully.");
+            let plain = |s: &str, limit| s.chars().filter(|c| !c.is_control()).take(limit).collect::<String>();
+            Outcome::RejectedWithDetails(evidence, farcooler_workflow::GroupFailure {
+                job: plain(&command.argv.join(" "), 256), first_line: plain(first, 1000), split: false,
+            })
+        })
     }
     pub(super) async fn verify_tree(&self, binding: &Binding) -> Result<String> {
         let tree = self.tree(binding);

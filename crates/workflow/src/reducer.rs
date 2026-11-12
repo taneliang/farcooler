@@ -57,7 +57,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
@@ -83,7 +83,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
@@ -180,7 +180,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             route(&mut item, id, input, "rejected", Some(e), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
                         _ if rerunning => { item.phase = Phase::Uncertain; }
-                        Outcome::CiResult { label, evidence, run } => {
+                        Outcome::CiResult { label, evidence, run, failure } => {
                             if item.run.starts_with("cancel:")
                                 || item.definition.stages[item.stage].kind != StageKind::AwaitCi
                                 || !matches!(label.as_str(), "passed" | "rejected" | "cancelled" | "timeout")
@@ -197,6 +197,14 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 item.last_evidence = Some(evidence.clone());
                             } else {
                                 item.ci_retry = None;
+                                if label == "rejected" {
+                                    if let Some(detail) = failure {
+                                        if detail.job.is_empty() || detail.job.len() > 1024 || detail.first_line.len() > 4096
+                                            || detail.job.chars().any(char::is_control) || detail.first_line.chars().any(char::is_control)
+                                        { return Err(Refusal::Evidence); }
+                                        if item.group_of.is_some() { item.group_failure = Some(detail.clone()); }
+                                    }
+                                }
                                 route(&mut item, id, input, label, Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                             }
                         }
@@ -274,9 +282,15 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             evidence_matches(&item, evidence)?;
                             route(&mut item, id, input, label, Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
-                        Outcome::Passed(evidence) | Outcome::Rejected(evidence) => {
+                        Outcome::Passed(evidence) | Outcome::Rejected(evidence) | Outcome::RejectedWithDetails(evidence, _) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
+                            if let Outcome::RejectedWithDetails(_, detail) = outcome {
+                                if detail.job.is_empty() || detail.job.len() > 1024 || detail.first_line.len() > 4096
+                                    || detail.job.chars().any(char::is_control) || detail.first_line.chars().any(char::is_control)
+                                { return Err(Refusal::Evidence); }
+                                if item.group_of.is_some() { item.group_failure = Some(detail.clone()); }
+                            }
                             finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
                         Outcome::SafeFailure | Outcome::SafeFailureBecause(_) => {
@@ -392,7 +406,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, cancel_reason: None, closed: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -915,6 +929,7 @@ fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&E
         // fewer members than this one had, so splitting ends within the group's size however big it is.
         split = item.members.len() >= 2 && out.room;
         target = if split {
+            if let Some(failure) = &mut item.group_failure { failure.split = true; }
             let rest = item.members.split_off(item.members.len().div_ceil(2));
             out.spawn.push((id.to_string(), rest));
             Target::Step(step)

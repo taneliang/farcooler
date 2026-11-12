@@ -113,6 +113,18 @@ pub struct Item {
     pub hook_calls: BTreeMap<String, u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hook_refused: Option<String>,
+    /// The last rejected landing gate, retained through a split and subsequent steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_failure: Option<GroupFailure>,
+}
+#[typeshare]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupFailure {
+    pub job: String,
+    pub first_line: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub split: bool,
 }
 /// One send-back: who asked (the input), when (the revision), from which step to which, on which run, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -270,11 +282,11 @@ pub struct Evidence {
 pub enum Outcome {
     Hook(crate::HookResult),
     /// CI facts are authenticated operation input, so the pure rule sees the same facts on replay.
-    CiResult { label: String, evidence: Evidence, run: Option<CiRun> },
+    CiResult { label: String, evidence: Evidence, run: Option<CiRun>, #[serde(default, skip_serializing_if = "Option::is_none")] failure: Option<GroupFailure> },
     /// A fold receipt carries conflict paths into the next build, including after recovery.
     FoldConflict { evidence: Evidence, #[serde(default)] files: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")] members: Option<Vec<String>> },
-    Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure,
+    Passed(Evidence), Rejected(Evidence), RejectedWithDetails(Evidence, GroupFailure), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),
     Interrupted, Uncertain, Stopped { operation: String, receipt: String } }

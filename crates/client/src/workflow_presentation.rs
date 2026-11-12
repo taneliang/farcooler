@@ -138,6 +138,22 @@ pub struct Presentation {
     #[typeshare(serialized_as = "I54")]
     pub revision: u64,
     pub runs: Vec<RunCard>,
+    /// Engine groups, including failed groups whose members have been handed back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub landing_groups: Vec<LandingGroup>,
+}
+#[typeshare]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LandingGroup {
+    pub id: String,
+    pub label: String,
+    pub step: String,
+    #[typeshare(serialized_as = "I54")]
+    pub since: i64,
+    pub members: Vec<String>,
+    pub failure: Option<farcooler_workflow::GroupFailure>,
+    pub split: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Error { Invalid, Unauthorized, Missing, Stale, Unavailable, ReasonRequired }
@@ -186,7 +202,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
         let item = &observed;
         let guard = digest(&(&snapshot_guard, id));
         if item.definition.validate().is_err() || item.pin != item.definition.pin()
-            || item.iteration > item.definition.max_reworks
+            || (item.definition.schema == 1 && item.iteration > item.definition.max_reworks)
             || (if item.phase == Phase::Done { item.stage != item.definition.stages.len() }
                 else { item.stage >= item.definition.stages.len() })
         { return Err(Error::Invalid); }
@@ -265,7 +281,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             stages: item.definition.stages.iter().map(|s| display::stage_card(s, style)).collect(),
             stage: stage.map(|s| display::stage_card(s, style)), gate, candidate: item.candidate.clone(),
             latest_evidence: item.last_evidence.clone(), pending_effect: item.pending.clone(),
-            iteration: item.iteration, reworks_remaining: item.definition.max_reworks - item.iteration,
+            iteration: item.iteration, reworks_remaining: item.definition.max_reworks.saturating_sub(item.iteration),
             attempt: item.attempt, fence: item.fence,
             forms: if kinds.contains(&ActionKind::RequestRework) {
                 vec![display::rework_form(farcooler_workflow::MAX_REWORK_REASON_BYTES, style)] } else { Vec::new() },
@@ -274,7 +290,20 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             actions: kinds.into_iter().map(|kind| Action { label: if kind == ActionKind::Cancel && item.phase == Phase::Failed { display::close_label(style) } else { display::action_label(&kind, style) }, kind, guard: guard.clone() }).collect() });
     }
     Ok(Presentation { schema: SCHEMA, workspace: state.workspace.clone(), epoch: state.epoch,
-        revision: state.revision, runs })
+        revision: state.revision, runs, landing_groups: state.items.iter()
+            .filter(|(_, i)| i.group_of.is_some() && !matches!(i.phase, Phase::Done | Phase::Cancelled))
+            .map(|(id, i)| LandingGroup {
+                id: id.clone(), label: format!("Landing group {}", id.strip_prefix("group-").and_then(|s| s.split('-').next()).and_then(|s| s.parse::<u64>().ok()).map_or_else(|| id.clone(), |n| n.to_string())),
+                step: i.definition.stages.get(i.stage).map(|s| format!("{} · {}",
+                    display::stage_label(&s.kind), display::phase_label(&i.phase, Style::Material)))
+                    .unwrap_or_else(|| display::phase_label(&i.phase, Style::Material)),
+                since: i.since_ms,
+                members: if i.members.is_empty() { i.handed.clone() } else { i.members.iter().map(|m| m.item.clone()).collect() },
+                failure: i.group_failure.clone().or_else(|| i.failure.as_ref().map(|f| farcooler_workflow::GroupFailure {
+                    job: i.definition.stages.get(i.stage).map(|s| display::stage_label(&s.kind).to_owned()).unwrap_or_default(),
+                    first_line: f.clone(), split: false,
+                })), split: i.group_failure.as_ref().is_some_and(|f| f.split),
+            }).collect() })
 }
 
 /// Reproject against the latest snapshot AND current authenticated context on every click.

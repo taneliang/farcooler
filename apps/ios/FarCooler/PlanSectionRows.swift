@@ -66,6 +66,10 @@ struct PlanSectionsList: View {
             if let words = section.empty {
                 empty(words, id: "plan-landing")
             } else {
+                ForEach(view.landingGroups ?? [], id: \.id) { group in
+                    PlanLandingGroupView(group: group)
+                    .accessibilityIdentifier("plan-landing-group-\(group.id)")
+                }
                 ForEach(view.landings) { card in
                     PlanLandingRow(card: card, explanation: section.help, ci: ci(card), now: view.now)
                     ForEach(card.tickets) { ticket in

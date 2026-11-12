@@ -124,6 +124,10 @@ struct PlanSectionsView: View {
     private func landing(_ section: WireSection) -> some View {
         chrome(section, id: "plan-landing") {
             VStack(alignment: .leading, spacing: Spacing.group) {
+                ForEach(view.landingGroups ?? [], id: \.id) { group in
+                    PlanLandingGroupView(group: group)
+                    .identified("plan-landing-group-\(group.id)")
+                }
                 ForEach(view.landings) { card in
                     PlanLandingCard(
                         card: card, explanation: section.help, ci: ci(card), now: view.now,

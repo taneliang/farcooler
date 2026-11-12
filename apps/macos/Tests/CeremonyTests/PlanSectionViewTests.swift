@@ -37,6 +37,23 @@ struct PlanSectionViewTests {
             width: width, height: 3200)
     }
 
+    @Test("Engine landing groups wrap long titles at phone width")
+    func landingQueueAtNarrowWidth() async throws {
+        let store = try await Self.store(.busy)
+        var view = try Self.view(store)
+        let title = String(repeating: "A long ticket title that must wrap completely. ", count: 5)
+        view.landingGroups = [WireLandingGroupView(id: "test-group", title: "Landing group 12", lines: [
+            "Run gate · Running", "4 min in this step", "ov-1105 · \(title)",
+            "Split after a gate failed", "Failed job: cargo test", "error: expected a passing gate",
+        ])]
+        let frames = await PlanThemePageTests.frames(PlanSectionsView(
+            view: view, model: store.plan.plan, statuses: [:], plan: store.plan,
+            selected: nil, keyed: false, defaults: PlanViewTests.defaults(), onOpen: { _ in }), width: 320, height: 3200)
+        let group = try #require(frames["plan-landing-group-test-group"])
+        #expect(group.minX >= 0 && group.maxX <= 320.5)
+        #expect(group.height > 200, "the complete title wraps vertically")
+    }
+
     @Test("Landing, In Review, Building, Waiting, Agents and Themes are drawn in the owner's order")
     func sectionsInOrder() async throws {
         let drawn = try await Self.drawn(.busy, width: 600)

@@ -5,6 +5,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.farcooler.model.PlanReadState
+import com.farcooler.model.Plan
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import com.farcooler.ui.FarCoolerTheme
 import com.farcooler.ui.PlanFolds
 import com.farcooler.ui.planItems
@@ -39,6 +45,30 @@ class PlanSectionsViewTest {
 
     private fun drawn(fixture: PlanFixture, folds: PlanFolds = PlanFolds.Defaults, columns: Int = 1) =
         SemanticsProbe.described(content = page(fixture, folds, columns))
+
+    @Test
+    @Config(qualifiers = "w320dp-h4200dp-xhdpi")
+    fun `engine groups wrap complete long titles at narrow phone width`() {
+        val fixture = PlanFixtures.long()
+        val queue = Json.parseToJsonElement(PlanFixtures.repositoryFile("test/fixtures/landing-queue.json")).jsonObject
+        val queuePlan = queue.getValue("request").jsonObject.getValue("plan").jsonObject
+        val raw = Json.parseToJsonElement(fixture.plan.wire!!).jsonObject
+        val plan = Plan.decode(JsonObject(raw + mapOf(
+            "workflow" to queuePlan.getValue("workflow"),
+            "now_ms" to queuePlan.getValue("now_ms"),
+            "cards" to JsonArray(raw.getValue("cards").jsonArray + queuePlan.getValue("cards").jsonArray),
+        )))
+        val showing = PlanFixture(plan, fixture.needsYou, fixture.statuses)
+        val tags = drawn(showing)
+        for (n in 1..4) {
+            val id = "group-${n.toString().padStart(20, '0')}-landing"
+            val row = tags.getValue("plan-landing-group-$id")
+            assertTrue(row.bounds.toString(), row.bounds.left >= 0 && row.bounds.right <= 641)
+        }
+        assertTrue(tags.values.any { it.words.contains("complete long ticket title") })
+        assertTrue(tags.values.any { it.words.contains("Failed job: cargo test --workspace") })
+        Capture.both("landing-queue-320", content = page(showing))
+    }
 
     @Test fun `the sections come in the design's order, under the band`() {
         val tags = drawn(PlanFixtures.long())

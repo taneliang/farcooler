@@ -2022,8 +2022,7 @@ async fn dispatch(
         // runner without `board_plan`, so a phone's Plan view says the runner
         // can't answer rather than waiting.
         "plan.get" => {
-            let plan = session.plan(id("workspace")?).await?;
-            Ok(crate::plan_json::plan_json(&plan))
+            Ok(session.plan_with_workflow(id("workspace")?).await?)
         }
         "plan.events" => {
             use farcooler_protocol::v1::plan_events_request::Subject;

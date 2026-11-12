@@ -630,3 +630,31 @@ fn stored_uncertainty_keeps_its_own_explanation() {
         assert_eq!(card.page.reason, reason);
     }
 }
+
+#[test]
+fn a_schema_two_split_is_presented_with_its_members_and_kept_failure() {
+    let mut definition = Definition::coding();
+    definition.schema = 2;
+    definition.max_reworks = 0;
+    definition.rework_target = None;
+    let mut state = enqueue(definition);
+    let item = state.items.get_mut("item").unwrap();
+    item.group_of = Some(farcooler_workflow::GroupOf { name: "landing".into(), pin: "pin".into() });
+    item.members = vec![farcooler_workflow::Member { item: "ov-1".into(), candidate: "candidate".into() }];
+    item.iteration = 1;
+    item.since_ms = 1000;
+    item.group_failure = Some(farcooler_workflow::GroupFailure {
+        job: "cargo test".into(), first_line: "error: failed assertion".into(), split: true,
+    });
+    let view = project(&state, &auth(), STYLE).unwrap();
+    assert_eq!(view.runs[0].reworks_remaining, 0);
+    let group = &view.landing_groups[0];
+    assert_eq!(group.members, ["ov-1"]);
+    assert_eq!(group.since, 1000);
+    assert!(group.split);
+    assert_eq!(group.failure.as_ref().unwrap().first_line, "error: failed assertion");
+    state.items.get_mut("item").unwrap().phase = Phase::Failed;
+    state.items.get_mut("item").unwrap().handed = vec!["ov-1".into()];
+    state.items.get_mut("item").unwrap().members.clear();
+    assert_eq!(project(&state, &auth(), STYLE).unwrap().landing_groups[0].members, ["ov-1"]);
+}

@@ -282,3 +282,6 @@ button.danger { color: var(--danger); }
 .saved-copies li p { margin: 0 0 4px; color: var(--text); }
 .saved-copies code { display: block; margin-bottom: 12px; overflow-wrap: anywhere; font-size: 12px; }
 @media (max-width: 480px) { .bar { flex-wrap: wrap; gap: 8px; } .bar .who { flex-basis: 40%; } }
+
+/* Engine group rows wrap whole ticket titles and bounded failure context on phones. */
+.plan-landing-group { padding: 12px 14px; margin: 8px 0; overflow-wrap: anywhere; }

@@ -294,6 +294,12 @@ export interface GateCard {
 	text: string;
 }
 
+export interface GroupFailure {
+	job: string;
+	firstLine: string;
+	split?: boolean | null;
+}
+
 export interface LadderStep {
 	label: string;
 	explanation: string;
@@ -464,6 +470,23 @@ export interface LandingCard {
 	tickets: TicketCard[];
 }
 
+export interface LandingGroup {
+	id: string;
+	label: string;
+	step: string;
+	since: number;
+	members: string[];
+	failure?: GroupFailure | null;
+	split: boolean;
+}
+
+export interface LandingGroupView {
+	id: string;
+	title: string;
+	/** Complete lines, in reading order; renderers only wrap and lay them out. */
+	lines: string[];
+}
+
 export enum SectionKind {
 	NeedsYou = "needs_you",
 	Landing = "landing",
@@ -580,6 +603,7 @@ export interface PlanView {
 	needsYou: number;
 	/** Live landings, furthest along first. */
 	landings: LandingCard[];
+	landingGroups?: LandingGroupView[] | null;
 	inReview: TicketCard[];
 	building: TicketCard[];
 	/** Next Up ranked, Not Ranked, then Waiting on You; empty groups left out. */
@@ -694,5 +718,7 @@ export interface Presentation {
 	epoch: number;
 	revision: number;
 	runs: RunCard[];
+	/** Engine groups, including failed groups whose members have been handed back. */
+	landingGroups?: LandingGroup[] | null;
 }
 

@@ -23,12 +23,14 @@ use typeshare::typeshare;
 use crate::workflow_presentation::{Presentation, RunCard};
 
 mod build;
+mod landing_queue;
 pub mod column;
 pub mod input;
 pub mod words;
 
 pub use build::{LandingPhase, DetailStage, TicketDetails, TicketDetail, TrackKind};
 pub use words::Style;
+pub use landing_queue::LandingGroupView;
 
 pub const SCHEMA: u32 = 1;
 
@@ -376,6 +378,8 @@ pub struct PlanView {
     pub needs_you: u64,
     /// Live landings, furthest along first.
     pub landings: Vec<LandingCard>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub landing_groups: Vec<LandingGroupView>,
     pub in_review: Vec<TicketCard>,
     pub building: Vec<TicketCard>,
     /// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
@@ -454,7 +458,7 @@ struct WordsStyle {
 /// Build the view from a plan, what the app knows beside it, and the
 /// workspace's workflow presentation.
 pub fn view(plan: &input::Plan, context: &input::Context, workflow: Option<&Presentation>) -> PlanView {
-    build::build(plan, context, workflow)
+    build::build(plan, context, workflow.or(plan.workflow.as_ref()))
 }
 
 /// The JSON bridge every platform calls: a request in, `{schema, view}` or

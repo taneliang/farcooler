@@ -1,0 +1,127 @@
+{
+  "request": {
+    "schema": 1,
+    "plan": {
+      "now_ms": 300000,
+      "cards": [
+        {
+          "task": "task-1",
+          "key": "ov-1",
+          "title": "Keep the complete long ticket title visible when the landing queue wraps on a narrow phone screen"
+        }
+      ],
+      "workflow": {
+        "schema": 2,
+        "workspace": "workspace",
+        "epoch": 1,
+        "revision": 20,
+        "runs": [],
+        "landingGroups": [
+          {
+            "id": "group-00000000000000000001-landing",
+            "label": "Landing group 1",
+            "step": "Run gate \u00b7 Running",
+            "since": 60000,
+            "members": [
+              "ov-1",
+              "ov-2"
+            ],
+            "failure": null,
+            "split": false
+          },
+          {
+            "id": "group-00000000000000000002-landing",
+            "label": "Landing group 2",
+            "step": "Wait for base \u00b7 Waiting",
+            "since": 120000,
+            "members": [
+              "ov-1",
+              "ov-2"
+            ],
+            "failure": null,
+            "split": false
+          },
+          {
+            "id": "group-00000000000000000003-landing",
+            "label": "Landing group 3",
+            "step": "Run gate \u00b7 Running",
+            "since": 180000,
+            "members": [
+              "ov-1",
+              "ov-2"
+            ],
+            "failure": {
+              "job": "cargo test --workspace",
+              "firstLine": "error: expected a passing gate",
+              "split": true
+            },
+            "split": true
+          },
+          {
+            "id": "group-00000000000000000004-landing",
+            "label": "Landing group 4",
+            "step": "Run gate \u00b7 Failed",
+            "since": 0,
+            "members": [
+              "ov-1",
+              "ov-2"
+            ],
+            "failure": {
+              "job": "cargo test --workspace",
+              "firstLine": "error: expected a passing gate",
+              "split": false
+            },
+            "split": false
+          }
+        ]
+      }
+    }
+  },
+  "expected": [
+    {
+      "id": "group-00000000000000000001-landing",
+      "title": "Landing group 1",
+      "lines": [
+        "Run gate \u00b7 Running",
+        "4 min in this step",
+        "ov-1 \u00b7 Keep the complete long ticket title visible when the landing queue wraps on a narrow phone screen",
+        "ov-2"
+      ]
+    },
+    {
+      "id": "group-00000000000000000002-landing",
+      "title": "Landing group 2",
+      "lines": [
+        "Wait for base \u00b7 Waiting",
+        "3 min in this step",
+        "ov-1 \u00b7 Keep the complete long ticket title visible when the landing queue wraps on a narrow phone screen",
+        "ov-2"
+      ]
+    },
+    {
+      "id": "group-00000000000000000003-landing",
+      "title": "Landing group 3",
+      "lines": [
+        "Run gate \u00b7 Running",
+        "2 min in this step",
+        "ov-1 \u00b7 Keep the complete long ticket title visible when the landing queue wraps on a narrow phone screen",
+        "ov-2",
+        "Split after a gate failed",
+        "Failed job: cargo test --workspace",
+        "error: expected a passing gate"
+      ]
+    },
+    {
+      "id": "group-00000000000000000004-landing",
+      "title": "Landing group 4",
+      "lines": [
+        "Run gate \u00b7 Failed",
+        "Time unavailable",
+        "ov-1 \u00b7 Keep the complete long ticket title visible when the landing queue wraps on a narrow phone screen",
+        "ov-2",
+        "Failed job: cargo test --workspace",
+        "error: expected a passing gate"
+      ]
+    }
+  ]
+}
