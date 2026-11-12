@@ -1,5 +1,11 @@
 # Engine exact-tree gate adapter (ov-1117)
 
+The completed isolated canonical wire/doc validation and independent
+adapter/prerequisite review are recorded in
+[engine-gate-operational.md](engine-gate-operational.md). Historical outstanding
+items and failed attempts below describe their status at that time. Reuse on
+existing production workflows remains disabled.
+
 The configured engine already executes Check and Run commands with a cleared,
 pinned environment, retains their output and numeric exit in a binding-specific
 ProcessFact, and checks the candidate after execution. `scripts/engine-gate.py`
@@ -185,3 +191,10 @@ paths even though the selected jobs are light. Independently review the concrete
 tool/dependency inventory before allowing a repeat to reuse results. A clean
 canonical success and repeat measurement under load 20 remain outstanding;
 there is no new operational hit rate or saved-wall-time claim.
+
+The operational follow-up also found that relocating Xcode's Git through a
+symlink changes its default helper/template lookup. Put its actual installation
+directory on PATH after the curated Python/tool bin, rather than symlinking Git
+into that bin. Preserve the failed attempt and start a new default-disabled cold
+capture after correcting the environment; its earlier red receipts cannot
+authorize a repeat.
