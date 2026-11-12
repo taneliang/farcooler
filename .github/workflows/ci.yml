@@ -151,6 +151,8 @@ jobs:
       # Reproduce a gate launched by scripts/heavy: private test queues must
       # still lock even though the parent already holds the machine queue.
       - run: HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test
+      - run: python3 scripts/gate-evidence-test.py
+      - run: python3 scripts/engine-gate-test.py
       - run: HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test
       - run: ./scripts/notarytool-retry.sh --self-test
       # What version.sh answers decides where a daemon installs — its runtime

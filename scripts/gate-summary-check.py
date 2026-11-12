@@ -20,6 +20,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import fcntl
 
 SUMMARY_NAME = "lane-gate-summary.txt"  # keep equal to lane-gate.py's
 # Failures a host can have that say nothing about the code. Each name is tagged by
@@ -47,15 +48,48 @@ def parse(text):
 
 
 def problem(repo):
+    """Hold a shared capture lock throughout verification, excluding new writers."""
+    gitdir = git(repo, "rev-parse", "--absolute-git-dir")
+    lockpath = pathlib.Path(gitdir) / "gate-evidence.lock"
+    if lockpath.exists():
+        try:
+            with open(lockpath, "rb") as lock:
+                fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                return _problem(repo)
+        except BlockingIOError:
+            return "a prospective v2 capture is still running"
+    result = _problem(repo)
+    # A first v2 writer can create its marker during a legacy verification.
+    # Repeat under the shared lock (or refuse active capture) if it appeared.
+    return problem(repo) if lockpath.exists() else result
+
+
+def _problem(repo):
     """Why the gate does not cover HEAD, or "" when it does."""
     gitdir = git(repo, "rev-parse", "--absolute-git-dir")
     path = pathlib.Path(gitdir) / SUMMARY_NAME
     sha = git(repo, "rev-parse", "HEAD")
     if not sha or not gitdir:
         return f"{repo} is not a git checkout"
+    lockpath = pathlib.Path(gitdir) / "gate-evidence.lock"
     if not path.is_file():
         return f"no gate summary at {path}; run scripts/lane-gate.py --worktree {repo}"
-    head, fails = parse(path.read_text())
+    text = path.read_text()
+    if lockpath.exists() and not text.startswith("lane-gate-summary v2"):
+        return "this worktree requires prospective v2 evidence; legacy v1 cannot replace it"
+    if text.startswith("lane-gate-summary v2"):
+        # A v2 pointer never gets the legacy verdict/env-gap shortcut. Recompute
+        # current scope and validate all receipts, logs and immutable parents.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("gate_evidence", pathlib.Path(__file__).with_name("gate_evidence.py"))
+        evidence = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(evidence)
+        try:
+            evidence.check_pointer(repo, path)
+        except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:
+            return f"v2 evidence refused: {error}"
+        return ""
+    head, fails = parse(text)
     if "head" not in head:
         return f"the gate summary at {path} is unreadable (no head line)"
     if head["head"] != sha:
@@ -80,8 +114,11 @@ def check(repo, waive=""):
     why = problem(repo)
     if not why:
         return 0, "gate-summary-check: ok, the gate covers HEAD"
+    gitdir = git(repo, "rev-parse", "--absolute-git-dir")
+    summary = pathlib.Path(gitdir) / SUMMARY_NAME
+    if (pathlib.Path(gitdir) / "gate-evidence.lock").exists() or (summary.is_file() and summary.read_text().startswith("lane-gate-summary v2")):
+        return 1, "gate-summary-check: refused: " + why + "; v2 evidence cannot be waived"
     if waive.strip():
-        gitdir = git(repo, "rev-parse", "--absolute-git-dir")
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         line = f"{stamp} {git(repo, 'rev-parse', 'HEAD')} WAIVED ({waive.strip()}): {why}"
         with open(pathlib.Path(gitdir) / "gate-waivers.log", "a") as f:
