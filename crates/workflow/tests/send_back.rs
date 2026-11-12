@@ -53,7 +53,7 @@ fn coding() -> Definition {
     let stage = |id: &str, kind| Stage { id: id.into(), kind, progression: Progression::Automatic, max_attempts: 1,
         operation: op.clone(), routes: Default::default(), limit: 0 };
     Definition { schema: 1, source: "coding/v1".into(), max_reworks: 0, rework_target: None, groups: Default::default(),
-        models: Default::default(), send_backs: None, script_policies: Default::default(), policies: Default::default(),
+        models: Default::default(), send_backs: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
         stages: vec![stage("build", StageKind::Build), stage("check", StageKind::Check),
             stage("review", StageKind::Review(Reviewer::Orchestrator("orchestrator".into()))), stage("land", StageKind::Land)] }
 }
@@ -236,4 +236,18 @@ fn a_routed_workflow_sends_back_and_clears_the_reason_when_its_build_passes() {
     assert_eq!(log.effects[0].brief.as_deref(), Some("Again, smaller."));
     log.observe("ov-1", Outcome::Passed(ev("c2")));
     assert_eq!((log.step_id("ov-1"), log.state.items["ov-1"].brief.clone()), ("check".into(), None));
+}
+
+#[test]
+fn published_send_back_limit_can_exceed_the_old_maximum() {
+    let mut d = coding();
+    d.send_backs = Some(7);
+    d.limits = Some(scheduling::Limits { send_backs: 7, ..Default::default() });
+    let mut log = at_review(d);
+    for _ in 0..7 {
+        log.send_back("ov-1", "Address the review finding").unwrap();
+        log.observe("ov-1", Outcome::Passed(ev("candidate")));
+        log.observe("ov-1", Outcome::Passed(ev("candidate")));
+    }
+    assert_eq!(log.send_back("ov-1", "Address the next finding"), Err(Refusal::Limit));
 }

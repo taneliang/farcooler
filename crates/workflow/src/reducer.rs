@@ -346,7 +346,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     controller(input)?;
                     // A failed run does not own its resource, so a retry queues like new work.
                     if item.phase != Phase::Failed || item.group_of.is_some() { return Err(Refusal::Phase); }
-                    if item.retries >= MAX_RETRIES { return Err(Refusal::Limit); }
+                    if item.retries >= item.definition.execution_limits().retries { return Err(Refusal::Limit); }
                     item.retries += 1;
                     item.attempt = 1;
                     item.failure = None;
@@ -372,7 +372,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     controller(input)?;
                     if !item.definition.is_ticket() || item.phase != Phase::WaitingApproval || item.follows.is_some() { return Err(Refusal::Phase); }
                     // The run's other tickets: each a ticket at rest of its own, named once (ov-970).
-                    if with.len() > MAX_FOLLOWERS || with.iter().any(|f| f == id || !valid_id(f))
+                    if with.len() > usize::from(definition.execution_limits().group_members) || with.iter().any(|f| f == id || !valid_id(f))
                         || with.iter().collect::<BTreeSet<_>>().len() != with.len()
                     { return Err(Refusal::Invalid); }
                     for follower in with {
@@ -851,18 +851,18 @@ fn valid_state(state: &State) -> bool {
                     && item.definition.policies.contains_key(&r.policy)
                     && item.definition.stages.get(item.stage).is_some_and(|s|
                         s.kind == StageKind::AwaitCi && item.ci_reruns.get(&s.id) == Some(&1)))
-                && item.retries <= MAX_RETRIES
+                && item.retries <= item.definition.execution_limits().retries
                 && item.rework_history.len() <= usize::from(item.iteration)
                 && item.rework_history.iter().enumerate().all(|(index, r)|
                     valid_id(&r.id) && valid_id(&r.principal) && valid_id(&r.run)
                     && r.definition_pin == item.pin && r.evidence.policy_pin == item.policy_pin
                     && valid_rework_reason(&r.reason) && r.iteration < item.iteration
                     && (index == 0 || item.rework_history[index-1].iteration < r.iteration))
-                && item.sent_back.len() <= usize::from(MAX_SEND_BACKS)
+                && item.sent_back.len() <= usize::from(item.definition.execution_limits().send_backs)
                 && item.sent_back.iter().all(|b| valid_id(&b.id) && valid_rework_reason(&b.reason))
                 && item.brief.as_deref().is_none_or(valid_rework_reason)
                 && item.failure.as_deref().is_none_or(valid_rework_reason)
-                && item.followers.len() <= MAX_FOLLOWERS
+                && item.followers.len() <= usize::from(item.definition.execution_limits().group_members)
                 // A live lead's tickets follow it and no other; a closed one's list is history, as they've let go.
                 && (matches!(item.phase, Phase::Done | Phase::Cancelled)
                     || item.followers.iter().all(|f| state.items.get(f).is_some_and(|t| t.follows.as_deref() == Some(id.as_str()))))

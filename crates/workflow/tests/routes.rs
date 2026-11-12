@@ -309,3 +309,21 @@ fn send_back_refuses_an_exhausted_gate_and_restarts_one_under_budget() {
     assert_eq!(stage(&transition.state), "stage-1");
     assert_eq!(transition.effects[0].kind, EffectKind::Execute(StageKind::Build));
 }
+
+#[test]
+fn published_limits_override_retries_back_edges_and_model_counts() {
+    let mut d = routed();
+    d.stages[2].limit = 6;
+    d.models.insert("stage-1".into(), (0..12).map(|n| format!("codex:model-{n}")).collect());
+    assert_eq!(d.validate(), Err(Refusal::Definition));
+    d.limits = Some(scheduling::Limits { retries: 6, back_edges: 6, models: 12, ..Default::default() });
+    d.validate().unwrap();
+    let mut state = start(d);
+    // Exhaust the stage's two attempts, six retries, then refuse the seventh.
+    for attempt in 0..=6 {
+        for _ in 0..2 { state = go(state.clone(), observe(&state, Outcome::SafeFailure)); }
+        assert_eq!(state.items["item"].phase, Phase::Failed);
+        if attempt < 6 { state = go(state.clone(), retry(&state)); }
+    }
+    assert_eq!(step(&state, &retry(&state)), Err(Refusal::Limit));
+}

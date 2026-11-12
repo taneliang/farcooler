@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use tokio::sync::{mpsc, oneshot};
 
+mod scheduling;
 mod adapters;
 mod process_logs;
 mod script_hooks;
@@ -418,7 +419,7 @@ impl Runtime {
     /// ready now and waits for it; the service loop also starts follow-on effects as each ends.
     pub async fn pump(&mut self, now_ms: i64) -> Result<usize> {
         #[cfg(test)] { self.sweeps += 1; }
-        self.next_lease = None;
+        self.next_lease = Some(now_ms.saturating_add(1_000));
         // The inbox is read while effects run, so cancels and decisions are never held up.
         let (_, placeholder) = mpsc::channel(1);
         let mut inbox = std::mem::replace(&mut self.inbox, placeholder);
@@ -504,11 +505,13 @@ impl Runtime {
         loop {
             if scan {
                 scan = self.continuous;
-                self.launch_ready(&workspaces, now_ms, running, futures, &mut count).await?;
+                let current = self.store.workflow_workspaces()?;
+                self.launch_ready(&current, now_ms, running, futures, &mut count).await?;
             }
             if running.is_empty() { break; }
             let mut shutdown = self.shutdown.clone();
             let event = tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(1)), if self.continuous && !stopping => Event::Tick,
                 (index, result) = next_finished(futures) => Event::Finished(index, result),
                 _ = async {
                     match &mut shutdown {
@@ -519,6 +522,7 @@ impl Runtime {
                 message = inbox.recv() => Event::Message(message),
             };
             match event {
+                Event::Tick => { scan = true; }
                 Event::Shutdown => {
                     stopping = true;
                     for job in running.iter() { job.cancel.send_replace(true); }
@@ -590,6 +594,7 @@ impl Runtime {
     async fn launch_ready_noting(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
         futures: &mut Vec<Slot>, count: &mut usize, waiting: &mut Vec<Placed>) -> Result<()>
     {
+        self.schedule_ready(workspaces, now_ms)?;
         for workspace in workspaces {
             for stored in self.store.workflow_outbox(workspace)? {
                 if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
@@ -869,6 +874,7 @@ struct Running {
     pool: Option<Pool>,
 }
 enum Event {
+    Tick,
     Finished(usize, Result<Outcome>),
     Shutdown,
     Message(Option<Inbox>),

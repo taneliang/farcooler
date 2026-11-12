@@ -108,7 +108,7 @@ pub(super) fn batched_push(runtime: &Runtime, base_mode: &str, patience_ms: u64)
         stages: vec![stage(c, "provision", StageKind::Provision, "coding-worktree/v1", ""),
             stage(c, "build", StageKind::Build, "coding-harness/v1", ""),
             stage(c, "check", StageKind::Check, "coding-check/v1", "0"), join],
-        groups: [("landing".to_string(), GroupDef { limit: Some(4), exclusive: c.landing_resource().unwrap(), steps })].into(), models: Default::default(), send_backs: None, script_policies: Default::default(), policies: Default::default() }
+        groups: [("landing".to_string(), GroupDef { limit: Some(4), exclusive: c.landing_resource().unwrap(), steps })].into(), models: Default::default(), send_backs: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default() }
 }
 pub(super) fn command(runtime: &Runtime, command: Command) -> Receipt {
     let controller = runtime.controller();
@@ -968,4 +968,35 @@ async fn next_group_gates_during_ci_and_rebases_after_red() {
         }
         assert_eq!(replay, state, "the resource handoff and red-CI retry replay exactly");
     }
+}
+
+#[tokio::test]
+async fn a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_capacity() {
+    let (dir, mut runtime) = lander("pass").await;
+    runtime.set_effect_cap(1);
+    let mut definition = batched_push(&runtime, "any", 5000);
+    definition.start_policy = Some(farcooler_workflow::scheduling::StartPolicy {
+        columns: ["todo".into()].into(), budget: farcooler_workflow::scheduling::Budget::Fixed(1),
+        files: Default::default(), dependencies: Default::default(), rotate_models: false, auto_queue: true,
+    });
+    at_join(&mut runtime, "one", &definition).await;
+    // No Queue command: the next owned sweep admits it to its group.
+    runtime.pump(10).await.unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items["one"].phase, Phase::Joined);
+    let group = group_id(&state);
+    until(&mut runtime, |s| s.items.get(&group).is_some_and(|g| g.definition.stages[g.stage].kind == StageKind::Run)).await;
+    // The gate fails unless the next ticket's build runs beside it, even with one build slot.
+    let script = dir.path().join("adapter.py");
+    let source = std::fs::read_to_string(&script).unwrap();
+    let marker = dir.path().join("build-alongside-gate");
+    let gate = format!("elif stage == 'gate':\n    import time\n    marker = pathlib.Path({:?})\n    until = time.time() + 4\n    while not marker.exists() and time.time() < until: time.sleep(0.02)\n    if not marker.exists(): sys.exit(8)\n", marker.to_str().unwrap());
+    let build = format!("if stage == 'build':\n    pathlib.Path({:?}).write_text('started')\n", marker.to_str().unwrap());
+    std::fs::write(script, source.replace("elif stage == 'gate':\n", &gate).replace("if stage == 'build':\n", &build)).unwrap();
+    runtime.continuous = true;
+    enqueue_item(&mut runtime, "w", "two", definition);
+    runtime.pump(11).await.unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert!(marker.exists(), "the next build started alongside the gate");
+    assert_eq!(phase_of(&state, &group), Some(Phase::Done), "landing gate consumed the build slot");
 }

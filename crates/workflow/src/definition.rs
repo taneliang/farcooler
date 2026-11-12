@@ -112,7 +112,7 @@ pub struct Definition {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub models: BTreeMap<String, Vec<String>>,
     /// How many times the orchestrator may send one run back to its build step (ov-968). Left out, it is
-    /// `DEFAULT_SEND_BACKS`; at most `MAX_SEND_BACKS`.
+    /// `DEFAULT_SEND_BACKS`; bounded by the published execution limits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_backs: Option<u8>,
     /// Built-in engine rules, pinned with the definition (ov-1113).
@@ -121,8 +121,15 @@ pub struct Definition {
     /// Pinned, read-only decision scripts at rare engine points (ov-1114).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub script_policies: BTreeMap<String, crate::ScriptPolicy>,
+    /// Owner-published admission policy. Omission keeps manual starts and legacy pin bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_policy: Option<crate::scheduling::StartPolicy>,
+    /// Execution limits are pinned with the run; changing a publication affects future runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<crate::scheduling::Limits>,
 }
 impl Definition {
+    pub fn execution_limits(&self) -> crate::scheduling::Limits { self.limits.clone().unwrap_or_default() }
     pub fn validate(&self) -> Result<(), Refusal> { self.check(false) }
     /// A group's steps, which may split the group and may not join another.
     pub fn validate_group(&self) -> Result<(), Refusal> { self.check(true) }
@@ -130,7 +137,7 @@ impl Definition {
     pub fn group_definition(&self, name: &str) -> Option<Definition> {
         let group = self.groups.get(name)?;
         Some(Definition { schema: 2, source: format!("group/{name}"), stages: group.steps.clone(),
-            max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: self.policies.iter().filter(|(_, p)| group.steps.iter().any(|s| s.id == p.step)).map(|(n,p)| (n.clone(),p.clone())).collect() , script_policies: self.script_policies.clone() })
+            max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: self.policies.iter().filter(|(_, p)| group.steps.iter().any(|s| s.id == p.step)).map(|(n,p)| (n.clone(),p.clone())).collect() , script_policies: self.script_policies.clone(), start_policy: None, limits: self.limits.clone() })
     }
     /// Every principal a step waits on, a group's steps included, in step order, each once (ov-1002): an
     /// approval step's, and a person's or the orchestrator's review gate's.
@@ -149,10 +156,12 @@ impl Definition {
         names
     }
     fn check(&self, in_group: bool) -> Result<(), Refusal> {
+        let limits = self.execution_limits();
+        if self.start_policy.as_ref().is_some_and(|p| !p.valid()) { return Err(Refusal::Definition); }
         let mut ids = BTreeSet::new();
         if !matches!(self.schema, 1 | 2) || self.source.is_empty() || self.source.len() > 256
-            || self.stages.is_empty() || self.stages.len() > 16 || self.max_reworks > 2
-            || self.send_backs.is_some_and(|n| n > MAX_SEND_BACKS)
+            || self.stages.is_empty() || self.stages.len() > limits.stages || self.max_reworks > limits.reworks
+            || self.send_backs.is_some_and(|n| n > limits.send_backs)
         { return Err(Refusal::Definition); }
         crate::hooks::validate_policies(&self.script_policies)?;
         self.validate_models()?;
@@ -162,7 +171,7 @@ impl Definition {
         for stage in &self.stages {
             if stage.kind == StageKind::RerunCi { return Err(Refusal::Definition); }
             if !valid_id(&stage.id) || !ids.insert(&stage.id)
-                || stage.max_attempts == 0 || stage.max_attempts > 5
+                || stage.max_attempts == 0 || stage.max_attempts > limits.attempts
             { return Err(Refusal::Definition); }
             if !valid_id(&stage.operation.adapter_version) || stage.operation.arguments.len() > 32
                 || stage.operation.arguments.iter().any(|a| a.len() > 4096 || a.contains('\0'))
@@ -227,13 +236,13 @@ impl Definition {
         }
         Ok(())
     }
-    /// Each list names a step that starts an agent (a build, or an agent's review gate), holds 1 to 8 distinct
+    /// Each list names a step that starts an agent (a build, or an agent's review gate), holds distinct
     /// models, and each is a plain `harness[:model]`.
     fn validate_models(&self) -> Result<(), Refusal> {
         for (step, models) in &self.models {
             let agent = self.stages.iter().any(|s| &s.id == step && starts_agent(&s.kind));
             let distinct = models.iter().collect::<BTreeSet<_>>().len() == models.len();
-            if !agent || models.is_empty() || models.len() > MAX_MODELS || !distinct || !models.iter().all(|m| valid_model(m)) {
+            if !agent || models.is_empty() || models.len() > self.execution_limits().models || !distinct || !models.iter().all(|m| valid_model(m)) {
                 return Err(Refusal::Definition);
             }
         }
@@ -269,7 +278,7 @@ impl Definition {
         let mut edges: Vec<(usize, &str, Option<usize>)> = Vec::new();
         let mut done_reachable_from: Vec<usize> = Vec::new();
         for (i, stage) in self.stages.iter().enumerate() {
-            if stage.limit > MAX_BACK_EDGE_LIMIT || stage.routes.len() > 8 { return Err(Refusal::Definition); }
+            if stage.limit > self.execution_limits().back_edges || stage.routes.len() > self.execution_limits().routes { return Err(Refusal::Definition); }
             if in_group && matches!(stage.kind, StageKind::Join { .. }) { return Err(Refusal::Definition); }
             let (mut back, mut splits) = (false, false);
             let mut labels: Vec<&str> = vec!["passed", "rejected"];
@@ -403,11 +412,11 @@ impl Definition {
     }
     pub fn pin(&self) -> String { digest(self) }
     /// How many send-backs one run may take.
-    pub fn send_back_limit(&self) -> u8 { self.send_backs.unwrap_or(DEFAULT_SEND_BACKS) }
+    pub fn send_back_limit(&self) -> u8 { self.send_backs.unwrap_or(DEFAULT_SEND_BACKS.min(self.execution_limits().send_backs)) }
     pub fn coding() -> Self {
         let kinds = [StageKind::Provision, StageKind::Build, StageKind::Check,
             StageKind::Review(Reviewer::Dispatch), StageKind::Land, StageKind::Ci];
-        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), policies: Default::default(),
+        Self { schema: 1, source: "coding/v1".into(), max_reworks: 2, rework_target: Some("stage-1".into()), groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
             stages: kinds.into_iter().enumerate().map(|(i, kind)| Stage {
                 id: format!("stage-{i}"), kind, progression: Progression::Automatic,
                 max_attempts: 2, routes: BTreeMap::new(), limit: 0,
@@ -426,7 +435,7 @@ impl Definition {
             progression: Progression::AwaitApproval { principal: "orchestrator".into() },
             max_attempts: 1, routes: BTreeMap::new(), limit: 0,
             operation: OperationSpec { adapter_version: "tracker/v1".into(), arguments: vec![], environment: BTreeMap::new() } };
-        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), policies: Default::default(),
+        Some(Self { schema: 1, source: TICKET_SOURCE.into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
             stages: TICKET_COLUMNS.iter().cycle().skip(start).take(TICKET_COLUMNS.len()).map(|id| stage(id)).collect() })
     }
     /// Whether this is the tracker-only template: a ticket with no run, moved by column.
@@ -434,7 +443,7 @@ impl Definition {
         self.source == TICKET_SOURCE && self.stages.iter().all(|s| s.kind == StageKind::Tracker)
     }
     pub fn tracker(principal: &str) -> Self {
-        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), policies: Default::default(),
+        Self { schema: 1, source: "tracker/v1".into(), max_reworks: 0, rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default(),
             stages: vec![Stage { id: "checklist".into(), kind: StageKind::Tracker,
                 progression: Progression::AwaitApproval { principal: principal.into() },
                 max_attempts: 1, routes: BTreeMap::new(), limit: 0,
@@ -459,6 +468,8 @@ pub const TICKET_COLUMNS: [&str; 5] = ["backlog", "todo", "doing", "review", "de
 pub const MAX_BACK_EDGE_LIMIT: u8 = 5;
 /// A ticket can carry at most this many followers when it starts.
 pub const MAX_FOLLOWERS: usize = 32;
+/// Default follower allowance; published execution limits can override it.
+pub const MAX_GROUP_MEMBERS: u8 = MAX_FOLLOWERS as u8;
 /// Labels a step can produce. `passed` and `rejected` come from anything; a label of a
 /// definition's own is only for steps whose binding or command the definition chose.
 pub fn can_emit(kind: &StageKind, label: &str) -> bool {
@@ -509,7 +520,7 @@ pub fn starts_agent(kind: &StageKind) -> bool { matches!(kind, StageKind::Build 
 /// Send-backs a run may take when its workflow doesn't say, and the most it may say (ov-968).
 pub const DEFAULT_SEND_BACKS: u8 = 3;
 pub const MAX_SEND_BACKS: u8 = 5;
-/// Most models one step may list.
+/// Default model-list allowance; a publication can override it in its execution limits.
 pub const MAX_MODELS: usize = 8;
 /// `harness` or `harness:model`, each part plain: it ends up as `--model` in a shell command.
 pub fn valid_model(model: &str) -> bool {

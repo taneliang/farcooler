@@ -21,7 +21,7 @@ impl Pool {
     /// through, and a wait on the base, CI or a pull request, which does no work of its own.
     pub(crate) fn of(effect: &Effect, item: &Item) -> Option<Pool> {
         match &effect.kind {
-            EffectKind::Stop { .. } => None,
+            EffectKind::Stop { .. } | EffectKind::Decide { .. } => None,
             EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr) => None,
             _ if item.group_of.is_some() => Some(Pool::Landing),
             EffectKind::Execute(StageKind::Build | StageKind::Review(_)) => Some(Pool::Agent),

@@ -1,5 +1,6 @@
 //! Pure workflow authority. All clocks, identities and authenticated grants are inputs.
 //! There are deliberately no process, filesystem, database or provider dependencies.
+pub mod scheduling;
 mod definition;
 mod reducer;
 mod state;

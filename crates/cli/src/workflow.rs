@@ -66,7 +66,7 @@ pub enum WorkflowCmd {
     /// Then reopen the ticket to run it again. A push must be settled with `settle` instead.
     ResolveCancellation { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         #[arg(long)] reason:String,#[command(flatten)] identity:Identity },
-    /// Run a failed item's step again. At most three retries per item.
+    /// Run a failed item's step again, within its published retry allowance.
     Retry { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Queue a ticket waiting at its join step into the open group for that step.
     Queue { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
