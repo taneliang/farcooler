@@ -256,18 +256,21 @@ struct WorkspaceCards: View {
             .contentShape(.rect)
         }
         .buttonStyle(GlassCardStyle(glassID: "agents", in: glass, zoomID: PhoneZoom.agents(place), zoom: zoom))
-        .contentShape(.contextMenuPreview, .floating)
-        .contextMenu {
-            AgentsCardActions(agents: agents, showAll: { navigator?.openAgents(place) }, navigator: navigator)
-        } preview: {
-            AgentsCardPreview(agents: agents, answering: connection.isAnswering)
-        }
+        // Keep the semantic button inside the context-menu wrapper. On iOS
+        // 27.2 an accessibility element around that wrapper kept its old
+        // landscape width after rotation, past the chat column (ov-1096).
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(agents.summary)
         .accessibilityValue("\(agents.count)")
         .accessibilityHint("Shows the agents")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("agents-card")
+        .contentShape(.contextMenuPreview, .floating)
+        .contextMenu {
+            AgentsCardActions(agents: agents, showAll: { navigator?.openAgents(place) }, navigator: navigator)
+        } preview: {
+            AgentsCardPreview(agents: agents, answering: connection.isAnswering)
+        }
     }
 }
 
