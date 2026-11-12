@@ -125,8 +125,8 @@ final class PlanSectionsCapturesUITests: XCTestCase {
     }
 
     /// The share of the screen's width, from the left edge, that holds the glyph column; blacked out in a resting-picture check.
-    // Leave room for the pulse beyond the glyph itself: on CI its right edge crosses 14%
-    // of the screen, so those changing pixels kept page 2 from ever settling (ov-1094).
+    // Leave room for the pulse beyond the glyph itself. Pixels outside the old 14% mask
+    // can keep a resting-picture comparison changing (ov-1094).
     private static let glyphColumnShare = 0.18
 
     /// The list below the bars, as pixels. The clock can tick during a walk, and the translucent
