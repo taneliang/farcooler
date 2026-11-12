@@ -523,3 +523,39 @@ async fn workflow_coding_a_provisioned_tree_changed_before_its_reconcile_fails_t
     let Outcome::SafeFailureBecause(said) = runtime.reconcile_coding(&binding).await.unwrap() else { panic!("not a sentence") };
     assert!(said.contains("mine.txt") && said.contains("Commit them"), "{said}");
 }
+
+/// ov-1087: checks the Codex-models bundle the owner publishes, which is read from the file named by
+/// `FARCOOLER_OV1087_BUNDLE` (a draft that lives under `.claude/agent/reports`, outside the tree). Run it by hand:
+/// `FARCOOLER_OV1087_BUNDLE=<workflow-codex.json> cargo test -p farcooler-daemon --lib workflow_codex_bundle -- --ignored`.
+/// It reads the file as `workspace set-workflow --file` does, publishes it to a scratch runtime, then starts a run
+/// with `build=codex:gpt-6.1-sol`, which the live definition refuses.
+#[tokio::test]
+#[ignore = "checks a draft file the owner has yet to publish; set FARCOOLER_OV1087_BUNDLE"]
+async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
+    use farcooler_protocol::{workflow_commands::{Action, Definition, Mutation}, workflow_config::AdapterConfiguration};
+    let path = std::env::var("FARCOOLER_OV1087_BUNDLE").expect("FARCOOLER_OV1087_BUNDLE names the bundle file");
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    #[derive(serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct Bundle { definition: Definition, adapter: Option<AdapterConfiguration> }
+    let bundle: Bundle = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&bundle).unwrap(), value, "the CLI refuses a bundle that doesn't round-trip");
+    let (definition, adapter) = (bundle.definition, bundle.adapter.map(Box::new));
+    assert_eq!(definition.models["build"], ["claude:sonnet", "claude:opus", "claude:haiku", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
+    assert_eq!(definition.models["gate-0"], ["claude:opus", "claude:sonnet", "codex:gpt-6.1-sol", "codex:gpt-6.1-terra", "codex:gpt-6.1-luna"]);
+    let (_dir, runtime) = configured(false, "pass").await;
+    let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
+    let wire = |principal, action| runtime.wire_command("w", principal, action).unwrap();
+    let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
+    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
+    println!("pin {pin}");
+    ok(&wire("owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
+    assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
+    let state = runtime.state("w").unwrap().unwrap(); let held = &state.items["ov-7"];
+    let start = |model: &str, sequence| wire("orchestrator", Action::Start { mutation: m(&format!("start-{sequence}"), state.revision, sequence), item: "ov-7".into(),
+        run: held.run.clone(), pin: held.pin.clone(), start_pin: pin.clone(), models: [("build".to_string(), model.to_string())].into(), worktree: None, with: vec![] });
+    let refused = start("codex:gpt-4", 2);
+    assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");
+    ok(&start("codex:gpt-6.1-sol", 3));
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["ov-7"].models["build"], "codex:gpt-6.1-sol");
+}
