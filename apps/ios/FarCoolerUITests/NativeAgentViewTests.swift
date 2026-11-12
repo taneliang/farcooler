@@ -435,10 +435,6 @@ final class NativeAgentViewTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         // Keep both states in a red nightly's result bundle: the gesture log
         // records the pinch, but cannot say whether Quick Look actually zoomed.
-        // In nightly 42703100256 (phone6), XCTest issued the pinch and a
-        // 300-point drag at 750 points/s, then found the viewer closed. Its
-        // cancelled shard left an incomplete result bundle, so that log alone
-        // cannot distinguish a missed zoom from a gesture handling defect.
         let afterZoom = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         afterZoom.name = "Image after pinch"
         afterZoom.lifetime = .keepAlways
