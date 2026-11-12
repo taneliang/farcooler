@@ -83,3 +83,21 @@ async fn a_build_nobody_hears_from_is_listed_after_the_window_and_one_that_spoke
     spoke.store(true, Ordering::Relaxed);
     assert!(run(&pane, "ov-t3", &spoke, 700).await.is_empty());
 }
+
+#[tokio::test]
+async fn a_build_that_becomes_stuck_tells_clients_to_reread_needs_you() {
+    use farcooler_protocol::v1::event::Payload;
+    let (_dir, svc, _repo) = crate::test_support::fixture().await;
+    let watcher = crate::watch::Watcher::new(svc);
+    let mut events = watcher.subscribe();
+    let pane = Pane::showing(TRUST).await;
+    let heard = AtomicBool::new(false);
+    run(&pane, "ov-t4", &heard, 300).await;
+    let said = tokio::time::timeout(Duration::from_secs(3), async {
+        while let Ok(event) = events.recv().await {
+            if matches!(event.payload, Some(Payload::NeedsYouChanged(_))) { return true; }
+        }
+        false
+    }).await.unwrap_or(false);
+    assert!(said, "no NeedsYouChanged was sent when the build became stuck");
+}

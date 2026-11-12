@@ -2754,6 +2754,8 @@ impl Watcher {
             }
         });
         crate::claude_login_renewal::listen_for_auth_failures(&watcher.service, &watcher);
+        // An engine build stuck on a question, or no longer (ov-1077).
+        crate::engine_stuck::listen(&watcher);
         // The engine moved cards inside a committed `workflow_apply` (ov-948).
         let weak = Arc::downgrade(&watcher);
         watcher.service.store.set_workflow_board_listener(Some(Arc::new(move |moves| {

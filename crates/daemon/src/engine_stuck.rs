@@ -67,23 +67,38 @@ pub fn list() -> Vec<Stuck> {
 struct Listed(Key);
 impl Drop for Listed {
     fn drop(&mut self) {
-        if let Ok(mut m) = table().lock() {
-            m.remove(&self.0);
-        }
+        clear(&self.0);
     }
 }
 
 fn set(key: &Key, question: String, now_ms: i64) {
-    if let Ok(mut m) = table().lock() {
+    let changed = table().lock().is_ok_and(|mut m| {
         let since_ms = m.get(key).map_or(now_ms, |s| s.since_ms);
-        m.insert(key.clone(), Stuck { workspace: key.0.clone(), item: key.1.clone(), since_ms, question });
-    }
+        let new = Stuck { workspace: key.0.clone(), item: key.1.clone(), since_ms, question };
+        m.insert(key.clone(), new.clone()).as_ref() != Some(&new)
+    });
+    if changed { announce(); }
 }
 
 fn clear(key: &Key) {
-    if let Ok(mut m) = table().lock() {
-        m.remove(key);
-    }
+    if table().lock().is_ok_and(|mut m| m.remove(key).is_some()) { announce(); }
+}
+
+/// Every watcher that tells clients the Needs You list moved. Nothing polls that list, so a build that
+/// becomes stuck, or stops being, has to say so itself.
+static LISTENERS: LazyLock<Mutex<Vec<std::sync::Weak<crate::watch::Watcher>>>> = LazyLock::new(Default::default);
+
+/// A watcher asks to hear when the list changes.
+pub(crate) fn listen(watcher: &std::sync::Arc<crate::watch::Watcher>) {
+    if let Ok(mut all) = LISTENERS.lock() { all.push(std::sync::Arc::downgrade(watcher)); }
+}
+
+fn announce() {
+    let live: Vec<_> = LISTENERS.lock().map(|mut all| {
+        all.retain(|w| w.strong_count() > 0);
+        all.iter().filter_map(|w| w.upgrade()).collect()
+    }).unwrap_or_default();
+    for watcher in live { watcher.announce_needs_you(); }
 }
 
 /// What a screen says of an agent that has not been heard from: its question, else nothing.
