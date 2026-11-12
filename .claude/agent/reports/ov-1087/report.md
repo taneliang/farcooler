@@ -30,3 +30,7 @@ farcooler-canary workspace set-workflow d7401571 --repo overnight \
 ## Re-checked (second pass)
 
 Still blocked. `workflow get 01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571 --json` (the full id; the 8-character short id is rejected) still returns `scope denied: known caller required`. The workspace home holds only `charter.md`, no definition. No acceptance line is met; the ticket should stay open until someone with a known caller supplies the definition.
+
+## Re-checked (third pass)
+
+Still blocked. `workflow get <full id> --json` still returns `scope denied: known caller required`. The repo holds only template fixtures (`crates/workflow/tests/templates.rs`), not the live definition, so there's nothing to copy honestly. Next step is unchanged: the owner or orchestrator saves `workflow get … --json` output and hands it to this ticket.
