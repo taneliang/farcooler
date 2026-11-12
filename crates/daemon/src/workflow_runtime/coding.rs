@@ -137,7 +137,7 @@ impl CodingConfigExt for CodingConfig {
         stages.push(self.stage("ci", StageKind::Ci, "coding-ci/v1", &self.ci.repository));
         Ok(Definition { schema: 1, source: "configured-coding/v1".into(), stages,
             max_reworks: if self.reviewer.is_some() { 2 } else { 0 },
-            rework_target: self.reviewer.as_ref().map(|_| "build".into()), groups: Default::default(), models: Default::default(), send_backs: None })
+            rework_target: self.reviewer.as_ref().map(|_| "build".into()), groups: Default::default(), models: Default::default(), send_backs: None, policies: Default::default() })
     }
     fn stage(&self, id: &str, kind: StageKind, version: &str, argument: &str) -> Stage {
         Stage { id: id.into(), kind, operation: self.operation(version, argument),
@@ -178,6 +178,10 @@ impl Pinned for CodingConfig {
     fn pinned(&self, definition: &Definition, in_group: bool) -> Result<()> {
         if in_group { definition.validate_group() } else { definition.validate() }
             .map_err(|_| Error::Refused("invalid definition"))?;
+        if !definition.policies.is_empty() {
+            self.ci.command.environment.get("CI_GH").filter(|p| std::path::Path::new(p).is_absolute())
+                .ok_or(Error::Refused("CI rerun policies need a pinned CI_GH"))?;
+        }
         let (mut provisioned, mut built, mut landed) = (false, false, false);
         let (mut based, mut folded, mut pushed) = (false, false, false);
         let (mut branched, mut opened, mut merged) = (false, false, false);

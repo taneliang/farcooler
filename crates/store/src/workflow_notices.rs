@@ -28,7 +28,7 @@ pub fn verb_name(kind: &StageKind) -> String {
         StageKind::Review(_) => "review".into(), StageKind::Land => "land".into(), StageKind::Ci => "ci".into(),
         StageKind::Tracker => "tracker".into(), StageKind::Action(a) | StageKind::Evaluate(a) => a.clone(),
         StageKind::Join { .. } => "join".into(), StageKind::AwaitBase => "await-base".into(), StageKind::Fold => "fold".into(),
-        StageKind::Run => "run".into(), StageKind::Push => "push".into(), StageKind::AwaitCi => "await-ci".into(), StageKind::Route => "route".into(),
+        StageKind::Run => "run".into(), StageKind::Push => "push".into(), StageKind::AwaitCi => "await-ci".into(), StageKind::RerunCi => "rerun-ci".into(), StageKind::Route => "route".into(),
         StageKind::PushBranch => "push-branch".into(), StageKind::OpenPr => "open-pr".into(),
         StageKind::PrReady => "pr-ready".into(), StageKind::AwaitPr => "await-pr".into(),
     }

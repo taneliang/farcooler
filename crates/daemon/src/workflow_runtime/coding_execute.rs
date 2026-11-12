@@ -85,6 +85,8 @@ pub struct CodingCiReceipt {
     pub binding: String,
     pub repository: String,
     pub run: serde_json::Value,
+    #[serde(default)]
+    pub failed_jobs: Option<Vec<String>>,
 }
 
 impl Exec {
@@ -282,6 +284,9 @@ impl Exec {
             ("FARCOOLER_WORKFLOW_ITEM", effect.item.clone()),
             ("FARCOOLER_WORKSPACE", binding.workspace.clone()),
         ] { command.environment.insert(key.into(), value); }
+        if let Some(retry) = &effect.ci_retry {
+            command.environment.insert("FARCOOLER_CI_RUN".into(), retry.run.id.to_string());
+        }
         // Who the runner is (ov-1083), as a login shell says it: a hand-run lane gate has USER and LOGNAME, and tests
         // that ssh back to this account read them. Only the account name passes, from the account database, never the
         // daemon's environment, which carries the owner's tokens and agent sockets.
@@ -448,7 +453,7 @@ impl Exec {
                         .map_err(|_| Error::Refused("configured worktree provisioning uncertain"))?;
                 }
             } },
-            StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::Route =>
+            StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route =>
                 return self.execute_verb(binding, kind, cancel).await,
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,

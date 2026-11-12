@@ -333,7 +333,7 @@ fn kind_slot(k: &StageKind) -> usize {
     match k { StageKind::Provision => 0, StageKind::Build => 1, StageKind::Check => 2, StageKind::Review(_) => 3,
         StageKind::Land => 4, StageKind::Ci => 5, StageKind::Tracker => 6, StageKind::Action(_) => 7,
         StageKind::Evaluate(_) => 8, StageKind::Join { .. } => 9, StageKind::AwaitBase => 10, StageKind::Fold => 11,
-        StageKind::Run => 12, StageKind::Push => 13, StageKind::AwaitCi => 14, StageKind::Route => 15,
+        StageKind::Run => 12, StageKind::Push => 13, StageKind::AwaitCi => 14, StageKind::RerunCi => 20, StageKind::Route => 15,
         StageKind::PushBranch => 16, StageKind::OpenPr => 17, StageKind::PrReady => 18, StageKind::AwaitPr => 19 }
 }
 fn reason_slot(r: &Reason) -> usize {

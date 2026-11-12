@@ -18,6 +18,7 @@ mod coding_execute;
 mod coding_native;
 mod coding_landing;
 mod coding_verbs;
+mod coding_ci_rerun;
 mod coding_settle;
 mod coding_pr;
 mod fold_trees;
@@ -855,6 +856,8 @@ mod concurrency_tests;
 mod observe_tests;
 #[cfg(test)]
 mod coding_verbs_tests;
+#[cfg(test)]
+mod coding_ci_rerun_tests;
 #[cfg(test)]
 mod coding_remote_tests;
 #[cfg(test)]

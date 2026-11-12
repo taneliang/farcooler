@@ -18,7 +18,7 @@ pub(super) fn stage_label(kind: &StageKind) -> &'static str {
         StageKind::Tracker => "Update tracker", StageKind::Action(_) => "Run action",
         StageKind::Evaluate(_) => "Evaluate result", StageKind::Join { .. } => "Join batch",
         StageKind::AwaitBase => "Wait for base", StageKind::Fold => "Combine changes",
-        StageKind::Run => "Run gate", StageKind::Push => "Push changes", StageKind::AwaitCi => "Wait for CI",
+        StageKind::Run => "Run gate", StageKind::Push => "Push changes", StageKind::AwaitCi => "Wait for CI", StageKind::RerunCi => "Rerun failed CI jobs",
         StageKind::Route => "Choose route",
         StageKind::PushBranch => "Push branch", StageKind::OpenPr => "Open pull request",
         StageKind::PrReady => "Mark ready", StageKind::AwaitPr => "Wait for merge",

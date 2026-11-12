@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use typeshare::typeshare;
-use crate::{Definition, StageKind, OperationSpec};
+use crate::{Definition, StageKind, OperationSpec, CiRetry, CiRun};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Refusal {
@@ -92,6 +92,12 @@ pub struct Item {
     /// remote's main couldn't be downloaded, say. Kept on a Failed run so the ticket reads why; the next answer clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
+    /// Reruns spent on each CI step. Spent before dispatch and never refunded by a restart or Retry.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ci_reruns: BTreeMap<String, u8>,
+    /// The run being rerun, then watched at a strictly newer attempt on the same commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ci_retry: Option<CiRetry>,
 }
 /// One send-back: who asked (the input), when (the revision), from which step to which, on which run, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,7 +235,10 @@ pub struct Evidence {
     pub policy_pin: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Outcome { Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure,
+pub enum Outcome {
+    /// CI facts are authenticated operation input, so the pure rule sees the same facts on replay.
+    CiResult { label: String, evidence: Evidence, run: Option<CiRun> },
+    Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),
     Interrupted, Uncertain, Stopped { operation: String, receipt: String } }
@@ -264,6 +273,9 @@ pub struct Effect {
     /// The tickets that follow this item's run (ov-970), so the agent is told every ticket it works.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub with: Vec<String>,
+    /// The exact failed run, carried by the rerun and subsequent CI look effects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ci_retry: Option<CiRetry>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Transition {

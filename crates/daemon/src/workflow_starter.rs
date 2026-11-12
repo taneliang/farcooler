@@ -37,9 +37,18 @@ pub const PROMPT: &str = "Work this ticket to its acceptance items and within it
 
 /// One look at CI on `$FARCOOLER_CANDIDATE`: the newest `$CI_WORKFLOW` run GitHub has for that commit, written
 /// as the receipt the CI step reads. No run yet is no answer yet: it exits non-zero and writes nothing.
-const CI_LOOK: &str = r#"out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs?head_sha=$FARCOOLER_CANDIDATE&event=$CI_EVENT&per_page=50" --jq '[.workflow_runs[] | select(.name == env.CI_WORKFLOW)] | max_by(.id) // empty | {binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}}') || exit 1
-[ -n "$out" ] || exit 1
-printf '%s\n' "$out" > "$FARCOOLER_RECEIPT""#;
+const CI_LOOK: &str = r#"if [ -n "$FARCOOLER_CI_RUN" ]; then
+ids=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$FARCOOLER_CI_RUN" --jq '[.id, .run_attempt] | @tsv') || exit 1
+else
+ids=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs?head_sha=$FARCOOLER_CANDIDATE&event=$CI_EVENT&per_page=50" --jq '[.workflow_runs[] | select(.name == env.CI_WORKFLOW)] | max_by(.id) // empty | [.id, .run_attempt] | @tsv') || exit 1
+fi
+[ -n "$ids" ] || exit 1
+read -r run attempt <<IDS
+$ids
+IDS
+out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt" --jq '{binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at, run_attempt}}') || exit 1
+jobs=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "stale") | .name]') || exit 1
+printf '%s,"failed_jobs":%s}\n' "${out%?}" "$jobs" > "$FARCOOLER_RECEIPT""#;
 
 /// `workflow get`'s reply, for a workspace that has never published: the settings this runner suggests for its first
 /// draft as `suggested_adapter`, or why it can't as `suggested_adapter_refused`. Only a `get` reply carries a
@@ -201,6 +210,43 @@ mod tests {
         // Another harness's runner lists none: its preset is whatever it was set up with.
         let b = lt::template("batched-push", &config("codex"), &["make check".into()], &[Extra::Agent], &Options::default()).unwrap();
         assert!(b.definition.models.is_empty());
+    }
+    #[tokio::test]
+    async fn the_ci_look_records_jobs_and_attempt_and_can_follow_the_exact_rerun() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let gh = dir.path().join("gh");
+        std::fs::write(&gh, r#"#!/usr/bin/python3
+import json, os, sys
+args = sys.argv[1:]
+endpoint = next(a for a in args if a.startswith('repos/'))
+if '/jobs?' in endpoint:
+    assert endpoint == 'repos/o/r/actions/runs/73/attempts/2/jobs?per_page=100', args
+    assert '--paginate' in args and '--slurp' in args, args
+    print(json.dumps(['iOS UI tests', 'Other failed job']))
+elif '/attempts/' in endpoint:
+    assert endpoint == 'repos/o/r/actions/runs/73/attempts/2', args
+    print(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'], repository='o/r', run=dict(id=73, run_attempt=2))))
+else:
+    if os.environ.get('FARCOOLER_CI_RUN'):
+        assert endpoint == 'repos/o/r/actions/runs/73', args
+    else:
+        assert endpoint.startswith('repos/o/r/actions/runs?head_sha='), args
+    print('73\t2')
+"#).unwrap();
+        std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for target in ["", "73"] {
+            let receipt = dir.path().join("receipt.json");
+            let output = tokio::process::Command::new("/bin/sh").args(["-c", super::CI_LOOK]).env_clear()
+                .env("CI_GH", &gh).env("CI_REPOSITORY", "o/r").env("CI_WORKFLOW", "CI").env("CI_EVENT", "push")
+                .env("FARCOOLER_CANDIDATE", "a".repeat(40)).env("FARCOOLER_OPERATION_BINDING", "bound")
+                .env("FARCOOLER_CI_RUN", target).env("FARCOOLER_RECEIPT", &receipt).output().await.unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let result: crate::workflow_runtime::CodingCiReceipt = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
+            assert_eq!(result.binding, "bound");
+            assert_eq!(result.run["run_attempt"], 2);
+            assert_eq!(result.failed_jobs.unwrap(), ["iOS UI tests", "Other failed job"]);
+        }
     }
     #[test]
     fn the_ci_look_stays_within_a_configured_commands_bounds() {

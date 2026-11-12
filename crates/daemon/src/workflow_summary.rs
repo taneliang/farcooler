@@ -217,6 +217,10 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
     }
     if kinds(|k| matches!(k, StageKind::Route)) { lines.push("Each ticket takes the route its changed files earn: some go straight to landing, some ask you first.".into()); }
     if kinds(|k| matches!(k, StageKind::AwaitCi)) { lines.push("It waits for CI to pass on what landed.".into()); }
+    for (name, policy) in &definition.policies {
+        let jobs = policy.rule.rerun_failed.jobs.iter().map(|j| code(j)).collect::<Vec<_>>().join(", ");
+        lines.push(format!("Rule {} reruns failed CI jobs once at {} only when every failed job is listed: {jobs}. It then waits for CI again; another failure follows the step's published route.", code(name), code(&policy.step)));
+    }
     if lines.is_empty() { lines.push("Nothing lands code. It only tracks tickets.".into()); }
     lines
 }

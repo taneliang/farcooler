@@ -688,3 +688,116 @@ fn a_pull_request_wait_a_restart_interrupted_looks_again_and_keeps_its_patience(
     while early.stage("a") != "branch" { early.pass("a"); }
     assert_eq!(early.try_outcome("a", Outcome::Interrupted).unwrap_err(), Refusal::Phase);
 }
+
+fn flaky_definition() -> Definition {
+    let mut definition = verb_ticket();
+    definition.policies.insert("flaky-ci".into(), CiPolicy { point: CiPoint::Result, step: "ci".into(),
+        rule: CiRule { rerun_failed: RerunFailed { jobs: vec!["iOS UI tests".into()], times: 1 } },
+        fallback: None });
+    definition
+}
+fn ci_answer(log: &mut Log, group: &str, label: &str, attempt: u32, jobs: &[&str]) -> Transition {
+    let evidence = log.evidence(group);
+    log.outcome(group, Outcome::CiResult { label: label.into(), evidence,
+        run: Some(CiRun { id: 73, attempt, failed_jobs: jobs.iter().map(|j| (*j).into()).collect() }) })
+}
+#[test]
+fn a_listed_ci_failure_reruns_once_then_green_lands_or_second_red_routes_rejected() {
+    for green in [true, false] {
+        let mut log = Log::new();
+        let group = verb_group(&mut log, flaky_definition());
+        walk_to(&mut log, &group, "ci");
+        let candidate = log.state.items[&group].candidate.clone();
+        let first = ci_answer(&mut log, &group, "rejected", 1, &["iOS UI tests"]);
+        assert_eq!(first.effects.len(), 1);
+        assert_eq!(first.effects[0].kind, EffectKind::Execute(StageKind::RerunCi));
+        assert_eq!(log.state.items[&group].ci_reruns["ci"], 1);
+        assert_eq!(log.state.items[&group].phase, Phase::Running, "red did not become passed");
+        assert!(log.state.items[&group].ci_retry.as_ref().unwrap().pending);
+        // Restart serializes and restores both the count and the exact run before it dispatches.
+        log.state = serde_json::from_str(&serde_json::to_string(&log.state).unwrap()).unwrap();
+        let resumed = log.pass(&group);
+        assert_eq!(resumed.effects[0].kind, EffectKind::Execute(StageKind::AwaitCi));
+        assert_eq!(resumed.effects[0].candidate, candidate);
+        assert_eq!(resumed.effects[0].ci_retry.as_ref().unwrap().run.id, 73);
+        assert_eq!(log.state.items[&group].phase, Phase::Running, "rerun acceptance is not green CI");
+        // A stale red/green from attempt 1 cannot finish the look at attempt 2.
+        let evidence = log.evidence(&group);
+        assert_eq!(log.try_outcome(&group, Outcome::CiResult { label: "passed".into(), evidence,
+            run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec![] }) }), Err(Refusal::Evidence));
+        let result = ci_answer(&mut log, &group, if green { "passed" } else { "rejected" }, 2,
+            if green { &[] } else { &["iOS UI tests"] });
+        assert_eq!(result.state.items[&group].phase, if green { Phase::Done } else { Phase::Failed });
+        assert!(result.effects.iter().all(|e| e.kind != EffectKind::Execute(StageKind::RerunCi)));
+        assert_eq!(result.state.items[&group].ci_reruns["ci"], 1);
+        assert_eq!(log.replay_digest(), digest(&log.state));
+    }
+}
+#[test]
+fn unlisted_empty_or_missing_ci_jobs_route_rejected_without_a_rerun() {
+    for jobs in [vec!["Rust"], vec!["iOS UI tests", "Rust"], vec![]] {
+        let mut log = Log::new();
+        let group = verb_group(&mut log, flaky_definition());
+        walk_to(&mut log, &group, "ci");
+        let result = ci_answer(&mut log, &group, "rejected", 1, &jobs);
+        assert_eq!(result.state.items[&group].phase, Phase::Failed);
+        assert!(result.effects.iter().all(|e| e.kind != EffectKind::Execute(StageKind::RerunCi)));
+    }
+}
+#[test]
+fn an_ambiguous_rerun_stays_uncertain_without_refunding_the_count() {
+    let mut log = Log::new();
+    let group = verb_group(&mut log, flaky_definition());
+    walk_to(&mut log, &group, "ci");
+    ci_answer(&mut log, &group, "rejected", 1, &["iOS UI tests"]);
+    let result = log.outcome(&group, Outcome::Interrupted);
+    assert!(result.effects.is_empty());
+    assert_eq!(log.state.items[&group].phase, Phase::Uncertain);
+    assert_eq!(log.state.items[&group].ci_reruns["ci"], 1);
+    let result = log.run(Command::Advance, Grant::Controller);
+    assert!(result.effects.is_empty());
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+#[test]
+fn ci_rules_are_checked_at_publication_and_empty_policies_preserve_legacy_bytes() {
+    let definition = flaky_definition();
+    assert_eq!(definition.validate(), Ok(()));
+    for (times, jobs, step) in [(0, vec!["iOS UI tests"], "ci"), (2, vec!["iOS UI tests"], "ci"),
+        (1, vec![], "ci"), (1, vec![""], "ci"), (1, vec!["a", "a"], "ci"), (1, vec!["a"], "gate")] {
+        let mut bad = definition.clone();
+        let rule = bad.policies.get_mut("flaky-ci").unwrap();
+        rule.step = step.into(); rule.rule.rerun_failed.times = times;
+        rule.rule.rerun_failed.jobs = jobs.into_iter().map(String::from).collect();
+        assert_eq!(bad.validate(), Err(Refusal::Definition));
+    }
+    let mut bad = definition.clone();
+    bad.stages[0].kind = StageKind::RerunCi;
+    assert_eq!(bad.validate(), Err(Refusal::Definition), "only the rule may emit a rerun");
+    let legacy = verb_ticket();
+    assert!(!serde_json::to_string(&legacy).unwrap().contains("policies"));
+    let raw = serde_json::to_value(&definition).unwrap();
+    assert_eq!(raw["policies"]["flaky-ci"]["point"], "ci.result");
+    assert_eq!(raw["policies"]["flaky-ci"]["rule"]["rerun_failed"]["times"], 1);
+    let mut bad = raw;
+    bad["policies"]["flaky-ci"]["rule"]["pass_anyway"] = true.into();
+    assert!(serde_json::from_value::<Definition>(bad).is_err());
+}
+
+#[test]
+fn a_ci_receipt_can_resolve_uncertainty_without_firing_a_rerun_policy() {
+    for label in ["passed", "rejected"] {
+        let mut log = Log::new();
+        let group = verb_group(&mut log, flaky_definition());
+        walk_to(&mut log, &group, "ci");
+        log.outcome(&group, Outcome::Uncertain);
+        let item = &log.state.items[&group];
+        let command = Command::Resolve { item: group.clone(), effect: item.pending.clone().unwrap(),
+            run: item.run.clone(), fence: item.fence,
+            outcome: Outcome::CiResult { label: label.into(), evidence: log.evidence(&group),
+                run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec!["iOS UI tests".into()] }) } };
+        let result = log.run(command, Grant::Controller);
+        assert_eq!(result.state.items[&group].phase, if label == "passed" { Phase::Done } else { Phase::Failed });
+        assert!(result.effects.iter().all(|e| e.kind != EffectKind::Execute(StageKind::RerunCi)));
+        assert_eq!(log.replay_digest(), digest(&log.state));
+    }
+}

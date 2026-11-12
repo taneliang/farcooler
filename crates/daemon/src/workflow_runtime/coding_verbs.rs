@@ -41,7 +41,7 @@ pub(super) fn classify_push(exit: Option<i32>, porcelain: &str, remote_after: Op
     }
 }
 pub(super) fn is_verb(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
+    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route)
         || super::coding_pr::is_pr_verb(kind)
 }
 const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.email=landing@farcooler.invalid",
@@ -105,6 +105,7 @@ impl Exec {
             // A wait that errs has failed for a reason and spends an attempt; only a cut-short wait is `Interrupted`.
             StageKind::AwaitBase => Ok(self.await_base(binding, cancel).await.unwrap_or_else(|error| {
                 tracing::warn!(%error, "await-base failed"); Outcome::SafeFailure })),
+            StageKind::RerunCi => self.rerun_ci(binding, cancel).await,
             StageKind::Fold => self.fold(binding, cancel).await,
             StageKind::Push => self.push(binding, cancel).await,
             StageKind::AwaitCi => Ok(self.await_ci(binding, cancel).await.unwrap_or_else(|error| {
@@ -140,6 +141,7 @@ impl Exec {
             Ok(raw) => raw,
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 return match kind {
+                    StageKind::RerunCi => self.reconcile_ci_rerun(binding).await,
                     StageKind::Push => Err(Error::Refused("push has no settlement; whether it landed is unknown")),
                     // A wait cut short only looks again; a fold or a route cut short is made anew and spends an attempt.
                     StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr => Ok(Outcome::Interrupted),
@@ -161,6 +163,11 @@ impl Exec {
         let manifest = digest(&(binding, &fact.candidate, &raw, &fact.label));
         let evidence = Evidence { candidate: fact.candidate, manifest: manifest.clone(),
             receipt: digest(&("coding-receipt/v1", manifest)), policy_pin: binding.effect.policy_pin.clone() };
+        if *kind == StageKind::AwaitCi && (binding.effect.ci_retry.is_some()
+            || fact.detail.get("run").is_some_and(|r| !r.is_null())) {
+            return Ok(Outcome::CiResult { label: fact.label, evidence,
+                run: fact.detail.get("run").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose()? });
+        }
         Ok(match fact.label.as_str() {
             "passed" => Outcome::Passed(evidence),
             "rejected" => Outcome::Rejected(evidence),
@@ -181,7 +188,7 @@ impl Exec {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
             if let Some(head) = self.fetch_base(binding, poll, &cancel).await? {
                 last = head.clone();
-                let ci = if green { Some(self.ci_poll(binding, &head, poll, &cancel).await?) } else { None };
+                let ci = if green { Some(self.ci_poll(binding, &head, poll, &cancel).await?.0) } else { None };
                 if matches!(ci, None | Some(CiStatus::Passed | CiStatus::Failed)) {
                     let mut detail = serde_json::json!({ "polls": poll + 1 });
                     if ci == Some(CiStatus::Failed) { detail["red"] = true.into(); }
@@ -234,7 +241,13 @@ impl Exec {
         let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
         for poll in 0u32.. {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
-            let label = match self.ci_poll(binding, &candidate, poll, &cancel).await? {
+            let (mut status, run) = self.ci_poll(binding, &candidate, poll, &cancel).await?;
+            if let Some(retry) = &binding.effect.ci_retry {
+                if !run.as_ref().is_some_and(|r| r.id == retry.run.id && r.attempt > retry.run.attempt) {
+                    status = CiStatus::Unknown;
+                }
+            }
+            let label = match status {
                 CiStatus::Passed => "passed",
                 CiStatus::Failed => "rejected",
                 CiStatus::Superseded => "cancelled",
@@ -244,14 +257,14 @@ impl Exec {
                     continue;
                 }
             };
-            self.write_fact(binding, label, &candidate, serde_json::json!({ "polls": poll + 1 }))?;
+            self.write_fact(binding, label, &candidate, serde_json::json!({ "polls": poll + 1, "run": run }))?;
             return self.reconcile_verb(binding, &StageKind::AwaitCi).await;
         }
         unreachable!("the poll count is unbounded")
     }
     /// One look at CI on `sha`: the configured provider hook runs once and writes a receipt. A hook
     /// that fails, or writes nothing, has no answer yet. A receipt about something else is an error.
-    async fn ci_poll(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<CiStatus> {
+    async fn ci_poll(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<(CiStatus, Option<CiRun>)> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
         let stem = format!("{}.poll-{poll}", digest(&binding.effect));
         let (receipt, log) = (self.root.join("receipts").join(format!("{stem}.provider.json")),
@@ -261,10 +274,10 @@ impl Exec {
         durable(&log, b"")?;
         let exit = crate::effect_runner::configured(&self.repository(), &command.argv, &command.environment, &log,
             Duration::from_millis(command.timeout_ms), cancel.clone()).await?;
-        if exit != Some(0) { return Ok(CiStatus::Unknown); }
+        if exit != Some(0) { return Ok((CiStatus::Unknown, None)); }
         let raw = match self.bytes(&receipt) {
             Ok(raw) => raw,
-            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(CiStatus::Unknown),
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok((CiStatus::Unknown, None)),
             Err(error) => return Err(error),
         };
         let provided: CodingCiReceipt = serde_json::from_slice(&raw)?;
@@ -275,7 +288,10 @@ impl Exec {
         if run.id == 0 || run.head_sha != sha || run.name != config.ci.workflow || run.event != config.ci.event {
             return Err(Error::Refused("foreign CI run provenance"));
         }
-        Ok(crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status)
+        let facts = provided.run["run_attempt"].as_u64().and_then(|n| u32::try_from(n).ok())
+            .map(|attempt| CiRun { id: run.id, attempt, failed_jobs: provided.failed_jobs.unwrap_or_default() });
+        if facts.as_ref().is_some_and(|r| !r.valid()) { return Err(Error::Refused("invalid CI run facts")); }
+        Ok((crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status, facts))
     }
 
     /// Apply every member's commits, in order, onto the base in a fresh tree. The tree is made new

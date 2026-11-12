@@ -45,7 +45,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, failure: None, rework_history: Vec::new(),
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
@@ -71,7 +71,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             let mut record = Item { definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, failure: None, rework_history: Vec::new(),
+                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
@@ -144,7 +144,42 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     let wait_since = item.wait_since.take();
                     // Each answer replaces the last attempt's reason; only a failure that says why sets one.
                     item.failure = None;
+                    // A rerun is an outside side effect. Its success resumes the CI look; anything
+                    // ambiguous waits for reconciliation and can never dispatch the rerun again.
+                    let rerunning = item.ci_retry.as_ref().is_some_and(|r| r.pending) && !item.run.starts_with("cancel:");
                     match outcome {
+                        Outcome::Passed(e) if rerunning => {
+                            evidence_matches(&item, e)?;
+                            item.ci_retry.as_mut().unwrap().pending = false;
+                            item.wait_since = None;
+                            item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                            launch(&mut item, id, input, &mut effects)?;
+                        }
+                        Outcome::Rejected(e) if rerunning && resolving => {
+                            evidence_matches(&item, e)?;
+                            route(&mut item, id, input, "rejected", Some(e), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                        }
+                        _ if rerunning => { item.phase = Phase::Uncertain; }
+                        Outcome::CiResult { label, evidence, run } => {
+                            if item.run.starts_with("cancel:")
+                                || item.definition.stages[item.stage].kind != StageKind::AwaitCi
+                                || !matches!(label.as_str(), "passed" | "rejected" | "cancelled" | "timeout")
+                            { return Err(Refusal::Phase); }
+                            evidence_matches(&item, evidence)?;
+                            if let Some(run) = run { if !run.valid() { return Err(Refusal::Evidence); } }
+                            if let Some(retry) = &item.ci_retry {
+                                if label != "timeout" && !run.as_ref().is_some_and(|r| r.id == retry.run.id && r.attempt > retry.run.attempt) {
+                                    return Err(Refusal::Evidence);
+                                }
+                            }
+                            // A recovered receipt can settle uncertainty, but Uncertain is never a policy point.
+                            if !resolving && label == "rejected" && crate::ci::rerun(&mut item, id, input, run.as_ref(), &mut effects)? {
+                                item.last_evidence = Some(evidence.clone());
+                            } else {
+                                item.ci_retry = None;
+                                route(&mut item, id, input, label, Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                            }
+                        }
                         Outcome::Uncertain => { item.phase = Phase::Uncertain; }
                         Outcome::Stopped { operation, receipt } => {
                             // A stop receipt is only valid for the cancellation operation, never execution.
@@ -256,7 +291,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                                 policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, cancel_reason: None, failure: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin: item.pin.clone() }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -527,7 +562,7 @@ fn launch(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -
     }
     Ok(())
 }
-fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mut Vec<Effect>) {
+pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mut Vec<Effect>) {
     let effect_id = digest(&("effect/v1", &input.workspace, &input.id, effects.len()));
     item.pending = Some(effect_id.clone());
     // A wait looked at again after a restart keeps its first deadline.
@@ -541,7 +576,7 @@ fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mu
         operation: item.definition.stages[item.stage].operation.clone(), created_ms,
         model: item.models.get(&item.definition.stages[item.stage].id).cloned(), tree: item.tree.clone(),
         brief: item.brief.clone().filter(|_| item.definition.stages[item.stage].kind == StageKind::Build),
-        with: item.followers.clone() });
+        with: item.followers.clone(), ci_retry: item.ci_retry.clone() });
 }
 fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     if !valid_id(&e.candidate) || !valid_id(&e.manifest) || !valid_id(&e.receipt)
@@ -619,6 +654,7 @@ fn room(next: &State, spawn: &[(String, Vec<Member>)]) -> bool { next.items.len(
 fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>, out: Out) -> Result<(), Refusal>
 {
     item.pending = None;
+    item.ci_retry = None;
     let stage = &item.definition.stages[item.stage];
     let (key, limit) = (stage.id.clone(), stage.limit);
     let from_join = matches!(stage.kind, StageKind::Join { .. });
@@ -699,6 +735,12 @@ fn valid_state(state: &State) -> bool {
                         && item.back_edges.iter().all(|(stage, taken)| item.definition.stages.iter()
                             .any(|s| &s.id == stage && s.limit >= *taken))
                     } else { item.iteration <= item.definition.max_reworks && item.back_edges.is_empty() }
+                && item.ci_reruns.iter().all(|(step, count)| *count == 1
+                    && item.definition.policies.values().any(|p| &p.step == step))
+                && item.ci_retry.as_ref().is_none_or(|r| r.run.valid()
+                    && item.definition.policies.contains_key(&r.policy)
+                    && item.definition.stages.get(item.stage).is_some_and(|s|
+                        s.kind == StageKind::AwaitCi && item.ci_reruns.get(&s.id) == Some(&1)))
                 && item.retries <= MAX_RETRIES
                 && item.rework_history.len() <= usize::from(item.iteration)
                 && item.rework_history.iter().enumerate().all(|(index, r)|

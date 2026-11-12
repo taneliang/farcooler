@@ -40,7 +40,7 @@ fn coding() -> Definition {
     let stage = |id: &str, kind| Stage { id: id.into(), kind, progression: Progression::Automatic, max_attempts: 1,
         operation: op.clone(), routes: Default::default(), limit: 0 };
     Definition { schema: 1, source: "coding/v1".into(), max_reworks: 0, rework_target: None, groups: Default::default(),
-        models: Default::default(), send_backs: None,
+        models: Default::default(), send_backs: None, policies: Default::default(),
         stages: vec![stage("build", StageKind::Build), stage("check", StageKind::Check), stage("land", StageKind::Land)] }
 }
 fn three() -> Log {

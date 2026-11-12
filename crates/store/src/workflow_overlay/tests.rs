@@ -15,10 +15,10 @@ fn steps() -> Vec<Stage> {
 }
 fn group(at: usize, phase: Phase, candidate: Option<&str>, members: &[&str]) -> Item {
     let definition = Definition { schema: 2, source: "group/landing".into(), stages: steps(), max_reworks: 0,
-        rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None };
+        rework_target: None, groups: BTreeMap::new(), models: BTreeMap::new(), send_backs: None, policies: Default::default() };
     Item { definition, pin: "pin".into(), policy_pin: "policy".into(), dependencies: BTreeSet::new(),
         resource: "ref:origin:main".into(), stage: at, iteration: 0, attempt: 0, fence: 1, phase, run: "run".into(),
-        pending: None, candidate: candidate.map(Into::into), last_evidence: None, stopping: None, cancel_reason: None, failure: None,
+        pending: None, candidate: candidate.map(Into::into), last_evidence: None, stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None,
         rework_history: vec![], back_edges: BTreeMap::new(), retries: 0, pushed: None,
         members: members.iter().map(|m| Member { item: (*m).into(), candidate: format!("cand-{m}") }).collect(),
         handed: vec![], since_ms: 0, wait_since: None,
