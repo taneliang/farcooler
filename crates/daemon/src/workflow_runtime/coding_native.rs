@@ -450,8 +450,7 @@ impl Exec {
             a.session.store(false, std::sync::atomic::Ordering::SeqCst);
         });
         // Capture actual PTY output before closing it; never parse it as success.
-        let output = tmux.capture_scrollback(&window.pane_id).await.map_err(|_| Error::Refused("native PTY output unavailable"))?;
-        crate::effect_runner::save_tail(&self.process_log(binding), output.as_bytes())?;
+        self.capture_native_output(binding, tmux, &window.pane_id).await?;
         self.quiesce_native(&owner).await?;
         if let Some(stopped) = frozen.take() { stopped.quiescent(); }
         let (mut completed, hooks, mut failure) = result.map_or((None, Vec::new(), None),
@@ -506,8 +505,7 @@ impl Exec {
                 // The pane cannot be captured or closed again. Its saved output and verdict survive the install.
                 self.bytes(&self.process_log(binding))?;
             } else {
-                let output = tmux.capture_scrollback(&owner.pane).await.map_err(|_| Error::Refused("interrupted native output unavailable"))?;
-                crate::effect_runner::save_tail(&self.process_log(binding), output.as_bytes())?;
+                self.capture_native_output(binding, &tmux, &owner.pane).await?;
                 self.quiesce_native(&owner).await?;
             }
             durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed, failure: None })?)?;
@@ -517,6 +515,14 @@ impl Exec {
         let socket = self.native_socket(binding);
         if socket.try_exists()? { std::fs::remove_file(socket)?; }
         Ok(completed)
+    }
+    async fn capture_native_output(&self, binding: &Binding, tmux: &TmuxServer, pane: &str) -> Result<()> {
+        // Scrollback alone excludes the visible screen, where the final error usually is.
+        // Request enough lines to cover the byte cap, then keep the same bounded tail as commands.
+        let output = tmux.capture_pane(pane, crate::effect_runner::LOG_LIMIT as u32).await
+            .map_err(|_| Error::Refused("native PTY output unavailable"))?;
+        crate::effect_runner::save_tail(&self.process_log(binding), output.as_bytes())?;
+        Ok(())
     }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<Option<String>> {
         let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&self.native_path(binding, "settled"))?)?;
@@ -645,6 +651,8 @@ else:
     pathlib.Path('result.txt').write_text('candidate native PTY')
     subprocess.check_call(['/usr/bin/git','add','--','result.txt'])
     subprocess.check_call(['/usr/bin/git','-c','commit.gpgsign=false','commit','--quiet','-m','native build'])
+    print('native stdout evidence', flush=True)
+    print('native stderr evidence', file=sys.stderr, flush=True)
     stop = 'stop' if agent == 'cursor' else 'Stop'
     hook(stop, sid='foreign')
     hook(stop, cwd='/foreign')
@@ -819,6 +827,21 @@ else:
             let (_dir, mut runtime, _fake) = native(mode).await;
             let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
             assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Failed, "{mode}");
+        }
+    }
+    #[tokio::test]
+    async fn workflow_native_failed_build_keeps_output_on_the_visible_screen() {
+        let (_dir, mut runtime, _fake) = native("failed").await;
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Failed);
+        let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+        let logs = reply["process_logs"].as_array().unwrap();
+        let log = logs.iter().find(|log| log["stage"] == serde_json::json!({"Execute":"Build"})).unwrap();
+        let output = std::fs::read_to_string(log["log_path"].as_str().unwrap()).unwrap();
+        for evidence in ["native stdout evidence", "native stderr evidence"] {
+            assert!(output.contains(evidence), "missing {evidence}: {output:?}");
+            assert!(log["tail"].as_str().unwrap().contains(evidence));
         }
     }
     #[tokio::test]
