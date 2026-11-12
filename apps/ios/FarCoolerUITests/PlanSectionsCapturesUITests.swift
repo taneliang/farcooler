@@ -125,15 +125,16 @@ final class PlanSectionsCapturesUITests: XCTestCase {
     }
 
     /// The share of the screen's width, from the left edge, that holds the glyph column; blacked out in a resting-picture check.
-    private static let glyphColumnShare = 0.14
+    // Leave room for the pulse beyond the glyph itself: on CI its right edge crosses 14%
+    // of the screen, so those changing pixels kept page 2 from ever settling (ov-1094).
+    private static let glyphColumnShare = 0.18
 
-    /// The screen below the status bar, as pixels: the clock ticks over a minute boundary in the middle of a
-    /// walk, and a picture that differs only by it is the same page (the sixth page of the light sheet was
-    /// the fifth with the clock a minute on, in the first run of this fix).
+    /// The list below the bars, as pixels. The clock can tick during a walk, and the translucent
+    /// navigation bar can show a pulsing glyph blurred behind it even after the list stops (ov-1094).
     private func bodyPicture() -> Data {
         let shot = XCUIScreen.main.screenshot().image
         guard let full = shot.cgImage else { return XCUIScreen.main.screenshot().pngRepresentation }
-        let top = Int(70 * shot.scale)
+        let top = Int(XCUIApplication().navigationBars["Plan"].frame.maxY * shot.scale)
         let crop = CGRect(x: 0, y: top, width: full.width, height: full.height - top)
         guard let body = full.cropping(to: crop) else { return XCUIScreen.main.screenshot().pngRepresentation }
         // Without the glyph column. A working agent's glyph pulses forever (`symbolEffect(.pulse, .repeating)`), so
