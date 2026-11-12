@@ -336,7 +336,7 @@ async fn workflow_coding_reviewer_rejection_has_bounded_rework() {
 }
 
 #[tokio::test]
-async fn workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_fact() {
+async fn workflow_coding_cancel_unknown_provider_completes_when_its_process_has_settled() {
     let (_dir, mut runtime) = configured(false, "ci-pending").await;
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     for time in 2..15 { runtime.pump(time).await.unwrap(); }
@@ -345,12 +345,10 @@ async fn workflow_coding_cancel_unknown_provider_waits_for_original_acceptance_f
     runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(), expected_revision: state.revision,
         sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 100).unwrap();
     runtime.pump(101).await.unwrap();
-    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
-    let path = runtime.root.join("receipts").join(format!("{}.provider.json", digest(&original.effect)));
-    let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    raw["run"]["status"] = "completed".into(); std::fs::write(path, serde_json::to_vec(&raw).unwrap()).unwrap();
-    runtime.pump(102).await.unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
+    let path = runtime.root.join("receipts").join(format!("{}.provider.json", digest(&original.effect)));
+    let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(raw["run"]["status"], "in_progress", "cancellation does not claim the provider succeeded");
     let stored = runtime.store.workflow_outbox("w").unwrap();
     assert_eq!(stored.iter().find(|s| s.effect.id == original.effect.id).unwrap().dispatch_state, "settled");
 }
@@ -682,4 +680,144 @@ fn live_codex_hooks(claude: &Path) -> String {
 }
 fn live_process(live: &farcooler_protocol::workflow_config::CodingConfig) -> farcooler_protocol::workflow_config::CodingCommand {
     match &live.harness { farcooler_protocol::workflow_config::CodingHarness::Native { process, .. } => process.clone(), _ => unreachable!() }
+}
+
+// ov-1122: use the same ticket through cancel/reopen/start, as the app does.
+fn rerun_command(runtime: &Runtime, workspace: &str, command: Command) {
+    let state = runtime.state(workspace).unwrap();
+    let sequence = state.as_ref().and_then(|s| s.source_sequences.get("controller").copied()).unwrap_or(0) + 1;
+    let receipt = runtime.apply(Request { id: format!("rerun-{sequence}"), workspace: workspace.into(),
+        expected_revision: state.map_or(0, |s| s.revision), sequence, command }, "controller", Grant::Controller, 1).unwrap();
+    assert!(receipt.result.is_ok(), "{:?}", receipt.result);
+}
+async fn rerun_fixture() -> (tempfile::TempDir, Runtime, String) {
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let host = Uuid::now_v7();
+    let repo = runtime.repository();
+    let root = runtime.store.create_repository_root(host, repo.to_str().unwrap(), 0).unwrap();
+    let repository = runtime.store.create_repository(host, root.id, "rerun", repo.join(".git").to_str().unwrap(), "").unwrap();
+    let workspace = runtime.store.create_workspace(repository.id, "Rerun", "rr").unwrap().id.to_string();
+    runtime.host = Some(WorktreeHost { dir: dir.path().join("trees"), install_id: "test".into(), locks: Default::default() });
+    rerun_command(&runtime, &workspace, Command::Enqueue { item: "ticket".into(), definition: Definition::ticket(),
+        policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "ticket"), dependencies: BTreeSet::new(),
+        initial_candidate: Some("ticket".into()) });
+    (dir, runtime, workspace)
+}
+fn rerun_start(runtime: &Runtime, workspace: &str, tree: RunTree) {
+    rerun_command(runtime, workspace, Command::Start { item: "ticket".into(), definition: runtime.configured_definition().unwrap(),
+        policy_pin: "p".into(), resource: Exec::item_resource(workspace, "ticket"), dependencies: BTreeSet::new(),
+        initial_candidate: None, models: Default::default(), tree: Some(Box::new(tree)), with: vec![] });
+}
+fn rerun_tree(dir: &Path, name: &str, base: &str) -> RunTree {
+    RunTree { name: name.into(), branch: name.into(), path: dir.join(name).to_string_lossy().into_owned(), base: base.into(), adopted: false }
+}
+#[tokio::test]
+async fn workflow_coding_second_run_of_ticket_provisions_its_own_base() {
+    let (dir, mut runtime, workspace) = rerun_fixture().await;
+    let base = runtime.base.clone();
+    rerun_start(&runtime, &workspace, rerun_tree(dir.path(), "first", &base));
+    runtime.pump(2).await.unwrap();
+    assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].stage, 1);
+    rerun_command(&runtime, &workspace, Command::Cancel { item: "ticket".into(), reason: None });
+    runtime.pump(3).await.unwrap();
+    assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].phase, Phase::Cancelled);
+    rerun_command(&runtime, &workspace, Command::Reopen { item: "ticket".into(), definition: Definition::ticket(),
+        policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "ticket") });
+    adapters::git(&runtime.repository(), &["-c", "user.name=Test", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false",
+        "commit", "--allow-empty", "-m", "new main"]).await.unwrap();
+    let base = adapters::git(&runtime.repository(), &["rev-parse", "HEAD"]).await.unwrap();
+    rerun_start(&runtime, &workspace, rerun_tree(dir.path(), "second", &base));
+    runtime.pump(4).await.unwrap();
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    assert_eq!(state.items["ticket"].stage, 1, "second Provision: {:?}", state.items["ticket"]);
+    assert_eq!(adapters::git(&dir.path().join("second"), &["rev-parse", "HEAD"]).await.unwrap(), base);
+}
+
+async fn mismatched_provision() -> (tempfile::TempDir, Runtime, String, Binding) {
+    let (dir, runtime, workspace) = rerun_fixture().await;
+    let old = runtime.base.clone();
+    adapters::git(&runtime.repository(), &["-c", "user.name=Test", "-c", "user.email=t@localhost", "-c", "commit.gpgsign=false",
+        "commit", "--allow-empty", "-m", "new base"]).await.unwrap();
+    let base = adapters::git(&runtime.repository(), &["rev-parse", "HEAD"]).await.unwrap();
+    rerun_start(&runtime, &workspace, rerun_tree(dir.path(), "mismatch", &base));
+    // Exactly the pre-update state: a legacy item pin, and an admitted Provision of the next run.
+    durable(&runtime.root.join(format!("base-{}.json", digest(&(&workspace, "ticket")))), &serde_json::to_vec(&old).unwrap()).unwrap();
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    let stored = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap();
+    let claim = runtime.store.workflow_claim_effect(&workspace, &stored.effect.id, "old-daemon", state.revision, state.epoch, 2, 10).unwrap().unwrap();
+    assert!(runtime.store.workflow_admit_effect(&claim, 2).unwrap());
+    let binding = Binding::new(&workspace, &stored.effect, claim.resource_generation, 0, &old);
+    (dir, runtime, workspace, binding)
+}
+#[tokio::test]
+async fn workflow_coding_base_mismatch_writes_unstarted_and_fails_safely() {
+    let (dir, runtime, workspace, binding) = mismatched_provision().await;
+    let (_, cancel) = tokio::sync::watch::channel(false);
+    let outcome = runtime.execute_coding(&workspace, &binding, cancel).await.unwrap();
+    assert!(matches!(outcome, Outcome::SafeFailureBecause(_)), "{outcome:?}");
+    assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), outcome);
+    let path = runtime.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)));
+    assert!(path.exists(), "durable Unstarted receipt");
+    assert!(!dir.path().join("mismatch").exists());
+}
+#[tokio::test]
+async fn workflow_coding_legacy_uncertain_provision_recovers_without_execution() {
+    let (dir, runtime, workspace, binding) = mismatched_provision().await;
+    runtime.observe(&workspace, &binding.effect, Outcome::Uncertain, false, 3).unwrap();
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(4).await.unwrap();
+    assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].phase, Phase::Failed);
+    assert!(!dir.path().join("mismatch").exists());
+    rerun_command(&runtime, &workspace, Command::Cancel { item: "ticket".into(), reason: None });
+    assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].phase, Phase::Cancelled);
+    rerun_command(&runtime, &workspace, Command::Reopen { item: "ticket".into(), definition: Definition::ticket(),
+        policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "ticket") });
+    assert!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].definition.is_ticket());
+}
+#[tokio::test]
+async fn workflow_coding_legacy_uncertain_stop_recovers_to_cancelled() {
+    let (dir, runtime, workspace, binding) = mismatched_provision().await;
+    runtime.observe(&workspace, &binding.effect, Outcome::Uncertain, false, 3).unwrap();
+    rerun_command(&runtime, &workspace, Command::Cancel { item: "ticket".into(), reason: None });
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    let stop = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap();
+    let claim = runtime.store.workflow_claim_effect(&workspace, &stop.effect.id, "old-stop", state.revision, state.epoch, 4, 10).unwrap().unwrap();
+    assert!(runtime.store.workflow_admit_effect(&claim, 4).unwrap());
+    runtime.observe(&workspace, &stop.effect, Outcome::Uncertain, false, 5).unwrap();
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(6).await.unwrap();
+    assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].phase, Phase::Cancelled);
+    assert!(!dir.path().join("mismatch").exists());
+}
+
+#[tokio::test]
+async fn workflow_coding_stop_uncertain_answer_with_settled_process_completes() {
+    let (_dir, mut runtime) = configured(false, "ci-wrong").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    for time in 2..15 { runtime.pump(time).await.unwrap(); }
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
+    rerun_command(&runtime, "w", Command::Cancel { item: "one".into(), reason: None });
+    runtime.pump(20).await.unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
+}
+
+#[tokio::test]
+async fn workflow_coding_legacy_admitted_base_and_receipts_keep_working() {
+    let (_dir, mut runtime) = configured(false, "pass").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let provision = runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .find(|s| matches!(s.effect.kind, EffectKind::Execute(StageKind::Provision))).unwrap().effect;
+    let legacy = runtime.root.join(format!("base-{}.json", digest(&("w", &provision.item))));
+    std::fs::rename(runtime.base_path("w", &provision).unwrap(), &legacy).unwrap();
+    let bytes = std::fs::read(&legacy).unwrap();
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Done);
+    assert_eq!(std::fs::read(legacy).unwrap(), bytes);
+    assert!(!runtime.base_path("w", &provision).unwrap().exists(), "never rebind an admitted legacy run");
 }

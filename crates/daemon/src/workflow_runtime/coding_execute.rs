@@ -124,6 +124,22 @@ impl Exec {
     fn unstarted_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
+    fn refuse_provision(&self, binding: &Binding, why: String) -> Result<Outcome> {
+        durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why: why.clone() })?)?;
+        Ok(Outcome::SafeFailureBecause(why))
+    }
+    /// A process fact is written only after its owned writers have ended. Its answer can still be unknown.
+    fn settled_process(&self, binding: &Binding) -> Result<(ProcessFact, Vec<u8>)> {
+        let raw = self.bytes(&self.fact_path(binding))?;
+        let fact: ProcessFact = serde_json::from_slice(&raw)?;
+        let command = self.bound_command(binding, false)?;
+        if fact.binding != *binding || fact.argv != command.argv || fact.environment != command.environment
+            || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
+            return Err(Error::Refused("configured process receipt mismatch"));
+        }
+        if self.is_native_agent(binding) { self.verify_native_settlement(binding, fact.exit)?; }
+        Ok((fact, raw))
+    }
     pub(super) fn git_settlement(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.git-settled.json", digest(&binding.effect)))
     }
@@ -375,8 +391,21 @@ impl Exec {
         // crash lost its journal. Never execute it, and never infer that external
         // acceptance was undone. Box breaks the Stop -> original reconciliation
         // recursion; original is required to be Execute above.
-        let outcome = Box::pin(self.reconcile_coding(&original_binding)).await?;
-        if outcome == Outcome::Uncertain { return Err(Error::Refused("original coding acceptance remains unknown")); }
+        let reconciled = Box::pin(self.reconcile_coding(&original_binding)).await;
+        let outcome = match reconciled {
+            Ok(outcome) if outcome != Outcome::Uncertain => outcome,
+            other => {
+                // Cancellation needs quiescence, not a successful answer from CI, a reviewer or a dirty tree.
+                // Limit this to process stages: an unknown push/landing acceptance still needs reconciliation.
+                if matches!(original.effect.kind, EffectKind::Execute(StageKind::Build | StageKind::Check
+                    | StageKind::Run | StageKind::Review(_) | StageKind::Ci)) {
+                    let (_, raw) = self.settled_process(&original_binding)?;
+                    return Ok(Outcome::Stopped { operation: operation.into(),
+                        receipt: digest(&("coding-quiescent/v1", binding, &original_binding, digest(&raw))) });
+                }
+                return match other { Err(error) => Err(error), _ => Err(Error::Refused("original coding acceptance remains unknown")) };
+            }
+        };
         Ok(Outcome::Stopped { operation: operation.into(), receipt: digest(&("coding-quiescent/v1", binding, &original_binding, outcome)) })
     }
     /// End a native agent whose turn was never settled, and write the process fact its settlement implies.
@@ -402,16 +431,14 @@ impl Exec {
                 // A download that fails has made nothing: the step fails with the sentence, kept so a restart reads it.
                 let log = self.root.join("receipts").join(format!("{}.provision.fetch.output", digest(&binding.effect)));
                 if let Err(why) = self.ensure_start_objects(&binding.base, &log).await {
-                    durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why })?)?;
-                    return self.reconcile_coding(binding).await;
+                    return self.refuse_provision(binding, why);
                 }
                 match &binding.effect.tree {
                 Some(named) => match self.provision_named(workspace, binding, named).await {
                     // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
                     // a pane still in it): the step fails with it, kept so a restart reads it (ov-1074).
                     Err(Error::Domain(refused)) => {
-                        durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why: refused.to_string() })?)?;
-                        return self.reconcile_coding(binding).await;
+                        return self.refuse_provision(binding, refused.to_string());
                     }
                     other => other?,
                 },
@@ -552,6 +579,15 @@ impl Exec {
             if unstarted.binding != *binding { return Err(Error::Refused("foreign Provision refusal")); }
             return Ok(Outcome::SafeFailureBecause(unstarted.why));
         }
+        if matches!(kind, StageKind::Provision) && !self.git_settlement(binding).try_exists()? {
+            if let Some(tree) = &binding.effect.tree {
+                // Older daemons refused this before touching the tree, but left no Unstarted receipt (ov-1122).
+                // Recover the exact refusal without running Provision, even when its Stop is already Uncertain.
+                if let Err(Error::Domain(refused)) = named_tree::check_base(binding, tree) {
+                    return self.refuse_provision(binding, refused.to_string());
+                }
+            }
+        }
         if matches!(kind, StageKind::Provision | StageKind::Land) {
             let raw = self.bytes(&self.git_settlement(binding))?;
             let settlement: GitSettlement = serde_json::from_slice(&raw)?;
@@ -564,14 +600,7 @@ impl Exec {
             if self.is_native_agent(binding) && !self.fact_path(binding).try_exists()? && self.recorded_verdict(binding) {
                 self.settle_interrupted_native(binding, Some(true)).await?;
             }
-            let raw = self.bytes(&self.fact_path(binding))?;
-            let fact: ProcessFact = serde_json::from_slice(&raw)?;
-            let command = self.bound_command(binding, false)?;
-            if fact.binding != *binding || fact.argv != command.argv || fact.environment != command.environment
-                || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
-                return Err(Error::Refused("configured process receipt mismatch"));
-            }
-            if self.is_native_agent(binding) { self.verify_native_settlement(binding, fact.exit)?; }
+            let (fact, raw) = self.settled_process(binding)?;
             // Even a dirty interrupted build can settle cancellation once this
             // exact owned group has been reaped; it supplies no candidate success.
             if fact.exit != Some(0) { return Ok(Outcome::SafeFailure); }

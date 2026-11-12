@@ -287,8 +287,8 @@ pub(super) async fn stop_on_changes(tree: &Path, ledger: &Path, run: &str, candi
 impl Exec {
     /// Make the run's named worktree, record it, and claim it for the board, under the repository's lock.
     pub(super) async fn provision_named(&self, workspace: &str, binding: &Binding, tree: &RunTree) -> Result<()> {
+        check_base(binding, tree)?;
         let host = self.host.as_ref().ok_or(Error::Refused("this runner can't make a named worktree for a run"))?;
-        if binding.base != tree.base { return Err(Error::Refused("named worktree base differs from the run's")); }
         let board = Uuid::parse_str(workspace).map_err(|_| Error::Refused("invalid workspace"))?;
         let repository = self.store.get_workspace(board).map_err(|_| Error::Refused("unknown workspace"))?.repository_id;
         let lock = host.lock(repository);
@@ -316,6 +316,11 @@ impl Exec {
 
 /// A refusal said as a sentence, for one that comes before anything is changed (ov-1074).
 fn said(sentence: &str) -> Error { Error::Domain(DomainError::refused(sentence.into())) }
+
+pub(super) fn check_base(binding: &Binding, tree: &RunTree) -> Result<()> {
+    if binding.base != tree.base { return Err(said("The worktree's base differs from the run's pinned base. Nothing was made; cancel and reopen the ticket to start a new run.")); }
+    Ok(())
+}
 
 /// An adopted tree must be clean (ov-968), so the run is its one writer. Changes in it are a person's, so the run
 /// refuses and leaves them as they are; nothing here resets or cleans (ov-979).

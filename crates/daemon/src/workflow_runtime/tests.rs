@@ -495,7 +495,7 @@ async fn workflow_runtime_interrupted_base_publication_recovers_before_admission
         let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap().effect;
         runtime.store.workflow_claim_effect("w", &effect.id, "crashed-publisher", state.revision,
             state.epoch, 2, 7).unwrap().unwrap();
-        let path = runtime.root.join(format!("base-{}.json", digest(&("w", &effect.item))));
+        let path = runtime.base_path("w", &effect).unwrap();
         if let Some(bytes) = partial { durable(&path, bytes.as_bytes()).unwrap(); }
         // A crash during the new writer's temporary publication is ignored too.
         durable(&runtime.root.join("base-publish-orphan.tmp"), b"\"unfinished").unwrap();
@@ -519,7 +519,7 @@ async fn workflow_runtime_admitted_base_is_never_recreated() {
     let (binding, claim) = claim(&runtime, "w", 2);
     runtime.pin_base("w", &binding.effect).await.unwrap();
     assert!(runtime.store.workflow_admit_effect(&claim, 2).unwrap());
-    let path = runtime.root.join(format!("base-{}.json", digest(&("w", &binding.effect.item))));
+    let path = runtime.base_path("w", &binding.effect).unwrap();
     // Corrupt legacy admitted pins are refused, never resampled or automatically repaired.
     std::fs::write(&path, b"").unwrap();
     drop(runtime);

@@ -429,7 +429,7 @@ async fn a_remote_that_cant_be_read_at_start_stops_the_ticket_and_says_why() {
     assert_eq!(outbox(&r.runtime, StageKind::Build), 0, "nothing was built");
     let provision = r.runtime.store.workflow_outbox("w").unwrap().into_iter()
         .find(|s| s.effect.kind == EffectKind::Execute(StageKind::Provision)).unwrap();
-    assert!(!r.runtime.root.join(format!("base-{}.json", digest(&("w", &provision.effect.item)))).exists(), "no base was pinned");
+    assert!(!r.runtime.base_path("w", &provision.effect).unwrap().exists(), "no base was pinned");
     assert!(!r.runtime.item_tree("w", &provision.effect.item).exists(), "no tree was made");
     assert_eq!(r.runtime.state("w").unwrap().unwrap().items["one"].failure.as_deref(), Some(super::coding_landing::UNREAD_TARGET), "the ticket says why");
 }

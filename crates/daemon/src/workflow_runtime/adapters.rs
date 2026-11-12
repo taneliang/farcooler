@@ -63,11 +63,39 @@ pub(super) async fn git(tree: &Path, args: &[&str]) -> Result<String> {
 /// and npm couldn't find `node_modules/.bin` in every gate (ov-1081).
 pub(super) fn folder_name(digest: &str) -> String { digest.replace(':', "-") }
 impl Exec {
-    fn base_path(&self, workspace: &str, effect: &Effect) -> PathBuf {
+    fn legacy_base_path(&self, workspace: &str, effect: &Effect) -> PathBuf {
         self.root.join(format!("base-{}.json", digest(&(workspace, &effect.item))))
     }
+    fn base_provision(&self, workspace: &str, effect: &Effect) -> Result<Option<Effect>> {
+        let effects = self.store.workflow_outbox(workspace)?;
+        if let EffectKind::Stop { operation } = &effect.kind {
+            let original = effects.iter().find(|s| s.effect.id == *operation && matches!(s.effect.kind, EffectKind::Execute(_)))
+                .ok_or(Error::Refused("missing original base binding"))?;
+            return self.base_provision(workspace, &original.effect);
+        }
+        // `run` changes at every stage, and can repeat after Reopen resets the fences. The Provision
+        // effect's unique id owns the base for all following steps, up to this item's next Provision.
+        // The outbox is ordered by revision; an item's next step is always emitted in a later revision.
+        let end = effects.iter().position(|s| s.effect.id == effect.id).ok_or(Error::Refused("missing base effect"))?;
+        Ok(effects[..=end].iter().rev().find(|s| s.effect.item == effect.item
+            && matches!(s.effect.kind, EffectKind::Execute(StageKind::Provision))).map(|s| s.effect.clone()))
+    }
+    pub(super) fn base_path(&self, workspace: &str, effect: &Effect) -> Result<PathBuf> {
+        Ok(match self.base_provision(workspace, effect)? {
+            Some(provision) => self.root.join(format!("base-{}.json", digest(&(workspace, &effect.item, &provision.id)))),
+            None => self.legacy_base_path(workspace, effect),
+        })
+    }
     pub(super) fn item_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
-        let path = self.base_path(workspace, effect);
+        // Cancel has its own run id, but stops work bound to the original run's base.
+        if let EffectKind::Stop { operation } = &effect.kind {
+            let effects = self.store.workflow_outbox(workspace)?;
+            let original = effects.iter().find(|s| s.effect.id == *operation && matches!(s.effect.kind, EffectKind::Execute(_)))
+                .ok_or(Error::Refused("missing original base binding"))?;
+            return self.item_base(workspace, &original.effect);
+        }
+        let run_path = self.base_path(workspace, effect)?;
+        let path = if run_path.try_exists()? { run_path } else { self.legacy_base_path(workspace, effect) };
         let bytes = match self.bytes(&path) {
             Ok(bytes) => bytes,
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(self.base.clone()),
@@ -80,7 +108,19 @@ impl Exec {
         Ok(base)
     }
     pub(super) async fn pin_base(&self, workspace: &str, effect: &Effect) -> Result<String> {
-        let path = self.base_path(workspace, effect);
+        let mut path = self.base_path(workspace, effect)?;
+        let effects = self.store.workflow_outbox(workspace)?;
+        let provision = self.base_provision(workspace, effect)?;
+        let start = provision.as_ref().and_then(|p| effects.iter().position(|s| s.effect.id == p.id)).unwrap_or(0);
+        let end = effects.iter().position(|s| s.effect.id == effect.id).ok_or(Error::Refused("missing base effect"))?;
+        let item_effects: Vec<_> = effects[start..=end].iter().filter(|s| s.effect.item == effect.item).collect();
+        if !path.try_exists()? && item_effects.iter().any(|s| s.resource_generation.is_some()
+            && matches!(s.dispatch_state.as_str(), "admitted" | "settled" | "uncertain")) {
+            // Already-admitted runs keep their old bindings and receipts, including legacy pins.
+            // A new run never selects that legacy pin just because its ticket has the same name.
+            path = self.legacy_base_path(workspace, effect);
+            if !path.try_exists()? { return Err(Error::Refused("admitted run base is missing")); }
+        }
         let exists = path.try_exists()?;
         let selected = if exists { self.item_base(workspace, effect) } else {
             Err(Error::Refused("base not yet published"))
@@ -90,8 +130,6 @@ impl Exec {
                 // Only the original claimed Provision can repair an old interrupted
                 // publication. Claimed cannot follow admitted, and outbox history is
                 // never erased, so no previously admitted item binding is resampled.
-                let effects = self.store.workflow_outbox(workspace)?;
-                let item_effects: Vec<_> = effects.iter().filter(|s| s.effect.item == effect.item).collect();
                 if item_effects.len() != 1 || item_effects[0].effect != *effect
                     || item_effects[0].dispatch_state != "claimed"
                     || !matches!(effect.kind, EffectKind::Execute(StageKind::Provision))
