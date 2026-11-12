@@ -427,8 +427,18 @@ final class NativeAgentViewTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(viewer.exists, "a short drag closed the image")
         // Zoomed in, a drag down pans the image; zoomed back out, it closes.
+        let beforeZoom = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        beforeZoom.name = "Image before pinch"
+        beforeZoom.lifetime = .keepAlways
+        add(beforeZoom)
         viewer.pinch(withScale: 3, velocity: 3)
         Thread.sleep(forTimeInterval: 1)
+        // Keep both states in a red nightly's result bundle: the gesture log
+        // records the pinch, but cannot say whether Quick Look actually zoomed.
+        let afterZoom = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        afterZoom.name = "Image after pinch"
+        afterZoom.lifetime = .keepAlways
+        add(afterZoom)
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: .fast, thenHoldForDuration: 0)
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(viewer.exists, "a drag on the zoomed image closed it rather than panning")
