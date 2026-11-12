@@ -91,6 +91,24 @@ runs:
         xcrun simctl io "$SIMULATOR_ID" enumerate 2>/dev/null \
           | awk '/Display class: 0/ {d=1} d && /Default width/ {w=$3} d && /Default height/ {print "Screen: " w " x " $3 " px"; exit}' || true
 
+    # Notification authorization belongs to the installed app and survives
+    # between launches. A denied answer prevents NotificationTapTests from
+    # filing the real banner, and simctl privacy cannot grant notifications.
+    # Start phone2 with a fresh install so its monitor can answer the prompt.
+    # Read the ID from the products: the channel determines the bundle ID.
+    - name: Reset phone2 notification authorization
+      if: ${{ inputs.shard == 'phone2' }}
+      shell: bash -e {0}
+      run: |
+        app="$RUNNER_TEMP/ios-dd/Products/Debug-iphonesimulator/FarCooler.app"
+        bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+        if xcrun simctl get_app_container "$SIMULATOR_ID" "$bundle_id" >/dev/null 2>&1; then
+          xcrun simctl uninstall "$SIMULATOR_ID" "$bundle_id"
+          echo "Uninstalled $bundle_id to reset its notification authorization."
+        else
+          echo "$bundle_id is not installed; notification authorization starts fresh."
+        fi
+
     # The script, never xcodebuild directly: it fails a run where every test
     # skipped, and one where a test skipped for want of a runner. XCTESTRUN,
     # set above, makes it `test-without-building` against those products.
