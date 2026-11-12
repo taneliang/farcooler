@@ -181,7 +181,7 @@ final class PlanSectionsCapturesUITests: XCTestCase {
             // samples after settling. A failed CI capture otherwise has no image of
             // the state it was waiting on (ov-1094).
             if page == 1 {
-                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-before-\(scheme).png"))
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-before-\(scheme).png-data"))
             }
             previous = here  // the same cropped picture `.changed` samples, so a clock tick alone is no change
             // The sheet's own list, as `reveal` does: a swipe on the window can land on the sheet's chrome.
@@ -190,9 +190,9 @@ final class PlanSectionsCapturesUITests: XCTestCase {
             list.swipeUp(velocity: .slow)
             let after = settled()
             if page == 1 {
-                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-after-1-\(scheme).png"))
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-after-1-\(scheme).png-data"))
                 Thread.sleep(forTimeInterval: 1.2)
-                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-after-2-\(scheme).png"))
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-after-2-\(scheme).png-data"))
             }
             if after == here { break }
         }
