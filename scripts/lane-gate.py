@@ -304,6 +304,8 @@ def steps_for(job, workflows, ctx):
                     skip = "checks the runner, installs the watchOS platform or packages products for CI's UI shards"
             elif SETUP.search(hay):
                 skip = "installs a toolchain on a CI runner"
+            elif name == "Green bases for Rust shadow (ov-1116)":
+                skip = "CI lists verified green bases; local shadow safely proposes full without that evidence"
             elif job == "web" and WEB_LINUX_ONLY.search(hay):
                 skip = "needs the Linux x86 wasm toolchain CI downloads; left to CI"
             elif job == "ios" and not IOS_KEEP.search(run):

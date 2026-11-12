@@ -147,6 +147,7 @@ jobs:
       # the code paths it must never swallow, and the green-base rule against a
       # scratch repository.
       - run: ./scripts/ci-changes.py --self-test
+      - run: python3 scripts/rust-shadow-test.py
       # Reproduce a gate launched by scripts/heavy: private test queues must
       # still lock even though the parent already holds the machine queue.
       - run: HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test
@@ -388,6 +389,9 @@ jobs:
 
   rust:
     name: Rust (${{ matrix.os }})
+    permissions:
+      actions: read
+      contents: read
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ${{ matrix.os }}
@@ -408,6 +412,17 @@ jobs:
         os: [ubuntu-24.04, macos-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Green bases for Rust shadow (ov-1116)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A failed/partial listing is no evidence: planner falls back to full.
+          if ! gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+            --jq '.workflow_runs[] | {head_sha}' > "$RUNNER_TEMP/rust-green.ndjson"; then
+            rm -f "$RUNNER_TEMP/rust-green.ndjson"
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -724,7 +739,18 @@ jobs:
       # layouts as JSON, which `farcooler_tmux::layout` now reads. Under
       # `cargo test` they had never run on 3.8, because an earlier binary had
       # already failed and `cargo test` stops at the first.
-      - run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace
+      # Shadow only: the full command always runs, then a narrow warm replay.
+      # Feature/target tests above and full doctests below are untouched.
+      - name: Full Rust tests and shadow measurement
+        env:
+          CANDIDATES: ${{ runner.temp }}/rust-green.ndjson
+        run: python3 scripts/rust-shadow.py --out "${{ runner.temp }}/rust-shadow" -- ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-shadow-${{ matrix.os }}
+          path: ${{ runner.temp }}/rust-shadow/
+
 
       # nextest does not run doctests, so this is the only thing that would.
       # There are none today (checked: every `Doc-tests` target reports zero),
