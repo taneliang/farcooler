@@ -980,6 +980,18 @@ async fn a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_c
         files: Default::default(), dependencies: Default::default(), rotate_models: false, auto_queue: true,
     });
     at_join(&mut runtime, "one", &definition).await;
+    // Removing automatic starts must not strand a reviewed run admitted under auto_queue.
+    let mut manual = definition.clone();
+    manual.start_policy = None;
+    let state = runtime.state("w").unwrap().unwrap();
+    let publication = farcooler_protocol::workflow_commands::Action::Publish {
+        mutation: farcooler_protocol::workflow_commands::Mutation {
+            id: "remove-start-policy".into(), revision: state.revision, epoch: state.epoch, sequence: 1,
+        }, expected_pin: None, definition: manual, adapter: None, notifications: None,
+    };
+    let answer = runtime.wire_command("w", "owner", publication).unwrap();
+    assert!(answer.pointer("/receipt/result/Ok").is_some(), "{answer}");
+    assert!(runtime.store.workflow_configuration("w").unwrap().unwrap().definition.start_policy.is_none());
     // No Queue command: the next owned sweep admits it to its group.
     runtime.pump(10).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();

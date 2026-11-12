@@ -251,6 +251,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removing_the_policy_holds_waiting_tickets_without_changing_admitted_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("runtime");
+        let runtime = Runtime::create(&root).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Fixed(1)));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a", "b"]);
+        runtime.schedule_with_load(&["w".into()], 100, Some(0)).unwrap();
+        let admitted = runtime.state("w").unwrap().unwrap().items["a"].clone();
+
+        d.start_policy = None;
+        publish(&runtime, d.clone());
+        runtime.schedule_with_load(&["w".into()], 101, Some(0)).unwrap();
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["a"], admitted);
+        complete(&runtime, "a", 102);
+        // Policy removal survives a restart and leaves the waiting ticket available for later admission.
+        drop(runtime);
+        let runtime = Runtime::open(&root).unwrap();
+        runtime.schedule_with_load(&["w".into()], 103, Some(0)).unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(finished(&state, "a"));
+        assert!(state.items["b"].definition.is_ticket());
+
+        d.start_policy = Some(policy(Budget::Unlimited));
+        publish(&runtime, d);
+        runtime.schedule_with_load(&["w".into()], 104, Some(0)).unwrap();
+        assert!(active(&runtime.state("w").unwrap().unwrap().items["b"]));
+    }
+
+    #[tokio::test]
     async fn lowering_the_published_budget_preserves_runs_and_holds_new_starts() {
         let dir = tempfile::tempdir().unwrap();
         let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();

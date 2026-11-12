@@ -34,3 +34,21 @@ Validation on this branch:
 Git/process fixture tests required execution outside the filesystem sandbox.
 No live policy was published and no real agents were launched for verification.
 Usage and policy JSON examples are in `docs/workflow-scheduling.md`.
+
+Policy-removal follow-up:
+
+- Added a restart regression showing that removing `start_policy` leaves admitted
+  runs unchanged, holds pending tickets after completion, and allows a later
+  publication to resume admission.
+- Strengthened the automatic landing/capacity test by publishing a definition
+  without `start_policy` before the reviewed ticket queues. Its admitted
+  `auto_queue` policy still joins it without a Queue command.
+- Re-ran the workflow crate tests and the daemon workflow runtime suite:
+  278 daemon tests passed. Both changed tests also passed together.
+- Temporarily replacing absent policy with unlimited admission and selecting
+  auto-queue from the current publication made both regression tests fail at
+  their respective waiting-ticket and joined-phase assertions. Restored the
+  original scheduling implementation afterward; all eight scheduling and
+  automatic landing/capacity tests then passed.
+- File-size budget, swallowed-call lint, doc-comment check against HEAD, and
+  `git diff --check` passed.
