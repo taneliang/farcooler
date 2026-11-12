@@ -101,12 +101,13 @@ mod tests {
         StartPolicy { columns: ["todo".into()].into(), budget, files: Default::default(), dependencies: Default::default(),
             rotate_models: true, auto_queue: true }
     }
-    fn publish(runtime: &Runtime, definition: Definition) {
-        let state = runtime.state("w").unwrap();
+    fn publish(runtime: &Runtime, definition: Definition) { publish_on(runtime, "w", definition); }
+    fn publish_on(runtime: &Runtime, workspace: &str, definition: Definition) {
+        let state = runtime.state(workspace).unwrap();
         let action = Action::Publish { mutation: Mutation { id: format!("pub-{}", definition.pin()), revision: state.map_or(0, |s| s.revision),
-            epoch: 1, sequence: 1 }, expected_pin: runtime.store.workflow_configuration("w").unwrap().map(|c| c.pin),
+            epoch: 1, sequence: 1 }, expected_pin: runtime.store.workflow_configuration(workspace).unwrap().map(|c| c.pin),
             definition, adapter: None, notifications: None };
-        let answer = runtime.wire_command("w", "owner", action).unwrap();
+        let answer = runtime.wire_command(workspace, "owner", action).unwrap();
         assert!(answer.pointer("/receipt/result/Ok").is_some(), "{answer}");
     }
     fn track(runtime: &Runtime, keys: &[&str]) {
@@ -216,6 +217,63 @@ mod tests {
         complete(&runtime, "a", 102);
         runtime.schedule_with_load(&["w".into()], 103, Some(0)).unwrap();
         assert!(active(&runtime.state("w").unwrap().unwrap().items["b"]));
+    }
+
+    #[tokio::test]
+    async fn file_claims_serialize_across_boards_without_holding_independent_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut first = coding_definition(false);
+        first.stages.retain(|s| s.kind == StageKind::Build);
+        let mut claims = policy(Budget::Unlimited);
+        claims.files.insert("a".into(), ["shared.rs".into()].into());
+        first.start_policy = Some(claims);
+        publish(&runtime, first.clone());
+        track(&runtime, &["a"]);
+        runtime.schedule_with_load(&["w".into()], 100, Some(0)).unwrap();
+
+        let mut second = first;
+        let claims = second.start_policy.as_mut().unwrap();
+        claims.files.clear();
+        claims.files.insert("b".into(), ["shared.rs".into()].into());
+        claims.files.insert("c".into(), ["independent.rs".into()].into());
+        publish_on(&runtime, "other", second);
+        runtime.track_tickets(&[("other".into(), "b".into(), "todo".into()),
+            ("other".into(), "c".into(), "todo".into())]).unwrap();
+        runtime.schedule_with_load(&["other".into()], 101, Some(0)).unwrap();
+        let state = runtime.state("other").unwrap().unwrap();
+        assert!(state.items["b"].definition.is_ticket(), "the first board still owns shared.rs");
+        assert!(active(&state.items["c"]), "an independent file can build in parallel");
+
+        complete(&runtime, "a", 102);
+        runtime.schedule_with_load(&["other".into()], 103, Some(0)).unwrap();
+        assert!(active(&runtime.state("other").unwrap().unwrap().items["b"]));
+    }
+
+    #[tokio::test]
+    async fn lowering_the_published_budget_preserves_runs_and_holds_new_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Fixed(3)));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a", "b", "c", "d"]);
+        runtime.schedule_with_load(&["w".into()], 100, Some(0)).unwrap();
+        d.start_policy.as_mut().unwrap().budget = Budget::Fixed(1);
+        publish(&runtime, d);
+        complete(&runtime, "a", 101);
+        complete(&runtime, "b", 102);
+        runtime.schedule_with_load(&["w".into()], 103, Some(0)).unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(active(&state.items["c"]));
+        assert!(state.items["d"].definition.is_ticket(), "the reduced budget is still full");
+        assert_eq!(state.items["c"].definition.start_policy.as_ref().unwrap().budget, Budget::Fixed(3));
+        complete(&runtime, "c", 104);
+        runtime.schedule_with_load(&["w".into()], 105, Some(0)).unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(active(&state.items["d"]));
+        assert_eq!(state.items["d"].definition.start_policy.as_ref().unwrap().budget, Budget::Fixed(1));
     }
 
 }
