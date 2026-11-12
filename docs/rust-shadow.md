@@ -7,7 +7,9 @@ feature/target checks, full Mac suite, nightly coverage and doctests remain.
 The baseline is the nearest earlier ancestor with a successful main CI run,
 using the same green-run listing and ancestor rule as `ci-changes.py`. A PR's
 base SHA and the previous commit are not proof that tests passed. Missing or
-failed listings, dirty tracked inputs and metadata errors propose full coverage.
+failed listings, dirty tracked or untracked inputs and metadata errors propose
+full coverage. Untracked inputs include tests and binaries Cargo auto-discovers;
+ignored build outputs do not make the checkout dirty.
 
 The graph comes from locked Cargo metadata with all features and no platform
 filter. Both resolve edges and dependency declarations contribute normal, dev,
@@ -29,14 +31,21 @@ CI uploads `rust-shadow-<os>` with:
 - `plan.json`: green base/head, changes, selected packages and reasons.
 - `full-inventory.json` and `selected-inventory.json`: nextest's complete JSON
   inventories, including ignored tests and filter matches.
-- `measurement.json`: actual full/replay wall seconds, exits, sampled load and
-  acceptance. Failed inventory collection is recorded and rejects the result.
+- `measurement.json`: actual full/replay wall seconds, exits, sampled load,
+  acceptance and compared runnable test counts. Failed inventory collection or
+  comparison is recorded and rejects the result.
 - `summary.txt`, also published to the job summary.
 
 The existing leak-checked full command always runs unchanged. Only after it
 passes does a narrow selection replay the same command with a package filter.
-Both runs wait for one- and five-minute load below 20. Load is sampled during
-execution; any sample at or above 20 invalidates the savings figure. A failure
+Inventory collection and both runs wait for one- and five-minute load below 20.
+The selected inventory must preserve every full-inventory case (including
+ignored tests) in selected packages and match exactly the proposed runnable
+test identities. Unknown schemas, empty full inventories, missing cases and
+unexpected runnable tests reject selection; nextest may omit listing binaries
+outside the filter. The full command still runs when inventory evidence fails.
+Load is sampled during execution; any sample at or above 20 invalidates the
+savings figure. A failure
 in either run rejects selection and fails the step. The test suite plants a CLI
 contract failure that passes a CLI-only run and fails its omitted daemon and
 Mac-style consumers; that result must reject selection.

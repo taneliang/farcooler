@@ -101,8 +101,8 @@ def plan(repo, candidates):
         raise ValueError("no verified green ancestor (previous commit is not evidence)")
     raw = capture(repo, "git", "diff", "--no-renames", "--name-status", "-z", f"{base}..{head}").split("\0")
     changes = list(zip(raw[0:-1:2], raw[1:-1:2]))
-    if capture(repo, "git", "status", "--porcelain", "--untracked-files=no").strip():
-        raise ValueError("dirty tracked inputs")
+    if capture(repo, "git", "status", "--porcelain", "--untracked-files=normal").strip():
+        raise ValueError("dirty or untracked inputs")
     # No --filter-platform: foreign target dependencies must remain visible.
     metadata = json.loads(capture(repo, "cargo", "metadata", "--locked", "--format-version", "1", "--all-features"))
     selected, reasons, full = select(repo, metadata, changes)
@@ -118,6 +118,52 @@ def accepted(full_rc, selected_rc, inventory_ok):
     # Even when the proposed selection passes, a planted failure in an omitted
     # consumer rejects it. Full failures are never overwritten by a replay.
     return full_rc == 0 and selected_rc == 0 and inventory_ok
+
+
+def inventory_tests(inventory):
+    """Read nextest's listed cases, retaining ignored and filtered cases."""
+    suites = inventory["rust-suites"]
+    if not isinstance(suites, dict) or not suites:
+        raise ValueError("missing test suites")
+    tests = {}
+    for binary, suite in suites.items():
+        package = suite["package-name"]
+        if suite["status"] not in ("listed", "skipped"):
+            raise ValueError(f"unknown suite status: {binary}")
+        for name, case in suite["testcases"].items():
+            match = case["filter-match"]["status"]
+            if match not in ("matches", "mismatch") or type(case["ignored"]) is not bool:
+                raise ValueError(f"invalid test case: {binary} {name}")
+            tests[binary, name] = (package, case["ignored"], match)
+    return tests
+
+
+def compare_inventories(full, selected, packages):
+    """A package filter must preserve exactly the proposed runnable tests.
+
+    nextest can skip listing whole binaries outside the expression. Compare
+    runnable identities and all cases within selected packages, rather than
+    assuming the two JSON inventories have identical suites.
+    """
+    full = inventory_tests(full)
+    selected = inventory_tests(selected)
+    if not full:
+        raise ValueError("full inventory has no tests")
+    expected_cases = {key: value for key, value in full.items()
+                      if packages is None or value[0] in packages}
+    actual_cases = {key: value for key, value in selected.items()
+                    if packages is None or value[0] in packages}
+    if actual_cases != expected_cases:
+        raise ValueError("selected package cases differ from full inventory")
+    if any(key not in full or value[:2] != full[key][:2] for key, value in selected.items()):
+        raise ValueError("selected inventory contains unknown or changed tests")
+    expected = {key for key, value in expected_cases.items() if value[2] == "matches"}
+    actual = {key for key, value in selected.items() if value[2] == "matches"}
+    if actual != expected:
+        raise ValueError("selected runnable tests differ from package proposal")
+    full_count = sum(value[2] == "matches" for value in full.values())
+    return {"full_runnable": full_count, "selected_runnable": len(actual),
+            "omitted_runnable": full_count - len(actual)}
 
 
 def measure(command, repo):
@@ -150,17 +196,27 @@ def run(args):
         proposal = {"full": True, "packages": [], "reasons": [f"full: {exc}"], "skips_enabled": False}
     (out / "plan.json").write_text(json.dumps(proposal, indent=2) + "\n")
     filters = ["-E", " or ".join(f"package(={p})" for p in proposal["packages"])] if not proposal["full"] else []
+    import heavy_lock
+    heavy_lock.wait_for_load(20, load=lambda: max(os.getloadavg()[:2]))
     inventory_ok = True
+    inventories = {}
+    comparison = None
     for name, extra in (("full", []), ("selected", filters)):
         try:
             inventory = capture(repo, "cargo", "nextest", "list", "--profile", "ci", "--workspace", "--message-format", "json", *extra)
-            json.loads(inventory)
             (out / f"{name}-inventory.json").write_text(inventory)
+            inventories[name] = json.loads(inventory)
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             inventory_ok = False
             (out / f"{name}-inventory-error.txt").write_text(str(exc))
+    if inventory_ok:
+        try:
+            comparison = compare_inventories(inventories["full"], inventories["selected"],
+                                            None if proposal["full"] else set(proposal["packages"]))
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            inventory_ok = False
+            (out / "inventory-comparison-error.txt").write_text(str(exc))
     # Both measurement runs require load <20; never stop another task's work.
-    import heavy_lock
     heavy_lock.wait_for_load(20, load=lambda: max(os.getloadavg()[:2]))
     full = measure(command, repo)
     selected = None
@@ -170,6 +226,7 @@ def run(args):
     valid = accepted(full["exit"], selected["exit"] if selected else full["exit"], inventory_ok)
     under_load_limit = all(m["peak_load_1m_5m"] < 20 for m in (full, selected) if m)
     report = {"full": full, "selected": selected, "selection_accepted": valid,
+              "inventory_comparison": comparison,
               "measurement_under_load_20": under_load_limit,
               "skips_enabled": False, "scope": "default host nextest only; full other suites and doctests retained",
               "warm_wall_savings_seconds": full["wall_seconds"] - selected["wall_seconds"] if selected and valid and under_load_limit else None}

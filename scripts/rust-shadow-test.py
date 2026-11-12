@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from copy import deepcopy
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("rust_shadow", Path(__file__).with_name("rust-shadow.py"))
@@ -43,6 +44,54 @@ class ShadowTests(unittest.TestCase):
 
     def choose(self, *changes):
         return shadow.select(self.repo, self.metadata, changes)
+
+    def inventory(self, selected=False):
+        suites = {}
+        for package in ("farcooler-cli", "farcooler-daemon"):
+            cases = {}
+            for name, ignored in (("contract", False), ("ignored_contract", True)):
+                matches = not ignored and (not selected or package == "farcooler-cli")
+                cases[name] = {"ignored": ignored, "filter-match": {
+                    "status": "matches" if matches else "mismatch"}}
+            suites[package] = {"package-name": package, "status": "listed", "testcases": cases}
+        return {"rust-suites": suites}
+
+    def test_inventories_must_match_the_proposed_cases(self):
+        full, selected = self.inventory(), self.inventory(True)
+        self.assertEqual(shadow.compare_inventories(full, selected, {"farcooler-cli"}),
+                         {"full_runnable": 2, "selected_runnable": 1, "omitted_runnable": 1})
+        # nextest may skip listing a binary excluded by the package filter.
+        skipped = deepcopy(selected)
+        skipped["rust-suites"]["farcooler-daemon"].update(status="skipped", testcases={})
+        shadow.compare_inventories(full, skipped, {"farcooler-cli"})
+        for bad in ({}, {"rust-suites": {}}, full):
+            with self.subTest(bad=bad), self.assertRaises((KeyError, ValueError)):
+                shadow.compare_inventories(full, bad, {"farcooler-cli"})
+        for mutation in ("missing", "filtered", "ignored", "extra", "unknown-status"):
+            bad = deepcopy(selected)
+            cases = bad["rust-suites"]["farcooler-cli"]["testcases"]
+            if mutation == "missing":
+                del cases["ignored_contract"]
+            elif mutation == "filtered":
+                cases["contract"]["filter-match"]["status"] = "mismatch"
+            elif mutation == "ignored":
+                cases["contract"]["ignored"] = True
+            elif mutation == "extra":
+                cases["new"] = deepcopy(cases["contract"])
+            else:
+                cases["contract"]["filter-match"]["status"] = "unknown"
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                shadow.compare_inventories(full, bad, {"farcooler-cli"})
+
+    def test_untracked_cargo_inputs_force_full_fallback(self):
+        for args in (("init", "-q"), ("add", "."),
+                     ("-c", "user.name=Test", "-c", "user.email=test@example.com",
+                      "-c", "commit.gpgsign=false", "commit", "-qm", "initial")):
+            shadow.capture(self.repo, "git", *args)
+        head = shadow.capture(self.repo, "git", "rev-parse", "HEAD").strip()
+        self.write("unrelated/tests/untracked.rs", "#[test] fn newly_discovered() {}")
+        with patch.object(shadow, "green_base", return_value=head), self.assertRaisesRegex(ValueError, "untracked"):
+            shadow.plan(self.repo, [head])
 
     def test_reverse_all_dependency_kinds_and_transitive(self):
         names, _, full = self.choose(("M", "leaf/src/lib.rs"))
@@ -110,8 +159,15 @@ class ShadowTests(unittest.TestCase):
         # This tiny nextest stand-in plants a failure only outside the filter.
         self.write("bin/cargo", '''#!/bin/sh
 case "$2" in
-  list) echo '{"rust-test-suites": {}}'; exit 0;;
-  run) echo "$*" >> "$SHADOW_COMMAND_LOG"; exit "$SHADOW_FULL_EXIT";;
+  list) case "$*" in
+    *' -E '*) cat "$SHADOW_SELECTED_INVENTORY";;
+    *) cat "$SHADOW_FULL_INVENTORY";;
+    esac; exit 0;;
+  run) echo "$*" >> "$SHADOW_COMMAND_LOG"
+    case "$*" in
+      *' -E '*) exit "$SHADOW_SELECTED_EXIT";;
+      *) exit "$SHADOW_FULL_EXIT";;
+    esac;;
 esac
 exit 2
 ''')
@@ -124,21 +180,31 @@ exit 2
         candidates.write_text('{"head_sha":"green"}\n')
         env = {"PATH": str(self.repo / "bin") + os.pathsep + os.environ["PATH"],
                "CANDIDATES": str(candidates), "SHADOW_FULL_EXIT": "1",
+               "SHADOW_SELECTED_EXIT": "0",
+               "SHADOW_FULL_INVENTORY": str(self.repo / "full.json"),
+               "SHADOW_SELECTED_INVENTORY": str(self.repo / "selected.json"),
                "SHADOW_COMMAND_LOG": str(self.repo / "commands")}
-        for full_exit in (1, 0):
+        self.write("full.json", json.dumps(self.inventory()))
+        for full_exit, selected_exit, bad_inventory, load in (
+                (1, 0, False, 1), (0, 0, False, 1), (0, 1, False, 1),
+                (0, 0, True, 1), (0, 0, False, 20)):
             env["SHADOW_FULL_EXIT"] = str(full_exit)
+            env["SHADOW_SELECTED_EXIT"] = str(selected_exit)
+            self.write("selected.json", json.dumps({} if bad_inventory else self.inventory(True)))
             (self.repo / "commands").unlink(missing_ok=True)
-            with patch.dict(os.environ, env), patch.object(Path, "cwd", return_value=self.repo), patch.object(shadow, "plan", return_value=proposal):
-                self.assertEqual(shadow.run(args), full_exit)
+            with patch.dict(os.environ, env), patch.object(Path, "cwd", return_value=self.repo), \
+                    patch.object(shadow, "plan", return_value=proposal), \
+                    patch("heavy_lock.wait_for_load"), patch.object(os, "getloadavg", return_value=(load, load, load)):
+                self.assertEqual(shadow.run(args), full_exit or selected_exit or int(bad_inventory))
             commands = (self.repo / "commands").read_text().splitlines()
             self.assertEqual(commands[0], "nextest run --profile ci --workspace --no-fail-fast")
-            self.assertEqual(len(commands), 1 if full_exit else 2)
-            if not full_exit:
+            self.assertEqual(len(commands), 1 if full_exit or bad_inventory else 2)
+            if not full_exit and not bad_inventory:
                 self.assertTrue(commands[1].endswith("-E package(=farcooler-cli)"))
             report = json.loads((self.repo / "report/measurement.json").read_text())
-            self.assertEqual(report["selection_accepted"], not full_exit)
+            self.assertEqual(report["selection_accepted"], not (full_exit or selected_exit or bad_inventory))
             self.assertFalse(report["skips_enabled"])
-            if full_exit:
+            if full_exit or selected_exit or bad_inventory or load >= 20:
                 self.assertIsNone(report["warm_wall_savings_seconds"])
         for name in ("full", "selected"):
             self.assertTrue((self.repo / f"report/{name}-inventory.json").exists())
