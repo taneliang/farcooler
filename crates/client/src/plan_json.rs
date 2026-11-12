@@ -15,6 +15,44 @@ use serde_json::{Value, json};
 
 use crate::session::{short, uuid_of};
 
+/// The authenticated workflow read used to enrich every app's Plan, including the CLI.
+pub fn workflow_request(workspace: uuid::Uuid) -> pb::Request {
+    use farcooler_protocol::capability;
+    let mut request = farcooler_transport::request("workflow.get");
+    request.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
+    request.required_capabilities = vec![capability::WORKFLOW_COMMANDS.into()];
+    request.payload = Some(pb::request::Payload::WorkflowCommand(pb::WorkflowCommand {
+        schema: 1,
+        json: serde_json::to_string(&farcooler_protocol::workflow_commands::Action::Get).expect("closed action"),
+    }));
+    request
+}
+
+/// The single enrichment and compatibility policy for CLI, native and web Plan reads.
+/// A missing future means the runner did not advertise workflow commands.
+pub async fn with_workflow(
+    plan: &pb::Plan,
+    workspace: uuid::Uuid,
+    read: Option<impl std::future::Future<Output = Result<pb::result::Value, crate::session::SessionError>>>,
+) -> Result<Value, crate::session::SessionError> {
+    use crate::session::{SessionError, workflow::decode_presentation};
+    let mut value = plan_json(plan);
+    let Some(read) = read else { return Ok(value); };
+    match read.await {
+        Ok(pb::result::Value::WorkflowReply(reply)) if reply.schema == 1 => {
+            let raw = serde_json::from_str(&reply.json).map_err(|e| SessionError::Protocol(e.to_string()))?;
+            let (_, _, presentation) = decode_presentation(workspace, &raw, crate::workflow_presentation::Style::Apple)?;
+            value["workflow"] = serde_json::to_value(presentation).expect("presentation serializes");
+        }
+        // Older and read-only runners can still supply the un-enriched Plan.
+        Err(SessionError::Refused { code, .. }) if matches!(pb::ErrorCode::try_from(code),
+            Ok(pb::ErrorCode::ScopeDenied | pb::ErrorCode::CapabilityUnsupported)) => {}
+        Err(error) => return Err(error),
+        _ => return Err(SessionError::Protocol("invalid workflow reply".into())),
+    }
+    Ok(value)
+}
+
 fn id_text(id: &[u8]) -> String {
     uuid_of(id).to_string()
 }

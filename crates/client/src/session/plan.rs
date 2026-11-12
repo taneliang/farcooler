@@ -19,21 +19,15 @@ impl Session {
         }
     }
 
-    /// The apps' plan read includes the authenticated engine presentation. Keeping this here
-    /// makes Mac, phone and wasm use the same source and avoids platform snapshot parsing.
+    /// The apps' Plan read delegates enrichment to the same shared reader the CLI uses,
+    /// so Mac, phone and wasm receive the authenticated engine presentation.
     pub async fn plan_with_workflow(&self, workspace: Uuid) -> Result<serde_json::Value, SessionError> {
-        let mut value = crate::plan_json::plan_json(&self.plan(workspace).await?);
-        if self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS) {
-            match self.workflow_snapshot(workspace, crate::workflow_presentation::Style::Apple).await {
-                Ok(snapshot) => value["workflow"] = serde_json::to_value(snapshot.presentation).expect("presentation serializes"),
-                // Workflow inspection requires control on older runners. Its optional enrichment
-                // must not remove a read-only connection's plan, or a pre-engine board's plan.
-                Err(SessionError::Refused { code, .. }) if matches!(farcooler_protocol::v1::ErrorCode::try_from(code),
-                    Ok(farcooler_protocol::v1::ErrorCode::ScopeDenied | farcooler_protocol::v1::ErrorCode::CapabilityUnsupported)) => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(value)
+        let plan = self.plan(workspace).await?;
+        let read = self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS).then(|| async {
+            let r = crate::plan_json::workflow_request(workspace);
+            self.value_requiring(&r.method, Some(workspace), r.payload, r.required_capabilities).await
+        });
+        crate::plan_json::with_workflow(&plan, workspace, read).await
     }
 
     /// The owner keeps one ruling (`ruling.set` to confirmed, as `user`,

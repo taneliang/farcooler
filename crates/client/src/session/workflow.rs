@@ -129,6 +129,20 @@ fn prepare_selection_with_reason(snapshot: &WorkflowSnapshot, workspace: Uuid, i
         id: Uuid::now_v7().to_string(), sequence, revision, epoch,
     })
 }
+/// Decode and project one authenticated workflow read for snapshots and Plan enrichment.
+pub(crate) fn decode_presentation(workspace: Uuid, raw: &serde_json::Value, style: Style)
+    -> Result<(State, WorkflowContext, Presentation), SessionError>
+{
+    let context: WorkflowContext = serde_json::from_value(raw["context"].clone()).map_err(|e| invalid(e.to_string()))?;
+    let state: State = if raw["state"].is_null() { State::empty(workspace.to_string(), context.capabilities.epoch) }
+        else { serde_json::from_value(raw["state"].clone()).map_err(|e| invalid(e.to_string()))? };
+    if state.workspace != workspace.to_string() { return Err(invalid("wrong workflow workspace")); }
+    let mut presentation = project(&state, &context, style)?;
+    // A runner from before ov-979 sends no stops.
+    let stops = serde_json::from_value(raw["stops"].clone()).unwrap_or_default();
+    cards::add_stops(&mut presentation, &stops, style);
+    Ok((state, context, presentation))
+}
 impl Session {
     async fn workflow_wire(&self, workspace: Uuid, json: String) -> Result<serde_json::Value, SessionError> {
         let action = wire::parse(&json).map_err(invalid)?;
@@ -143,14 +157,7 @@ impl Session {
     /// Fetch authenticated state, admission context and schema2 cards.
     pub async fn workflow_snapshot(&self, workspace: Uuid, style: Style) -> Result<WorkflowSnapshot, SessionError> {
         let raw = self.workflow_wire(workspace, serde_json::to_string(&wire::Action::Get).expect("closed action")).await?;
-        let context: WorkflowContext = serde_json::from_value(raw["context"].clone()).map_err(|e| invalid(e.to_string()))?;
-        let state: State = if raw["state"].is_null() { State::empty(workspace.to_string(), context.capabilities.epoch) }
-            else { serde_json::from_value(raw["state"].clone()).map_err(|e| invalid(e.to_string()))? };
-        if state.workspace != workspace.to_string() { return Err(invalid("wrong workflow workspace")); }
-        let mut presentation = project(&state, &context, style)?;
-        // A runner from before ov-979 sends no stops.
-        let stops = serde_json::from_value(raw["stops"].clone()).unwrap_or_default();
-        cards::add_stops(&mut presentation, &stops, style);
+        let (state, context, presentation) = decode_presentation(workspace, &raw, style)?;
         let host = self.host().await?;
         let host = Uuid::from_slice(&host.id).map_err(|_| invalid("invalid workflow host identity"))?.to_string();
         Ok(WorkflowSnapshot { schema: 2, host, state, context, style, presentation, configuration: raw["configuration"].clone(), notices: raw["notices"].clone() })

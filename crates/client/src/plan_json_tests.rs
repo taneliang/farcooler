@@ -401,3 +401,28 @@ fn suggested_reviewers_appear_only_when_sent() {
     let json = plan_json(&plan);
     assert_eq!((json["suggested_reviewers"][0]["pr"].as_u64(), json["suggested_reviewers"][0]["reviewers"][0].as_str()), (Some(31), Some("alice")));
 }
+
+/// Enrichment is optional only for older/read-only runners. Malformed or failed
+/// workflow reads must surface rather than silently hiding an engine queue.
+#[tokio::test]
+async fn workflow_enrichment_keeps_compatibility_without_hiding_read_failures() {
+    use crate::session::SessionError;
+    use farcooler_protocol::v1::{ErrorCode, result};
+    type Answer = Result<result::Value, SessionError>;
+    let plan = the_plan();
+    let workspace = uuid::Uuid::from_u128(7);
+    let bare = plan_json(&plan);
+    let missing = None::<std::future::Ready<Answer>>;
+    assert_eq!(with_workflow(&plan, workspace, missing).await.unwrap(), bare);
+    for code in [ErrorCode::ScopeDenied, ErrorCode::CapabilityUnsupported] {
+        let denied = std::future::ready(Err(SessionError::Refused {
+            code: code as i32, retryable: false, message: "denied".into(), what: "workflow".into(),
+        }));
+        assert_eq!(with_workflow(&plan, workspace, Some(denied)).await.unwrap(), bare);
+    }
+    let broken = std::future::ready(Err(SessionError::Protocol("broken read".into())));
+    assert!(matches!(with_workflow(&plan, workspace, Some(broken)).await,
+        Err(SessionError::Protocol(message)) if message == "broken read"));
+    let malformed = std::future::ready(Ok(result::Value::Plan(Default::default())));
+    assert!(matches!(with_workflow(&plan, workspace, Some(malformed)).await, Err(SessionError::Protocol(_))));
+}

@@ -1,0 +1,637 @@
+{
+  "agents": [],
+  "agents_spend": null,
+  "board_counts": {
+    "backlog": 0,
+    "cancelled": 0,
+    "done": 0,
+    "in_progress": 0,
+    "in_review": 0,
+    "needs_decision": 0,
+    "todo": 0
+  },
+  "cards": [
+    {
+      "key": "ov-1",
+      "status": "In Review",
+      "task": "00000000-0000-0000-0000-000000000001",
+      "title": "Keep the complete long ticket title visible when the landing queue wraps on a narrow phone screen"
+    }
+  ],
+  "ci": [],
+  "cost": null,
+  "landed_not_closed": [],
+  "landings": [],
+  "lines": [],
+  "now_ms": 300000,
+  "off_the_line": [
+    {
+      "key": "ov-1",
+      "status": "In Review",
+      "task": "00000000-0000-0000-0000-000000000001"
+    }
+  ],
+  "rulings": [],
+  "themes": [],
+  "workflow": {
+    "epoch": 1,
+    "landingGroups": [
+      {
+        "failure": null,
+        "id": "group-00000000000000000001-landing",
+        "label": "Landing group 1",
+        "members": [
+          "ov-1",
+          "ov-2"
+        ],
+        "since": 60000,
+        "split": false,
+        "step": "Run gate · Running"
+      },
+      {
+        "failure": null,
+        "id": "group-00000000000000000002-landing",
+        "label": "Landing group 2",
+        "members": [
+          "ov-1",
+          "ov-2"
+        ],
+        "since": 120000,
+        "split": false,
+        "step": "Wait for base · Waiting"
+      },
+      {
+        "failure": {
+          "firstLine": "error: expected a passing gate",
+          "job": "cargo test --workspace",
+          "split": true
+        },
+        "id": "group-00000000000000000003-landing",
+        "label": "Landing group 3",
+        "members": [
+          "ov-1",
+          "ov-2"
+        ],
+        "since": 180000,
+        "split": true,
+        "step": "Run gate · Running"
+      },
+      {
+        "failure": {
+          "firstLine": "error: expected a passing gate",
+          "job": "cargo test --workspace"
+        },
+        "id": "group-00000000000000000004-landing",
+        "label": "Landing group 4",
+        "members": [
+          "ov-1",
+          "ov-2"
+        ],
+        "since": 0,
+        "split": false,
+        "step": "Run gate · Failed"
+      }
+    ],
+    "revision": 20,
+    "runs": [
+      {
+        "actions": [
+          {
+            "guard": "wf1:e3e0cf8a46593f6a68052366c16326a4841672db0485313db6f86b9d62fc1e64",
+            "kind": "Cancel",
+            "label": "Cancel Run"
+          }
+        ],
+        "attempt": 1,
+        "candidate": null,
+        "definitionPin": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2",
+        "fence": 1,
+        "gate": null,
+        "item": "group-00000000000000000001-landing",
+        "iteration": 1,
+        "label": "Workflow Run",
+        "latestEvidence": null,
+        "page": {
+          "copyLabel": "Copy",
+          "details": [
+            {
+              "title": "Run",
+              "value": "ba5b9a98",
+              "whole": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad"
+            },
+            {
+              "title": "Workflow",
+              "value": "0a740686",
+              "whole": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2"
+            },
+            {
+              "title": "Operation",
+              "value": "953e6303",
+              "whole": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c"
+            },
+            {
+              "title": "Attempt",
+              "value": "1"
+            }
+          ],
+          "detailsLabel": "Details",
+          "more": [
+            "This run has entered a rework iteration."
+          ],
+          "outcome": "Running",
+          "reason": "Running: Run gate.",
+          "retryLabel": "Try Again",
+          "steps": [
+            {
+              "label": "Wait for base",
+              "state": "Done"
+            },
+            {
+              "label": "Combine changes",
+              "state": "Done"
+            },
+            {
+              "label": "Run gate",
+              "state": "Running"
+            },
+            {
+              "label": "Push changes",
+              "state": "Not started"
+            },
+            {
+              "label": "Wait for CI",
+              "state": "Not started"
+            }
+          ],
+          "ticket": "group-00000000000000000001-landing"
+        },
+        "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
+        "phase": "Running",
+        "phaseLabel": "Running",
+        "policyPin": "policy",
+        "reasons": [
+          {
+            "kind": "Automatic",
+            "label": "Running",
+            "text": "The engine is executing this stage."
+          },
+          {
+            "kind": "Reworking",
+            "label": "Rework Iteration",
+            "text": "This run has entered a rework iteration."
+          }
+        ],
+        "reworksRemaining": 0,
+        "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+        "stage": {
+          "id": "landing-2",
+          "kind": "Run",
+          "label": "Run Gate",
+          "progression": "Automatic",
+          "progressionLabel": "Automatic"
+        },
+        "stages": [
+          {
+            "id": "landing-0",
+            "kind": "AwaitBase",
+            "label": "Wait for Base",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-1",
+            "kind": "Fold",
+            "label": "Combine Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-2",
+            "kind": "Run",
+            "label": "Run Gate",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-3",
+            "kind": "Push",
+            "label": "Push Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-4",
+            "kind": "AwaitCi",
+            "label": "Wait for CI",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          }
+        ]
+      },
+      {
+        "actions": [
+          {
+            "guard": "wf1:1a1887caf316bfca0f77eaaf18729c2bcf3089e555c9a39cbc93737f6e009e0d",
+            "kind": "Cancel",
+            "label": "Cancel Run"
+          }
+        ],
+        "attempt": 1,
+        "candidate": null,
+        "definitionPin": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2",
+        "fence": 1,
+        "gate": null,
+        "item": "group-00000000000000000002-landing",
+        "iteration": 2,
+        "label": "Workflow Run",
+        "latestEvidence": null,
+        "page": {
+          "copyLabel": "Copy",
+          "details": [
+            {
+              "title": "Run",
+              "value": "ba5b9a98",
+              "whole": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad"
+            },
+            {
+              "title": "Workflow",
+              "value": "0a740686",
+              "whole": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2"
+            },
+            {
+              "title": "Operation",
+              "value": "953e6303",
+              "whole": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c"
+            },
+            {
+              "title": "Attempt",
+              "value": "1"
+            }
+          ],
+          "detailsLabel": "Details",
+          "more": [
+            "This run has entered a rework iteration."
+          ],
+          "outcome": "Waiting",
+          "reason": "This run is waiting for prerequisites or an available resource.",
+          "retryLabel": "Try Again",
+          "steps": [
+            {
+              "label": "Wait for base",
+              "state": "Waiting"
+            },
+            {
+              "label": "Combine changes",
+              "state": "Not started"
+            },
+            {
+              "label": "Run gate",
+              "state": "Not started"
+            },
+            {
+              "label": "Push changes",
+              "state": "Not started"
+            },
+            {
+              "label": "Wait for CI",
+              "state": "Not started"
+            }
+          ],
+          "ticket": "group-00000000000000000002-landing"
+        },
+        "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
+        "phase": "Blocked",
+        "phaseLabel": "Waiting",
+        "policyPin": "policy",
+        "reasons": [
+          {
+            "kind": "DependenciesOrResource",
+            "label": "Waiting",
+            "text": "This run is waiting for prerequisites or an available resource."
+          },
+          {
+            "kind": "Reworking",
+            "label": "Rework Iteration",
+            "text": "This run has entered a rework iteration."
+          }
+        ],
+        "reworksRemaining": 0,
+        "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+        "stage": {
+          "id": "landing-0",
+          "kind": "AwaitBase",
+          "label": "Wait for Base",
+          "progression": "Automatic",
+          "progressionLabel": "Automatic"
+        },
+        "stages": [
+          {
+            "id": "landing-0",
+            "kind": "AwaitBase",
+            "label": "Wait for Base",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-1",
+            "kind": "Fold",
+            "label": "Combine Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-2",
+            "kind": "Run",
+            "label": "Run Gate",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-3",
+            "kind": "Push",
+            "label": "Push Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-4",
+            "kind": "AwaitCi",
+            "label": "Wait for CI",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          }
+        ]
+      },
+      {
+        "actions": [
+          {
+            "guard": "wf1:f29bcb9d444bc06da5abee1d820d0b6b4c272ab8884f1dae29332ed67cd513a9",
+            "kind": "Cancel",
+            "label": "Cancel Run"
+          }
+        ],
+        "attempt": 1,
+        "candidate": null,
+        "definitionPin": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2",
+        "fence": 1,
+        "gate": null,
+        "item": "group-00000000000000000003-landing",
+        "iteration": 3,
+        "label": "Workflow Run",
+        "latestEvidence": null,
+        "page": {
+          "copyLabel": "Copy",
+          "details": [
+            {
+              "title": "Run",
+              "value": "ba5b9a98",
+              "whole": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad"
+            },
+            {
+              "title": "Workflow",
+              "value": "0a740686",
+              "whole": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2"
+            },
+            {
+              "title": "Operation",
+              "value": "953e6303",
+              "whole": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c"
+            },
+            {
+              "title": "Attempt",
+              "value": "1"
+            }
+          ],
+          "detailsLabel": "Details",
+          "more": [
+            "This run has entered a rework iteration."
+          ],
+          "outcome": "Running",
+          "reason": "Running: Run gate.",
+          "retryLabel": "Try Again",
+          "steps": [
+            {
+              "label": "Wait for base",
+              "state": "Done"
+            },
+            {
+              "label": "Combine changes",
+              "state": "Done"
+            },
+            {
+              "label": "Run gate",
+              "state": "Running"
+            },
+            {
+              "label": "Push changes",
+              "state": "Not started"
+            },
+            {
+              "label": "Wait for CI",
+              "state": "Not started"
+            }
+          ],
+          "ticket": "group-00000000000000000003-landing"
+        },
+        "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
+        "phase": "Running",
+        "phaseLabel": "Running",
+        "policyPin": "policy",
+        "reasons": [
+          {
+            "kind": "Automatic",
+            "label": "Running",
+            "text": "The engine is executing this stage."
+          },
+          {
+            "kind": "Reworking",
+            "label": "Rework Iteration",
+            "text": "This run has entered a rework iteration."
+          }
+        ],
+        "reworksRemaining": 0,
+        "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+        "stage": {
+          "id": "landing-2",
+          "kind": "Run",
+          "label": "Run Gate",
+          "progression": "Automatic",
+          "progressionLabel": "Automatic"
+        },
+        "stages": [
+          {
+            "id": "landing-0",
+            "kind": "AwaitBase",
+            "label": "Wait for Base",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-1",
+            "kind": "Fold",
+            "label": "Combine Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-2",
+            "kind": "Run",
+            "label": "Run Gate",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-3",
+            "kind": "Push",
+            "label": "Push Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-4",
+            "kind": "AwaitCi",
+            "label": "Wait for CI",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          }
+        ]
+      },
+      {
+        "actions": [
+          {
+            "guard": "wf1:53c15308a4172d452a4f5880191abf52b5d55066d2392eeb359320725d266307",
+            "kind": "Cancel",
+            "label": "Close Run"
+          }
+        ],
+        "attempt": 1,
+        "candidate": null,
+        "definitionPin": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2",
+        "fence": 1,
+        "gate": null,
+        "item": "group-00000000000000000004-landing",
+        "iteration": 4,
+        "label": "Workflow Run",
+        "latestEvidence": null,
+        "page": {
+          "copyLabel": "Copy",
+          "details": [
+            {
+              "title": "Run",
+              "value": "ba5b9a98",
+              "whole": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad"
+            },
+            {
+              "title": "Workflow",
+              "value": "0a740686",
+              "whole": "wf1:0a740686b5ad6d54baf07ba7c6ab18182102b893a8fcb301be9e952f340234a2"
+            },
+            {
+              "title": "Operation",
+              "value": "953e6303",
+              "whole": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c"
+            },
+            {
+              "title": "Attempt",
+              "value": "1"
+            }
+          ],
+          "detailsLabel": "Details",
+          "more": [
+            "This run has entered a rework iteration."
+          ],
+          "outcome": "Failed",
+          "reason": "This run has failed.",
+          "retryLabel": "Try Again",
+          "steps": [
+            {
+              "label": "Wait for base",
+              "state": "Done"
+            },
+            {
+              "label": "Combine changes",
+              "state": "Done"
+            },
+            {
+              "label": "Run gate",
+              "state": "Failed"
+            },
+            {
+              "label": "Push changes",
+              "state": "Not started"
+            },
+            {
+              "label": "Wait for CI",
+              "state": "Not started"
+            }
+          ],
+          "ticket": "group-00000000000000000004-landing"
+        },
+        "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
+        "phase": "Failed",
+        "phaseLabel": "Failed",
+        "policyPin": "policy",
+        "reasons": [
+          {
+            "kind": "Failed",
+            "label": "Failed",
+            "text": "This run has failed."
+          },
+          {
+            "kind": "Reworking",
+            "label": "Rework Iteration",
+            "text": "This run has entered a rework iteration."
+          }
+        ],
+        "reworksRemaining": 0,
+        "run": "wf1:ba5b9a9883cce864560ee1747ed5217908fbcfbf7f5af4904a5956a542c9b4ad",
+        "stage": {
+          "id": "landing-2",
+          "kind": "Run",
+          "label": "Run Gate",
+          "progression": "Automatic",
+          "progressionLabel": "Automatic"
+        },
+        "stages": [
+          {
+            "id": "landing-0",
+            "kind": "AwaitBase",
+            "label": "Wait for Base",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-1",
+            "kind": "Fold",
+            "label": "Combine Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-2",
+            "kind": "Run",
+            "label": "Run Gate",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-3",
+            "kind": "Push",
+            "label": "Push Changes",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          },
+          {
+            "id": "landing-4",
+            "kind": "AwaitCi",
+            "label": "Wait for CI",
+            "progression": "Automatic",
+            "progressionLabel": "Automatic"
+          }
+        ]
+      }
+    ],
+    "schema": 2,
+    "workspace": "00000000-0000-0000-0000-000000000202"
+  }
+}

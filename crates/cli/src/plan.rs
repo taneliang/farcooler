@@ -30,7 +30,7 @@
 //!
 //! One read draws the overview, so a heartbeat reads `plan --json` instead of
 //! `task list` plus a `task show` per card. `plan --json` is exactly
-//! `farcooler_client::plan_json::plan_json`, the shape the apps decode.
+//! the shared client Plan JSON, including the engine presentation the apps decode.
 
 use std::collections::HashMap;
 
@@ -287,7 +287,16 @@ async fn run_on<L: DispatchLink>(
     match cmd {
         None => {
             let plan = get_plan(link, &ws, false).await?;
-            Ok(if json { plan_json(&plan).to_string() } else { overview(&plan, now) })
+            if !json { return Ok(overview(&plan, now)); }
+            let supported = link.capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS);
+            let workspace = crate::uuid_of(&ws);
+            let read = supported.then(|| async {
+                let request = farcooler_client::plan_json::workflow_request(workspace);
+                let answer = link.call(request).await.map_err(farcooler_client::session::SessionError::from)?;
+                answer.value.ok_or_else(|| farcooler_client::session::SessionError::Protocol("workflow.get returned nothing".into()))
+            });
+            let value = farcooler_client::plan_json::with_workflow(&plan, workspace, read).await?;
+            Ok(value.to_string())
         }
         Some(PlanCmd::Set { tickets }) => {
             let plan = get_plan(link, &ws, true).await?;

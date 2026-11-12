@@ -911,6 +911,7 @@ dependencies = [
  "farcooler-store",
  "farcooler-tailcat",
  "farcooler-transport",
+ "farcooler-workflow",
  "libc",
  "prost",
  "prost-types",
