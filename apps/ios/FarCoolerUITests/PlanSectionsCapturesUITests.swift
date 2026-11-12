@@ -125,16 +125,15 @@ final class PlanSectionsCapturesUITests: XCTestCase {
     }
 
     /// The share of the screen's width, from the left edge, that holds the glyph column; blacked out in a resting-picture check.
-    // Leave room for the pulse beyond the glyph itself. Pixels outside the old 14% mask
-    // can keep a resting-picture comparison changing (ov-1094).
-    private static let glyphColumnShare = 0.18
+    private static let glyphColumnShare = 0.14
 
-    /// The list below the bars, as pixels. The clock can tick during a walk, and the translucent
-    /// navigation bar can show a pulsing glyph blurred behind it even after the list stops (ov-1094).
+    /// The screen below the status bar, as pixels: the clock ticks over a minute boundary in the middle of a
+    /// walk, and a picture that differs only by it is the same page (the sixth page of the light sheet was
+    /// the fifth with the clock a minute on, in the first run of this fix).
     private func bodyPicture() -> Data {
         let shot = XCUIScreen.main.screenshot().image
         guard let full = shot.cgImage else { return XCUIScreen.main.screenshot().pngRepresentation }
-        let top = Int(XCUIApplication().navigationBars["Plan"].frame.maxY * shot.scale)
+        let top = Int(70 * shot.scale)
         let crop = CGRect(x: 0, y: top, width: full.width, height: full.height - top)
         guard let body = full.cropping(to: crop) else { return XCUIScreen.main.screenshot().pngRepresentation }
         // Without the glyph column. A working agent's glyph pulses forever (`symbolEffect(.pulse, .repeating)`), so
@@ -178,12 +177,23 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 expecting: previous.map { .changed(from: $0, sample: { self.bodyPicture() }, "the list scrolled to page \(page)") }
                     ?? first ?? .shows(app.navigationBars["Plan"]))
             let here = settled()
+            // Preserve the full screen on both sides of the first swipe, including two
+            // samples after settling. A failed CI capture otherwise has no image of
+            // the state it was waiting on (ov-1094).
+            if page == 1 {
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-before-\(scheme).png"))
+            }
             previous = here  // the same cropped picture `.changed` samples, so a clock tick alone is no change
             // The sheet's own list, as `reveal` does: a swipe on the window can land on the sheet's chrome.
             let list = app.collectionViews.allElementsBoundByIndex.last { $0.exists && $0.isHittable } ?? app.collectionViews.firstMatch
             list.swipeUp(velocity: .slow)
             list.swipeUp(velocity: .slow)
             let after = settled()
+            if page == 1 {
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-after-1-\(scheme).png"))
+                Thread.sleep(forTimeInterval: 1.2)
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("\(tag)-\(name)-diagnostic-after-2-\(scheme).png"))
+            }
             if after == here { break }
         }
     }
