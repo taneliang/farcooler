@@ -94,3 +94,34 @@ fn ambiguous_receipts_apply_the_fallback_instead_of_choosing_the_last_field() {
         assert!(done.items["a"].hook_refused.is_some(), "accepted duplicate: {duplicate}");
     }
 }
+
+#[test]
+fn ci_rules_never_suspend_observations_that_need_controller_resolution() {
+    let s = running_ci();
+    let uncertain = step(&s, &observe(&s, Outcome::Uncertain)).unwrap().state;
+    let e = Evidence { candidate: "sha".into(), manifest: "m".into(), receipt: "r".into(), policy_pin: "p".into() };
+    assert_eq!(step(&uncertain, &observe(&uncertain, Outcome::Passed(e))), Err(Refusal::Phase));
+    assert!(uncertain.items["a"].deciding.is_none());
+    assert!(uncertain.items["a"].hook_calls.is_empty());
+}
+
+#[test]
+fn ci_rules_validate_result_labels_before_spending_a_call() {
+    let s = running_ci();
+    let e = Evidence { candidate: "sha".into(), manifest: "m".into(), receipt: "r".into(), policy_pin: "p".into() };
+    assert_eq!(step(&s, &observe(&s, Outcome::Labeled("unknown".into(), e.clone()))), Err(Refusal::Invalid));
+    let mut routed = s.clone();
+    routed.items.get_mut("a").unwrap().definition.schema = 2;
+    let item = routed.items.get_mut("a").unwrap();
+    item.pin = item.definition.pin();
+    assert_eq!(step(&routed, &observe(&routed, Outcome::Labeled("unknown".into(), e.clone()))), Err(Refusal::Evidence));
+    // A real result still fires and settles; refused observations did not consume the budget.
+    let s = step(&s, &observe(&s, Outcome::Passed(e.clone()))).unwrap().state;
+    let done = step(&s, &answer(&s, serde_json::json!({"decision":"accept"}))).unwrap().state;
+    assert_eq!(done.items["a"].phase, Phase::Done);
+    // A completed run's stage is past the end of its definition. Late observations must not index it.
+    let mut late = observe(&s, Outcome::Passed(e));
+    late.expected_revision = done.revision;
+    late.id = "late-ci-result".into(); late.source_sequence = done.revision + 1;
+    assert_eq!(step(&done, &late), Err(Refusal::Phase));
+}

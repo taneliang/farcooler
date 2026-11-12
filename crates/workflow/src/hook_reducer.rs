@@ -11,6 +11,11 @@ pub(super) fn failed(before: &State, next: &mut State, input: &Input, effects: &
 /// Suspend only a validated CI observation. The original receipt remains the authority for routing.
 pub(super) fn ci(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -> Result<bool, Refusal> {
     let Command::Observe { effect, run, fence, outcome, .. } = &input.command else { return Ok(false) };
+    // A rule may suspend only an observation the ordinary reducer can consume. In particular,
+    // an uncertain operation still needs a controller's Resolve, and a closed run has no stage.
+    if !matches!(item.phase, Phase::Running | Phase::Cancelling) || item.run.starts_with("cancel:") {
+        return Ok(false);
+    }
     if !matches!(item.definition.stages[item.stage].kind, StageKind::Ci | StageKind::AwaitCi) { return Ok(false); }
     let evidence = match outcome {
         Outcome::Passed(e) | Outcome::Rejected(e) | Outcome::Labeled(_, e) => e,
@@ -18,6 +23,13 @@ pub(super) fn ci(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Eff
     };
     if item.pending.as_ref() != Some(effect) || &item.run != run || item.fence != *fence { return Err(Refusal::Stale); }
     if input.grant != (Grant::Operation { effect: effect.clone(), run: run.clone(), fence: *fence }) { return Err(Refusal::Unauthorized); }
+    if let Outcome::Labeled(label, _) = outcome {
+        let stage = &item.definition.stages[item.stage];
+        if item.definition.schema != 2 { return Err(Refusal::Invalid); }
+        if !(emits_unrouted(&stage.kind, label) || stage.routes.contains_key(label)) {
+            return Err(Refusal::Evidence);
+        }
+    }
     evidence_matches(item, evidence)?;
     item.last_evidence = Some(evidence.clone());
     Ok(crate::hooks::fire(item, id, input, HookPoint::CiResult, Some(Box::new(input.clone())), effects))

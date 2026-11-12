@@ -58,6 +58,8 @@ ordinary orchestrator command checks, including their budgets and landing
 restrictions. Relabel requires a declared route and can never turn red into
 `passed`. A CI observation waits for its rule and then routes its original
 receipt (or the legal replacement label). `Uncertain` is never a rule point.
+CI observations must pass the ordinary phase, authorization, evidence and result
+label checks before a rule can suspend them or spend its call budget.
 There are no agent rules or CI rerun verbs in this slice.
 
 Call and fence freshness are checked before parsing; a superseded call is
