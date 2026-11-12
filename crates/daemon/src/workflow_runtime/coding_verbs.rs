@@ -168,8 +168,10 @@ impl Exec {
         })
     }
 
-    /// Wait for the landing target's head, and for CI to pass on it if the step says `green`. A red
-    /// base keeps waiting. The head becomes the group's candidate: the base everything else builds on.
+    /// Wait for the landing target's head, and for CI to finish on it if the step says `green`. A
+    /// pending base keeps waiting; a red one is taken as it is, so a fix for red main can land: the
+    /// group's gates judge the folded commit, and CI after the push decides (ov-1076). The head
+    /// becomes the group's candidate: the base everything else builds on.
     async fn await_base(&self, binding: &Binding, cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
         let (every, patience) = wait_times(&binding.effect.operation).ok_or(Error::Refused("unsound wait times"))?;
         let green = binding.effect.operation.arguments.get(1).map(String::as_str) == Some("green");
@@ -179,8 +181,11 @@ impl Exec {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
             if let Some(head) = self.fetch_base(binding, poll, &cancel).await? {
                 last = head.clone();
-                if !green || self.ci_poll(binding, &head, poll, &cancel).await? == CiStatus::Passed {
-                    self.write_fact(binding, "passed", &head, serde_json::json!({ "polls": poll + 1 }))?;
+                let ci = if green { Some(self.ci_poll(binding, &head, poll, &cancel).await?) } else { None };
+                if matches!(ci, None | Some(CiStatus::Passed | CiStatus::Failed)) {
+                    let mut detail = serde_json::json!({ "polls": poll + 1 });
+                    if ci == Some(CiStatus::Failed) { detail["red"] = true.into(); }
+                    self.write_fact(binding, "passed", &head, detail)?;
                     return self.reconcile_verb(binding, &StageKind::AwaitBase).await;
                 }
             } else if super::coding::landing_url(self.landing()?).is_some() {

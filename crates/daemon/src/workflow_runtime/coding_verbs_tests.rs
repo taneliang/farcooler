@@ -51,8 +51,13 @@ pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
         .replace("['/usr/bin/git', 'add', '--', 'result.txt']", "['/usr/bin/git', 'add', '--', name]")
         .replace("    assert pathlib.Path('result.txt').read_text().startswith('candidate')", "    assert any(p.read_text().startswith('candidate') for p in pathlib.Path('.').glob('*.txt'))")
         .replace("elif stage == 'review':\n", &format!("{GATE}elif stage == 'review':\n"))
-        .replace("conclusion='failure' if mode == 'ci-fail' else 'success',", "conclusion='failure' if mode == 'ci-fail' else ('cancelled' if mode == 'ci-cancel' else 'success'),");
-    assert!(text.contains("elif stage == 'gate'") && text.contains("name = 'shared.txt'") && text.contains("'cancelled'"));
+        .replace("conclusion='failure' if mode == 'ci-fail' else 'success',", "conclusion='failure' if mode == 'ci-fail' else ('cancelled' if mode == 'ci-cancel' else 'success'),")
+        // `base-red`: CI failed on the base the remote starts at, and passes on anything pushed after it.
+        .replace("conclusion='failure' if mode == 'ci-fail'", "conclusion='failure' if mode == 'ci-fail' or (mode == 'base-red' and candidate == os.environ['RED'])")
+        // `base-pending`: CI on that base never finishes.
+        .replace("status='in_progress' if mode == 'ci-pending'", "status='in_progress' if mode == 'ci-pending' or (mode == 'base-pending' and candidate == os.environ['RED'])");
+    assert!(text.contains("elif stage == 'gate'") && text.contains("name = 'shared.txt'") && text.contains("'cancelled'")
+        && text.contains("mode == 'base-red'") && text.contains("mode == 'base-pending'"));
     std::fs::write(&script, text).unwrap();
     let bare = dir.path().join("private-remote.git"); std::fs::create_dir(&bare).unwrap();
     adapters::git(&bare, &["init", "--bare", "--quiet"]).await.unwrap();
@@ -66,6 +71,7 @@ pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
     config.landing = Some(CodingLanding { job: "landing-956".into(), repository: bare.canonicalize().unwrap(),
         target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
     config.checks[1].argv[2] = "gate".into();
+    config.ci.command.environment.insert("RED".into(), config.base.clone());
     for (key, value) in [("MARKER", dir.path().join("marker")), ("REMOTE", bare.clone()), ("SCRATCH", dir.path().join("other-lander"))] {
         config.checks[1].environment.insert(key.into(), value.to_string_lossy().into_owned());
     }
@@ -294,16 +300,40 @@ async fn a_push_with_no_settlement_after_a_crash_stays_uncertain_and_sends_nothi
 }
 
 #[tokio::test]
-async fn waiting_for_a_base_whose_ci_is_red_times_out_and_waiting_for_ci_that_never_ends_times_out() {
-    for (mode, base_mode, label) in [("ci-fail", "green", "base"), ("ci-pending", "any", "ci")] {
+async fn waiting_for_a_base_whose_ci_is_pending_times_out_and_waiting_for_ci_that_never_ends_times_out() {
+    for (mode, base_mode, label) in [("base-pending", "green", "base"), ("ci-pending", "any", "ci")] {
         let (_dir, mut runtime) = lander(mode).await;
+        let first = remote_head(&runtime).await;
         let definition = batched_push(&runtime, base_mode, 300);
         at_join(&mut runtime, "one", &definition).await;
         command(&runtime, Command::Queue { item: "one".into() });
         until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
         // `timeout` is an ordinary label here, routed to fail.
         let landed = outbox(&runtime, StageKind::Push);
-        assert_eq!(landed, usize::from(label == "ci"), "{mode}: a red base never pushes; a CI timeout comes after the push");
+        assert_eq!(landed, usize::from(label == "ci"), "{mode}: a pending base never pushes; a CI timeout comes after the push");
+        assert_eq!(remote_head(&runtime).await == first, label == "base", "{mode}");
+    }
+}
+
+/// A fix for red main: the base's CI failed, so waiting longer can't turn it green. The group folds
+/// onto it anyway, the gate judges the folded commit, and CI after the push decides (ov-1076).
+#[tokio::test]
+async fn a_batch_on_a_base_whose_ci_failed_folds_gates_and_lands_and_ci_after_the_push_decides() {
+    for (mode, after) in [("base-red", Phase::Done), ("ci-fail", Phase::Failed)] {
+        let (_dir, mut runtime) = lander(mode).await;
+        let first = remote_head(&runtime).await;
+        let definition = batched_push(&runtime, "green", 5000);
+        at_join(&mut runtime, "one", &definition).await;
+        command(&runtime, Command::Queue { item: "one".into() });
+        let state = until(&mut runtime, |s| phase_of(s, "one") == Some(after.clone())).await;
+        for kind in [StageKind::Fold, StageKind::Run, StageKind::Push, StageKind::AwaitCi] {
+            assert_eq!(outbox(&runtime, kind.clone()), 1, "{mode}: {kind:?} ran once on the red base");
+        }
+        let pushed = remote_head(&runtime).await;
+        assert_ne!(pushed, first, "{mode}: the fix reached the remote");
+        let remote = &runtime.coding.as_ref().unwrap().landing.as_ref().unwrap().repository;
+        assert!(adapters::git(remote, &["merge-base", "--is-ancestor", &first, &pushed]).await.is_ok(), "{mode}: folded onto the red base");
+        if after == Phase::Done { assert_eq!(candidate_of(&state, "one"), Some(pushed.as_str())); }
     }
 }
 

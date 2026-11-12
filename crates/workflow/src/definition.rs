@@ -25,7 +25,8 @@ pub enum StageKind {
     /// result as a label: `passed`, `rejected`, or `dropped`. `adopt` takes the group's result as
     /// the ticket's candidate.
     Join { group: String, adopt: bool },
-    /// Group steps. Wait for the target's head (green, if the step says so) and take it as the base.
+    /// Group steps. Wait for the target's head and take it as the base. A `green` step also waits for
+    /// CI on it to finish: a red base is taken too, so a fix for red main can land (ov-1076).
     AwaitBase,
     /// Group steps. Apply each member's commits, in order, onto the base in a fresh tree.
     Fold,
