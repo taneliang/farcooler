@@ -112,6 +112,29 @@ class EngineGateTest(unittest.TestCase):
         self.assertFalse(self.f.pointer.exists())
         self.assertFalse((self.f.repo / ".fixture/wire-count").exists())
 
+    def test_malformed_receipt_reruns_and_preserves_corrupt_history(self):
+        self.green()
+        parent = fixtures.evidence.pointer_parent(self.f.pointer)
+        directory = pathlib.Path(parent["directory"])
+        manifest = directory / "manifest.json"
+        data = json.loads(manifest.read_bytes())
+        # Keep the pointer digest consistent to reach the validator's shape
+        # checks, rather than testing its already-covered digest rejection.
+        data["jobs"]["doc-comments"][0] = None
+        raw = fixtures.evidence.canonical(data)
+        manifest.chmod(0o600)
+        manifest.write_bytes(raw)
+        self.f.pointer.write_text("lane-gate-summary v2\nevidence: " + str(directory) +
+                                  "\nsha256: " + fixtures.evidence.digest(raw) + "\n")
+        pointer = self.f.pointer.read_bytes()
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        result = self.metrics()
+        self.assertEqual((result["reused_jobs"], result["selected_jobs"]), (0, 2))
+        self.assertTrue(all(p.read_bytes() == contents for p, contents in before.items()))
+        archives = list(self.root.glob("history-*.pointer.txt"))
+        self.assertTrue(any(p.read_bytes() == pointer for p in archives))
+        self.f.checker(0)
+
     def test_candidate_is_checked_again_under_capture_lock(self):
         adapter = self.f.scripts / "engine-gate.py"
         # Move HEAD after the initial candidate check but before locked preflight.

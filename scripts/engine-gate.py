@@ -82,15 +82,17 @@ def run(args):
                 candidate = evidence.pointer_parent(pointer)
                 prior = evidence.validate_chain(candidate["directory"], candidate["sha256"], scope)
                 parent = candidate
-            except (ValueError, OSError, KeyError, TypeError):
+            except (ValueError, OSError, KeyError, TypeError, AttributeError):
                 # No legacy/stale/partial assertion can supply coverage. A cold
                 # capture below retains the exact pointer without importing it.
+                # Malformed JSON receipt shapes can also fail attribute access
+                # in ov-903's validator; they are misses, never coverage.
                 prior = {}
         reused = [j for j in chosen if evidence.passed(scope["plan"][j], prior.get(j, []))]
         if len(reused) == len(chosen):
             try:
                 evidence.check_pointer(repo, pointer)
-            except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError):
+            except (ValueError, OSError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError):
                 # Even complete rows cannot override a failed run completion.
                 parent, reused = None, []
         if len(reused) == len(chosen):

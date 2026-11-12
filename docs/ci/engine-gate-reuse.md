@@ -152,3 +152,36 @@ Acceptance 3 remains open: no independently reviewed concrete application input
 inventory was supplied, no successful clean application gate has been captured,
 and there is no new valid operational hit-rate/wall-saving measurement under
 load 20. The prior shell-fixture measurements above retain their stated scope.
+
+## Malformed receipt recovery (2026-11-13)
+
+A new subprocess counterexample replaces a receipt with JSON `null` and updates
+the pointer's manifest digest. Previously ov-903's validator raised
+`AttributeError` while accessing that receipt, bypassing the adapter's miss
+handler. The adapter now treats this malformed shape as unusable evidence,
+archives the exact pointer, and executes every required job. The test verifies
+zero reuse, successful independent summary checking after the fresh capture,
+and byte-for-byte preservation of the corrupt manifest and all prior raw files.
+It failed with the original uncaught exception before the fix. The prospective
+writer, checker, schema, and production opt-in are unchanged.
+
+The adapter suite now has nine passing tests; all sixteen original ov-903
+tests also pass. Fixture timing is excluded from operational measurements.
+
+A fresh canonical wire/doc preflight with the ARM Python executable was attempted
+in `/private/tmp/ov1117-canonical-asljch2j`, with reuse disabled and a private
+empty HOME. It refused execution because the restricted PATH lacked Cargo,
+which the wire job needs for its conditional typeshare installation. No job
+receipt or success was produced. The next isolated candidate, in
+`/private/tmp/ov1117-canonical-2ka9te8p`, includes the installed Cargo and
+typeshare paths, but its launcher refused to start at one-minute load 24.00.
+Both private directories retain their invocation/environment/input declarations;
+these declarations have not received independent prerequisite review.
+
+For the next operational attempt, select `/opt/homebrew/bin/python3.14` explicitly
+and put `/Users/e-liang/.local/bin` before `/usr/local/bin` so child `python3`
+commands use the ARM interpreter too. Include the installed Cargo and typeshare
+paths even though the selected jobs are light. Independently review the concrete
+tool/dependency inventory before allowing a repeat to reuse results. A clean
+canonical success and repeat measurement under load 20 remain outstanding;
+there is no new operational hit rate or saved-wall-time claim.
