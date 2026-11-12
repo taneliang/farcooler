@@ -1,0 +1,337 @@
+{
+  "definition": {
+    "schema": 2,
+    "source": "landing/batched-push",
+    "stages": [
+      {
+        "id": "provision",
+        "kind": "Provision",
+        "progression": "Automatic",
+        "max_attempts": 2,
+        "operation": {
+          "adapter_version": "coding-worktree/v1",
+          "arguments": [
+            "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+            ""
+          ],
+          "environment": {}
+        }
+      },
+      {
+        "id": "build",
+        "kind": "Build",
+        "progression": "Automatic",
+        "max_attempts": 2,
+        "operation": {
+          "adapter_version": "coding-harness/v1",
+          "arguments": [
+            "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+            ""
+          ],
+          "environment": {}
+        }
+      },
+      {
+        "id": "gate-0",
+        "kind": {
+          "Review": "Agent"
+        },
+        "progression": "Automatic",
+        "max_attempts": 2,
+        "operation": {
+          "adapter_version": "coding-review/v1",
+          "arguments": [
+            "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+            "agent",
+            "{\"prompt\":\"Review it against the lane rules in /Users/e-liang/Dev/overnight/.claude/agent/reports/lanes/rules.md as well as the ticket. Every acceptance item is met and shown by a test that fails without the change. Nothing breaks the rules: no cargo fmt churn, stash, amend or `add -A`; heavy runs went through `scripts/heavy`; tests that build git repos pass under CI-like git. For UI work, judge polish from the captures in .claude/agent/reports/<ticket>/ at the narrowest width with long real content, light and dark, not just whether it works, and a UI change with no captures isn't ready. Net hand-written app lines should go down. Pass only what you'd land on main.\",\"models\":[[\"crates/workflow/**\",\"claude:opus\"],[\"crates/daemon/src/workflow_runtime/**\",\"claude:opus\"],[\"crates/daemon/src/workflow_runtime.rs\",\"claude:opus\"],[\"crates/daemon/src/workflow_*.rs\",\"claude:opus\"],[\"crates/protocol/src/workflow_*.rs\",\"claude:opus\"],[\"crates/store/src/workflow*\",\"claude:opus\"],[\"crates/daemon/src/landing_templates.rs\",\"claude:opus\"],[\"crates/daemon/src/path_routes.rs\",\"claude:opus\"],[\"crates/daemon/src/review_agent.rs\",\"claude:opus\"],[\"crates/transport/**\",\"claude:opus\"],[\"crates/fence/**\",\"claude:opus\"],[\"crates/ceremony/**\",\"claude:opus\"],[\"services/relay/**\",\"claude:opus\"],[\"crates/daemon/src/*key*\",\"claude:opus\"],[\"crates/daemon/src/*sign_in*\",\"claude:opus\"],[\"crates/daemon/src/*grant*\",\"claude:opus\"],[\"crates/daemon/src/*scope*\",\"claude:opus\"],[\"crates/daemon/src/*trust*\",\"claude:opus\"],[\"crates/daemon/src/member_*\",\"claude:opus\"],[\"crates/daemon/src/people_roles*\",\"claude:opus\"],[\"crates/daemon/src/tunnel_gate*\",\"claude:opus\"],[\"crates/cli/src/node_key*\",\"claude:opus\"]]}"
+          ],
+          "environment": {}
+        },
+        "routes": {
+          "rejected": {
+            "Step": "build"
+          }
+        },
+        "limit": 4
+      },
+      {
+        "id": "route",
+        "kind": "Route",
+        "progression": "Automatic",
+        "max_attempts": 2,
+        "operation": {
+          "adapter_version": "coding-route/v1",
+          "arguments": [
+            "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+            "{\"default\":\"push\",\"rules\":[[\"services/site/public/**\",\"ask\"]]}"
+          ],
+          "environment": {}
+        },
+        "routes": {
+          "ask": {
+            "Step": "approve"
+          },
+          "push": {
+            "Step": "join"
+          }
+        }
+      },
+      {
+        "id": "approve",
+        "kind": {
+          "Review": {
+            "Person": "owner"
+          }
+        },
+        "progression": "Automatic",
+        "max_attempts": 2,
+        "operation": {
+          "adapter_version": "coding-review/v1",
+          "arguments": [
+            "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+            "person:owner"
+          ],
+          "environment": {}
+        },
+        "routes": {
+          "rejected": {
+            "Step": "build"
+          }
+        },
+        "limit": 2
+      },
+      {
+        "id": "join",
+        "kind": {
+          "Join": {
+            "group": "landing",
+            "adopt": true
+          }
+        },
+        "progression": "Automatic",
+        "max_attempts": 1,
+        "operation": {
+          "adapter_version": "coding-join/v1",
+          "arguments": [
+            "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+            "landing"
+          ],
+          "environment": {}
+        },
+        "routes": {
+          "rejected": {
+            "Step": "build"
+          }
+        },
+        "limit": 1
+      }
+    ],
+    "max_reworks": 0,
+    "rework_target": null,
+    "groups": {
+      "landing": {
+        "limit": 0,
+        "exclusive": "wf1:56ecfe65962e6f7819367ba4aec32310c64b305032b8e642c09bc657364f6156",
+        "steps": [
+          {
+            "id": "base",
+            "kind": "AwaitBase",
+            "progression": "Automatic",
+            "max_attempts": 5,
+            "operation": {
+              "adapter_version": "coding-await-base/v1",
+              "arguments": [
+                "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+                "green",
+                "60000",
+                "10800000"
+              ],
+              "environment": {}
+            },
+            "routes": {
+              "timeout": "Fail"
+            }
+          },
+          {
+            "id": "fold",
+            "kind": "Fold",
+            "progression": "Automatic",
+            "max_attempts": 2,
+            "operation": {
+              "adapter_version": "coding-fold/v1",
+              "arguments": [
+                "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+                ""
+              ],
+              "environment": {}
+            },
+            "routes": {
+              "conflict": {
+                "Split": {
+                  "step": "base",
+                  "otherwise": "Fail"
+                }
+              }
+            },
+            "limit": 5
+          },
+          {
+            "id": "gate-0",
+            "kind": "Run",
+            "progression": "Automatic",
+            "max_attempts": 2,
+            "operation": {
+              "adapter_version": "coding-gate/v1",
+              "arguments": [
+                "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+                "0"
+              ],
+              "environment": {}
+            },
+            "routes": {
+              "rejected": {
+                "Split": {
+                  "step": "base",
+                  "otherwise": "Fail"
+                }
+              }
+            },
+            "limit": 5
+          },
+          {
+            "id": "push",
+            "kind": "Push",
+            "progression": "Automatic",
+            "max_attempts": 2,
+            "operation": {
+              "adapter_version": "coding-push/v1",
+              "arguments": [
+                "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+                "refs/heads/main"
+              ],
+              "environment": {}
+            },
+            "routes": {
+              "base_moved": {
+                "Step": "base"
+              }
+            },
+            "limit": 2
+          },
+          {
+            "id": "ci",
+            "kind": "AwaitCi",
+            "progression": "Automatic",
+            "max_attempts": 5,
+            "operation": {
+              "adapter_version": "coding-await-ci/v1",
+              "arguments": [
+                "wf1:e7648d27ed8fc592253daef32a3bd02c4e4713a0fca139b418381fbc3edcfa22",
+                "taneliang/farcooler",
+                "60000",
+                "10800000",
+                "[\"Web\",\"Doc comments\"]"
+              ],
+              "environment": {}
+            }
+          }
+        ]
+      }
+    },
+    "models": {
+      "build": [
+        "claude:sonnet",
+        "claude:opus",
+        "claude:haiku",
+        "codex:gpt-6.1-sol",
+        "codex:gpt-6.1-terra",
+        "codex:gpt-6.1-luna"
+      ],
+      "gate-0": [
+        "claude:sonnet",
+        "claude:opus",
+        "codex:gpt-6.1-sol",
+        "codex:gpt-6.1-terra",
+        "codex:gpt-6.1-luna"
+      ]
+    }
+  },
+  "adapter": {
+    "version": "coding/v1",
+    "config": {
+      "repository": "/Users/e-liang/Dev/overnight",
+      "base": "3f78754f936855710dfec920fe3d492f879b610d",
+      "landing_ref": "refs/heads/main",
+      "landing": {
+        "job": "landing-main",
+        "repository": "ssh://git@github.com/taneliang/farcooler.git",
+        "target": "refs/heads/main",
+        "config_digest": ""
+      },
+      "harness": {
+        "Native": {
+          "preset": "claude",
+          "settings": {
+            "path": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow-claude-hooks.json",
+            "digest": "wf1:71c940a353627bea46c91ad7cc00d14bc4b15a976abfbc4054402715b2097941"
+          },
+          "project_hooks": null,
+          "plugin_dir": null,
+          "prompt": "Work this ticket to its acceptance items and within its constraints. First read the lane rules in /Users/e-liang/Dev/overnight/.claude/agent/reports/lanes/rules.md and follow them: no cargo fmt, git stash or autostash; every heavy run (a full crate's tests, gradle, xcodebuild, swift test) through `scripts/heavy`; tests that build git repos also pass under CI-like git (a scratch HOME whose .gitconfig sets init.defaultBranch = master); UI captures at the narrowest width with long real content, light and dark, in .claude/agent/reports/<ticket>/; and net hand-written app lines going down. Run the tests your change can affect, each new one seen failing first. Commit your work on this branch, with a message that names the ticket, and don't push. The rules' report goes in your last message: the SHAs, net app lines per language, tests red then green, and anything unverified. Then end your turn.",
+          "process": {
+            "argv": [],
+            "environment": {
+              "HOME": "/Users/e-liang",
+              "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/Users/e-liang/.local/bin:/Users/e-liang/.cargo/bin"
+            },
+            "timeout_ms": 10800000
+          },
+          "codex_hooks": {
+            "path": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow-codex-hooks.json",
+            "digest": "wf1:2b8957b0ae8c657426f4951a73c5ce271b81d3670597906f82ac5c21041253e2"
+          }
+        }
+      },
+      "checks": [
+        {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "scripts/landing-gate"
+          ],
+          "environment": {
+            "ANDROID_HOME": "/Users/e-liang/Library/Android/sdk",
+            "CARGO_BUILD_JOBS": "4",
+            "HEAVY_LOAD_LIMIT": "20",
+            "HOME": "/Users/e-liang",
+            "JAVA_HOME": "/opt/homebrew/opt/openjdk@17",
+            "PATH": "/opt/homebrew/bin:/Users/e-liang/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+          },
+          "timeout_ms": 10800000
+        }
+      ],
+      "reviewer": null,
+      "ci": {
+        "repository": "taneliang/farcooler",
+        "workflow": "CI",
+        "event": "push",
+        "command": {
+          "argv": [
+            "/bin/sh",
+            "-c",
+            "out=$(\"$CI_GH\" api \"repos/$CI_REPOSITORY/actions/runs?head_sha=$FARCOOLER_CANDIDATE&event=$CI_EVENT&per_page=50\" --jq '[.workflow_runs[] | select(.name == (env.FARCOOLER_CI_WORKFLOW // env.CI_WORKFLOW))] | max_by(.id) // empty | {binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at}}') || exit 1\n[ -n \"$out\" ] || exit 0\nprintf '%s\\n' \"$out\" > \"$FARCOOLER_RECEIPT\""
+          ],
+          "environment": {
+            "CI_EVENT": "push",
+            "CI_GH": "/opt/homebrew/bin/gh",
+            "CI_REPOSITORY": "taneliang/farcooler",
+            "CI_WORKFLOW": "CI",
+            "HOME": "/Users/e-liang",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:/Users/e-liang/.cargo/bin"
+          },
+          "timeout_ms": 120000
+        }
+      }
+    }
+  }
+}

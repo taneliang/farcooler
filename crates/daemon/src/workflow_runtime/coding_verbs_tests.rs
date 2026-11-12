@@ -735,3 +735,69 @@ async fn a_gate_in_the_fold_tree_sees_the_account_and_the_refs_a_lane_gate_reads
     assert_eq!(seen["python3"], tools.join("python3").to_str().unwrap(), "the account's python3 comes first: {seen}");
     assert_eq!(seen["origin/main"], 0, "the fold tree reads the repository's refs: {seen}");
 }
+
+/// A CI provider that answers for whichever workflow `FARCOOLER_CI_WORKFLOW` names, from `CI_RUNS`: `success`,
+/// `failure`, `pending`, or `none` (no run: the push didn't start it).
+const CI_BY_WORKFLOW: &str = r#"import json, os, pathlib, sys
+name = os.environ['FARCOOLER_CI_WORKFLOW']
+state = json.loads(os.environ['CI_RUNS']).get(name, 'success')
+if state == 'none': sys.exit(0)
+pathlib.Path(os.environ['FARCOOLER_RECEIPT']).write_text(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'],
+    repository='offline/repository', run=dict(id=74, name=name, head_sha=os.environ['FARCOOLER_CANDIDATE'],
+    status='in_progress' if state == 'pending' else 'completed', conclusion='failure' if state == 'failure' else 'success',
+    html_url='fixture://ci/74', created_at='2026-01-01T00:00:00Z', event='push'))))
+"#;
+
+/// The label the group's CI wait settled on.
+fn ci_label(runtime: &Runtime) -> String {
+    std::fs::read_dir(runtime.root.join("receipts")).unwrap().map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().ends_with(".verb.json"))
+        .map(|p| serde_json::from_slice::<serde_json::Value>(&std::fs::read(p).unwrap()).unwrap())
+        .find(|fact| fact["binding"]["effect"]["kind"]["Execute"] == "AwaitCi")
+        .map(|fact| fact["label"].as_str().unwrap().to_string()).unwrap_or_default()
+}
+
+/// ov-1071: a CI wait can wait on other workflows besides the configured one. Red anywhere is red, one still going is
+/// waited for, and one the push never started (a path filter) doesn't hold the landing.
+#[tokio::test]
+async fn a_ci_wait_waits_on_every_workflow_it_names_that_the_push_started() {
+    let also = serde_json::to_string(&["Web", "Doc comments"]).unwrap();
+    for (runs, named, label, phase) in [
+        (r#"{"Web":"success","Doc comments":"none"}"#, true, "passed", Phase::Done),
+        (r#"{"Web":"failure"}"#, true, "rejected", Phase::Failed),
+        (r#"{"Doc comments":"pending"}"#, true, "timeout", Phase::Failed),
+        (r#"{"configured-check":"none"}"#, true, "timeout", Phase::Failed),
+        // Without the list, only the configured workflow counts, as before.
+        (r#"{"Web":"failure"}"#, false, "passed", Phase::Done),
+    ] {
+        let (dir, runtime) = lander("pass").await;
+        let script = dir.path().join("ci-by-workflow.py");
+        std::fs::write(&script, CI_BY_WORKFLOW).unwrap();
+        let root = runtime.root.clone();
+        let mut config = runtime.coding.clone().unwrap();
+        config.ci.command.argv = vec!["/usr/bin/python3".into(), script.to_string_lossy().into_owned()];
+        config.ci.command.environment.insert("CI_RUNS".into(), runs.into());
+        std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+        drop(runtime);
+        let mut runtime = Runtime::open(&root).unwrap();
+        let mut definition = batched_push(&runtime, "any", 800);
+        if named { definition.groups.get_mut("landing").unwrap().steps[4].operation.arguments.push(also.clone()); }
+        runtime.coding.as_ref().unwrap().validate_definition(&definition).unwrap();
+        at_join(&mut runtime, "one", &definition).await;
+        command(&runtime, Command::Queue { item: "one".into() });
+        until(&mut runtime, |s| phase_of(s, "one") == Some(phase.clone())).await;
+        assert_eq!(ci_label(&runtime), label, "{runs} named={named}");
+    }
+}
+
+#[tokio::test]
+async fn a_ci_wait_that_names_its_own_workflow_again_or_nothing_sound_is_refused() {
+    let (_dir, runtime) = lander("pass").await;
+    let config = runtime.coding.as_ref().unwrap();
+    for bad in ["[]", "\"Web\"", r#"["Web","Web"]"#, r#"["configured-check"]"#, r#"[" "]"#] {
+        let mut definition = batched_push(&runtime, "any", 800);
+        definition.groups.get_mut("landing").unwrap().steps[4].operation.arguments.push(bad.into());
+        assert!(config.validate_definition(&definition).is_err(), "{bad}");
+    }
+    assert_eq!(super::coding_verbs::combined(&[]), farcooler_store::board_ci::CiStatus::Unknown);
+}

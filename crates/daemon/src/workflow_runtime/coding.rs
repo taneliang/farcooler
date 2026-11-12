@@ -165,9 +165,20 @@ pub(super) const WAIT_EVERY_MS: std::ops::RangeInclusive<u64> = 10..=3_600_000;
 pub(super) const WAIT_PATIENCE_MS: std::ops::RangeInclusive<u64> = 10..=14 * 24 * 3_600_000;
 /// The poll interval and patience a waiting step pinned, if it pinned sound ones.
 pub(super) fn wait_times(operation: &OperationSpec) -> Option<(u64, u64)> {
-    let [_, _, every, patience] = operation.arguments.as_slice() else { return None };
+    // A CI wait may pin one more: the other workflows it waits on (ov-1071).
+    let (every, patience) = match operation.arguments.as_slice() { [_, _, every, patience] | [_, _, every, patience, _] => (every, patience), _ => return None };
     let (every, patience) = (every.parse::<u64>().ok()?, patience.parse::<u64>().ok()?);
     (WAIT_EVERY_MS.contains(&every) && WAIT_PATIENCE_MS.contains(&patience)).then_some((every, patience))
+}
+/// The most other workflows one CI wait may name.
+pub const MAX_ALSO_WORKFLOWS: usize = 8;
+/// The other workflows a CI wait pinned: a JSON list of 1 to 8 distinct names, each as GitHub shows it.
+pub(super) fn also_workflows(text: &str) -> Option<Vec<String>> {
+    let names: Vec<String> = serde_json::from_str(text).ok()?;
+    let distinct = names.iter().collect::<std::collections::BTreeSet<_>>().len() == names.len();
+    let sound = !names.is_empty() && names.len() <= MAX_ALSO_WORKFLOWS && distinct
+        && names.iter().all(|n| !n.trim().is_empty() && n.len() <= 100 && !n.chars().any(char::is_control));
+    sound.then_some(names)
 }
 impl PinnedDefinition for CodingConfig {
     fn validate_pinned_definition(&self, definition: &Definition) -> Result<()> { self.pinned(definition, false) }
@@ -206,7 +217,18 @@ impl Pinned for CodingConfig {
                     if !matches!(self.harness, CodingHarness::Native { .. }) {
                         return Err(Error::Refused("an agent's review gate needs a native harness"));
                     }
-                    self.operation("coding-review/v1", AGENT_REVIEWER)
+                    let mut expected = self.operation("coding-review/v1", AGENT_REVIEWER);
+                    // Options of the workflow's own (ov-1071): each model a path rule names is one the step lists, so
+                    // the launchable check below covers it.
+                    if let Some(text) = stage.operation.arguments.get(2) {
+                        let options = crate::review_agent::ReviewOptions::read(text).ok_or(Error::Refused("unsound review options"))?;
+                        let listed = definition.models.get(&stage.id);
+                        if options.models.iter().any(|(_, model)| !listed.is_some_and(|l| l.contains(model))) {
+                            return Err(Error::Refused("a review's path rule names a model its step doesn't list"));
+                        }
+                        expected.arguments.push(text.clone());
+                    }
+                    expected
                 },
                 StageKind::Review(_) if built && (!landed || definition.max_reworks == 0) =>
                     self.operation("coding-review/v1", &self.reviewer.as_ref().ok_or(Error::Refused("missing reviewer"))?.identity),
@@ -251,7 +273,15 @@ impl Pinned for CodingConfig {
                 },
                 StageKind::AwaitCi if pushed || merged => {
                     let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
-                    self.wait_operation("coding-await-ci/v1", &self.ci.repository, every, patience)
+                    let mut expected = self.wait_operation("coding-await-ci/v1", &self.ci.repository, every, patience);
+                    // The other workflows the step waits on besides the configured one (ov-1071).
+                    if let Some(text) = stage.operation.arguments.get(4) {
+                        if also_workflows(text).is_none_or(|also| also.contains(&self.ci.workflow)) {
+                            return Err(Error::Refused("unsound CI workflows"));
+                        }
+                        expected.arguments.push(text.clone());
+                    }
+                    expected
                 },
                 _ => return Err(Error::Refused("unsupported operation or unsafe prerequisites")),
             };

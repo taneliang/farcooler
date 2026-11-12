@@ -174,7 +174,9 @@ impl Exec {
                 CodingHarness::Command(_) => return Err(Error::Refused("an agent's review gate needs a native harness")),
                 CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt: _, process, codex_hooks } => {
                     // The model the run picked at Start, or the configured preset when the workflow lists none (ov-966).
-                    let preset = binding.effect.model.as_deref().unwrap_or(preset);
+                    // A review whose options choose by path runs with the model its paths earned (ov-1071).
+                    let model = self.run_model(binding);
+                    let preset = model.as_deref().unwrap_or(preset);
                     let agent = preset.split(':').next().unwrap_or("");
                     let claude = agent == "claude";
                     if let Some(settings) = settings.as_ref().filter(|_| launch && claude) { settings.verify()?; }
@@ -225,8 +227,8 @@ impl Exec {
             return Err(Error::Refused("not a native harness"));
         };
         Ok(match &binding.effect.kind {
-            EffectKind::Execute(StageKind::Review(Reviewer::Agent)) => Self::reviewing(&binding.effect.item),
-            _ => Self::briefed(prompt, &binding.effect),
+            EffectKind::Execute(StageKind::Review(Reviewer::Agent)) => Self::review_prompt(binding),
+            _ => Self::briefed(prompt, &binding.effect, binding.iteration),
         })
     }
     /// An agent gate's brief (ov-969). Fixed text, so a recovery rebuilds the same command. The verdict is the
@@ -234,7 +236,9 @@ impl Exec {
     pub(super) fn reviewing(item: &str) -> String {
         format!("You are reviewing ticket {item}. Read it first with `farcooler task show {item}`. The work under review is \
             the commits from $FARCOOLER_BASE to $FARCOOLER_CANDIDATE in this worktree. Review it against the ticket. Don't \
-            change, commit or stage anything here.\n\nWhen you've decided, record your verdict with \
+            change, commit or stage anything here.\n\nIf it isn't ready, first write what must change, plainly, with \
+            `farcooler task note {item} --kind finding --body \"…\"`: a fresh agent makes the fix, and that note is how it \
+            knows.\n\nWhen you've decided, record your verdict with \
             `farcooler workflow verdict --passed true` or `farcooler workflow verdict --passed false`, then end your turn. \
             Only that command's verdict counts. If you end your turn without one, the review hasn't happened, and it \
             runs again.")
@@ -242,7 +246,8 @@ impl Exec {
     /// The published prompt, led by the card this run is for. The card's own words are read by the agent
     /// (`farcooler task show`), not copied here, so a recovery rebuilds the same command whatever the card says now.
     /// What the effect itself carries is said: an adopted branch's earlier work, and why the run was sent back (ov-968).
-    pub(super) fn briefed(prompt: &str, effect: &farcooler_workflow::Effect) -> String {
+    /// A build a later step turned back is a fix round: a fresh agent, told so and where the reasons are (ov-1071).
+    pub(super) fn briefed(prompt: &str, effect: &farcooler_workflow::Effect, iteration: u8) -> String {
         let item = &effect.item;
         let mut brief = if effect.with.is_empty() {
             format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.")
@@ -263,6 +268,11 @@ impl Exec {
             brief.push_str(&format!("\n\nThis ticket was sent back to you. Your earlier work is in this worktree; carry on from it. \
                 The reason it was sent back:\n\n{said}"));
             if cut { brief.push_str(&format!("…\n\n(The reason is cut short here. Read all of it with `farcooler workflow get`, under {item}.)")); }
+        } else if iteration > 0 {
+            brief.push_str(&format!("\n\nThis is fix round {iteration}. A later step turned back this ticket's last build, and you're a \
+                fresh agent picking it up. The earlier work is on this branch: read it with `git log --stat $FARCOOLER_BASE..HEAD`. \
+                If a review turned it back, the reviewer wrote what must change on the ticket: read its newest notes with \
+                `farcooler task show {item}`. Fix that, keep what was right, and commit."));
         }
         format!("{brief}\n\n{prompt}")
     }
@@ -294,7 +304,7 @@ impl Exec {
             for key in ["USER", "LOGNAME"] { command.environment.insert(key.into(), account.clone()); }
         }
         // The model the run picked at Start (ov-966); a native harness launches it, a command one is told.
-        if let Some(model) = &effect.model { command.environment.insert("FARCOOLER_WORKFLOW_MODEL".into(), model.clone()); }
+        if let Some(model) = self.run_model(binding) { command.environment.insert("FARCOOLER_WORKFLOW_MODEL".into(), model); }
     }
     /// A gate that was ended mid-run (a restart, a crash) may have left files in the tree. In a private tree
     /// they are ours and the candidate is a commit, so start the run from exactly the commit. A tree the app
@@ -465,6 +475,7 @@ impl Exec {
                 if matches!(kind, StageKind::Run) && tree.try_exists()? { self.settle_run_tree(binding, &tree).await?; }
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
+                if matches!(kind, StageKind::Review(Reviewer::Agent)) { self.choose_review_model(binding, &tree).await?; }
                 if matches!(kind, StageKind::Build | StageKind::Review(Reviewer::Agent)) { self.install_codex_hooks(binding, &tree).await?; }
                 self.run_coding(binding, self.coding_command(binding)?, cancel).await?;
             }

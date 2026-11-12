@@ -226,3 +226,59 @@ async fn a_verdict_survives_the_daemon_stopping_before_the_turn_ends() {
     let (outcome, ()) = tokio::join!(runtime.execute_coding("w", &binding, cancelled), stop);
     assert!(matches!(outcome.unwrap(), Outcome::Passed(_)));
 }
+
+/// ov-1071: an agent gate's options give its reviewer the workflow's words, and choose its model by the paths the
+/// ticket changed. The build here changes `result.txt`.
+fn with_options(runtime: &Runtime, rule: &str) -> Definition {
+    let mut definition = definition(runtime);
+    let options = crate::review_agent::ReviewOptions { prompt: Some("Read the lane rules first.".into()),
+        models: vec![(rule.into(), "claude:opus".into())] };
+    let gate = definition.stages.iter_mut().find(|s| s.id == "agent-review").unwrap();
+    gate.operation.arguments.push(options.argument());
+    definition.models.insert("agent-review".into(), vec!["claude:sonnet".into(), "claude:opus".into()]);
+    definition
+}
+
+#[tokio::test]
+async fn a_review_runs_with_the_model_its_changed_paths_earn_and_the_workflows_words() {
+    for (rule, model) in [("result.txt", "claude:opus"), ("crates/**", "claude:sonnet")] {
+        let (dir, mut runtime, _fake) = three_gates("pass").await;
+        let definition = with_options(&runtime, rule);
+        runtime.coding.as_ref().unwrap().validate_definition(&definition).unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        let state = settle(&mut runtime, 2).await;
+        assert_eq!(at(&state), ("orchestrator-review".into(), Phase::WaitingReview), "{rule}");
+        assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), format!("{model}\n{model}\n"), "{rule}: both attempts");
+    }
+    let (_dir, mut runtime, _fake) = three_gates("never").await;
+    let definition = with_options(&runtime, "result.txt");
+    enqueue(&mut runtime, "w", "one", definition);
+    let binding = {
+        for time in 2..20 {
+            if at(&runtime.state("w").unwrap().unwrap()).0 == "agent-review" { break; }
+            runtime.pump(time).await.unwrap();
+        }
+        super::coding_tests::admitted(&runtime).await
+    };
+    let (_hold, cancelled) = tokio::sync::watch::channel(false);
+    runtime.execute_coding("w", &binding, cancelled).await.unwrap();
+    // The launch, and a rebuild of it, name the chosen model and carry the workflow's words after the engine's brief.
+    let command = runtime.coding_command(&binding).unwrap();
+    assert_eq!(command.environment.get("FARCOOLER_WORKFLOW_MODEL").map(String::as_str), Some("claude:opus"));
+    let prompt = command.environment.get("TEST_LAUNCHED_PROMPT").unwrap();
+    assert!(prompt.starts_with("You are reviewing ticket one.") && prompt.ends_with("\n\nRead the lane rules first."), "{prompt}");
+    assert!(prompt.contains("farcooler task note one --kind finding"), "the reviewer is told where its reasons go: {prompt}");
+    assert_eq!(runtime.coding_command(&binding).unwrap(), command);
+}
+
+#[tokio::test]
+async fn a_review_option_naming_a_model_its_step_doesnt_list_is_refused() {
+    let (_dir, runtime, _fake) = three_gates("pass").await;
+    let config = runtime.coding.as_ref().unwrap();
+    let mut definition = with_options(&runtime, "result.txt");
+    definition.models.insert("agent-review".into(), vec!["claude:sonnet".into()]);
+    assert!(config.validate_definition(&definition).is_err(), "opus isn't listed");
+    let mut garbled = with_options(&runtime, "result.txt");
+    garbled.stages.iter_mut().find(|s| s.id == "agent-review").unwrap().operation.arguments[2] = "{}".into();
+    assert!(config.validate_definition(&garbled).is_err(), "options that say nothing");
+}

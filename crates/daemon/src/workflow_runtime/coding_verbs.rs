@@ -262,22 +262,49 @@ impl Exec {
         }
         unreachable!("the poll count is unbounded")
     }
-    /// One look at CI on `sha`: the configured provider hook runs once and writes a receipt. A hook
-    /// that fails, or writes nothing, has no answer yet. A receipt about something else is an error.
+    /// One look at CI on `sha`, over every workflow the step waits on. The configured workflow must have a run; each
+    /// other one a CI wait names (ov-1071) counts once the push started it. GitHub starts every workflow a push
+    /// triggers together, so one with no run beside the configured one's is one this push didn't trigger (a path filter).
+    /// Anything red is red; anything still going waits; all green is green. The run facts are the configured
+    /// workflow's: that is the run a CI retry reruns.
     async fn ci_poll(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<(CiStatus, Option<CiRun>)> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
-        let stem = format!("{}.poll-{poll}", digest(&binding.effect));
+        let also = match &binding.effect.kind {
+            EffectKind::Execute(StageKind::AwaitCi) => match binding.effect.operation.arguments.get(4) {
+                Some(text) => super::coding::also_workflows(text).ok_or(Error::Refused("unsound CI workflows"))?,
+                None => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        let Some((first, run)) = self.ci_look(binding, sha, poll, &config.ci.workflow, 0, cancel).await? else { return Ok((CiStatus::Unknown, None)) };
+        let mut all = vec![first];
+        for (index, name) in also.iter().enumerate() {
+            if let Some((status, _)) = self.ci_look(binding, sha, poll, name, index + 1, cancel).await? { all.push(status); }
+        }
+        Ok((combined(&all), run))
+    }
+    /// One look at one workflow's newest run on `sha`: the configured provider hook runs once, told which workflow in
+    /// `FARCOOLER_CI_WORKFLOW`, and writes a receipt. A hook that fails couldn't say (`Unknown`); one that succeeds and
+    /// writes nothing found no run (`None`). A receipt about something else is an error. Only the configured workflow
+    /// (`index` 0) follows a CI retry's exact run; the others look for their newest run on `sha`.
+    async fn ci_look(&self, binding: &Binding, sha: &str, poll: u32, workflow: &str, index: usize,
+        cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<(CiStatus, Option<CiRun>)>> {
+        let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
+        // The configured workflow keeps the names it always had.
+        let stem = match index { 0 => format!("{}.poll-{poll}", digest(&binding.effect)), n => format!("{}.poll-{poll}.ci-{n}", digest(&binding.effect)) };
         let (receipt, log) = (self.root.join("receipts").join(format!("{stem}.provider.json")),
             self.root.join("receipts").join(format!("{stem}.output")));
         let mut command = config.ci.command.clone();
         self.pin_context(&mut command, binding, sha, &receipt);
+        command.environment.insert("FARCOOLER_CI_WORKFLOW".into(), workflow.into());
+        if index != 0 { command.environment.remove("FARCOOLER_CI_RUN"); }
         durable(&log, b"")?;
         let exit = crate::effect_runner::configured(&self.repository(), &command.argv, &command.environment, &log,
             Duration::from_millis(command.timeout_ms), cancel.clone()).await?;
-        if exit != Some(0) { return Ok((CiStatus::Unknown, None)); }
+        if exit != Some(0) { return Ok(Some((CiStatus::Unknown, None))); }
         let raw = match self.bytes(&receipt) {
             Ok(raw) => raw,
-            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok((CiStatus::Unknown, None)),
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
         let provided: CodingCiReceipt = serde_json::from_slice(&raw)?;
@@ -285,13 +312,13 @@ impl Exec {
             return Err(Error::Refused("foreign CI provider identity"));
         }
         let run = crate::ci_watch::parse_run(&serde_json::to_vec(&provided.run)?).ok_or(Error::Refused("invalid CI receipt"))?;
-        if run.id == 0 || run.head_sha != sha || run.name != config.ci.workflow || run.event != config.ci.event {
+        if run.id == 0 || run.head_sha != sha || run.name != workflow || run.event != config.ci.event {
             return Err(Error::Refused("foreign CI run provenance"));
         }
         let facts = provided.run["run_attempt"].as_u64().and_then(|n| u32::try_from(n).ok())
             .map(|attempt| CiRun { id: run.id, attempt, failed_jobs: provided.failed_jobs.unwrap_or_default() });
         if facts.as_ref().is_some_and(|r| !r.valid()) { return Err(Error::Refused("invalid CI run facts")); }
-        Ok((crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status, facts))
+        Ok(Some((crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status, facts)))
     }
 
     /// Apply every member's commits, in order, onto the base in a fresh tree. The tree is made new
@@ -511,4 +538,13 @@ pub(super) async fn pause(every: u64, cancel: &tokio::sync::watch::Receiver<bool
         _ = tokio::time::sleep(Duration::from_millis(every)) => *cancel.borrow(),
         cancelled = watching.wait_for(|c| *c) => cancelled.is_ok(),
     }
+}
+
+/// Where CI stands over several workflows' runs (ov-1071): anything red is red, then anything a newer push superseded,
+/// then all green is green; anything else is still going.
+pub(super) fn combined(all: &[CiStatus]) -> CiStatus {
+    if all.contains(&CiStatus::Failed) { CiStatus::Failed }
+    else if all.contains(&CiStatus::Superseded) { CiStatus::Superseded }
+    else if !all.is_empty() && all.iter().all(|s| *s == CiStatus::Passed) { CiStatus::Passed }
+    else { CiStatus::Unknown }
 }

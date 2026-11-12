@@ -54,7 +54,7 @@ async fn workflow_send_back_builds_again_in_the_same_tree_and_the_agent_is_told_
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     runtime.coding = Some(config);
     let command = runtime.coding_command(&binding).unwrap();
-    let brief = Exec::briefed("implement the selected task", &binding.effect);
+    let brief = Exec::briefed("implement the selected task", &binding.effect, binding.iteration);
     assert!(brief.contains("sent back to you") && brief.contains(reason), "{brief}");
     // The launch quotes the brief (twice, inside a login shell), so look for words the quoting leaves alone.
     assert!(command.argv[2].contains("This ticket was sent back to you.") && command.argv[2].contains("result.txt must say what changed")
@@ -69,21 +69,37 @@ fn workflow_send_back_brief_cuts_a_long_reason_on_a_character_and_names_an_adopt
     let mut effect: Effect = serde_json::from_value(serde_json::json!({ "id": "e", "item": "ov-7", "run": "r", "epoch": 1, "fence": 1,
         "resource": "x", "definition_pin": "d", "policy_pin": "p", "candidate": null, "kind": { "Execute": "Build" },
         "operation": { "adapter_version": "a", "arguments": [], "environment": {} }, "created_ms": 0 })).unwrap();
-    assert!(!Exec::briefed("go", &effect).contains("sent back"), "nothing to say, nothing said");
+    assert!(!Exec::briefed("go", &effect, 0).contains("sent back"), "nothing to say, nothing said");
     // One byte and then three a character, so the cut at 1,500 falls inside one unless it looks for the boundary.
     let long = format!("a{}", "修".repeat(MAX_REWORK_REASON_BYTES / 3 - 1));
     effect.brief = Some(long.clone());
-    let brief = Exec::briefed("go", &effect);
+    let brief = Exec::briefed("go", &effect, 0);
     let kept = brief.split("The reason it was sent back:\n\n").nth(1).unwrap().split('…').next().unwrap();
     assert!(kept.len() <= super::coding_execute::MAX_BRIEF_REASON_BYTES && long.starts_with(kept) && !kept.is_empty(), "{}", kept.len());
     assert!(brief.contains("cut short") && brief.contains("farcooler workflow get"));
     // The longest brief still fits in one launch command.
     assert!(crate::service::shell_quote(&brief.replace('修', "'")).len() < crate::service::MAX_INLINE_LAUNCH_BYTES);
     effect.tree = Some(RunTree { name: "n".into(), branch: "e-liang/earlier".into(), path: "/t".into(), base: "a".repeat(40), adopted: true });
-    assert!(Exec::briefed("go", &effect).contains("on the branch e-liang/earlier, which already has work on it"));
+    assert!(Exec::briefed("go", &effect, 0).contains("on the branch e-liang/earlier, which already has work on it"));
     // One run on several tickets names them all (ov-970).
     effect.with = vec!["ov-8".into(), "ov-9".into()];
-    assert!(Exec::briefed("go", &effect).starts_with("You are working on tickets ov-7, ov-8 and ov-9, together, in this one worktree and branch."));
+    assert!(Exec::briefed("go", &effect, 0).starts_with("You are working on tickets ov-7, ov-8 and ov-9, together, in this one worktree and branch."));
+}
+
+/// A build a later step turned back starts as a fresh agent (ov-1071): it's told it's a fix round and where the review's
+/// reasons are. A send-back already says why, so it isn't told twice.
+#[test]
+fn a_fix_round_is_told_it_is_one_and_where_the_reasons_are() {
+    let mut effect: Effect = serde_json::from_value(serde_json::json!({ "id": "e", "item": "ov-7", "run": "r", "epoch": 1, "fence": 1,
+        "resource": "x", "definition_pin": "d", "policy_pin": "p", "candidate": null, "kind": { "Execute": "Build" },
+        "operation": { "adapter_version": "a", "arguments": [], "environment": {} }, "created_ms": 0 })).unwrap();
+    assert!(!Exec::briefed("go", &effect, 0).contains("fix round"), "a first build is no fix round");
+    let round = Exec::briefed("go", &effect, 2);
+    assert!(round.contains("This is fix round 2.") && round.contains("fresh agent") && round.contains("`farcooler task show ov-7`"), "{round}");
+    assert!(round.ends_with("\n\ngo"), "the workflow's prompt still closes it: {round}");
+    effect.brief = Some("the copy is wrong".into());
+    let sent = Exec::briefed("go", &effect, 2);
+    assert!(sent.contains("sent back to you") && !sent.contains("fix round"), "{sent}");
 }
 
 /// A build left Uncertain is sent back once its agent has ended, never before (ov-1090): ov-1076's and ov-1084's

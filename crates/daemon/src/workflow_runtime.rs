@@ -21,6 +21,7 @@ mod coding_verbs;
 mod coding_ci_rerun;
 mod coding_settle;
 mod coding_pr;
+mod review_agent;
 mod fold_trees;
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict};
@@ -871,3 +872,5 @@ mod gate_tests;
 mod send_back_tests;
 #[cfg(test)]
 mod fold_trees_tests;
+#[cfg(test)]
+mod main_bundle_tests;

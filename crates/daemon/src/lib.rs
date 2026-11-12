@@ -130,6 +130,7 @@ pub mod workflow_drafts;
 pub mod workflow_starter;
 pub(crate) mod workflow_deciders;
 pub mod path_routes;
+pub mod review_agent;
 pub mod landing_read;
 pub mod charter_draft;
 pub mod survey;

@@ -35,14 +35,17 @@ pub const CI_WORKFLOW: &str = "CI";
 pub const PROMPT: &str = "Work this ticket to its acceptance items and within its constraints. Run the tests your change \
     can affect. Commit your work on this branch, with a message that names the ticket, then end your turn.";
 
-/// One look at CI on `$FARCOOLER_CANDIDATE`: the newest `$CI_WORKFLOW` run GitHub has for that commit, written
-/// as the receipt the CI step reads. No run yet is no answer yet: it exits non-zero and writes nothing.
-const CI_LOOK: &str = r#"if [ -n "$FARCOOLER_CI_RUN" ]; then
+/// One look at CI on `$FARCOOLER_CANDIDATE`: the newest run GitHub has for that commit of the workflow the engine names
+/// (`$FARCOOLER_CI_WORKFLOW`, ov-1071), else of `$CI_WORKFLOW`, or the exact run a CI retry follows (`$FARCOOLER_CI_RUN`),
+/// written as the receipt the CI step reads. A look that fails exits non-zero; one that finds no run for the commit
+/// succeeds and writes nothing, which a CI wait reads as a workflow this push didn't start.
+pub const CI_LOOK: &str = r#"if [ -n "$FARCOOLER_CI_RUN" ]; then
 ids=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$FARCOOLER_CI_RUN" --jq '[.id, .run_attempt] | @tsv') || exit 1
-else
-ids=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs?head_sha=$FARCOOLER_CANDIDATE&event=$CI_EVENT&per_page=50" --jq '[.workflow_runs[] | select(.name == env.CI_WORKFLOW)] | max_by(.id) // empty | [.id, .run_attempt] | @tsv') || exit 1
-fi
 [ -n "$ids" ] || exit 1
+else
+ids=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs?head_sha=$FARCOOLER_CANDIDATE&event=$CI_EVENT&per_page=50" --jq '[.workflow_runs[] | select(.name == (env.FARCOOLER_CI_WORKFLOW // env.CI_WORKFLOW))] | max_by(.id) // empty | [.id, .run_attempt] | @tsv') || exit 1
+[ -n "$ids" ] || exit 0
+fi
 read -r run attempt <<IDS
 $ids
 IDS

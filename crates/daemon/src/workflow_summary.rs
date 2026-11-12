@@ -207,9 +207,11 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
     let mut lines = Vec::new();
     let target = config.landing.as_ref().map_or(config.landing_ref.as_str(), |l| l.target.as_str());
     let target = code(target.strip_prefix("refs/heads/").unwrap_or(target));
+    let uncapped = definition.groups.values().any(|g| g.limit == 0);
     let batch = definition.groups.values().map(|g| g.limit).max().unwrap_or(1);
     if kinds(|k| matches!(k, StageKind::Push)) {
-        if batch > 1 { lines.push(format!("Finished tickets queue together, up to {batch} at a time, and one push puts them on {target}.")); }
+        if uncapped { lines.push(format!("Every finished ticket that's ready queues together, and one push puts them on {target}.")); }
+        else if batch > 1 { lines.push(format!("Finished tickets queue together, up to {batch} at a time, and one push puts them on {target}.")); }
         else { lines.push(format!("Each ticket is pushed to {target} on its own.")); }
     } else if kinds(|k| matches!(k, StageKind::OpenPr)) {
         let base = config.pull_request.as_ref().map_or(target, |p| code(&p.base));
@@ -404,6 +406,13 @@ mod tests {
             "How code lands:", "up to 4 at a time", "`main`", "waits for CI", "Who approves:", "You approve each ticket before it lands."] {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
+    }
+    #[test]
+    fn an_uncapped_batch_says_every_ready_ticket_lands_together() {
+        let b = bundle("batched-push", &["make check"], &[], Some(0));
+        let text = summarize("Land everything ready.", &b, None, None);
+        assert!(text.contains("Every finished ticket that's ready queues together, and one push puts them on `main`."), "{text}");
+        assert!(!text.contains("at a time"), "{text}");
     }
     /// The question a person is asked, from the real producer, pinned for the apps' Review screens to parse
     /// (ov-978). Set FARCOOLER_REGEN_FIXTURES=1 to rewrite it after a deliberate change to the summary.

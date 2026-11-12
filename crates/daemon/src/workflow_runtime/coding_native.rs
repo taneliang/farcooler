@@ -117,7 +117,8 @@ impl Exec {
         let Some(CodingConfig { harness: CodingHarness::Native { preset, .. }, .. }) = &self.coding else {
             return Err(Error::Refused("not a native harness"));
         };
-        let preset = binding.effect.model.as_deref().unwrap_or(preset);
+        let model = self.run_model(binding);
+        let preset = model.as_deref().unwrap_or(preset);
         preset.split(':').next().unwrap_or("").parse().map_err(|_| Error::Refused("unknown native agent"))
     }
     /// Copy the runner's pinned Codex hooks into a Codex run's worktree, where Codex reads them (ov-1088): the engine
