@@ -118,6 +118,8 @@ impl Handler for RecoveryHandler {
 /// Hold `socket` and answer only cutover recovery until a termination signal,
 /// or until an attempt ends. True means it ended, and the next start is ordinary.
 pub async fn serve(socket: &std::path::Path, root: std::path::PathBuf) -> std::io::Result<bool> {
+    // Before the bind: once the socket accepts, a caller may signal at once.
+    let signaled = crate::refusal::signaled();
     let server = farcooler_transport::UnixListenerServer::bind(socket)?;
     tracing::warn!(socket = %socket.display(), "ordinary startup refused; serving cutover recovery only");
     let done = std::sync::Arc::new(tokio::sync::Notify::new());
@@ -128,7 +130,7 @@ pub async fn serve(socket: &std::path::Path, root: std::path::PathBuf) -> std::i
     };
     let result = tokio::select! {
         served = server.serve_with_pid(sessions) => served.map(|()| false),
-        _ = crate::refusal::signaled() => Ok(false),
+        _ = signaled => Ok(false),
         _ = done.notified() => Ok(true),
     };
     let _ = std::fs::remove_file(socket);

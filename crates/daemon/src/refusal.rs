@@ -61,15 +61,23 @@ pub async fn hold(
 /// cannot receive: no session gets far enough to ask. `ensure_local` signals
 /// the socket's peer instead, as it does for a daemon too old to know the
 /// method.
-pub async fn signaled() {
-    let Ok(mut term) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-    else {
-        let _ = tokio::signal::ctrl_c().await;
-        return;
-    };
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        _ = term.recv() => {}
+///
+/// The handler is installed when this is called, not when the future is first
+/// polled: `hold` binds its socket before it polls, and anything that treats
+/// an accepting socket as "up" may signal at once. A late handler left that
+/// window open, and the default action killed the daemon by the signal.
+pub fn signaled() -> impl std::future::Future<Output = ()> {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+    async move {
+        match term.as_mut() {
+            Some(term) => tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            },
+            None => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
     }
 }
 
@@ -138,5 +146,21 @@ mod tests {
         stop.notify_one();
         held.await.unwrap().unwrap();
         assert!(!socket.exists(), "the socket goes with the daemon");
+    }
+
+    /// A SIGTERM that arrives before anything has polled the shutdown future
+    /// is still the orderly stop. `hold` and recovery bind their socket first,
+    /// so a caller can signal the moment the socket accepts; a handler that
+    /// was only installed on the first poll left that window to the default
+    /// action, which kills the process by the signal (no exit code at all).
+    /// Without the eager handler this test's own process dies of the signal.
+    #[tokio::test]
+    async fn a_signal_before_the_first_poll_is_still_a_stop() {
+        let shutdown = signaled();
+        // SAFETY: raising a signal in this process, which now has a handler.
+        unsafe { libc::raise(libc::SIGTERM) };
+        tokio::time::timeout(std::time::Duration::from_secs(10), shutdown)
+            .await
+            .expect("the signal was caught");
     }
 }
