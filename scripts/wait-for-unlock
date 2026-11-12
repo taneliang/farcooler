@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Wait while this Mac's screen is locked (ov-1089).
+#
+#     scripts/wait-for-unlock
+#
+# Mac display and key tests (the scroller's display link, the Secure Enclave
+# signer) are invalid in a locked session: they fail or crawl, and a good landing
+# batch gets split. So the landing gate waits here, before the Mac tests, and
+# says it is waiting. This only reads the lock state. It never unlocks, wakes
+# or keeps the display awake: locking is the owner's security choice.
+#
+# FARCOOLER_LOCK_STATE_CMD replaces the read (it prints "true" while locked) and
+# FARCOOLER_LOCK_POLL_SECONDS the poll interval (default 30), for the test.
+# FARCOOLER_LOCK_WAIT_LIMIT_SECONDS (default 0, wait forever) gives up with exit 3.
+set -u
+
+lock_state() {
+  if [ -n "${FARCOOLER_LOCK_STATE_CMD:-}" ]; then
+    sh -c "$FARCOOLER_LOCK_STATE_CMD" 2>/dev/null
+  elif [ "$(uname)" = Darwin ]; then
+    ioreg -n Root -d1 -a 2>/dev/null | grep -A1 CGSSessionScreenIsLocked | grep -Eo '<(true|false)/>' | head -1 | tr -d '</>'
+  else
+    echo false
+  fi
+}
+
+poll="${FARCOOLER_LOCK_POLL_SECONDS:-30}"
+limit="${FARCOOLER_LOCK_WAIT_LIMIT_SECONDS:-0}"
+waited=0
+told=0
+while [ "$(lock_state)" = true ]; do
+  if [ "$told" -eq 0 ]; then
+    echo "wait-for-unlock: the screen is locked, so the Mac tests are waiting (checking every ${poll}s; nothing here touches the lock)"
+    told=1
+  fi
+  if [ "$limit" -gt 0 ] && [ "$waited" -ge "$limit" ]; then
+    echo "wait-for-unlock: still locked after ${waited}s, giving up" >&2
+    exit 3
+  fi
+  sleep "$poll"
+  waited=$((waited + poll))
+done
+[ "$told" -eq 1 ] && echo "wait-for-unlock: the screen is unlocked, going on after ${waited}s"
+exit 0

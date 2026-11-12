@@ -33,6 +33,11 @@ if [ -z "$jobs_line" ]; then
 fi
 echo "landing-gate: jobs: $jobs_line"
 
+# Mac tests need an unlocked session (ov-1089): wait for it before they start.
+if printf '%s' "$jobs_line" | grep -Eq '(^|, )(swift-tests|swift)(,|$)'; then
+  "$here/wait-for-unlock" || { echo "landing-gate: the screen stayed locked" >&2; exit 2; }
+fi
+
 if printf '%s' "$jobs_line" | grep -Eq '(^|, )(tunnel|rust|swift-tests|swift|ios|android|web)(,|$)'; then
   "$here/heavy" -- python3 "${gate[@]}" "$@"
 else
