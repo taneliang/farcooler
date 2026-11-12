@@ -54,6 +54,10 @@ apps/android/local.properties
 .claude/worktrees/
 .claude/settings.local.json
 
+# Browser session logs and engine-generated Codex hooks are local scratch.
+/.gstack/
+/.codex/
+
 # Mockups from the brainstorming companion. Working material, not source.
 .superpowers/
 
