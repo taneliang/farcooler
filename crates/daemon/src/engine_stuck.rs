@@ -84,17 +84,26 @@ fn clear(key: &Key) {
     if table().lock().is_ok_and(|mut m| m.remove(key).is_some()) { announce(); }
 }
 
+type Listeners = Mutex<Vec<std::sync::Weak<crate::watch::Watcher>>>;
 /// Every watcher that tells clients the Needs You list moved. Nothing polls that list, so a build that
 /// becomes stuck, or stops being, has to say so itself.
-static LISTENERS: LazyLock<Mutex<Vec<std::sync::Weak<crate::watch::Watcher>>>> = LazyLock::new(Default::default);
+#[cfg(not(test))]
+static LISTENERS: LazyLock<Listeners> = LazyLock::new(Default::default);
+// Under test, per thread like `TABLE`, so one test's builds never wake another test's watcher.
+#[cfg(test)]
+thread_local! { static LISTENER_TABLE: &'static Listeners = Box::leak(Box::default()); }
+#[cfg(test)]
+fn listeners() -> &'static Listeners { LISTENER_TABLE.with(|t| *t) }
+#[cfg(not(test))]
+fn listeners() -> &'static Listeners { &LISTENERS }
 
 /// A watcher asks to hear when the list changes.
 pub(crate) fn listen(watcher: &std::sync::Arc<crate::watch::Watcher>) {
-    if let Ok(mut all) = LISTENERS.lock() { all.push(std::sync::Arc::downgrade(watcher)); }
+    if let Ok(mut all) = listeners().lock() { all.push(std::sync::Arc::downgrade(watcher)); }
 }
 
 fn announce() {
-    let live: Vec<_> = LISTENERS.lock().map(|mut all| {
+    let live: Vec<_> = listeners().lock().map(|mut all| {
         all.retain(|w| w.strong_count() > 0);
         all.iter().filter_map(|w| w.upgrade()).collect()
     }).unwrap_or_default();

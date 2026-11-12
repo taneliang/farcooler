@@ -92,7 +92,7 @@ async fn a_build_that_becomes_stuck_tells_clients_to_reread_needs_you() {
     let mut events = watcher.subscribe();
     let pane = Pane::showing(TRUST).await;
     let heard = AtomicBool::new(false);
-    run(&pane, "ov-t4", &heard, 300).await;
+    run(&pane, "ov-t4", &heard, 1000).await;
     let said = tokio::time::timeout(Duration::from_secs(3), async {
         while let Ok(event) = events.recv().await {
             if matches!(event.payload, Some(Payload::NeedsYouChanged(_))) { return true; }
