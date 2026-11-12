@@ -280,3 +280,27 @@ use the planned landing-gate command only when the host is below the limit,
 retain its full logs and per-job summary, and monitor load throughout execution.
 If load crosses 20, interrupt only processes started by this measurement and
 exclude the attempt from the baseline, as with the earlier local test attempt.
+
+
+## Resume preflight, 13 November 2026 (Singapore)
+
+Read the live ticket again at source `a64f8c9b471eecfd859e2ffde8f8c8b8b6523458`. Acceptance items 2–4
+remain met; item 1 still requires a fresh controlled local full-gate/test
+baseline. The regenerated gate plan selects the same ten job families as the
+saved plan; only the changed-file count differs.
+
+The [resume samples](resume-preflight.json) record all three load averages at
+30-second intervals for 300 seconds, from
+`2026-11-12T16:01:30.355542+00:00` to `2026-11-12T16:06:30.448535+00:00`. Load started at **9.63 / 73.77 / 77.60** and
+ended at **2.76 / 29.99 / 56.08** (1/5/15 minutes). Every sample exceeded the limit
+of 20. No heavy measurement was started and no unrelated process was signaled.
+A fresh full-suite result remains unmeasured.
+
+Extended `validate.py` to check both rejected preflights' decisions, command,
+load samples and time order, and to verify the failed/interrupted nextest
+attempts remain nonzero. Counterexamples change the preflight decision, make
+a rejected sample fall below the limit, or turn the interrupted test exit green;
+each must fail validation. This protects the distinction between a blocked
+measurement and a passing baseline. The evidence validator, these
+counterexamples, file-size budget, doc-comment check and `git diff --check`
+passed. No product or CI behavior changed.

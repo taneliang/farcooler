@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate the captured spike evidence without running a product build or test."""
+import datetime
 import hashlib
 import json
 import pathlib
@@ -25,6 +26,25 @@ for name in ['cold', 'warm']:
     units.append(json.loads(re.search(r'const UNIT_DATA = (\[.*?\]);', text, re.S)[1]))
 assert len(units[0]) > 400 and all(unit['duration'] == 0 for unit in units[1])
 print('PASS: cold/warm builds exited 0; warm units all fresh/zero-time; sampled load below 20')
+for name in ['fresh-gate-preflight.json', 'resume-preflight.json']:
+    preflight = json.loads((root / name).read_text())
+    assert preflight['decision'] == 'not_started_load_limit', name
+    assert preflight['limit'] == 20
+    assert preflight['command'] == [
+        'scripts/landing-gate', '--base',
+        'd986f3083730db7cda3b91caf5e536ba321b7c1e', '--keep-target']
+    samples = preflight['samples']
+    assert len(samples) >= 6
+    times = [datetime.datetime.fromisoformat(row['utc']) for row in samples]
+    assert all(a < b for a, b in zip(times, times[1:]))
+    assert (times[-1] - times[0]).total_seconds() >= 150
+    assert all(len(row['load_1_5_15']) == 3
+               and max(row['load_1_5_15']) >= preflight['limit'] for row in samples)
+print('PASS: both full-gate preflights remained above the load limit; neither is a gate result')
+for name, code in [('test-preflight-failure.json', 126), ('test-results.json', 254)]:
+    attempt = json.loads((root / name).read_text())
+    assert len(attempt['runs']) == 1 and attempt['runs'][0]['exit'] == code
+print('PASS: failed/interrupted nextest attempts remain excluded from passing baselines')
 for ref in json.loads((root / 'ci-runs.json').read_text()):
     run = json.loads((root / f"ci-{ref['databaseId']}.json").read_text())
     assert run['headSha'] == ref['headSha'] and str(ref['databaseId']) in run['url']
