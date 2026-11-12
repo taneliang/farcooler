@@ -83,12 +83,15 @@ impl Host {
         tokio::time::timeout(std::time::Duration::from_secs(15), self.service.stop_workflows()).await.unwrap().unwrap();
     }
 }
-async fn call(link: &mut Link, workspace: Uuid, action: Action) -> serde_json::Value {
+async fn try_call(link: &mut Link, workspace: Uuid, action: &Action) -> Result<serde_json::Value, String> {
     let mut req = farcooler_transport::request(action.method());
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(workspace.as_bytes()));
-    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(&action).unwrap() }));
-    let result::Value::WorkflowReply(reply) = link.call(req).await.unwrap().value.unwrap() else { panic!("wrong result") };
-    serde_json::from_str(&reply.json).unwrap()
+    req.payload = Some(request::Payload::WorkflowCommand(pb::WorkflowCommand { schema: 1, json: serde_json::to_string(action).unwrap() }));
+    let result::Value::WorkflowReply(reply) = link.call(req).await.map_err(|e| e.to_string())?.value.unwrap() else { panic!("wrong result") };
+    Ok(serde_json::from_str(&reply.json).unwrap())
+}
+async fn call(link: &mut Link, workspace: Uuid, action: Action) -> serde_json::Value {
+    try_call(link, workspace, &action).await.unwrap()
 }
 /// A note on the card, as `actor` says it.
 async fn say(link: &mut Link, card: Uuid, kind: pb::TaskNoteKind, actor: &str, body: &str) {
@@ -184,6 +187,17 @@ async fn the_orchestrator_pane_runs_the_skills_commands() {
     let (ws, key, out) = (std::env::var("OV1012_WS").unwrap().parse::<Uuid>().unwrap(), std::env::var("OV1012_KEY").unwrap(), std::env::var("OV1012_OUT").unwrap());
     let skill = skill();
     let mut link: Link = Client::connect(&socket, "orchestrator-pane", "1").await.unwrap();
+    // The daemon knows a pane only once its inventory has refreshed past it; until then it calls this process an
+    // unknown caller. A busy machine (the landing gate's) starts this before that refresh, so wait for it.
+    let mut known = false;
+    for _ in 0..1200 {
+        match try_call(&mut link, ws, &Action::Get).await {
+            Ok(_) => { known = true; break; }
+            Err(e) if e.contains("known caller") => tokio::time::sleep(std::time::Duration::from_millis(50)).await,
+            Err(e) => panic!("the pane's first read failed: {e}"),
+        }
+    }
+    assert!(known, "the daemon never knew this pane");
 
     // Section 4: no workflow yet. The skill sends the orchestrator to `workflow-draft`, which proposes; it never publishes.
     assert!(skill.contains("workspace workflow-draft") && skill.contains("--orchestrator-gate"), "the skill no longer teaches drafting");
