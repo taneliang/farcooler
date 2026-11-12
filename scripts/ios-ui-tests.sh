@@ -360,7 +360,16 @@ TEST_TIME_LIMIT="${TEST_TIME_LIMIT:-360}"
 # first nightly's capture job down (run 38612973602, testTheConversation, in
 # `app.terminate()` after the test had done its work). The app's own failures
 # are other messages.
-INFRA_SIGNATURES='Failed to launch|Early unexpected exit|never finished bootstrapping|Unable to boot|Failed to boot|Simulator device failed to boot|Failed to terminate com\.'
+#
+# `does not have a process ID` and `has not loaded accessibility` are the
+# runner's two reports of a launch that returned and left no usable app
+# (PhoneHarnessLaunch.swift, `launch()`): the simulator started no process, or
+# started one that never published its accessibility tree. Each hit a different
+# test each night (ov-1099) and the next test on the same build launched fine,
+# so they are weather. Retrying does not repeat ov-703: that absorbed the error
+# inside the test, where it passed; this reruns the shard, whose second attempt
+# is final. An app that really cannot launch fails the second attempt too.
+INFRA_SIGNATURES='Failed to launch|does not have a process ID|has not loaded accessibility|Early unexpected exit|never finished bootstrapping|Unable to boot|Failed to boot|Simulator device failed to boot|Failed to terminate com\.'
 
 # 0 (true) when the log shows an infrastructure failure and nothing else failed.
 infra_only_failure() {

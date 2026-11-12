@@ -57,6 +57,14 @@ TERMINATE="/x/Tests.swift:132: error: -[FarCoolerUITests.A testA] : Failed to te
 Test Suite 'Selected tests' failed at 2026-10-14.
 	 Executed 5 tests, with 1 failure (0 unexpected) in 4.0 (4.0) seconds
 ** TEST EXECUTE FAILED **"
+NOPID="/x/PhoneHarnessLaunch.swift:61: error: -[FarCoolerUITests.A testA] : Application 'com.farcooler.ios.local' does not have a process ID
+Test Suite 'All tests' failed at 2026-11-10.
+	 Executed 8 tests, with 1 failure (0 unexpected) in 4.0 (4.0) seconds
+** TEST FAILED **"
+NOAX="/x/PhoneHarnessLaunch.swift:58: error: -[FarCoolerUITests.A testA] : Application 'com.farcooler.ios.local' has not loaded accessibility
+Test Suite 'All tests' failed at 2026-11-11.
+	 Executed 8 tests, with 1 failure (0 unexpected) in 4.0 (4.0) seconds
+** TEST FAILED **"
 BOOTSTRAP="Early unexpected exit, operation never finished bootstrapping - no restart will be attempted
 ** TEST FAILED **"
 ASSERT="/x/Tests.swift:20: error: -[FarCoolerUITests.B testB] : XCTAssertTrue failed - the pane never drew
@@ -70,6 +78,8 @@ Failing tests:
 HUNG_LAUNCH="$LAUNCH
 $HUNG"
 MIXED="$LAUNCH
+$ASSERT"
+MIXED_NOPID="$NOPID
 $ASSERT"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
@@ -91,7 +101,7 @@ run() {
     SUMMARY="$(cat "$scratch/summary" 2>/dev/null || true)"
 }
 
-for infra in "$LAUNCH" "$BOOTSTRAP" "$TERMINATE"; do
+for infra in "$LAUNCH" "$BOOTSTRAP" "$TERMINATE" "$NOPID" "$NOAX"; do
     run 1 "$infra" 65 "$PASS" 0
     [ "$CODE" -eq 0 ] || fail "an infrastructure failure then a pass was not green: $OUT"
     [ "$CALLS" -eq 2 ] || fail "an infrastructure failure ran xcodebuild $CALLS time(s), wanted 2"
@@ -131,6 +141,14 @@ for hung in "$HUNG" "$HUNG_LAUNCH"; do
 done
 
 grep -q -- '-test-timeouts-enabled YES' scripts/ios-ui-tests.sh || fail "xcodebuild is not given a test time limit"
+
+run 1 "$MIXED_NOPID" 65 "$PASS" 0
+[ "$CALLS" -eq 1 ] || fail "an assertion failure beside a no-process launch error was retried ($CALLS calls)"
+
+# An app that really cannot launch fails again, and that is red (ov-1099).
+run 1 "$NOPID" 65 "$NOPID" 65 "$PASS" 0
+[ "$CALLS" -eq 2 ] || fail "a repeated no-process failure ran xcodebuild $CALLS time(s), wanted 2"
+[ "$CODE" -eq 65 ] || fail "a repeated no-process failure exited $CODE, wanted 65"
 
 run 1 "$LAUNCH" 65 "$BOOTSTRAP" 65 "$PASS" 0
 [ "$CALLS" -eq 2 ] || fail "a second infrastructure failure ran xcodebuild $CALLS time(s), wanted 2"
