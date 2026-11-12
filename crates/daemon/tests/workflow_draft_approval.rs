@@ -128,13 +128,12 @@ async fn a_draft_publishes_only_when_a_person_answers_approve() {
     assert!(reply["draft"]["summary"].as_str().unwrap().contains("`make check`"), "{reply}");
     assert_eq!(pin(&host), None, "a proposal publishes nothing");
 
-    // The card is a decision in Needs Decision whose question is the whole change. It has no quick-answer
-    // options, so no Needs You row or notification carries an Approve button: the words that approve it come
-    // after the whole change.
+    // The card is a decision in Needs Decision whose question is the whole change. Its options are the words
+    // that approve it and `decline`, so one tap publishes exactly this draft (ov-1073).
     let task = host.service.store.get_task(card).unwrap();
     assert_eq!(task.status, TaskStatus::NeedsDecision);
     let (ask, words) = asked(&host, card);
-    assert!(ask.extra.get("options").is_none(), "{:?}", ask.extra);
+    assert_eq!(ask.extra["options"], serde_json::json!([words.clone(), "decline"]), "{:?}", ask.extra);
     // R-111, M2: every member reads a card, so no environment value is on it; the names are.
     assert!(ask.body.contains("`PATH=(hidden)`") && !ask.body.contains("/usr/bin:/bin"), "{}", ask.body);
     assert!(reply["draft"]["summary"].as_str().unwrap().contains("`PATH=(hidden)`") && !reply["draft"]["summary"].as_str().unwrap().contains("/usr/bin:/bin"), "{reply}");
@@ -163,6 +162,8 @@ async fn a_draft_publishes_only_when_a_person_answers_approve() {
     assert_ne!(again.id, ask.id, "asked again, so the card is back in Needs You");
     assert_eq!(same, words);
     assert_eq!(host.service.store.get_task(card).unwrap().status, TaskStatus::NeedsDecision);
+    let said: Vec<_> = host.service.store.notes_for(card, Some(NoteKind::Finding)).unwrap().into_iter().map(|n| n.body).collect();
+    assert!(said.iter().any(|b| b.contains("Approving needs this change") && b.contains(&words)), "a bare approve says what's missing: {said:?}");
 
     // The person answers with the words at the end of the change: it publishes, and the card closes.
     say(&mut link, card, pb::TaskNoteKind::Answer, "user", &format!("  {} ", words.to_uppercase())).await;

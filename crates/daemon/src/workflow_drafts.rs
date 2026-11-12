@@ -4,9 +4,9 @@
 //! drafted against. `propose` files it, renders its summary from the definition (`workflow_summary`), and opens
 //! a card in Needs Decision that asks a person.
 //!
-//! **A person approves only what they read.** The card has no quick-answer options, so no Needs You row and
-//! no notification carries an Approve button: those show the headline, never the change. The card's full
-//! question ends with the words that approve it, `approve <code>`, where the code is cut from the digest of
+//! **An approval names what it approves.** The question's options are `approve <code>` and `decline` (ov-1073),
+//! so one tap on any app's row or Review screen publishes exactly this draft, and a bare "approve" says
+//! what's missing. The card's full question ends with the words that approve it, `approve <code>`, where the code is cut from the digest of
 //! the definition, the adapter and the summary. Only a client that shows the whole question shows the code,
 //! and an answer approves only the draft whose content it was cut from.
 //!
@@ -157,7 +157,9 @@ pub(crate) fn compose(headline: &str, summary: &str, code: &str) -> String {
 /// Ask the draft's question on its card, as the daemon, and remember which note asked it.
 fn ask(svc: &Service, draft: &Draft, card: Uuid) -> Result<()> {
     let note = svc.store.add_note(card, NoteKind::Question, Actor::Manager, &question(draft),
-        serde_json::json!({ EXTRA: { "id": draft.id, "digest": draft.digest } }))?;
+        serde_json::json!({ EXTRA: { "id": draft.id, "digest": draft.digest },
+            // One tap approves exactly this draft: the option's text is the answer, and it carries the code (ov-1073).
+            "options": [format!("{APPROVE} {}", code(&draft.digest)), DECLINE] }))?;
     let _held = LOCK.lock().map_err(|_| DomainError::OperationFailed)?;
     let mut now = get(svc, &draft.id)?.ok_or(DomainError::NotFound)?;
     now.task = Some(card);
@@ -315,7 +317,12 @@ pub(crate) async fn after_note(rpc: &crate::rpc::Rpc, note: &pb::TaskNote) {
     } else if decides && words == format!("{APPROVE} {}", code(&draft.digest)) {
         approve(rpc, draft, task, answer).await;
     } else {
-        let why = if decides { format!("Nothing was published. To publish this change, read it on the card and answer with the words at its end. To leave things as they are, answer `{DECLINE}`.") }
+        let why = if decides {
+            let wanted = format!("{APPROVE} {}", code(&draft.digest));
+            if words == APPROVE { format!("Nothing was published. Approving needs this change’s code, so answer `{wanted}`, or tap that button. To leave things as they are, answer `{DECLINE}`.") }
+            else if words.starts_with(&format!("{APPROVE} ")) { format!("Nothing was published. That code isn’t this change’s. To publish it, answer `{wanted}`. To leave things as they are, answer `{DECLINE}`.") }
+            else { format!("Nothing was published. To publish this change, answer `{wanted}`. To leave things as they are, answer `{DECLINE}`.") }
+        }
             else { "Nothing was published. Only the owner or a Maintainer can approve or decline a workflow change.".to_string() };
         let _ = svc.store.add_note(task, NoteKind::Finding, Actor::Manager, &why, serde_json::json!({}));
         if ask(svc, &draft, task).is_ok() && let Ok(card) = svc.store.get_task(task) { rpc.watcher.announce_task_changed(&card, None, Actor::Manager); }
