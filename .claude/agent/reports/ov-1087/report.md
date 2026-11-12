@@ -26,3 +26,7 @@ farcooler-canary workspace set-workflow d7401571 --repo overnight \
 ```
 
 `<R>`, `<E>`, `<S>` come from the same `workflow get` output: the state's current revision, epoch and next sequence. The `--expected-pin` is the full current pin (the ticket gives only its prefix).
+
+## Re-checked (second pass)
+
+Still blocked. `workflow get 01a0e3c7-3e2c-7ed0-b31c-0cc0d7401571 --json` (the full id; the 8-character short id is rejected) still returns `scope denied: known caller required`. The workspace home holds only `charter.md`, no definition. No acceptance line is met; the ticket should stay open until someone with a known caller supplies the definition.
