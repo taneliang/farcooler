@@ -940,6 +940,8 @@ jobs:
 
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
+      # The landing gate waits while the screen is locked (ov-1089).
+      - run: ./scripts/wait-for-unlock-test.sh
       # A test run that ends early, or counts fewer tests than its floor, fails
       # (ov-324): a test that exited the process once ended `swift test` with
       # exit 0 and left every later test unrun.
