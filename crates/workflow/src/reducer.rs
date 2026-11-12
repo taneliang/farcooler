@@ -340,9 +340,14 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                 }
                 Command::SendBack { reason, .. } => {
                     controller(input)?;
-                    // Only while nothing is in flight: an effect running now would answer for a step it left.
-                    if !matches!(item.phase, Phase::WaitingReview | Phase::WaitingApproval | Phase::WaitingJoin | Phase::Failed)
-                        || item.pending.is_some() || item.group_of.is_some() || item.definition.is_ticket()
+                    // Only while nothing is in flight: an effect running now would answer for a step it left. A build
+                    // left Uncertain is the one exception (ov-1090): its effect is fenced off by the send-back, and the
+                    // runner takes it only once that build's process is known to have ended.
+                    let uncertain_build = item.phase == Phase::Uncertain && item.stopping.is_none()
+                        && !item.run.starts_with("cancel:") && item.definition.stages[item.stage].kind == StageKind::Build;
+                    if !(matches!(item.phase, Phase::WaitingReview | Phase::WaitingApproval | Phase::WaitingJoin | Phase::Failed)
+                            && item.pending.is_none() || uncertain_build)
+                        || item.group_of.is_some() || item.definition.is_ticket()
                     { return Err(Refusal::Phase); }
                     if !valid_rework_reason(reason) { return Err(Refusal::Invalid); }
                     let to = item.definition.stages[..=item.stage].iter().rposition(|s| s.kind == StageKind::Build)

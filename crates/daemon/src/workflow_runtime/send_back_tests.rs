@@ -82,3 +82,36 @@ fn workflow_send_back_brief_cuts_a_long_reason_on_a_character_and_names_an_adopt
     effect.with = vec!["ov-8".into(), "ov-9".into()];
     assert!(Exec::briefed("go", &effect).starts_with("You are working on tickets ov-7, ov-8 and ov-9, together, in this one worktree and branch."));
 }
+
+/// A build left Uncertain is sent back once its agent has ended, never before (ov-1090): ov-1076's and ov-1084's
+/// builds sat there with their edits uncommitted, and neither retry nor send-back would take them.
+#[tokio::test]
+async fn workflow_send_back_recovers_an_uncertain_build_once_its_process_has_ended() {
+    let (_dir, mut runtime) = configured(false, "prose").await;
+    started(&mut runtime).await;
+    runtime.pump(2).await.unwrap(); // provision
+    let binding = admitted(&runtime).await;
+    assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
+    // The daemon went away with the build admitted: nothing says it ended.
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(3).await.unwrap();
+    let send_back = |runtime: &Runtime, id: &str, sequence: u64| {
+        let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
+        runtime.wire_command("w", "orchestrator", Action::SendBack { mutation: m(id, state.revision, sequence), item: "ov-7".into(),
+            run: item.run.clone(), pin: item.pin.clone(), reason: "Your turn ended before you committed. Carry on from the worktree.".into() }).unwrap()
+    };
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["ov-7"].phase, Phase::Uncertain);
+    let early = send_back(&runtime, "early", 3);
+    assert_eq!(early.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Phase"), "its agent may still be at work: {early}");
+    // The build's process ends, leaving its edits uncommitted, as ov-1076's did.
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    runtime.execute_coding("w", &binding, cancelled).await.unwrap();
+    ok(&send_back(&runtime, "back", 4));
+    let rebuilt = admitted(&runtime).await;
+    assert_eq!(rebuilt.effect.kind, EffectKind::Execute(StageKind::Build));
+    assert_ne!(rebuilt.effect.id, binding.effect.id);
+    assert_eq!(rebuilt.effect.brief.as_deref(), Some("Your turn ended before you committed. Carry on from the worktree."));
+    assert_eq!(std::fs::read_to_string(runtime.tree(&rebuilt).join("result.txt")).unwrap().split(" run ").next(),
+        Some("candidate iteration 0"), "the edits are still in the tree");
+}

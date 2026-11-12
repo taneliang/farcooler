@@ -98,7 +98,7 @@ async fn not_success_is_uncertain(mode: &str) {
     assert_eq!(runtime.pump(100).await.unwrap(), 0);
     assert_eq!(runtime.state("w").unwrap().unwrap(), before);
 }
-/// A mode whose check or CI says it failed: Failed.
+/// A mode whose build, check or CI says it failed: Failed.
 async fn a_failure_fails(mode: &str) {
     let (_dir, mut runtime) = configured(false, mode).await;
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
@@ -106,7 +106,8 @@ async fn a_failure_fails(mode: &str) {
 }
 /// A test per mode (ov-993): six runtimes in one test took 12 s.
 mod workflow_coding_exit_prose_dirty_checks_and_ci_provenance_are_not_success {
-    #[tokio::test] async fn prose() { super::not_success_is_uncertain("prose").await; }
+    // A build that says it's done and commits nothing has answered: no candidate (ov-1090).
+    #[tokio::test] async fn prose() { super::a_failure_fails("prose").await; }
     #[tokio::test] async fn mutate() { super::not_success_is_uncertain("mutate").await; }
     #[tokio::test] async fn ci_wrong() { super::not_success_is_uncertain("ci-wrong").await; }
     #[tokio::test] async fn ci_missing() { super::not_success_is_uncertain("ci-missing").await; }

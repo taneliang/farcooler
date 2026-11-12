@@ -91,7 +91,8 @@ pub enum WorkflowCmd {
         #[arg(long="with",value_name="KEY")] with:Vec<String>,
         #[command(flatten)] identity:Identity },
     /// Send a run back to its build step, which starts again in the same worktree. The agent is told --reason.
-    /// Taken while the run waits for a review, an approval or its landing group, or has failed.
+    /// Taken while the run waits for a review, an approval or its landing group, or has failed, or while its build is
+    /// Uncertain once that build's agent has ended.
     SendBack { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         /// Why, for the agent: what to change. At most 4096 bytes; the first 1500 are in its brief.
         #[arg(long)] reason:String,#[command(flatten)] identity:Identity },

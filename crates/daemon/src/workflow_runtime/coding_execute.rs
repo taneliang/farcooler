@@ -88,8 +88,19 @@ pub struct CodingCiReceipt {
 }
 
 impl Exec {
-    fn fact_path(&self, binding: &Binding) -> PathBuf {
-        self.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect)))
+    fn fact_path(&self, binding: &Binding) -> PathBuf { self.effect_fact_path(&binding.effect) }
+    fn effect_fact_path(&self, effect: &Effect) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.process.json", digest(effect)))
+    }
+    /// Whether the effect an Uncertain build waits on has nothing running any more (ov-1090): it was never let out,
+    /// or its process fact is written, which happens only once the agent or command has ended. Only then may the
+    /// orchestrator send the build back; a send-back while the old agent still edits the tree would set two at it.
+    pub(super) fn build_has_ended(&self, workspace: &str, item: &Item) -> Result<bool> {
+        let Some(pending) = &item.pending else { return Ok(true) };
+        let effects = self.store.workflow_outbox(workspace)?;
+        let Some(stored) = effects.iter().find(|s| &s.effect.id == pending) else { return Ok(false) };
+        if stored.resource_generation.is_none() || stored.dispatch_state == "suppressed" { return Ok(true); }
+        Ok(self.effect_fact_path(&stored.effect).try_exists()?)
     }
     pub(super) fn owner_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.owner.json", digest(&binding.effect)))
@@ -492,6 +503,23 @@ impl Exec {
         }
         Ok(candidate)
     }
+    /// Why a build's tree holds no new commit for it to hand on, said as a sentence for the run, or `None` when it
+    /// does (ov-1090): changes left uncommitted, or a HEAD still at the base or at the candidate it was given.
+    pub(super) async fn unfinished_build(&self, binding: &Binding, tree: &Path) -> Result<Option<String>> {
+        let changed = self.tree_changes(binding, tree).await?;
+        if !changed.is_empty() {
+            let shown = changed.iter().take(3).map(String::as_str).collect::<Vec<_>>().join(", ");
+            let (shown, _) = cut_at(&shown, 1000);
+            let more = if changed.len() > 3 { format!(" and {} more", changed.len() - 3) } else { String::new() };
+            return Ok(Some(format!("The build ended its turn with changes it hadn't committed: {shown}{more}. \
+                They're still in its worktree, and the build carries on from them.")));
+        }
+        let head = self.git_recorded(binding, tree, &["rev-parse", "HEAD"]).await?;
+        if head == binding.base || binding.effect.candidate.as_ref() == Some(&head) {
+            return Ok(Some("The build ended its turn without committing anything new.".into()));
+        }
+        Ok(None)
+    }
     async fn verify_landing(&self, binding: &Binding) -> Result<()> {
         self.verify_remote_landing(binding).await?;
         // A network landing is read at the remote, which `verify_remote_landing` just did. The shared repository's
@@ -545,6 +573,12 @@ impl Exec {
             facts.extend(raw);
         }
         let tree = self.tree(binding);
+        // A build that ended its turn without committing has answered: it made no candidate (ov-1090). Its work stays
+        // in the tree, and the step runs again there, so the next agent carries on from it. Never Uncertain: nothing
+        // is unknown about a turn that has ended, and Uncertain held ov-1076's and ov-1084's work where no command reached.
+        if matches!(kind, StageKind::Build) {
+            if let Some(why) = self.unfinished_build(binding, &tree).await? { return Ok(Outcome::SafeFailureBecause(why)); }
+        }
         let mut candidate = match self.verify_tree(binding).await {
             // A provisioned tree with someone's changes in it fails the step with the sentence, never Uncertain (ov-1074).
             Err(Error::Domain(refused)) if matches!(kind, StageKind::Provision) =>

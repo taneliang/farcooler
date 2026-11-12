@@ -114,6 +114,34 @@ fn a_send_back_is_taken_from_a_failed_step_and_a_rework_review_reaches_the_build
     assert_eq!(log.effects[0].brief.as_deref(), Some("Name the error."));
 }
 
+/// A build whose answer was lost sits Uncertain with its effect pending (ov-1090). Sending it back builds again in the
+/// same tree, and the lost effect's late answer is stale. Any other Uncertain step still waits for a person to settle it.
+#[test]
+fn a_send_back_recovers_an_uncertain_build_and_fences_off_its_lost_effect() {
+    let mut log = Log::new();
+    log.track("ov-1");
+    log.start("ov-1", coding(), Some(tree()));
+    let lost = log.effects[0].clone();
+    log.observe("ov-1", Outcome::Uncertain);
+    assert_eq!((log.step_id("ov-1"), &log.state.items["ov-1"].phase), ("build".into(), &Phase::Uncertain));
+    log.send_back("ov-1", "Your last turn ended before you committed. Carry on from the worktree's changes.").unwrap();
+    let item = &log.state.items["ov-1"];
+    assert_eq!((log.step_id("ov-1"), &item.phase, item.tree.clone()), ("build".into(), &Phase::Running, Some(tree())));
+    assert_ne!(item.pending.as_ref(), Some(&lost.id));
+    assert_eq!(log.effects[0].brief.as_deref(), Some("Your last turn ended before you committed. Carry on from the worktree's changes."));
+    assert_eq!(log.try_run(Command::Resolve { item: "ov-1".into(), effect: lost.id.clone(), run: lost.run.clone(), fence: lost.fence,
+        outcome: Outcome::SafeFailure }, Grant::Controller), Err(Refusal::Stale));
+
+    // A check left Uncertain is not a build: a send-back would hide what the check found.
+    let mut log = Log::new();
+    log.track("ov-1");
+    log.start("ov-1", coding(), None);
+    log.observe("ov-1", Outcome::Passed(ev("c1")));
+    log.observe("ov-1", Outcome::Uncertain);
+    assert_eq!((log.step_id("ov-1"), &log.state.items["ov-1"].phase), ("check".into(), &Phase::Uncertain));
+    assert_eq!(log.send_back("ov-1", "why"), Err(Refusal::Phase));
+}
+
 #[test]
 fn a_send_back_is_refused_mid_step_on_a_ticket_across_a_landing_past_the_limit_and_from_a_person() {
     let mut log = Log::new();

@@ -32,6 +32,15 @@ struct NativeSettlement {
 const VERDICT_QUIET: Duration = Duration::from_secs(60);
 #[cfg(test)]
 const VERDICT_QUIET: Duration = Duration::from_secs(1);
+/// How long a build that ended its turn without committing is kept, quiet, for its next turn (ov-1090). An agent that
+/// backgrounds a wait (until the load is down; for a test run) ends its turn and is woken when the wait is over:
+/// ending it at its first turn's end left ov-1076's and ov-1084's edits uncommitted. Measured from the turn's end or
+/// the agent's last hook, whichever is later. Past it, the build has given up: its step fails and runs again in the
+/// same tree, which still holds the work.
+#[cfg(not(test))]
+const UNFINISHED_QUIET: Duration = Duration::from_secs(30 * 60);
+#[cfg(test)]
+const UNFINISHED_QUIET: Duration = Duration::from_secs(2);
 
 // Each effect has its own retained server, never the installed daemon's socket.
 // A cancelled future tears down its server but cannot publish quiescence/success.
@@ -220,6 +229,8 @@ impl Exec {
         let mut look = tokio::time::interval(Duration::from_millis(250));
         let mut heard = tokio::time::Instant::now();
         let mut verdict = None;
+        let building = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
+        let mut unfinished: Option<tokio::time::Instant> = None;
         loop {
             let stream = tokio::select! {
                 accepted = listener.accept() => accepted?.0,
@@ -227,6 +238,10 @@ impl Exec {
                     if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(tokio::time::Instant::now()); }
                     if verdict.is_some_and(|at: tokio::time::Instant| at.max(heard).elapsed() >= VERDICT_QUIET) {
                         tracing::warn!(effect = %binding.effect.id, "the reviewer recorded its verdict and went quiet without its turn's end being heard; the verdict ends it");
+                        return Ok((true, hooks));
+                    }
+                    if unfinished.is_some_and(|at| at.max(heard).elapsed() >= UNFINISHED_QUIET) {
+                        tracing::warn!(effect = %binding.effect.id, "the build ended its turn without committing and was quiet after; its turn is over");
                         return Ok((true, hooks));
                     }
                     continue;
@@ -264,6 +279,15 @@ impl Exec {
             if prompted {
                 for event in events {
                     if let AgentEvent::TurnEnded { reason } = event {
+                        // A build that ends its turn with nothing committed may be waiting on something it backgrounded:
+                        // it stays, and its next turn's end is read the same way (ov-1090). A tree that can't be read
+                        // ends the turn as before.
+                        if building && reason == EndReason::EndTurn
+                            && self.unfinished_build(binding, &tree).await.ok().flatten().is_some() {
+                            tracing::info!(effect = %binding.effect.id, "the build ended its turn without committing; waiting for its next turn");
+                            unfinished = Some(tokio::time::Instant::now());
+                            continue;
+                        }
                         return Ok((reason == EndReason::EndTurn, hooks));
                     }
                 }
@@ -407,6 +431,12 @@ if mode == 'barrier':
     while len(list(d.iterdir())) < 2:
         if time.time() - t > 4: sys.exit(9)
         time.sleep(0.05)
+if mode in ('background', 'abandon'):
+    # Ends its turn with its work uncommitted, as an agent that backgrounds a wait does (ov-1090). `background` is
+    # woken when the wait is over and commits in its next turn; `abandon` never comes back.
+    pathlib.Path('result.txt').write_text('started before the wait')
+    hook('Stop')
+    time.sleep(30 if mode == 'abandon' else 0.5)
 if mode == 'cancel':
     subprocess.run(['/bin/sleep','30'])
 else:
@@ -466,6 +496,28 @@ else:
             assert!(socket.len() <= 103 && !socket.ends_with("/h.sock"), "{socket}");
             assert!(!Path::new(socket).exists(), "{socket} outlived its build");
         }
+    }
+    /// A build that backgrounds a wait ends its turn with its work uncommitted, and is woken when the wait is over
+    /// (ov-1090): it is kept for that next turn, and what it commits then is the candidate.
+    #[tokio::test]
+    async fn workflow_native_build_that_ends_its_turn_uncommitted_is_kept_for_its_next_turn() {
+        let (_dir, mut runtime, _fake) = native("background").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        let state = finish(&mut runtime, "w").await;
+        assert_eq!((&state.items["one"].phase, state.items["one"].attempt), (&Phase::Done, 1), "{state:?}");
+    }
+    /// One that never comes back fails its step with what it left, which stays in its tree: never Uncertain, where
+    /// no command reached ov-1076 and ov-1084.
+    #[tokio::test]
+    async fn workflow_native_build_that_never_commits_fails_with_its_work_kept_never_uncertain() {
+        let (_dir, mut runtime, _fake) = native("abandon").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        let state = finish(&mut runtime, "w").await;
+        let item = &state.items["one"];
+        assert_eq!(item.phase, Phase::Failed, "{state:?}");
+        assert_eq!(item.failure.as_deref(), Some("The build ended its turn with changes it hadn't committed: result.txt. \
+            They're still in its worktree, and the build carries on from them."));
+        assert_eq!(std::fs::read_to_string(runtime.item_tree("w", "one").join("result.txt")).unwrap(), "started before the wait");
     }
     #[tokio::test]
     async fn workflow_coding_native_foreign_subagent_hooks_and_failures_never_pass() {

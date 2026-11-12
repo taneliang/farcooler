@@ -198,6 +198,9 @@ impl Runtime {
                 Action::SendBack { item, run, pin, reason, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
+                    } else if matches!(state.items.get(item), Some(i) if i.phase == Phase::Uncertain && !self.build_has_ended(workspace, i)?) {
+                        // An Uncertain build goes back only once its agent has ended (ov-1090).
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Phase))?
                     } else {
                         let input = input(Command::SendBack { item:item.clone(),reason:reason.clone() },Grant::Controller);
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
