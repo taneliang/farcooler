@@ -206,7 +206,9 @@ struct WorkspaceScreen: View {
                 // The agents at work, over the chat, where the tray under it
                 // was (ov-619): the plan column beside it has Now/Next.
                 if !summary.isImplicit {
-                    WorkspaceCards(connection: connection, summary: summary, place: place, showsPlan: false)
+                    WorkspaceCards(
+                        connection: connection, summary: summary, place: place,
+                        showsPlan: false, columnWidth: widths.chat)
                         .padding(.top, Spacing.group)
                         .accessibilityHidden(sidebarUp)
                 }
