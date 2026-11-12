@@ -4,6 +4,24 @@ Status: diagnostic change; neither acceptance item is complete yet.
 
 ## Follow-up on Nov 12
 
+At 23:14 SGT, checked the task and CI again. `gh run list --workflow
+nightly.yml --limit 5 --json databaseId,headSha,createdAt,status,conclusion`
+still returns 43080833359 as the newest run. Downloaded its failed-job log
+with `gh run view 43080833359 --log-failed` and confirmed:
+
+- The pad shard selected iPad Pro 11-inch (M5), iOS 27.2.
+- The rotation method started at 20:03:29 UTC and failed at launch at
+  20:07:05 UTC, before any layout assertion.
+- There is no `CHAT children` report in that run's failed-job log.
+- `xcrun simctl list runtimes` still lists only iOS 26.5, 27.0 and 27.1.
+
+This follow-up changes only this evidence report. No executable behavior
+changed, so no additional UI test run is warranted beyond the three-test
+run below. Acceptance remains blocked on a CI run containing diagnostic
+commit `b484be421`, followed by a nightly pad result after the identified
+cause is fixed. Do not mark either acceptance item complete from local
+success or infer the overflowing child from the aggregate pane frame.
+
 Re-read ov-1096 and ov-1101 and queried the five most recent Nightly runs.
 The latest is still Nov 11's run 43080833359 at commit
 `57aece5574271f744cc4473e9e3f611a31df3805`; it predates this branch's diagnostic
