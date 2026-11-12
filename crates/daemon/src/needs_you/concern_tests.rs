@@ -51,6 +51,28 @@ fn a_task_is_its_lanes_then_its_desks_member_or_nobodys() {
     assert_eq!(people.whose(Some(pane), Some(desk)), member("alice"), "the item's own pane wins over the desk");
 }
 
+/// ov-1003: a card held at an engine gate is its decider's, over its lane and
+/// its desk; a gate any Maintainer decides is nobody's.
+#[test]
+fn a_gate_is_its_deciders_over_its_lane_and_desk() {
+    let (bobs, owners, maintainers, plain) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+    let pane = Uuid::now_v7();
+    let on_alice = |t: Uuid| (t, "alice".to_string());
+    let people = People {
+        team: true,
+        desks: HashMap::from([on_alice(bobs), on_alice(owners), on_alice(maintainers), on_alice(plain)]),
+        panes: HashMap::from([(pane, alices())]),
+        lanes: HashMap::from([(bobs, pane)]),
+        deciders: HashMap::from([(bobs, member("bob")), (owners, Some(Whose::Owner)), (maintainers, None)]),
+        ..People::default()
+    };
+    assert_eq!(people.whose(None, Some(bobs)), member("bob"), "Bob decides, not Alice's lane");
+    assert_eq!(people.whose(Some(pane), Some(bobs)), member("bob"), "nor the lane named as the item's pane");
+    assert_eq!(people.whose(None, Some(owners)), Some(Whose::Owner), "the owner decides, on Alice's desk");
+    assert_eq!(people.whose(None, Some(maintainers)), None, "any Maintainer: nobody's");
+    assert_eq!(people.whose(None, Some(plain)), member("alice"), "no gate: the desk, as before");
+}
+
 #[test]
 fn a_member_reads_their_own_as_yours_and_anothers_as_others() {
     let alice = Person::Member("alice".into());

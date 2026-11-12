@@ -10,6 +10,10 @@
 //! - on any other pane: the member whose login it was launched on
 //!   (`terminal_logins`, so an orchestrator's lanes are its lead's); no row is
 //!   the runner's own login, the owner's; a removed member's login is nobody's;
+//! - a card the workflow engine holds at a gate: the gate's decider (ov-1003),
+//!   whatever desk or lane it is on, since nobody else can decide it: `owner`
+//!   the owner's, `member:<handle>` that member's (the owner's, who can
+//!   reassign the run, once they are removed), `role:maintainer` nobody's;
 //! - a task's item with no agent on it: the member whose desk it is, else
 //!   nobody's;
 //! - a pull request review request: the owner's, whose `gh` login it asks;
@@ -128,14 +132,21 @@ pub struct People {
     pub desks: HashMap<Uuid, String>,
     /// Each member's name, by handle.
     pub names: HashMap<String, String>,
+    /// Each card the engine holds at a gate waiting on a person: whose that
+    /// decider is (`decider`). It wins over the card's lane and desk.
+    pub deciders: HashMap<Uuid, Option<Whose>>,
 }
 
 impl People {
-    /// The person an item about `terminal` or `task` concerns: the pane's,
-    /// else the task's lane's, else the task's desk's member, else nobody.
+    /// The person an item about `terminal` or `task` concerns: the decider of
+    /// the gate the task waits at, else the pane's, else the task's lane's,
+    /// else the task's desk's member, else nobody.
     pub fn whose(&self, terminal: Option<Uuid>, task: Option<Uuid>) -> Option<Whose> {
         if !self.team {
             return None;
+        }
+        if let Some(decider) = task.and_then(|t| self.deciders.get(&t)) {
+            return decider.clone();
         }
         if let Some(pane) = terminal.or_else(|| task.and_then(|t| self.lanes.get(&t).copied())) {
             return self.panes.get(&pane).map_or(Some(Whose::Owner), whose_pane);
@@ -175,6 +186,16 @@ impl People {
                 }
                 people.names.insert(member.handle, member.name);
             }
+            // The engine's tables unread route as if it held nothing.
+            for workspace in store.workflow_workspaces().unwrap_or_default() {
+                let Ok(Some(state)) = store.workflow_state(&workspace) else { continue };
+                for item in state.items.keys() {
+                    let Some(whose) = crate::workflow_deciders::waiting_on(&state, item).and_then(|d| decider(store, d)) else { continue };
+                    if let Ok(Some(task)) = store.workflow_item_task(&workspace, item) {
+                        people.deciders.insert(task, whose);
+                    }
+                }
+            }
         }
         Ok(people)
     }
@@ -209,6 +230,12 @@ impl People {
                     people.desks.insert(task.id, member.handle);
                 }
             }
+            if let Ok(Some((workspace, item))) = store.workflow_item_of_task(task.id)
+                && let Ok(Some(state)) = store.workflow_state(&workspace)
+                && let Some(whose) = crate::workflow_deciders::waiting_on(&state, &item).and_then(|d| decider(store, d))
+            {
+                people.deciders.insert(task.id, whose);
+            }
         }
         Ok(people)
     }
@@ -222,6 +249,22 @@ impl People {
         let lane = self.lanes.entry(task).or_insert(t.id);
         *lane = (*lane).min(t.id);
     }
+}
+
+/// Whose a gate's decider is, `None` when it names no person (an
+/// orchestrator's gate, which routes by the card as before). `owner` is the
+/// owner's; `member:<handle>` that member's while they are one, else the
+/// owner's, who alone can reassign the run (`workflow_deciders::gone_note`);
+/// `role:maintainer` nobody's, so the owner, a Maintainer too, is pushed.
+fn decider(store: &farcooler_store::Store, principal: &str) -> Option<Option<Whose>> {
+    if principal == "owner" {
+        return Some(Some(Whose::Owner));
+    }
+    if principal == crate::workflow_deciders::MAINTAINER {
+        return Some(None);
+    }
+    let handle = principal.strip_prefix("member:")?;
+    Some(Some(if store.member(handle).is_ok() { Whose::Member(handle.into()) } else { Whose::Owner }))
 }
 
 /// One pane's facts by point lookups.

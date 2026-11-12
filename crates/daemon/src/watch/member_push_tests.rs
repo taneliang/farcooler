@@ -339,6 +339,72 @@ async fn a_task_with_no_agent_is_nobodys_and_alerts_the_owner() {
     assert!(heard(&mut taps).await.is_empty());
 }
 
+/// A card on Alice's desk, held by the engine at a gate `decider` decides.
+fn a_gate_on_alices_desk(svc: &Service, workspace: Uuid, decider: &str) -> farcooler_store::models::Task {
+    let card = svc.store.create_task(workspace, "Ship the PDF export", Actor::User).unwrap();
+    svc.store.set_rep_desk(workspace, "alice", card.id).unwrap();
+    let definition = farcooler_workflow::Definition::tracker(decider);
+    let revision = svc.store.workflow_state(&workspace.to_string()).unwrap().map_or(0, |s| s.revision);
+    let input = farcooler_workflow::Input { schema: 1, id: format!("e-{}", card.key), workspace: workspace.to_string(),
+        expected_revision: revision, epoch: 1, source: "controller".into(), source_sequence: revision + 1, now_ms: 0, grant: farcooler_workflow::Grant::Controller,
+        busy_resources: Default::default(),
+        command: farcooler_workflow::Command::Enqueue { item: card.key.clone(), policy_pin: definition.pin(), resource: card.key.clone(),
+            dependencies: Default::default(), initial_candidate: Some(definition.pin()), definition } };
+    assert!(svc.store.workflow_apply(&input).unwrap().result.is_ok());
+    let state = svc.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
+    assert_eq!(crate::workflow_deciders::waiting_on(&state, &card.key), Some(decider), "the run waits at the gate");
+    svc.store.get_task(card.id).unwrap()
+}
+
+/// The member accounts pushed about `task`'s decision, and whether the owner's own notice alerted.
+async fn decision_pushed(svc: &Service, watcher: &Watcher, taps: &mut UnboundedReceiver<Tapped>, task: &farcooler_store::models::Task) -> (Vec<String>, bool) {
+    let whose = crate::needs_you::concern::whose_task(&svc.store, task);
+    let owner_alerts = watcher.route_task_notice(task, whose, Class::Decision, None).settle(watcher, None).await;
+    let members = heard(taps).await.into_iter().filter(|t| t.kind == Some("member")).map(|t| t.title).collect();
+    (members, owner_alerts)
+}
+
+/// ov-1003: a gate waiting on Bob pushes Bob alone, though the card is on
+/// Alice's desk; one waiting on the owner pushes the owner, and not Alice.
+/// Without the engine, Alice's desk card is hers, as before.
+#[tokio::test]
+async fn a_gate_pushes_its_decider_not_the_desks_member() {
+    let (_dir, svc, workspace, _) = a_runner().await;
+    let bob = Directory { account: "acct-bob", email: "bob@example.com" };
+    svc.store.set_member_in("bob", "Bob Okafor", &["bob-phone".into()], bob).unwrap();
+    let watcher = Watcher::new(svc.clone());
+    let mut taps = watcher.tap_notices();
+
+    let bobs = a_gate_on_alices_desk(&svc, workspace, "member:bob");
+    assert_eq!(decision_pushed(&svc, &watcher, &mut taps, &bobs).await, (vec!["acct-bob".to_string()], false), "Bob's devices only");
+
+    let owners = a_gate_on_alices_desk(&svc, workspace, "owner");
+    assert_eq!(decision_pushed(&svc, &watcher, &mut taps, &owners).await, (vec![], true), "the owner, not Alice");
+
+    let plain = svc.store.create_task(workspace, "Pick a PDF library", Actor::User).unwrap();
+    svc.store.set_rep_desk(workspace, "alice", plain.id).unwrap();
+    assert_eq!(decision_pushed(&svc, &watcher, &mut taps, &plain).await, (vec!["acct-alice".to_string()], false), "a desk card with no gate is Alice's");
+
+    // The Needs You list reads each card's person by the same rule.
+    use crate::needs_you::concern::{People, Whose};
+    let listed = People::read(&svc.store, &[], &Default::default()).unwrap();
+    let read = |t: &farcooler_store::models::Task| listed.whose(None, Some(t.id));
+    assert_eq!((read(&bobs), read(&owners), read(&plain)), (Some(Whose::Member("bob".into())), Some(Whose::Owner), Some(Whose::Member("alice".into()))));
+}
+
+/// ov-1003: once the member a gate waits on is removed, the owner, who can
+/// reassign the run, is pushed rather than the desk's member.
+#[tokio::test]
+async fn a_gate_on_a_removed_member_pushes_the_owner() {
+    let (_dir, svc, workspace, _) = a_runner().await;
+    svc.store.set_member("bob", "Bob Okafor", &[]).unwrap();
+    let watcher = Watcher::new(svc.clone());
+    let mut taps = watcher.tap_notices();
+    let bobs = a_gate_on_alices_desk(&svc, workspace, "member:bob");
+    svc.store.remove_member("bob").unwrap();
+    assert_eq!(decision_pushed(&svc, &watcher, &mut taps, &bobs).await, (vec![], true));
+}
+
 #[test]
 fn a_needs_you_push_names_its_kind_and_class_on_the_wire() {
     let kind = crate::push::MemberKind::NeedsYou("review");

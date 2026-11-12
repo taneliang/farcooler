@@ -130,6 +130,12 @@ impl Store {
         ).optional()?;
         Ok(raw.flatten().and_then(|b| uuid::Uuid::from_slice(&b).ok()))
     }
+    /// The workspace and item of the run a card is, if the engine owns it (`workflow_item_task` the other way).
+    pub fn workflow_item_of_task(&self, task: uuid::Uuid) -> Result<Option<(String, String)>> {
+        Ok(self.conn().query_row(
+            "SELECT workspace, item FROM workflow_owned_items WHERE task_id = ?1", [task.as_bytes().as_slice()], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?)
+    }
     pub fn workflow_events(&self, workspace: &str) -> Result<Vec<Input>> {
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT payload FROM workflow_events WHERE workspace = ?1 ORDER BY revision")?;
