@@ -43,7 +43,7 @@ use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
 /// target directory, which renames nothing, keeps working.
 ///
 /// An integration test that runs this library in its own process is a
-/// harness in cargo's `deps/`, one directory below the CLI it built. Under
+/// harness whose CLI is in Cargo's profile directory. Under
 /// the tests' switch (`test_stub_agents`) that directory is looked in too, so
 /// a web or Changes pane there runs the real `pane-host` (ov-547). Before, it
 /// ran a bare `farcooler` that was on no `PATH`, and the pane died at once:
@@ -52,9 +52,9 @@ use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
 pub fn cli_binary(daemon_exe: Option<&std::path::Path>) -> String {
     let candidates = farcooler_protocol::CHANNEL.cli_binary_candidates();
     let beside = daemon_exe.and_then(|p| p.parent());
-    let above_a_harness = beside
-        .filter(|dir| test_stub_agents() && dir.file_name().is_some_and(|name| name == "deps"))
-        .and_then(|dir| dir.parent());
+    let above_a_harness = daemon_exe
+        .filter(|_| test_stub_agents())
+        .and_then(farcooler_core::scratch::cargo_profile);
     beside
         .into_iter()
         .chain(above_a_harness)

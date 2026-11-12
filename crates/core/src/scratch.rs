@@ -16,6 +16,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static ROOT: OnceLock<PathBuf> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+/// The profile directory above a Cargo harness. `cfg(test)` cannot identify a
+/// harness to a dependency it calls, so config isolation and test-only binary
+/// lookup recognize both Cargo layouts here (Rust 1.100 changed it, ov-1125).
+/// Built or installed binaries beside the profile must keep their real config.
+pub fn cargo_profile(exe: &Path) -> Option<&Path> {
+    let dir = exe.parent()?;
+    if dir.file_name()? == "deps" {
+        return dir.parent();
+    }
+    let hash = if dir.file_name()? == "out" { dir.parent()? } else { dir };
+    let build = hash.parent()?.parent()?;
+    (build.file_name()? == "build").then(|| build.parent()).flatten()
+}
+
 /// Registered with `atexit`, where a panic must not unwind into C.
 #[cfg(not(target_arch = "wasm32"))]
 extern "C" fn remove_root() {
@@ -60,6 +74,19 @@ pub fn dir(tag: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cargo_harnesses_in_both_layouts_name_their_profile() {
+        for profile in ["target/debug", "custom-target/release", "custom-target/aarch64-apple-darwin/ci"] {
+            let profile = Path::new(profile);
+            for layout in ["deps/test-hash", "build/package/hash/test-hash", "build/package/hash/out/test-hash"] {
+                assert_eq!(cargo_profile(&profile.join(layout)), Some(profile));
+            }
+            assert_eq!(cargo_profile(&profile.join("farcoolerd")), None);
+        }
+        assert_eq!(cargo_profile(Path::new("/usr/local/bin/farcooler")), None);
+        assert_eq!(cargo_profile(Path::new("target/debug/build/package-hash/build-script-build")), None);
+    }
 
     #[test]
     fn two_directories_are_distinct_and_empty() {

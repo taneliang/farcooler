@@ -74,16 +74,14 @@ pub fn helper() -> Option<&'static Helper> {
 }
 
 /// `farcooler-lfs-filter` beside `exe`, by `exe`'s real path: in its
-/// directory, or for a `cargo test` binary (in `target/<profile>/deps`) the
-/// one above. `None` when there's no executable there, or its directory can't
+/// directory, or for a Cargo harness the profile directory above it.
+/// `None` when there's no executable there, or its directory can't
 /// be a `PATH` entry (it holds a `:`).
 pub fn locate(exe: &Path) -> Option<Helper> {
     let exe = exe.canonicalize().ok()?;
     let dir = exe.parent()?;
     let mut dirs = vec![dir.to_path_buf()];
-    if dir.file_name().is_some_and(|n| n == "deps") {
-        dirs.extend(dir.parent().map(Path::to_path_buf));
-    }
+    dirs.extend(farcooler_core::scratch::cargo_profile(&exe).map(Path::to_path_buf));
     dirs.into_iter().find_map(|dir| {
         let program = dir.join(NAME);
         let usable = crate::git_sandbox::is_executable(&program)
@@ -414,6 +412,10 @@ mod tests {
         let want = Some(Helper { dir: root.clone(), program: root.join(NAME) });
         assert_eq!(locate(&root.join("farcoolerd")), want);
         assert_eq!(locate(&root.join("deps/test-1234")), want);
+        let nested = root.join("build/package/hash/out/test-1234");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        executable(&nested, b"\x7fELF");
+        assert_eq!(locate(&nested), want);
 
         // Through a symlink to the daemon, as `~/.local/bin` might hold it.
         let elsewhere = tempfile::tempdir().unwrap();

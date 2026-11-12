@@ -243,7 +243,7 @@ pub fn branch_prefix_from(path: &Path) -> String {
 }
 
 /// A config file of the process's own when it is a test binary: one cargo
-/// put in `target/<profile>/deps/`, where only test harnesses live, and
+/// put below a Cargo profile's `deps/` or `build/<package>/<hash>/out/`, and
 /// never an installed or built `farcooler` or `farcoolerd`.
 ///
 /// `cfg(test)` can't do this: it is set only for the crate under test, and
@@ -256,9 +256,7 @@ fn test_binary_config() -> Option<PathBuf> {
         return None;
     }
     let exe = std::env::current_exe().ok()?;
-    let parent = exe.parent()?;
-    (parent.file_name()? == "deps")
-        .then(|| crate::scratch::root().join("config.toml"))
+    crate::scratch::cargo_profile(&exe).map(|_| crate::scratch::root().join("config.toml"))
 }
 
 /// The runner's branch prefix, found the same way the registry is.
@@ -498,7 +496,7 @@ mod tests {
     /// A test binary reads its own config file, not this machine's.
     #[test]
     fn a_test_binary_never_reads_this_machines_config() {
-        let isolated = test_binary_config().expect("a test harness, under target/*/deps");
+        let isolated = test_binary_config().expect("a test harness below a Cargo profile");
         assert!(isolated.starts_with(crate::scratch::root()), "{isolated:?}");
         if std::env::var_os("FARCOOLER_CONFIG").is_none() {
             assert_eq!(config_path(), Some(isolated));

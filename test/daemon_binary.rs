@@ -24,7 +24,7 @@ mod tests {
             std::fs::create_dir_all(&profile).unwrap();
             let daemon = profile.join("farcoolerd");
             std::fs::write(&daemon, b"fixture").unwrap();
-            for layout in ["deps/test-hash", "build/farcooler-client/hash/test-hash"] {
+            for layout in ["deps/test-hash", "build/farcooler-client/hash/test-hash", "build/farcooler-client/hash/out/test-hash"] {
                 assert_eq!(find_above(&profile.join(layout)), Some(daemon.clone()));
             }
         }
