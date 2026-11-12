@@ -241,7 +241,8 @@ impl Exec {
                 .is_some_and(|r| r.binding == digest(binding) && r.identity == AGENT_REVIEWER
                     && binding.effect.candidate.as_ref() == Some(&r.candidate))
     }
-    async fn native_turn(&self, listener: &tokio::net::UnixListener, binding: &Binding) -> Result<(bool, Vec<HookLine>)> {
+    async fn native_turn(&self, listener: &tokio::net::UnixListener, binding: &Binding,
+        heard_from: &std::sync::atomic::AtomicBool) -> Result<(bool, Vec<HookLine>)> {
         let agent = self.native_agent(binding)?;
         let tree = self.tree(binding);
         let mut assembler = MessageAssembler::new();
@@ -292,6 +293,7 @@ impl Exec {
             }
             if session.as_ref() != Some(sid) { continue; }
             heard = tokio::time::Instant::now();
+            heard_from.store(true, std::sync::atomic::Ordering::Relaxed);
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
                 if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(self.native_prompt(binding)?.as_str()) { prompted = true; }
@@ -344,8 +346,13 @@ impl Exec {
         // Listed for watching only (ov-972); declared after `host`, so it is unlisted before the server is reaped.
         let _watchable = crate::watch_view::publish(&binding.workspace, &binding.effect.item, tmux.clone(), pane.clone());
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
+        // A build stopped on a question, or never heard from, is told in Needs You (ov-1077).
+        let heard_from = std::sync::atomic::AtomicBool::new(false);
+        let stuck = crate::engine_stuck::watch(&binding.workspace, &binding.effect.item, self.native_agent(binding)?.as_str(),
+            tmux, &window.pane_id, &heard_from);
         let result = tokio::select! {
-            result = tokio::time::timeout(Duration::from_millis(command.timeout_ms), self.native_turn(&listener, binding)) => match result {
+            never = stuck => match never {},
+            result = tokio::time::timeout(Duration::from_millis(command.timeout_ms), self.native_turn(&listener, binding, &heard_from)) => match result {
                 Ok(Ok(turn)) => Some(turn),
                 Ok(Err(error)) => { tracing::warn!(effect = %binding.effect.id, %error, "the native build's turn could not be read"); None }
                 Err(_) => { tracing::warn!(effect = %binding.effect.id, "the native build's turn did not end in time"); None }

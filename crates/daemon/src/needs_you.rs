@@ -35,6 +35,7 @@ use uuid::Uuid;
 use crate::wire::{id_bytes, pane_mode, terminal_role, timestamp};
 
 pub(crate) mod concern;
+mod engine;
 pub(crate) mod kept;
 pub(crate) mod login;
 pub(crate) mod pr;
@@ -149,6 +150,8 @@ pub struct Inputs {
     /// Empty when the runner has no board that lands through pull requests,
     /// and when `gh` could not say: absent, never an error.
     pub pr_requests: Vec<crate::pr_review::ReviewRequest>,
+    /// The engine builds stopped on a question or never heard from (`engine_stuck`, ov-1077).
+    pub engine_stuck: Vec<crate::engine_stuck::Stuck>,
     /// The hosts of a repository's own git remotes, lowercased, for each
     /// repository that has a task waiting on a question that names a review
     /// thread: the Enterprise hosts a thread's link may have (ov-315).
@@ -234,6 +237,7 @@ pub async fn gather(
     }
     inputs.tasks = tasks.into_values().collect();
     inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
+    inputs.engine_stuck = crate::engine_stuck::list();
     inputs.logins = svc.login_needs();
     inputs.runner = crate::push::runner_name().to_string();
     let since = millis(SystemTime::now()) - kept::WINDOW_MS;
@@ -257,6 +261,8 @@ enum Subject {
     Terminal(Uuid),
     /// A pull request waiting on this login: its place in `Inputs::pr_requests`.
     Request(usize),
+    /// An engine build that is stuck: its place in `Inputs::engine_stuck` (ov-1077).
+    Engine(usize),
 }
 
 /// One reason a subject needs somebody, before signals are folded into items.
@@ -510,6 +516,7 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
         signals.extend(task_signal(task, inputs));
     }
     signals.extend(inputs.pr_requests.iter().enumerate().map(|(i, r)| pr::request_signal(i, r)));
+    signals.extend(inputs.engine_stuck.iter().enumerate().map(|(i, s)| engine::signal(i, s)));
     let mut quiet = login::items(inputs, now_ms);
     quiet.extend(kept::items(inputs, now_ms));
 
@@ -554,7 +561,7 @@ fn item(
 ) -> pb::NeedsYouItem {
     let task = match winner.subject {
         Subject::Task(id) => tasks.get(&id).copied(),
-        Subject::Terminal(_) | Subject::Request(_) => None,
+        Subject::Terminal(_) | Subject::Request(_) | Subject::Engine(_) => None,
     };
     let terminal = terminal.and_then(|id| terminals.get(&id).copied());
     let worktree = terminal
@@ -566,13 +573,17 @@ fn item(
     let workspace = task
         .map(|t| t.workspace_id)
         .filter(|id| !id.is_nil())
+        .or_else(|| match winner.subject {
+            Subject::Engine(i) => inputs.engine_stuck.get(i).and_then(|s| Uuid::parse_str(&s.workspace).ok()),
+            _ => None,
+        })
         .or_else(|| terminal.and_then(|t| t.workspace_id))
         .or_else(|| worktree.and_then(|w| w.worktree.workspace_id));
     let repository = task.map(|t| t.repository_id).or_else(|| worktree.map(|w| w.worktree.repository_id));
     let concern = inputs.people.as_ref().and_then(|people| {
         let whose = match winner.subject {
             // The runner's `gh` login is its owner's.
-            Subject::Request(_) => Some(concern::Whose::Owner),
+            Subject::Request(_) | Subject::Engine(_) => Some(concern::Whose::Owner),
             _ => people.whose(terminal.map(|t| t.id), task.map(|t| t.id)),
         };
         concern::concern(whose.as_ref(), inputs.viewer.as_ref(), &people.names)
