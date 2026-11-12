@@ -28,7 +28,10 @@ enum NotificationTapHarness {
     static func scheduleIfRequested() {
         guard isRequested else { return }
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        // Match Notifier: on the iOS 27 simulator, requesting only alert and
+        // sound grants permission but leaves the local notification client absent.
+        // SpringBoard then rejects center.add with UNErrorDomain 2003.
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             // Refused, said on the window too, so the test names it rather
             // than waiting out its 90 s for a mark that can't come.
             guard granted else {
