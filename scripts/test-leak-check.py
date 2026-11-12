@@ -430,6 +430,15 @@ def self_test():
          "import os; d=os.path.join(os.environ['TMPDIR'],'.tmpAbC123','.local','state','gh'); os.makedirs(d); open(os.path.join(d,'device-id'),'w').close()", 1)
     case("another file in a .tmp directory",
          "import os; d=os.path.join(os.environ['TMPDIR'],'.tmpAbC123'); os.makedirs(d); open(os.path.join(d,'x'),'w').close()", 1)
+    # A runner's own tmux config (ov-1091). The runner and its engine agents
+    # write `farcooler-<install>.tmux.conf` into the TMPDIR they were started
+    # with, which is never the private one a run gets: the Swift arm below
+    # shows one appearing in the system temp folder mid-run is not counted.
+    # The same file left in the run's TMPDIR, by a test or by a CLI a test
+    # started, still fails it.
+    conf = "farcooler-01a00995fd2f7f238b65ac553bd23298.tmux.conf"
+    case("a run that leaves a runner-style tmux config in its TMPDIR",
+         f"import os; open(os.path.join(os.environ['TMPDIR'],{conf!r}),'w').close()", 1)
     case("an unrelated temp file",
          "import os; open(os.path.join(os.environ['TMPDIR'],'clang-cache'),'w').close()", 0)
     # The command's own failure must come through even when it leaks nothing.
@@ -446,10 +455,12 @@ def self_test():
         os.makedirs(fake)
         leftover = os.path.join(folder, f"fc-leak-selftest-{_uuid.uuid4()}")
         daemon = os.path.join(folder, f"fc-leak-daemon-{os.getpid()}")
+        runner_conf = os.path.join(folder, conf)
         for name, body, want in (
             ("a Swift run that leaves a folder in the system temp folder", f"mkdir {leftover}", 1),
             ("a Swift run that removes what it made there", f"mkdir {leftover} && rmdir {leftover}", 0),
             ("a system daemon's entry with no UUID in the system temp folder", f"mkdir {daemon}", 0),
+            ("a runner's tmux config appearing in the system temp folder mid-run, strict", f"touch {runner_conf}", 0),
         ):
             with open(os.path.join(fake, "swift"), "w") as f:
                 f.write("#!/bin/sh\n" + body + "\n")
@@ -461,6 +472,8 @@ def self_test():
                 failures.append(f"{name}: exit {rc}, wanted {'non-zero' if want else 'zero'}")
             shutil.rmtree(leftover, ignore_errors=True)
             shutil.rmtree(daemon, ignore_errors=True)
+            if os.path.exists(runner_conf):
+                os.remove(runner_conf)
         # Off CI and not strict, a shared Mac only gets a note.
         with open(os.path.join(fake, "swift"), "w") as f:
             f.write(f"#!/bin/sh\nmkdir {leftover}\n")

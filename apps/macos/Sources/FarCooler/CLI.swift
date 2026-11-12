@@ -33,8 +33,19 @@ enum CLI {
         // and a canary app falling through to it would run the release CLI
         // against the release daemon — the app would look like it was working,
         // on the wrong fleet, with nothing anywhere saying so.
-        let onPath = CommandLineTools.channelName(for: "farcooler")
-        candidates += ["/usr/local/bin/\(onPath)", "\(NSHomeDirectory())/.local/bin/\(onPath)"]
+        //
+        // Never from the test process (ov-1091). It is a Local build, so this
+        // found `~/.local/bin/farcooler-local`, the CLI of whatever Far Cooler
+        // Local app the Mac has installed, and every test that made a
+        // `DaemonClient` without a stub ran it against the owner's own Local
+        // install. A September one still wrote its tmux config into TMPDIR,
+        // which failed the leak check on two landings. CI has no app installed
+        // and so never took this branch; the test process now doesn't either.
+        // `QuietTestProcess` sets the variable when the test bundle loads.
+        if ProcessInfo.processInfo.environment["FARCOOLER_NO_INSTALLED_CLI"] == nil {
+            let onPath = CommandLineTools.channelName(for: "farcooler")
+            candidates += ["/usr/local/bin/\(onPath)", "\(NSHomeDirectory())/.local/bin/\(onPath)"]
+        }
 
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
