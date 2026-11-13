@@ -399,6 +399,17 @@ impl Exec {
         let original_binding = Binding::new(&binding.workspace, &original.effect,
             original.resource_generation.ok_or(Error::Refused("missing original generation"))?,
             binding.iteration, &binding.base);
+        // Provision's settlement proves its bounded Git operation returned. Cancellation only needs
+        // that proof: a tree moved or edited afterwards need not still qualify as a candidate (ov-1074).
+        // No missing receipt is inferred from the tree, and no worktree or branch is changed here.
+        if original.effect.kind == EffectKind::Execute(StageKind::Provision)
+            && self.git_settlement(&original_binding).try_exists()? {
+            self.check_binding(&binding.workspace, &original_binding)?;
+            let settlement: GitSettlement = serde_json::from_slice(&self.bytes(&self.git_settlement(&original_binding))?)?;
+            if settlement.binding != original_binding { return Err(Error::Refused("foreign Git settlement")); }
+            return Ok(Outcome::Stopped { operation: operation.into(),
+                receipt: digest(&("provision-quiescent/v1", binding, &original_binding)) });
+        }
         if self.is_native_agent(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
             self.settle_interrupted_native(&original_binding, None).await?;
         }

@@ -824,3 +824,53 @@ async fn workflow_coding_legacy_admitted_base_and_receipts_keep_working() {
     assert_eq!(std::fs::read(legacy).unwrap(), bytes);
     assert!(!runtime.base_path("w", &provision).unwrap().exists(), "never rebind an admitted legacy run");
 }
+
+/// ov-1074: cancelling a completed Provision needs proof that its Git operation ended, not a tree
+/// that still passes the candidate checks. A branch moved after provisioning must not trap Cancel.
+#[tokio::test]
+async fn workflow_coding_cancel_uncertain_provision_uses_quiescence_not_candidate_validity() {
+    let (_dir, mut runtime) = configured(false, "pass").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    let binding = admitted(&runtime).await;
+    let (_, cancel) = tokio::sync::watch::channel(false);
+    assert!(matches!(runtime.execute_coding("w", &binding, cancel).await.unwrap(), Outcome::Passed(_)));
+    let tree = runtime.tree(&binding);
+    adapters::git(&tree, &["checkout", "-q", "-b", "moved-by-person"]).await.unwrap();
+    std::fs::write(runtime.repository().join(".git/info/exclude"), "mine.txt\n").unwrap();
+    std::fs::write(tree.join("mine.txt"), "keep my work").unwrap();
+    assert!(runtime.observe("w", &binding.effect, Outcome::Uncertain, false, 20).unwrap());
+    let root = runtime.root.clone(); drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert!(runtime.submit(&runtime.controller(), Request { id: "cancel-provision".into(), workspace: "w".into(),
+        expected_revision: state.revision, sequence: 2,
+        command: Command::Cancel { item: "one".into(), reason: None } }, 21).unwrap().result.is_ok());
+    runtime.pump(22).await.unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
+    assert_eq!(std::fs::read_to_string(tree.join("mine.txt")).unwrap(), "keep my work");
+    assert_eq!(adapters::git(&tree, &["symbolic-ref", "--short", "HEAD"]).await.unwrap(), "moved-by-person");
+    uncertain_provision_without_quiescence_stays_uncertain().await;
+}
+
+/// Missing or mismatched settlement means no proof the old Provision stopped. Preserve uncertainty.
+async fn uncertain_provision_without_quiescence_stays_uncertain() {
+    for foreign in [false, true] {
+        let (_dir, mut runtime) = configured(false, "pass").await;
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        let binding = admitted(&runtime).await;
+        if foreign {
+            let mut other = binding.clone(); other.generation += 1;
+            durable(&runtime.git_settlement(&binding), &serde_json::to_vec(&serde_json::json!({ "binding": other })).unwrap()).unwrap();
+        }
+        assert!(runtime.observe("w", &binding.effect, Outcome::Uncertain, false, 20).unwrap());
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(runtime.submit(&runtime.controller(), Request { id: "cancel-provision".into(), workspace: "w".into(),
+            expected_revision: state.revision, sequence: 2,
+            command: Command::Cancel { item: "one".into(), reason: None } }, 21).unwrap().result.is_ok());
+        runtime.pump(22).await.unwrap();
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
+        assert!(!runtime.tree(&binding).exists(), "recovery must never run Provision again");
+    }
+}

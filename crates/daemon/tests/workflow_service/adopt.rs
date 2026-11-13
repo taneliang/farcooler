@@ -33,6 +33,12 @@ async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_on
             std::fs::create_dir_all(tree.join(file).parent().unwrap()).unwrap();
             std::fs::write(tree.join(file),farcooler_daemon::hook_install::merge_codex("{}",&dir.path().join("h.sock"))).unwrap();
         }
+        // Ignored build output beside the engine's hooks is not a person's uncommitted change either.
+        std::fs::write(tree.join(".gitignore"), "ignored-output/\n").unwrap();
+        git(&tree,&["add",".gitignore"]).await.unwrap();
+        git(&tree,&["-c","user.name=Test","-c","user.email=test@localhost","-c","commit.gpgsign=false","commit","--quiet","-m","ignore output"]).await.unwrap();
+        std::fs::create_dir(tree.join("ignored-output")).unwrap();
+        std::fs::write(tree.join("ignored-output/result"),"generated").unwrap();
         if theirs { std::fs::write(tree.join("mine.txt"),"someone's work").unwrap(); }
         let snapshot=get(&mut link,workspace).await; let item=&snapshot["state"]["items"][&ticket.key];
         sequence+=1;
