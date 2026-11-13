@@ -322,6 +322,24 @@ describe('following a conversation', () => {
 })
 
 describe('the runner’s rows through the wasm module', () => {
+  it('pins every child page and live follow to its native ID', async () => {
+    const asked: unknown[][] = []
+    const runner = {
+      agentRows: async (...args: unknown[]) => (asked.push(args), JSON.stringify(page([], 4))),
+      agentRowsFollow: async (...args: unknown[]) => (asked.push(args), JSON.stringify(changes([], 4))),
+    }
+    const id = '01a1d142-5ac6-76b3-a8a0-fc7491c5720c'
+    const source = sourceOf(runner as any, 'term-1', id)
+    await source.page(null, 100)
+    await source.page(12, 50)
+    await source.follow(7, 4, 20000)
+    expect(asked).toEqual([
+      ['term-1', undefined, 100, id],
+      ['term-1', 12, 50, id],
+      ['term-1', 7, 4, 20000, id],
+    ])
+  })
+
   it('asks for the newest page with no cursor and reads the JSON the module gives', async () => {
     const asked: unknown[][] = []
     const runner = {
@@ -333,9 +351,9 @@ describe('the runner’s rows through the wasm module', () => {
     expect((await source.page(12, 50)).epoch).toBe(7)
     await source.follow(7, 4, 20000)
     expect(asked).toEqual([
-      ['rows', 'term-1', undefined, 100],
-      ['rows', 'term-1', 12, 50],
-      ['follow', 'term-1', 7, 4, 20000],
+      ['rows', 'term-1', undefined, 100, undefined],
+      ['rows', 'term-1', 12, 50, undefined],
+      ['follow', 'term-1', 7, 4, 20000, undefined],
     ])
   })
 })

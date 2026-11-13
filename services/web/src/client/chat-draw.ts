@@ -22,6 +22,7 @@ import {
   subagentState,
   taskProgress,
   toolsLabel,
+  transcriptWords,
 } from './chat-copy'
 import { bodyOf, kindOf, type Row } from './chat-rows'
 import { blocksOf, type Span } from './chat-text'
@@ -231,7 +232,7 @@ function toggle(memory: Memory, key: string, on: boolean): void {
   else memory.open.delete(key)
 }
 
-function subagentRow(row: Row): HTMLElement {
+function subagentRow(row: Row, openAgent?: (id: string) => void): HTMLElement {
   const agent = bodyOf(row)
   const card = el('div', 'card subagent')
   const head = el('p', 'card-title')
@@ -240,6 +241,12 @@ function subagentRow(row: Row): HTMLElement {
   if (agent.description) card.append(el('p', 'card-body', agent.description))
   const meta = [subagentState(agent.status), toolsLabel(agent.tool_count ?? 0), agent.status === 'Running' ? agent.current_action : ''].filter(Boolean)
   card.append(el('p', 'card-meta', meta.join(' · ')))
+  if (openAgent && typeof agent.agent_id === 'string' && agent.agent_id) {
+    const open = el('button', 'quiet', transcriptWords().open)
+    open.type = 'button'
+    open.onclick = () => openAgent(agent.agent_id)
+    card.append(open)
+  }
   return card
 }
 
@@ -286,7 +293,7 @@ function tasksRow(row: Row): HTMLElement {
 
 /// One row as an element, or null for a kind that draws nothing here (the
 /// hint is the composer's; a kind this build doesn't know is skipped).
-export function drawRow(row: Row, memory: Memory): HTMLElement | null {
+export function drawRow(row: Row, memory: Memory, openAgent?: (id: string) => void): HTMLElement | null {
   switch (kindOf(row)) {
     case 'Turn':
       return turnRow(row, memory)
@@ -301,7 +308,7 @@ export function drawRow(row: Row, memory: Memory): HTMLElement | null {
     case 'Tool':
       return toolRow(row, memory)
     case 'Subagent':
-      return subagentRow(row)
+      return subagentRow(row, openAgent)
     case 'Ask':
       return askRow(row)
     case 'Queued':

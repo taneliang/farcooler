@@ -1178,6 +1178,7 @@ impl Projection {
         let Some(&t) = self.index.get(&turn_id) else { return };
         let running = self.rows[self.since_turn(t)]
             .iter()
+            .filter(|r| !r.retracted)
             .filter(|r| r.turn.as_deref() == Some(&turn_id))
             .filter(|r| matches!(&r.kind, RowKind::Subagent(s) if s.background && s.status == SubagentState::Running))
             .count() as u32;

@@ -180,8 +180,7 @@ impl Children {
         }
         let mut folded = 0;
         for (c, reader, projection) in self.files.values_mut() {
-            // Recheck the binding on every poll, including after file replacement.
-            if !child(c.path.clone()).is_some_and(|now| now.id == c.id && now.parent == c.parent) { continue; }
+            let id = format!("sub:codex:{}", c.id);
             loop {
                 let report = reader.read(|line| match line {
                     Line::Complete(bytes) => projection.fold_codex_line(bytes),
@@ -190,6 +189,16 @@ impl Children {
                 });
                 folded += report.lines;
                 if !report.more || report.bytes == 0 { break; }
+            }
+            // An unavailable or replaced transcript proves no current state.
+            // Remove its summary too, rather than leaving a stale running agent.
+            if reader.binding_refused() {
+                *projection = Projection::for_session(&c.id);
+                if let Some(&i) = parent.index.get(&id) {
+                    parent.retract(i);
+                    parent.count_background(i);
+                }
+                continue;
             }
             let turn = projection.rows().iter().rev().find_map(|r| match &r.kind { RowKind::Turn(t) => Some(t), _ => None });
             let Some(turn) = turn else { continue };
@@ -204,7 +213,6 @@ impl Children {
                 model: projection.codex.model.clone(), started_ms: turn.started_ms, ended_ms: turn.ended_ms,
                 last_ms: projection.codex.last_at, ..Subagent::default()
             };
-            let id = format!("sub:codex:{}", c.id);
             if let Some(&i) = parent.index.get(&id) {
                 if parent.rows[i].kind != RowKind::Subagent(sub.clone()) {
                     parent.rows[i].kind = RowKind::Subagent(sub);

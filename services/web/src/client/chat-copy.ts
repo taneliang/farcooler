@@ -38,6 +38,11 @@ function phrase(name: string, fill: Record<string, string | number> = {}, by?: s
   return Object.entries(fill).reduce((line, [key, value]) => line.replaceAll(`{${key}}`, String(value)), words)
 }
 
+export const transcriptWords = () => ({
+  title: phrase('transcript_title'), open: phrase('transcript_open'),
+  close: phrase('transcript_close'), empty: phrase('transcript_empty'),
+})
+
 /// How a finished turn ended, or null while it is open (`outcome`).
 export function outcomeLine(turn: any): string | null {
   const outcome = turn.outcome

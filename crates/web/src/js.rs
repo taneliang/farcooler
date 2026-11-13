@@ -389,18 +389,18 @@ impl WebRunner {
     /// numbers here: an epoch is the daemon's start in milliseconds times a
     /// thousand, inside a double's exact integers until the year 2255.
     #[wasm_bindgen(js_name = agentRows)]
-    pub async fn agent_rows(&self, terminal: String, before: Option<f64>, limit: u32) -> Result<String, JsValue> {
+    pub async fn agent_rows(&self, terminal: String, before: Option<f64>, limit: u32, agent: Option<String>) -> Result<String, JsValue> {
         let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;
-        Ok(self.0.agent_rows(id, before.map(|b| b as u64), limit).await.map_err(web_failure)?.to_string())
+        Ok(self.0.agent_rows(id, before.map(|b| b as u64), limit, agent.as_deref()).await.map_err(web_failure)?.to_string())
     }
 
     /// What changed in an agent's rows after `after_rev` of projection
     /// `epoch`, held up to `wait_ms` while nothing has, as JSON in the apps'
     /// shape (`rows_json::changes_json`).
     #[wasm_bindgen(js_name = agentRowsFollow)]
-    pub async fn agent_rows_follow(&self, terminal: String, epoch: f64, after_rev: f64, wait_ms: u32) -> Result<String, JsValue> {
+    pub async fn agent_rows_follow(&self, terminal: String, epoch: f64, after_rev: f64, wait_ms: u32, agent: Option<String>) -> Result<String, JsValue> {
         let id = Uuid::parse_str(&terminal).map_err(|e| failure("protocol", &e.to_string()))?;
-        let changes = self.0.agent_rows_follow(id, epoch as u64, after_rev as u64, wait_ms).await.map_err(web_failure)?;
+        let changes = self.0.agent_rows_follow(id, epoch as u64, after_rev as u64, wait_ms, agent.as_deref()).await.map_err(web_failure)?;
         Ok(changes.to_string())
     }
 

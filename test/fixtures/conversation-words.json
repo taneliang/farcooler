@@ -89,7 +89,11 @@
         "tasks_progress": "{done} of {n} done",
         "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
         "tools": "{n} tools",
-        "tools_one": "1 tool"
+        "tools_one": "1 tool",
+        "transcript_close": "Close Transcript",
+        "transcript_empty": "No transcript available yet.",
+        "transcript_open": "Open Transcript",
+        "transcript_title": "Agent Transcript"
       },
       "send": {
         "": {
@@ -415,7 +419,11 @@
         "tasks_progress": "{done} of {n} done",
         "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
         "tools": "{n} tools",
-        "tools_one": "1 tool"
+        "tools_one": "1 tool",
+        "transcript_close": "Close Transcript",
+        "transcript_empty": "No transcript available yet.",
+        "transcript_open": "Open Transcript",
+        "transcript_title": "Agent Transcript"
       },
       "send": {
         "": {
@@ -741,7 +749,11 @@
         "tasks_progress": "{done} of {n} done",
         "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
         "tools": "{n} tools",
-        "tools_one": "1 tool"
+        "tools_one": "1 tool",
+        "transcript_close": "Close transcript",
+        "transcript_empty": "No transcript available yet.",
+        "transcript_open": "Open transcript",
+        "transcript_title": "Agent transcript"
       },
       "send": {
         "": {
@@ -1067,7 +1079,11 @@
         "tasks_progress": "{done} of {n} done",
         "too_long_composed": "That message is over 100,000 characters. Shorten it, or paste it in the terminal.",
         "tools": "{n} tools",
-        "tools_one": "1 tool"
+        "tools_one": "1 tool",
+        "transcript_close": "Close transcript",
+        "transcript_empty": "No transcript available yet.",
+        "transcript_open": "Open transcript",
+        "transcript_title": "Agent transcript"
       },
       "send": {
         "": {

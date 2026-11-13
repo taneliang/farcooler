@@ -80,8 +80,8 @@ declare module 'fc-web' {
     /// An agent's rows in the apps' shape (crates/client's rows_json): the
     /// newest, or up to `limit` before row `before`; and what changed after a
     /// revision, held by the runner while nothing has.
-    agentRows(terminal: string, before: number | undefined, limit: number): Promise<string>
-    agentRowsFollow(terminal: string, epoch: number, afterRev: number, waitMs: number): Promise<string>
+    agentRows(terminal: string, before: number | undefined, limit: number, agent?: string): Promise<string>
+    agentRowsFollow(terminal: string, epoch: number, afterRev: number, waitMs: number, agent?: string): Promise<string>
     /// Send a message as the person's; true when the agent was busy and it waits.
     compose(terminal: string, text: string): Promise<boolean>
     /// `compose`, with images (`{mime, data}`) typed into the agent's box

@@ -12,17 +12,17 @@
 import type { WebRunner } from 'fc-web'
 
 import { admit, filesOf, IMAGE_TYPES, IMAGE_WORDS, parseLimits, type Picked, readImages } from './attachments'
-import { chatTrouble, isWorking } from './chat-copy'
+import { chatTrouble, isWorking, transcriptWords } from './chat-copy'
 import { Outbox } from './chat-send'
 import { closesWithLine, drawEnd, drawRow, type Memory, toolsGroup } from './chat-draw'
 import { bodyOf, type Delta, itemsOf, nodesOf, type Phase, RowFollower, RowLedger, type RowSource, type ViewNode } from './chat-rows'
 import type { Pane } from './panes'
 
 /// A runner's rows, through the wasm module's JSON.
-export function sourceOf(runner: WebRunner, terminal: string): RowSource {
+export function sourceOf(runner: WebRunner, terminal: string, agent?: string): RowSource {
   return {
-    page: async (before, limit) => JSON.parse(await runner.agentRows(terminal, before ?? undefined, limit)),
-    follow: async (epoch, rev, waitMs) => JSON.parse(await runner.agentRowsFollow(terminal, epoch, rev, waitMs)),
+    page: async (before, limit) => JSON.parse(await runner.agentRows(terminal, before ?? undefined, limit, agent)),
+    follow: async (epoch, rev, waitMs) => JSON.parse(await runner.agentRowsFollow(terminal, epoch, rev, waitMs, agent)),
   }
 }
 
@@ -48,6 +48,7 @@ export class ChatView implements Pane<WebRunner> {
   private readonly memory: Memory = { open: new Set() }
   /// What is drawn, by node id: the element and what it was drawn from.
   private readonly drawn = new Map<string, { el: HTMLElement | null; sig: string }>()
+  private child: { dialog: HTMLDialogElement; view: ChatView } | null = null
 
   private readonly scroller = el('div', 'chat-scroll')
   private readonly older = el('button', 'quiet chat-older', 'Load Earlier Messages')
@@ -73,6 +74,7 @@ export class ChatView implements Pane<WebRunner> {
   constructor(
     private readonly host: HTMLElement,
     private readonly runnerLabel: string,
+    private readonly agentId?: string,
   ) {
     host.classList.add('chat-host')
     this.scroller.setAttribute('role', 'log')
@@ -125,6 +127,7 @@ export class ChatView implements Pane<WebRunner> {
     this.chooser.tabIndex = -1
     field.append(this.attachButton, this.box, this.send)
     this.composer.append(this.strip, field, this.chooser)
+    this.composer.hidden = !!agentId
     this.scroller.append(this.older, this.list, this.empty)
     const foot = el('div', 'chat-foot')
     foot.append(this.working, this.problem, this.composer)
@@ -198,23 +201,27 @@ export class ChatView implements Pane<WebRunner> {
 
   show(on: boolean): void {
     this.host.hidden = !on
-    if (!on) return
+    if (!on) {
+      this.child?.dialog.close()
+      return
+    }
     if (this.stick) this.toBottom()
     // Not on a touch screen: focusing the box would raise the keyboard over
     // the conversation before the person asked to write.
-    if (!matchMedia('(pointer: coarse)').matches) this.box.focus()
+    if (!this.agentId && !matchMedia('(pointer: coarse)').matches) this.box.focus()
   }
 
   async attach(runner: WebRunner, terminal: string, _ended: () => void, _resuming = false): Promise<void> {
     // Opened again on the same connection: already following.
-    if (this.runner === runner && this.follower?.following) return
+    if (this.runner === runner && this.terminal === terminal && this.follower?.following) return
+    this.child?.dialog.close()
     this.follower?.stop()
     this.runner = runner
     this.terminal = terminal
-    this.outbox ??= new Outbox(() => this.runner, terminal, this.runnerLabel)
+    if (!this.agentId) this.outbox ??= new Outbox(() => this.runner, terminal, this.runnerLabel)
     this.shownBefore = true
     this.host.dataset.attached = 'true'
-    this.follower = new RowFollower(this.ledger, sourceOf(runner, terminal), {
+    this.follower = new RowFollower(this.ledger, sourceOf(runner, terminal, this.agentId), {
       changed: delta => this.draw(delta),
       phase: phase => {
         this.phase = phase
@@ -235,6 +242,7 @@ export class ChatView implements Pane<WebRunner> {
   }
 
   detach(): void {
+    this.child?.dialog.close()
     this.follower?.stop()
     this.follower = null
     delete this.host.dataset.attached
@@ -305,7 +313,31 @@ export class ChatView implements Pane<WebRunner> {
       )
     }
     const row = rows.get(node.item.id)
-    return row ? drawRow(row, this.memory) : null
+    return row ? drawRow(row, this.memory, this.agentId ? undefined : id => this.openChild(id)) : null
+  }
+
+  /// A child gets its own ledger and follower. Parent messages and Stop
+  /// remain on the parent; this transcript has no mutation controls.
+  private openChild(id: string): void {
+    if (!this.runner) return
+    this.child?.dialog.close()
+    const dialog = el('dialog', 'chat-child')
+    dialog.setAttribute('aria-label', transcriptWords().title)
+    const close = el('button', 'quiet', transcriptWords().close)
+    close.type = 'button'
+    close.onclick = () => dialog.close()
+    const host = el('div', 'chat-child-body')
+    const view = new ChatView(host, this.runnerLabel, id)
+    dialog.append(close, host)
+    document.body.append(dialog)
+    this.child = { dialog, view }
+    dialog.addEventListener('close', () => {
+      view.dispose()
+      dialog.remove()
+      if (this.child?.dialog === dialog) this.child = null
+    }, { once: true })
+    dialog.showModal()
+    void view.attach(this.runner, this.terminal, () => {})
   }
 
   /// Everything but the list: what the foot says, whether the box can send,
@@ -315,12 +347,12 @@ export class ChatView implements Pane<WebRunner> {
     const turn = newest ? bodyOf(newest) : null
     // Stop only where one Esc stops the turn: while a dialog is up it would
     // answer the dialog No (`isWorking`).
-    const working = !!turn && isWorking(turn)
+    const working = !this.agentId && !!turn && isWorking(turn)
     this.working.hidden = !working
     this.host.dataset.working = working ? 'true' : 'false'
     this.older.hidden = !this.ledger.moreBefore
     this.empty.hidden = this.ledger.order.some(id => id !== 'hint:composer')
-    this.empty.textContent = this.phase.kind === 'loading' ? 'Loading the conversation…' : 'No messages yet. Send one below.'
+    this.empty.textContent = this.phase.kind === 'loading' ? 'Loading the conversation…' : this.agentId ? transcriptWords().empty : 'No messages yet. Send one below.'
     this.box.placeholder = this.ledger.hint || 'Message'
     const trouble = this.phase.kind === 'trouble' ? chatTrouble(this.phase.word, this.runnerLabel) : this.phase.kind === 'unavailable' ? chatTrouble('runner_too_old', this.runnerLabel) : ''
     this.note.textContent = trouble
@@ -362,6 +394,7 @@ export class ChatView implements Pane<WebRunner> {
   /// Images chosen, pasted or dropped: the ones that fit wait beside the box,
   /// and the first reason one didn't is said.
   private async take(files: File[]): Promise<void> {
+    if (this.agentId) return
     if (files.length === 0) return
     const { picked, others, unreadable } = await readImages(files, () => this.nextImage++)
     // Asked each time: the runner on the connection may be a new one.

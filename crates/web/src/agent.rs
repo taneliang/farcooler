@@ -18,28 +18,31 @@ use crate::wire::Runner;
 
 impl Runner {
     /// Up to `limit` of `terminal`'s rows before `before` (the newest when
-    /// `None`), as `{epoch, rev, moreBefore, rows}`.
+    /// `None`), as `{epoch, rev, moreBefore, rows}`. `agent` scopes the read
+    /// to that child's transcript using the runner's verified native binding.
     pub async fn agent_rows(
         &self,
         terminal: Uuid,
         before: Option<u64>,
         limit: u32,
+        agent: Option<&str>,
     ) -> Result<serde_json::Value, WebError> {
-        let page = self.session.agent_rows(terminal, before, limit, None).await?;
+        let page = self.session.agent_rows(terminal, before, limit, agent).await?;
         Ok(farcooler_client::rows_json::rows_page_json(&page))
     }
 
     /// What changed in `terminal`'s rows after `after_rev` of projection
     /// `epoch`, as `{epoch, rev, reset, changes}`. The runner holds the call
-    /// up to `wait_ms` while nothing has.
+    /// up to `wait_ms` while nothing has, in the same child scope as the page.
     pub async fn agent_rows_follow(
         &self,
         terminal: Uuid,
         epoch: u64,
         after_rev: u64,
         wait_ms: u32,
+        agent: Option<&str>,
     ) -> Result<serde_json::Value, WebError> {
-        let changes = self.session.agent_rows_follow(terminal, epoch, after_rev, wait_ms, None).await?;
+        let changes = self.session.agent_rows_follow(terminal, epoch, after_rev, wait_ms, agent).await?;
         Ok(farcooler_client::rows_json::changes_json(&changes))
     }
 

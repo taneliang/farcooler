@@ -137,6 +137,11 @@ pub fn words(style: Style, agent: &str) -> Words {
         ("draft_in_terminal_bring", "The terminal’s box already holds a draft of its own.".into()),
         ("handoff", format!("{agent} is showing something only the terminal can.")),
         ("panel", format!("This opens a panel in {agent}, so it’s for the terminal.")),
+        // A child's read-only transcript (ov-879).
+        ("transcript_title", style.label("agent transcript")),
+        ("transcript_open", style.label("open transcript")),
+        ("transcript_close", style.label("close transcript")),
+        ("transcript_empty", "No transcript available yet.".into()),
         // A turn's ending.
         ("outcome_done", "Done".into()),
         ("outcome_took", "Took {time}".into()),

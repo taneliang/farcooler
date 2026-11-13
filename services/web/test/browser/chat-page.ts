@@ -4,6 +4,10 @@
 /// wasm module gives the view.
 
 import { ChatView } from '../../src/client/chat'
+import { useConversationWords } from '../../src/client/chat-copy'
+import words from '../../../../test/fixtures/conversation-words.json'
+
+useConversationWords(request => JSON.stringify((words as any)[`apple_${JSON.parse(request).conversation.agent.toLowerCase()}`]))
 import type { Row } from '../../src/client/chat-rows'
 
 const EPOCH = 1_700_000_000_000_001
@@ -14,6 +18,7 @@ const turn = (id: string, ord: number, rev: number, prompt: string, extra: objec
 
 export class FakeRunner {
   rows: Row[] = []
+  child = new Map<string, FakeRunner>()
   rev = 0
   composed: string[] = []
   /// Each message's images as `type:bytes`, by message.
@@ -35,11 +40,13 @@ export class FakeRunner {
     for (const wake of this.parked.splice(0)) wake()
   }
 
-  async agentRows(_t: string, _before: number | undefined, _limit: number): Promise<string> {
+  async agentRows(_t: string, _before: number | undefined, _limit: number, agent?: string): Promise<string> {
+    if (agent) return this.child.get(agent)!.agentRows(_t, _before, _limit)
     return JSON.stringify({ epoch: EPOCH, rev: this.rev, moreBefore: false, rows: this.rows })
   }
 
-  async agentRowsFollow(_t: string, epoch: number, after: number, _wait: number): Promise<string> {
+  async agentRowsFollow(_t: string, epoch: number, after: number, _wait: number, agent?: string): Promise<string> {
+    if (agent) return this.child.get(agent)!.agentRowsFollow(_t, epoch, after, _wait)
     const answer = () => ({ epoch: EPOCH, rev: this.rev, reset: epoch !== EPOCH, changes: this.log.filter(c => c.rev > after).map(c => ({ kind: c.kind, id: c.row.id, rev: c.rev, row: c.row })) })
     if (this.rev > after) return JSON.stringify(answer())
     await new Promise<void>(wake => this.parked.push(wake))
@@ -77,14 +84,14 @@ export class FakeRunner {
 /// asked and answered, a task list, a queued follow-up, and the agent still
 /// working.
 export function conversation(r: FakeRunner): void {
-  r.put(turn('turn:1', 0, 0, 'The web build fails on CI after the chat change. Find out why and fix it without touching the wasm crate.\n\nIt only fails on Linux.', { outcome: 'Finished', duration_ms: 142_000 }) as any)
+  r.put(turn('turn:1', 0, 0, 'The web build fails on CI after the chat change. Find out why and fix it without touching the wasm crate.\n\nIt only fails on Linux.', { outcome: 'Finished', duration_ms: 142_000, took: '2:22' }) as any)
   r.put(row('think:1', 0, 0, { Thinking: { started_ms: 1000, ended_ms: 5000 } }, 'turn:1') as any)
   r.put(row('p:1', 0, 0, { Prose: { text: 'I’ll start with the CI log, then compare the two builds.', conclusion: false } }, 'turn:1') as any)
   const tool = (id: string, name: string, summary: string, extra: object = {}) => row(id, 0, 0, { Tool: { name, status: 'Done', summary, diff: [], ...extra } }, 'turn:1') as any
   r.put(tool('tool:1', 'Bash', 'Read the failing job’s log', { input: 'command: gh run view --log-failed', result: 'Error: Cannot find module ./chat.css' }))
   r.put(tool('tool:2', 'Read', '/Users/me/overnight/services/web/scripts/build.mjs'))
   r.put(tool('tool:3', 'Grep', 'chat.css'))
-  r.put(row('sub:1', 0, 0, { Subagent: { tool_use_id: 'x', agent_type: 'general-purpose', description: 'Map every place the stylesheet is read', background: false, status: 'Completed', tool_count: 14, current_action: '' } }, 'turn:1') as any)
+  r.put(row('sub:1', 0, 0, { Subagent: { tool_use_id: 'x', agent_id: '01a1d142-5ac6-76b3-a8a0-fc7491c5720c', model: 'gpt-6.1-sol', agent_type: 'codex', description: 'Map every place the stylesheet is read', background: false, status: 'Completed', tool_count: 14, current_action: '' } }, 'turn:1') as any)
   r.put(
     row('p:2', 0, 0, {
       Prose: {
@@ -105,10 +112,14 @@ export function conversation(r: FakeRunner): void {
 
 const runner = new FakeRunner()
 conversation(runner)
+const child = new FakeRunner()
+child.put(turn('child:turn', 0, 0, 'Review ov-879 parent isolation', { activity: 'Busy' }) as any)
+child.put(row('child:prose', 0, 0, { Prose: { text: 'Only the child transcript is shown here.', conclusion: false } }, 'child:turn') as any)
+runner.child.set('01a1d142-5ac6-76b3-a8a0-fc7491c5720c', child)
 
 const host = document.createElement('div')
 host.className = 'terminal-host'
 document.getElementById('terminal')!.append(host)
 const view = new ChatView(host, 'studio')
-;(window as any).__chat = { runner, view }
+;(window as any).__chat = { runner, view, child }
 void view.attach(runner as any, 'term-1', () => {}).then(() => view.show(true))

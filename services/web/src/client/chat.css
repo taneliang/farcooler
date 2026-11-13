@@ -118,3 +118,10 @@
 .chat-attach svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .chat-field { padding-left: 6px; }
 .chat-host[data-dropping="true"]::after { content: "Drop Images to Attach"; position: absolute; inset: 8px; display: grid; place-items: center; border: 2px dashed var(--run); border-radius: 18px; background: color-mix(in srgb, var(--bg) 82%, transparent); color: var(--text); font-weight: 600; pointer-events: none; }
+
+/* Child transcripts keep their own scroll position and stream (ov-879). */
+.chat-child { width: min(860px, calc(100vw - 24px)); height: min(820px, calc(100dvh - 24px)); box-sizing: border-box; padding: 12px; color: var(--text); background: var(--bg); border: 1px solid var(--rule); border-radius: 16px; }
+.chat-child[open] { display: flex; flex-direction: column; gap: 8px; }
+.chat-child > button { align-self: flex-end; flex: none; }
+.chat-child .chat-child-body { position: relative; inset: auto; flex: 1; min-height: 0; }
+.chat-child::backdrop { background: #0008; }

@@ -152,6 +152,40 @@ fn real_codex_child_opens_under_its_parent_with_its_own_rows() {
 }
 
 #[test]
+fn an_unavailable_child_retracts_its_summary_and_can_return() {
+    let (root, main, child) = setup("codex-child-summary-replaced");
+    let mut parent = SessionProjector::open(main);
+    parent.poll();
+    let rev = parent.projection().revision();
+    std::fs::write(&child, CHILD.replace("\"thread_source\":\"subagent\"", "\"thread_source\":\"guardian_review\"")).unwrap();
+    parent.poll();
+    assert!(parent.projection().page(None, 100).is_empty());
+    assert!(parent.projection().changes_since(rev, 100).unwrap().iter().any(|c| matches!(c, Change::Remove { .. })));
+    std::fs::write(&child, CHILD).unwrap();
+    parent.poll();
+    let rows = parent.projection().page(None, 100);
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(&rows[0].kind, RowKind::Subagent(s) if s.status == SubagentState::Completed));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_refused_drill_cannot_republish_its_nested_child_summaries() {
+    let (root, main, child) = setup("codex-child-nested-refused");
+    let nested = "01a1d142-5ac6-76b3-a8a0-fc7491c5720d";
+    let path = child.with_file_name(format!("rollout-nested-{nested}.jsonl"));
+    std::fs::write(path, CHILD.replace(ID, nested).replace(PARENT, ID)).unwrap();
+    let mut drill = SessionProjector::open_subagent(child.clone(), main);
+    drill.poll();
+    assert!(drill.projection().rows().iter().any(|r| matches!(r.kind, RowKind::Subagent(_))));
+    std::fs::write(&child, CHILD.replace("\"thread_source\":\"subagent\"", "\"thread_source\":\"guardian_review\"")).unwrap();
+    drill.poll();
+    assert!(drill.binding_refused());
+    assert!(drill.projection().page(None, 100).is_empty());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn a_rebuild_keeps_the_child_under_the_parent_turn_that_launched_it() {
     let (root, main, _) = setup("codex-child-parent-turn");
     use std::io::Write;
@@ -180,6 +214,13 @@ fn the_parent_counts_only_running_children_in_their_launch_turn() {
     let rev = parent.projection().revision();
     parent.poll();
     assert_eq!(rev, parent.projection().revision(), "an unchanged poll must not wake followers");
+    let running = std::fs::read(&child).unwrap();
+    std::fs::remove_file(&child).unwrap();
+    parent.poll();
+    assert_eq!(count(&parent), 0, "unavailable agents must leave the running count");
+    std::fs::write(&child, running).unwrap();
+    parent.poll();
+    assert_eq!(count(&parent), 1, "a restored binding can publish its summary again");
     let mut file = std::fs::OpenOptions::new().append(true).open(&child).unwrap();
     writeln!(file, "{}", CHILD.lines().last().unwrap()).unwrap();
     parent.poll_paths(&[child]);

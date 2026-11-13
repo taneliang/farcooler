@@ -61,7 +61,7 @@ async fn an_agents_rows_come_as_the_apps_json_and_the_list_says_it_is_an_agent()
             }
             assert!(runner.terminals().await.unwrap()[0].agent, "a role of agent is an agent");
 
-            let page = runner.agent_rows(TERMINAL, None, 100).await.expect("agent.rows");
+            let page = runner.agent_rows(TERMINAL, None, 100, None).await.expect("agent.rows");
             assert_eq!(page["epoch"], EPOCH);
             assert_eq!(page["rev"], 2);
             assert_eq!(page["moreBefore"], false);
@@ -86,11 +86,11 @@ async fn a_follow_brings_only_what_changed_and_a_strange_epoch_resets() {
                 chat.put("turn:a", TURN);
                 chat.put("prose:1", PROSE);
             }
-            let page = runner.agent_rows(TERMINAL, None, 100).await.unwrap();
+            let page = runner.agent_rows(TERMINAL, None, 100, None).await.unwrap();
             let (epoch, rev) = (page["epoch"].as_u64().unwrap(), page["rev"].as_u64().unwrap());
 
             seen.chat.lock().await.put("prose:1", PROSE_MORE);
-            let follow = runner.agent_rows_follow(TERMINAL, epoch, rev, 0).await.expect("agent.rows_follow");
+            let follow = runner.agent_rows_follow(TERMINAL, epoch, rev, 0, None).await.expect("agent.rows_follow");
             assert_eq!(follow["reset"], false);
             assert_eq!(follow["rev"], 3);
             let changes = follow["changes"].as_array().unwrap();
@@ -99,7 +99,7 @@ async fn a_follow_brings_only_what_changed_and_a_strange_epoch_resets() {
             assert_eq!(changes[0]["id"], "prose:1");
             assert_eq!(changes[0]["row"]["kind"]["Prose"]["text"], "Looking at the log now");
 
-            let stranger = runner.agent_rows_follow(TERMINAL, epoch + 1, rev, 0).await.unwrap();
+            let stranger = runner.agent_rows_follow(TERMINAL, epoch + 1, rev, 0, None).await.unwrap();
             assert_eq!(stranger["reset"], true);
         })
         .await;
@@ -122,4 +122,18 @@ async fn a_message_is_composed_and_stop_is_an_interrupt() {
             assert_eq!(seen.interrupts.load(Ordering::SeqCst), 1);
         })
         .await;
+}
+
+/// Child reads must carry native identity on both paging and following;
+/// dropping either argument silently returns the parent conversation.
+#[tokio::test]
+async fn a_childs_native_id_is_sent_on_every_rows_request() {
+    tokio::task::LocalSet::new().run_until(async {
+        let (runner, seen) = connect().await;
+        let id = "01a1d142-5ac6-76b3-a8a0-fc7491c5720c";
+        runner.agent_rows(TERMINAL, None, 100, Some(id)).await.unwrap();
+        runner.agent_rows_follow(TERMINAL, EPOCH, 0, 0, Some(id)).await.unwrap();
+        runner.agent_rows(TERMINAL, None, 100, None).await.unwrap();
+        assert_eq!(*seen.row_agents.lock().await, [id, id, ""]);
+    }).await;
 }

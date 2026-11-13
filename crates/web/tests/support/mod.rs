@@ -145,6 +145,8 @@ pub struct Seen {
     attached: Mutex<Option<russh::ChannelWriteHalf<Msg>>>,
     /// The terminal's agent conversation, as the runner's projector holds it.
     pub chat: Mutex<Chat>,
+    /// Native child IDs carried on pages and follows, empty for the parent.
+    pub row_agents: Mutex<Vec<String>>,
     /// What `terminal.compose` carried, as the text of its first block.
     pub composed: Mutex<Vec<String>>,
     /// The images of each `terminal.compose` as `(MIME type, byte count)`.
@@ -326,6 +328,7 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                     capability::BOARD_PLAN.to_string(),
                     capability::BOARD_RULING_ACTIONS.to_string(),
                     capability::AGENT_ROWS.to_string(),
+                    capability::SUBAGENT_ROWS.to_string(),
                     capability::AGENT_COMPOSE.to_string(),
                     capability::COMPOSE.to_string(),
                     capability::TERMINAL_INTERRUPT.to_string(),
@@ -371,8 +374,12 @@ async fn fake_daemon(channel: Channel<Msg>, seen: Arc<Seen>) {
                         }
                         answer(&req, result::Value::Empty(Empty {}))
                     }
-                    ("agent.rows", _) => answer(&req, result::Value::AgentRowPage(seen.chat.lock().await.page())),
+                    ("agent.rows", Some(request::Payload::AgentRowsPage(p))) => {
+                        seen.row_agents.lock().await.push(p.agent_id);
+                        answer(&req, result::Value::AgentRowPage(seen.chat.lock().await.page()))
+                    },
                     ("agent.rows_follow", Some(request::Payload::AgentRowsFollow(f))) => {
+                        seen.row_agents.lock().await.push(f.agent_id);
                         answer(&req, result::Value::AgentRowChanges(seen.chat.lock().await.follow(f.epoch, f.after_rev)))
                     }
                     ("terminal.compose", Some(request::Payload::AgentPrompt(p))) => {

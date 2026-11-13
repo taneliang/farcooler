@@ -114,6 +114,8 @@ impl LineReader {
         self.partial.len()
     }
 
+    pub(super) fn binding_refused(&self) -> bool { self.binding_refused }
+
     /// Hand every complete line appended since the last call to `each`, in
     /// file order. A missing file is nothing yet, not an error.
     pub fn read(&mut self, mut each: impl FnMut(Line<'_>)) -> ReadReport {
@@ -339,7 +341,7 @@ impl SessionProjector {
         let mut folded = self.poll_main();
         let agents: Vec<String> = self.subagents.keys().cloned().collect();
         folded += self.poll_subagents(&agents);
-        if self.codex {
+        if self.codex && !self.main.binding_refused {
             folded += self.codex_children.poll(self.main.path(), &mut self.projection);
         }
         folded
@@ -355,7 +357,9 @@ impl SessionProjector {
             folded += self.poll_main();
         }
         if self.codex {
-            folded += self.codex_children.poll(self.main.path(), &mut self.projection);
+            if !self.main.binding_refused {
+                folded += self.codex_children.poll(self.main.path(), &mut self.projection);
+            }
             return folded;
         }
         // Most events in a project directory are another session's.
