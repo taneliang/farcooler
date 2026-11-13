@@ -182,7 +182,7 @@ async fn workflow_coding_cancel_running_owned_process_settles_original_then_stop
     let (shutdown, receiver) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move { runtime.run(receiver).await.unwrap(); runtime });
     tokio::time::timeout(Duration::from_secs(5), async {
-        while !started.exists() { tokio::time::sleep(Duration::from_millis(1000)).await; }
+        while !started.exists() { tokio::time::sleep(Duration::from_millis(10)).await; }
     }).await.unwrap();
     let state = handle.state("w").await.unwrap().unwrap();
     let result = handle.submit(&controller, Request { id: "cancel".into(), workspace: "w".into(),
@@ -191,7 +191,7 @@ async fn workflow_coding_cancel_running_owned_process_settles_original_then_stop
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if handle.state("w").await.unwrap().unwrap().items["one"].phase == Phase::Cancelled { break; }
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await.unwrap();
     let pid: i32 = std::fs::read_to_string(started).unwrap().parse().unwrap();
@@ -234,7 +234,7 @@ async fn workflow_coding_pending_ci_wakes_from_explicit_observation_without_rela
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if handle.state("w").await.unwrap().unwrap().items["one"].phase == Phase::Done { break; }
-            tokio::time::sleep(Duration::from_millis(1000)).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await.unwrap();
     stop.send(true).unwrap(); task.await.unwrap();
