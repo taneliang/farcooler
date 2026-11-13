@@ -108,3 +108,31 @@ ignored. All temporary hook-exclusion mutations were restored before green runs.
 
 No app source changed (net Swift/Kotlin lines: 0/0). Commit SHA is supplied by the
 commit containing this report and the final response; no push is performed.
+
+## Acceptance verification on the adopted restart
+
+The restart already contains the hook exclusion (`3f06cebd3`) and settled-Provision
+cancellation (`26428803b`). This pass extends the socket regression to distinguish
+an ordinary untracked file, a person's `.codex/config.toml` beside the hooks, a staged
+`.codex/hooks.json`, and an edited tracked `.codex/hooks.json`. Every case must fail
+at Provision, preserve the changed contents, and save `SafeFailureBecause` with the
+same refusal sentence shown on the item. Only exact untracked hook paths are exempt.
+
+Fresh verification:
+
+- Removed the `adapters::tree_changes` hook exclusion temporarily: the socket
+  regression failed because the hooks-only tree was Failed instead of Done,
+  explicitly naming `.codex/hooks.json` and `.cursor/hooks.json`. Restored it fully.
+- The expanded socket regression then passed, and passed again with scratch HOME
+  `/tmp/ov1074-master-home` and `init.defaultBranch = master` (five adoption cases).
+- `cargo test --offline -p farcooler-daemon --lib provision -- --test-threads=2`
+  under the same scratch HOME: **4 passed**. This covers cancellation after restart,
+  missing/foreign settlement receipts, a tree changed before reconciliation, and
+  Provision object-download failure/concurrency.
+- `git diff --check`, `scripts/file-size-budget.py`, and the doc-comment check
+  against HEAD passed. No wire or app types changed; net Swift/Kotlin lines: 0/0.
+
+Filtered Cargo runs used `scripts/heavy --no-lock` with one build job, after the
+shared load gate remained busy; the lane rules permit targeted tests freely.
+No full suite was rerun in this pass. The commands in Safe recovery were checked
+against the installed CLI's help; no live recovery command was executed.

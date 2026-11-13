@@ -4,7 +4,8 @@ use farcooler_protocol::workflow_commands::NamedTree;
 /// ov-1074: Main's first adopt ended Uncertain at Provision. The worktree held nothing but the hooks files Far Cooler
 /// writes into every worktree it opens a pane in, untracked, and the step's clean-tree check read them as changes.
 /// A tree with only those carries on and lands; one with a person's change in it fails with a sentence that says
-/// what to do, never Uncertain, and the change is left as it is.
+/// what to do, never Uncertain, and the change is left as it is. The exemption covers exact untracked hook
+/// paths only: nearby files and staged or tracked hooks are still a person's work.
 #[tokio::test]
 async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_one_with_changes_fails_with_a_sentence() {
     if person_terminal("adopt::workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_one_with_changes_fails_with_a_sentence").await { return; }
@@ -18,7 +19,7 @@ async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_on
     let mut sequence=1;
     let mut tickets=Vec::new();
     let settled=|phase:&Phase| matches!(phase,Phase::Done|Phase::Failed|Phase::Uncertain);
-    for (name,theirs) in [("hooks-only",false),("changed",true)] {
+    for name in ["hooks-only", "changed", "beside-hooks", "staged-hooks", "tracked-hooks"] {
         let ticket=host.service.store.create_task(workspace,name,farcooler_store::models::Actor::User).unwrap();
         host.service.track_tickets(Some(ticket.id)).await;
         // Earlier work on a branch of its own, in a worktree the app lists, as a pane left it.
@@ -39,7 +40,18 @@ async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_on
         git(&tree,&["-c","user.name=Test","-c","user.email=test@localhost","-c","commit.gpgsign=false","commit","--quiet","-m","ignore output"]).await.unwrap();
         std::fs::create_dir(tree.join("ignored-output")).unwrap();
         std::fs::write(tree.join("ignored-output/result"),"generated").unwrap();
-        if theirs { std::fs::write(tree.join("mine.txt"),"someone's work").unwrap(); }
+        let changed = match name {
+            "changed" => Some("mine.txt"),
+            "beside-hooks" => Some(".codex/config.toml"),
+            "staged-hooks" | "tracked-hooks" => Some(".codex/hooks.json"),
+            _ => None,
+        };
+        if name == "tracked-hooks" {
+            git(&tree,&["add",".codex/hooks.json"]).await.unwrap();
+            git(&tree,&["-c","user.name=Test","-c","user.email=test@localhost","-c","commit.gpgsign=false","commit","--quiet","-m","track hooks"]).await.unwrap();
+        }
+        if let Some(path) = changed { std::fs::write(tree.join(path),"someone's work").unwrap(); }
+        if name == "staged-hooks" { git(&tree,&["add",".codex/hooks.json"]).await.unwrap(); }
         let snapshot=get(&mut link,workspace).await; let item=&snapshot["state"]["items"][&ticket.key];
         sequence+=1;
         accepted(&call(&mut link,workspace,Action::Start { mutation:mutation(name,snapshot["state"]["revision"].as_u64().unwrap(),sequence),
@@ -52,13 +64,21 @@ async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_on
             if let Some(item)=state.items.get(&ticket.key).filter(|i| settled(&i.phase)) { break item.clone(); }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }}).await.expect("the run settles");
-        tickets.push((item,tree));
+        tickets.push((item,tree,changed));
     }
-    let ((clean,_),(item,tree))=(&tickets[0],&tickets[1]);
+    let (clean,_,_)=&tickets[0];
     assert_eq!(clean.phase,Phase::Done,"only our hooks files: the run carries on and lands: {clean:?}");
-    assert_eq!((&item.phase,item.stage),(&Phase::Failed,0),"a person's change fails the Provision, never Uncertain: {item:?}");
-    let said=item.failure.as_deref().unwrap_or_default();
-    assert!(said.contains("changes") && said.contains("Commit them") && said.contains("discard them"),"said as a sentence with what to do: {said}");
-    assert_eq!(std::fs::read_to_string(tree.join("mine.txt")).unwrap(),"someone's work","the change is left as it is");
+    for (item,tree,changed) in &tickets[1..] {
+        assert_eq!((&item.phase,item.stage),(&Phase::Failed,0),"a person's change fails the Provision, never Uncertain: {item:?}");
+        let said=item.failure.as_deref().unwrap_or_default();
+        assert!(said.contains("changes") && said.contains("Commit them") && said.contains("discard them"),"said as a sentence with what to do: {said}");
+        let provision=host.service.store.workflow_outbox(&workspace.to_string()).unwrap().into_iter()
+            .find(|stored| stored.effect.run == item.run && stored.effect.kind == farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Provision)).unwrap();
+        let journal=dir.path().join("state/workflow/receipts").join(format!("{}.json",farcooler_workflow::digest(&provision.effect)));
+        let journal:serde_json::Value=serde_json::from_slice(&std::fs::read(journal).unwrap()).unwrap();
+        assert_eq!(serde_json::from_value::<farcooler_workflow::Outcome>(journal["outcome"].clone()).unwrap(),
+            farcooler_workflow::Outcome::SafeFailureBecause(said.into()),"the durable outcome retains the refusal sentence");
+        assert_eq!(std::fs::read_to_string(tree.join(changed.unwrap())).unwrap(),"someone's work","the change is left as it is");
+    }
     drop(link);host.close().await;
 }
