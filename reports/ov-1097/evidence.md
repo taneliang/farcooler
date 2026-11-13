@@ -36,3 +36,13 @@ On the local iPhone 17 / iOS 27.0 simulator, using `scripts/ios-ui-tests.sh`:
 - After tightening the initial decode guard to reject both white and black backgrounds, the final focused swipe test passed: 1 collected, 0 skipped, 1 actually ran. See [local-focused-test.log](local-focused-test.log).
 
 The marker check rejects the failed CI precondition: 392 / 874 = 44.9%, below the required 70%. A passing **next nightly** remains a separate acceptance gate; local results cannot establish it.
+
+## Follow-up validation, November 13
+
+Re-read the ticket and the complete GitHub job log for nightly 43303932801, phone6. The [suite verdict excerpt](ci-suite-verdict.log) confirms that all 25 NativeAgentViewTests finished at 22:53:02 UTC, with this swipe test the sole failure. The later shard cancellation does not truncate this test's execution log or its class verdict.
+
+The test now prints fitted-marker, zoomed-marker, and screen heights into the CI log, and retains the post-pinch screenshot before asserting the zoom precondition. Failed zoom or refit preconditions stop the test before the dependent gesture, so they cannot produce a misleading pan or dismissal failure. The optional recording flag is removed on early returns too.
+
+Re-ran all four image methods on iPhone 17 / iOS 27.0: **4 collected, 0 skipped, 4 passed**. The fitted marker measured 452 pixels; after the pinch it measured 2,354 pixels on a 2,622-pixel screen, exceeding the 1,835-pixel threshold. After the recording-flag cleanup change, the final focused swipe run also passed: **1 collected, 0 skipped, 1 passed**. See [image-tests-validation.log](image-tests-validation.log).
+
+Checked GitHub's latest five nightly runs during this follow-up. The newest remains 43303932801 at source commit `5ad68765332092f74bfee1364a89b0f86c1104c7`, before the zoom/drag correction. There is no subsequent nightly result for this fix yet; acceptance item 2 remains pending. The branch already contains the requested run-start base `9f6cbfb3926e54d8eedf8512e1ed3de331859ddf`.

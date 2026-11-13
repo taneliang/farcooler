@@ -430,6 +430,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(wait(30) { thumbnails.count == 5 }, "not every image shown: \(thumbnails.count)")
         let flag = ProcessInfo.processInfo.environment["FARCOOLER_SWIPE_FLAG"]
         if let flag { FileManager.default.createFile(atPath: flag, contents: nil); Thread.sleep(forTimeInterval: 1) }
+        defer { if let flag { try? FileManager.default.removeItem(atPath: flag) } }
         thumbnails.element(boundBy: 1).tap()
         let viewer = app.otherElements["QLPreviewControllerView"]
         XCTAssertTrue(viewer.waitForExistence(timeout: 15), "the image didn't open: \(app.debugDescription)")
@@ -458,27 +459,37 @@ final class NativeAgentViewTests: XCTestCase {
         // dismissed it. Zoom far enough to have vertical content to pan,
         // and check the drawn state instead of assuming the pinch took.
         viewer.pinch(withScale: 6, velocity: 3)
-        XCTAssertTrue(wait(10) {
+        let zoomed = wait(10) {
             let image = XCUIScreen.main.screenshot().image
             return Self.imageMarkerHeight(image) > Int(image.size.height * image.scale * 0.7)
-        }, "the pinch did not leave enough vertical image content to pan")
-        let afterZoom = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        }
+        let zoomedImage = XCUIScreen.main.screenshot()
+        let zoomedMarkerHeight = Self.imageMarkerHeight(zoomedImage.image)
+        let screenHeight = Int(zoomedImage.image.size.height * zoomedImage.image.scale)
+        // Keep measurements in the CI log as well as the recording, even
+        // when the precondition fails and the pan must not run.
+        print("ov-1097: fitted marker=\(fittedMarkerHeight)px, zoomed marker=\(zoomedMarkerHeight)px, screen=\(screenHeight)px, required>\(Int(Double(screenHeight) * 0.7))px")
+        let afterZoom = XCTAttachment(screenshot: zoomedImage)
         afterZoom.name = "Image after pinch"
         afterZoom.lifetime = .keepAlways
         add(afterZoom)
+        XCTAssertTrue(zoomed, "the pinch did not leave enough vertical image content to pan")
+        guard zoomed else { return }
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 80)), withVelocity: .slow, thenHoldForDuration: 0.3)
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(viewer.exists, "a drag on the zoomed image closed it rather than panning")
         // The synthetic pinch-in didn't undo the larger zoom locally.
         // Quick Look's double tap resets it to fit; verify that below.
         viewer.doubleTap()
-        XCTAssertTrue(wait(10) {
+        let refitted = wait(10) {
             let height = Self.imageMarkerHeight(XCUIScreen.main.screenshot().image)
             return abs(height - fittedMarkerHeight) < fittedMarkerHeight / 10
-        }, "the image did not return to its fitted size before the dismissal swipe")
+        }
+        XCTAssertTrue(refitted, "the image did not return to its fitted size before the dismissal swipe")
+        guard refitted else { return }
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: .fast, thenHoldForDuration: 0)
         XCTAssertTrue(viewer.waitForNonExistence(timeout: 10), "a swipe down left the image open")
-        if let flag { Thread.sleep(forTimeInterval: 1); try? FileManager.default.removeItem(atPath: flag) }
+        if flag != nil { Thread.sleep(forTimeInterval: 1) }
         XCTAssertTrue(thumbnails.element(boundBy: 1).isHittable, "the conversation isn't back under the finger")
     }
 
