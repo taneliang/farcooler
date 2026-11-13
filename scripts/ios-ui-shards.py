@@ -108,7 +108,6 @@ SHARDS = {
         "TunnelRouteOfferTests",  # 25 s; seeded -hosts and -runnerAlternatives (ov-485). Moved from phone3 (ov-722)
     ],
     "phone": [
-        "PagesUITests",  # 440 s; -phone-harness -phone-plan -phone-pages (ov-285)
         "WorkspaceScreenTests",  # about 225 s (188 s of it before the cancel); -phone-harness
         "ChangesPatchNoticeTests",  # 70 s; -changes-layout-harness
         "TaskUsageUITests",  # 77 s; -phone-harness (ov-195)
@@ -131,7 +130,6 @@ SHARDS = {
         "NotificationTapTests",  # 218 s failing, 2 tests; -notification-tap-harness, taps a real banner (ov-787)
     ],
     "phone3": [
-        "PlanRulingsUITests",  # 351 s; -phone-harness -phone-plan -phone-rulings (ov-304)
         "RunnerReachTests",  # 8 s; seeded -hosts at an address that never answers
         "SealedReplyUITests",  # 50 s; -sealed-reply (ov-770)
         "FailedLaunchTests",  # under 1 s; launches no app of ours (ov-703)
@@ -158,10 +156,16 @@ SHARDS = {
     # runs never reached are estimates; the next nightly's budget job is the measure.
     "phone6": [
         "NativeAgentViewTests",  # 747 s (675 to 854); -native-agent-harness. Moved from phone3 (ov-722)
-        "PhonePlanColumnUITests",  # 376 s (266 to 482); -phone-harness -phone-plan -phone-agents (ov-874). Moved from phone3 (ov-722)
         "GlassUITests",  # 258 s; -native-agent-harness, -phone-harness -phone-native -native-agents (ov-789). Moved from phone4 (ov-722)
         "BoardUnreadUITests",  # 95 s; -phone-harness (ov-113). Moved from phone4 (ov-722)
     ],
+    # ov-1133: Nightly 43303932801 measured PlanRulings at 525 s and
+    # phone6's earlier measurements put PhonePlanColumn at 376 s. Move them
+    # off the over-budget phone3 and phone6 jobs.
+    "phone7": ["PlanRulingsUITests", "PhonePlanColumnUITests"],
+    # Pages took 1,750 s in the same run, leaving phone no room for its
+    # other classes. Give it a separate job until new measurements are available.
+    "phone8": ["PagesUITests"],
     # The team classes, added on Oct 30 when `phone` was cancelled at the
     # timeout (ov-722): moved from phone, and RunnerPeopleUITests from phone2.
     "phone5": [
@@ -220,8 +224,9 @@ LOCAL = {
 # captures3 1,220 (were 1,871, 1,047, 844). A shard's job adds 230 to 400 s.
 CAPTURE_SHARDS = {
     "captures": ["NavigationCapturesUITests"],  # 1,348 s (996 to 1,840)
-    "captures2": ["PolishSweepUITests", "GlassCapturesUITests"],  # 1,047 + 148 s
+    "captures2": ["PolishSweepUITests"],  # Glass moved to captures4 (ov-1133)
     "captures3": ["ConversationCapturesUITests", "PlanSectionsCapturesUITests", "ComposerGapsCapturesUITests"],  # 697 + 523 s, and four short launches; the gaps skip without their own switch
+    "captures4": ["GlassCapturesUITests"],  # 336 s in Nightly 43303932801 (ov-1133)
 }
 CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
@@ -537,7 +542,7 @@ def self_test():
     planted("a cron at noon Pacific", "08:00 and 13:59", lambda t: t.replace('"23 11 * * *"', '"23 20 * * *"'))
     planted("report not waiting for a job", "does not wait for", lambda t: t.replace("needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing]", "needs: [ios, ios-ui]"))
     planted("no captures job", "no `captures` job", lambda t: t.replace("shard: ${{ matrix.shard }}\n          capture-out", "shard: shell\n          capture-out"))
-    planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2, captures3]", "shard: [captures, captures2]"))
+    planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2, captures3, captures4]", "shard: [captures, captures2, captures3]"))
     planted(
         "the action ignoring the device", "--device",
         lambda t: t.replace("ios-ui-shards.py --device", "echo iPhone"),
