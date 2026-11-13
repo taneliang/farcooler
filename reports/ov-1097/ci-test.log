@@ -1,0 +1,66 @@
+2026-11-12T22:45:30.0873470Z Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' started.
+2026-11-12T22:45:30.1640720Z     t =     0.00s Start Test at 2026-11-12 22:45:30.017
+2026-11-12T22:45:30.2233230Z     t =     0.07s Set Up
+2026-11-12T22:45:30.2342140Z     t =     0.08s Terminate com.farcooler.ios.local:23748
+2026-11-12T22:45:30.2449590Z 2026-11-12 22:45:30.231 xcodebuild[3980:18469] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-12T22:45:30.2589360Z 2026-11-12 22:45:30.232 xcodebuild[3980:18469] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-12T22:45:30.2592020Z 2026-11-12 22:45:30.233 xcodebuild[3980:18469] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-12T22:45:41.1740420Z     t =    11.14s Wait for com.farcooler.ios.local to become Not Running
+2026-11-12T22:45:41.1759310Z     t =    11.14s Open com.farcooler.ios.local
+2026-11-12T22:45:41.1869340Z     t =    11.14s     Launch com.farcooler.ios.local
+2026-11-12T22:45:41.2254950Z 2026-11-12 22:45:41.182 xcodebuild[3980:18469] [MT] IDELaunchParametersSnapshot: debugger version lookup failed for path '<nil>': noURL
+2026-11-12T22:45:41.2386000Z 2026-11-12 22:45:41.182 xcodebuild[3980:18469] [MT] IDELaunchParametersSnapshot: no debugger version
+2026-11-12T22:45:41.2846410Z 2026-11-12 22:45:41.277 xcodebuild[3980:18469] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-12T22:45:44.9142960Z     t =    14.89s         Setting up automation session
+2026-11-12T22:45:50.9361070Z     t =    20.77s         Wait for com.farcooler.ios.local to idle
+2026-11-12T22:45:55.2291020Z     t =    25.20s Waiting 180.0s for Any (First Match) to exist
+2026-11-12T22:45:56.3134360Z     t =    26.23s     Checking `Expect predicate `existsNoRetry == 1` for object Any (First Match)`
+2026-11-12T22:45:56.3221700Z     t =    26.23s         Checking existence of `Any (First Match)`
+2026-11-12T22:45:56.3909660Z     t =    26.28s Waiting 60.0s for "native-transcript" Any to exist
+2026-11-12T22:45:57.3730850Z     t =    27.32s     Checking `Expect predicate `existsNoRetry == 1` for object "native-transcript" Any`
+2026-11-12T22:45:57.4072200Z     t =    27.32s         Checking existence of `"native-transcript" Any`
+2026-11-12T22:45:57.6020890Z     t =    27.43s Find the "native-showing" Any
+2026-11-12T22:45:57.6500780Z     t =    27.54s Get number of matches for: Elements matching predicate '"native-prompt-image" IN identifiers'
+2026-11-12T22:45:57.7904050Z     t =    27.72s Tap "native-prompt-image" Any
+2026-11-12T22:45:57.8082650Z     t =    27.72s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:45:57.8546940Z     t =    27.72s     Find the "native-prompt-image" Any
+2026-11-12T22:45:57.9138830Z     t =    27.83s     Check for interrupting elements affecting "native-prompt-image" Button
+2026-11-12T22:45:57.9612760Z     t =    27.93s     Synthesize event
+2026-11-12T22:45:58.5521050Z     t =    28.25s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:45:58.6400370Z     t =    28.27s Waiting 15.0s for "QLPreviewControllerView" Other to exist
+2026-11-12T22:45:59.4266460Z     t =    29.32s     Checking `Expect predicate `existsNoRetry == 1` for object "QLPreviewControllerView" Other`
+2026-11-12T22:45:59.5106890Z     t =    29.32s         Checking existence of `"QLPreviewControllerView" Other`
+2026-11-12T22:46:08.6391600Z     t =    36.89s Press Target Application 'com.farcooler.ios.local'[0.50, 0.50] for 0.1 seconds, then drag to Target Application 'com.farcooler.ios.local'[0.50, 0.50] -> (0.0, 40.0) with velocity of 250.00 pixels per second, and then hold for 0.0 seconds 
+2026-11-12T22:46:08.9326830Z     t =    36.89s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:46:08.9578980Z     t =    36.90s     Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:10.3442060Z     t =    40.18s     Check for interrupting elements affecting "FC Local" Application
+2026-11-12T22:46:10.6105380Z     t =    40.23s     Synthesize event
+2026-11-12T22:46:10.7310560Z     t =    40.24s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:10.7425190Z     t =    40.26s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:10.7526530Z     t =    40.28s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:10.7628850Z     t =    40.30s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:10.7730410Z     t =    40.38s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:10.9508290Z     t =    40.92s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:46:12.4782760Z     t =    42.43s Checking existence of `"QLPreviewControllerView" Other`
+2026-11-12T22:46:12.5830240Z     t =    42.54s Pinch with scale 3, velocity 3 in "QLPreviewControllerView" Other
+2026-11-12T22:46:12.6188300Z     t =    42.54s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:46:12.6306130Z     t =    42.55s     Find the "QLPreviewControllerView" Other
+2026-11-12T22:46:12.6948990Z     t =    42.62s     Check for interrupting elements affecting "QLPreviewControllerView" Other
+2026-11-12T22:46:12.7343220Z     t =    42.66s     Synthesize event
+2026-11-12T22:46:12.7479500Z     t =    42.68s         Pinching with rect {{50, 50}, {302, 774}}
+2026-11-12T22:46:14.0936060Z     t =    44.05s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:46:15.0952890Z     t =    45.07s Press Target Application 'com.farcooler.ios.local'[0.50, 0.50] for 0.1 seconds, then drag to Target Application 'com.farcooler.ios.local'[0.50, 0.50] -> (0.0, 300.0) with velocity of 750.00 pixels per second, and then hold for 0.0 seconds 
+2026-11-12T22:46:15.1055800Z     t =    45.07s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:46:15.1313360Z     t =    45.07s     Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:15.1422090Z     t =    45.10s     Check for interrupting elements affecting "FC Local" Application
+2026-11-12T22:46:15.1687420Z     t =    45.13s     Synthesize event
+2026-11-12T22:46:15.1790830Z     t =    45.14s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:15.2057590Z     t =    45.16s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:15.2159530Z     t =    45.19s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:15.2463560Z     t =    45.21s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:15.2710890Z     t =    45.24s         Find the Target Application 'com.farcooler.ios.local'
+2026-11-12T22:46:16.1039620Z     t =    46.02s     Wait for com.farcooler.ios.local to idle
+2026-11-12T22:46:18.9180520Z     t =    48.90s Checking existence of `"QLPreviewControllerView" Other`
+2026-11-12T22:46:19.5971080Z /Users/runner/work/farcooler/farcooler/apps/ios/FarCoolerUITests/NativeAgentViewTests.swift:434: error: -[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage] : XCTAssertTrue failed - a drag on the zoomed image closed it rather than panning
+2026-11-12T22:46:19.6193230Z     t =    49.60s Tear Down
+2026-11-12T22:46:19.8733940Z Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' failed (49.856 seconds).

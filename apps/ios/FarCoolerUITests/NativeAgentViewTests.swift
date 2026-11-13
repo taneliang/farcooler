@@ -389,14 +389,35 @@ final class NativeAgentViewTests: XCTestCase {
         capture("images-full", expecting: .when("the image opened at full size") { preview.exists || app.navigationBars.firstMatch.exists })
     }
 
-    /// Whether the middle of `image` is something other than the viewer's
-    /// white page: any channel clearly under full.
-    private static func centerIsDrawn(_ image: UIImage) -> Bool {
-        guard let cg = image.cgImage, let data = cg.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return false }
-        let bpp = cg.bitsPerPixel / 8
-        guard bpp >= 3 else { return false }
-        let offset = (cg.height / 2) * cg.bytesPerRow + (cg.width / 2) * bpp
-        return (0..<3).contains { bytes[offset + $0] < 235 }
+    /// The pale circle in the orange fixture, measured down the screen's
+    /// middle. Unlike the viewer's existence, this proves the pinch zoomed.
+    /// The circle is half the picture's height, so a circle taller than 70%
+    /// of the screen leaves vertical room for the short pan below.
+    private static func imageMarkerHeight(_ image: UIImage) -> Int {
+        guard let cg = image.cgImage else { return 0 }
+        var pixels = [UInt8](repeating: 0, count: cg.height * 4)
+        return pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: 1, height: cg.height,
+                bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+            ) else { return 0 }
+            context.draw(cg, in: CGRect(x: -cg.width / 2, y: 0, width: cg.width, height: cg.height))
+            let bytes = buffer.bindMemory(to: UInt8.self)
+            var longest = 0
+            var run = 0
+            for y in 0..<cg.height {
+                let p = y * 4
+                if bytes[p] > 230 && bytes[p + 1] > 175 && bytes[p + 2] > 100 && bytes[p + 2] < 220 {
+                    run += 1
+                    longest = max(longest, run)
+                } else {
+                    run = 0
+                }
+            }
+            return longest
+        }
     }
 
     /// **A swipe down puts an open image away** (ov-806), as in Photos, with
@@ -414,12 +435,10 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(viewer.waitForExistence(timeout: 15), "the image didn't open: \(app.debugDescription)")
         // Settled: a drag during the zoom in is the presentation's, not the swipe's.
         Thread.sleep(forTimeInterval: 1)
-        // Drawn: nightly 41218510431's recording shows the viewer open on an
-        // all-white page for the whole test, the picture not yet decoded,
-        // and a pinch on nothing zooms nothing, so the drag after it closed
-        // the viewer. The picture is orange, and the page around it white.
+        // Wait for the picture's marker: both a white loading page and the
+        // black background without a decoded image must keep waiting.
         XCTAssertTrue(
-            wait(30) { Self.centerIsDrawn(XCUIScreen.main.screenshot().image) },
+            wait(30) { Self.imageMarkerHeight(XCUIScreen.main.screenshot().image) > 0 },
             "the viewer opened on a blank page: the picture was never drawn")
         let middle = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         // A short, slow drag isn't a dismissal: the image springs back.
@@ -427,23 +446,36 @@ final class NativeAgentViewTests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(viewer.exists, "a short drag closed the image")
         // Zoomed in, a drag down pans the image; zoomed back out, it closes.
-        let beforeZoom = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        let fittedImage = XCUIScreen.main.screenshot()
+        let fittedMarkerHeight = Self.imageMarkerHeight(fittedImage.image)
+        XCTAssertGreaterThan(fittedMarkerHeight, 0, "the orange image's marker is missing")
+        let beforeZoom = XCTAttachment(screenshot: fittedImage)
         beforeZoom.name = "Image before pinch"
         beforeZoom.lifetime = .keepAlways
         add(beforeZoom)
-        viewer.pinch(withScale: 3, velocity: 3)
-        Thread.sleep(forTimeInterval: 1)
-        // Keep both states in a red nightly's result bundle: the gesture log
-        // records the pinch, but cannot say whether Quick Look actually zoomed.
+        // Nightly 43303932801, phone6: scale 3 enlarged the picture but
+        // left it letterboxed; the following 300-point, 750 pt/s flick
+        // dismissed it. Zoom far enough to have vertical content to pan,
+        // and check the drawn state instead of assuming the pinch took.
+        viewer.pinch(withScale: 6, velocity: 3)
+        XCTAssertTrue(wait(10) {
+            let image = XCUIScreen.main.screenshot().image
+            return Self.imageMarkerHeight(image) > Int(image.size.height * image.scale * 0.7)
+        }, "the pinch did not leave enough vertical image content to pan")
         let afterZoom = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         afterZoom.name = "Image after pinch"
         afterZoom.lifetime = .keepAlways
         add(afterZoom)
-        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: .fast, thenHoldForDuration: 0)
+        middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 80)), withVelocity: .slow, thenHoldForDuration: 0.3)
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertTrue(viewer.exists, "a drag on the zoomed image closed it rather than panning")
-        viewer.pinch(withScale: 0.2, velocity: -3)
-        Thread.sleep(forTimeInterval: 1.5)
+        // The synthetic pinch-in didn't undo the larger zoom locally.
+        // Quick Look's double tap resets it to fit; verify that below.
+        viewer.doubleTap()
+        XCTAssertTrue(wait(10) {
+            let height = Self.imageMarkerHeight(XCUIScreen.main.screenshot().image)
+            return abs(height - fittedMarkerHeight) < fittedMarkerHeight / 10
+        }, "the image did not return to its fitted size before the dismissal swipe")
         middle.press(forDuration: 0.1, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: .fast, thenHoldForDuration: 0)
         XCTAssertTrue(viewer.waitForNonExistence(timeout: 10), "a swipe down left the image open")
         if let flag { Thread.sleep(forTimeInterval: 1); try? FileManager.default.removeItem(atPath: flag) }

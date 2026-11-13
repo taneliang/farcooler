@@ -1,0 +1,46 @@
+Test Case '-[FarCoolerUITests.FirstRunUITests testOnboardingTeachesWhatARunnerIsFor]' passed (8.940 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 8.940 (8.945) seconds
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testABringHereThatWentPartlySaysTheTextIsInBoth]' passed (14.021 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testACodexPaneOffersItsConversation]' passed (15.816 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testACodexPaneOnAnOlderRunnerShowsItsTerminal]' passed (8.105 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testADialogShowsHandoff]' passed (14.098 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testADraftInTheTerminalRefusesWithShowTerminal]' passed (18.183 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testAFollowUpdatesARowInPlace]' passed (15.612 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testAPromptsImagesShowAndOpen]' passed (11.135 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testAReconnectKeepsTheConversationAndTheKeyboard]' passed (12.100 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testARefusedClearGivesTheTextBack]' passed (14.046 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASentPhotosThumbnailsSurviveARestartOffline]' passed (15.310 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' passed (22.119 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testBringHereMovesTheTerminalsDraftAndTheSendGoes]' passed (14.017 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testBusyShowsQueued]' passed (12.782 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testComposeSends]' passed (12.851 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testCoveringTheTerminalTakesItsKeyboardAway]' passed (9.210 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testFlagOffShowsTheTerminal]' passed (12.853 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testHarnessTurnsRenderAsTheirOwnRows]' passed (14.481 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testNoThumbnailsWhereTheRunnerServesNoImages]' passed (8.538 seconds).
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1097-image-swipe-down/apps/ios/FarCoolerUITests/NativeAgentViewTests.swift:331: error: -[FarCoolerUITests.NativeAgentViewTests testNoticeTurnsRenderAsNotices] : XCTAssertTrue failed - no notice turn
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testNoticeTurnsRenderAsNotices]' failed (37.579 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testOffThenOnFollowsAgain]' passed (11.314 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testSendFailuresSayWhatTheyMean]' passed (23.859 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testStaleRowsSaySoAndSendWaits]' passed (11.532 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testTheFollowStopsOffScreen]' passed (21.472 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testTheSwitchKeepsTheDraftAndTheTerminal]' passed (16.544 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testTheTextLeads]' passed (13.844 seconds).
+	 Executed 25 tests, with 1 failure (0 unexpected) in 381.422 (381.438) seconds
+Test Case '-[FarCoolerUITests.NativeAnswersUITests testAQuestionIsAnsweredWithAnOption]' passed (12.059 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 12.059 (12.060) seconds
+Test Case '-[FarCoolerUITests.NativeComposerTests testAPhotoAloneCanBeSent]' passed (9.869 seconds).
+Test Case '-[FarCoolerUITests.NativeComposerTests testASlashCommandIsSent]' passed (12.078 seconds).
+	 Executed 2 tests, with 0 failures (0 unexpected) in 21.947 (21.948) seconds
+Test Case '-[FarCoolerUITests.PlanUITests testARunnerWithoutBoardPlanShowsNothingNew]' passed (12.771 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 12.771 (12.771) seconds
+Test Case '-[FarCoolerUITests.RunnerReachTests testARunnerSavedBeforeReachExistedStillLoads]' passed (7.158 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 7.158 (7.159) seconds
+Test Case '-[FarCoolerUITests.TaskScreenTests testAnsweringADecisionRemovesItFromNeedsYou]' passed (10.673 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 10.673 (10.674) seconds
+Test Case '-[FarCoolerUITests.WorkspaceScreenTests testNoSegmentsAWorkspaceIsItsConversationOrItsPlan]' passed (26.511 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 26.511 (26.512) seconds
+	 Executed 33 tests, with 1 failure (0 unexpected) in 481.480 (481.516) seconds
+	 Executed 33 tests, with 1 failure (0 unexpected) in 481.480 (481.518) seconds
+** TEST FAILED **
+  33 collected, 0 skipped, 33 actually ran
