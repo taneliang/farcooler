@@ -276,6 +276,8 @@ data class Column (
 	val roster: List<ColumnAgent>,
 	/// "10 agents".
 	val agentWords: String,
+	/// The roster heading, independent of ticket-stage counts.
+	val rosterTitle: String,
 	val footer: List<Count>,
 	/// The tickets waiting for a builder, each once, in the plan's order.
 	val waiting: List<WaitingTicket>

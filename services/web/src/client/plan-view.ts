@@ -246,8 +246,9 @@ function pipelineSection(column: Column, on: PlanHandlers): HTMLElement | null {
   if (column.pipeline.length === 0 && column.roster.length === 0) return null
   const wrap = make('section', 'plan-section plan-pipeline')
   if (column.roster.length) {
-    wrap.append(heading('Agents', column.agentWords, true))
-    const roster = make('ul', 'plan-list plan-agent-roster')
+    wrap.append(heading(column.rosterTitle, column.agentWords, true))
+    const roster = make('ul', 'plan-list')
+    roster.classList.add('plan-agent-roster')
     for (const agent of column.roster) roster.append(agentCard(agent, '', null, on, false))
     wrap.append(roster)
   }

@@ -155,6 +155,7 @@ fn ov895_canonical_stages_and_unique_roster_count_different_units() {
             agent("orch", "orchestrator", &[], "", 100)],
     }), json!({}));
     assert_eq!(c.agent_words, "3 agents");
+    assert_eq!(c.roster_title, "Agents");
     assert_eq!(c.roster.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["b", "r", "l"]);
     assert!(c.roster[1].tickets.is_empty());
     assert_eq!(c.pipeline.iter().map(|g| (g.stage, g.count)).collect::<Vec<_>>(),

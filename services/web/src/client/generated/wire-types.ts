@@ -235,6 +235,8 @@ export interface Column {
 	roster: ColumnAgent[];
 	/** "10 agents". */
 	agentWords: string;
+	/** The roster heading, independent of ticket-stage counts. */
+	rosterTitle: string;
 	footer: Count[];
 	/** The tickets waiting for a builder, each once, in the plan's order. */
 	waiting: WaitingTicket[];

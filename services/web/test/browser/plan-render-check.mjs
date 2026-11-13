@@ -38,6 +38,7 @@ try {
       same('stage order', stages.map(s => s.dataset.stage), c.pipeline.map(g => g.stage))
       const cards = [...root.querySelectorAll('[data-agent]')]
       same('unique roster', cards.map(a => a.dataset.agent), c.roster.map(a => a.id))
+      if (c.roster.length) same('roster heading', text(root.querySelector('.plan-pipeline h2')), `${c.rosterTitle}${c.agentWords}`)
       if (cards.some(a => a.querySelector('[data-task]'))) out.push('ticket nested under an agent')
       for (const a of c.roster) {
         const card = cards.find(el => el.dataset.agent === a.id)

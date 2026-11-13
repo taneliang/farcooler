@@ -92,7 +92,7 @@ extension WirePipeStage: CaseIterable {
     /// has emptied; a group in the column says its own (`Group.title`).
     public var title: String {
         switch self {
-        case .stuck: "Needs You"
+        case .stuck: SharedWords.needsYou
         case .building: "Building"
         case .reviewing: "Reviewing"
         case .landing: "Landing"

@@ -376,6 +376,7 @@
             "working": true
           }
         ],
+        "rosterTitle": "Agents",
         "waiting": [
           {
             "key": "ov-485",

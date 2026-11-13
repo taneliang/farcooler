@@ -352,11 +352,13 @@ public struct WireColumn: Codable, Equatable, Sendable {
 	public var roster: [WireColumnAgent]
 	/// "10 agents".
 	public var agentWords: String
+	/// The roster heading, independent of ticket-stage counts.
+	public var rosterTitle: String
 	public var footer: [WireCount]
 	/// The tickets waiting for a builder, each once, in the plan's order.
 	public var waiting: [WireWaitingTicket]
 
-	public init(facts: [WireFact], initiatives: [WireInitiative], quietInitiatives: [WireInitiative], quietLine: String?, initiativeCount: Int64, pipeline: [WireGroup], roster: [WireColumnAgent], agentWords: String, footer: [WireCount], waiting: [WireWaitingTicket]) {
+	public init(facts: [WireFact], initiatives: [WireInitiative], quietInitiatives: [WireInitiative], quietLine: String?, initiativeCount: Int64, pipeline: [WireGroup], roster: [WireColumnAgent], agentWords: String, rosterTitle: String, footer: [WireCount], waiting: [WireWaitingTicket]) {
 		self.facts = facts
 		self.initiatives = initiatives
 		self.quietInitiatives = quietInitiatives
@@ -365,6 +367,7 @@ public struct WireColumn: Codable, Equatable, Sendable {
 		self.pipeline = pipeline
 		self.roster = roster
 		self.agentWords = agentWords
+		self.rosterTitle = rosterTitle
 		self.footer = footer
 		self.waiting = waiting
 	}

@@ -164,6 +164,8 @@ pub const DOT: &str = " \u{00B7} ";
 pub struct Words {
     /// The Agents card's title when nothing is running: "No Agents Running".
     pub agents_none: String,
+    /// The pipeline stage's title, including when its list has emptied.
+    pub needs_you: String,
     /// The label of a card's answer row: "Waiting on You".
     pub waiting_on_you: String,
     /// What a blocked agent is doing, in the middle of a sentence: "waiting on you".
@@ -176,6 +178,7 @@ impl Words {
     pub fn new(style: Style) -> Self {
         Self {
             agents_none: style.label("no agents running"),
+            needs_you: super::column::PipeStage::Stuck.title().into(),
             waiting_on_you: style.label("waiting on you"),
             blocked_doing: "waiting on you".to_string(),
             handle_waited_on: "A workflow or a run still names someone who had that handle. Choose another handle, or ask the Owner to cancel those runs and publish a workflow that doesn\u{2019}t name them.".to_string(),

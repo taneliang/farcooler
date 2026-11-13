@@ -90,7 +90,7 @@ pub enum PipeStage {
 impl PipeStage {
     const ALL: [PipeStage; 4] = [PipeStage::Stuck, PipeStage::Building, PipeStage::Reviewing, PipeStage::Landing];
 
-    fn title(self) -> &'static str {
+    pub(super) fn title(self) -> &'static str {
         match self {
             PipeStage::Stuck => "Needs You",
             PipeStage::Building => "Building",
@@ -251,6 +251,8 @@ pub struct Column {
     pub roster: Vec<ColumnAgent>,
     /// "10 agents".
     pub agent_words: String,
+    /// The roster heading, independent of ticket-stage counts.
+    pub roster_title: String,
     pub footer: Vec<Count>,
     /// The tickets waiting for a builder, each once, in the plan's order.
     pub waiting: Vec<WaitingTicket>,
@@ -283,6 +285,7 @@ pub(super) fn column(r: &Reader) -> Column {
         initiatives,
         quiet_initiatives: quiet,
         agent_words: if agents == 1 { "1 agent".into() } else { format!("{agents} agents") },
+        roster_title: "Agents".into(),
         pipeline,
         roster,
         footer,
