@@ -167,6 +167,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn workflow_get_keeps_only_the_last_forty_lines() {
+        let output = (0..60).map(|n| format!("line {n}\n")).collect::<String>();
+        let (_dir, runtime) = failed_logs(1, &output).await;
+        let reply = get_with_bounded_logs(&runtime, 1);
+        let log = &reply["process_logs"][0];
+        let tail = log["tail"].as_str().unwrap();
+        assert_eq!(tail.lines().count(), 40);
+        assert!(tail.starts_with("line 20\n"));
+        assert!(tail.ends_with("line 59"));
+        assert_eq!(log["tail_truncated"], true);
+    }
+
+    #[tokio::test]
+    async fn workflow_get_budgets_plain_text_tails_without_shortening_newest_logs() {
+        let output = "x".repeat(8 * 1024);
+        let (_dir, runtime) = failed_logs(48, &output).await;
+        let reply = get_with_bounded_logs(&runtime, 48);
+        let logs = reply["process_logs"].as_array().unwrap();
+        // JSON string quotes consume budget too: 32 complete tails exceed 256 KiB.
+        assert_eq!(logs.iter().filter(|log| log["tail"] == "").count(), 17);
+        for log in &logs[17..] { assert_eq!(log["tail"], output); }
+        assert_eq!(logs.last().unwrap()["tail_truncated"], false);
+    }
+
+    #[tokio::test]
     async fn workflow_get_bounds_a_two_mib_single_line_failure() {
         // Three-byte characters force the byte cutoff to land inside a UTF-8 code point.
         let output = "xx".to_owned() + &"界".repeat((crate::effect_runner::LOG_LIMIT - 5) / 3) + "END";
