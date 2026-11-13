@@ -46,3 +46,16 @@ The test now prints fitted-marker, zoomed-marker, and screen heights into the CI
 Re-ran all four image methods on iPhone 17 / iOS 27.0: **4 collected, 0 skipped, 4 passed**. The fitted marker measured 452 pixels; after the pinch it measured 2,354 pixels on a 2,622-pixel screen, exceeding the 1,835-pixel threshold. After the recording-flag cleanup change, the final focused swipe run also passed: **1 collected, 0 skipped, 1 passed**. See [image-tests-validation.log](image-tests-validation.log).
 
 Checked GitHub's latest five nightly runs during this follow-up. The newest remains 43303932801 at source commit `5ad68765332092f74bfee1364a89b0f86c1104c7`, before the zoom/drag correction. There is no subsequent nightly result for this fix yet; acceptance item 2 remains pending. The branch already contains the requested run-start base `9f6cbfb3926e54d8eedf8512e1ed3de331859ddf`.
+
+## Final acceptance audit, November 13, 03:04 UTC
+
+Read `farcooler task show ov-1097` again and fetched the full phone6 job log with `gh run view 43303932801 --repo taneliang/farcooler --job 131507653767 --log`. The retained test excerpt matches the fetched log: the scale-3 pinch is at 22:46:12 UTC, the 300-point / 750-point-per-second flick is at 22:46:15, and the pan assertion fails at 22:46:19. The class finishes at 22:53:02 with 25 tests and this sole failure. Re-inspected the post-pinch recording frame: the black band above the enlarged picture confirms the missing vertical-pan precondition described above. No further production or gesture changes are justified by this audit.
+
+`gh run list --repo taneliang/farcooler --workflow nightly.yml --limit 5 --json databaseId,headSha,status,conclusion,createdAt` still reports 43303932801 as the newest nightly, created at 2026-11-12T20:48:24Z on `5ad68765332092f74bfee1364a89b0f86c1104c7`. There is no nightly running this branch's correction. The workflow normally runs on main; a local simulator result does not satisfy acceptance item 2.
+
+| Acceptance item | Evidence / status |
+| --- | --- |
+| Cause named from a CI log | Confirmed: insufficient vertical zoom for the following fast dismissal-sized gesture; complete test execution and class verdict verified against the fetched job log and retained recording. |
+| Test passes on the next nightly | **Pending external CI evidence.** No later nightly exists at the time of this audit. |
+
+The local machine has iOS 26.5, 27.0, and 27.1 runtimes, but not CI's iOS 27.2. `git rebase "$FARCOOLER_BASE"` reports that `ov-1097-image-swipe-down` is up to date on the requested run-start base. Fresh local verification passed all four image methods: 4 collected, 0 skipped, 4 passed in 71.042 seconds. The swipe test measured a 452-pixel fitted marker and a 2,354-pixel zoomed marker on a 2,622-pixel screen (required greater than 1,835 pixels). See [final-image-tests-validation.log](final-image-tests-validation.log).

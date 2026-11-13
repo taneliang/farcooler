@@ -1,0 +1,26 @@
+Fresh validation of inherited ov-1097 gesture correction, November 13.
+iPhone 17 / iOS 27.0; SIMULATOR_ID=47C77A22-0EDF-4349-B2A1-F678935955AB
+Command: PATH=/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin SIMULATOR_ID=47C77A22-0EDF-4349-B2A1-F678935955AB bash scripts/ios-ui-tests.sh FarCoolerUITests/NativeAgentViewTests/testAPromptsImagesShowAndOpen FarCoolerUITests/NativeAgentViewTests/testASentPhotosThumbnailsSurviveARestartOffline FarCoolerUITests/NativeAgentViewTests/testASwipeDownClosesAnOpenImage FarCoolerUITests/NativeAgentViewTests/testNoThumbnailsWhereTheRunnerServesNoImages
+Summary excerpt; full local log: /tmp/ov1097-final-image-tests.log
+
+Test Suite 'Selected tests' started at 2026-11-13 11:05:45.627.
+Test Suite 'FarCoolerUITests.xctest' started at 2026-11-13 11:05:45.627.
+Test Suite 'NativeAgentViewTests' started at 2026-11-13 11:05:45.627.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testAPromptsImagesShowAndOpen]' started.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testAPromptsImagesShowAndOpen]' passed (15.751 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASentPhotosThumbnailsSurviveARestartOffline]' started.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASentPhotosThumbnailsSurviveARestartOffline]' passed (19.444 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' started.
+ov-1097: fitted marker=452px, zoomed marker=2354px, screen=2622px, required>1835px
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' passed (26.083 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testNoThumbnailsWhereTheRunnerServesNoImages]' started.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testNoThumbnailsWhereTheRunnerServesNoImages]' passed (9.746 seconds).
+Test Suite 'NativeAgentViewTests' passed at 2026-11-13 11:06:56.667.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 71.025 (71.040) seconds
+Test Suite 'FarCoolerUITests.xctest' passed at 2026-11-13 11:06:56.669.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 71.025 (71.041) seconds
+Test Suite 'Selected tests' passed at 2026-11-13 11:06:56.669.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 71.025 (71.042) seconds
+** TEST SUCCEEDED **
+  4 collected, 0 skipped, 4 actually ran
+OK: 4 test(s) executed.
