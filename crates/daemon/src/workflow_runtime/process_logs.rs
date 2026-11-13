@@ -205,6 +205,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn workflow_get_bounds_legacy_logs_without_changing_retained_evidence() {
+        // Old daemons did not cap files. Exercise every multibyte UTF-8 width at
+        // the seek boundary, and leave the original evidence intact for inspection.
+        for character in ["é", "界", "🦀"] {
+            let output = character.repeat(3 * 1024 * 1024 / character.len()) + "END";
+            let (_dir, runtime) = failed_logs(1, &output).await;
+            let reply = get_with_bounded_logs(&runtime, 1);
+            let log = &reply["process_logs"][0];
+            let tail = log["tail"].as_str().unwrap();
+            assert!(tail.ends_with("END"));
+            assert!(!tail.contains('�'));
+            assert_eq!(log["tail_truncated"], true);
+            assert_eq!(std::fs::read_to_string(log["log_path"].as_str().unwrap()).unwrap(), output);
+        }
+    }
+
+    #[tokio::test]
     async fn workflow_get_bounds_lossy_utf8_expansion() {
         let (_dir, runtime) = failed_logs(1, "").await;
         let effect = runtime.store.workflow_outbox("w").unwrap().remove(0).effect;
