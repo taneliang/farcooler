@@ -1,0 +1,110 @@
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' started.
+    t =     0.01s Start Test at 2026-11-13 09:26:35.233
+    t =     0.03s Set Up
+    t =     0.04s Open com.farcooler.ios.local
+    t =     0.04s     Launch com.farcooler.ios.local
+2026-11-13 09:26:35.703 xcodebuild[12235:21257093] [MT] IDELaunchParametersSnapshot: debugger version lookup failed for path '<nil>': noURL
+2026-11-13 09:26:35.703 xcodebuild[12235:21257093] [MT] IDELaunchParametersSnapshot: no debugger version
+objc[15444]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_24A434/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x106b18398) and /Library/Developer/CoreSimulator/Volumes/iOS_24A434/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x109ba8310). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+2026-11-13 09:26:35.752 xcodebuild[12235:21257093] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+    t =     2.12s         Setting up automation session
+    t =     4.48s         Wait for com.farcooler.ios.local to idle
+    t =     7.42s Waiting 180.0s for Any (First Match) to exist
+    t =     8.44s     Checking `Expect predicate `existsNoRetry == 1` for object Any (First Match)`
+    t =     8.44s         Checking existence of `Any (First Match)`
+    t =     8.46s Waiting 60.0s for "native-transcript" Any to exist
+    t =     9.49s     Checking `Expect predicate `existsNoRetry == 1` for object "native-transcript" Any`
+    t =     9.49s         Checking existence of `"native-transcript" Any`
+    t =     9.55s Find the "native-showing" Any
+    t =     9.58s Get number of matches for: Elements matching predicate '"native-prompt-image" IN identifiers'
+    t =     9.67s Tap "native-prompt-image" Any
+    t =     9.67s     Wait for com.farcooler.ios.local to idle
+    t =     9.67s     Find the "native-prompt-image" Any
+    t =     9.71s     Check for interrupting elements affecting "native-prompt-image" Button
+    t =     9.75s     Synthesize event
+    t =    10.04s     Wait for com.farcooler.ios.local to idle
+    t =    10.05s Waiting 15.0s for "QLPreviewControllerView" Other to exist
+    t =    11.07s     Checking `Expect predicate `existsNoRetry == 1` for object "QLPreviewControllerView" Other`
+    t =    11.07s         Checking existence of `"QLPreviewControllerView" Other`
+    t =    14.72s Press Target Application 'com.farcooler.ios.local'[0.50, 0.50] for 0.1 seconds, then drag to Target Application 'com.farcooler.ios.local'[0.50, 0.50] -> (0.0, 40.0) with velocity of 250.00 pixels per second, and then hold for 0.0 seconds 
+    t =    14.72s     Wait for com.farcooler.ios.local to idle
+    t =    14.72s     Find the Target Application 'com.farcooler.ios.local'
+    t =    14.80s     Check for interrupting elements affecting "FC Local" Application
+    t =    14.82s     Synthesize event
+    t =    14.82s         Find the Target Application 'com.farcooler.ios.local'
+    t =    14.83s         Find the Target Application 'com.farcooler.ios.local'
+    t =    14.95s         Find the Target Application 'com.farcooler.ios.local'
+    t =    14.97s         Find the Target Application 'com.farcooler.ios.local'
+    t =    14.98s         Find the Target Application 'com.farcooler.ios.local'
+    t =    15.49s     Wait for com.farcooler.ios.local to idle
+    t =    17.02s Checking existence of `"QLPreviewControllerView" Other`
+    t =    17.29s Added attachment named 'Image before pinch'
+    t =    17.30s Pinch with scale 6, velocity 3 in "QLPreviewControllerView" Other
+    t =    17.30s     Wait for com.farcooler.ios.local to idle
+    t =    17.30s     Find the "QLPreviewControllerView" Other
+    t =    17.38s     Check for interrupting elements affecting "QLPreviewControllerView" Other
+    t =    17.44s     Synthesize event
+    t =    17.45s         Pinching with rect {{50, 50}, {302, 774}}
+    t =    19.79s     Wait for com.farcooler.ios.local to idle
+    t =    19.98s Added attachment named 'Image after pinch'
+    t =    19.98s Press Target Application 'com.farcooler.ios.local'[0.50, 0.50] for 0.1 seconds, then drag to Target Application 'com.farcooler.ios.local'[0.50, 0.50] -> (0.0, 80.0) with velocity of 250.00 pixels per second, and then hold for 0.3 seconds 
+    t =    19.98s     Wait for com.farcooler.ios.local to idle
+    t =    19.98s     Find the Target Application 'com.farcooler.ios.local'
+    t =    20.02s     Check for interrupting elements affecting "FC Local" Application
+    t =    20.05s     Synthesize event
+    t =    20.06s         Find the Target Application 'com.farcooler.ios.local'
+    t =    20.09s         Find the Target Application 'com.farcooler.ios.local'
+    t =    20.13s         Find the Target Application 'com.farcooler.ios.local'
+    t =    20.16s         Find the Target Application 'com.farcooler.ios.local'
+    t =    20.19s         Find the Target Application 'com.farcooler.ios.local'
+    t =    21.20s     Wait for com.farcooler.ios.local to idle
+    t =    22.70s Checking existence of `"QLPreviewControllerView" Other`
+    t =    22.78s Double tap "QLPreviewControllerView" Other
+    t =    22.78s     Wait for com.farcooler.ios.local to idle
+    t =    22.78s     Find the "QLPreviewControllerView" Other
+    t =    22.85s     Check for interrupting elements affecting "QLPreviewControllerView" Other
+    t =    22.89s     Synthesize event
+    t =    23.24s     Wait for com.farcooler.ios.local to idle
+    t =    23.75s Press Target Application 'com.farcooler.ios.local'[0.50, 0.50] for 0.1 seconds, then drag to Target Application 'com.farcooler.ios.local'[0.50, 0.50] -> (0.0, 300.0) with velocity of 750.00 pixels per second, and then hold for 0.0 seconds 
+    t =    23.75s     Wait for com.farcooler.ios.local to idle
+    t =    23.76s     Find the Target Application 'com.farcooler.ios.local'
+    t =    23.79s     Check for interrupting elements affecting "FC Local" Application
+    t =    23.83s     Synthesize event
+    t =    23.83s         Find the Target Application 'com.farcooler.ios.local'
+    t =    23.87s         Find the Target Application 'com.farcooler.ios.local'
+    t =    23.90s         Find the Target Application 'com.farcooler.ios.local'
+    t =    23.94s         Find the Target Application 'com.farcooler.ios.local'
+    t =    23.97s         Find the Target Application 'com.farcooler.ios.local'
+    t =    24.74s     Wait for com.farcooler.ios.local to idle
+    t =    25.75s Waiting 10.0s for "QLPreviewControllerView" Other to not exist
+    t =    26.77s     Checking `Expect predicate `existsNoRetry == 0` for object "QLPreviewControllerView" Other`
+    t =    26.77s         Checking existence of `"QLPreviewControllerView" Other`
+    t =    26.82s Find the "native-prompt-image" Any
+    t =    26.87s Tear Down
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' passed (27.109 seconds).
+Test Suite 'NativeAgentViewTests' passed at 2026-11-13 09:27:02.342.
+	 Executed 1 test, with 0 failures (0 unexpected) in 27.109 (27.115) seconds
+Test Suite 'FarCoolerUITests.xctest' passed at 2026-11-13 09:27:02.343.
+	 Executed 1 test, with 0 failures (0 unexpected) in 27.109 (27.116) seconds
+Test Suite 'Selected tests' passed at 2026-11-13 09:27:02.343.
+	 Executed 1 test, with 0 failures (0 unexpected) in 27.109 (27.118) seconds
+2026-11-13 09:27:02.383 xcodebuild[12235:21257093] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-13 09:27:02.383 xcodebuild[12235:21257093] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-13 09:27:02.384 xcodebuild[12235:21257093] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-13 09:27:02.394 xcodebuild[12235:21257093] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-13 09:27:02.394 xcodebuild[12235:21257093] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-13 09:27:02.394 xcodebuild[12235:21257093] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-13 09:27:02.674 xcodebuild[12235:21257093] [MT] IDETestOperationsObserverDebug: 43.146 elapsed -- Testing started completed.
+2026-11-13 09:27:02.674 xcodebuild[12235:21257093] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-13 09:27:02.674 xcodebuild[12235:21257093] [MT] IDETestOperationsObserverDebug: 43.146 sec, +43.146 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/e-liang/Library/Developer/Xcode/DerivedData/FarCooler-cwtqtcsbjvsddqfgipbqwallwyql/Logs/Test/Test-FarCooler-2026.11.13_09-26-09-+0800.xcresult
+
+** TEST SUCCEEDED **
+
+
+─────────────────────────────────────────────
+  1 collected, 0 skipped, 1 actually ran
+─────────────────────────────────────────────
+OK: 1 test(s) executed.
