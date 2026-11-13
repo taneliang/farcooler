@@ -451,3 +451,57 @@ async fn a_template_accepts_published_large_and_unlimited_batch_sizes() {
         assert_eq!(bundle.definition.groups["landing"].limit, batch);
     }
 }
+
+/// Hold A at its gate while B's members finish separate builds, including a publication between
+/// arrivals. A waiting ticket's old pin must not open another train under the new batch limit.
+#[tokio::test]
+async fn staggered_ready_tickets_join_one_waiter_while_an_active_landing_keeps_its_pin() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+    let (_dir, mut runtime) = lander("pass").await;
+    let mut p = plan(Template::BatchedPush, vec![Gate::Command(1)]); p.batch = 1;
+    let mut definition = built(&runtime, &p);
+    definition.groups.get_mut("landing").unwrap().steps[2].progression =
+        Progression::AwaitApproval { principal: "owner".into() };
+    at_join(&mut runtime, "a", &definition).await;
+    assert!(command(&runtime, Command::Queue { item: "a".into() }).result.is_ok());
+    let state = until(&mut runtime, |s| s.items.values().any(|i| i.phase == Phase::WaitingApproval)).await;
+    let active = state.items["a"].grouped_in.clone().unwrap();
+    let pinned = state.items[&active].clone();
+    at_join(&mut runtime, "b", &definition).await;
+    assert!(command(&runtime, Command::Queue { item: "b".into() }).result.is_ok());
+    let state = runtime.state("w").unwrap().unwrap();
+    let waiting = state.items["b"].grouped_in.clone().unwrap();
+    let mut published = definition.clone(); published.groups.get_mut("landing").unwrap().limit = 0;
+    let reply = runtime.wire_command("w", "owner", Action::Publish {
+        mutation: Mutation { id: "staggered-publication".into(), revision: state.revision, epoch: state.epoch, sequence: 1 },
+        expected_pin: None, definition: published.clone(),
+        adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
+    }).unwrap();
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    for (index, item) in ["c", "d"].into_iter().enumerate() {
+        at_join(&mut runtime, item, &definition).await;
+        assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok());
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(state.items[item].grouped_in.as_deref(), Some(waiting.as_str()));
+        assert_eq!(state.items[&waiting].members.len(), index + 2);
+        assert_eq!(state.items.values().filter(|i| i.group_of.is_some() && i.phase == Phase::Blocked).count(), 1);
+        assert_eq!(state.items[&active], pinned, "publication leaves the active gate alone");
+    }
+    for group in [&active, &waiting] {
+        let state = until(&mut runtime, |s| phase_of(s, group) == Some(Phase::WaitingApproval)).await;
+        let item = &state.items[group];
+        let session = runtime.decision_session(&runtime.controller(), "owner").unwrap();
+        let sequence = state.source_sequences.get("decision:owner").copied().unwrap_or(0) + 1;
+        let receipt = runtime.decide(&session, Request { id: format!("approve-{group}"), workspace: "w".into(),
+            expected_revision: state.revision, sequence, command: Command::Approve { item: group.clone(),
+                run: item.run.clone(), pin: item.pin.clone(), candidate: item.candidate.clone() } }, 100).unwrap();
+        assert!(receipt.result.is_ok(), "{receipt:?}");
+    }
+    let state = until(&mut runtime, |s| ["a", "b", "c", "d"].iter().all(|t| phase_of(s, t) == Some(Phase::Done))).await;
+    for kind in [StageKind::Fold, StageKind::Run, StageKind::AwaitCi, StageKind::Push] {
+        assert_eq!(outbox(&runtime, kind.clone()), 2, "one {kind:?} for A, one for all of B");
+    }
+    let mut replay = State::empty("w".into(), 1);
+    for event in runtime.events("w").unwrap() { replay = step(&replay, &event).unwrap().state; }
+    assert_eq!(state, replay);
+}
