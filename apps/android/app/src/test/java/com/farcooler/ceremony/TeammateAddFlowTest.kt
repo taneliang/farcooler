@@ -53,10 +53,13 @@ class TeammateAddFlowTest {
         override fun fingerprint(publicKey: String) = "SHA256:test"
         override fun clientId(publicKey: String) = "farcooler-0123456789ab"
         val sealed = mutableListOf<Pair<String, String>>()
-        override fun seal(offerJson: String, manifestJson: String, heldMs: Long): CeremonyCore.Answer {
+        override fun sealTeammate(offerJson: String, manifestJson: String, privateKey: String, authorities: String, heldMs: Long): CeremonyCore.Answer {
+            assertEquals("phone-key", privateKey)
             sealed += offerJson to manifestJson
             return CeremonyCore.Answer.Payload("""{"sealed":"c2VhbGVkLXJlcGx5","code":"ABC234"}""")
         }
+        override fun seal(offerJson: String, manifestJson: String, heldMs: Long): CeremonyCore.Answer =
+            error("a teammate browser reply must use the device-signed seal")
     }
 
     private val buildBox = Runner(id = "r1", label = "build-box", reach = Reach.Direct("build-box.example.com", 22), user = "alice")
@@ -187,6 +190,7 @@ class TeammateAddFlowTest {
         )
         val posts = mutableListOf<Triple<String, String, String>>()
         val store = scanned(core)
+        store.sealedReply.privateKey = { "phone-key" }
         store.sealedReply.post = { ceremony, account, sealed ->
             posts += Triple(ceremony, account, sealed)
             SealedReplyPost.Outcome.POSTED
@@ -212,6 +216,7 @@ class TeammateAddFlowTest {
         )
         val posts = mutableListOf<String>()
         val store = scanned(core)
+        store.sealedReply.privateKey = { "phone-key" }
         store.sealedReply.post = { ceremony, _, _ ->
             posts += ceremony
             SealedReplyPost.Outcome.POSTED
@@ -241,6 +246,7 @@ class TeammateAddFlowTest {
         val core = Core()
         val posts = mutableListOf<String>()
         val store = scanned(core)
+        store.sealedReply.privateKey = { "phone-key" }
         store.sealedReply.post = { ceremony, _, _ ->
             posts += ceremony
             SealedReplyPost.Outcome.POSTED

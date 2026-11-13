@@ -36,6 +36,8 @@ pub fn new_reply_secret() -> String {
 struct Posted {
     sealed: String,
     #[serde(default)]
+    authority: farcooler_ceremony::signed::Trust,
+    #[serde(default)]
     posted_by: String,
     /// The poster's email as the relay has it, or none on file.
     #[serde(default)]
@@ -79,8 +81,8 @@ pub struct Opened {
 /// The offer's own account's reply, when there is one, is the only one
 /// tried, as [`earliest`] says. Without one, every teammate's reply from this
 /// one read is tried in the order they were posted, and the first that opens
-/// AND names its own poster as the person granting it is the one (ov-778
-/// R-113). The read deleted them all at the relay, so a forged reply refused
+/// AND names its own poster AND verifies its device signature and every
+/// runner attestation against the relay's directory authority (ov-1020). The read deleted them all at the relay, so a forged reply refused
 /// here must not cost the real one behind it.
 ///
 /// "Names its own poster": the manifest's `granted_by` is the email the relay
@@ -104,7 +106,8 @@ pub fn open_earliest(
 
 /// Every reply from one read that may be offered to the person, best first
 /// (ov-778 R-113 F2). The account's own reply is alone. Otherwise each
-/// teammate's reply that opens and names its own poster, in posting order.
+/// teammate's reply that opens, names its poster, and passes device and
+/// runner authority verification, in posting order.
 ///
 /// More than one can pass: a teammate who posts a reply naming themselves
 /// passes too, and the read has already deleted the real one. The person's
@@ -135,7 +138,10 @@ pub fn open_all(
             Ok((manifest, code)) => {
                 let taken = taken(&manifest);
                 if granted_by_poster(taken.granted_by.as_deref(), reply.posted_by_email.as_deref()) {
-                    passed.push(Opened { code, taken });
+                    match farcooler_ceremony::signed::verify(&manifest, offer, &reply.authority) {
+                        Ok(()) => passed.push(Opened { code, taken }),
+                        Err(e) => { refused.get_or_insert(e); }
+                    }
                 } else {
                     refused.get_or_insert(CeremonyError::WrongAccount);
                 }
@@ -201,7 +207,13 @@ pub fn accept(
     shown_at_ms: f64,
     now_ms: f64,
 ) -> Result<Manifest, CeremonyError> {
-    farcooler_ceremony::take_reply(reply, offer, already_taken, held_for(shown_at_ms, now_ms))
+    let manifest = farcooler_ceremony::take_reply(reply, offer, already_taken, held_for(shown_at_ms, now_ms))?;
+    // QR replies carry no independently fetched poster/runner authority. A
+    // teammate uses the verified sealed route; QR cannot downgrade that gate.
+    if offer.reply_key.is_some() || manifest.granted_by.is_some() || manifest.proof.is_some() {
+        return Err(CeremonyError::UnregisteredKey);
+    }
+    Ok(manifest)
 }
 
 /// Whether a code shown at `shown_at_ms` is past the window, so a stored offer
@@ -287,6 +299,17 @@ mod tests {
     const NODE: &str = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const SHOWN: f64 = 1_000_000.0;
 
+    #[test]
+    fn ov1020_unsigned_teammate_reply_is_refused() {
+        let secret = new_reply_secret();
+        let o = offer("Chrome", "bob", KEY, NODE, &secret).unwrap();
+        let mut m = farcooler_ceremony::manifest(&o, vec![runner(HOST)]);
+        m.granted_by = Some("alice@example.com".into());
+        let (sealed, _) = farcooler_ceremony::seal_reply(&o, &m).unwrap();
+        let answer = serde_json::json!({"replies": [{"sealed": sealed, "posted_by": "alice", "posted_by_email": "alice@example.com"}]}).to_string();
+        assert!(open_all(&answer, &o, &secret, false, 0.0, 1.0).is_err());
+    }
+
     fn reply_to(o: &Offer, granted_by: Option<&str>) -> String {
         let mut m = farcooler_ceremony::manifest(o, Vec::new());
         m.granted_by = granted_by.map(str::to_string);
@@ -300,7 +323,7 @@ mod tests {
         let o = offer("Chrome on Mac", "acct", KEY, NODE, &new_reply_secret()).unwrap();
         let reply = reply_to(&o, None);
         let window = farcooler_ceremony::FRESHNESS.as_millis() as f64;
-        assert!(accept(&reply, &o, false, SHOWN, SHOWN + window).is_ok());
+        assert_eq!(accept(&reply, &o, false, SHOWN, SHOWN + window), Err(CeremonyError::UnregisteredKey));
         assert_eq!(accept(&reply, &o, false, SHOWN, SHOWN + window + 1.0), Err(CeremonyError::Stale));
         // A start in the future is a time this device can't vouch for.
         assert_eq!(accept(&reply, &o, false, SHOWN, SHOWN - 1.0), Err(CeremonyError::Stale));
@@ -341,7 +364,7 @@ mod tests {
             entry("fine", false, Some("failed")),
         ];
         let reply = farcooler_ceremony::encode_manifest(&farcooler_ceremony::manifest(&o, runners));
-        let got = granted(&accept(&reply, &o, false, SHOWN, SHOWN).unwrap());
+        let got = granted(&farcooler_ceremony::take_reply(&reply, &o, false, Duration::ZERO).unwrap());
         let causes: Vec<(&str, &str, &str)> = got.iter().map(|g| (g.id.as_str(), g.why.as_str(), g.cause.as_str())).collect();
         assert_eq!(
             causes,
@@ -353,12 +376,10 @@ mod tests {
     #[test]
     fn a_teammates_reply_names_who_granted_it() {
         let o = offer("Chrome on Mac", "acct", KEY, NODE, &new_reply_secret()).unwrap();
-        let own = accept(&reply_to(&o, None), &o, false, SHOWN, SHOWN).unwrap();
-        assert_eq!(taken(&own).granted_by, None);
-        let blank = accept(&reply_to(&o, Some("  ")), &o, false, SHOWN, SHOWN).unwrap();
-        assert_eq!(taken(&blank).granted_by, None);
-        let theirs = accept(&reply_to(&o, Some("ana@example.com")), &o, false, SHOWN, SHOWN).unwrap();
-        assert_eq!(taken(&theirs).granted_by.as_deref(), Some("ana@example.com"));
+        // Stripping the grantor cannot downgrade a browser offer to raw QR.
+        assert_eq!(accept(&reply_to(&o, None), &o, false, SHOWN, SHOWN), Err(CeremonyError::UnregisteredKey));
+        assert_eq!(accept(&reply_to(&o, Some("ana@example.com")), &o, false, SHOWN, SHOWN), Err(CeremonyError::UnregisteredKey));
+        assert_eq!(accept(&reply_to(&o, Some("  ")), &o, false, SHOWN, SHOWN), Err(CeremonyError::UnregisteredKey));
     }
 
     /// One runner whose host key prints as `host_key`, reached by tunnel.
@@ -455,7 +476,63 @@ mod tests {
     fn sealed_by(o: &Offer, host_key: &str, granted_by: Option<&str>) -> (String, String) {
         let mut m = farcooler_ceremony::manifest(o, vec![runner(host_key)]);
         m.granted_by = granted_by.map(str::to_string);
+        if granted_by.is_some() {
+            let device = signing_key(1);
+            let runner_key = signing_key(2);
+            let public = runner_key.public_key().to_openssh().unwrap();
+            m.runners[0].id = farcooler_ceremony::fingerprint(&public).unwrap();
+            let authority = farcooler_ceremony::signed::Authority {
+                runner_key: public,
+                signature: farcooler_ceremony::signed::signature(&runner_key, farcooler_ceremony::signed::RUNNER_NAMESPACE,
+                    &farcooler_ceremony::signed::authority_statement(o, &farcooler_ceremony::fingerprint(&device.public_key().to_openssh().unwrap()).unwrap())).unwrap(),
+            };
+            farcooler_ceremony::signed::sign(&mut m, o, &device.to_openssh(russh::keys::ssh_key::LineEnding::LF).unwrap(), vec![authority]).unwrap();
+        }
         farcooler_ceremony::seal_reply(o, &m).unwrap()
+    }
+
+    fn signing_key(seed: u8) -> russh::keys::ssh_key::PrivateKey {
+        use russh::keys::ssh_key::{PrivateKey, private::{Ed25519Keypair, KeypairData}};
+        PrivateKey::new(KeypairData::Ed25519(Ed25519Keypair::from_seed(&[seed; 32])), "").unwrap()
+    }
+
+    #[test]
+    fn ov1020_signatures_bind_the_whole_reply_and_every_runner() {
+        use farcooler_ceremony::{signed, seal_reply};
+        let secret = new_reply_secret();
+        let o = offer("Browser", "bob", KEY, NODE, &secret).unwrap();
+        let (sealed, _) = sealed_by(&o, HOST, Some("alice@example.com"));
+        let (manifest, _) = open(&sealed, &o, &secret, false, SHOWN, SHOWN).unwrap();
+        let trust = || signed::Trust {
+            devices: vec![farcooler_ceremony::fingerprint(&signing_key(1).public_key().to_openssh().unwrap()).unwrap()],
+            runners: vec![manifest.runners[0].id.clone()],
+        };
+        signed::verify(&manifest, &o, &trust()).unwrap();
+        let mut empty = trust();
+        empty.devices.clear();
+        assert!(signed::verify(&manifest, &o, &empty).is_err());
+        empty = trust();
+        empty.runners.clear();
+        assert!(signed::verify(&manifest, &o, &empty).is_err());
+        let other = offer("Browser", "bob", KEY, NODE, &new_reply_secret()).unwrap();
+        assert!(signed::verify(&manifest, &other, &trust()).is_err());
+        let mut changed = manifest.clone();
+        changed.runners[0].host_key = FORGED.into();
+        assert!(signed::verify(&changed, &o, &trust()).is_err());
+        changed = manifest.clone();
+        changed.granted_by = Some("carol@example.com".into());
+        assert!(signed::verify(&changed, &o, &trust()).is_err());
+        changed = manifest.clone();
+        changed.runners.push(runner(FORGED));
+        assert!(signed::verify(&changed, &o, &trust()).is_err());
+        changed = manifest.clone();
+        changed.proof.as_mut().unwrap().device_key = signing_key(3).public_key().to_openssh().unwrap();
+        assert!(signed::verify(&changed, &o, &trust()).is_err());
+        // Resealing a modified body cannot repair its device signature, and
+        // refusing that forgery does not hide the real reply in the same read.
+        let (forged, _) = seal_reply(&o, &changed).unwrap();
+        let answer = relay_says_from(&[(&forged, "alice", Some("alice@example.com")), (&sealed, "alice", Some("alice@example.com"))]);
+        assert_eq!(open_all(&answer, &o, &secret, false, SHOWN, SHOWN).unwrap().len(), 1);
     }
 
     /// The relay's read with who posted each and their email on file:
@@ -463,7 +540,10 @@ mod tests {
     fn relay_says_from(posts: &[(&str, &str, Option<&str>)]) -> String {
         let replies: Vec<_> = posts
             .iter()
-            .map(|(s, by, email)| serde_json::json!({"sealed": s, "posted_by": by, "posted_by_email": email}))
+            .map(|(s, by, email)| serde_json::json!({"sealed": s, "posted_by": by, "posted_by_email": email, "authority": {
+                "devices": [farcooler_ceremony::fingerprint(&signing_key(1).public_key().to_openssh().unwrap()).unwrap()],
+                "runners": [farcooler_ceremony::fingerprint(&signing_key(2).public_key().to_openssh().unwrap()).unwrap()]
+            }}))
             .collect();
         serde_json::json!({ "replies": replies }).to_string()
     }

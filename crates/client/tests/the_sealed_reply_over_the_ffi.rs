@@ -162,3 +162,40 @@ fn another_key_does_not_open_it() {
     assert!(refused.get("error").is_some(), "{refused}");
     assert!(decode_offer(&shown).is_ok());
 }
+
+/// Ov-1020: the phone boundary signs a reply and replaces local runner ids
+/// with the directory-pinned runner identity before sealing it.
+#[test]
+fn a_teammate_reply_is_device_signed_over_a_live_runner_attestation() {
+    use farcooler_client::ceremony::{self as ceremony, signed};
+    use russh::keys::ssh_key::{PrivateKey, LineEnding, private::{Ed25519Keypair, KeypairData}};
+    let key = |seed| PrivateKey::new(KeypairData::Ed25519(Ed25519Keypair::from_seed(&[seed; 32])), "").unwrap();
+    let (phone, runner) = (key(1), key(2));
+    let reply_key = ReplyKey::generate();
+    let offer_json = browser_offer(&reply_key);
+    let o = decode_offer(&offer_json).unwrap();
+    let mut m = ceremony::manifest(&o, serde_json::from_str(RUNNERS).unwrap());
+    m.granted_by = Some("alice@example.com".into());
+    let phone_fp = ceremony::fingerprint(&phone.public_key().to_openssh().unwrap()).unwrap();
+    let runner_key = runner.public_key().to_openssh().unwrap();
+    let runner_fp = ceremony::fingerprint(&runner_key).unwrap();
+    let authority = signed::Authority { runner_key, signature: signed::signature(&runner, signed::RUNNER_NAMESPACE,
+        &signed::authority_statement(&o, &phone_fp)).unwrap() };
+    let authorities = serde_json::json!({ &m.runners[0].id: authority });
+    let offer_c = CString::new(offer_json.clone()).unwrap();
+    let manifest_c = CString::new(ceremony::encode_manifest(&m)).unwrap();
+    let private_c = CString::new(phone.to_openssh(LineEnding::LF).unwrap().as_str()).unwrap();
+    let seal = |authority: &Value, held| {
+        let authority_c = CString::new(authority.to_string()).unwrap();
+        json(|out, capacity| unsafe { farcooler_client::ffi::farcooler_client_ceremony_seal_teammate(
+            offer_c.as_ptr(), manifest_c.as_ptr(), private_c.as_ptr(), authority_c.as_ptr(), held, out, capacity) })
+    };
+    let sealed = seal(&authorities, 0);
+    let opened = take(sealed["sealed"].as_str().unwrap(), &reply_key.secret(), &offer_json);
+    assert_eq!(opened["code"], sealed["code"]);
+    let manifest: ceremony::Manifest = serde_json::from_value(opened["manifest"].clone()).unwrap();
+    assert_eq!(manifest.runners[0].id, runner_fp);
+    signed::verify(&manifest, &o, &signed::Trust { devices: vec![phone_fp], runners: vec![runner_fp] }).unwrap();
+    assert_eq!(seal(&serde_json::json!({}), 0)["error"], "unregistered_key");
+    assert_eq!(seal(&authorities, STALE_MS)["error"], "stale");
+}

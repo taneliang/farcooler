@@ -795,6 +795,8 @@ pub mod capability {
     /// admin action only on a runner with it; an older one is refused with a
     /// word.
     pub const STEP_UP: &str = "step_up";
+    /// Runner attestations for device-signed teammate browser replies (ov-1020).
+    pub const CEREMONY_AUTHORITY: &str = "ceremony_authority";
     /// A Mac that isn't the runner, with no step-up key of its own, has an
     /// admin action approved on the person's iPhone (ov-858): `approval.ask`,
     /// `approval.list`, `approval.grant`, `approval.status` and
@@ -833,7 +835,7 @@ pub mod capability {
             PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
             WORKSPACE_CHARTER, BOARD_THEME_MOVE, MEMBER_ROLES, PASSKEY_KEYS,
             MEMBER_DEVICES_READ, CRASH_REPORTS, WORKSPACE_MAINTAINERS, PERSON_ACCESS,
-            STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN, CHECK_IN_OCCURRENCE_CAS,
+            CEREMONY_AUTHORITY, STEP_UP, PHONE_APPROVAL, AGENT_STOP, WORKSPACE_CHECK_IN, CHECK_IN_OCCURRENCE_CAS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1151,6 +1153,7 @@ pub mod method {
         CrashReport = "crash.report" => CRASH_REPORTS,
         MemberSetAccess = "member.set_access" => PERSON_ACCESS,
         ClientSetCap = "client.set_cap" => PERSON_ACCESS,
+        CeremonyAuthority = "ceremony.authority" => CEREMONY_AUTHORITY,
         AuthChallenge = "auth.challenge" => STEP_UP,
         ClientSetStepUpKey = "client.set_step_up_key" => STEP_UP,
         ClientApproveStepUp = "client.approve_step_up" => STEP_UP,

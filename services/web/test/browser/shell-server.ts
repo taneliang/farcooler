@@ -13,6 +13,8 @@ import { shellCsp, withHeaders } from '../../src/headers'
 export interface Reports {
   /// Bodies posted to /csp, as the browser sent them.
   csp: string[]
+  /// One read of the signed enrollment replies, as the real relay returns them.
+  ceremonyReply?: unknown
   /// Registrations the stub relay accepted.
   registered?: number
   /// The sealed copies the stub relay keeps, by credential id (ov-779), and
@@ -82,7 +84,11 @@ export function shellHandler(dist: (path: string) => Uint8Array | null, env: Pic
       if (ok) reports.registered = (reports.registered ?? 0) + 1
       return withHeaders(JSON.stringify(ok ? {} : { error: 'refused' }), ok ? 200 : 400, { 'content-type': 'application/json' })
     }
-    if (path === '/api/relay/ceremony/reply') return withHeaders('{}', 404, { 'content-type': 'application/json' })
+    if (path === '/api/relay/ceremony/reply') {
+      const answer = reports.ceremonyReply
+      delete reports.ceremonyReply
+      return withHeaders(JSON.stringify(answer ?? {}), answer ? 200 : 404, { 'content-type': 'application/json' })
+    }
     // A browser's sealed copies (ov-779), kept as the relay keeps them: by
     // credential id, a save replacing the one before. Ciphertext only, so the
     // walk can check nothing in the clear reached it.

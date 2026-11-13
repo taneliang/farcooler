@@ -583,3 +583,14 @@ impl AsyncWrite for Valve {
     }
 }
 
+
+/// A same-account phone's sealed reply. Browser offers no longer accept the
+/// unsigned camera fallback, so connection tests use the relay route too.
+pub fn open_own_reply(offer: &farcooler_ceremony::Offer, manifest: &farcooler_ceremony::Manifest) -> Vec<farcooler_web::enroll::Granted> {
+    let key = farcooler_ceremony::ReplyKey::generate();
+    let mut offer = offer.clone();
+    offer.reply_key = Some(key.public().into());
+    let (sealed, _) = farcooler_ceremony::seal_reply(&offer, manifest).unwrap();
+    let answer = serde_json::json!({"replies": [{"posted_by": offer.account, "sealed": sealed}]}).to_string();
+    farcooler_web::enroll::open_earliest(&answer, &offer, &key.secret(), false, 0.0, 0.0).unwrap().taken.runners
+}

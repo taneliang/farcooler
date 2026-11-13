@@ -15,9 +15,9 @@
 //! RFC 9180 HPKE in base mode, with DHKEM(X25519, HKDF-SHA256), HKDF-SHA256 and
 //! ChaCha20-Poly1305, single-shot. Far Cooler implements none of it: this is
 //! the `hpke` crate. Base mode, not auth mode, because the sender has no key
-//! the new device could know in advance; the reply leg stays unauthenticated,
-//! exactly as the module note on the QR leg says, and sealing changes who can
-//! READ a reply, not who can WRITE one.
+//! the new device could know in advance. Sealing changes who can READ a
+//! reply, not who can WRITE one. Teammate browser replies therefore carry
+//! separate device signatures and runner attestations (`signed`, ov-1020).
 //!
 //! ## What it does not stop
 //!
@@ -68,6 +68,9 @@ const INFO: &[u8] = b"farcooler ceremony reply v1";
 
 /// An X25519 public key is 32 bytes, and so is the encapsulated key.
 const KEY_BYTES: usize = 32;
+
+/// Signed replies include one attestation per runner; the QR budget stays unchanged.
+pub const SIGNED_BUDGET: usize = 8192;
 
 /// The key a device asks for its reply to be sealed to.
 ///
@@ -139,7 +142,7 @@ pub fn seal_reply(offer: &Offer, manifest: &Manifest) -> Result<(String, String)
         return Err(CeremonyError::Malformed("this reply answers a different offer".into()));
     }
     let plaintext = encode_manifest(manifest);
-    if plaintext.len() > BUDGET {
+    if plaintext.len() > if manifest.proof.is_some() { SIGNED_BUDGET } else { BUDGET } {
         return Err(CeremonyError::TooLarge);
     }
     let bytes = decode_exact(reply_key, "reply key")?;

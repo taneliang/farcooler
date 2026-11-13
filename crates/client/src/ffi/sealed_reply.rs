@@ -105,3 +105,35 @@ pub unsafe extern "C" fn farcooler_client_ceremony_take_sealed(
         spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
     })
 }
+
+/// Seal a teammate reply signed by this device, with one live runner
+/// attestation per phone-local runner id. Private key material never leaves
+/// this call. Refuses missing authority rather than posting an unsigned reply.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_ceremony_seal_teammate(
+    offer_json: *const c_char, manifest_json: *const c_char,
+    private_key: *const c_char, authorities_json: *const c_char,
+    held_ms: u64, out: *mut u8, capacity: usize,
+) -> usize {
+    guarded(0, || {
+        let answer = (|| -> Result<String, CeremonyError> {
+            still_fresh(Duration::from_millis(held_ms))?;
+            let text = |p| unsafe { read_str(p) }.ok_or(CeremonyError::UnregisteredKey);
+            let offer = decode_offer(&text(offer_json)?)?;
+            let mut manifest: Manifest = serde_json::from_str(&text(manifest_json)?)
+                .map_err(|_| CeremonyError::UnregisteredKey)?;
+            let by_id: std::collections::BTreeMap<String, crate::ceremony::signed::Authority> =
+                serde_json::from_str(&text(authorities_json)?).map_err(|_| CeremonyError::UnregisteredKey)?;
+            let mut authorities = Vec::new();
+            for runner in &mut manifest.runners {
+                let authority = by_id.get(&runner.id).ok_or(CeremonyError::UnregisteredKey)?;
+                runner.id = crate::ceremony::fingerprint(&authority.runner_key).ok_or(CeremonyError::UnregisteredKey)?;
+                authorities.push(authority.clone());
+            }
+            crate::ceremony::signed::sign(&mut manifest, &offer, &text(private_key)?, authorities)?;
+            let (sealed, code) = seal_reply(&offer, &manifest)?;
+            Ok(json!({ "sealed": sealed, "code": code }).to_string())
+        })();
+        spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
+    })
+}

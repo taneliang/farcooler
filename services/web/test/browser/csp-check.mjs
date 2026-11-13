@@ -16,13 +16,13 @@
 // WebAuthn domain, as a person's would stay in their authenticator):
 //
 // - boot (both wasm modules, a node key minted in Go), Make Passkey, the
-//   enrollment screen with the passkey's sk-ecdsa line in the code, and the
-//   camera;
+//   enrollment screen with the passkey's sk-ecdsa line in the code, and no
+//   unsigned camera fallback;
 // - a stored code past the ceremony's window is replaced, another account's
 //   passkey and runners are discarded, and a slice-1 device (a WebCrypto
 //   Ed25519 key) is asked for a passkey and a new enrollment;
-// - with --fake-daemon: a phone's reply played through the fake camera and
-//   read after the window is refused; a teammate's reply asks before it joins;
+// - with --fake-daemon: an unsigned teammate reply is refused; a signed
+//   reply verifies the device and runner authority and asks before it joins;
 //   Connect opens a terminal through a REAL sshd (only sshd verifies a
 //   passkey's webauthn-sk signature) whose Key A line is the offer's sk-ecdsa
 //   key and whose forced command is crates/web's fake daemon
@@ -69,7 +69,6 @@ import { brotliDecompressSync } from 'node:zlib'
 
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
-import qrcode from 'qrcode-generator'
 
 const args = process.argv.slice(2)
 const flag = name => {
@@ -537,38 +536,11 @@ function skKey(line) {
   return { type: fields[0].toString(), application: fields[3].toString() }
 }
 
-/// A phone's reply to `offer`, as the QR code a fake camera shows: a y4m file
-/// of the code on white, the shape Chromium's fake capture device plays.
-function replyVideo(offer, grantedBy, name) {
-  const blob = Buffer.from(offer.key_a.split(' ')[1], 'base64')
-  const target = `SHA256:${createHash('sha256').update(blob).digest('base64').replace(/=+$/, '')}`
-  const reply = JSON.stringify({
-    v: 2,
-    ceremony: offer.ceremony,
-    account: offer.account,
-    channel: offer.channel,
-    target,
-    runners: [{ id: 'r1', label: 'studio', alias: 'studio', user: me, host_key: runner.hostKey, reach: { kind: 'tailcat', token: 'test' }, pending: false }],
-    ...(grantedBy ? { granted_by: grantedBy } : {}),
-  })
-  const code = qrcode(0, 'L')
-  code.addData(reply, 'Byte')
-  code.make()
-  const [W, H] = [640, 480]
-  const modules = code.getModuleCount()
-  const scale = Math.floor((H - 40) / (modules + 8))
-  const left = Math.floor((W - modules * scale) / 2)
-  const top = Math.floor((H - modules * scale) / 2)
-  const y = Buffer.alloc(W * H, 235)
-  for (let r = 0; r < modules; r++)
-    for (let c = 0; c < modules; c++)
-      if (code.isDark(r, c))
-        for (let dy = 0; dy < scale; dy++) y.fill(16, (top + r * scale + dy) * W + left + c * scale, (top + r * scale + dy) * W + left + (c + 1) * scale)
-  const chroma = Buffer.alloc((W / 2) * (H / 2) * 2, 128)
-  const frame = Buffer.concat([Buffer.from('FRAME\n'), y, chroma])
-  const path = join(scratch, `${name}.y4m`)
-  writeFileSync(path, Buffer.concat([Buffer.from(`YUV4MPEG2 W${W} H${H} F10:1 Ip A1:1 C420jpeg\n`), ...Array(10).fill(frame)]))
-  return path
+/// A device-signed reply with a runner attestation, made by the Rust core.
+function signedReply(offer, unsigned = false) {
+  return JSON.parse(execFileSync('cargo', ['run', '--quiet', '--manifest-path', '../../crates/web/Cargo.toml',
+    '--example', 'ceremony_reply', '--', JSON.stringify(offer), runner.hostKey, me, ...(unsigned ? ['unsigned'] : [])],
+    { encoding: 'utf8' }))
 }
 
 /// The terminal in front, once its runner has accepted the attach.
@@ -1079,11 +1051,7 @@ try {
     if (touches !== 1) failures.push(`making the passkey cost ${touches} sign-ins, not the one registration`)
     console.log(`csp-check: the offer's key is ${key.type} for ${key.application}`)
 
-    await page.click('#scan')
-    await page.waitForFunction(() => document.querySelector('#camera-video')?.readyState >= 2, null, { timeout: 30_000 })
-    await page.waitForTimeout(1000)
-    await page.click('#camera-cancel')
-    console.log('csp-check: the camera opened and closed')
+    if (await page.$('#scan')) failures.push('an unsigned camera reply can bypass device verification')
 
     // A stored code past the window is discarded for a new one.
     await edit(page, { offerShownAt: Date.now() - 10 * 60_000 })
@@ -1162,34 +1130,17 @@ try {
 
     if (runner) {
       runner.enroll(JSON.parse((await device(page)).offer).key_a)
-      // A reply read after the window is refused, through the real camera path.
-      let current = JSON.parse((await device(page)).offer)
-      let secret = await replySecret(page)
-      if (!secret) failures.push('the code on screen has no secret half in the tab')
-      await session.context.close()
-      session = await launch(replyVideo(current, null, 'late'), secret)
-      page = session.page
-      await page.clock.install()
-      await page.goto(origin)
-      await enrolling(page)
-      await page.clock.setSystemTime(Date.now() + 130_000)
-      await page.click('#scan')
-      await page.waitForFunction(() => document.getElementById('enroll-note')?.textContent?.includes('came after'), null, { timeout: 60_000 })
-      kept = await device(page)
-      if (kept.runners) failures.push('a reply after the window was taken')
-      else console.log('csp-check: a reply after the window was refused')
-      // The harness skewed this page's clock; put the new code's time back.
-      await edit(page, { offerShownAt: Date.now() })
-
-      // A teammate's reply asks before it joins.
-      current = JSON.parse(kept.offer)
-      secret = await replySecret(page)
-      await session.context.close()
-      session = await launch(replyVideo(current, 'ana@example.com', 'teammate'), secret)
-      page = session.page
-      await page.goto(origin)
-      await enrolling(page)
-      await page.click('#scan')
+      // An unsigned teammate reply is refused before the signed reply arrives.
+      const current = JSON.parse((await device(page)).offer)
+      reports.ceremonyReply = signedReply(current, true)
+      await page.waitForTimeout(3000)
+      if (!(await page.isHidden('#compare')) || (await device(page)).runners) failures.push('an unsigned teammate reply was offered')
+      const signed = signedReply(current)
+      reports.ceremonyReply = signed
+      await page.waitForSelector('#compare:not([hidden])', { timeout: 60_000 })
+      const code = (await page.textContent('#compare-code')).replace(/\s/g, '')
+      if (code !== signed.code) failures.push(`the device and browser codes differ: ${code}, ${signed.code}`)
+      await page.click('#compare-yes')
       await page.waitForSelector('#join:not([hidden])', { timeout: 60_000 })
       const title = await page.textContent('#join-title')
       if (title !== 'Join Your Teammate’s Runner “studio”?') failures.push(`the join prompt says ${JSON.stringify(title)}`)

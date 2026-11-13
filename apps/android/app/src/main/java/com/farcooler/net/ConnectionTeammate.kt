@@ -53,3 +53,12 @@ suspend fun Connection.enrollTeammate(
         TeammateAddOutcome.Declined(TeammateAccessRules.refusal(e.what ?: e.word.orEmpty(), runner, device))
     }
 }
+
+/** A proof by the runner's registered identity, behind its live admin and step-up gate. */
+suspend fun Connection.ceremonyAuthority(context: Context, offer: String): JsonObject? {
+    val flow = stepUp(context) ?: return null
+    return try {
+        flow.perform("ceremony.authority", JsonObject(mapOf("offer" to JsonPrimitive(offer))),
+            "Confirm this browser’s access to ${host.label}.", teammateFacts("")?.signs == true)
+    } catch (_: StepUpFailure) { null } catch (_: CoreException) { null }
+}

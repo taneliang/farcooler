@@ -157,6 +157,13 @@ impl RunnerKey {
         self.0.public_key().to_openssh().unwrap_or_default()
     }
 
+    /// Called only behind the live RPC admin/step-up gate. The signature
+    /// names the authenticated device, not a key chosen by the request.
+    pub(crate) fn ceremony_authority(&self, offer: &farcooler_ceremony::Offer, device: &str) -> Result<String, KeyError> {
+        farcooler_ceremony::signed::signature(&self.0, farcooler_ceremony::signed::RUNNER_NAMESPACE,
+            &farcooler_ceremony::signed::authority_statement(offer, device)).map_err(|_| KeyError::Signing)
+    }
+
     /// The signature the relay verifies, armored, for `account` putting
     /// `install` in `team` at `relay`, at `issued_at` (milliseconds since the epoch).
     ///

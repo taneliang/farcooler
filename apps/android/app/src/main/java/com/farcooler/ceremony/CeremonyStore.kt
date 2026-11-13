@@ -357,6 +357,10 @@ interface CeremonyCalls {
     fun teammateReply(offerJson: String, runners: List<CeremonyRunner>, grantedBy: String): CeremonyCore.Answer =
         CeremonyCore.Answer.Refused(Refusal.Unknown)
 
+    /** Device-signed teammate reply, with one live runner attestation per runner (ov-1020). */
+    fun sealTeammate(offerJson: String, manifestJson: String, privateKey: String, authorities: String, heldMs: Long): CeremonyCore.Answer =
+        CeremonyCore.Answer.Refused(Refusal.Unknown)
+
     /**
      * Seal a reply to its offer's reply key (ov-770). A fake that doesn't
      * answer refuses, so it posts nothing.
@@ -509,6 +513,10 @@ object CeremonyCore : CeremonyCalls {
             .getOrNull()
             ?.takeIf { it.isNotEmpty() }
     }
+
+    /** Device-signed teammate reply, with one live runner attestation per runner (ov-1020). */
+    override fun sealTeammate(offerJson: String, manifestJson: String, privateKey: String, authorities: String, heldMs: Long): Answer =
+        answer { NativeClient.nativeCeremonySealTeammate(offerJson, manifestJson, privateKey, authorities, heldMs.coerceAtLeast(0)) }
 
     /**
      * Seal the reply built for a browser's offer to the key it named, with
@@ -1328,7 +1336,7 @@ class CeremonyStore(
                 // A teammate's browser can't scan the reply either: sealed to
                 // its key and posted for its account, which the relay lets a
                 // teammate do (ov-778). An offer with no reply key posts nothing.
-                sealedReply.send(core, rescanned, answer.json, scannedAt?.let { clock() - it } ?: Long.MAX_VALUE)
+                sealedReply.send(core, rescanned, answer.json, scannedAt?.let { clock() - it } ?: Long.MAX_VALUE, teammate = true)
             }
         }
     }

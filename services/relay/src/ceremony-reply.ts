@@ -22,31 +22,19 @@
 ///   the same 404, so a reader learns nothing about a ceremony that isn't
 ///   theirs. The five-minute cron deletes what nobody read.
 ///
-/// ## What the seal does not stop
-///
-/// A reply from anyone who saw the offer, and may post, OPENS. The offer is
-/// public, so it gives them the reply key, the ceremony, the account, the
-/// channel and the Key A, which is all a valid reply needs; a forged one can
-/// list the forger's machines with their host keys pinned, and it passes
-/// `accept_manifest` too. The ceremony's module note names this risk for the
-/// QR leg ("filmed the first code, is in the room"), and the relay removes "in
-/// the room": the posters are the account itself and its teammates. What stops
-/// a forged reply is the browser's comparison code (slice 8): six characters
-/// over the manifest that the person matches against the granting phone's
-/// screen before anything is kept. `posted_by` and `posted_by_email` are there
-/// so the browser can say who a reply is from, and refuse a teammate's reply
-/// whose `granted_by` names someone else (ov-778 R-113); neither proves
-/// anything about the runners inside.
+/// Teammate replies are device-signed and carry ceremony-bound runner
+/// attestations (ov-1020). The read supplies independent current directory
+/// authority; the browser checks every runner and the device signature before
+/// offering the reply. Same-account replies still require the in-person code.
 
 import { requireAccount } from './session'
+import { holds, type HoldRow } from './directory/hold'
 import { readLimited } from './heartbeat-body'
 import { json, type Env } from './index'
 
-/// The largest body `POST` takes. A manifest at the ceremony's byte budget
-/// (`BUDGET`, 1800) seals to under 2.5 KB of base64url; the Rust test
-/// `a_manifest_over_budget_is_not_sealed_and_one_at_budget_fits_the_relay`
-/// holds the two numbers together.
-export const REPLY_MAX = 4096
+/// Signed replies add one attestation per runner: at most 8 KB plaintext,
+/// about 11 KB after HPKE and base64url, plus the request's identifiers.
+export const REPLY_MAX = 12288
 
 /// How many replies one ceremony and account holds, and so the most one read
 /// returns. One per poster: the account itself, always let in, and up to three
@@ -173,8 +161,9 @@ async function takeReplies(request: Request, env: Env, ceremony: string): Promis
     .bind(...posters)
     .all<{ id: string; email: string | null }>()
   const emailOf = new Map(emails.results.map(row => [row.id, row.email]))
+  const authority = new Map(await Promise.all(posters.filter(p => p !== reader).map(async p => [p, await replyAuthority(env, p, reader)] as const)))
   return json(
-    { replies: replies.map(row => ({ sealed: row.sealed, posted_by: row.posted_by, posted_by_email: emailOf.get(row.posted_by) ?? null })) },
+    { replies: replies.map(row => ({ authority: authority.get(row.posted_by), sealed: row.sealed, posted_by: row.posted_by, posted_by_email: emailOf.get(row.posted_by) ?? null })) },
     200,
     NO_STORE,
   )
@@ -201,4 +190,22 @@ function looksSealed(sealed: string): boolean {
     return false
   }
   return bytes.length >= SEALED_MIN_BYTES && !PLAINTEXT.some(marker => bytes.includes(marker))
+}
+
+/// Current authority, read after taking the ciphertext. Runner identities are
+/// their registered keys, not a phone's local ids. A device held after an
+/// account reset is withheld here even if the feature flag for roster UI is off.
+async function replyAuthority(env: Env, poster: string, reader: string): Promise<{ devices: string[]; runners: string[] }> {
+  const devices = await env.DB.prepare(`SELECT id, state, trust_reset, trusted_at, certified_by, key_a_fingerprint
+    FROM device_keys WHERE account_id = ?`).bind(poster).all<HoldRow & { key_a_fingerprint: string }>()
+  const standing = holds(devices.results, Date.now())
+  const eligible = devices.results.filter(d => (d.state === 'trusted' || d.state === 'certified')
+    && !standing.unrooted.has(d.id) && !standing.since.has(d.id))
+  const runners = await env.DB.prepare(`SELECT DISTINCT n.runner_key_fingerprint FROM runners n
+    JOIN runner_roles r ON r.runner_id = n.id AND r.account_id = ? AND r.role IN ('owner', 'admin')
+    JOIN memberships p ON p.team_id = n.team_id AND p.account_id = ? AND p.role IN ('admin', 'member')
+    JOIN memberships m ON m.team_id = n.team_id AND m.account_id = ? AND m.role IN ('admin', 'member')
+    JOIN teams t ON t.id = n.team_id AND t.personal_of IS NULL`).bind(poster, poster, reader)
+    .all<{ runner_key_fingerprint: string }>()
+  return { devices: eligible.map(d => d.key_a_fingerprint), runners: runners.results.map(r => r.runner_key_fingerprint) }
 }

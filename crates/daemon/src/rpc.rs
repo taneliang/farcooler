@@ -612,7 +612,7 @@ fn scope_of(method: Method) -> Scope {
         // check who may do what themselves, and a step-up carries the rest.
         // So are a Mac's ask for its phone to approve and the phone's answer (ov-858).
         Method::AuthChallenge | Method::ClientSetStepUpKey | Method::ClientApproveStepUp | Method::ApprovalAsk | Method::ApprovalList | Method::ApprovalGrant | Method::ApprovalStatus | Method::ApprovalDeny => Scope::Control,
-        Method::ClientRevoke => Scope::HostAdmin,
+        Method::ClientRevoke | Method::CeremonyAuthority => Scope::HostAdmin,
         // Who is on the runner, as the device list is; saying so is who may log
         // in's weight. A rep opens an agent pane: `host_admin`, or its member's
         // own device, checked in `rpc_people` (ov-494).
@@ -991,6 +991,22 @@ impl Rpc {
                 crate::person_access::enroll(svc, &self.peer, self.caller_pid, &self.session, self.stepped.get(), p).await
             }
 
+            "ceremony.authority" => {
+                let Some(request::Payload::CeremonyAuthority(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                let device = self.peer.client_id.as_deref().ok_or(DomainError::AuthRequired)?;
+                let fingerprint = crate::enrollment::key_of(svc, device).await.ok_or(DomainError::AuthRequired)?;
+                let offer = farcooler_ceremony::decode_offer(&p.offer)
+                    .map_err(|_| DomainError::InvalidArgument { what: "offer" })?;
+                let key = crate::runner_key::RunnerKey::load_or_create_in(svc.root_dir())
+                    .map_err(|_| DomainError::OperationFailed)?;
+                let signature = key.ceremony_authority(&offer, &fingerprint)
+                    .map_err(|_| DomainError::OperationFailed)?;
+                Ok(result::Value::CeremonyAuthority(farcooler_protocol::v1::CeremonyAuthorityReply {
+                    runner_key: key.public_line(), device: fingerprint, signature,
+                }))
+            }
             // Removes the line AND closes what the line let in — see
             // `enrollment::revoke` for exactly what that does and does not
             // contain.

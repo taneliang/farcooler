@@ -50,6 +50,10 @@ class SealedReply {
     var post: suspend (ceremony: String, account: String, sealed: String) -> SealedReplyPost.Outcome =
         { _, _, _ -> SealedReplyPost.Outcome.NOT_SIGNED_IN }
 
+    /** Live runner attestations and this phone's Key A; neither defaults to a guess. */
+    var authority: suspend (runner: String, offer: String) -> JsonObject? = { _, _ -> null }
+    var privateKey: () -> String? = { null }
+
     private val _state = MutableStateFlow(State.NONE)
     val state: StateFlow<State> = _state.asStateFlow()
 
@@ -73,11 +77,23 @@ class SealedReply {
      * Every refusal posts nothing: the core is the only judge of the key, the
      * freshness window and whether the reply answers this offer.
      */
-    suspend fun send(core: CeremonyCalls, offerJson: String, replyJson: String, heldMs: Long) {
+    suspend fun send(core: CeremonyCalls, offerJson: String, replyJson: String, heldMs: Long, teammate: Boolean = false) {
         reset()
         val asked = CeremonyCore.decode(offerJson, CeremonyOffer.serializer()) ?: return
         if (asked.replyKey == null) return
-        val sealed = (core.seal(offerJson, replyJson, heldMs) as? CeremonyCore.Answer.Payload)
+        val started = (System.nanoTime() / 1_000_000)
+        val answer = if (teammate) {
+            val manifest = CeremonyCore.decode(replyJson, CeremonyManifest.serializer())
+            val key = privateKey()
+            val authorities = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
+            for (runner in manifest?.runners.orEmpty()) {
+                authority(runner.id, offerJson)?.let { authorities[runner.id] = it }
+            }
+            if (manifest == null || key == null) CeremonyCore.Answer.Refused(Refusal.Unknown)
+            else core.sealTeammate(offerJson, replyJson, key, JsonObject(authorities).toString(),
+                if (heldMs == Long.MAX_VALUE) heldMs else heldMs + (System.nanoTime() / 1_000_000) - started)
+        } else core.seal(offerJson, replyJson, heldMs)
+        val sealed = (answer as? CeremonyCore.Answer.Payload)
             ?.let { sealedOf(it.json) }
         if (sealed == null) {
             _state.value = State.NOT_SENT

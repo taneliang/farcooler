@@ -799,6 +799,25 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonySeal(
     })
 }
 
+/// Device-signed teammate browser reply (ov-1020), with live runner attestations.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonySealTeammate(
+    mut env: JNIEnv, _class: JClass, offer_json: JString, manifest_json: JString,
+    private_key: JString, authorities_json: JString, held_ms: jlong,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let offer = c_string(&mut env, &offer_json);
+        let manifest = c_string(&mut env, &manifest_json);
+        let key = c_string(&mut env, &private_key);
+        let authorities = c_string(&mut env, &authorities_json);
+        let pointer = |v: &Option<CString>| v.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_seal_teammate(pointer(&offer), pointer(&manifest),
+                pointer(&key), pointer(&authorities), held_ms.max(0) as u64, out, capacity)
+        })
+    })
+}
+
 /// A sealed reply, opened with the reply key's secret half and taken, or
 /// refused: `nativeCeremonyAccept` for a reply that came through the relay.
 /// Answers `{"manifest","code"}`, the code from the opener's exporter.

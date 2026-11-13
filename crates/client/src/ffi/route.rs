@@ -154,6 +154,7 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // The app's step-up arrives with its Face ID prompt (ov-856, slice 4).
         // Reached through `step_up.begin`, `step_up.finish` and `step_up.propose`,
         // which build them with the bytes a key signs.
+        Method::CeremonyAuthority => Some(method.name()),
         Method::AuthChallenge | Method::ClientSetStepUpKey => None,
         // A Mac's ask for its iPhone to approve an admin action, and the
         // iPhone's side of it (ov-858): `approval_args`.

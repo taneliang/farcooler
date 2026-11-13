@@ -1162,7 +1162,7 @@ final class CeremonyStore: ObservableObject {
             // A teammate's browser can't scan the reply (ov-778): its offer
             // names a reply key, so the reply is sealed to it and posted once,
             // for the teammate's account, as for one's own browser (ov-770).
-            sealedReply.send(offer: rescanned, reply: data, heldFor: scannedAt.map { Date().timeIntervalSince($0) } ?? .infinity)
+            sealedReply.send(offer: rescanned, reply: data, heldFor: scannedAt.map { Date().timeIntervalSince($0) } ?? .infinity, teammate: true)
         }
     }
 

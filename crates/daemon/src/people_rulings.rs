@@ -139,7 +139,7 @@ pub fn member_ruling(method: M) -> Ruling {
 
         // A device's own step-up (ov-856): a nonce, its key, and an approval
         // that `step_up_rpc` holds to the same person.
-        M::AuthChallenge
+        M::CeremonyAuthority | M::AuthChallenge
         | M::ClientSetStepUpKey
         | M::ClientApproveStepUp
         // A Mac's ask for its person's phone to approve an action, and that

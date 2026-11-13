@@ -57,6 +57,7 @@ import com.farcooler.ceremony.TeamDirectory
 import com.farcooler.ceremony.TeammateAccessRules
 import com.farcooler.ceremony.TeammateEnroller
 import com.farcooler.net.enrollTeammate
+import com.farcooler.net.ceremonyAuthority
 import com.farcooler.net.teammateFacts
 import kotlinx.coroutines.launch
 
@@ -96,6 +97,8 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
             it.teamDirectory = { TeamDirectory.fetch(model.account::directoryPost) }
             it.teammateFacts = { runner, account -> model.fleet.connection(runner.id)?.teammateFacts(account) }
             // A browser's offer: its sealed reply goes to this account's relay (ov-770).
+            it.sealedReply.privateKey = com.farcooler.data.Identity::privateKey
+            it.sealedReply.authority = { runner, offer -> model.fleet.connection(runner)?.ceremonyAuthority(context, offer) }
             it.sealedReply.post = { ceremony, account, sealed ->
                 SealedReplyPost.send(model.account::directoryPost, ceremony, account, sealed)
             }

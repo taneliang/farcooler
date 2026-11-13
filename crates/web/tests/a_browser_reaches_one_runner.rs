@@ -53,9 +53,7 @@ fn granted_runner(host_key: &str) -> enroll::Granted {
         pending: false,
         pending_why: None,
     };
-    let reply = farcooler_ceremony::encode_manifest(&farcooler_ceremony::manifest(&offer, vec![entry]));
-    let manifest = enroll::accept(&reply, &offer, false, 0.0, 0.0).expect("the browser accepts its own reply");
-    enroll::granted(&manifest).remove(0)
+    support::open_own_reply(&offer, &farcooler_ceremony::manifest(&offer, vec![entry])).remove(0)
 }
 
 async fn dial(stream: tokio::io::DuplexStream, granted: &enroll::Granted, client_key: &str) -> Result<Runner, WebError> {
@@ -199,7 +197,7 @@ fn only_a_written_tunneled_runner_is_dialable_from_a_browser() {
             entry("address", Reach::Direct { host: "box.local".into(), port: 22 }, false),
         ],
     ));
-    let granted = enroll::granted(&enroll::accept(&reply, &offer, false, 0.0, 0.0).unwrap());
+    let granted = support::open_own_reply(&offer, &serde_json::from_str(&reply).unwrap());
     let why: Vec<(&str, &str, &str)> =
         granted.iter().map(|g| (g.id.as_str(), g.token.as_str(), g.why.as_str())).collect();
     assert_eq!(

@@ -1013,3 +1013,35 @@ async fn with_no_first_key_code_a_phone_is_refused() {
     let none = word(call(&conn, phone.step(&r.pin, req, &n)).await);
     assert!(none.ends_with("first_key_wrong"), "{none}");
 }
+
+/// Ov-1020: a Control device cannot mint runner authority with the actual
+/// dispatcher, and even an admin must perform the ceremony's own step-up.
+#[tokio::test]
+async fn ceremony_authority_requires_live_admin_and_attests_the_authenticated_key() {
+    let r = runner().await;
+    std::fs::set_permissions(r.svc.root_dir(), std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    let secret = farcooler_ceremony::ReplyKey::generate();
+    let mut offer = farcooler_ceremony::offer("Browser", "bob", &key(42), None);
+    offer.reply_key = Some(secret.public().into());
+    let req = Request { method: "ceremony.authority".into(), payload: Some(request::Payload::CeremonyAuthority(
+        pb::CeremonyAuthorityRequest { offer: farcooler_ceremony::encode_offer(&offer) })), ..Default::default() };
+    let conn = r.conn("phone-o");
+    assert!(word(call(&conn, req.clone()).await).starts_with("scope-denied"));
+    let phone = Device::new("phone-o", 51);
+    r.trust(&phone, ALG_DEVICE);
+    assert!(word(call(&conn, req.clone()).await).contains("step_up_needed"));
+    let n = nonce(&conn).await;
+    let result::Value::CeremonyAuthority(a) = call(&conn, phone.step(&r.pin, req.clone(), &n)).await.unwrap() else { panic!("authority") };
+    assert_eq!(a.device, farcooler_ceremony::fingerprint(&key(1)).unwrap());
+    let sig = ssh_key::SshSig::from_pem(a.signature).unwrap();
+    ssh_key::PublicKey::from_openssh(&a.runner_key).unwrap().verify(
+        farcooler_ceremony::signed::RUNNER_NAMESPACE,
+        &farcooler_ceremony::signed::authority_statement(&offer, &a.device), &sig).unwrap();
+    let member = Device::new("phone-b", 52);
+    r.trust(&member, ALG_DEVICE);
+    let conn = r.conn("phone-b");
+    let n = nonce(&conn).await;
+    assert!(call(&conn, member.step(&r.pin, req.clone(), &n)).await.is_err());
+    // The socket cannot manufacture a named device's attestation.
+    assert!(call(&r.socket(), req).await.is_err());
+}

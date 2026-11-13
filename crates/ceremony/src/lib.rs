@@ -247,27 +247,8 @@ pub struct RunnerEntry {
     pub pending_why: Option<String>,
 }
 
-/// The reply: the runners a trusted device granted, addressed to one ceremony.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Manifest {
-    pub v: u8,
-    pub ceremony: String,
-    pub account: String,
-    pub channel: String,
-    /// The fingerprint of the Key A this reply answers, so it can be consumed
-    /// only by the device that asked.
-    pub target: String,
-    pub runners: Vec<RunnerEntry>,
-    /// Whose runners these are, when they aren't the new device's own
-    /// account's: the granting admin's email, so a teammate's device asks
-    /// "Join …'s runners?" before it adds them (ov-525). Absent on a
-    /// same-account reply, and from older builds.
-    ///
-    /// Shown, never trusted: the reply leg is unauthenticated (see the module
-    /// note), so this is a name for a confirmation, not a proof of anything.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub granted_by: Option<String>,
-}
+mod manifest;
+pub use manifest::Manifest;
 
 /// Why a code was refused.
 ///
@@ -433,6 +414,7 @@ pub fn accept_offer(encoded: &str, expecting_account: &str) -> Result<Offer, Cer
 /// and the new device already holds the key to compare it against.
 pub fn manifest(offer: &Offer, runners: Vec<RunnerEntry>) -> Manifest {
     Manifest {
+        proof: None,
         v: VERSION,
         ceremony: offer.ceremony.clone(),
         account: offer.account.clone(),
@@ -1498,3 +1480,6 @@ mod tests {
         assert_eq!(decode_offer(&v1_offer_json("phone", "acct", KEY_A)).expect("older").model, "");
     }
 }
+
+/// Device-signed teammate replies, pinned to live runner authority.
+pub mod signed;

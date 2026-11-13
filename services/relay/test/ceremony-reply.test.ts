@@ -83,7 +83,7 @@ async function team(id: string, members: [string, 'admin' | 'member' | 'billing'
 }
 
 /// What a read answers with, for one reply.
-const one = (sealed: string, postedBy: string) => ({ replies: [{ sealed, posted_by: postedBy, posted_by_email: null }] })
+const one = (sealed: string, postedBy: string, own = postedBy === ALICE) => ({ replies: [{ sealed, posted_by: postedBy, posted_by_email: null, ...(own ? {} : { authority: { devices: [], runners: [] } }) }] })
 
 /// A sealed-shaped reply that isn't the fixture: 64 bytes of `n`.
 const junk = (n: number) => base64Url(new Uint8Array(64).fill(n))
@@ -140,8 +140,8 @@ describe('the sealed ceremony reply', () => {
     expect((await post('dave', { ceremony: CEREMONY, account: ALICE, sealed: junk(1) })).status).toBe(200)
     expect((await take(ALICE)).body).toEqual({
       replies: [
-        { sealed: fixture.sealed, posted_by: 'carol', posted_by_email: null },
-        { sealed: junk(1), posted_by: 'dave', posted_by_email: null },
+        { sealed: fixture.sealed, posted_by: 'carol', posted_by_email: null, authority: { devices: [], runners: [] } },
+        { sealed: junk(1), posted_by: 'dave', posted_by_email: null, authority: { devices: [], runners: [] } },
       ],
     })
   })
@@ -155,7 +155,7 @@ describe('the sealed ceremony reply', () => {
     expect((await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed: junk(2) })).status).toBe(200)
     const { replies } = (await take(ALICE)).body as { replies: Record<string, unknown>[] }
     expect(replies).toEqual([
-      { sealed: fixture.sealed, posted_by: 'carol', posted_by_email: 'carol@example.com' },
+      { sealed: fixture.sealed, posted_by: 'carol', posted_by_email: 'carol@example.com', authority: { devices: [], runners: [] } },
       // No email on file is said as none, never as someone else's.
       { sealed: junk(2), posted_by: ALICE, posted_by_email: null },
     ])
@@ -190,7 +190,7 @@ describe('the sealed ceremony reply', () => {
     expect((await post('mallory', { ceremony: CEREMONY, account: 'mallory', sealed: junk(9) })).status).toBe(200)
     expect((await post(ALICE)).status).toBe(200)
     expect((await take(ALICE)).body).toEqual(one(fixture.sealed, ALICE))
-    expect((await take('mallory')).body).toEqual(one(junk(9), 'mallory'))
+    expect((await take('mallory')).body).toEqual(one(junk(9), 'mallory', true))
   })
 
   it('doesn’t let a teammate’s junk post block the account’s own', async () => {
@@ -248,7 +248,7 @@ describe('the sealed ceremony reply', () => {
   })
 
   it('refuses a body over 4 KB, and takes one at exactly 4 KB', async () => {
-    expect(REPLY_MAX).toBe(4096)
+    expect(REPLY_MAX).toBe(12288)
     const body = JSON.stringify({ ceremony: CEREMONY, account: ALICE, sealed: fixture.sealed })
     const atLimit = body + ' '.repeat(REPLY_MAX - body.length)
     expect((await post(ALICE, atLimit + ' ')).status).toBe(413)
@@ -359,5 +359,38 @@ describe('what the relay holds of a reply', () => {
     }
     expect(await stored()).toEqual([])
     expect(await everywhere()).not.toContain(HOST_KEY)
+  })
+})
+
+
+describe('device-signed teammate reply authority (ov-1020)', () => {
+  it('pins only current admin runners and rooted, confirmed devices, independently of the poster’s ciphertext', async () => {
+    await team('signing-team', [['carol', 'admin'], [ALICE, 'member']])
+    const now = Date.now()
+    for (const [id, state, reset, parent] of [
+      ['trusted', 'trusted', 0, null], ['certified', 'certified', 0, 'trusted'],
+      ['pending', 'pending', 0, null], ['revoked', 'revoked', 0, null],
+      ['held', 'trusted', 1, null], ['held-child', 'certified', 0, 'held'],
+      ['unrooted', 'certified', 0, 'revoked'],
+    ] as const) {
+      await env.DB.prepare(`INSERT INTO device_keys (id, account_id, label, key_a, key_a_fingerprint, state,
+        trust_reset, trusted_at, certified_by, created_at) VALUES (?, 'carol', ?, 'public', ?, ?, ?, ?, ?, ?)`)
+        .bind(id, id, `SHA256:${id}`, state, reset, now, parent, now).run()
+    }
+    await env.DB.prepare(`INSERT INTO runners (id, team_id, runner_key, runner_key_fingerprint, install_key, name, created_at)
+      VALUES ('runner', 'signing-team', 'public', 'SHA256:runner', 'install', 'Runner', ?)` ).bind(now).run()
+    await env.DB.prepare(`INSERT INTO runner_roles (runner_id, account_id, role, signature, granted_at)
+      VALUES ('runner', 'carol', 'admin', 'signed', ?)` ).bind(now).run()
+    await post('carol')
+    let answer = (await take(ALICE)).body.replies[0]
+    expect(answer.authority.devices.sort()).toEqual(['SHA256:certified', 'SHA256:trusted'])
+    expect(answer.authority.runners).toEqual(['SHA256:runner'])
+    // Revocation and role loss are read now, even when the ciphertext was
+    // posted before them. No enrollment feature flag can turn this off.
+    await post('carol')
+    await env.DB.prepare(`UPDATE device_keys SET state = 'revoked' WHERE id = 'trusted'`).run()
+    await env.DB.prepare(`DELETE FROM runner_roles WHERE runner_id = 'runner'`).run()
+    answer = (await take(ALICE)).body.replies[0]
+    expect(answer.authority).toEqual({ devices: [], runners: [] })
   })
 })

@@ -1743,7 +1743,7 @@ async fn dispatch(
         // A runner admin's switch: members' own logins, `{harness, on}` (ov-652).
         "member.set_own_login" => rep_args::set_own_login(session, args).await,
         "approval.ask" | "approval.status" | "approval.finish" | "approval.list" | "approval.grant" | "approval.deny" => approval_args::call(session, method, args).await,
-        "step_up.begin" | "step_up.finish" | "step_up.propose" | "client.approve_step_up" | "member.set_access" | "client.set_cap" => step_up_args::call(session, method, args).await,
+        "ceremony.authority" | "step_up.begin" | "step_up.finish" | "step_up.propose" | "client.approve_step_up" | "member.set_access" | "client.set_cap" => step_up_args::call(session, method, args).await,
         // The owner gives a member a role, `{handle, role}` (ov-784).
         "member.set_role" => rep_args::set_role(session, args).await,
         // The owner's Add Teammate, one runner's half (ov-854): not a wire
@@ -3203,7 +3203,7 @@ use reach::push_connect;
 mod teammate;
 pub use teammate::{farcooler_client_ceremony_scan_teammate, farcooler_client_ceremony_teammate_reply};
 mod sealed_reply;
-pub use sealed_reply::{farcooler_client_ceremony_seal, farcooler_client_ceremony_take_sealed};
+pub use sealed_reply::{farcooler_client_ceremony_seal_teammate, farcooler_client_ceremony_seal, farcooler_client_ceremony_take_sealed};
 mod device_keys;
 pub use device_keys::{farcooler_client_device_certificate, farcooler_client_device_registration, farcooler_client_rekey_proof};
 use board_reads_args::mark_read_of;

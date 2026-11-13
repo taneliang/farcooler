@@ -39,8 +39,7 @@ async fn connect() -> (Runner, Arc<Seen>) {
         pending_why: None,
     };
     let reply = farcooler_ceremony::encode_manifest(&farcooler_ceremony::manifest(&offer, vec![entry]));
-    let manifest = enroll::accept(&reply, &offer, false, 0.0, 0.0).unwrap();
-    let granted = enroll::granted(&manifest).remove(0);
+    let granted = support::open_own_reply(&offer, &serde_json::from_str(&reply).unwrap()).remove(0);
     let mut signer = Ed25519InMemory(key(BROWSER_KEY));
     let conn = ssh::connect(browser_side, &granted.host_key, &granted.user, &line(BROWSER_KEY), &mut signer).await.unwrap();
     (Runner::start(conn).await.expect("connects"), seen)

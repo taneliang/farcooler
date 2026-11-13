@@ -5,7 +5,7 @@
 ///    every hashed file and an open tab must not ask for one that's gone.
 /// 2. A browser with no runners shows today's v2 offer as a QR code. The phone
 ///    runs its existing ceremony on it, and the browser reads the phone's reply
-///    through the camera. crates/web accepts the reply with the ceremony's own
+///    sealed through the relay. crates/web accepts it with the ceremony's own
 ///    rules and keeps each runner's host key.
 /// 3. A browser with runners dials the first one it can reach through the
 ///    tunnel, SSHes in with that host key pinned, lists its terminals and
@@ -23,9 +23,9 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { acceptReply, connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, planView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, planView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
-import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, replyRefusal, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
+import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
 import { Fleet, type RunnerDeps } from './fleet'
 import { type BoardView, buttonsFor, countLabel, countOf, isCounted, pageTitle } from './needs'
@@ -42,7 +42,7 @@ import { type Answer, DetailSheet } from './detail-view'
 import { corePhrases } from './core-phrases'
 import { useConversationWords } from './chat-copy'
 import { askToUsePasskey } from './passkey-prompt'
-import { drawCode, scan } from './qr'
+import { drawCode } from './qr'
 import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
@@ -346,7 +346,7 @@ async function register(session: Session): Promise<void> {
 /// wrote it, and everything a forged reply must echo is printed in the code. So
 /// a stored code past the window is discarded for a new one, a code on screen
 /// is replaced when it expires, and a reply that comes later is refused in
-/// wasm (`acceptReply`).
+/// wasm (`openReply`).
 async function enroll(session: Session, notice = ''): Promise<void> {
   const { device } = session
   clearTimeout(retiring)
@@ -374,11 +374,10 @@ async function enroll(session: Session, notice = ''): Promise<void> {
   note.textContent = notice
   note.hidden = notice === ''
   show('enroll')
-  // Replaced on time, unless the camera is open: a reply read then is judged
-  // by the window anyway, and a new code mid-scan would only confuse.
+  // A reply to the retired code is refused by the same freshness window.
   retiring = window.setTimeout(() => {
-    if ($('enroll').hidden || !$('camera').hidden) return
-    void enroll(session, 'That code expired, so here’s a new one. Scan it with your phone, then scan its reply within two minutes.')
+    if ($('enroll').hidden) return
+    void enroll(session, 'That code expired, so here’s a new one. Scan it with your phone, then compare the code it sends back.')
   }, Math.max(0, (device.offerShownAt ?? 0) + freshnessMs() - Date.now()) + 500)
 
   void waitForSealedReply(session, note)
@@ -390,29 +389,7 @@ async function enroll(session: Session, notice = ''): Promise<void> {
     await saveDevice(device)
     void enroll(session)
   }
-  $<HTMLButtonElement>('scan').onclick = async () => {
-    const camera = $('camera')
-    camera.hidden = false
-    note.hidden = true
-    let scanning: { stop: () => void } | null = null
-    $<HTMLButtonElement>('camera-cancel').onclick = () => {
-      scanning?.stop()
-      camera.hidden = true
-    }
-    try {
-      scanning = await scan($<HTMLVideoElement>('camera-video'), text => {
-        // The offer's own code is on this screen too; only a reply counts.
-        if (!/"runners"\s*:/.test(text)) return false
-        camera.hidden = true
-        void takeReply(session, text)
-        return true
-      })
-    } catch {
-      camera.hidden = true
-      note.textContent = "Far Cooler can’t use a camera here. Allow camera access for this site, then select Scan Reply again."
-      note.hidden = false
-    }
-  }
+
 }
 
 /// Wait for the phone's sealed reply to the code on screen. When one opens, the
@@ -486,31 +463,7 @@ async function keep(session: Session, opened: Opened): Promise<void> {
   await finishTaken(session, { granted_by: opened.granted_by, runners: opened.runners })
 }
 
-async function takeReply(session: Session, reply: string): Promise<void> {
-  const { device } = session
-  let taken: { granted_by: string | null; runners: Granted[] }
-  try {
-    taken = JSON.parse(acceptReply(reply, device.offer ?? '', !device.offer, device.offerShownAt ?? 0))
-  } catch (e) {
-    const word = (e as Error).message
-    if (word === 'stale') {
-      // Too late for this code, and so for any reply to it: a new one.
-      delete device.offer
-      delete device.offerShownAt
-      await saveDevice(device)
-      void enroll(session, replyRefusal(word))
-      return
-    }
-    const note = $('enroll-note')
-    note.textContent = replyRefusal(word)
-    note.hidden = false
-    return
-  }
-  await finishTaken(session, taken)
-}
-
-/// A reply the person has accepted (a scanned one, or a sealed one whose code
-/// they matched): the offer is spent, so a second reply to it is refused.
+/// A sealed reply whose code the person matched spends the offer.
 async function finishTaken(session: Session, taken: { granted_by: string | null; runners: Granted[] }): Promise<void> {
   const { device } = session
   stopPolling()

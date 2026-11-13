@@ -62,9 +62,9 @@ pub const ALG_WEBAUTHN: &str = "webauthn-es256";
 
 /// The methods that take a step-up from a remote device. `step_up` on any
 /// other is refused (S9).
-pub const METHODS: [&str; 8] = [
+pub const METHODS: [&str; 9] = [
     "client.revoke", "client.enroll", "member.set", "member.remove", "member.set_role", "client.approve_step_up",
-    "member.set_access", "client.set_cap",
+    "member.set_access", "client.set_cap", "ceremony.authority",
 ];
 
 /// The methods that may carry a step-up and never need one (ov-974): a

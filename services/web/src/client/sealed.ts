@@ -9,8 +9,8 @@
 ///    the reply posted by the offer's own account wins, and only with none does
 ///    the earliest teammate's open (crates/web `enroll::earliest` decides).
 /// 2. **The code is this browser's own**, from its own open of that reply. A
-///    reply sealed by anyone but the person's phone opens, and shows another
-///    code than the phone's: that difference is the only defense there is.
+///    same-account reply still relies on this comparison. A teammate's reply
+///    also needs its device signature and directory-pinned runner attestations.
 /// 3. **Nothing is kept until the person says the codes match**
 ///    ([`confirmCodes`] is the only way an opened reply reaches `keep`).
 ///

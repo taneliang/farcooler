@@ -201,7 +201,7 @@ names an X25519 `reply_key`, and the phone seals the reply to it with HPKE
 (`crates/ceremony/src/seal.rs`). The relay holds ciphertext and who posted it.
 It never sees a runner, a host key or a token.
 
-- `POST /v1/ceremony/reply` takes `{ceremony, account, sealed}`, at most 4 KB.
+- `POST /v1/ceremony/reply` takes `{ceremony, account, sealed}`, at most 12 KB.
   The poster must be signed in as `account`, or be its teammate: both `admin`
   or `member` of a team that isn't personal, the rule `teammate.rs` uses for
   granting (`TEAMMATE_RULE`). Anyone else gets 403. Each poster gets one reply
@@ -216,15 +216,31 @@ It never sees a runner, a host key or a token.
   refusal is the same 404.
 - Both routes spend `CEREMONY_REPLY_LIMIT`, 120 a minute per account.
 
-**What the seal doesn't stop.** The offer is public, so anyone who saw it and
-may post can seal a reply that opens and passes the ceremony's checks, listing
-their own machines. The relay narrows who that can be to the account and its
-teammates. What stops it is the browser's comparison code (web slice 8): the
-person matches six characters computed over the reply against the granting
-phone's screen before the browser keeps anything. A teammate's reply is
-opened only when its `granted_by` is its poster's email, and the comparison
-screen names that teammate, so a reply from Carol can't pass as Alice's
-(ov-778 R-113).
+**Teammate reply authority (ov-1020).** HPKE alone authenticates no sender.
+For a teammate, the phone obtains a `ceremony.authority` attestation from each
+live runner after its normal admin/step-up gate. The runner signs this offer's
+ceremony, account, channel, target, reply key and the actual connection's device
+fingerprint in the `farcooler-ceremony-authority-v1` SSH namespace. The phone
+then signs the complete manifest and attestations with Key A in the separate
+`farcooler-teammate-reply-v1` namespace, and seals that signed reply. Runner ids
+in it are runner-key fingerprints, replacing the phone's local ids.
+
+The read includes independent `authority` for each teammate poster: current
+rooted trusted/certified device fingerprints and registered runner fingerprints
+that the poster administers in a team shared with the reader. Pending, revoked,
+unrooted and reset-held devices are excluded, regardless of the roster feature
+flag. Reset-held devices remain conservatively excluded here until their hold
+ends, even if a team's admin already confirmed them. The browser checks every
+runner's attestation and the whole device signature against this authority;
+missing, legacy and mismatched proofs fail closed. `granted_by` must also match
+the poster's verified email. The same-account reply still relies on its
+session-authenticated poster and the in-person comparison code.
+
+The browser has no raw QR reply fallback: a reply with its grantor field removed
+cannot bypass these checks. Both screens still compare the HPKE exporter code
+before anything is kept. Signed plaintext is bounded at 8 KB; ordinary QR
+manifests retain their 1,800-byte budget. The relay stores only ciphertext;
+authority metadata is looked up at read time, never taken from the poster.
 
 ## Browsers' sealed copies
 

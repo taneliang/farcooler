@@ -100,30 +100,67 @@ final class SealedReply: ObservableObject {
     /// `reply_key` is read here only to decide whether to ask the core at all.
     /// Every refusal posts nothing: the core is the only judge of the key, the
     /// freshness window and whether the reply answers this offer.
-    func send(offer: Data, reply: Data, heldFor: TimeInterval) {
+    func send(offer: Data, reply: Data, heldFor: TimeInterval, teammate: Bool = false) {
         reset()
         guard let asked = try? JSONDecoder().decode(CeremonyOffer.self, from: offer),
             asked.reply_key != nil
         else { return }
-        guard case .payload(let data) = CeremonyCore.seal(offer: offer, reply: reply, heldFor: heldFor),
-            let sealed = try? JSONDecoder().decode(Sealed.self, from: data)
-        else {
-            state = .notSent
-            return
-        }
-        hostKeys = ((try? JSONDecoder().decode(CeremonyManifest.self, from: reply))?.runners ?? [])
-            .map { (label: $0.label, hostKey: $0.host_key) }
         state = .sending
+        let started = Date()
         let post = self.post
         sending = Task {
+            let answer: CeremonyCore.Answer
+            if teammate {
+                answer = await Self.signed(offer: offer, reply: reply, heldFor: heldFor, started: started)
+            } else {
+                answer = CeremonyCore.seal(offer: offer, reply: reply, heldFor: heldFor)
+            }
+            guard !Task.isCancelled else { return }
+            guard case .payload(let data) = answer,
+                let sealed = try? JSONDecoder().decode(Sealed.self, from: data)
+            else {
+                state = .notSent
+                return
+            }
+            hostKeys = ((try? JSONDecoder().decode(CeremonyManifest.self, from: reply))?.runners ?? [])
+                .map { (label: $0.label, hostKey: $0.host_key) }
             let outcome = await post(asked.ceremony, asked.account, sealed.sealed)
-            // A delivery is a delivery even when the screen has moved on, so a
-            // later send for this ceremony can show its code (ov-778 F3).
             if outcome == .posted { delivered[asked.ceremony] = sealed.code }
             guard !Task.isCancelled else { return }
             let first = outcome == .alreadyPosted ? delivered[asked.ceremony] : nil
             code = outcome.showsCode ? sealed.code : first
             state = outcome == .posted || first != nil ? .sent : .notSent
+        }
+    }
+
+    /// The runner attests to the actual authenticated device after its normal
+    /// admin/Face ID gate. A disconnected or older runner cannot be vouched for.
+    private static func signed(offer: Data, reply: Data, heldFor: TimeInterval, started: Date) async -> CeremonyCore.Answer {
+        guard let manifest = try? JSONDecoder().decode(CeremonyManifest.self, from: reply),
+            let privateKey = Identity.privateKey(), let offerText = String(data: offer, encoding: .utf8),
+            let replyText = String(data: reply, encoding: .utf8)
+        else { return .refused(.unknown) }
+        var authorities: [String: Any] = [:]
+        for runner in manifest.runners {
+            guard let id = UUID(uuidString: runner.id), let connection = Connection.live(for: id),
+                let authority = await connection.ceremonyAuthority(offer: offerText)
+            else { return .refused(.unknown) }
+            authorities[runner.id] = authority
+        }
+        guard !Task.isCancelled,
+            let encoded = try? JSONSerialization.data(withJSONObject: authorities),
+            let authorityText = String(data: encoded, encoding: .utf8)
+        else { return .refused(.unknown) }
+        return offerText.withCString { offer in
+            replyText.withCString { reply in
+                privateKey.withCString { key in
+                    authorityText.withCString { authorities in
+                        CeremonyCore.answer { farcooler_client_ceremony_seal_teammate(
+                            offer, reply, key, authorities,
+                            CeremonyCore.milliseconds(heldFor + Date().timeIntervalSince(started)), $0, $1) }
+                    }
+                }
+            }
         }
     }
 

@@ -50,6 +50,7 @@ pub(super) fn build(method: &str, args: &serde_json::Value) -> Result<farcooler_
     };
     let mut target = None;
     let payload = match method {
+        "ceremony.authority" => request::Payload::CeremonyAuthority(farcooler_protocol::v1::CeremonyAuthorityRequest { offer: need("offer")? }),
         "client.revoke" => request::Payload::ClientRevoke(farcooler_protocol::v1::ClientRevoke {
             client_id: need("clientId")?,
             with_added: flag("withAdded"),
@@ -228,6 +229,7 @@ impl Session {
 /// answers: the device list, an enrollment, the people, or a key's state.
 pub(crate) fn value_json(value: &result::Value) -> Result<serde_json::Value, SessionError> {
     Ok(match value {
+        result::Value::CeremonyAuthority(a) => json!({ "runner_key": a.runner_key, "device": a.device, "signature": a.signature }),
         result::Value::ClientList(l) => enrolled_json(&l.items),
         result::Value::ClientEnroll(r) => enroll_json(r),
         result::Value::MemberList(l) => crate::members_json::members_json(l),

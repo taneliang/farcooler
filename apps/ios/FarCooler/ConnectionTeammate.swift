@@ -1,6 +1,20 @@
 import Foundation
 
 extension Connection {
+    /// A ceremony-bound signature by this runner's directory identity, issued
+    /// only after the runner's live admin gate admits this device (ov-1020).
+    func ceremonyAuthority(offer: String) async -> [String: Any]? {
+        guard phase == .connected, let stepUp = stepUp() else { return nil }
+        let signs = await teammateFacts(account: "")?.signs == true
+        do {
+            let data = try await stepUp.perform("ceremony.authority", ["offer": offer],
+                reason: "Confirm this browser’s access to \(hostLabel).", hasTrustedKey: signs)
+            return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        } catch {
+            return nil
+        }
+    }
+
     /// What this phone is on this runner and who is there already (ov-856):
     /// what Add Teammate offers, and whether the runner is asked at all. Nil
     /// when the runner can't be asked or doesn't record the people's access.

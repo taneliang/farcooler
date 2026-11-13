@@ -259,6 +259,11 @@ internal object NativeClient {
         heldMs: Long,
     ): String?
 
+    /** Device-signed teammate reply; Rust checks the runner attestations before sealing (ov-1020). */
+    external fun nativeCeremonySealTeammate(
+        offerJson: String, manifestJson: String, privateKey: String, authoritiesJson: String, heldMs: Long,
+    ): String?
+
     /**
      * The reply sealed to a browser's reply key, and the comparison code, as
      * `{"sealed","code"}` or a refusal (ov-770). The seal and the code are

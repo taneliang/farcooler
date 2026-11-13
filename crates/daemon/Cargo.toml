@@ -55,6 +55,7 @@ farcooler-agent-core.workspace = true
 # them into `AgentEvent`. `hook_ingress` is the I/O around it.
 farcooler-agent-hooks.workspace = true
 farcooler-core.workspace = true
+farcooler-ceremony.workspace = true
 farcooler-fence.workspace = true
 farcooler-review.workspace = true
 # The tunnel. Stubbed by default — see the `tailcat` feature above — so a
