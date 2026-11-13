@@ -166,3 +166,18 @@ runtime command was stopped while queued behind other gate jobs, before it built
 or tested. Targeted commands ran through `scripts/heavy --no-lock` with one build
 job and debug info disabled, as lane rules permit. No full suite was rerun.
 Net Swift/Kotlin lines remain 0/0; no wire types changed. No live recovery was run.
+
+## ov-1150 replay onto main
+
+Replayed the three outstanding commits onto `origin/main` at `a6e065c71`.
+They applied without conflicts; range-diff shows the three patches unchanged.
+The existing main changes remain in place.
+
+With Cargo's target directory in this worktree, the offline targeted tests passed:
+
+- `cargo test -p farcooler-daemon --lib provision -- --test-threads=2`: 6 passed.
+- `cargo test -p farcooler-daemon --lib workflow_coding -- --test-threads=2`: 52 passed.
+- The `workflow_service_over_socket` adopted-tree regression: 1 passed.
+
+`git diff --check`, the file-size budget, and the doc-comment check against
+`origin/main` also passed. No live recovery was run.
