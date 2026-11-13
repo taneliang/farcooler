@@ -562,6 +562,58 @@ mod tests {
         assert_eq!(opened[0].code, honest_code);
     }
 
+    /// One authorized runner must not lend its authority to another runner
+    /// in the same device-signed reply.
+    #[test]
+    fn ov1020_every_runner_needs_its_own_directory_pin_and_attestation() {
+        use farcooler_ceremony::{signed, seal_reply};
+        let secret = new_reply_secret();
+        let o = offer("Browser", "bob", KEY, NODE, &secret).unwrap();
+        let (first, _) = sealed_by(&o, HOST, Some("alice@example.com"));
+        let (mut manifest, _) = open(&first, &o, &secret, false, SHOWN, SHOWN).unwrap();
+        let device = signing_key(1);
+        let private = device.to_openssh(russh::keys::ssh_key::LineEnding::LF).unwrap();
+        let device_fp = farcooler_ceremony::fingerprint(&device.public_key().to_openssh().unwrap()).unwrap();
+        let second_key = signing_key(4);
+        let second_public = second_key.public_key().to_openssh().unwrap();
+        let mut second = runner(FORGED);
+        second.id = farcooler_ceremony::fingerprint(&second_public).unwrap();
+        manifest.runners.push(second);
+        let mut authorities = manifest.proof.take().unwrap().authorities;
+        authorities.push(signed::Authority {
+            runner_key: second_public,
+            signature: signed::signature(&second_key, signed::RUNNER_NAMESPACE,
+                &signed::authority_statement(&o, &device_fp)).unwrap(),
+        });
+        signed::sign(&mut manifest, &o, &private, authorities.clone()).unwrap();
+        let (honest, honest_code) = seal_reply(&o, &manifest).unwrap();
+        let pins: Vec<_> = manifest.runners.iter().map(|r| r.id.clone()).collect();
+        let answer = |sealed: &str, runners: &[String]| serde_json::json!({"replies": [{
+            "sealed": sealed, "posted_by": "alice", "posted_by_email": "alice@example.com",
+            "authority": {"devices": [&device_fp], "runners": runners}
+        }]}).to_string();
+        let opened = open_all(&answer(&honest, &pins), &o, &secret, false, SHOWN, SHOWN).unwrap();
+        assert_eq!(opened[0].code, honest_code);
+        assert_eq!(opened[0].taken.runners.len(), 2);
+        // A valid device signature cannot substitute for either directory pin.
+        for retained in &pins {
+            assert_eq!(open_all(&answer(&honest, std::slice::from_ref(retained)), &o, &secret, false, SHOWN, SHOWN),
+                Err(CeremonyError::UnregisteredKey));
+        }
+        // Re-sign after substituting the first runner's attestation for the
+        // second: failure must come from runner verification, not device signing.
+        authorities[1] = authorities[0].clone();
+        manifest.proof = None;
+        let signature = signed::signature(&device, signed::DEVICE_NAMESPACE,
+            &serde_json::to_vec(&(&manifest, &authorities)).unwrap()).unwrap();
+        manifest.proof = Some(signed::Proof {
+            device_key: device.public_key().to_openssh().unwrap(), authorities, signature,
+        });
+        let (forged, _) = seal_reply(&o, &manifest).unwrap();
+        assert_eq!(open_all(&answer(&forged, &pins), &o, &secret, false, SHOWN, SHOWN),
+            Err(CeremonyError::UnregisteredKey));
+    }
+
     /// The relay's read with who posted each and their email on file:
     /// `(sealed, posted_by, posted_by_email)`.
     fn relay_says_from(posts: &[(&str, &str, Option<&str>)]) -> String {
