@@ -154,8 +154,6 @@ pub struct Exec {
     /// One first download of a landing remote's main at a time, per remote, shared by every copy (ov-1058 review 3):
     /// four Provisions starting together wait on one download instead of each fetching all of main, and share its failure.
     seeding: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::sync::Arc<coding_landing::Seeding>>>>,
-    /// Held while a Provision creates its worktree, shared by every copy: git fails a second `worktree add` on the same repository (ov-1085).
-    worktree_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
     /// A test's stand-in for the runner user's home, where git and ssh read their own configuration (ov-1026).
     #[cfg(test)]
     pub(super) user_home: Option<PathBuf>,
@@ -322,7 +320,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                seeding: Default::default(), worktree_gate: Default::default(), #[cfg(test)] user_home: None },
+                seeding: Default::default(), #[cfg(test)] user_home: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;

@@ -182,7 +182,7 @@ async fn workflow_coding_cancel_running_owned_process_settles_original_then_stop
     let (shutdown, receiver) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move { runtime.run(receiver).await.unwrap(); runtime });
     tokio::time::timeout(Duration::from_secs(5), async {
-        while !started.exists() { tokio::time::sleep(Duration::from_millis(10)).await; }
+        while !started.exists() { tokio::time::sleep(Duration::from_millis(1000)).await; }
     }).await.unwrap();
     let state = handle.state("w").await.unwrap().unwrap();
     let result = handle.submit(&controller, Request { id: "cancel".into(), workspace: "w".into(),
@@ -191,7 +191,7 @@ async fn workflow_coding_cancel_running_owned_process_settles_original_then_stop
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if handle.state("w").await.unwrap().unwrap().items["one"].phase == Phase::Cancelled { break; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     }).await.unwrap();
     let pid: i32 = std::fs::read_to_string(started).unwrap().parse().unwrap();
@@ -234,7 +234,7 @@ async fn workflow_coding_pending_ci_wakes_from_explicit_observation_without_rela
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if handle.state("w").await.unwrap().unwrap().items["one"].phase == Phase::Done { break; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         }
     }).await.unwrap();
     stop.send(true).unwrap(); task.await.unwrap();
@@ -448,7 +448,10 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     let mut builds = std::collections::BTreeMap::new();
     for stored in runtime.store.workflow_outbox("w").unwrap().into_iter().filter(|s| s.active) {
         let state = runtime.state("w").unwrap().unwrap();
-        let claim = runtime.store.workflow_claim_effect("w", &stored.effect.id, "test", state.revision, state.epoch, 10, 100).unwrap().unwrap();
+        let claim = runtime.store.workflow_claim_effect("w", &stored.effect.id, "test", state.revision, state.epoch, 10, 100).unwrap().unwrap_or_else(|| panic!(
+            "the build effect for {} could not be claimed. It is {:?}; the run is {:?}; the outbox is {:?}",
+            stored.effect.item, stored.effect.kind, state.items[&stored.effect.item].phase, runtime.store.workflow_outbox("w").unwrap()
+                .iter().map(|o| (o.effect.item.clone(), o.dispatch_state.clone(), o.active)).collect::<Vec<_>>()));
         let base = runtime.pin_base("w", &stored.effect).await.unwrap();
         assert!(runtime.store.workflow_admit_effect(&claim, 10).unwrap());
         builds.insert(stored.effect.item.clone(), Binding::new("w", &stored.effect, claim.resource_generation, 0, &base));
