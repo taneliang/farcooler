@@ -1,0 +1,38 @@
+{
+  "device": "FB14681F-0AA5-4E50-A43A-BF34197848BF",
+  "configuration": "Release -O + DEBUG fixtures",
+  "runs": [
+    {
+      "mode": "SwiftUI",
+      "raw": "frames=1109 seconds=19.32 hitches=38 over-one-frame=27 worst-ms=40.4 ratio-ms-per-s=42.2 slot-ms=16.7 text-views-made=46 script-distance=35697 rows-start=403 container=SwiftUI rows=421 items=301"
+    },
+    {
+      "mode": "UIKit",
+      "raw": "frames=968 seconds=19.34 hitches=83 over-one-frame=59 worst-ms=106.6 ratio-ms-per-s=164.8 slot-ms=16.7 text-views-made=20 script-distance=35160 rows-start=404 container=UIKit rows=421 items=301"
+    },
+    {
+      "mode": "UIKit",
+      "raw": "frames=992 seconds=19.32 hitches=71 over-one-frame=50 worst-ms=105.6 ratio-ms-per-s=143.4 slot-ms=16.7 text-views-made=12 script-distance=35264 rows-start=404 container=UIKit rows=422 items=302"
+    },
+    {
+      "mode": "SwiftUI",
+      "raw": "frames=1107 seconds=19.30 hitches=35 over-one-frame=27 worst-ms=34.2 ratio-ms-per-s=40.5 slot-ms=16.7 text-views-made=57 script-distance=35680 rows-start=404 container=SwiftUI rows=421 items=301"
+    },
+    {
+      "mode": "SwiftUI",
+      "raw": "frames=1099 seconds=19.33 hitches=46 over-one-frame=29 worst-ms=38.0 ratio-ms-per-s=50.6 slot-ms=16.7 text-views-made=59 script-distance=35687 rows-start=403 container=SwiftUI rows=421 items=301"
+    },
+    {
+      "mode": "UIKit",
+      "raw": "frames=979 seconds=19.35 hitches=75 over-one-frame=58 worst-ms=100.9 ratio-ms-per-s=154.5 slot-ms=16.7 text-views-made=22 script-distance=35234 rows-start=404 container=UIKit rows=422 items=302"
+    }
+  ],
+  "base_commit": "6afab149ab10a5548dc6033537914945cbd93c0b",
+  "host": "Apple M5 / Mac17,2",
+  "simulator": "iPhone 17 / iOS 26.5",
+  "xcode": "27.1 (27A9275), iPhoneSimulator27.1 SDK",
+  "corpus": "400 RealSession rows preloaded, -native-long-reports, ongoing NativeLiveRows stream",
+  "order": "SwiftUI, UIKit, UIKit, SwiftUI, SwiftUI, UIKit",
+  "measured_date": "2026-11-14",
+  "prototype_sha256": "ba7b42f035c68b7a4338f9395679c59beb2f39cc25bd3f54ca08e4c58b038175"
+}

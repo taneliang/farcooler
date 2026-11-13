@@ -1,0 +1,13 @@
+Release arm64 UI test, dedicated iPhone 17 / iOS 26.5 simulator, 2026-11-14
+Test Case '-[FarCoolerUITests.TranscriptSpikeUITests testCollectionStreamsAndDisclosesTools]' started.
+Test Case '-[FarCoolerUITests.TranscriptSpikeUITests testCollectionStreamsAndDisclosesTools]' passed (14.548 seconds).
+Test Suite 'TranscriptSpikeUITests' passed at 2026-11-14 04:00:40.419.
+	 Executed 1 test, with 0 failures (0 unexpected) in 14.548 (14.549) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 14.548 (14.550) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 14.548 (14.551) seconds
+** TEST SUCCEEDED **
+
+Python compile: passed
+file-size-budget: ok, 2093 files, 27 grandfathered
+Six frame reports: container, corpus, movement and duration checks passed
+Prototype and UI-test sources match the built disposable copy byte for byte
