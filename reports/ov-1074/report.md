@@ -136,3 +136,33 @@ Filtered Cargo runs used `scripts/heavy --no-lock` with one build job, after the
 shared load gate remained busy; the lane rules permit targeted tests freely.
 No full suite was rerun in this pass. The commands in Safe recovery were checked
 against the installed CLI's help; no live recovery command was executed.
+
+## Landing rebase (Nov 14)
+
+Rebased the two outstanding ov-1074 commits onto `origin/main` at `ed6a0555f`
+with `git rebase --no-autostash` after preserving the generated, untracked
+`.codex/hooks.json` outside the worktree. The tracked and untracked tree was clean
+when the rebase started. The only conflict was concurrent test additions at the
+end of `coding_tests.rs`: retained main's rerun, legacy-base, and process-stop
+regressions followed by this ticket's Provision cancellation regressions.
+`git range-diff` confirms the ticket patches changed only their insertion context.
+The reducer, workflow starter, coding verbs, and group tests match main exactly;
+no features were added.
+
+Post-rebase validation (no new tests or behavior changes):
+
+- `cargo test --offline -p farcooler-daemon --lib provision -- --test-threads=2`:
+  **6 passed**, including main's second-run and legacy recovery regressions.
+- `cargo test --offline -p farcooler-daemon --lib workflow_coding -- --test-threads=2`:
+  **52 passed**, under scratch HOME `/tmp/ov1074-master-home` with
+  `init.defaultBranch = master`; includes the merged tests and native cancellation.
+- Targeted `workflow_service_over_socket` adoption regression: **1 passed** under
+  that same scratch HOME, covering hooks-only adoption and all four dirty cases.
+- `git diff --check`, `scripts/file-size-budget.py`, and
+  `scripts/doc-comment-check.py --base origin/main`: passed.
+
+Used system Python because the PATH Python cannot execute on this host. The broad
+runtime command was stopped while queued behind other gate jobs, before it built
+or tested. Targeted commands ran through `scripts/heavy --no-lock` with one build
+job and debug info disabled, as lane rules permit. No full suite was rerun.
+Net Swift/Kotlin lines remain 0/0; no wire types changed. No live recovery was run.
