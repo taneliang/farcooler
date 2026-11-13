@@ -1,0 +1,42 @@
+iPhone 17 / iOS 27.0; SIMULATOR_ID=47C77A22-0EDF-4349-B2A1-F678935955AB
+scripts/ios-ui-tests.sh with the four NativeAgentViewTests image methods
+Summary excerpt; full local log: /tmp/ov1097-image-tests.log
+
+Test Suite 'Selected tests' started at 2026-11-13 10:48:24.907.
+Test Suite 'FarCoolerUITests.xctest' started at 2026-11-13 10:48:24.908.
+Test Suite 'NativeAgentViewTests' started at 2026-11-13 10:48:24.908.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testAPromptsImagesShowAndOpen]' started.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testAPromptsImagesShowAndOpen]' passed (12.469 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASentPhotosThumbnailsSurviveARestartOffline]' started.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASentPhotosThumbnailsSurviveARestartOffline]' passed (15.443 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' started.
+ov-1097: fitted marker=452px, zoomed marker=2354px, screen=2622px, required>1835px
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' passed (21.714 seconds).
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testNoThumbnailsWhereTheRunnerServesNoImages]' started.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testNoThumbnailsWhereTheRunnerServesNoImages]' passed (8.307 seconds).
+Test Suite 'NativeAgentViewTests' passed at 2026-11-13 10:49:22.845.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 57.932 (57.937) seconds
+Test Suite 'FarCoolerUITests.xctest' passed at 2026-11-13 10:49:22.846.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 57.932 (57.938) seconds
+Test Suite 'Selected tests' passed at 2026-11-13 10:49:22.846.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 57.932 (57.939) seconds
+** TEST SUCCEEDED **
+  4 collected, 0 skipped, 4 actually ran
+OK: 4 test(s) executed.
+
+Final source verification after recording-flag cleanup:
+Test Suite 'Selected tests' started at 2026-11-13 10:49:52.139.
+Test Suite 'FarCoolerUITests.xctest' started at 2026-11-13 10:49:52.139.
+Test Suite 'NativeAgentViewTests' started at 2026-11-13 10:49:52.139.
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' started.
+ov-1097: fitted marker=452px, zoomed marker=2354px, screen=2622px, required>1835px
+Test Case '-[FarCoolerUITests.NativeAgentViewTests testASwipeDownClosesAnOpenImage]' passed (21.098 seconds).
+Test Suite 'NativeAgentViewTests' passed at 2026-11-13 10:50:13.240.
+	 Executed 1 test, with 0 failures (0 unexpected) in 21.098 (21.101) seconds
+Test Suite 'FarCoolerUITests.xctest' passed at 2026-11-13 10:50:13.241.
+	 Executed 1 test, with 0 failures (0 unexpected) in 21.098 (21.102) seconds
+Test Suite 'Selected tests' passed at 2026-11-13 10:50:13.241.
+	 Executed 1 test, with 0 failures (0 unexpected) in 21.098 (21.103) seconds
+** TEST SUCCEEDED **
+  1 collected, 0 skipped, 1 actually ran
+OK: 1 test(s) executed.
