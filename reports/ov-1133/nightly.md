@@ -37,3 +37,14 @@ runner warrants a retry rather than an unverified change to the budget. GitHub
 rejected a job retry while the workflow is still running. At the last check,
 the phone6 image-test shard remained queued. The Nightly has not passed, and
 neither the image test's CI result nor the requested green proof is established.
+
+Nightly [43374015223](https://github.com/taneliang/farcooler/actions/runs/43374015223)
+was dispatched on `1273bc3eb` after run 43369485423 was cancelled and the
+queue cleared. Its Mac scrolling check passed, but the first-page performance
+check measured a 164.7295 ms stall against the 100 ms CI budget; the following
+streaming test measured its own first page at 54 ms. The `captures3` Plan
+capture again failed to reach the page-three scroll state on iOS 27.2, and
+`phone2` failed two notification-tap tests because the harness never marked
+a notification scheduled. The run was still in progress when these findings
+were recorded; `phone6` had not started. These failures do not establish a
+green Nightly or an image-test result.
