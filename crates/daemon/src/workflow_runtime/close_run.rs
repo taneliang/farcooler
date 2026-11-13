@@ -12,7 +12,11 @@ impl Runtime {
         let Some(state) = self.state(workspace)? else { return Ok(false) };
         if state.revision != mutation.revision || state.epoch != mutation.epoch { return Ok(false); }
         let Some(live) = state.items.get(item).filter(|i| &i.run == run && &i.pin == pin) else { return Ok(false) };
-        if !coding::sha(sha) || live.stopping.is_some() { return Ok(false); }
+        // No proof can make these sources closable. Refuse before reading a bundle or fetching Git,
+        // while keeping the durable receipt lookup above so an accepted command can still replay.
+        if !coding::sha(sha) || live.definition.is_ticket() || live.follows.is_some() || live.group_of.is_some()
+            || live.stopping.is_some() || matches!(live.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling)
+        { return Ok(false); }
         let mut exec = self.exec.clone();
         if self.service_mode {
             let bundle = self.store.workflow_bundle(&live.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
@@ -71,9 +75,23 @@ mod tests {
         drop(runtime);
         let runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
         assert_eq!(send(&runtime, request.clone()).await, reply);
+        // A second close is impossible, so it must not read Git even with a fresh command identity.
+        let state = runtime.state("w").unwrap().unwrap();
+        let repeated = close(&state, "already-closed", CloseResolution::Landed { sha:landed.clone() });
+        assert!(!runtime.verify_close("w", "orchestrator", &repeated).await.unwrap());
         let mut changed = request;
         if let Action::Close { resolution, .. } = &mut changed { *resolution = CloseResolution::Landed { sha:"f".repeat(40) }; }
         assert!(runtime.verify_close("w", "orchestrator", &changed).await.is_err(), "identity cannot change its evidence");
+    }
+    #[tokio::test]
+    async fn workflow_close_at_rest_is_refused_before_reading_the_landing_target() {
+        let (_dir, runtime) = configured(false, "pass").await;
+        runtime.track_tickets(&[("w".into(), "old".into(), "todo".into())]).unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(state.items["old"].definition.is_ticket());
+        let sha = runtime.coding.as_ref().unwrap().base.clone();
+        let request = close(&state, "no-run", CloseResolution::Landed { sha });
+        assert!(!runtime.verify_close("w", "orchestrator", &request).await.unwrap());
     }
     #[tokio::test]
     async fn workflow_close_continuation_requires_another_open_ticket_and_current_run() {
