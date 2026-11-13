@@ -438,21 +438,40 @@ mod portable {
     /// `notify`, unchanged: exclusions are accepted and ignored.
     pub(in super::super) struct Backend {
         inner: RecommendedWatcher,
+        #[cfg(all(test, target_os = "linux"))]
+        pub(in super::super) closed: Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>,
         #[cfg(test)]
         pub(in super::super) seam: Seam,
     }
 
     impl Backend {
         pub(in super::super) fn new(sink: Sink) -> Result<Backend, String> {
+            #[cfg(all(test, target_os = "linux"))]
+            let closed = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+            #[cfg(all(test, target_os = "linux"))]
+            let record = Arc::clone(&closed);
             // No filtering by `EventKind`, for the reason `LogWatcher` gives:
             // the backends disagree about which kind an append surfaces as.
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 if let Ok(event) = res {
                     sink(&event.paths);
+                    // Record after routing: seeing a sentinel close is a barrier
+                    // for all earlier events on this inotify instance.
+                    #[cfg(all(test, target_os = "linux"))]
+                    if matches!(
+                        event.kind,
+                        notify::EventKind::Access(notify::event::AccessKind::Close(
+                            notify::event::AccessMode::Write
+                        ))
+                    ) {
+                        record.lock().unwrap().extend(event.paths);
+                    }
                 }
             })
             .map(|inner| Backend {
                 inner,
+                #[cfg(all(test, target_os = "linux"))]
+                closed,
                 #[cfg(test)]
                 seam: Seam::default(),
             })

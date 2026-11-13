@@ -4,8 +4,14 @@
 //! of quiet, and on a loaded Mac it does not always: one run in 83 failed that
 //! way during ov-545. So on macOS this writes a sentinel file into the
 //! worktree root and into its git directory — they are separate streams — and
-//! waits until the backend has delivered both. A stream delivers in event
-//! order, so every earlier write on it has been delivered by then. Only then
+//! waits until the backend has delivered both. Linux also needs a barrier:
+//! registration and fixture setup can open watched directories. Inotify
+//! reports those accesses as the watched directory itself, and a delayed
+//! callback can outlast an arbitrarily long quiet interval
+//! (ov-1137). Sentinel close events pass through that same inotify queue after
+//! the setup events, so seeing both closes after routing establishes a barrier.
+//! A stream delivers in event order, so every earlier write on it has been
+//! delivered by then. Only then
 //! does it drain, and wait for quiet as before.
 //!
 //! The sentinels stay behind in the scratch repository: removing one would be
@@ -38,6 +44,39 @@ pub(super) fn settle(watcher: &TreeWatcher, worktree: &Path) {
 
 /// Write a sentinel into the worktree and its git directory and wait for both.
 fn barrier(watcher: &TreeWatcher, worktree: &Path) {
+    #[cfg(target_os = "linux")]
+    {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let git_dir = crate::review::git_dir(worktree);
+        let paths: Vec<_> = [worktree, git_dir.as_path()]
+            .iter()
+            .map(|dir| {
+                let path = dir.join(format!("fc-settle-{}-{n}", std::process::id()));
+                std::fs::write(&path, "").unwrap();
+                path
+            })
+            .collect();
+        let start = Instant::now();
+        loop {
+            let backend = watcher.watcher.lock().unwrap();
+            let closed = backend
+                .as_ref()
+                .expect("watcher must start")
+                .closed
+                .lock()
+                .unwrap();
+            if paths.iter().all(|path| closed.contains(path)) {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "inotify did not deliver sentinel closes: {paths:?}, got {closed:?}"
+            );
+            drop(closed);
+            drop(backend);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -55,7 +94,7 @@ fn barrier(watcher: &TreeWatcher, worktree: &Path) {
             });
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let _ = (watcher, worktree, &NEXT, Ordering::Relaxed);
 }
 
