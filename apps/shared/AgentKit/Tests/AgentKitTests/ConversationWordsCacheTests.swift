@@ -4,6 +4,47 @@ import Testing
 @testable import AgentKit
 
 struct ConversationWordsCacheTests {
+    @Test func restoredAndOlderPagesPrepareWordsBeforeLayout() async throws {
+        // Returning to a cached pane and paging upward reach the same layout
+        // as the first network page. Neither should do its first item lookup
+        // on the main actor.
+        let ms = Int64.random(in: 1_500_000_000_000..<2_000_000_000_000)
+        func row(_ ord: UInt64, duration: Int64) -> AgentRow {
+            AgentRow(id: "turn:\(ord)", ord: ord, rev: 1, kind: .turn(.init(
+                prompt: "A turn", origin: "page-\(UUID().uuidString)", startedMs: 1,
+                endedMs: duration + 1, durationMs: duration,
+                outcome: .finished, backgroundRunning: 0, activity: nil)))
+        }
+        let newest = row(1, duration: ms)
+        let oldest = row(0, duration: ms + 1)
+        let ledger = AgentRowLedger()
+        let restored = try await ledger.restore(AgentRowSnapshot(
+            epoch: 1, rev: 1, moreBefore: true, rows: [newest]))
+        #expect(restored.rows == [newest])
+        #expect(ConversationWords.itemCache.cached(.milliseconds(ms)) != nil,
+                "restored rows must be ready before the cached pane lays out")
+        guard case .turn(let restoredTurn) = newest.kind else { Issue.record("not a turn"); return }
+        #expect(ConversationWords.itemCache.cached(.origin(restoredTurn.origin)) as? Bool == false,
+                "restore must prepare origins before a later page can prime them")
+
+        guard case .turn(let turn) = oldest.kind else { Issue.record("not a turn"); return }
+        let data = RowFixture.json([
+            "epoch": 1, "rev": 1, "moreBefore": false, "rows": [[
+                "id": oldest.id, "ord": oldest.ord, "rev": 1,
+                "kind": ["Turn": [
+                    "prompt": turn.prompt, "origin": turn.origin, "started_ms": 1,
+                    "ended_ms": ms + 2, "duration_ms": ms + 1, "outcome": "Finished",
+                    "background_running": 0,
+                ]],
+            ]],
+        ])
+        let older = try await ledger.older(data)
+        #expect(older.prepends && older.rows == [oldest])
+        #expect(ConversationWords.itemCache.cached(.milliseconds(ms + 1)) != nil,
+                "older rows must be ready before scroll-position preservation lays them out")
+        #expect(ConversationWords.itemCache.cached(.origin(turn.origin)) as? Bool == false)
+    }
+
     @Test func theLedgerPreparesWordsBeforeHandingRowsToTheView() async throws {
         let ms = Int64.random(in: 1_000_000_000_000..<1_500_000_000_000)
         let origin = "ledger-\(UUID().uuidString)"

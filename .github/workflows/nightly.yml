@@ -258,6 +258,10 @@ jobs:
       # (ov-1016), which nothing else in this job builds first.
       - name: Build the Rust client library for AgentKit's tests
         run: cargo build --release -p farcooler-client
+      # A cold process proves the ledger prepares the phrase table and item
+      # answers before layout (ov-1098), independently of runner timing noise.
+      - name: Conversation words ready before layout
+        run: ./scripts/swift-test-guard.sh <(echo 7) -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit --filter ConversationWordsCacheTests
       - name: AgentKit row budgets
         run: ./scripts/swift-test-guard.sh <(echo 2) -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests
       # One `swift test` each: in one run the two suites go at once on the one
