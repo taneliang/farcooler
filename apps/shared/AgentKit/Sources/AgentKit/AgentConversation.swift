@@ -320,7 +320,6 @@ extension AgentConversation {
         count <= 0 ? nil : ConversationWords.phrase(count == 1 ? "tools_one" : "tools", ["n": "\(count)"])
     }
 
-
     /// A notice turn's words, without claude's straight quotes.
     public static func noticeText(_ turn: AgentRow.Turn) -> String {
         turn.prompt.replacingOccurrences(of: "\"", with: "")
@@ -496,6 +495,7 @@ public enum ConversationWords {
         return fill.reduce(words) { $0.replacingOccurrences(of: "{\($1.key)}", with: $1.value) }
     }
 }
+
 extension ConversationWords {
     /// Prepare the phrase table before rows reach the main actor.
     static func prepare(_ rows: [AgentRow]) {
