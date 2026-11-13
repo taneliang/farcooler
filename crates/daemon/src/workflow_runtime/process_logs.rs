@@ -147,6 +147,8 @@ mod tests {
         };
         let frame = farcooler_protocol::framing::encode(&envelope).expect("workflow get must fit the protocol cap");
         eprintln!("workflow get with {count} failures: {} wire bytes", frame.len());
+        let budgets = reply["back_edge_budgets"].as_object().unwrap();
+        assert_eq!(budgets.len(), count);
         let logs = reply["process_logs"].as_array().unwrap();
         assert_eq!(logs.len(), count);
         for log in logs {
