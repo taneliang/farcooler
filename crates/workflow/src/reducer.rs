@@ -494,7 +494,14 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
     if let Command::SendBack { item, .. } = &input.command {
         let restarted = next.items.get(item).ok_or(Refusal::Missing)?;
         if restarted.phase != Phase::Running || restarted.definition.stages[restarted.stage].kind != StageKind::Build {
-            return Err(Refusal::SendBackRefused("The build could not start because its resource is unavailable or it requires approval.".into()));
+            let reason = match restarted.phase {
+                Phase::WaitingApproval => "The build could not start because it requires approval.",
+                Phase::Blocked if !restarted.dependencies.iter().all(|d| dependency_done(&next, d)) =>
+                    "The build could not start because a dependency is not done.",
+                Phase::Blocked => "The build could not start because its resource is unavailable.",
+                _ => "The build could not start.",
+            };
+            return Err(Refusal::SendBackRefused(reason.into()));
         }
     }
     // A group says when it reached the step and phase it is in now.
