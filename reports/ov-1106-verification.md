@@ -112,3 +112,26 @@ Load-gate review return (`a9ce08a3`):
 - File-size budget, doc-comment check against HEAD, swallowed-call lint, and
   `git diff --check` passed. Fixture execution needed filesystem sandbox
   escalation for git operations. No live policy was published.
+
+Combined admission follow-up (Nov 13):
+
+- Re-read ov-1106 through the installed Canary CLI. The branch already contains
+  the implementation and fixes for both recorded load-burst review returns.
+- Added `completion_refills_fixed_capacity_only_after_load_gap_and_good_sample`:
+  a fake clock and fake load admit three runs, hold the fourth, complete one,
+  retain the runner-wide gap through clock rollback and repeated scans, hold on
+  missing or high load, then refill exactly at the deadline with a good sample.
+  The fixed and load policies are published on separate boards, exercising
+  their combined runner-wide constraints without publishing any live policy.
+- The regression failed on the existing implementation at `gap holds at 99`:
+  the load policy's board had no aggregate yet, so `workflow_workspaces` omitted
+  it and the scheduler never applied its constraint. Publication is independent
+  of aggregate creation. Scheduling now inventories the union of persisted
+  states and publication selections, and its cache represents an absent
+  aggregate revision explicitly. Recovery's aggregate-only inventory is unchanged.
+- Fresh validation: the daemon workflow and full store/workflow library nextest
+  command listed above passed **996 tests**, including the new regression.
+  CLI workflow tests passed **14 tests**, with the existing private-fixture
+  test ignored. File-size budget, doc-comment, swallowed-call, and whitespace
+  checks passed. The initial sandboxed scheduling run could not invoke Git for
+  fixtures; the successful workflow run used filesystem sandbox escalation.

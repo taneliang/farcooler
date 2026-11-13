@@ -125,6 +125,14 @@ impl Store {
         Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Published constraints apply even before a board has its first tracked ticket or run.
+    pub fn workflow_scheduling_workspaces(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT workspace FROM workflow_states
+            UNION SELECT workspace FROM workflow_bundle_selections ORDER BY workspace")?;
+        Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Cheap cache invalidation without loading the aggregate JSON.
     pub fn workflow_state_revision(&self, workspace: &str) -> Result<Option<u64>> {
         Ok(self.conn().query_row("SELECT revision FROM workflow_states WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?)

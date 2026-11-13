@@ -13,7 +13,7 @@ pub(super) struct Scheduler {
     state_reads: usize,
 }
 struct Board {
-    revision: u64,
+    revision: Option<u64>,
     policy_enabled: bool,
     state: Option<State>,
 }
@@ -39,14 +39,14 @@ impl Runtime {
     fn schedule_with_load(&self, workspaces: &[String], now_ms: i64, load: Option<u64>) -> Result<()> {
         let mut scan = self.scheduling.lock().unwrap();
         // Inventory belongs to the runner, even when this pass was woken for only one board.
-        let all = self.store.workflow_workspaces()?;
+        let all = self.store.workflow_scheduling_workspaces()?;
         scan.boards.retain(|w, _| all.contains(w));
         scan.refused.retain(|(w, _, _), _| all.contains(w));
         let mut configs = BTreeMap::new();
         for workspace in &all {
             let config = self.store.workflow_configuration(workspace)?;
             let enabled = config.as_ref().is_some_and(|c| c.definition.start_policy.is_some());
-            let revision = self.store.workflow_state_revision(workspace)?.ok_or(Error::Refused("missing scheduling board"))?;
+            let revision = self.store.workflow_state_revision(workspace)?;
             if !scan.boards.get(workspace).is_some_and(|b| b.revision == revision && b.policy_enabled == enabled) {
                 let state = if enabled || self.store.workflow_has_runs(workspace)? {
                     #[cfg(test)] { scan.state_reads += 1; }
@@ -106,7 +106,7 @@ impl Runtime {
                         let next = next.ok_or(Error::Refused("missing committed scheduling state"))?;
                         busy = busy - before + next.items.values().filter(|i| active(i)).count();
                         let board = scan.boards.get_mut(workspace).unwrap();
-                        board.revision = next.revision;
+                        board.revision = Some(next.revision);
                         board.state = Some(next);
                         scan.refused.remove(&retry_key);
                         if !queue { scan.last_start_ms = Some(now_ms); }
@@ -462,6 +462,41 @@ mod tests {
         complete(&runtime, "a", 360_102);
         runtime.schedule_with_load(&["other".into()], 360_103, Some(2000)).unwrap();
         assert!(active(&runtime.state("other").unwrap().unwrap().items["z"]));
+    }
+
+    #[tokio::test]
+    async fn completion_refills_fixed_capacity_only_after_load_gap_and_good_sample() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Fixed(3)));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a", "b", "c", "d"]);
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000, min_start_gap_ms: 60_000 }));
+        publish_on(&runtime, "load-policy", d);
+        assert!(runtime.store.workflow_configuration("load-policy").unwrap().is_some());
+        assert!(runtime.state("load-policy").unwrap().is_none(), "publication needs no aggregate");
+        for time in [100, 60_100, 120_100] {
+            runtime.schedule_with_load(&["w".into()], time, Some(2000)).unwrap();
+        }
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(state.items.values().filter(|i| active(i)).count(), 3);
+        assert!(state.items["d"].definition.is_ticket());
+        complete(&runtime, "a", 120_101);
+        // A backwards clock and a freed build slot must not bypass the admission timer.
+        for time in [99, 120_101, 180_099] {
+            runtime.schedule_with_load(&["w".into()], time, Some(2000)).unwrap();
+            assert!(runtime.state("w").unwrap().unwrap().items["d"].definition.is_ticket(), "gap holds at {time}");
+        }
+        for load in [None, Some(6000), Some(8000)] {
+            runtime.schedule_with_load(&["w".into()], 180_100, load).unwrap();
+            assert!(runtime.state("w").unwrap().unwrap().items["d"].definition.is_ticket(), "load holds at {load:?}");
+        }
+        runtime.schedule_with_load(&["w".into()], 180_100, Some(2000)).unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(active(&state.items["d"]));
+        assert_eq!(state.items.values().filter(|i| active(i)).count(), 3);
     }
 
     #[tokio::test]
