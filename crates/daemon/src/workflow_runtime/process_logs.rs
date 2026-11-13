@@ -205,6 +205,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn workflow_get_bounds_captured_output_from_a_failed_process() {
+        let (_dir, runtime) = failed_logs(1, "").await;
+        let effect = runtime.store.workflow_outbox("w").unwrap().remove(0).effect;
+        let path = runtime.effect_log(&effect).unwrap();
+        // Exercise the actual merged-stream capture before workflow get: more than
+        // 2 MiB without a newline, followed by failure evidence on stderr.
+        let argv = ["/bin/sh", "-c",
+            "dd if=/dev/zero bs=1024 count=2048 2>/dev/null | tr '\\000' x; printf END >&2; exit 1"]
+            .map(String::from);
+        let environment = [("PATH".into(), "/usr/bin:/bin".into())].into_iter().collect();
+        let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+        let exit = crate::effect_runner::configured(&runtime.root, &argv, &environment,
+            &path, Duration::from_secs(30), cancelled).await.unwrap();
+        assert_eq!(exit, Some(1));
+        let retained = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(retained.len(), crate::effect_runner::LOG_LIMIT);
+        assert!(retained.ends_with("END"));
+        let reply = get_with_bounded_logs(&runtime, 1);
+        let log = &reply["process_logs"][0];
+        assert_eq!(log["tail"], retained[retained.len() - 8 * 1024..]);
+        assert_eq!(log["tail_truncated"], true);
+        assert_eq!(log["exit"], 1);
+        assert_eq!(Path::new(log["log_path"].as_str().unwrap()), path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), retained);
+    }
+
+    #[tokio::test]
     async fn workflow_get_bounds_legacy_logs_without_changing_retained_evidence() {
         // Old daemons did not cap files. Exercise every multibyte UTF-8 width at
         // the seek boundary, and leave the original evidence intact for inspection.
