@@ -1,6 +1,12 @@
 //! Process evidence is local to the engine, alongside the receipts that retain it (ov-1127).
 use super::*;
 
+const TAIL_BYTES: usize = 8 * 1024;
+const TAIL_LINES: usize = 40;
+// Count JSON escaping too: control bytes can grow sixfold on the wire. Leave room for
+// state and log paths in the 1 MiB control envelope, while retaining the newest evidence.
+const REPLY_TAIL_BYTES: usize = 256 * 1024;
+
 impl Exec {
     pub(super) fn effect_log(&self, effect: &Effect) -> Option<PathBuf> {
         let receipts = self.root.join("receipts");
@@ -33,13 +39,36 @@ impl Exec {
             let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path)?;
             let metadata = file.metadata()?;
             if !metadata.is_file() || metadata.nlink() != 1 { continue; }
-            file.seek(SeekFrom::Start(metadata.len().saturating_sub(crate::effect_runner::LOG_LIMIT as u64)))?;
+            let offset = metadata.len().saturating_sub(TAIL_BYTES as u64);
+            file.seek(SeekFrom::Start(offset))?;
             let mut bytes = Vec::new();
-            file.take(crate::effect_runner::LOG_LIMIT as u64).read_to_end(&mut bytes)?;
-            let text = String::from_utf8_lossy(&bytes);
-            let tail = text.lines().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+            file.take(TAIL_BYTES as u64).read_to_end(&mut bytes)?;
+            // Seeking may split a UTF-8 character. Skip its continuation bytes rather than
+            // manufacture a replacement character for an otherwise valid log.
+            let mut first = 0;
+            if offset > 0 {
+                while first < bytes.len() && bytes[first] & 0xc0 == 0x80 { first += 1; }
+            }
+            let text = String::from_utf8_lossy(&bytes[first..]);
+            let mut lines = text.lines().rev();
+            let mut tail = lines.by_ref().take(TAIL_LINES).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+            let mut truncated = offset > 0 || lines.next().is_some();
+            // Lossy decoding can expand invalid input, so enforce the final byte bound too.
+            let mut cut = tail.len().saturating_sub(TAIL_BYTES);
+            while !tail.is_char_boundary(cut) { cut += 1; }
+            if cut > 0 { tail = tail[cut..].to_owned(); truncated = true; }
             logs.push(serde_json::json!({"item":effect.item, "run":effect.run, "effect":effect.id,
-                "stage":effect.kind, "log_path":path, "exit":exit, "tail":tail}));
+                "stage":effect.kind, "log_path":path, "exit":exit, "tail":tail, "tail_truncated":truncated}));
+        }
+        let mut budget = 0;
+        for log in &logs { budget += serde_json::to_vec(&log["tail"])?.len(); }
+        // The outbox is ordered by revision, then id: omit oldest tails first, keeping
+        // every path available for inspecting the complete retained process output.
+        for log in &mut logs {
+            if budget <= REPLY_TAIL_BYTES { break; }
+            budget -= serde_json::to_vec(&log["tail"])?.len() - 2; // empty JSON string still costs two bytes
+            log["tail"] = "".into();
+            log["tail_truncated"] = true.into();
         }
         Ok(logs)
     }
@@ -79,6 +108,109 @@ mod tests {
     use super::*;
     use super::super::tests::{enqueue, finish};
 
+    async fn failed_logs(count: usize, output: &str) -> (tempfile::TempDir, Runtime) {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let controller = runtime.controller();
+        for n in 0..count {
+            let receipt = runtime.submit(&controller, Request {
+                id: format!("enqueue-{n}"), workspace: "w".into(), expected_revision: n as u64,
+                sequence: n as u64 + 1,
+                command: Command::Enqueue { item: format!("item-{n:03}"), definition: coding_definition(false),
+                    policy_pin: "policy/v1".into(), resource: Exec::item_resource("w", &format!("item-{n:03}")),
+                    dependencies: BTreeSet::new(), initial_candidate: None },
+            }, 1).unwrap();
+            assert!(receipt.result.is_ok(), "{:?}", receipt.result);
+        }
+        for stored in runtime.store.workflow_outbox("w").unwrap() {
+            let key = digest(&stored.effect);
+            std::fs::write(runtime.root.join("receipts").join(format!("{key}.output")), output).unwrap();
+            std::fs::write(runtime.root.join("receipts").join(format!("{key}.process.json")), br#"{"exit":1}"#).unwrap();
+        }
+        (dir, runtime)
+    }
+
+    fn get_with_bounded_logs(runtime: &Runtime, count: usize) -> serde_json::Value {
+        let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+        use farcooler_protocol::v1 as pb;
+        let envelope = pb::WireEnvelope {
+            protocol_version: farcooler_protocol::PROTOCOL_VERSION,
+            message_id: farcooler_protocol::ids::new_id(),
+            body: Some(pb::wire_envelope::Body::Response(pb::Response {
+                request_id: farcooler_protocol::ids::new_id(),
+                outcome: Some(pb::response::Outcome::Result(pb::Result {
+                    value: Some(pb::result::Value::WorkflowReply(pb::WorkflowReply {
+                        schema: 1, json: reply.to_string(),
+                    })),
+                })),
+            })),
+        };
+        let frame = farcooler_protocol::framing::encode(&envelope).expect("workflow get must fit the protocol cap");
+        eprintln!("workflow get with {count} failures: {} wire bytes", frame.len());
+        let logs = reply["process_logs"].as_array().unwrap();
+        assert_eq!(logs.len(), count);
+        for log in logs {
+            assert!(Path::new(log["log_path"].as_str().unwrap()).is_file());
+            assert!(log["tail"].as_str().unwrap().len() <= 8 * 1024);
+        }
+        let budget: usize = logs.iter().map(|log| serde_json::to_vec(&log["tail"]).unwrap().len()).sum();
+        assert!(budget <= 256 * 1024, "encoded tails use {budget} bytes");
+        reply
+    }
+
+    #[tokio::test]
+    async fn workflow_get_keeps_short_tails_whole() {
+        let (_dir, runtime) = failed_logs(1, "first\nlast\n").await;
+        let reply = get_with_bounded_logs(&runtime, 1);
+        assert_eq!(reply["process_logs"][0]["tail"], "first\nlast");
+        assert_eq!(reply["process_logs"][0]["tail_truncated"], false);
+    }
+
+    #[tokio::test]
+    async fn workflow_get_bounds_a_two_mib_single_line_failure() {
+        // Three-byte characters force the byte cutoff to land inside a UTF-8 code point.
+        let output = "xx".to_owned() + &"界".repeat((crate::effect_runner::LOG_LIMIT - 5) / 3) + "END";
+        assert_eq!(output.len(), crate::effect_runner::LOG_LIMIT);
+        let (_dir, runtime) = failed_logs(1, &output).await;
+        let reply = get_with_bounded_logs(&runtime, 1);
+        let log = &reply["process_logs"][0];
+        assert_eq!(log["tail_truncated"], true);
+        assert!(log["tail"].as_str().unwrap().ends_with("END"));
+        assert!(!log["tail"].as_str().unwrap().contains('�'));
+    }
+
+    #[tokio::test]
+    async fn workflow_get_bounds_lossy_utf8_expansion() {
+        let (_dir, runtime) = failed_logs(1, "").await;
+        let effect = runtime.store.workflow_outbox("w").unwrap().remove(0).effect;
+        let path = runtime.effect_log(&effect).unwrap();
+        std::fs::write(path, vec![0xff; 8 * 1024]).unwrap();
+        let reply = get_with_bounded_logs(&runtime, 1);
+        assert_eq!(reply["process_logs"][0]["tail_truncated"], true);
+        assert!(reply["process_logs"][0]["tail"].as_str().unwrap().contains('�'));
+    }
+
+    #[tokio::test]
+    async fn workflow_get_drops_oldest_tails_to_bound_many_failures() {
+        // Each source is small, but together they exceed the control envelope cap.
+        // Control characters also ensure the budget counts JSON escaping.
+        let output = "\u{0001}".repeat(32 * 1024);
+        let (_dir, runtime) = failed_logs(48, &output).await;
+        let reply = get_with_bounded_logs(&runtime, 48);
+        let logs = reply["process_logs"].as_array().unwrap();
+        assert_eq!(logs.first().unwrap()["item"], "item-000");
+        assert_eq!(logs.last().unwrap()["item"], "item-047");
+        let mut saw_tail = false;
+        for log in logs {
+            if log["tail"] == "" {
+                assert!(!saw_tail, "only the oldest tails should be omitted");
+                assert_eq!(log["tail_truncated"], true);
+            } else { saw_tail = true; }
+        }
+        assert_eq!(logs[0]["tail"], "");
+        assert!(saw_tail, "keep the newest evidence");
+    }
+
     #[tokio::test]
     async fn workflow_failed_gate_keeps_both_streams_and_get_points_to_its_tail() {
         let (_dir, mut runtime) = super::super::coding_tests::configured(false, "check-fail").await;
@@ -94,6 +226,7 @@ mod tests {
         assert!(text.contains("gate stdout"));
         assert!(text.contains("gate stderr"));
         assert_eq!(log["tail"].as_str().unwrap().lines().count(), 40);
+        assert_eq!(log["tail_truncated"], true);
         assert!(log["tail"].as_str().unwrap().contains("gate stderr"));
         let fact = path.with_extension("process.json");
         let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(&fact).unwrap()).unwrap();
