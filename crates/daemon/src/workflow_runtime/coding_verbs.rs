@@ -195,6 +195,7 @@ impl Exec {
         }
         if *kind == StageKind::Fold && fact.label == "conflict" {
             return Ok(Outcome::FoldConflict { evidence,
+                members: serde_json::from_value(fact.detail.get("members").cloned().unwrap_or(serde_json::json!([])))?,
                 files: serde_json::from_value(fact.detail.get("files").cloned().unwrap_or(serde_json::json!([])))? });
         }
         Ok(match fact.label.as_str() {
@@ -440,24 +441,23 @@ impl Exec {
         spotlight::exclude_builds(&tree).await;
         for member in members {
             if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
-            let range = format!("{base}..{}", member.candidate);
-            let listed = self.git_recorded(binding, &tree, &["rev-list", "--reverse", &range]).await?;
-            for commit in listed.lines().filter(|c| !c.is_empty()) {
-                let pick = |extra: &'static [&'static str]| -> Vec<&str> {
-                    COMMIT_IDENTITY.iter().copied().chain(extra.iter().copied()).collect()
-                };
-                let mut args = pick(&["cherry-pick", "-x"]); args.push(commit);
-                if self.try_git(binding, &tree, &args).await?.0 { continue; }
-                let unmerged = self.try_git(binding, &tree, &["diff", "--name-only", "--diff-filter=U"]).await?.1;
-                let clean = self.try_git(binding, &tree, &["diff", "--cached", "--quiet"]).await?.0
-                    && self.try_git(binding, &tree, &["diff", "--quiet"]).await?.0;
-                // Already on the base: an empty pick.
-                if unmerged.trim().is_empty() && clean && self.try_git(binding, &tree, &pick(&["cherry-pick", "--skip"])).await?.0 {
-                    continue;
+            if let Some(conflict) = self.pick_member(binding, &tree, &base, member).await? {
+                // Diagnose every ticket against main in one pass. Bisection would leave one
+                // conflicting ticket creating a new waiting group at every failed fold.
+                let mut conflicts = Vec::new();
+                for suspect in members {
+                    if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
+                    self.git_recorded(binding, &tree, &["reset", "--hard", &base]).await?;
+                    if self.pick_member(binding, &tree, &base, suspect).await?.is_some() {
+                        conflicts.push(suspect.item.clone());
+                    }
                 }
-                self.try_git(binding, &tree, &["cherry-pick", "--abort"]).await?;
+                // Each ticket applies alone: this member conflicted with an earlier member.
+                // Send it back too, leaving the earlier successful members together.
+                if conflicts.is_empty() { conflicts.push(member.item.clone()); }
+                self.git_recorded(binding, &tree, &["reset", "--hard", &base]).await?;
                 self.write_fact(binding, "conflict", &base, serde_json::json!({
-                    "member": member.item, "commit": commit, "files": unmerged.lines().collect::<Vec<_>>() }))?;
+                    "members": conflicts, "first_conflict": conflict }))?;
                 return self.reconcile_verb(binding, &StageKind::Fold).await;
             }
         }
@@ -474,6 +474,32 @@ impl Exec {
         }
         self.write_fact(binding, "passed", &folded, serde_json::json!({ "base": base, "members": members.len() }))?;
         self.reconcile_verb(binding, &StageKind::Fold).await
+    }
+
+    /// Apply one pinned member; an empty pick is already on the base. Abort a conflict before
+    /// returning so diagnosis and the next member always start from a settled tree.
+    async fn pick_member(&self, binding: &Binding, tree: &Path, base: &str,
+        member: &farcooler_workflow::Member) -> Result<Option<serde_json::Value>>
+    {
+        let range = format!("{base}..{}", member.candidate);
+        let listed = self.git_recorded(binding, tree, &["rev-list", "--reverse", &range]).await?;
+        for commit in listed.lines().filter(|c| !c.is_empty()) {
+            let pick = |extra: &'static [&'static str]| -> Vec<&str> {
+                COMMIT_IDENTITY.iter().copied().chain(extra.iter().copied()).collect()
+            };
+            let mut args = pick(&["cherry-pick", "-x"]); args.push(commit);
+            if self.try_git(binding, tree, &args).await?.0 { continue; }
+            let unmerged = self.try_git(binding, tree, &["diff", "--name-only", "--diff-filter=U"]).await?.1;
+            let clean = self.try_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0
+                && self.try_git(binding, tree, &["diff", "--quiet"]).await?.0;
+            if unmerged.trim().is_empty() && clean && self.try_git(binding, tree, &pick(&["cherry-pick", "--skip"])).await?.0 {
+                continue;
+            }
+            self.git_recorded(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
+            return Ok(Some(serde_json::json!({ "member": member.item, "commit": commit,
+                "files": unmerged.lines().collect::<Vec<_>>() })));
+        }
+        Ok(None)
     }
 
     /// Push the folded commit to the target, once, and only while the target is still at the base the

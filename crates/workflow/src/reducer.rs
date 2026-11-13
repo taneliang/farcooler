@@ -212,7 +212,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             item.phase = Phase::Cancelled;
                             item.pending = None;
                         }
-                        Outcome::FoldConflict { evidence, files } => {
+                        Outcome::FoldConflict { evidence, files, members } if members.is_empty() => {
                             if item.run.starts_with("cancel:") || item.group_of.is_none()
                                 || item.definition.stages[item.stage].kind != StageKind::Fold
                             { return Err(Refusal::Phase); }
@@ -230,6 +230,45 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                     reason.push_str("… See the fold receipt for the full conflicting file list.");
                                 }
                                 item.brief = Some(reason);
+                            }
+                        }
+                        Outcome::FoldConflict { members, evidence, files } => {
+                            if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
+                            if item.definition.schema != 2 || item.group_of.is_none()
+                                || item.definition.stages[item.stage].kind != StageKind::Fold
+                                || item.pushed.is_some() || members.is_empty()
+                                || members.iter().collect::<BTreeSet<_>>().len() != members.len()
+                                || members.iter().any(|id| !item.members.iter().any(|m| &m.item == id))
+                            { return Err(Refusal::Evidence); }
+                            evidence_matches(&item, evidence)?;
+                            // A published non-splitting conflict policy still decides as written.
+                            if let Target::Split { step, .. } = target_of(&item, "conflict") {
+                                for member in members {
+                                    let mut ticket = next.items.remove(member).ok_or(Refusal::Missing)?;
+                                    ticket.grouped_in = None;
+                                    if let Some(build) = ticket.definition.stages.iter().position(|s| s.kind == StageKind::Build) {
+                                        ticket.brief = Some(conflict_brief(evidence, files)?);
+                                        ticket.candidate = None; ticket.stage = build; ticket.attempt = 1;
+                                        ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                                        ticket.phase = Phase::Blocked;
+                                    } else {
+                                        route(&mut ticket, member, input, "rejected", None,
+                                            Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                                        ticket.brief = Some(conflict_brief(evidence, files)?);
+                                    }
+                                    next.items.insert(member.clone(), ticket);
+                                }
+                                item.members.retain(|m| !members.contains(&m.item));
+                                if item.members.is_empty() {
+                                    item.pending = None; item.last_evidence = Some(evidence.clone());
+                                    item.phase = Phase::Failed;
+                                } else {
+                                    take_route(&mut item, id, input, ("conflict", Some(evidence)), Target::Step(step),
+                                        Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                                }
+                            } else {
+                                route(&mut item, id, input, "conflict", Some(evidence),
+                                    Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                             }
                         }
                         Outcome::Labeled(label, evidence) => {
@@ -600,7 +639,20 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
     Ok(Transition { state: next, effects, notices })
 }
 
-/// Zero is the published spelling of no batch cap. The state envelope still bounds memory.
+/// Quote paths and bound the build brief independently of the full fold receipt.
+fn conflict_brief(evidence: &Evidence, files: &[String]) -> Result<String, Refusal> {
+    let mut reason = format!("Rebase your existing work onto landing base {} and resolve the cherry-pick conflicts in: {}. Run the affected tests and commit the result. Checks and review will run again for the new candidate.",
+        evidence.candidate, serde_json::to_string(files).map_err(|_| Refusal::Invalid)?);
+    if reason.len() > MAX_REWORK_REASON_BYTES {
+        let mut end = MAX_REWORK_REASON_BYTES - 80;
+        while !reason.is_char_boundary(end) { end -= 1; }
+        reason.truncate(end);
+        reason.push_str("… See the fold receipt for the full conflicting file list.");
+    }
+    Ok(reason)
+}
+
+/// An absent limit leaves the landing batch uncapped. The state envelope still bounds memory.
 fn has_room(limit: Option<u32>, count: usize) -> bool { limit.is_none_or(|n| count < n as usize) }
 fn waiting_group(g: &Item) -> bool {
     g.group_of.is_some() && g.phase == Phase::Blocked && g.stage == 0
@@ -628,7 +680,7 @@ fn consolidate_groups(state: &mut State) -> Result<(), Refusal> {
         for (target, cap) in &open {
             let dest = state.items.get_mut(target).ok_or(Refusal::Missing)?;
             if dest.group_of != group.group_of || dest.policy_pin != group.policy_pin || dest.resource != group.resource { continue; }
-            let count = if *cap == 0 { group.members.len() } else { usize::from(*cap).saturating_sub(dest.members.len()).min(group.members.len()) };
+            let count = cap.map_or(group.members.len(), |n| (n as usize).saturating_sub(dest.members.len()).min(group.members.len()));
             let moved: Vec<_> = group.members.drain(..count).collect();
             for member in &moved {
                 state.items.get_mut(&member.item).ok_or(Refusal::Missing)?.grouped_in = Some(target.clone());
@@ -806,6 +858,15 @@ fn room(next: &State, spawn: &[(String, Vec<Member>)]) -> bool { next.items.len(
 /// A split keeps the first half of a group here and hands the rest to `spawn`.
 fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option<&Evidence>, out: Out) -> Result<(), Refusal>
 {
+    let target = target_of(item, label);
+    take_route(item, id, input, (label, evidence), target, out)
+}
+/// Take an already selected route. A diagnosed fold conflict retries the whole healthy batch
+/// through the split's back edge, spending the same published retry budget.
+fn take_route(item: &mut Item, id: &str, input: &Input, answer: (&str, Option<&Evidence>),
+    mut target: Target, out: Out) -> Result<(), Refusal>
+{
+    let (label, evidence) = answer;
     item.pending = None;
     item.ci_retry = None;
     let stage = &item.definition.stages[item.stage];
@@ -821,7 +882,6 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
     if label == "passed" && matches!(stage.kind, StageKind::Push) {
         item.pushed = evidence.map(|e| e.candidate.clone());
     }
-    let mut target = target_of(item, label);
     let taken = item.back_edges.get(&key).copied().unwrap_or(0);
     let mut split = false;
     if let Target::Split { step, otherwise } = target {

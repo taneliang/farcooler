@@ -1012,3 +1012,69 @@ async fn a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_c
     assert!(marker.exists(), "the next build started alongside the gate");
     assert_eq!(phase_of(&state, &group), Some(Phase::Done), "landing gate consumed the build slot");
 }
+
+/// A failed fold diagnoses all bad members against main in one pass, even when a good ticket
+/// precedes them. The remaining members land together, without a chain of split groups.
+#[tokio::test]
+async fn a_fold_conflict_isolates_all_bad_tickets_and_keeps_the_healthy_batch_together() {
+    let (dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    for item in ["ahead", "good-one", "bad-one", "good-two", "bad-two"] {
+        at_join(&mut runtime, item, &definition).await;
+    }
+    let before = runtime.state("w").unwrap().unwrap();
+    let other = dir.path().join("other");
+    let remote = runtime.coding.as_ref().unwrap().landing.as_ref().unwrap().repository.clone();
+    assert!(tokio::process::Command::new("/usr/bin/git")
+        .args(["clone", "-q", "-b", "main", remote.to_str().unwrap(), other.to_str().unwrap()])
+        .status().await.unwrap().success());
+    for item in ["bad-one", "bad-two"] {
+        let candidate = before.items[item].candidate.as_ref().unwrap();
+        let path = adapters::git(&runtime.repository(), &["diff-tree", "--no-commit-id", "--name-only", "-r", candidate]).await.unwrap();
+        std::fs::write(other.join(path.trim()), "another landing changed this file").unwrap();
+    }
+    for args in [vec!["add", "."], vec!["-c", "user.name=Other", "-c", "user.email=o@localhost", "-c", "commit.gpgsign=false", "commit", "-qm", "conflicting landing"],
+        vec!["push", "-q", "origin", "HEAD:refs/heads/main"]] {
+        assert!(tokio::process::Command::new("/usr/bin/git").current_dir(&other)
+            .args(args).status().await.unwrap().success());
+    }
+    // The first queue owns the target; the other four join one waiting group before any fold runs.
+    for item in ["ahead", "good-one", "bad-one", "good-two", "bad-two"] {
+        assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok());
+    }
+    let state = until(&mut runtime, |s| ["ahead", "good-one", "good-two"].iter().all(|t| phase_of(s, t) == Some(Phase::Done))
+        && ["bad-one", "bad-two"].iter().all(|t| phase_of(s, t) == Some(Phase::Failed))).await;
+    assert_eq!(outbox(&runtime, StageKind::Fold), 3, "ahead, diagnosis, one healthy fold");
+    assert_eq!(outbox(&runtime, StageKind::Run), 2, "one gate for each healthy landing");
+    assert_eq!(outbox(&runtime, StageKind::AwaitCi), 2, "one CI watch for each healthy landing");
+    let folds: Vec<_> = runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .filter(|s| s.effect.kind == EffectKind::Execute(StageKind::Fold)).collect();
+    assert_eq!(folds.iter().map(|s| s.effect.item.as_str()).collect::<std::collections::BTreeSet<_>>().len(), 2, "no split groups");
+    let diagnosed = folds.iter().find(|s| s.effect.members.len() == 4).unwrap();
+    let fact = runtime.root.join("receipts").join(format!("{}.verb.json", digest(&diagnosed.effect)));
+    let fact: serde_json::Value = serde_json::from_slice(&std::fs::read(fact).unwrap()).unwrap();
+    let binding: Binding = serde_json::from_value(fact["binding"].clone()).unwrap();
+    let recovered = runtime.reconcile_verb(&binding, &StageKind::Fold).await.unwrap();
+    assert!(matches!(recovered, Outcome::FoldConflict { members, .. } if members == ["bad-one", "bad-two"]));
+    let mut replay = State::empty("w".into(), 1);
+    for event in runtime.events("w").unwrap() { replay = step(&replay, &event).unwrap().state; }
+    assert_eq!(state, replay);
+}
+
+#[tokio::test]
+async fn tickets_that_apply_alone_but_conflict_together_return_the_conflicting_member() {
+    let (dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "ahead", &definition).await;
+    let script = dir.path().join("adapter.py");
+    let text = std::fs::read_to_string(&script).unwrap();
+    std::fs::write(&script, text.replace("name = 'shared.txt' if mode == 'conflict' else 'result-' + os.environ['FARCOOLER_WORKFLOW_RUN'][:8] + '.txt'", "name = 'shared.txt'")).unwrap();
+    for item in ["first", "second"] { at_join(&mut runtime, item, &definition).await; }
+    for item in ["ahead", "first", "second"] {
+        assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok());
+    }
+    until(&mut runtime, |s| phase_of(s, "first") == Some(Phase::Done) && phase_of(s, "second") == Some(Phase::Failed)).await;
+    assert_eq!(outbox(&runtime, StageKind::Fold), 3);
+    assert_eq!(outbox(&runtime, StageKind::Run), 2);
+    assert_eq!(outbox(&runtime, StageKind::AwaitCi), 2);
+}

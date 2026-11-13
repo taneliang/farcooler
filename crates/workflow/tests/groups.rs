@@ -1077,3 +1077,63 @@ fn unlimited_and_published_finite_limits_can_exceed_the_old_thirty_two_ticket_ca
     log.run(Command::Advance, Grant::Controller);
     assert_eq!(log.group_of("ticket-35"), waiting);
 }
+
+#[test]
+fn a_diagnosed_fold_conflict_returns_only_bad_members_and_never_bisects_the_healthy_batch() {
+    let mut log = Log::new();
+    let mut d = verb_ticket();
+    let g = d.groups.get_mut("landing").unwrap(); g.limit = 0;
+    g.steps[1].routes.insert("conflict".into(), Target::Split { step: "base".into(), otherwise: Box::new(Target::Fail) });
+    g.steps[1].limit = 3;
+    for name in ["ahead", "a", "bad-one", "b", "bad-two", "c"] {
+        log.enqueue(name, d.clone());
+        while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
+        log.queue(name);
+    }
+    let ahead = log.group_of("ahead");
+    let group = log.group_of("a");
+    pass_group(&mut log, &ahead, 5);
+    walk_to(&mut log, &group, "fold");
+    let evidence = log.evidence(&group);
+    for members in [vec![], vec!["foreign".into()], vec!["bad-one".into(), "bad-one".into()]] {
+        assert_eq!(log.try_outcome(&group, Outcome::FoldConflict { members, evidence: evidence.clone() }).unwrap_err(), Refusal::Evidence);
+    }
+    let transition = log.outcome(&group, Outcome::FoldConflict {
+        members: vec!["bad-one".into(), "bad-two".into()], evidence });
+    assert_eq!(log.stage(&group), "base");
+    assert_eq!(log.state.items[&group].members.iter().map(|m| m.item.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+    for name in ["bad-one", "bad-two"] {
+        assert_eq!(log.stage(name), "stage-1");
+        assert_eq!(log.state.items[name].phase, Phase::Running);
+        assert!(log.state.items[name].brief.as_ref().unwrap().contains("conflict"));
+        assert_eq!(log.state.items[name].grouped_in, None);
+    }
+    assert_eq!(transition.effects.iter().filter(|e| e.item == group).count(), 1);
+    assert_eq!(log.groups().len(), 1, "the ahead group is archived; no split sibling was created");
+    pass_group(&mut log, &group, 5);
+    assert_eq!(log.state.items[&group].handed, ["a", "b", "c"]);
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn a_diagnosed_conflict_keeps_the_published_failure_policy_and_releases_an_empty_group() {
+    for split in [false, true] {
+        let mut log = Log::new();
+        let mut d = verb_ticket();
+        if split {
+            let fold = &mut d.groups.get_mut("landing").unwrap().steps[1];
+            fold.routes.insert("conflict".into(), Target::Split { step: "base".into(), otherwise: Box::new(Target::Fail) });
+            fold.limit = 3;
+        }
+        let group = verb_group(&mut log, d);
+        walk_to(&mut log, &group, "fold");
+        let evidence = log.evidence(&group);
+        log.outcome(&group, Outcome::FoldConflict { members: vec!["a".into()], evidence });
+        assert_eq!(log.state.items[&group].phase, Phase::Failed);
+        assert!(!owns_resource(&log.state.items[&group]));
+        assert!(log.state.items[&group].members.is_empty());
+        assert_eq!(log.stage("a"), "stage-1");
+        assert_eq!(log.state.items["a"].grouped_in, None);
+        assert_eq!(log.replay_digest(), digest(&log.state));
+    }
+}
