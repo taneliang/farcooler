@@ -82,7 +82,8 @@ pub struct Opened {
 /// tried, as [`earliest`] says. Without one, every teammate's reply from this
 /// one read is tried in the order they were posted, and the first that opens
 /// AND names its own poster AND verifies its device signature and every
-/// runner attestation against the relay's directory authority (ov-1020). The read deleted them all at the relay, so a forged reply refused
+/// runner attestation against the relay's directory authority (ov-1020).
+/// The read deleted them all at the relay, so a forged reply refused
 /// here must not cost the real one behind it.
 ///
 /// "Names its own poster": the manifest's `granted_by` is the email the relay
@@ -533,6 +534,32 @@ mod tests {
         let (forged, _) = seal_reply(&o, &changed).unwrap();
         let answer = relay_says_from(&[(&forged, "alice", Some("alice@example.com")), (&sealed, "alice", Some("alice@example.com"))]);
         assert_eq!(open_all(&answer, &o, &secret, false, SHOWN, SHOWN).unwrap().len(), 1);
+    }
+
+    /// A trusted device alone cannot vouch for its admin access to a runner.
+    /// Re-signing the payload isolates the runner attestation check from the
+    /// device signature check: both signatures must hold independently.
+    #[test]
+    fn ov1020_a_valid_device_signature_cannot_repair_another_devices_runner_authority() {
+        use farcooler_ceremony::signed;
+        let secret = new_reply_secret();
+        let o = offer("Browser", "bob", KEY, NODE, &secret).unwrap();
+        let (honest, honest_code) = sealed_by(&o, HOST, Some("alice@example.com"));
+        let (mut manifest, _) = open(&honest, &o, &secret, false, SHOWN, SHOWN).unwrap();
+        let mut proof = manifest.proof.take().unwrap();
+        let other_device = farcooler_ceremony::fingerprint(&signing_key(3).public_key().to_openssh().unwrap()).unwrap();
+        proof.authorities[0].signature = signed::signature(&signing_key(2), signed::RUNNER_NAMESPACE,
+            &signed::authority_statement(&o, &other_device)).unwrap();
+        let payload = serde_json::to_vec(&(&manifest, &proof.authorities)).unwrap();
+        proof.signature = signed::signature(&signing_key(1), signed::DEVICE_NAMESPACE, &payload).unwrap();
+        manifest.proof = Some(proof);
+        let (forged, _) = farcooler_ceremony::seal_reply(&o, &manifest).unwrap();
+        let answer = relay_says_from(&[(&forged, "alice", Some("alice@example.com"))]);
+        assert_eq!(open_all(&answer, &o, &secret, false, SHOWN, SHOWN), Err(CeremonyError::UnregisteredKey));
+        let answer = relay_says_from(&[(&forged, "alice", Some("alice@example.com")), (&honest, "alice", Some("alice@example.com"))]);
+        let opened = open_all(&answer, &o, &secret, false, SHOWN, SHOWN).unwrap();
+        assert_eq!(opened.len(), 1);
+        assert_eq!(opened[0].code, honest_code);
     }
 
     /// The relay's read with who posted each and their email on file:
