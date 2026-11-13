@@ -12,3 +12,10 @@ after recording that failure, it was cancelled to release the runners. The
 shards were rebalanced using the measured class times. The corrected branch
 was dispatched as [Nightly 43362860903](https://github.com/taneliang/farcooler/actions/runs/43362860903)
 on commit `dab98c8dd`, after the queue cleared. See the run for its verdict.
+
+Run 43362860903 passed the shard-budget check but failed the separate CI job
+headroom check: a green macOS Rust job took 54 minutes against a 60-minute
+limit. It was cancelled after that failure, and the limit was raised to 70
+minutes. [Nightly 43363154074](https://github.com/taneliang/farcooler/actions/runs/43363154074)
+was dispatched on commit `5d471f3c1` after the queue cleared. See the run for
+its verdict.
