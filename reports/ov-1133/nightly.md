@@ -27,3 +27,13 @@ The corresponding three tests passed locally on iOS 27.0; CI uses 27.2. The
 run was cancelled after those failures. The notice fixture was also corrected
 and its focused test passed locally; the preceding ov-1097 validation had
 identified the missing field as a separate failure in the image test class.
+
+Nightly [43369485423](https://github.com/taneliang/farcooler/actions/runs/43369485423)
+was already running on commit `97f483692` when this investigation resumed.
+Its Mac perf gates job failed: the scrolling test measured a median main-thread
+hitch of 75.005797 ms/s against the 75.0 ms/s CI budget. This branch does not
+change the scrolling implementation; the 0.005797 ms/s overage on a shared
+runner warrants a retry rather than an unverified change to the budget. GitHub
+rejected a job retry while the workflow is still running. At the last check,
+the phone6 image-test shard remained queued. The Nightly has not passed, and
+neither the image test's CI result nor the requested green proof is established.
