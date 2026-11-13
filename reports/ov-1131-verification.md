@@ -90,3 +90,45 @@ Fresh validation, with `PATH=/opt/homebrew/bin:$PATH TMPDIR=/tmp`:
   --lib -- -D warnings`: passed.
 - File-size budget, swallowed-call lint, doc-comment checks, protocol lint,
   copy lint, visual-token lint, and diff whitespace checks: passed.
+
+## Acceptance audit on resumed build
+
+Read ov-1131 and ov-1106 again using the installed Canary CLI. All six parent
+commits and both ov-1131 fixes are already on this branch; no second
+cherry-pick is needed. The latest ov-1131 review receipt
+(`wf1:bf10aea8fb92e1a3c7ec9bd29c1dafdc6fc25430837c47895c155782e7f93095.json`)
+passes candidate `c750d2b7c`. Its preceding rejection is addressed by the
+continuous-sweep regression above.
+
+Inherited acceptance coverage:
+
+| Item | Implementation and regression coverage |
+| --- | --- |
+| 1: Published eligibility, budget, step models | `StartPolicy`, definition validation, and `load_and_known_files_and_dependencies_hold_starts_and_models_rotate` |
+| 2: Automatic starts and capacity refill | `published_policy_is_pumped_without_start_commands_and_can_pause_and_resume` and `fake_clock_and_load_start_three_hold_fourth_and_refill_on_finish` |
+| 3: Serialize known conflicts and blockers | `file_claims_serialize_across_boards_without_holding_independent_work`, pinned-claim republishing coverage, and dependency checks |
+| 4: Reviewed tickets join automatically | `a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_capacity`, including publication removal after admission |
+| 5: Three starts, fourth held, then refill | `fake_clock_and_load_start_three_hold_fourth_and_refill_on_finish` |
+| 6: Published fixed, unlimited, and load budgets | `Budget`, runner-wide combined constraints, lowering-budget tests, and empty-board publication coverage |
+| 7: Landing gates release build capacity | `a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_capacity` |
+| 8: Published execution limits | `Limits`, `published_limits_override_retries_back_edges_and_model_counts`, and `published_send_back_limit_can_exceed_the_old_maximum` |
+| ov-1131 repeated-scan burst | `near_limit_burst_keeps_load_allowance_across_scans_and_restart` at load 5.999/6, plus the continuous-sweep timer regression |
+
+The latest landing receipts report a conflict applying `bc537cfec` to the
+landing base in `crates/workflow/tests/routes.rs`; they report no additional
+scheduler review finding. This audit does not claim a successful landing.
+
+Fresh validation on the resumed build, with `PATH=/opt/homebrew/bin:$PATH
+TMPDIR=/tmp`:
+
+- `cargo nextest run -p farcooler-daemon -p farcooler-store
+  -p farcooler-workflow --lib -E 'package(farcooler-store) |
+  package(farcooler-workflow) | test(workflow)' --no-fail-fast`:
+  **1,010 passed**, including both ov-1131 regressions.
+- `cargo test -p farcooler-workflow --no-fail-fast`: **151 passed**.
+- File-size budget, swallowed-call lint, doc-comment check against
+  `origin/main`, and diff whitespace check: passed.
+
+This resumed build changes only this verification record. The implementation,
+regressions, and earlier failing-before-fix evidence remain in the existing
+branch commits.
