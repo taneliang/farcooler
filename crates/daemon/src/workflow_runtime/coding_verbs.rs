@@ -442,19 +442,20 @@ impl Exec {
         for member in members {
             if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
             if let Some(conflict) = self.pick_member(binding, &tree, &base, member).await? {
-                // Diagnose every ticket against main in one pass. Bisection would leave one
-                // conflicting ticket creating a new waiting group at every failed fold.
+                // Diagnose the whole batch on main, retaining only successful members. This
+                // catches both conflicts with main and conflicts between tickets in one pass.
                 let mut conflicts = Vec::new();
+                self.git_recorded(binding, &tree, &["reset", "--hard", &base]).await?;
                 for suspect in members {
                     if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
-                    self.git_recorded(binding, &tree, &["reset", "--hard", &base]).await?;
+                    let checkpoint = self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
                     if self.pick_member(binding, &tree, &base, suspect).await?.is_some() {
                         conflicts.push(suspect.item.clone());
+                        // Aborting a pick only undoes its last commit; discard every earlier
+                        // commit from this member before testing the next member.
+                        self.git_recorded(binding, &tree, &["reset", "--hard", &checkpoint]).await?;
                     }
                 }
-                // Each ticket applies alone: this member conflicted with an earlier member.
-                // Send it back too, leaving the earlier successful members together.
-                if conflicts.is_empty() { conflicts.push(member.item.clone()); }
                 self.git_recorded(binding, &tree, &["reset", "--hard", &base]).await?;
                 self.write_fact(binding, "conflict", &base, serde_json::json!({
                     "members": conflicts, "first_conflict": conflict }))?;
