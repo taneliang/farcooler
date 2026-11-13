@@ -1875,7 +1875,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was recorded. run it from outside Far Cooler's panes, or answer in the app",
         "landing_history" => "this workspace has landing history that is kept, so it can't be deleted",
         "engine_lands" => "this board lands through the workflow engine now. landings from before the move are kept as history and can't be changed",
-        "engine_owned" => "a workflow runs this ticket, so its column follows the run and can't be moved by hand. ask the orchestrator",
+        "engine_owned" => "a workflow runs this ticket, so its column follows the run and can't be moved by hand. ask the orchestrator to use `farcooler workflow close` for work completed elsewhere",
         "engine_owned_ended" => "a workflow ran this ticket and its column is final, so it can't be moved by hand",
         "engine_dispatch" => "this workspace runs its work through its workflow, so a ticket isn't given a pane by hand. \
              track it with `farcooler workflow track`, then start it with `farcooler workflow start`",

@@ -1046,6 +1046,7 @@ pub mod method {
         WorkflowMove = "workflow.move" => WORKFLOW_COMMANDS,
         WorkflowStart = "workflow.start" => WORKFLOW_COMMANDS,
         WorkflowSendBack = "workflow.send_back" => WORKFLOW_COMMANDS,
+        WorkflowClose = "workflow.close" => WORKFLOW_COMMANDS,
         WorkflowReopen = "workflow.reopen" => WORKFLOW_COMMANDS,
         WorkflowPropose = "workflow.propose" => WORKFLOW_COMMANDS,
         WorkflowDrafts = "workflow.drafts" => WORKFLOW_COMMANDS,

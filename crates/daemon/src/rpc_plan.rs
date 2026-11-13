@@ -82,6 +82,7 @@ pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, scope: 
         "line.set" => {
             let Some(request::Payload::LineSet(p)) = req.payload else { return Err(payload_missing()) };
             let task = required_id(&p.task_id)?;
+            svc.store.refuse_run_write(task)?;
             let actor = actor_from_wire(&p.actor)?;
             let stage = p.stage.map(stage_of).transpose()?;
             if stage.is_some() { crate::by_hand::refuse(&svc.store, task, crate::by_hand::STAGE)?; }

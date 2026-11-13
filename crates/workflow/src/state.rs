@@ -95,6 +95,8 @@ pub struct Item {
     /// Why the run was cancelled, when the cancel gave a reason (ov-1047): the board it ran on was deleted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<CloseResolution>,
     /// Why the step's last attempt failed, when it failed before doing anything and said so (ov-1058): the landing
     /// remote's main couldn't be downloaded, say. Kept on a Failed run so the ticket reads why; the next answer clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -164,6 +166,8 @@ pub struct State {
 /// What a later step needs to know about an item that has left live state.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Archived {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<CloseResolution>,
     pub phase: Phase,
     pub candidate: Option<String>,
     /// A group that landed: what the board needs to keep drawing it. Absent for tickets, and for
@@ -209,6 +213,11 @@ pub struct Input {
     #[serde(default)]
     pub busy_resources: BTreeSet<String>,
 }
+/// Why a run ended outside the engine. Kept in the accepted event and archived run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum CloseResolution { Landed { sha: String }, Continued { item: String } }
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Command {
     Decide { item: String, call: String, fence: u64, policy_pin: String, result: crate::HookResult },
@@ -223,6 +232,8 @@ pub enum Command {
     Observe { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
     /// `reason` is why, kept on the run when the runtime or a person gives one (ov-1047).
     Cancel { item: String, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
+    /// A controller records work finished outside the run. The runtime verifies the landing first.
+    Close { item: String, resolution: CloseResolution },
     /// A controller runs a failed item's step again, within `MAX_RETRIES`.
     Retry { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.

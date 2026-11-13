@@ -317,3 +317,22 @@ fn a_card_a_persons_command_moves_names_them() {
         assert_eq!(last.actor, said, "{actor:?}");
     }
 }
+
+#[test]
+fn externally_closed_runs_leave_needs_you_and_the_plan_now_rows() {
+    for resolution in [CloseResolution::Landed { sha:"a".repeat(40) }, CloseResolution::Continued { item:"other".into() }] {
+        let b = board();
+        enqueue(&b, Definition::tracker("owner"));
+        assert_eq!(seen(&b).0, "needs_decision");
+        let request = input(&b, "external-close", 1, Grant::Controller,
+            Command::Close { item:b.task.key.clone(), resolution:resolution.clone() });
+        let receipt = b.store.workflow_apply(&request).unwrap();
+        assert!(receipt.result.is_ok(), "{receipt:?}");
+        let expected = if matches!(resolution, CloseResolution::Landed { .. }) { ("done", "landed") } else { ("cancelled", "dropped") };
+        assert_eq!(seen(&b), (expected.0.into(), Some(expected.1.into())));
+        assert_eq!(b.store.workflow_apply(&request).unwrap(), receipt);
+        assert!(b.store.refuse_run_write(b.task.id).is_err(), "ownership remains final");
+        command(&b, "advance-close", Command::Advance).unwrap();
+        assert!(!b.store.workflow_state(&b.ws.to_string()).unwrap().unwrap().items.contains_key(&b.task.key));
+    }
+}

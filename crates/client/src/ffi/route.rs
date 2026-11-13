@@ -17,7 +17,7 @@ use farcooler_protocol::method::Method;
 /// allowed; forgetting is not. `every_route_has_an_arm` then calls each name.
 pub(super) fn route(method: Method) -> Option<&'static str> {
     match method {
-        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowResolveCancellation | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowSendBack | Method::WorkflowReopen | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowCutover | Method::WorkflowReview | Method::WorkflowWatch | Method::WorkflowPause | Method::WorkflowResume => None,
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowResolveCancellation | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowSendBack | Method::WorkflowClose | Method::WorkflowReopen | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowCutover | Method::WorkflowReview | Method::WorkflowWatch | Method::WorkflowPause | Method::WorkflowResume => None,
         // An arm under its own wire name.
         Method::HostHealth
         | Method::DaemonVersion

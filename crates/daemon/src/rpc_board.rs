@@ -83,6 +83,7 @@ pub(crate) async fn dispatch(
             if let Ok(id) = crate::task_ops::required_id(&p.task_id)
                 && svc.store.task_is_engine_owned(id)?
             {
+                svc.store.refuse_run_write(id)?;
                 let seat = crate::caller_seat::caller_seat(svc, caller_pid).await;
                 let person = crate::caller_person::caller_person(svc, peer, caller_pid, caller_pane)?;
                 if let Some(task) = crate::ticket_moves::move_through_engine(svc, seat, &person, id, &p).await? {
@@ -180,5 +181,33 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, 13, "the board's routes");
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+    use farcooler_workflow::{Command, Definition, Grant, Input};
+
+    #[tokio::test]
+    async fn run_owned_status_is_refused_before_any_tmux_caller_lookup() {
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let card = svc.store.create_task(workspace, "engine run", Actor::Manager).unwrap();
+        let definition = Definition::tracker("owner");
+        let receipt = svc.store.workflow_apply(&Input { schema:1, id:"enqueue".into(), workspace:workspace.to_string(),
+            expected_revision:0, epoch:1, source:"test".into(), source_sequence:1, now_ms:1, grant:Grant::Controller,
+            busy_resources:Default::default(), command:Command::Enqueue { item:card.key, policy_pin:definition.pin(),
+                resource:"run".into(), dependencies:Default::default(), initial_candidate:Some(definition.pin()), definition } }).unwrap();
+        assert!(receipt.result.is_ok());
+        let watcher = Watcher::new(svc.clone());
+        let before = svc.tmux.calls_total();
+        let peer = farcooler_transport::Peer { client_id:None, scope:pb::Scope::Control };
+        let req = Request { method:"task.set_status".into(), payload:Some(request::Payload::TaskSetStatus(pb::TaskSetStatus {
+            task_id:card.id.as_bytes().to_vec().into(), status:pb::TaskStatus::Done as i32, actor:"manager".into() })), ..Default::default() };
+        let result = tokio::time::timeout(std::time::Duration::from_millis(250), dispatch(&svc, &watcher, &peer,
+            (Some(std::process::id() as i32), &std::sync::OnceLock::new(), None), req)).await.expect("refusal never waits on tmux");
+        assert!(matches!(result, Err(DomainError::Conflict { what:"engine_owned" })), "{result:?}");
+        assert_eq!(svc.tmux.calls_total(), before, "no caller-seat lookup for an impossible write");
     }
 }

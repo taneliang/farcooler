@@ -66,6 +66,11 @@ pub enum WorkflowCmd {
     /// Then reopen the ticket to run it again. A push must be settled with `settle` instead.
     ResolveCancellation { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         #[arg(long)] reason:String,#[command(flatten)] identity:Identity },
+    /// Close work completed outside this run. --sha must be a full commit on the landing target;
+    /// --continues-under names another open ticket in this workspace. Any active operation is stopped before the card closes.
+    Close { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+        #[arg(long,required_unless_present="continues_under",conflicts_with="continues_under")] sha:Option<String>,
+        #[arg(long,required_unless_present="sha")] continues_under:Option<String>,#[command(flatten)] identity:Identity },
     /// Run a failed item's step again, within its published retry allowance.
     Retry { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Queue a ticket waiting at its join step into the open group for that step.
@@ -137,6 +142,14 @@ impl WorkflowCmd {
                     return Err("The reason must record what was lost and what you checked, in at most 4096 bytes.".into());
                 }
                 (workspace,Action::ResolveCancellation { mutation:identity.mutation(),item,run,pin,reason })
+            }
+            Self::Close { workspace,item,run,pin,sha,continues_under,identity } => {
+                let resolution = match (sha,continues_under) {
+                    (Some(sha),None) => farcooler_protocol::workflow_commands::CloseResolution::Landed { sha },
+                    (None,Some(item)) => farcooler_protocol::workflow_commands::CloseResolution::Continued { item },
+                    _ => return Err("Say either --sha or --continues-under.".into()),
+                };
+                (workspace,Action::Close { mutation:identity.mutation(),item,run,pin,resolution })
             }
             Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
             Self::Queue { workspace,item,run,pin,identity } => (workspace,Action::Queue { mutation:identity.mutation(),item,run,pin }),
@@ -499,5 +512,28 @@ mod bundle_tests {
         assert_eq!(unsafe {libc::mkfifo(name.as_ptr(),0o600)},0);
         assert!(read_file(&fifo).is_err());
         std::fs::write(&path,vec![b' ';MAX_BYTES+1]).unwrap();assert!(publication.action().is_err());
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn workflow_close_requires_one_resolution_and_preserves_the_run_identity() {
+        let args = ["farcooler", "workflow", "close", "00000000-0000-0000-0000-000000000000", "ov-1",
+            "--run", "run", "--pin", "pin", "--command-id", "external-close", "--revision", "4", "--epoch", "1", "--sequence", "5"];
+        assert!(crate::Cli::try_parse_from(args).is_err());
+        assert!(crate::Cli::try_parse_from(args.into_iter().chain(["--sha", &"a".repeat(40), "--continues-under", "ov-2"])).is_err());
+        for flags in [["--sha", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], ["--continues-under", "ov-2"]] {
+            let cli = crate::Cli::try_parse_from(args.into_iter().chain(flags)).unwrap();
+            let crate::Command::Workflow(command) = cli.command else { panic!("workflow command") };
+            let (workspace, action) = command.action().unwrap();
+            assert!(matches!(&action, Action::Close { mutation, item, run, pin, .. }
+                if mutation.id == "external-close" && mutation.revision == 4 && item == "ov-1" && run == "run" && pin == "pin"));
+            let req = request(workspace, &action).unwrap();
+            assert_eq!(req.method, "workflow.close");
+        }
     }
 }

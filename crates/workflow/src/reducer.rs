@@ -57,7 +57,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
@@ -83,7 +83,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
@@ -96,7 +96,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
                 | Command::Queue { item } | Command::Leave { item }
                 | Command::Move { item, .. } | Command::Start { item, .. }
-                | Command::Resolve { item, .. } | Command::SendBack { item, .. } => item,
+                | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. } => item,
                 Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
             };
             let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
@@ -209,8 +209,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 return Err(Refusal::Evidence);
                             }
                             item.stopping = None;
-                            item.phase = Phase::Cancelled;
                             item.pending = None;
+                            finish_close(&mut item);
                         }
                         Outcome::FoldConflict { evidence, files, members: None } => {
                             if item.run.starts_with("cancel:") || item.group_of.is_none()
@@ -312,6 +312,31 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                         }
                     }
                 }
+                Command::Close { resolution, .. } => {
+                    controller(input)?;
+                    // A group's push owns other work. Its settlement remains the landing protocol's.
+                    if item.definition.is_ticket() || item.follows.is_some() || item.group_of.is_some()
+                        || item.stopping.is_some()
+                        || matches!(item.phase, Phase::Done | Phase::Cancelled | Phase::Cancelling) {
+                        return Err(Refusal::Phase);
+                    }
+                    match resolution {
+                        CloseResolution::Landed { sha } if sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()) => {}
+                        CloseResolution::Continued { item: other } if other != id && valid_id(other) => {}
+                        _ => return Err(Refusal::Invalid),
+                    }
+                    if item.phase == Phase::Joined { detach(&mut next, id, &mut item)?; }
+                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    item.closed = Some(resolution.clone());
+                    if let Some(operation) = item.pending.take() {
+                        // The close survives a crash while Stop is outstanding. Its stop receipt, not the
+                        // caller's claim, makes the final move, so no active worker is abandoned.
+                        item.phase = Phase::Cancelling;
+                        item.stopping = Some(operation.clone());
+                        item.run = format!("cancel:{}", run_id(&item, id, input));
+                        emit(&mut item, id, input, EffectKind::Stop { operation }, &mut effects);
+                    } else { finish_close(&mut item); }
+                }
                 Command::Cancel { reason, .. } => {
                     controller(input)?;
                     // A follower goes where its lead's run goes (ov-970).
@@ -367,7 +392,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, cancel_reason: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, cancel_reason: None, closed: None, failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -522,7 +547,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             let item = next.items.remove(&id).ok_or(Refusal::Missing)?;
             let group = item.group_of.as_ref().map(|g| ArchivedGroup {
                 name: g.name.clone(), tickets: item.handed.clone(), pushed: item.pushed.clone().or_else(|| item.candidate.clone()), since_ms: item.since_ms });
-            next.archive.insert(id, Archived { phase: item.phase, candidate: item.candidate, group });
+            next.archive.insert(id, Archived { closed:item.closed, phase: item.phase, candidate: item.candidate, group });
         }
     }
     // A group that ended hands each member its result, through the member's own join routes.
@@ -943,6 +968,18 @@ fn valid_membership(state: &State, id: &str, item: &Item) -> bool {
     let waiting_ok = item.phase != Phase::WaitingJoin
         || matches!(item.definition.stages.get(item.stage).map(|s| &s.kind), Some(StageKind::Join { .. }));
     queued_ok && group_ok && waiting_ok
+}
+
+/// A plain cancellation drops its card; an external close completes only after any stop was acknowledged.
+fn finish_close(item: &mut Item) {
+    match &item.closed {
+        Some(CloseResolution::Landed { sha }) => {
+            item.candidate = Some(sha.clone());
+            item.stage = item.definition.stages.len();
+            item.phase = Phase::Done;
+        }
+        _ => item.phase = Phase::Cancelled,
+    }
 }
 
 fn valid_state(state: &State) -> bool {

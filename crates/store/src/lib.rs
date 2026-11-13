@@ -114,6 +114,11 @@ impl Store {
     pub fn task_is_tracked_ticket(&self, task: uuid::Uuid) -> farcooler_core::Result<bool> {
         workflow_projection::is_ticket(&self.conn(), task).map_err(error::map_err)
     }
+    /// Refuse a manual write to a run-owned card before any caller/runtime waits. Tickets at rest
+    /// still reach the authenticated engine move path. The store transaction repeats this guard.
+    pub fn refuse_run_write(&self, task: uuid::Uuid) -> farcooler_core::Result<()> {
+        workflow_projection::refuse_unless_at_rest(&self.conn(), task)
+    }
     /// Whether the engine holds this card (a ticket at rest or a run).
     pub fn task_is_engine_owned(&self, task: uuid::Uuid) -> farcooler_core::Result<bool> {
         workflow_projection::is_owned(&self.conn(), task).map_err(error::map_err)

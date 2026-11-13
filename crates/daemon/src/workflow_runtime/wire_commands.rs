@@ -25,6 +25,10 @@ pub(super) fn hide_environment(reply: &mut serde_json::Value) {
 /// What a hidden environment value reads as.
 pub(super) use crate::workflow_summary::HIDDEN;
 
+/// Runner-prepared inputs. Neither field is accepted from the wire.
+#[derive(Default)]
+pub(super) struct Prepared { pub tree: Option<RunTree>, pub close_verified: bool }
+
 impl CommandHandle {
     pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {
         let (send, receive) = oneshot::channel();
@@ -36,15 +40,16 @@ impl CommandHandle {
 impl Runtime {
     #[cfg(test)]
     pub(super) fn wire_command(&self, workspace: &str, principal: &str, action: Action) -> Result<serde_json::Value> {
-        self.wire_command_with(workspace, principal, &[principal.to_string()], None, action, None)
+        self.wire_command_with(workspace, principal, &[principal.to_string()], None, action, Prepared::default())
     }
-    /// `tree` is what `prepare_start` resolved for a Start that names a worktree (ov-967). `actor` is who sent
+    /// `prepared.tree` is what `prepare_start` resolved for a Start that names a worktree (ov-967). `actor` is who sent
     /// it, as admission read them, written into the receipt (ov-1001). `deciders` are the decider names the caller
     /// holds (`Admission::deciders`): a decision is made as the one its gate waits on, if the caller holds it, and
     /// otherwise as `principal`, which the reducer then refuses (ov-1002).
     pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, deciders: &[String], actor: Option<&WorkflowActor>, action: Action,
-        tree: Option<RunTree>) -> Result<serde_json::Value>
+        prepared: Prepared) -> Result<serde_json::Value>
     {
+        let Prepared { tree, close_verified } = prepared;
         let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         // A proposal is filed and answered by the daemon before the engine is involved (`workflow_drafts`).
@@ -75,7 +80,7 @@ impl Runtime {
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
             | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
-            | Action::SendBack { mutation, .. } | Action::Reopen { mutation, .. } => mutation,
+            | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } => mutation,
             Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -230,6 +235,22 @@ impl Runtime {
                             self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                         }
                         _ => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?,
+                    }
+                }
+                Action::Close { item, run, pin, resolution, .. } => {
+                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
+                    } else {
+                        // A landing proof is produced only by the asynchronous runtime path, never the wire.
+                        let verified = close_verified;
+                        let continues = matches!(resolution, farcooler_workflow::CloseResolution::Continued { item: other }
+                            if other != item && state.items.get(other).is_some_and(|i| !matches!(i.phase, Phase::Done | Phase::Cancelled)));
+                        if !verified && !continues {
+                            self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Evidence))?
+                        } else {
+                            let input = input(Command::Close { item:item.clone(),resolution:resolution.clone() },Grant::Controller);
+                            self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
+                        }
                     }
                 }
                 Action::SendBack { item, run, pin, reason, .. } => {

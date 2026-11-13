@@ -1,5 +1,5 @@
 //! Closed command vocabulary, shared by the real CLI producer and daemon parser.
-pub use farcooler_workflow::{Definition, valid_rework_reason};
+pub use farcooler_workflow::{CloseResolution, Definition, valid_rework_reason};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_BYTES: usize = 60 * 1024;
@@ -24,6 +24,8 @@ pub enum Action {
     /// The owner confirms an uncertain cancellation is quiescent after checking processes and external effects.
     /// The reason records what was lost and what was checked; this never asserts success.
     ResolveCancellation { mutation: Mutation, item: String, run: String, pin: String, reason: String },
+    /// Close work completed outside this run, with a verified landing or a continuing ticket.
+    Close { mutation: Mutation, item: String, run: String, pin: String, resolution: farcooler_workflow::CloseResolution },
     /// Run a failed item's step again. A controller's command, like cancel.
     Retry { mutation: Mutation, item: String, run: String, pin: String },
     /// Queue a ticket waiting at its join step into the open group. The orchestrator decides.
@@ -79,6 +81,7 @@ impl Action {
             Self::Review { .. } => "workflow.review",
             Self::Cancel { .. } => "workflow.cancel",
             Self::ResolveCancellation { .. } => "workflow.resolve_cancellation",
+            Self::Close { .. } => "workflow.close",
             Self::Retry { .. } => "workflow.retry",
             Self::Queue { .. } => "workflow.queue",
             Self::Leave { .. } => "workflow.leave",

@@ -386,7 +386,7 @@ const SENTENCES: &[(&str, &str)] = &[
     // A hand move on a card a workflow run owns (ov-948): the run moves it.
     (
         "engine_owned",
-        "A workflow runs this ticket, so its column follows the run and can't be moved by hand. Ask the orchestrator.",
+        "A workflow runs this ticket, so its column follows the run and can't be moved by hand. Ask the orchestrator to use `farcooler workflow close` for work completed elsewhere.",
     ),
     (
         "engine_owned_ended",

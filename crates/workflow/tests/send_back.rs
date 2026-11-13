@@ -252,3 +252,32 @@ fn published_send_back_limit_can_exceed_the_old_maximum() {
     assert_eq!(log.send_back("ov-1", "Address the next finding"),
         Err(Refusal::SendBackRefused("The send-back limit of 7 has been reached.".into())));
 }
+
+#[test]
+fn external_close_is_controller_only_fenced_and_replayable() {
+    for resolution in [CloseResolution::Landed { sha:"a".repeat(40) }, CloseResolution::Continued { item:"ov-2".into() }] {
+        let mut log = at_review(coding());
+        let command = Command::Close { item:"ov-1".into(), resolution:resolution.clone() };
+        assert_eq!(log.try_run(command.clone(), Grant::Decision { principal:"orchestrator".into() }), Err(Refusal::Unauthorized));
+        let before = log.state.items["ov-1"].fence;
+        log.try_run(command, Grant::Controller).unwrap();
+        let item = &log.state.items["ov-1"];
+        assert_eq!(item.closed, Some(resolution.clone()));
+        assert_eq!(item.fence, before + 1);
+        assert_eq!(item.phase, if matches!(resolution, CloseResolution::Landed { .. }) { Phase::Done } else { Phase::Cancelled });
+        assert!(log.effects.is_empty(), "closing starts no work");
+        // The next step must accept the resulting state and archive the closed run.
+        log.try_run(Command::Advance, Grant::Controller).unwrap();
+        assert!(!log.state.items.contains_key("ov-1"));
+        assert_eq!(log.state.archive["ov-1"].closed, Some(resolution));
+    }
+    let mut log = at_review(coding());
+    log.send_back("ov-1", "Fix the build").unwrap();
+    let operation = log.state.items["ov-1"].pending.clone().unwrap();
+    log.try_run(Command::Close { item:"ov-1".into(), resolution:CloseResolution::Landed { sha:"a".repeat(40) } }, Grant::Controller).unwrap();
+    assert_eq!(log.state.items["ov-1"].phase, Phase::Cancelling);
+    assert!(matches!(&log.effects[0].kind, EffectKind::Stop { operation: stopped } if stopped == &operation));
+    log.observe("ov-1", Outcome::Stopped { operation, receipt:"stopped".into() });
+    assert_eq!(log.state.items["ov-1"].phase, Phase::Done);
+    assert_eq!(log.state.items["ov-1"].candidate, Some("a".repeat(40)));
+}

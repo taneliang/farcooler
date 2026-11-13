@@ -514,3 +514,23 @@ when the rebase was conflict-free. Review evidence is pinned to the candidate
 commit; a changed base or conflict resolution produces a new candidate. The
 engine does not infer that an earlier review applies to it. A clean automatic
 fold continues to the group's gates without sending the ticket back to Build.
+
+### Closing work completed outside its workflow run
+
+An engine run owns its card's status and plan stage. Hand edits are refused;
+the workspace's orchestrator can record an external completion with
+`farcooler workflow close <workspace> <key> --run <run> --pin <pin>`, using
+the run identity and revision from `workflow get` and the usual
+`--command-id`, `--revision`, `--epoch`, and `--sequence` mutation flags.
+Choose one outcome:
+
+- `--sha <full-commit>` verifies that the commit is on the run's pinned landing
+  target, then marks the card Done and its plan stage Landed.
+- `--continues-under <other-key>` requires another open engine ticket in the
+  same workspace, then marks the old card Cancelled and its stage Dropped.
+
+Both remove the old card from Now. The outcome stays in the engine event log
+and archived run. Any pending operation is stopped before the final move,
+using the same recoverable stop protocol as cancellation. An active landing
+group must be settled first. A retry with the same command identity returns
+its durable receipt.
