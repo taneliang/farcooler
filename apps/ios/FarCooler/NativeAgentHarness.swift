@@ -864,6 +864,7 @@ final class NativeHarnessRunner: ObservableObject {
     private static func turn(_ prompt: String, origin: String, open: Bool = false) -> [String: Any] {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var turn: [String: Any] = ["prompt": prompt, "origin": origin, "background_running": 0]
+        if origin == "Notification" { turn["notice"] = true }
         if open, CommandLine.arguments.contains("-native-suggestion") {
             // At rest, with claude's box suggesting the next prompt (ov-409).
             turn["activity"] = "Idle"
