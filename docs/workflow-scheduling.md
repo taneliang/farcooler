@@ -40,8 +40,10 @@ one-second service scans. Set a different positive gap in the published budget:
 published gap applies to the whole runner, alongside the strictest load and
 fixed limits. Failed admissions and queues do not consume the gap. The timer
 is recovered once from accepted automatic start events on the runtime’s first
-scheduling scan, so republishing, completion, and daemon restart do not reset it. Missing or high
-load samples hold admission even after the gap expires.
+scheduling scan, so republishing, completion, and daemon restart do not reset it.
+Continuous sweeps advance their clock while effects run, so a long landing gate
+cannot freeze admission gaps or effect lease deadlines. Missing or high load
+samples hold admission even after the gap expires.
 `{"Fixed":0}` pauses automatic starts. Budgets constrain the whole runner:
 active ticket runs across every board count, including manually started runs,
 reviews, approval waits, and runs whose board no longer has a start policy.

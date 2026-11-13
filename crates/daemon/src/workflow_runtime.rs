@@ -456,6 +456,14 @@ impl Runtime {
     async fn sweep_loop(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>,
         running: &mut Vec<Running>, futures: &mut Vec<Slot>) -> Result<usize>
     {
+        // A service sweep can stay open for hours. Advance its supplied clock with monotonic
+        // elapsed time so admission gaps, leases and observations do not freeze behind a long gate.
+        // One-shot fixture pumps retain their caller-controlled timestamp.
+        let started = tokio::time::Instant::now();
+        let continuous = self.continuous;
+        let clock = || if continuous {
+            now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX))
+        } else { now_ms };
         let mut count = 0;
         let workspaces = self.store.workflow_workspaces()?;
         let mut occupancy = Vec::new();
@@ -507,7 +515,7 @@ impl Runtime {
             if scan {
                 scan = self.continuous;
                 let current = self.store.workflow_workspaces()?;
-                self.launch_ready(&current, now_ms, running, futures, &mut count).await?;
+                self.launch_ready(&current, clock(), running, futures, &mut count).await?;
             }
             if running.is_empty() { break; }
             let mut shutdown = self.shutdown.clone();
@@ -568,7 +576,7 @@ impl Runtime {
                     // remains available for the Stop effect's quiescence check.
                     let current = self.state(&workspace)?.ok_or(Error::Refused("missing state"))?;
                     if current.items.get(&effect.item).is_some_and(|i| i.pending.as_ref() == Some(&effect.id)) {
-                        self.observe(&workspace, &effect, outcome, false, now_ms)?;
+                        self.observe(&workspace, &effect, outcome, false, clock())?;
                     }
                     count += 1;
                     // Not at the end of the sweep, which a long gate elsewhere may hold for hours.

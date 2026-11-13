@@ -199,6 +199,62 @@ mod tests {
                 run: effect.run, fence: effect.fence }, time).unwrap().result.is_ok());
     }
     #[tokio::test]
+    async fn continuous_sweep_advances_load_gap_while_an_effect_stays_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        super::super::concurrency_tests::enqueue_item(&mut runtime, "w", "gate", coding_definition(false));
+        let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap().effect;
+        let binding = Binding::new("w", &effect, 1, 0, &runtime.base);
+        let (cancel, _) = tokio::sync::watch::channel(false);
+        // Keep the actual continuous sweep open, as a long landing gate does. No external process runs.
+        let job = Running { workspace: "w".into(), effect, binding, cancel, wait: true };
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.stages[0].progression = Progression::AwaitApproval { principal: "owner".into() };
+        // Isolate the admission timer from host load; near-limit fake samples are tested separately.
+        d.start_policy = Some(policy(Budget::Load { below_milli: u64::MAX, min_start_gap_ms: 60_000 }));
+        publish(&runtime, d);
+        track(&runtime, &["a", "b", "c"]);
+        runtime.continuous = true;
+        let handle = runtime.command_handle(&runtime.controller()).unwrap();
+        let (finish, finished) = oneshot::channel();
+        tokio::time::pause();
+        let task = tokio::spawn(async move {
+            let (_, placeholder) = mpsc::channel(1);
+            let mut inbox = std::mem::replace(&mut runtime.inbox, placeholder);
+            runtime.sweep_loop(100, &mut inbox, &mut vec![job],
+                &mut vec![Some(Box::pin(async move {
+                    finished.await.unwrap();
+                    Ok(Outcome::SafeFailure)
+                }))]).await.unwrap();
+            runtime
+        });
+        let first = handle.state("w").await.unwrap().unwrap();
+        assert!(!first.items["a"].definition.is_ticket());
+        assert!(first.items["b"].definition.is_ticket());
+        // Reads and scans before the gap cannot spend another allowance.
+        for seconds in [1, 1, 57] {
+            tokio::time::advance(Duration::from_secs(seconds)).await;
+            handle.state("w").await.unwrap();
+            assert!(handle.state("w").await.unwrap().unwrap().items["b"].definition.is_ticket());
+        }
+        tokio::time::advance(Duration::from_secs(1)).await;
+        handle.state("w").await.unwrap();
+        let after_gap = handle.state("w").await.unwrap().unwrap();
+        tokio::time::advance(Duration::from_secs(60)).await;
+        handle.state("w").await.unwrap();
+        let after_second_gap = handle.state("w").await.unwrap().unwrap();
+        finish.send(()).unwrap();
+        let runtime = task.await.unwrap();
+        assert!(!after_gap.items["b"].definition.is_ticket(), "a running effect must not freeze admission time");
+        assert!(after_gap.items["c"].definition.is_ticket(), "one allowance per gap");
+        assert!(!after_second_gap.items["c"].definition.is_ticket(), "later gaps keep advancing in the same sweep");
+        let observation = runtime.events("w").unwrap().into_iter().find(|event|
+            matches!(&event.command, Command::Observe { item, .. } if item == "gate")).unwrap();
+        assert!(observation.now_ms >= 120_100, "settlement must use the advanced clock too");
+    }
+
+    #[tokio::test]
     async fn fake_clock_and_load_start_three_hold_fourth_and_refill_on_finish() {
         let dir = tempfile::tempdir().unwrap();
         let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
