@@ -36,7 +36,7 @@ fn running_ci() -> State {
     s
 }
 #[test]
-fn ci_rule_waits_then_routes_the_original_result_and_rejects_stale_or_unpinned_answers() {
+fn ci_rule_waits_then_routes_the_original_result_and_drops_stale_answers() {
     let s = running_ci();
     let e = Evidence { candidate: "sha".into(), manifest: "m".into(), receipt: "r".into(), policy_pin: "p".into() };
     let t = step(&s, &observe(&s, Outcome::Rejected(e))).unwrap();
@@ -48,9 +48,23 @@ fn ci_rule_waits_then_routes_the_original_result_and_rejects_stale_or_unpinned_a
     let mut stale = good.clone();
     if let Command::Decide { call, .. } = &mut stale.command { *call = "old".into(); }
     assert_eq!(step(&s, &stale), Err(Refusal::Stale));
+    let mut stale_fence = good.clone();
+    if let Command::Decide { fence, .. } = &mut stale_fence.command { *fence += 1; }
+    assert_eq!(step(&s, &stale_fence), Err(Refusal::Stale));
     let mut pin = good.clone();
     if let Command::Decide { policy_pin, .. } = &mut pin.command { *policy_pin = "new".into(); }
-    assert_eq!(step(&s, &pin), Err(Refusal::Evidence));
+    let mut unauthorized = pin.clone(); unauthorized.grant = Grant::Controller;
+    assert_eq!(step(&s, &unauthorized), Err(Refusal::Unauthorized));
+    let refused = step(&s, &pin).unwrap().state;
+    assert_eq!(refused.items["a"].phase, Phase::Failed);
+    assert!(refused.items["a"].deciding.is_none());
+    assert!(refused.items["a"].hook_refused.is_some());
+    // Even a missing answer cannot spend a retry under a different policy pin.
+    if let Command::Decide { result, .. } = &mut pin.command { *result = HookResult::Missing; }
+    let refused = step(&s, &pin).unwrap();
+    assert!(refused.state.items["a"].deciding.is_none());
+    assert!(refused.state.items["a"].hook_refused.is_some());
+    assert!(!refused.effects.iter().any(|e| matches!(e.kind, EffectKind::Decide { .. })));
     let done = step(&s, &good).unwrap();
     assert_eq!(done.state.items["a"].phase, Phase::Failed);
     assert!(done.state.items["a"].hook_refused.is_none());

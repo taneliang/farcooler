@@ -42,9 +42,11 @@ pub(super) fn decide(state: &State, input: &Input) -> Result<Transition, Refusal
     if &open.input.call != call || item.fence != *fence || open.input.fence != *fence { return Err(Refusal::Stale); }
     let effect = item.pending.as_ref().ok_or(Refusal::Stale)?;
     if input.grant != (Grant::Operation { effect: effect.clone(), run: item.run.clone(), fence: *fence }) { return Err(Refusal::Unauthorized); }
-    if policy_pin != &open.input.policy_pin || policy_pin != &item.policy_pin { return Err(Refusal::Evidence); }
+    // A fresh, authenticated answer under the wrong pin is a bad decision, not a stale
+    // call. Settle it with the published fallback instead of leaving the call open.
+    let pinned = policy_pin == &open.input.policy_pin && policy_pin == &item.policy_pin;
     let policy = item.definition.script_policies.get(&open.policy).ok_or(Refusal::Definition)?;
-    if matches!(result, HookResult::Timeout | HookResult::Missing) && open.attempt == 1 {
+    if pinned && matches!(result, HookResult::Timeout | HookResult::Missing) && open.attempt == 1 {
         let mut base = state.clone();
         let record = base.items.get_mut(id).ok_or(Refusal::Missing)?;
         let retry = record.deciding.as_mut().ok_or(Refusal::Missing)?;
@@ -59,7 +61,7 @@ pub(super) fn decide(state: &State, input: &Input) -> Result<Transition, Refusal
         return Ok(t);
     }
     let parsed = match result {
-        HookResult::Receipt { raw, manifest } if raw.len() <= 16_384 && valid_id(manifest) => {
+        HookResult::Receipt { raw, manifest } if pinned && raw.len() <= 16_384 && valid_id(manifest) => {
             serde_json::from_str::<HookDecision>(raw).ok().filter(|d| &d.call == call).map(|d| d.choice)
         }
         _ => None,

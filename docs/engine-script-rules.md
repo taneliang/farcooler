@@ -63,7 +63,8 @@ label checks before a rule can suspend them or spend its call budget.
 There are no agent rules or CI rerun verbs in this slice.
 
 Call and fence freshness are checked before parsing; a superseded call is
-stale. The policy pin must match the call. Duplicate fields, unknown schemas,
+stale. A fresh, authenticated answer with a mismatched policy pin applies the
+fallback without retrying. Duplicate fields, unknown schemas,
 decisions or fields, malformed JSON, and moves that are illegal now apply the fallback and leave a
 sentence in the run's failure context. The fallback is deliberately limited to
 the point's default action, so it always works when another actor changes the
