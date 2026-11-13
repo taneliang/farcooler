@@ -389,7 +389,17 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                         .ok_or(Refusal::Invalid)?;
                     // Never back across a landing: what it landed would be built and landed again.
                     if item.definition.stages[to..=item.stage].iter().any(|s| lands(&s.kind)) { return Err(Refusal::Phase); }
-                    if item.sent_back.len() >= usize::from(item.definition.send_back_limit()) { return Err(Refusal::Limit); }
+                    let limit = item.definition.send_back_limit();
+                    if item.sent_back.len() >= usize::from(limit) {
+                        return Err(Refusal::SendBackRefused(format!("The send-back limit of {limit} has been reached.")));
+                    }
+                    let stage = &item.definition.stages[item.stage];
+                    if stage.limit > 0 && item.back_edges.get(&stage.id).copied().unwrap_or(0) >= stage.limit {
+                        return Err(Refusal::SendBackRefused(format!("The back-edge limit of {} for step {} has been reached.", stage.limit, stage.id)));
+                    }
+                    if item.fence == u64::MAX {
+                        return Err(Refusal::SendBackRefused(format!("The fence limit of {} has been reached.", u64::MAX)));
+                    }
                     item.sent_back.push(SendBack { id: input.id.clone(), revision: input.expected_revision, run: item.run.clone(),
                         from: item.definition.stages[item.stage].id.clone(), to: item.definition.stages[to].id.clone(), reason: reason.clone() });
                     item.brief = Some(reason.clone());
@@ -480,6 +490,12 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
         if !ready(&next, &item, input) { next.items.insert(id, item); continue; }
         enter(&mut item, &id, input, &mut effects)?;
         next.items.insert(id, item);
+    }
+    if let Command::SendBack { item, .. } = &input.command {
+        let restarted = next.items.get(item).ok_or(Refusal::Missing)?;
+        if restarted.phase != Phase::Running || restarted.definition.stages[restarted.stage].kind != StageKind::Build {
+            return Err(Refusal::SendBackRefused("The build could not start because its resource is unavailable or it requires approval.".into()));
+        }
     }
     // A group says when it reached the step and phase it is in now.
     for (id, item) in next.items.iter_mut().filter(|(_, i)| i.group_of.is_some()) {

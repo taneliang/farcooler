@@ -7,6 +7,8 @@ use crate::{Definition, StageKind, OperationSpec, CiRetry, CiRun};
 pub enum Refusal {
     Definition, Invalid, Duplicate, Stale, Unauthorized, Missing, Blocked, Resource,
     Phase, Evidence, Limit,
+    /// A send-back cannot be accepted; the sentence identifies the exhausted budget.
+    SendBackRefused(String),
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -304,3 +306,12 @@ pub fn valid_rework_reason(reason: &str) -> bool {
     !reason.trim().is_empty() && reason.len() <= MAX_REWORK_REASON_BYTES
         && !reason.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\r' | '\n'))
 }
+
+/// Each step's back-edge budget, including unused and zero-limit steps.
+pub fn back_edge_budgets(item: &Item) -> BTreeMap<String, BackEdgeBudget> {
+    item.definition.stages.iter().map(|stage| (stage.id.clone(), BackEdgeBudget {
+        used: item.back_edges.get(&stage.id).copied().unwrap_or(0), limit: stage.limit,
+    })).collect()
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackEdgeBudget { pub used: u8, pub limit: u8 }

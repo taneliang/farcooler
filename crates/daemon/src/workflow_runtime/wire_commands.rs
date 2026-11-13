@@ -63,8 +63,10 @@ impl Runtime {
                     if stop.run == live.run { stops.insert(item.clone(), serde_json::json!(stop)); }
                 }
             }
+            let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
+                .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
             return Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
-                "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}));
+                "back_edge_budgets":budgets, "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}));
         }
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }

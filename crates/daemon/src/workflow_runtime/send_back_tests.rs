@@ -27,6 +27,9 @@ async fn workflow_send_back_builds_again_in_the_same_tree_and_the_agent_is_told_
     started(&mut runtime).await;
     let state = finish(&mut runtime, "w").await;
     let item = &state.items["ov-7"];
+    let view = runtime.wire_command("w", "orchestrator", Action::Get).unwrap();
+    assert_eq!(view.pointer("/back_edge_budgets/ov-7/build/used"), Some(&serde_json::json!(0)));
+    assert_eq!(view.pointer("/back_edge_budgets/ov-7/build/limit"), Some(&serde_json::json!(0)));
     assert_eq!(item.phase, Phase::Failed, "the check failed");
     let built = item.last_evidence.clone().unwrap().candidate;
     let reason = "The check fails: result.txt must say what changed. Don't 'fix' it with $(rm -rf ~); 修复它.";

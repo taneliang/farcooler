@@ -165,7 +165,7 @@ fn a_send_back_is_refused_mid_step_on_a_ticket_across_a_landing_past_the_limit_a
     log.send_back("ov-1", "first").unwrap();
     log.observe("ov-1", Outcome::Passed(ev("c2")));
     log.observe("ov-1", Outcome::Passed(ev("c2")));
-    assert_eq!(log.send_back("ov-1", "second"), Err(Refusal::Limit));
+    assert_eq!(log.send_back("ov-1", "second"), Err(Refusal::SendBackRefused("The send-back limit of 1 has been reached.".into())));
     let mut d = coding();
     d.send_backs = Some(MAX_SEND_BACKS + 1);
     assert_eq!(d.validate(), Err(Refusal::Definition));
