@@ -9,6 +9,7 @@ pub(super) struct Scheduler {
     boards: BTreeMap<String, Board>,
     refused: BTreeMap<(String, String, bool), i64>,
     last_start_ms: Option<i64>,
+    recovered_start: bool,
     #[cfg(test)]
     state_reads: usize,
 }
@@ -38,6 +39,12 @@ impl Runtime {
     }
     fn schedule_with_load(&self, workspaces: &[String], now_ms: i64, load: Option<u64>) -> Result<()> {
         let mut scan = self.scheduling.lock().unwrap();
+        // Admission history outlives both completed runs and runtime restarts. Read it once,
+        // rather than parsing the durable event log on every one-second service scan.
+        if !scan.recovered_start {
+            scan.last_start_ms = self.store.workflow_last_automatic_start_ms()?;
+            scan.recovered_start = true;
+        }
         // Inventory belongs to the runner, even when this pass was woken for only one board.
         let all = self.store.workflow_scheduling_workspaces()?;
         scan.boards.retain(|w, _| all.contains(w));
@@ -413,6 +420,45 @@ mod tests {
         runtime.schedule_with_load(&["w".into()], 180_100, Some(2000)).unwrap();
         let busy: usize = ["w", "other"].iter().map(|w| runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
         assert_eq!(busy, 3, "blocked scans do not move the deadline");
+    }
+
+    #[tokio::test]
+    async fn near_limit_burst_keeps_load_allowance_across_scans_and_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("runtime");
+        let runtime = Runtime::create(&root).await.unwrap();
+        let mut d = coding_definition(false);
+        d.stages.retain(|s| s.kind == StageKind::Build);
+        d.start_policy = Some(policy(Budget::Load { below_milli: 6000, min_start_gap_ms: 60_000 }));
+        publish(&runtime, d.clone());
+        track(&runtime, &["a", "b", "c", "d"]);
+        runtime.schedule_with_load(&["w".into()], 100, Some(5999)).unwrap();
+        for time in [100, 101, 1100, 2100] {
+            runtime.schedule_with_load(&["w".into()], time, Some(5999)).unwrap();
+            assert_eq!(runtime.state("w").unwrap().unwrap().items.values().filter(|i| active(i)).count(), 1);
+        }
+        // Completion and restart cannot turn the same lagging load into another allowance.
+        complete(&runtime, "a", 2101);
+        drop(runtime);
+        let runtime = Runtime::open(&root).unwrap();
+        publish_on(&runtime, "other", d);
+        runtime.track_tickets(&[("other".into(), "z".into(), "todo".into())]).unwrap();
+        for time in [99, 2102, 3100, 59_100, 60_099] {
+            runtime.schedule_with_load(&["other".into(), "w".into()], time, Some(5999)).unwrap();
+            for board in ["w", "other"] {
+                assert!(runtime.state(board).unwrap().unwrap().items.values().all(|i| !active(i)),
+                    "restart must retain the runner-wide allowance at {time}");
+            }
+        }
+        for load in [None, Some(6000), Some(7000)] {
+            runtime.schedule_with_load(&["w".into()], 60_100, load).unwrap();
+            assert!(runtime.state("w").unwrap().unwrap().items["b"].definition.is_ticket());
+        }
+        runtime.schedule_with_load(&["w".into(), "other".into()], 60_100, Some(5999)).unwrap();
+        runtime.schedule_with_load(&["other".into()], 60_100, Some(5999)).unwrap();
+        let busy: usize = ["w", "other"].iter().map(|w|
+            runtime.state(w).unwrap().unwrap().items.values().filter(|i| active(i)).count()).sum();
+        assert_eq!(busy, 1, "a fresh acceptable sample after the gap permits exactly one more start");
     }
 
     #[tokio::test]

@@ -39,7 +39,9 @@ one-second service scans. Set a different positive gap in the published budget:
 `{"Load":{"below_milli":6000,"min_start_gap_ms":120000}}`. The longest
 published gap applies to the whole runner, alongside the strictest load and
 fixed limits. Failed admissions and queues do not consume the gap. The timer
-is retained for the lifetime of the runtime; republishing does not reset it.
+is recovered once from accepted automatic start events on the runtime’s first
+scheduling scan, so republishing, completion, and daemon restart do not reset it. Missing or high
+load samples hold admission even after the gap expires.
 `{"Fixed":0}` pauses automatic starts. Budgets constrain the whole runner:
 active ticket runs across every board count, including manually started runs,
 reviews, approval waits, and runs whose board no longer has a start policy.

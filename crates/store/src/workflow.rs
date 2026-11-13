@@ -133,6 +133,14 @@ impl Store {
         Ok(stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Recover the runner-wide load gap from accepted starts, even after completion or archival.
+    /// Events contain only accepted commands, so a refused start cannot postpone admission.
+    pub fn workflow_last_automatic_start_ms(&self) -> Result<Option<i64>> {
+        Ok(self.conn().query_row("SELECT max(json_extract(payload, '$.now_ms')) FROM workflow_events
+            WHERE json_extract(payload, '$.source') = 'runtime'
+            AND json_type(payload, '$.command.Start') = 'object'", [], |r| r.get(0))?)
+    }
+
     /// Cheap cache invalidation without loading the aggregate JSON.
     pub fn workflow_state_revision(&self, workspace: &str) -> Result<Option<u64>> {
         Ok(self.conn().query_row("SELECT revision FROM workflow_states WHERE workspace=?1", [workspace], |r| r.get(0)).optional()?)

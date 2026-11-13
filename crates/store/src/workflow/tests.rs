@@ -88,6 +88,33 @@ fn workflow_refusals_deduplicated_without_revision() {
     assert_eq!(store.workflow_events("workspace").unwrap().len(), 1);
     assert_eq!(store.workflow_outbox("workspace").unwrap().len(), 1);
 }
+
+#[test]
+fn workflow_load_gap_recovers_only_accepted_automatic_starts() {
+    let store = Store::open_in_memory().unwrap();
+    assert_eq!(store.workflow_last_automatic_start_ms().unwrap(), None);
+    let mut ticket = enqueue("workspace", "resource");
+    if let Command::Enqueue { definition, initial_candidate, .. } = &mut ticket.command {
+        *definition = Definition::ticket_at("todo").unwrap();
+        *initial_candidate = Some("policy-1".into());
+    }
+    assert!(store.workflow_apply(&ticket).unwrap().result.is_ok());
+    assert_eq!(store.workflow_last_automatic_start_ms().unwrap(), None);
+    let start = Input { id: "start".into(), source: "runtime".into(), source_sequence: 1,
+        expected_revision: 1, now_ms: 100, command: Command::Start { item: "item".into(),
+            definition: Definition::coding(), policy_pin: "policy-1".into(), resource: "resource".into(),
+            dependencies: Default::default(), initial_candidate: None, models: Default::default(),
+            tree: None, with: vec![] }, ..ticket };
+    assert!(store.workflow_apply(&start).unwrap().result.is_ok());
+    assert_eq!(store.workflow_last_automatic_start_ms().unwrap(), Some(100));
+    let refused = Input { id: "refused".into(), now_ms: 2000, ..start.clone() };
+    assert!(store.workflow_apply(&refused).unwrap().result.is_err());
+    let advance = Input { id: "advance".into(), expected_revision: 2, source_sequence: 2,
+        now_ms: 3000, command: Command::Advance, ..start };
+    assert!(store.workflow_apply(&advance).unwrap().result.is_ok());
+    assert_eq!(store.workflow_last_automatic_start_ms().unwrap(), Some(100),
+        "refused starts and unrelated runtime events cannot move the load deadline");
+}
 #[test]
 fn workflow_concurrent_resource_admission_across_connections() {
     let path = temp();
