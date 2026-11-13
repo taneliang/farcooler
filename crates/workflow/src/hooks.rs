@@ -128,7 +128,7 @@ pub(crate) fn fire(item: &mut Item, id: &str, input: &Input, point: HookPoint,
         policy_pin: item.policy_pin.clone(), label: observation.as_ref().and_then(|i| match &i.command {
             Command::Observe { outcome: Outcome::Passed(_), .. } => Some("passed".into()),
             Command::Observe { outcome: Outcome::Rejected(_), .. } => Some("rejected".into()),
-            Command::Observe { outcome: Outcome::Labeled(label, _), .. } => Some(label.clone()), _ => None }), candidate: item.candidate.clone(), failure: item.failure.clone(),
+            Command::Observe { outcome: Outcome::Labeled(label, _) | Outcome::CiResult { label, .. }, .. } => Some(label.clone()), _ => None }), candidate: item.candidate.clone(), failure: item.failure.clone(),
         evidence: item.last_evidence.clone(), groups: Vec::new(), members: item.members.clone(), retries: item.retries,
         allowed: allowed.into_iter().map(Into::into).collect() };
     item.deciding = Some(HookCall { policy: name, deadline_ms: input.now_ms.saturating_add(policy.timeout_ms as i64),

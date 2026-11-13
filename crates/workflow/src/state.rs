@@ -101,10 +101,16 @@ pub struct Item {
     pub failure: Option<String>,
     /// Reruns spent on each CI step. Spent before dispatch and never refunded by a restart or Retry.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap<String, u8>,
+    pub ci_reruns: BTreeMap<String, u8>,
     /// The run being rerun, then watched at a strictly newer attempt on the same commit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ci_retry: Option<CiRetry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deciding: Option<crate::HookCall>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hook_calls: BTreeMap<String, u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_refused: Option<String>,
 }
 /// One send-back: who asked (the input), when (the revision), from which step to which, on which run, and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

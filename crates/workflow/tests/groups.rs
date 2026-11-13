@@ -964,3 +964,25 @@ fn a_split_rule_rejoins_only_a_waiting_group_with_the_same_pins_and_room() {
     assert_eq!(log.state.archive[&rest].phase, Phase::Cancelled);
     assert_eq!(log.replay_digest(), digest(&log.state));
 }
+
+#[test]
+fn a_script_observes_the_new_ci_result_before_the_builtin_rerun() {
+    let mut definition = flaky_definition();
+    definition.script_policies.insert("ci-script".into(), ScriptPolicy { point: HookPoint::CiResult,
+        script: "/tmp/ci-rule".into(), digest: digest(&vec![0u8]), timeout_ms: 30,
+        max_calls: 1, fallback: HookMove::Accept });
+    let mut log = Log::new();
+    let group = verb_group(&mut log, definition);
+    walk_to(&mut log, &group, "ci");
+    let result = ci_answer(&mut log, &group, "rejected", 1, &["iOS UI tests"]);
+    assert!(matches!(result.effects[0].kind, EffectKind::Decide { .. }));
+    let item = &log.state.items[&group];
+    let call = item.deciding.as_ref().unwrap().input.call.clone();
+    assert_eq!(item.deciding.as_ref().unwrap().input.label.as_deref(), Some("rejected"));
+    let grant = Grant::Operation { effect: item.pending.clone().unwrap(), run: item.run.clone(), fence: item.fence };
+    let command = Command::Decide { item: group.clone(), call: call.clone(), fence: item.fence, policy_pin: item.policy_pin.clone(),
+        result: HookResult::Receipt { raw: serde_json::json!({"schema":"hook-decision/v1","call":call,"decision":"accept"}).to_string(), manifest: "m".into() } };
+    let result = log.run(command, grant);
+    assert_eq!(result.effects[0].kind, EffectKind::Execute(StageKind::RerunCi));
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}

@@ -1,12 +1,12 @@
 # Script rules at engine decision points
 
-A published workflow definition can include `policies`. Each rule names one of
+A published workflow definition can include `script_policies`. Each rule names one of
 `group.splits`, `ci.result`, or `run.fails`, and pins a script's absolute path
 and bytes. Only one rule may name each point. Existing definitions omit this
 field and retain their pins and behavior.
 
 ```json
-"policies": {
+"script_policies": {
   "failure-triage": {
     "point": "run.fails",
     "script": "/home/runner/rules/triage.sh",

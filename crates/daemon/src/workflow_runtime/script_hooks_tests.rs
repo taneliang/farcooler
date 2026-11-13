@@ -14,7 +14,7 @@ async fn failed(body: &str) -> (tempfile::TempDir, Runtime) {
     let policy = script(dir.path(), body);
     let mut definition = coding_definition(false);
     definition.stages.truncate(1); definition.stages[0].max_attempts = 1;
-    definition.policies.insert("triage".into(), policy);
+    definition.script_policies.insert("triage".into(), policy);
     super::tests::enqueue(&mut runtime, "w", "coding", definition);
     let effect = runtime.store.workflow_outbox("w").unwrap()[0].effect.clone();
     let state = runtime.state("w").unwrap().unwrap();
@@ -150,4 +150,22 @@ async fn script_hooks_fake_clock_expiry_is_logged_and_keeps_the_retry_deadline()
     assert_eq!(times, [1_000, 2_000]);
     assert!(runtime.state("w").unwrap().unwrap().items["coding"].deciding.is_none());
     replay(&runtime);
+}
+
+#[tokio::test]
+async fn spawn_failure_removes_checkout_and_worktree_registration() {
+    let (_dir, mut runtime) = failed("exit 0").await;
+    let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap().effect;
+    let binding = Binding::new("w", &effect, 0, 0, &runtime.base);
+    let path = Path::new(&match &effect.kind { EffectKind::Decide { policy, .. } => policy.script.clone(), _ => panic!() }).to_owned();
+    let bytes = b"#!/nonexistent/farcooler-hook-interpreter\n".to_vec();
+    std::fs::write(&path, &bytes).unwrap();
+    let mut binding = binding;
+    if let EffectKind::Decide { policy, .. } = &mut binding.effect.kind { policy.digest = digest(&bytes); }
+    runtime.exec.launched = Some((20, std::time::Instant::now()));
+    assert!(matches!(runtime.execute_hook(&binding, None).await.unwrap(), Outcome::Hook(HookResult::Missing)));
+    let checkout = runtime.exec.root.join(format!("hook-tree-{}", effect.id));
+    assert!(!checkout.exists());
+    let output = std::process::Command::new("git").arg("-C").arg(runtime.exec.repository()).args(["worktree", "list", "--porcelain"]).output().unwrap();
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(checkout.to_str().unwrap()));
 }

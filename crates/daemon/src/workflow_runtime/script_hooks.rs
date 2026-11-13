@@ -47,43 +47,45 @@ impl Exec {
         let checkout = self.root.join(format!("hook-tree-{}", binding.effect.id));
         let checkout_name = checkout.to_str().ok_or(Error::Refused("invalid rule checkout path"))?;
         adapters::git(&self.repository(), &["worktree", "add", "--detach", checkout_name, &binding.base]).await?;
-        let mut command = tokio::process::Command::new(&executable);
-        command.env_clear().env("FARCOOLER_RECEIPT", self.hook_receipt(&binding.effect))
-            .current_dir(&checkout).stdin(Stdio::piped()).stdout(log.try_clone()?).stderr(log)
-            .kill_on_drop(true).process_group(0);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(_) => return Ok(Outcome::Hook(HookResult::Missing)),
-        };
-        let pid = child.id();
-        let document = serde_json::to_vec(input)?;
-        let mut stdin = child.stdin.take().ok_or(Error::Refused("missing rule stdin"))?;
-        let wait = async {
-            // A broken pipe is an exit, and still may have left a valid receipt.
-            let _ = stdin.write_all(&document).await;
-            drop(stdin);
-            child.wait().await
-        };
-        let remaining = open.deadline_ms.saturating_sub(self.clock_ms()).max(1);
-        let interrupted = tokio::select! {
-            completed = tokio::time::timeout(Duration::from_millis(remaining as u64), wait) =>
-                completed.is_err().then_some(HookResult::Timeout),
-            _ = async {
-                match &mut cancelled {
-                    Some(signal) => { if !*signal.borrow() { let _ = signal.changed().await; } }
-                    None => std::future::pending::<()>().await,
-                }
-            } => Some(HookResult::Missing),
-        };
-        if let Some(result) = interrupted {
-            if let Some(pid) = pid { unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } }
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-            adapters::git(&self.repository(), &["worktree", "remove", "--force", checkout_name]).await?;
-            return Ok(Outcome::Hook(result));
-        }
+        let result: Result<Outcome> = async {
+            let mut command = tokio::process::Command::new(&executable);
+            command.env_clear().env("FARCOOLER_RECEIPT", self.hook_receipt(&binding.effect))
+                .current_dir(&checkout).stdin(Stdio::piped()).stdout(log.try_clone()?).stderr(log)
+                .kill_on_drop(true).process_group(0);
+            let mut child = match command.spawn() {
+                Ok(child) => child,
+                Err(_) => return Ok(Outcome::Hook(HookResult::Missing)),
+            };
+            let pid = child.id();
+            let document = serde_json::to_vec(input)?;
+            let mut stdin = child.stdin.take().ok_or(Error::Refused("missing rule stdin"))?;
+            let wait = async {
+                // A broken pipe is an exit, and still may have left a valid receipt.
+                let _ = stdin.write_all(&document).await;
+                drop(stdin);
+                child.wait().await
+            };
+            let remaining = open.deadline_ms.saturating_sub(self.clock_ms()).max(1);
+            let interrupted = tokio::select! {
+                completed = tokio::time::timeout(Duration::from_millis(remaining as u64), wait) =>
+                    completed.is_err().then_some(HookResult::Timeout),
+                _ = async {
+                    match &mut cancelled {
+                        Some(signal) => { if !*signal.borrow() { let _ = signal.changed().await; } }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => Some(HookResult::Missing),
+            };
+            if let Some(result) = interrupted {
+                if let Some(pid) = pid { unsafe { libc::kill(-(pid as i32), libc::SIGKILL); } }
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Ok(Outcome::Hook(result));
+            }
+            // A receipt, not exit status or stdout, is the decision.
+            Ok(Outcome::Hook(self.hook_result(binding)))
+        }.await;
         adapters::git(&self.repository(), &["worktree", "remove", "--force", checkout_name]).await?;
-        // A receipt, not exit status or stdout, is the decision.
-        Ok(Outcome::Hook(self.hook_result(binding)))
+        result
     }
 }
