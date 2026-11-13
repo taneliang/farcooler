@@ -398,7 +398,8 @@ jobs:
     # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
     # macOS 60: its runners have run 2-3x slower, the crash-matrix binary alone takes about 6 min, and 35 min cut main off about 4900 of 6665 tests in (ov-992).
     # Ubuntu 45 (ov-1056): the last five green main runs took 24.8-31.1 min (gh run view, Nov 9). The leak-checked nextest step went 11.1 to 14.0 min and clippy 3.2 to 4.2 across them. 45 is 45% over the slowest.
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 45 }}
+    # ov-1133: a recent green macOS job took 54 minutes; 70 leaves room for runner variance.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 70 || 45 }}
     strategy:
       fail-fast: false
       matrix:
