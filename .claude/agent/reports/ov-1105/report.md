@@ -137,3 +137,37 @@ after building its required CLI binary and removing the parent agent session’s
 `FARCOOLER_NATIVE_HOOK_SOCKET` from the test environment; that variable overrides
 the tests’ private hook sockets. File-size, swallowed-call, copy, staged doc-comment
 and diff whitespace checks passed. No platform layout code changed in this round.
+
+## CLI enrichment and final acceptance audit
+
+The Mac's `plan --json` read now uses the same authenticated workflow request,
+decoding, group validation, and compatibility policy as the Session-based apps.
+The socket integration regression invokes the actual CLI, compares its output
+with `Session::plan_with_workflow`, and holds both to the fixture consumed by
+the Mac's 320 pt Plan home test. The Mac test no longer injects workflow data,
+so it cannot conceal a missing CLI read.
+
+The final audit found the shared queue reachable in the current Mac and iPhone
+Plan columns, the iPad and Android Landings sections, and the web Plan screen.
+Each renderer lays out the Rust-supplied group title and complete lines; member
+selection, failure interpretation, elapsed time, and ordering remain in Rust.
+
+Fresh verification on November 13: all 287 web tests, the client TypeScript
+check, and the production Plan browser regression passed. The browser check
+verifies all four queue-only groups and their complete lines at 320 px,
+including horizontal bounds and clipping. File-size budget, copy,
+swallowed-call, visual-token, and diff-whitespace checks also passed.
+
+The actual CLI socket regression passed, including equality with the shared
+Session read and the Mac fixture. All three AgentKit PlanView tests passed
+against a freshly built Rust client library. Platform UI code was unchanged in
+this audit; the Mac, iPhone, and Android layout results above remain the prior
+verification, rather than fresh runs in this pass.
+
+The client unit suite passed 350 tests, with one existing ignored test; its
+remaining two tests initially lacked their required `target/debug/farcoolerd`.
+After building that binary, both passed on a focused rerun, for 352 passing
+client tests across the runs. Initial sandbox-only socket, browser-process,
+and compiler-cache setup failures were resolved with the required local access.
+This pass changes only this verification report; the implementation and its
+CLI regression were already committed on the ticket branch.
