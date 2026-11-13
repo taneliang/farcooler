@@ -356,3 +356,30 @@ exactly this.
 inherits `CLAUDE_CODE_SESSION_ID` and adopts the PARENT session's `aiTitle`,
 which makes the join look broken when it is not. Strip `CLAUDE_CODE_*` and
 `CLAUDECODE` first.
+
+### Codex child transcripts (ov-879)
+
+Codex 0.167.2 writes a child rollout with `session_meta.payload.id` naming its
+native thread UUID. `session_id` can still name the parent. The observed header
+has `source.subagent.thread_spawn.parent_thread_id` and `agent_path`; the path
+is a collaboration role, not the native UUID. Only a verified direct child of
+the pane's joined rollout may open. A unique registered task path can resolve
+to that UUID; repeated task paths are ambiguous. Guardian headers instead use
+`source.subagent.other: "guardian"` / `thread_source: "guardian_review"` and
+are excluded.
+
+A fork copies parent records, including another `session_meta`, into the child
+rollout and assigns new outer timestamps. Its native
+`subagent_history_start_ordinal` is the boundary for the child's own records.
+A fork without this boundary is unavailable rather than showing the copied
+conversation. Own `turn_context.model` supplies the model, and own turn ends
+and subsequent starts supply ended/resumed state. The child's first own
+`task_started.turn_attribution.parent_turn_id` places its summary under the
+launching parent turn, preserving that turn's ticket context on a rebuild.
+No ticket is guessed from the task path or inferred from a board registration.
+
+Discovery is bounded to the same CODEX_HOME's dated sessions tree from the
+parent's day onward, with cached headers. Each opened child descriptor is
+revalidated against its native ID and parent on every poll, including after
+replacement. Its own rows are projected separately; the parent receives a
+summary and never receives the child's prose or tool rows.

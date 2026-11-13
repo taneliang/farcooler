@@ -269,6 +269,9 @@ pub struct Subagent {
     /// `agentId`, once the launch result or the meta file names it.
     pub agent_id: Option<String>,
     pub agent_type: String,
+    /// The child's own turn context, never inferred from its parent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// `agent_type` as words, "General purpose" (`words::agent_type`).
     pub type_words: String,
     pub description: String,

@@ -1,8 +1,8 @@
 //! A subagent's own rows (ov-453): `agent_id` on `agent.rows` and
 //! `agent.rows_follow`, for a view that opens a running agent from its tray.
 //!
-//! The agent's transcript is claude's `<session>/subagents/agent-<id>.jsonl`
-//! beside the pane's (`projector::subagent_transcript`), read by a projector
+//! The agent's transcript is Claude's `<session>/subagents/agent-<id>.jsonl`
+//! beside the pane's, or a verified Codex child rollout (ov-879), read by a projector
 //! of its own as though it were a session: the task it was given is the
 //! turn's prompt, then its calls and its words, so it draws in the view's
 //! own style.
@@ -49,7 +49,7 @@ pub struct SubagentProjectors {
 impl SubagentProjectors {
     /// The projector for `agent` of `terminal`, on `path`: the one held, or a
     /// new one when none is or the pane's session moved (`/clear`).
-    fn get(&self, terminal: Uuid, agent: &str, path: PathBuf) -> Arc<Open> {
+    fn get(&self, terminal: Uuid, agent: &str, path: PathBuf, parent: PathBuf) -> Arc<Open> {
         let mut open = self.open.lock().unwrap_or_else(|e| e.into_inner());
         let key = (terminal, agent.to_string());
         if let Some(held) = open.get(&key).filter(|held| held.lock().transcript() == path) {
@@ -62,15 +62,15 @@ impl SubagentProjectors {
                 open.remove(&oldest);
             }
         }
-        let fresh = Arc::new(Open { session: Mutex::new(SessionProjector::open(path)), epoch: next_epoch(), used: Mutex::new(Instant::now()) });
+        let fresh = Arc::new(Open { session: Mutex::new(SessionProjector::open_subagent(path, parent)), epoch: next_epoch(), used: Mutex::new(Instant::now()) });
         open.insert(key, fresh.clone());
         fresh
     }
 
     /// Up to `limit` of the agent's rows before `before`, oldest first, read
     /// up to now. Blocking: it reads the file.
-    pub fn page(&self, terminal: Uuid, agent: &str, path: PathBuf, before: Option<u64>, limit: usize) -> Page {
-        let open = self.get(terminal, agent, path);
+    pub fn page(&self, terminal: Uuid, agent: &str, path: PathBuf, parent: PathBuf, before: Option<u64>, limit: usize) -> Page {
+        let open = self.get(terminal, agent, path, parent);
         let mut session = open.lock();
         session.poll();
         let p = session.projection();
@@ -81,14 +81,18 @@ impl SubagentProjectors {
 
     /// What changed after revision `after` of projection `epoch` (`since`),
     /// read again every `POLL` until something has or `deadline` passes.
-    pub async fn follow(&self, terminal: Uuid, agent: &str, path: PathBuf, since: (u64, u64), deadline: tokio::time::Instant, max: usize) -> Follow {
+    pub async fn follow(&self, terminal: Uuid, agent: &str, transcripts: (PathBuf, PathBuf), since: (u64, u64), deadline: tokio::time::Instant, max: usize) -> Follow {
         let (epoch, after) = since;
-        let open = self.get(terminal, agent, path);
+        let (path, parent) = transcripts;
+        let open = self.get(terminal, agent, path, parent);
         loop {
             let read = open.clone();
             let answer = tokio::task::spawn_blocking(move || {
                 let mut session = read.lock();
                 session.poll();
+                if session.binding_refused() {
+                    return Some(Follow::Reset { epoch: read.epoch, rev: 0 });
+                }
                 let p = session.projection();
                 let rev = p.revision();
                 if epoch != read.epoch || after > rev {

@@ -172,3 +172,30 @@ func anAgentOpensToItsOwnRows() async throws {
     drill.close()
     #expect(drill.opened == nil && !opened.store.isFollowing)
 }
+
+@MainActor
+@Test("Codex children open by native id and keep their own model in completed history")
+func codexChildModelAndNativeIdentity() async throws {
+    let native = "01a1d142-5ac6-76b3-a8a0-fc7491c5720c"
+    var wire = TrayRows.sub(1, "/root/review", agent: native, type: "codex")
+    var sub = (wire["kind"] as! [String: Any])["Subagent"] as! [String: Any]
+    sub["type_words"] = "Wegener"
+    sub["model"] = "gpt-6.1-sol"
+    wire["kind"] = ["Subagent": sub]
+    let store = try await TrayRows.store([TrayRows.turn(0, "turn:p1"), wire])
+    let entry = try #require(AgentTray.entries(store).last)
+    #expect(entry.agentId == native)
+    #expect(entry.title == "Wegener · GPT-6.1 Sol")
+    sub["status"] = "Completed"
+    sub["ended_ms"] = 9_000
+    wire["kind"] = ["Subagent": sub]
+    let ended = try await TrayRows.store([TrayRows.turn(0, "turn:p1"), wire])
+    #expect(AgentTray.entries(ended).isEmpty)
+    guard case .subagent(let history)? = ended.box("sub:/root/review")?.row.kind else {
+        Issue.record("Completed child must remain in history")
+        return
+    }
+    #expect(history.endedMs == 9_000)
+    #expect(history.agentId == native)
+    #expect(AgentTray.title(history).contains("GPT-6.1 Sol"))
+}

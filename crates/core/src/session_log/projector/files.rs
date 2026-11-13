@@ -20,11 +20,10 @@
 //! `Agent` call makes its row (ov-870): its own `Agent` calls are rows in its
 //! parent's turn, and folded after the whole main file they were all pushed
 //! below the newest turn. Or a codex
-//! rollout, `rollout-<time>-<thread>.jsonl` (ov-378), one file with no
-//! subagent files followed (`codex.rs`).
+//! rollout, `rollout-<time>-<thread>.jsonl` (ov-378), with child threads
+//! projected separately and summarized under their launching turn (ov-879).
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -75,6 +74,8 @@ pub struct LineReader {
     /// Bytes of an over-cap line skipped so far, while one is streaming past.
     skipping: Option<u64>,
     identity: Option<(u64, u64)>,
+    binding: Option<super::codex_children::Binding>,
+    binding_refused: bool,
 }
 
 #[cfg(unix)]
@@ -92,7 +93,11 @@ impl LineReader {
     /// From the start of the file: the projection is rebuilt from disk, so the
     /// whole record is read once.
     pub fn new(path: PathBuf) -> LineReader {
-        LineReader { path, offset: 0, partial: Vec::new(), skipping: None, identity: None }
+        LineReader { path, offset: 0, partial: Vec::new(), skipping: None, identity: None, binding: None, binding_refused: false }
+    }
+
+    pub(super) fn require_binding(&mut self, binding: super::codex_children::Binding) {
+        self.binding = Some(binding);
     }
 
     pub fn path(&self) -> &Path {
@@ -119,8 +124,30 @@ impl LineReader {
     /// prompt's images are read back from there.
     pub fn read_at(&mut self, mut each: impl FnMut(u64, Line<'_>)) -> ReadReport {
         let mut report = ReadReport::default();
-        let Ok(mut file) = File::open(&self.path) else { return report };
+        if self.binding_refused {
+            self.offset = 0;
+            self.partial.clear();
+            self.skipping = None;
+            self.identity = None;
+        }
+        self.binding_refused = self.binding.is_some();
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let Ok(mut file) = options.open(&self.path) else { return report };
         let Ok(meta) = file.metadata() else { return report };
+        if !meta.is_file() { return report; }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if meta.nlink() != 1 { return report; }
+        }
+        if self.binding.as_ref().is_some_and(|binding| !binding.permits(&file, &self.path)) { return report; }
+        self.binding_refused = false;
         let identity = identity_of(&meta);
         let replaced = self.identity.is_some() && identity != self.identity;
         self.identity = identity;
@@ -223,6 +250,7 @@ pub struct SessionProjector {
     /// Each subagent's agent id by the `Agent` call its meta names, for
     /// reading its file when that call's row is made.
     launches: HashMap<String, String>,
+    codex_children: super::codex_children::Children,
     /// Lines held back as half-written, summed over every read. For the
     /// benchmark and logs.
     pub held_back: u64,
@@ -239,9 +267,22 @@ impl SessionProjector {
             subagents_dir,
             subagents: BTreeMap::new(),
             launches: HashMap::new(),
+            codex_children: Default::default(),
             held_back: 0,
         }
     }
+
+    /// Open a child with its parent pinned; a replaced rollout cannot turn
+    /// an already-open drill-in into a guardian or another session.
+    pub fn open_subagent(transcript: PathBuf, parent: PathBuf) -> SessionProjector {
+        let mut session = Self::open(transcript);
+        if is_codex_rollout(&parent) {
+            session.main.binding = Some(super::codex_children::Binding::new(session.main.path(), parent));
+        }
+        session
+    }
+
+    pub fn binding_refused(&self) -> bool { self.main.binding_refused }
 
     pub fn projection(&self) -> &Projection {
         &self.projection
@@ -285,6 +326,7 @@ impl SessionProjector {
         self.subagents_dir = session_of(&transcript).1;
         self.codex = is_codex_rollout(&transcript);
         self.subagents.clear();
+        self.codex_children = Default::default();
         self.launches.clear();
         self.main = LineReader::new(transcript);
     }
@@ -297,6 +339,9 @@ impl SessionProjector {
         let mut folded = self.poll_main();
         let agents: Vec<String> = self.subagents.keys().cloned().collect();
         folded += self.poll_subagents(&agents);
+        if self.codex {
+            folded += self.codex_children.poll(self.main.path(), &mut self.projection);
+        }
         folded
     }
 
@@ -308,6 +353,10 @@ impl SessionProjector {
         let mut folded = 0;
         if paths.iter().any(|p| p == self.main.path()) {
             folded += self.poll_main();
+        }
+        if self.codex {
+            folded += self.codex_children.poll(self.main.path(), &mut self.projection);
+            return folded;
         }
         // Most events in a project directory are another session's.
         if !paths.iter().any(|p| p.starts_with(&self.subagents_dir)) {
@@ -350,6 +399,7 @@ impl SessionProjector {
                 break;
             }
         }
+        if self.main.binding_refused { self.projection = Projection::default(); }
         folded + nested
     }
 
@@ -495,12 +545,16 @@ impl SessionProjector {
 
 /// Where claude writes subagent `agent`'s own transcript for the session
 /// whose transcript is `transcript`: `<session>/subagents/agent-<agent>.jsonl`
-/// beside it, nested agents' too (ov-453). `None` for a codex rollout, and
-/// for an id claude never writes (anything but ASCII letters, digits, `-` and
+/// beside it, nested agents' too (ov-453). Codex children are resolved by
+/// their native header and verified direct parent (ov-879). `None`
+/// for an id neither producer writes (anything but ASCII letters, digits, `-` and
 /// `_`), so a name a client sends can never reach outside that folder.
 pub fn subagent_transcript(transcript: &Path, agent: &str) -> Option<PathBuf> {
     let plain = !agent.is_empty() && agent.len() <= 128 && agent.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    if !plain || is_codex_rollout(transcript) {
+    if is_codex_rollout(transcript) {
+        return super::codex_children::transcript(transcript, agent);
+    }
+    if !plain {
         return None;
     }
     Some(session_of(transcript).1.join(format!("agent-{agent}.jsonl")))

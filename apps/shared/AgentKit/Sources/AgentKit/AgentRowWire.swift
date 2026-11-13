@@ -207,6 +207,8 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         public var tokens: Int? = nil
         /// `agentType` as words, "General purpose"; the core says.
         public var typeWords: String? = nil
+        /// The child thread's own model, when its producer names it.
+        public var model: String? = nil
     }
 
     public struct Ask: Sendable, Equatable, Codable {
@@ -489,7 +491,7 @@ extension AgentRow {
                 startedMs: AgentRowJSON.ms(p["started_ms"]), endedMs: AgentRowJSON.ms(p["ended_ms"]),
                 toolCount: AgentRowJSON.int(p["tool_count"]), currentAction: text("current_action"),
                 lastMs: AgentRowJSON.ms(p["last_ms"]), agentId: (p["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 },
-                tokens: (p["tokens"] as? NSNumber)?.intValue, typeWords: p["type_words"] as? String))
+                tokens: (p["tokens"] as? NSNumber)?.intValue, typeWords: p["type_words"] as? String, model: p["model"] as? String))
         case "Ask":
             let questions = (p["questions"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { q in
                 Ask.Question(

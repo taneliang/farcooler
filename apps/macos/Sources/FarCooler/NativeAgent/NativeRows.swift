@@ -255,7 +255,7 @@ private struct SubagentRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 NativeStatusMark(status: subagent.status)
-                Text(subagent.typeWords ?? subagent.agentType).fontWeight(.medium)
+                Text(AgentTray.agentTitle(subagent)).fontWeight(.medium)
                 Text(subagent.description).lineLimit(1).layoutPriority(-1)
                 Spacer(minLength: Spacing.group)
                 if let tools = AgentConversation.toolsLabel(subagent.toolCount) {

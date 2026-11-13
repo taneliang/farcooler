@@ -252,7 +252,7 @@ private fun SubagentHeader(subagent: AgentRow.Subagent?, onBack: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        subagent.typeWords ?: subagent.agentType,
+                        subagent.title,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                     )

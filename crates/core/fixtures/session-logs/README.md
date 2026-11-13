@@ -321,3 +321,11 @@ is a made-up `ov-12: polish the sidebar`. The ids are synthetic, and the same
 agent keeps the same id across its launch, its notification and its resume.
 The times are synthetic too, a minute apart, because the real ones came from
 ten different days.
+
+`codex-child-thread.jsonl` (ov-879) is a reduced Codex 0.167.2 child rollout
+captured on 2026-11-13. Native IDs, ordinals, fork metadata, turn attribution,
+model, and producer envelopes are retained. Prompts, command, output and prose
+are redacted; private instructions, git data and encrypted content are omitted.
+The inherited parent `turn_context` is synthetic with a deliberately different
+model. The copied parent turn/prompt before `subagent_history_start_ordinal`
+exercise isolation; the child's own call, prose and completion follow it.

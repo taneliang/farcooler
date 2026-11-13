@@ -28,6 +28,7 @@
 
 mod asks;
 mod codex;
+mod codex_children;
 pub mod literal_operation;
 pub mod detail;
 pub mod held;
@@ -97,3 +98,6 @@ mod record_types_tests;
 
 #[cfg(test)]
 mod literal_operation_tests;
+
+#[cfg(test)]
+mod codex_children_tests;

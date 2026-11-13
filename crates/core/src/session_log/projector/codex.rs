@@ -50,7 +50,12 @@ pub(crate) struct CodexState {
     /// same turn is a steer.
     prompted: HashSet<usize>,
     /// The previous record's time, which is when a reasoning step began.
-    last_at: Option<i64>,
+    pub(super) last_at: Option<i64>,
+    pub(super) model: Option<String>,
+    pub(super) parent_turn: Option<String>,
+    header_seen: bool,
+    child: bool,
+    child_start: Option<u64>,
     /// Each reply folded, by its row id and words.
     said: HashSet<u64>,
 }
@@ -145,6 +150,20 @@ impl Projection {
                 return;
             }
         };
+        // A fork copies parent history with NEW timestamps. Only the native
+        // ordinal boundary proves which bytes are this child's (ov-879).
+        if !self.codex.header_seen {
+            self.codex.header_seen = true;
+            let h = &record["payload"];
+            self.codex.child = h.pointer("/source/subagent/thread_spawn").is_some();
+            if self.codex.child {
+                self.codex.child_start = h.get("subagent_history_start_ordinal").and_then(Value::as_u64);
+                if h.get("forked_from_id").is_none() { self.codex.child_start = Some(0); }
+            }
+        }
+        if self.codex.child && !record.get("ordinal").and_then(Value::as_u64)
+            .zip(self.codex.child_start).is_some_and(|(ordinal, start)| ordinal >= start)
+        { return; }
         // Read again after a rewrite or a rebind back to this file.
         if self.seen("codex", line) {
             return;
@@ -154,6 +173,7 @@ impl Projection {
         match str_at(&record, "type") {
             Some("event_msg") => self.codex_event(payload, at),
             Some("response_item") => self.codex_item(payload, at),
+            Some("turn_context") => { self.codex.model = str_at(payload, "model").map(str::to_string); },
             Some(kind) if SILENT_TYPES.contains(&kind) => {}
             Some(kind) => self.gap(GapReason::Unknown(kind.to_string())),
             None => self.gap(GapReason::Unknown(String::new())),
@@ -167,6 +187,10 @@ impl Projection {
     fn codex_event(&mut self, payload: &Value, at: Option<i64>) {
         match str_at(payload, "type") {
             Some("task_started") => {
+                if self.codex.child && self.codex.parent_turn.is_none() {
+                    self.codex.parent_turn = payload.pointer("/turn_attribution/parent_turn_id")
+                        .and_then(Value::as_str).map(str::to_string);
+                }
                 let started = at.or_else(|| payload.get("started_at").and_then(Value::as_i64).map(|s| s * 1000));
                 let id = match str_at(payload, "turn_id") {
                     Some(turn) => format!("turn:{turn}"),

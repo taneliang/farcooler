@@ -235,7 +235,7 @@ function subagentRow(row: Row): HTMLElement {
   const agent = bodyOf(row)
   const card = el('div', 'card subagent')
   const head = el('p', 'card-title')
-  head.append(dot(agent.status === 'Running' ? 'Running' : agent.status === 'Completed' ? 'Done' : 'Failed'), document.createTextNode(` ${agent.type_words ?? agent.agent_type ?? ''}`))
+  head.append(dot(agent.status === 'Running' ? 'Running' : agent.status === 'Completed' ? 'Done' : 'Failed'), document.createTextNode(` ${agent.type_words ?? agent.agent_type ?? ''}${agent.model ? ` · ${agent.model}` : ''}`))
   card.append(head)
   if (agent.description) card.append(el('p', 'card-body', agent.description))
   const meta = [subagentState(agent.status), toolsLabel(agent.tool_count ?? 0), agent.status === 'Running' ? agent.current_action : ''].filter(Boolean)

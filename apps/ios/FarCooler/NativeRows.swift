@@ -196,7 +196,7 @@ private struct SubagentRow: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 NativeStatusMark(status: subagent.status)
-                Text(subagent.typeWords ?? subagent.agentType).fontWeight(.medium)
+                Text(AgentTray.agentTitle(subagent)).fontWeight(.medium)
                 Spacer(minLength: Spacing.group)
                 // At the accessibility sizes the count and the time take a line
                 // of their own: beside the name they left it a column one

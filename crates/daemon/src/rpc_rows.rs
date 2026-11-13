@@ -49,10 +49,10 @@ pub(crate) async fn dispatch(svc: &Service, req: Request) -> Result<result::Valu
             };
             let page = match p.agent_id.is_empty() {
                 true => open.then(|| session_projectors::global().read_page(terminal, p.before, limit)).flatten(),
-                false => match subagent_path(open, terminal, &p.agent_id)? {
-                    Some(path) => {
+                false => match subagent_path(open, terminal, &p.agent_id).await? {
+                    Some((path, parent)) => {
                         let (agent, before) = (p.agent_id.clone(), p.before);
-                        tokio::task::spawn_blocking(move || subagent_rows::global().page(terminal, &agent, path, before, limit)).await.ok()
+                        tokio::task::spawn_blocking(move || subagent_rows::global().page(terminal, &agent, path, parent, before, limit)).await.ok()
                     }
                     None => None,
                 },
@@ -203,10 +203,14 @@ pub const OPENED_EVERY: Duration = Duration::from_millis(250);
 
 /// Where subagent `agent` of `terminal` writes its own transcript, beside
 /// the pane's (ov-453). `None` while the pane has no session open; refused
-/// for an id claude never writes.
-fn subagent_path(open: bool, terminal: Uuid, agent: &str) -> Result<Option<PathBuf>> {
+/// for an invalid Claude id or an unverified Codex child.
+async fn subagent_path(open: bool, terminal: Uuid, agent: &str) -> Result<Option<(PathBuf, PathBuf)>> {
     let Some(main) = open.then(|| session_projectors::global().transcript(terminal)).flatten() else { return Ok(None) };
-    farcooler_core::session_log::projector::subagent_transcript(&main, agent).map(Some).ok_or(DomainError::InvalidArgument { what: "agent_id" })
+    let agent = agent.to_string();
+    tokio::task::spawn_blocking(move || {
+        farcooler_core::session_log::projector::subagent_transcript(&main, &agent)
+            .map(|path| Some((path, main))).ok_or(DomainError::InvalidArgument { what: "agent_id" })
+    }).await.map_err(|_| DomainError::InvalidArgument { what: "agent_id" })?
 }
 
 /// A follow of a subagent's own rows, its wait counted from `arrived` as
@@ -221,8 +225,8 @@ async fn subagent_follow(
     let mut open = open.await?;
     // The pane's projector, once the tick opens it, as `follow_answer` waits.
     loop {
-        if let Some(path) = subagent_path(open, terminal, &p.agent_id)? {
-            return Ok(subagent_rows::global().follow(terminal, &p.agent_id, path, (p.epoch, p.after_rev), deadline, session_projectors::MAX_CHANGES).await);
+        if let Some((path, parent)) = subagent_path(open, terminal, &p.agent_id).await? {
+            return Ok(subagent_rows::global().follow(terminal, &p.agent_id, (path, parent), (p.epoch, p.after_rev), deadline, session_projectors::MAX_CHANGES).await);
         }
         let now = tokio::time::Instant::now();
         if now >= deadline {

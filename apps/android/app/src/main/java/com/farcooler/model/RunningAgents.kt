@@ -31,7 +31,7 @@ data class SubagentEntry(
             val sub = (row.kind as? AgentRow.Kind.OfSubagent)?.subagent ?: return@mapNotNull null
             SubagentEntry(
                 id = row.id,
-                title = sub.typeWords ?: sub.agentType,
+                title = sub.title,
                 description = sub.description,
                 running = sub.status == AgentRow.Status.Running,
                 startedMs = sub.startedMs,

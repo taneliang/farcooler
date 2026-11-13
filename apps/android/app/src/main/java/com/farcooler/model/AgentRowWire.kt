@@ -195,7 +195,12 @@ data class AgentRow(
         val agentId: String? = null,
         /** [agentType] as words, "General purpose"; the core says. */
         val typeWords: String? = null,
-    )
+        /** The child thread's own model, when its producer names it. */
+        val model: String? = null,
+    ) {
+        val title: String get() = (typeWords ?: agentType) +
+            (model?.takeIf { it.isNotEmpty() }?.let { " · ${PlanWords.model(it)}" } ?: "")
+    }
 
     data class Ask(
         /** `Question`, `Permission` or `PlanExit`. */
@@ -462,6 +467,7 @@ internal object AgentRowJson {
                     lastMs = ms(p["last_ms"]),
                     agentId = string(p["agent_id"])?.takeIf { it.isNotEmpty() },
                     typeWords = string(p["type_words"]),
+                    model = string(p["model"]),
                 ),
             )
             "Ask" -> AgentRow.Kind.OfAsk(

@@ -274,7 +274,7 @@ private fun SubagentRow(row: String, subagent: AgentRow.Subagent) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusMark(subagent.status)
-            Text(subagent.typeWords ?: subagent.agentType, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text(subagent.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             AgentConversation.toolsLabel(subagent.toolCount)?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("native-subagent-tools"))
             }

@@ -90,7 +90,7 @@ extension AgentTray {
         subagentIds.compactMap { id in
             guard case .subagent(let sub)? = row(id)?.kind, sub.status == .running else { return nil }
             return Entry(
-                id: id, isMain: false, title: sub.typeWords ?? sub.agentType, description: sub.description,
+                id: id, isMain: false, title: agentTitle(sub), description: sub.description,
                 action: sub.currentAction, running: true, startedMs: sub.startedMs, tokens: sub.tokens, agentId: sub.agentId,
                 toolUseId: sub.toolUseId.isEmpty ? nil : sub.toolUseId)
         }
@@ -168,7 +168,13 @@ extension AgentTray {
 
     /// The drilled-in view's title: the agent's type and its description.
     public static func title(_ sub: AgentRow.Subagent) -> String {
-        sub.description.isEmpty ? sub.typeWords ?? sub.agentType : "\(sub.typeWords ?? sub.agentType): \(sub.description)"
+        sub.description.isEmpty ? agentTitle(sub) : "\(agentTitle(sub)): \(sub.description)"
+    }
+
+    public static func agentTitle(_ sub: AgentRow.Subagent) -> String {
+        let name = sub.typeWords ?? sub.agentType
+        guard let model = sub.model, !model.isEmpty else { return name }
+        return "\(name) · \(PlanWords.model(model))"
     }
 
     /// Said in a drilled-in view whose agent the runner can't open.

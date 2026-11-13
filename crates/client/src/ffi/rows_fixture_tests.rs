@@ -58,6 +58,7 @@ fn rows() -> Vec<Row> {
             tool_use_id: "toolu_2".into(),
             agent_id: Some("a1".into()),
             agent_type: "Explore".into(),
+            model: None,
             type_words: "Explore".into(),
             description: "Find the callers".into(),
             background: true,

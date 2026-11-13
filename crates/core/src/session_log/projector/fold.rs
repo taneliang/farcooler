@@ -1173,7 +1173,7 @@ impl Projection {
 
     /// Recount the background agents still running for the turn row `sub`
     /// belongs to.
-    fn count_background(&mut self, sub: usize) {
+    pub(super) fn count_background(&mut self, sub: usize) {
         let Some(turn_id) = self.rows[sub].turn.clone() else { return };
         let Some(&t) = self.index.get(&turn_id) else { return };
         let running = self.rows[self.since_turn(t)]
