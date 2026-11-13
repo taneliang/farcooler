@@ -191,6 +191,26 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             item.phase = Phase::Cancelled;
                             item.pending = None;
                         }
+                        Outcome::FoldConflict { evidence, files } => {
+                            if item.run.starts_with("cancel:") || item.group_of.is_none()
+                                || item.definition.stages[item.stage].kind != StageKind::Fold
+                            { return Err(Refusal::Phase); }
+                            evidence_matches(&item, evidence)?;
+                            route(&mut item, id, input, "conflict", Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                            if item.phase == Phase::Failed {
+                                // Quote unusual paths so control bytes cannot invalidate the stored brief.
+                                let reason = format!("Rebase your existing work onto landing base {} and resolve the cherry-pick conflicts in: {}. Run the affected tests and commit the result. Checks and review will run again for the new candidate.",
+                                    evidence.candidate, serde_json::to_string(files).map_err(|_| Refusal::Invalid)?);
+                                let mut reason = reason;
+                                if reason.len() > MAX_REWORK_REASON_BYTES {
+                                    let mut end = MAX_REWORK_REASON_BYTES - 80;
+                                    while !reason.is_char_boundary(end) { end -= 1; }
+                                    reason.truncate(end);
+                                    reason.push_str("… See the fold receipt for the full conflicting file list.");
+                                }
+                                item.brief = Some(reason);
+                            }
+                        }
                         Outcome::Labeled(label, evidence) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             let stage = &item.definition.stages[item.stage];
@@ -457,6 +477,8 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             _ => "dropped",
         };
         let result = if label == "landed" { group.pushed.clone() } else { group.candidate.clone() };
+        let rebase = (label == "rejected" && group.definition.stages[group.stage].kind == StageKind::Fold)
+            .then(|| group.brief.clone()).flatten();
         let members = std::mem::take(&mut group.members);
         // Remember whom it ran: the board still draws a finished group with its tickets.
         group.handed = members.iter().map(|m| m.item.clone()).collect();
@@ -466,7 +488,19 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             if let StageKind::Join { adopt: true, .. } = ticket.definition.stages[ticket.stage].kind {
                 if matches!(label, "passed" | "landed") && result.is_some() { ticket.candidate = result.clone(); }
             }
-            route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+            if let Some((reason, build)) = rebase.as_ref().and_then(|reason| ticket.definition.stages.iter()
+                .position(|s| s.kind == StageKind::Build).map(|build| (reason, build))) {
+                // A stale base is integration work, not a rejected review. It spends no back edge or iteration.
+                // Queue like other join returns; enter() still enforces dependencies, resources and approval.
+                ticket.brief = Some(reason.clone());
+                ticket.candidate = None;
+                ticket.stage = build;
+                ticket.attempt = 1;
+                ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                ticket.phase = Phase::Blocked;
+            } else {
+                route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+            }
             next.items.insert(member.item, ticket);
         }
     }
@@ -681,6 +715,8 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
     let stage = &item.definition.stages[item.stage];
     let (key, limit) = (stage.id.clone(), stage.limit);
     let from_join = matches!(stage.kind, StageKind::Join { .. });
+    let fold_conflict = stage.kind == StageKind::Fold && label == "conflict";
+    if item.group_of.is_some() { item.brief = None; }
     if let Some(evidence) = evidence {
         item.last_evidence = Some(evidence.clone());
         if label != "rejected" && makes_candidate(&stage.kind) { item.candidate = Some(evidence.candidate.clone()); }
@@ -704,7 +740,13 @@ fn route(item: &mut Item, id: &str, input: &Input, label: &str, evidence: Option
         } else { *otherwise };
     }
     let to = match &target {
-        Target::Fail | Target::Split { .. } => { item.phase = Phase::Failed; return Ok(()); }
+        Target::Fail | Target::Split { .. } => {
+            if fold_conflict {
+                item.brief = Some(format!("Rebase your existing work onto landing base {} and resolve the cherry-pick conflicts. Run the affected tests and commit the result. Checks and review will run again for the new candidate.",
+                    item.candidate.as_deref().unwrap_or("the current target")));
+            }
+            item.phase = Phase::Failed; return Ok(());
+        }
         Target::Done => {
             item.stage = item.definition.stages.len();
             item.phase = Phase::Done;

@@ -240,6 +240,8 @@ pub struct Evidence {
 pub enum Outcome {
     /// CI facts are authenticated operation input, so the pure rule sees the same facts on replay.
     CiResult { label: String, evidence: Evidence, run: Option<CiRun> },
+    /// A fold receipt carries conflict paths into the next build, including after recovery.
+    FoldConflict { evidence: Evidence, files: Vec<String> },
     Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),

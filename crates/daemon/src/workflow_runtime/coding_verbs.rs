@@ -168,6 +168,10 @@ impl Exec {
             return Ok(Outcome::CiResult { label: fact.label, evidence,
                 run: fact.detail.get("run").filter(|r| !r.is_null()).map(|r| serde_json::from_value(r.clone())).transpose()? });
         }
+        if *kind == StageKind::Fold && fact.label == "conflict" {
+            return Ok(Outcome::FoldConflict { evidence,
+                files: serde_json::from_value(fact.detail.get("files").cloned().unwrap_or(serde_json::json!([])))? });
+        }
         Ok(match fact.label.as_str() {
             "passed" => Outcome::Passed(evidence),
             "rejected" => Outcome::Rejected(evidence),

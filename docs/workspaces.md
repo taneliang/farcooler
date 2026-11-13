@@ -495,3 +495,19 @@ anyone has to argue about it.
 All three platforms move together when a string changes sides. The iOS and
 Android create-and-fail strings in particular are byte-identical on purpose,
 because one person gets whichever surface delivers first.
+
+## Join conflicts and review
+
+When a landing fold cannot cherry-pick a candidate, it first follows the group's
+conflict route (normally splitting a batch). If that ends the group before a
+push, its tickets return to Build in their existing worktrees. The build brief
+names the landing base and conflicting files from the fold receipt and asks for
+a rebase, tests, and a commit. This return spends neither the join's back-edge
+allowance nor a review rework iteration; repeated landing races do not exhaust a
+reviewed ticket. A busy build resource still queues the ticket normally.
+
+After a rebase, the workflow runs its configured checks and review again, even
+when the rebase was conflict-free. Review evidence is pinned to the candidate
+commit; a changed base or conflict resolution produces a new candidate. The
+engine does not infer that an earlier review applies to it. A clean automatic
+fold continues to the group's gates without sending the ticket back to Build.

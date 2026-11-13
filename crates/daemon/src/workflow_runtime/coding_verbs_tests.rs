@@ -216,7 +216,7 @@ async fn a_push_the_remote_refuses_is_a_moved_base_and_a_push_that_may_have_land
 }
 
 #[tokio::test]
-async fn a_conflict_fails_the_group_and_frees_the_target() {
+async fn a_conflict_returns_the_ticket_to_build_with_paths_and_frees_the_target() {
     let (dir, mut runtime) = lander("conflict").await;
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "one", &definition).await;
@@ -233,7 +233,16 @@ async fn a_conflict_fails_the_group_and_frees_the_target() {
     }
     let theirs = remote_head(&runtime).await;
     command(&runtime, Command::Queue { item: "one".into() });
-    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+    let state = until(&mut runtime, |s| s.items["one"].brief.is_some()).await;
+    let ticket = &state.items["one"];
+    assert_eq!(ticket.phase, Phase::Running);
+    assert_eq!(ticket.definition.stages[ticket.stage].kind, StageKind::Build);
+    assert!(ticket.back_edges.is_empty());
+    assert_eq!(ticket.iteration, 0);
+    let build = runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .find(|s| s.effect.item == "one" && s.effect.brief.is_some()).unwrap();
+    let brief = build.effect.brief.unwrap();
+    assert!(brief.contains("shared.txt") && brief.contains(&theirs), "{brief}");
     assert_eq!(remote_head(&runtime).await, theirs, "a conflicting group pushes nothing");
     assert_eq!(outbox(&runtime, StageKind::Push), 0);
     assert_eq!(outbox(&runtime, StageKind::Run), 0, "the fold stopped the group; the gate never ran on a half-folded tree");
@@ -241,7 +250,12 @@ async fn a_conflict_fails_the_group_and_frees_the_target() {
     assert_eq!(group, Some(Phase::Failed));
     // The conflicted tree isn't left mid-pick: the failed group's tree is gone (ov-1084).
     let tree = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.effect.kind == EffectKind::Execute(StageKind::Fold)).unwrap();
-    let tree = runtime.tree(&Binding::new("w", &tree.effect, 1, 0, &runtime.base));
+    let binding = Binding::new("w", &tree.effect, tree.resource_generation.unwrap(), 0,
+        &runtime.item_base("w", &tree.effect).unwrap());
+    let recovered = runtime.reconcile_verb(&binding, &StageKind::Fold).await.unwrap();
+    assert!(matches!(recovered, Outcome::FoldConflict { ref evidence, ref files }
+        if evidence.candidate == theirs && files == &["shared.txt".to_string()]), "{recovered:?}");
+    let tree = runtime.tree(&binding);
     assert!(!tree.exists(), "{}", tree.display());
 }
 
