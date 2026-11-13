@@ -246,7 +246,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        shard: [shell, agent, phone, phone2, phone3, phone4, phone5, phone6, pad]
+        shard: [shell, agent, phone, phone2, phone3, phone4, phone5, phone6, phone7, phone8, pad]
         exclude:
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'shell' && 'shell' || '__none__' }}
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'agent' && 'agent' || '__none__' }}
@@ -256,6 +256,8 @@ jobs:
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone4' && 'phone4' || '__none__' }}
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone5' && 'phone5' || '__none__' }}
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone6' && 'phone6' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone7' && 'phone7' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone8' && 'phone8' || '__none__' }}
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'pad' && 'pad' || '__none__' }}
     steps:
       - uses: actions/checkout@v4
@@ -285,11 +287,12 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        shard: [captures, captures2, captures3]
+        shard: [captures, captures2, captures3, captures4]
         exclude:
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'captures' && 'captures' || '__none__' }}
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'captures2' && 'captures2' || '__none__' }}
           - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'captures3' && 'captures3' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'captures4' && 'captures4' || '__none__' }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
