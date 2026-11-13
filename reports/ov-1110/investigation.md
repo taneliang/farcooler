@@ -4,6 +4,12 @@ Measured at source `d986f3083730db7cda3b91caf5e536ba321b7c1e`, 12 November 2026.
 This commit contains research and captured evidence only. No product, profile,
 test inventory, gate or CI behavior changes.
 
+**13 November, 08:58–09:14 Singapore retry:** [new capture](retry-local/summary.md)
+preserves another controlled cold/warm pair (182.44 s / 2.01 s outer wall;
+Cargo warm 0.45 s). Nextest was interrupted at load **20.98 / 11.87 / 9.43**
+after 787.02 s, before the landing gate could start. Acceptance 1 remains open;
+this attempt does not replace the earlier completed local test observation.
+
 **13 November resume:** [fresh local results](resume-local/summary.md) now include
 another cold/warm Cargo timing pair and a completed 6,928-test local nextest run
 at sampled load below 20 (6,916 passed, 12 failed). The fresh full landing gate
@@ -360,3 +366,49 @@ the interrupted gate's per-step summary and full nextest durations/failures.
 [gate-step-logs.zip](resume-local/gate-step-logs.zip) preserves the gate's own
 step logs. Reproduce the local summary with `python3 reports/ov-1110/resume-summary.py`.
 No product or CI behavior changed.
+
+## Controlled retry, 13 November 2026, 08:58–09:14 Singapore
+
+Read the live ticket with the installed Canary CLI at source
+`1fe54243d8cd030693484c635aee2678715195d0`. Its manager finding permits recording
+the blocker if load prevents a fresh full baseline again. Initial command
+preflight was **7.27 / 5.43 / 7.30**. Ran
+`/usr/bin/python3 reports/ov-1110/resume-measure.py --output retry-local`
+with the machine-wide lock, an isolated new target, three build jobs, debug info
+off, three nextest threads, the CI resource groups and both leak wrappers.
+
+The [receipt](retry-local/results.json) and [summary](retry-local/summary.md)
+record successful controlled builds: cold **182.44 s**, warm **2.01 s** outer
+wall. Cargo reports 3m00s and 0.45s respectively. All sampled averages during
+these builds were below 20. The outer timer includes up to two seconds of
+polling latency. Original timing HTML is preserved in
+[cold-timing.zip](retry-local/cold-timing.zip) and
+[warm-timing.zip](retry-local/warm-timing.zip). Native crypto remains the
+longest compilation unit at 50.37 s; overlapping daemon and SSH compilation
+units took 31.17 s and 20.56 s. This is another observation, not a controlled
+A/B comparison against the previous run's host activity.
+
+Nextest compiled in 2m11s and reported **654.028 s** execution before the load
+monitor interrupted it at **2026-11-13T01:14:21.986256+00:00** (09:14 Singapore).
+The sampled load was **20.9795 / 11.8696 / 9.4321**. Only the capture's own new
+process group received SIGINT. Outer wall time was **787.02 s**, process exit
+**-2** (SIGINT); the receipt marks it uncontrolled. Nextest reports 5,157 of
+6,928 tests: 5,142 passed and 15 failed, including three SIGINT-interrupted
+tests; 1,771 were not run and 33 skipped. The summary distinguishes the
+12 assertion/integration failures from those three interrupted tests.
+Leak wrappers did not finish, so this attempt establishes no leak-check result.
+Its top 20 are only the slowest observed tests in this partial run. The earlier
+complete 6,928-test run and historical CI evidence remain available above.
+
+The capture stops after a load blocker. **No landing gate was started in this
+retry**, and there is no new full-gate or per-job wall time to report.
+Acceptance 1 still needs a quiet full-gate measurement window. No unrelated
+processes were signaled, and no product, CI or test-selection behavior changed.
+
+[logs.zip](retry-local/logs.zip) preserves all three command logs. Regenerate
+the summary with `python3 reports/ov-1110/capture-summary.py reports/ov-1110/retry-local`.
+The driver now requires a new output directory, preserving previous failed and
+successful captures. Checks reject an existing output directory and paths
+outside the report directory without overwriting evidence. The evidence
+validator also checks this retry's interruption and summary, with a
+counterexample that must reject a forged controlled result.

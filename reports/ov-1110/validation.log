@@ -3,6 +3,7 @@ PASS: cold/warm builds exited 0; warm units all fresh/zero-time; sampled load be
 PASS: both full-gate preflights remained above the load limit; neither is a gate result
 PASS: failed/interrupted nextest attempts remain excluded from passing baselines
 PASS: resumed build/test observations and blocked gate remain distinct; local top-20 regenerates
+PASS: retry builds controlled; interrupted suite excluded; gate not started; forged controlled flag rejected
 PASS: five CI run IDs and source SHAs match requested runs
 PASS: top-20 observed and Rust rows match timestamped raw extracts
 PASS: historical gate copy matches original receipt hash

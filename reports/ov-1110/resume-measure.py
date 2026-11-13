@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ov-1110 research capture: serialize measurements and retain load blockers."""
+import argparse
 import datetime
 import json
 import os
@@ -11,8 +12,14 @@ import time
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-OUT = pathlib.Path(__file__).resolve().parent / 'resume-local'
-OUT.mkdir(exist_ok=True)
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--output', default='resume-local', help='new evidence directory beside this driver')
+args = parser.parse_args()
+if pathlib.Path(args.output).name != args.output or args.output in ('.', '..'):
+    parser.error('--output must be a directory name')
+OUT = pathlib.Path(__file__).resolve().parent / args.output
+# A retry must never replace an earlier observation, including a failed one.
+OUT.mkdir(exist_ok=False)
 sys.path.insert(0, str(ROOT / 'scripts'))
 import heavy_lock
 

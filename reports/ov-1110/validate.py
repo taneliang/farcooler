@@ -75,6 +75,37 @@ with zipfile.ZipFile(local / 'gate-step-logs.zip') as archive:
     assert len(archive.namelist()) == 73
     assert archive.testzip() is None
 print('PASS: resumed build/test observations and blocked gate remain distinct; local top-20 regenerates')
+retry = root / 'retry-local'
+retried = json.loads((retry / 'results.json').read_text())
+assert not retried['cold_target_existed'] and retried['limit'] == 20
+assert [r['label'] for r in retried['runs']] == ['cold', 'warm', 'nextest']
+assert [r['exit'] for r in retried['runs']] == [0, 0, -2]
+assert [r['controlled'] for r in retried['runs']] == [True, True, False]
+for run in retried['runs']:
+    times = [datetime.datetime.fromisoformat(s['utc'])
+             for s in run['preflight'] + run['samples'] + [run['end']]]
+    assert all(a <= b for a, b in zip(times, times[1:]))
+for name in ['cold', 'warm']:
+    with zipfile.ZipFile(retry / f'{name}-timing.zip') as archive:
+        units = json.loads(re.search(r'const UNIT_DATA = (\[.*?\]);', archive.read(f'{name}-timing.html').decode(), re.S)[1])
+    assert len(units) > 400 if name == 'cold' else all(u['duration'] == 0 for u in units)
+with zipfile.ZipFile(retry / 'logs.zip') as archive:
+    assert set(archive.namelist()) == {'cold.log', 'warm.log', 'nextest.log'}
+    text = archive.read('nextest.log').decode()
+    assert '5157/6928 tests run: 5142 passed, 15 failed, 33 skipped' in text
+    assert '1771/6928 tests were not run due to interrupt' in text
+    assert len(re.findall(r'^\s*SIGINT \[', text, re.M)) == 3
+rendered = subprocess.run([sys.executable, str(root / 'capture-summary.py'), str(retry)], capture_output=True, text=True, check=True)
+assert rendered.stdout == (retry / 'summary.md').read_text()
+assert 'Observed 5157 of 6928 test results.' in rendered.stdout
+with tempfile.TemporaryDirectory(prefix='ov1110-retry-validation-', dir='/private/tmp') as temporary:
+    dest = pathlib.Path(temporary)
+    shutil.copyfile(retry / 'logs.zip', dest / 'logs.zip')
+    retried['runs'][-1]['controlled'] = True
+    (dest / 'results.json').write_text(json.dumps(retried))
+    red = subprocess.run([sys.executable, str(root / 'capture-summary.py'), str(dest)], capture_output=True, text=True)
+    assert red.returncode != 0 and 'AssertionError' in red.stderr
+print('PASS: retry builds controlled; interrupted suite excluded; gate not started; forged controlled flag rejected')
 for ref in json.loads((root / 'ci-runs.json').read_text()):
     run = json.loads((root / f"ci-{ref['databaseId']}.json").read_text())
     assert run['headSha'] == ref['headSha'] and str(ref['databaseId']) in run['url']
