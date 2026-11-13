@@ -225,13 +225,20 @@ then signs the complete manifest and attestations with Key A in the separate
 `farcooler-teammate-reply-v1` namespace, and seals that signed reply. Runner ids
 in it are runner-key fingerprints, replacing the phone's local ids.
 
+A runner that is offline, or whose enrollment or attestation failed, goes in
+the reply as `pending` with no attestation and keeps its local id (ov-1149).
+The device signature still covers it, so the browser shows it as not enrolled
+and never dials it, while the runners that did attest enroll as usual. At least
+one runner must attest: with none, the phone posts nothing.
+
 The read includes independent `authority` for each teammate poster: current
 rooted trusted/certified device fingerprints and registered runner fingerprints
 that the poster administers in a team shared with the reader. Pending, revoked,
 unrooted and reset-held devices are excluded, regardless of the roster feature
 flag. Reset-held devices remain conservatively excluded here until their hold
 ends, even if a team's admin already confirmed them. The browser checks every
-runner's attestation and the whole device signature against this authority;
+enrolled runner's attestation and pin, and the whole device signature, against
+this authority (a pending entry turned enrolled meets both checks);
 missing, legacy and mismatched proofs fail closed. `granted_by` must also match
 the poster's verified email. The same-account reply still relies on its
 session-authenticated poster and the in-person comparison code.

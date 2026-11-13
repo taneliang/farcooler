@@ -196,6 +196,54 @@ fn a_teammate_reply_is_device_signed_over_a_live_runner_attestation() {
     let manifest: ceremony::Manifest = serde_json::from_value(opened["manifest"].clone()).unwrap();
     assert_eq!(manifest.runners[0].id, runner_fp);
     signed::verify(&manifest, &o, &signed::Trust { devices: vec![phone_fp], runners: vec![runner_fp] }).unwrap();
-    assert_eq!(seal(&serde_json::json!({}), 0)["error"], "unregistered_key");
     assert_eq!(seal(&authorities, STALE_MS)["error"], "stale");
+    // No runner attested at all: nothing would enroll, so nothing is sealed.
+    assert_eq!(seal(&serde_json::json!({}), 0)["error"], "unregistered_key");
+    // A runner key attesting for another device is still refused outright.
+    let wrong = signed::Authority { runner_key: authority.runner_key.clone(), signature: signed::signature(&runner,
+        signed::RUNNER_NAMESPACE, &signed::authority_statement(&o, "SHA256:other")).unwrap() };
+    assert_eq!(seal(&serde_json::json!({ &m.runners[0].id: wrong }), 0)["error"], "unregistered_key");
+}
+
+/// Ov-1149: one runner offline (pending, never attested) and one whose
+/// attestation never came back still leave a signed reply for the runner that
+/// did; both others go as not enrolled.
+#[test]
+fn an_offline_runner_does_not_stop_a_teammate_reply() {
+    use farcooler_client::ceremony::{self as ceremony, signed};
+    use russh::keys::ssh_key::{PrivateKey, LineEnding, private::{Ed25519Keypair, KeypairData}};
+    let key = |seed| PrivateKey::new(KeypairData::Ed25519(Ed25519Keypair::from_seed(&[seed; 32])), "").unwrap();
+    let (phone, runner) = (key(1), key(2));
+    let reply_key = ReplyKey::generate();
+    let offer_json = browser_offer(&reply_key);
+    let o = decode_offer(&offer_json).unwrap();
+    let one: Vec<ceremony::RunnerEntry> = serde_json::from_str(RUNNERS).unwrap();
+    let entry = |id: &str, label: &str, pending: bool| ceremony::RunnerEntry {
+        id: id.into(), label: label.into(), pending, pending_why: pending.then(|| "not_connected".into()), ..one[0].clone()
+    };
+    let runners = vec![
+        entry("0198f0c3-0000-7000-8000-00000000000b", "offline", true),
+        entry("0198f0c3-0000-7000-8000-00000000000a", "online", false),
+        entry("0198f0c3-0000-7000-8000-00000000000c", "declined", false),
+    ];
+    let mut m = ceremony::manifest(&o, runners);
+    m.granted_by = Some("alice@example.com".into());
+    let phone_fp = ceremony::fingerprint(&phone.public_key().to_openssh().unwrap()).unwrap();
+    let runner_key = runner.public_key().to_openssh().unwrap();
+    let runner_fp = ceremony::fingerprint(&runner_key).unwrap();
+    let authority = signed::Authority { runner_key, signature: signed::signature(&runner, signed::RUNNER_NAMESPACE,
+        &signed::authority_statement(&o, &phone_fp)).unwrap() };
+    let offer_c = CString::new(offer_json.clone()).unwrap();
+    let manifest_c = CString::new(ceremony::encode_manifest(&m)).unwrap();
+    let private_c = CString::new(phone.to_openssh(LineEnding::LF).unwrap().as_str()).unwrap();
+    let authority_c = CString::new(serde_json::json!({ &m.runners[1].id: authority }).to_string()).unwrap();
+    let sealed = json(|out, capacity| unsafe { farcooler_client::ffi::farcooler_client_ceremony_seal_teammate(
+        offer_c.as_ptr(), manifest_c.as_ptr(), private_c.as_ptr(), authority_c.as_ptr(), 0, out, capacity) });
+    assert!(sealed.get("sealed").is_some(), "{sealed}");
+    let opened = take(sealed["sealed"].as_str().unwrap(), &reply_key.secret(), &offer_json);
+    let manifest: ceremony::Manifest = serde_json::from_value(opened["manifest"].clone()).unwrap();
+    let states: Vec<_> = manifest.runners.iter().map(|r| (r.label.as_str(), r.pending, r.pending_why.as_deref())).collect();
+    assert_eq!(states, [("offline", true, Some("not_connected")), ("online", false, None), ("declined", true, Some("failed"))]);
+    assert_eq!(manifest.runners[1].id, runner_fp);
+    signed::verify(&manifest, &o, &signed::Trust { devices: vec![phone_fp], runners: vec![runner_fp] }).unwrap();
 }

@@ -180,3 +180,52 @@ class SealedReplyTest {
         }
     }
 }
+
+/**
+ * A teammate's browser reply with one runner offline (ov-1149): the pending
+ * runner is never asked to attest, a runner that can't attest is left to the
+ * core to send as not enrolled, and the reply is sealed and posted anyway.
+ */
+class SealedReplyTeammateOfflineTest {
+    private val offer = "{\"v\":2,\"key_a\":\"ssh-ed25519 AAAAbrowser\",\"name\":\"Chrome\",\"account\":\"user_bob\"," +
+        "\"channel\":\"stable\",\"ceremony\":\"c-1\",\"node_key\":\"\",\"reply_key\":\"YwbAvkATmjREjY8yCsUr87XR8t4kv8l2bK516AhoEWQ\"}"
+
+    private fun runner(id: String, pending: Boolean) =
+        "{\"id\":\"$id\",\"label\":\"$id\",\"alias\":\"$id\",\"user\":\"alice\",\"host_key\":\"SHA256:x\"," +
+            "\"reach\":{\"kind\":\"direct\",\"host\":\"$id.example.com\",\"port\":22},\"pending\":$pending}"
+
+    private val manifest = "{\"v\":2,\"ceremony\":\"c-1\",\"account\":\"user_bob\",\"runners\":[" +
+        "${runner("offline", true)},${runner("online", false)},${runner("declined", false)}]}"
+
+    private class Core : CeremonyCalls {
+        var authorities: String? = null
+        override fun scan(encoded: String, expectingAccount: String, heldMs: Long) = error("not scanned here")
+        override fun reply(offerJson: String, runners: List<CeremonyRunner>) = error("not built here")
+        override fun fingerprint(publicKey: String) = "SHA256:test"
+        override fun clientId(publicKey: String) = "farcooler-0123456789ab"
+        override fun seal(offerJson: String, manifestJson: String, heldMs: Long) = error("a teammate reply is device-signed")
+        override fun sealTeammate(offerJson: String, manifestJson: String, privateKey: String, authorities: String, heldMs: Long): CeremonyCore.Answer {
+            this.authorities = authorities
+            return CeremonyCore.Answer.Payload("""{"sealed":"c2VhbGVkLXJlcGx5","code":"ABC234"}""")
+        }
+    }
+
+    @Test
+    fun anOfflineRunnerIsNotAskedAndTheReplyStillGoes() = runTest {
+        val core = Core()
+        val asked = mutableListOf<String>()
+        val posts = mutableListOf<String>()
+        val reply = SealedReply()
+        reply.privateKey = { "phone-key" }
+        reply.authority = { runner, _ ->
+            asked += runner
+            if (runner == "online") buildJsonObject { put("runner_key", kotlinx.serialization.json.JsonPrimitive("k")) } else null
+        }
+        reply.post = { _, _, sealed -> posts += sealed; SealedReplyPost.Outcome.POSTED }
+        reply.send(core, offer, manifest, 0, teammate = true)
+        assertEquals(listOf("online", "declined"), asked)
+        assertEquals("""{"online":{"runner_key":"k"}}""", core.authorities)
+        assertEquals(listOf("c2VhbGVkLXJlcGx5"), posts)
+        assertEquals(SealedReply.State.SENT, reply.state.value)
+    }
+}

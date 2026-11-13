@@ -614,6 +614,115 @@ mod tests {
             Err(CeremonyError::UnregisteredKey));
     }
 
+    /// Ov-1149: an online runner and an offline one, as the phone signs them.
+    /// The offline runner stays in the reply as pending, with its phone-local
+    /// id, no attestation and no directory pin; the online one is attested.
+    fn offline_and_online(o: &Offer) -> (Manifest, String) {
+        let device = signing_key(1);
+        let device_fp = farcooler_ceremony::fingerprint(&device.public_key().to_openssh().unwrap()).unwrap();
+        let mut offline = runner(FORGED);
+        offline.label = "laptop".into();
+        offline.pending = true;
+        offline.pending_why = Some("not_connected".into());
+        let online_key = signing_key(2);
+        let online_public = online_key.public_key().to_openssh().unwrap();
+        let mut online = runner(HOST);
+        online.id = farcooler_ceremony::fingerprint(&online_public).unwrap();
+        let mut m = farcooler_ceremony::manifest(o, vec![offline, online]);
+        m.granted_by = Some("alice@example.com".into());
+        let authority = farcooler_ceremony::signed::Authority {
+            runner_key: online_public,
+            signature: farcooler_ceremony::signed::signature(&online_key, farcooler_ceremony::signed::RUNNER_NAMESPACE,
+                &farcooler_ceremony::signed::authority_statement(o, &device_fp)).unwrap(),
+        };
+        farcooler_ceremony::signed::sign(&mut m, o, &device.to_openssh(russh::keys::ssh_key::LineEnding::LF).unwrap(),
+            vec![authority]).unwrap();
+        (m, device_fp)
+    }
+
+    fn signed_answer(sealed: &str, device_fp: &str, runners: &[String]) -> String {
+        serde_json::json!({"replies": [{
+            "sealed": sealed, "posted_by": "alice", "posted_by_email": "alice@example.com",
+            "authority": {"devices": [device_fp], "runners": runners}
+        }]}).to_string()
+    }
+
+    #[test]
+    fn ov1149_an_offline_runner_does_not_stop_the_online_one_enrolling() {
+        let secret = new_reply_secret();
+        let o = offer("Browser", "bob", KEY, NODE, &secret).unwrap();
+        let (m, device_fp) = offline_and_online(&o);
+        let (sealed, code) = farcooler_ceremony::seal_reply(&o, &m).unwrap();
+        // The directory pins only runners the device administers and that
+        // answered; the offline one has no pin in this read.
+        let opened = open_all(&signed_answer(&sealed, &device_fp, &[m.runners[1].id.clone()]), &o, &secret, false, SHOWN, SHOWN)
+            .unwrap();
+        assert_eq!(opened[0].code, code);
+        let runners = &opened[0].taken.runners;
+        assert_eq!((runners[0].label.as_str(), runners[0].why.as_str(), runners[0].cause.as_str(), runners[0].token.as_str()),
+            ("laptop", "pending", "not_connected", ""));
+        assert_eq!((runners[1].label.as_str(), runners[1].why.as_str(), runners[1].token.as_str()), ("studio", "", "tc-token"));
+    }
+
+    /// Ov-1149: holding the device key lets a forger re-sign any payload, but
+    /// a pending entry still can't become enrolled without that runner's own
+    /// attestation AND its directory pin.
+    #[test]
+    fn ov1149_a_forger_cannot_turn_a_pending_entry_into_an_enrolled_one() {
+        use farcooler_ceremony::signed;
+        let secret = new_reply_secret();
+        let o = offer("Browser", "bob", KEY, NODE, &secret).unwrap();
+        let (honest, device_fp) = offline_and_online(&o);
+        let device = signing_key(1);
+        let online_pin = honest.runners[1].id.clone();
+        let attacker_key = signing_key(5);
+        let attacker_public = attacker_key.public_key().to_openssh().unwrap();
+        let attacker_fp = farcooler_ceremony::fingerprint(&attacker_public).unwrap();
+        let attacker_authority = signed::Authority {
+            runner_key: attacker_public,
+            signature: signed::signature(&attacker_key, signed::RUNNER_NAMESPACE, &signed::authority_statement(&o, &device_fp)).unwrap(),
+        };
+        // Re-sign the body with a valid device signature, bypassing `sign`'s
+        // own checks, exactly as a forger holding the device key could.
+        let resign = |m: &Manifest, authorities: Vec<signed::Authority>| {
+            let mut m = m.clone();
+            m.proof = None;
+            let signature = signed::signature(&device, signed::DEVICE_NAMESPACE,
+                &serde_json::to_vec(&(&m, &authorities)).unwrap()).unwrap();
+            m.proof = Some(signed::Proof { device_key: device.public_key().to_openssh().unwrap(), authorities, signature });
+            farcooler_ceremony::seal_reply(&o, &m).unwrap().0
+        };
+        let refused = |sealed: &str, pins: &[String]| {
+            assert_eq!(open_all(&signed_answer(sealed, &device_fp, pins), &o, &secret, false, SHOWN, SHOWN),
+                Err(CeremonyError::UnregisteredKey));
+        };
+        let honest_authorities = honest.proof.as_ref().unwrap().authorities.clone();
+        let mut flipped = honest.clone();
+        flipped.runners[0].pending = false;
+        flipped.runners[0].pending_why = None;
+        // Flipped with no attestation for it: the online one's can't cover two.
+        refused(&resign(&flipped, honest_authorities.clone()), std::slice::from_ref(&online_pin));
+        // The online runner's attestation moved to the flipped position.
+        refused(&resign(&flipped, vec![honest_authorities[0].clone(), honest_authorities[0].clone()]), std::slice::from_ref(&online_pin));
+        // A real attestation for the flipped entry, but the directory has no
+        // pin at that position: a valid device signature can't stand in for it.
+        flipped.runners[0].id = attacker_fp.clone();
+        refused(&resign(&flipped, vec![attacker_authority.clone(), honest_authorities[0].clone()]), std::slice::from_ref(&online_pin));
+        // Without the device's re-signing, flipping the flag alone fails too.
+        let mut unsigned_flip = honest.clone();
+        unsigned_flip.runners[0].pending = false;
+        refused(&farcooler_ceremony::seal_reply(&o, &unsigned_flip).unwrap().0, std::slice::from_ref(&online_pin));
+        // Every entry pending, re-signed with no attestations: nothing vouches.
+        let mut none = honest.clone();
+        none.runners[1].pending = true;
+        refused(&resign(&none, Vec::new()), std::slice::from_ref(&online_pin));
+        // The control: the same forgery with both the pin and an attestation
+        // is what an honest two-runner reply looks like, and it does pass.
+        let pinned = [attacker_fp, online_pin];
+        let sealed = resign(&flipped, vec![attacker_authority, honest_authorities[0].clone()]);
+        assert_eq!(open_all(&signed_answer(&sealed, &device_fp, &pinned), &o, &secret, false, SHOWN, SHOWN).unwrap().len(), 1);
+    }
+
     /// The relay's read with who posted each and their email on file:
     /// `(sealed, posted_by, posted_by_email)`.
     fn relay_says_from(posts: &[(&str, &str, Option<&str>)]) -> String {

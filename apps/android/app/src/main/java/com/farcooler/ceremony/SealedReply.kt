@@ -86,7 +86,9 @@ class SealedReply {
             val manifest = CeremonyCore.decode(replyJson, CeremonyManifest.serializer())
             val key = privateKey()
             val authorities = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
-            for (runner in manifest?.runners.orEmpty()) {
+            // A pending runner isn't asked; one that can't attest is sent as
+            // not enrolled by the core, so the others still go (ov-1149).
+            for (runner in manifest?.runners.orEmpty().filterNot { it.pending }) {
                 authority(runner.id, offerJson)?.let { authorities[runner.id] = it }
             }
             if (manifest == null || key == null) CeremonyCore.Answer.Refused(Refusal.Unknown)

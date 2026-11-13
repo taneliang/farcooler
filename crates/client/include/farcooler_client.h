@@ -655,7 +655,8 @@ size_t farcooler_client_ceremony_teammate_reply(const char *offer_json,
                                                 size_t capacity);
 
 /* Device-signed teammate reply; authorities_json maps local runner ids to
- * {runner_key, signature} from ceremony.authority. Never posts unsigned. */
+ * {runner_key, signature} from ceremony.authority. A runner without one is
+ * sent as pending (not enrolled). Never posts unsigned. */
 size_t farcooler_client_ceremony_seal_teammate(const char *offer_json, const char *manifest_json,
     const char *private_key, const char *authorities_json, uint64_t held_ms, uint8_t *out, size_t capacity);
 

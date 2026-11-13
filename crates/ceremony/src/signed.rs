@@ -55,8 +55,11 @@ fn verifies(key: &str, namespace: &str, bytes: &[u8], signature: &str) -> bool {
     key.verify(namespace, bytes, &signature).is_ok()
 }
 
-/// The phone calls this only after collecting one attestation per runner.
-/// A missing attestation is a refusal before anything is sealed or posted.
+/// The phone calls this after collecting one attestation per ENROLLED runner,
+/// in order. A pending entry (offline, or its enrollment failed) carries none
+/// and is signed as pending: the browser shows it as not enrolled and never
+/// dials it (ov-1149). A missing attestation for an enrolled entry is a
+/// refusal before anything is sealed or posted.
 pub fn sign(manifest: &mut Manifest, offer: &Offer, private: &str, authorities: Vec<Authority>) -> Result<(), CeremonyError> {
     let key = PrivateKey::from_openssh(private).map_err(|_| CeremonyError::UnregisteredKey)?;
     let device_key = key.public_key().to_openssh().map_err(|_| CeremonyError::UnregisteredKey)?;
@@ -66,13 +69,22 @@ pub fn sign(manifest: &mut Manifest, offer: &Offer, private: &str, authorities: 
     Ok(())
 }
 
+/// The entries a reply claims this browser's key is on. Only these need a
+/// runner attestation and a directory pin; a pending entry grants nothing, so
+/// turning one into an enrolled one meets both checks like any other.
+fn enrolled(manifest: &Manifest) -> impl Iterator<Item = &crate::RunnerEntry> {
+    manifest.runners.iter().filter(|r| !r.pending)
+}
+
 fn check_authorities(manifest: &Manifest, offer: &Offer, device: &str, authorities: &[Authority]) -> Result<(), CeremonyError> {
     let device = fingerprint(device).ok_or(CeremonyError::UnregisteredKey)?;
     let statement = authority_statement(offer, &device);
-    if manifest.runners.is_empty() || manifest.runners.len() != authorities.len() {
+    // At least one runner must vouch: a reply that enrolls nowhere is refused,
+    // so with every runner offline the phone posts nothing, as before.
+    if authorities.is_empty() || enrolled(manifest).count() != authorities.len() {
         return Err(CeremonyError::UnregisteredKey);
     }
-    for (runner, authority) in manifest.runners.iter().zip(authorities) {
+    for (runner, authority) in enrolled(manifest).zip(authorities) {
         if fingerprint(&authority.runner_key).as_deref() != Some(runner.id.as_str())
             || !verifies(&authority.runner_key, RUNNER_NAMESPACE, &statement, &authority.signature) {
             return Err(CeremonyError::UnregisteredKey);
@@ -81,12 +93,13 @@ fn check_authorities(manifest: &Manifest, offer: &Offer, device: &str, authoriti
     Ok(())
 }
 
-/// Every runner is pinned independently, and the entire reply is covered by
-/// the device's signature. One wrong runner refuses the whole reply.
+/// Every enrolled runner is pinned independently, and the entire reply,
+/// pending entries included, is covered by the device's signature. One wrong
+/// enrolled runner refuses the whole reply.
 pub fn verify(manifest: &Manifest, offer: &Offer, trust: &Trust) -> Result<(), CeremonyError> {
     let proof = manifest.proof.as_ref().ok_or(CeremonyError::UnregisteredKey)?;
     let device = fingerprint(&proof.device_key).ok_or(CeremonyError::UnregisteredKey)?;
-    if !trust.devices.contains(&device) || manifest.runners.iter().any(|r| !trust.runners.contains(&r.id)) {
+    if !trust.devices.contains(&device) || enrolled(manifest).any(|r| !trust.runners.contains(&r.id)) {
         return Err(CeremonyError::UnregisteredKey);
     }
     check_authorities(manifest, offer, &proof.device_key, &proof.authorities)?;

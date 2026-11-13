@@ -107,8 +107,10 @@ pub unsafe extern "C" fn farcooler_client_ceremony_take_sealed(
 }
 
 /// Seal a teammate reply signed by this device, with one live runner
-/// attestation per phone-local runner id. Private key material never leaves
-/// this call. Refuses missing authority rather than posting an unsigned reply.
+/// attestation per enrolled phone-local runner id. Private key material never
+/// leaves this call. A pending runner needs none, and an enrolled one without
+/// an attestation is sent as pending: one offline runner never stops the
+/// reply (ov-1149). With no runner attested at all, nothing is sealed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_ceremony_seal_teammate(
     offer_json: *const c_char, manifest_json: *const c_char,
@@ -126,7 +128,15 @@ pub unsafe extern "C" fn farcooler_client_ceremony_seal_teammate(
                 serde_json::from_str(&text(authorities_json)?).map_err(|_| CeremonyError::UnregisteredKey)?;
             let mut authorities = Vec::new();
             for runner in &mut manifest.runners {
-                let authority = by_id.get(&runner.id).ok_or(CeremonyError::UnregisteredKey)?;
+                if runner.pending { continue }
+                // Enrolled, but its runner didn't attest (gone offline since, or
+                // the admin gate declined): the browser can't verify it, so it
+                // goes as not enrolled rather than costing the others (ov-1149).
+                let Some(authority) = by_id.get(&runner.id) else {
+                    runner.pending = true;
+                    runner.pending_why = Some("failed".into());
+                    continue;
+                };
                 runner.id = crate::ceremony::fingerprint(&authority.runner_key).ok_or(CeremonyError::UnregisteredKey)?;
                 authorities.push(authority.clone());
             }

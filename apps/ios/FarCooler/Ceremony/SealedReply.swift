@@ -134,17 +134,19 @@ final class SealedReply: ObservableObject {
     }
 
     /// The runner attests to the actual authenticated device after its normal
-    /// admin/Face ID gate. A disconnected or older runner cannot be vouched for.
+    /// admin/Face ID gate. A disconnected or older runner cannot be vouched for,
+    /// so the core sends it as not enrolled; a pending runner isn't asked at
+    /// all. Either way the runners that did attest still get a reply (ov-1149).
     private static func signed(offer: Data, reply: Data, heldFor: TimeInterval, started: Date) async -> CeremonyCore.Answer {
         guard let manifest = try? JSONDecoder().decode(CeremonyManifest.self, from: reply),
             let privateKey = Identity.privateKey(), let offerText = String(data: offer, encoding: .utf8),
             let replyText = String(data: reply, encoding: .utf8)
         else { return .refused(.unknown) }
         var authorities: [String: Any] = [:]
-        for runner in manifest.runners {
+        for runner in manifest.runners where !runner.pending {
             guard let id = UUID(uuidString: runner.id), let connection = Connection.live(for: id),
                 let authority = await connection.ceremonyAuthority(offer: offerText)
-            else { return .refused(.unknown) }
+            else { continue }
             authorities[runner.id] = authority
         }
         guard !Task.isCancelled,
