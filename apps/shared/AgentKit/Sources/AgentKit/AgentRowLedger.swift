@@ -263,6 +263,9 @@ public actor AgentRowLedger {
     /// `delta` with what it says about the window, made from version `base`
     /// (no change: the version it's at).
     private func stamped(_ delta: AgentRowDelta, from base: UInt64? = nil) -> AgentRowDelta {
+        // Prepare only changed rows here, off the main actor: their first
+        // render must not pay for the core's item words through JSON.
+        ConversationWords.prepare(delta.rows)
         var delta = delta
         delta.base = base ?? version
         delta.version = version

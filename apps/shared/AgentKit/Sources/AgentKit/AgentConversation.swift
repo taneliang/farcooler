@@ -320,6 +320,7 @@ extension AgentConversation {
         count <= 0 ? nil : ConversationWords.phrase(count == 1 ? "tools_one" : "tools", ["n": "\(count)"])
     }
 
+
     /// A notice turn's words, without claude's straight quotes.
     public static func noticeText(_ turn: AgentRow.Turn) -> String {
         turn.prompt.replacingOccurrences(of: "\"", with: "")
@@ -474,9 +475,11 @@ public enum ConversationWords {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var asked: [String: Table] = [:]
 
+    static func cachedTable(_ agent: String = "Claude") -> Table? { lock.withLock { asked[agent] } }
+
     /// The table for `agent` ("Claude", "Codex"); nil until the bridge answers.
     public static func table(_ agent: String = "Claude") -> Table? {
-        if let found = lock.withLock({ asked[agent] }) { return found }
+        if let found = cachedTable(agent) { return found }
         let request = #"{"schema":1,"conversation":{"style":"apple","agent":"\#(agent)"}}"#
         guard let answer = PlanViewPresenter.ask(request),
               let table = try? JSONDecoder().decode(Reply.self, from: Data(answer.utf8)).conversation
@@ -491,5 +494,12 @@ public enum ConversationWords {
         let phrases = table(agent)?.phrases
         let words = word.flatMap { phrases?[name + "_" + $0] } ?? phrases?[name] ?? ""
         return fill.reduce(words) { $0.replacingOccurrences(of: "{\($1.key)}", with: $1.value) }
+    }
+}
+extension ConversationWords {
+    /// Prepare the phrase table before rows reach the main actor.
+    static func prepare(_ rows: [AgentRow]) {
+        guard !rows.isEmpty else { return }
+        _ = table()
     }
 }
