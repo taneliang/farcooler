@@ -4,6 +4,44 @@ Both acceptance items are met: the diagnostic CI log names the overflowing
 Agents card, and the revised layout passes the full subsequent Nightly pad
 shard on iOS 27.2.
 
+## Acceptance audit — November 13, 2026
+
+Read `ov-1096` and the duplicate `ov-1101` intent again, then independently
+re-fetched both jobs' logs and the passing run's job status from GitHub.
+
+- [x] Name the child from a CI log: job **131307587775** names the outer
+  `agents-card` button at x=395.5, width=456, right edge=851.5, beyond the
+  834-point window. Its inner button and the terminal fit; see the frame
+  comparison below and [ci-child-frames.log](ci-child-frames.log).
+- [x] Pass the next Nightly pad shard after the final layout fix: job
+  **131427829590**, run **43286220413**, checks out **58745627e** and passes
+  `testTheChatIsShownAndSurvivesATurn` on iOS **27.2**, with **22 tests run,
+  0 failures**. GitHub reports the pad job's conclusion as `success`; see
+  [ci-pad-pass.log](ci-pad-pass.log).
+
+The existing branch already contains the final layout fix and regression
+coverage. This audit needs no additional production change or relaxation of
+the window-containment assertion.
+
+Fresh local verification on November 13 used the repository wrapper on the
+booted iPad Pro 11-inch (M5), iOS 27.0:
+
+```sh
+PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin \
+SIMULATOR_ID=69812625-4152-49C1-9B30-4C236AAE1C92 \
+IOS_UI_LEASE_TIMEOUT=60 \
+./scripts/ios-ui-tests.sh FarCoolerUITests/PadWorkspaceUITests
+```
+
+All **22 runnable tests passed**, with the one capture-only test skipped,
+in 527.694 seconds. This includes rotation, compact-width chat preservation,
+the resized card's preview and sheet, and keyboard/tree width changes.
+The wrapper confirmed `23 collected, 1 skipped, 22 actually ran` and
+`OK: 22 test(s) executed.` This supplements the iOS 27.2 CI evidence above.
+`git diff --check`, `scripts/file-size-budget.py`, and
+`scripts/ios-ui-shards.py --check` also passed (using `/usr/bin/python3` for
+the Python checks because `/usr/local/bin/python3` cannot run on this host).
+
 ## CI root cause
 
 [Nightly 43252796734, pad job 131307587775](https://github.com/taneliang/farcooler/actions/runs/43252796734/job/131307587775)
