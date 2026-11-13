@@ -185,7 +185,7 @@ async fn a_reviewer_that_ends_its_turn_in_a_subdirectory_settles_from_its_verdic
 }
 
 /// The review effect, admitted and not yet run.
-async fn held_review(runtime: &mut Runtime) -> Binding {
+pub(super) async fn held_review(runtime: &mut Runtime) -> Binding {
     let definition = definition(runtime);
     enqueue(runtime, "w", "one", definition);
     for time in 2..20 {

@@ -602,8 +602,13 @@ impl Exec {
         if matches!(kind, StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci) {
             // A reviewer whose verdict is recorded but whose turn never settled: the daemon died before its end was
             // seen (ov-1082). The verdict is the review, so the reviewer is ended and the step settles from it.
-            if self.is_native_agent(binding) && !self.fact_path(binding).try_exists()? && self.recorded_verdict(binding) {
-                self.settle_interrupted_native(binding, Some(true)).await?;
+            // No owner and an empty private server instead prove the review never launched: settle without a
+            // verdict so the step can run again, including after an Uncertain observation (ov-1130).
+            if self.is_native_agent(binding) && !self.fact_path(binding).try_exists()? {
+                let verdict = self.recorded_verdict(binding);
+                if verdict || self.native_review_without_owner(binding)? {
+                    self.settle_interrupted_native(binding, verdict.then_some(true)).await?;
+                }
             }
             let (fact, raw) = self.settled_process(binding)?;
             // Even a dirty interrupted build can settle cancellation once this

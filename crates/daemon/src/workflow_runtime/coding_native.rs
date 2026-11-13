@@ -17,12 +17,22 @@ struct NativeOwner {
     pane: String,
     tty: String,
 }
+/// Launched keeps the receipt shape previous engines wrote. A never-launched review records its binding
+/// directly rather than inventing a pane owner, and can only supply an interrupted exit, never a verdict.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NativeSettlement {
-    owner: NativeOwner,
-    hooks: Vec<HookLine>,
-    completed: Option<bool>,
+#[serde(untagged, deny_unknown_fields)]
+enum NativeSettlement {
+    Launched { owner: NativeOwner, hooks: Vec<HookLine>, completed: Option<bool> },
+    NeverLaunched { binding: Binding },
+}
+impl NativeSettlement {
+    fn completion(&self, binding: &Binding) -> Result<Option<bool>> {
+        match self {
+            Self::Launched { owner, completed, .. } if owner.binding == *binding && owner.terminal == terminal(binding) => Ok(*completed),
+            Self::NeverLaunched { binding: original } if original == binding => Ok(None),
+            _ => Err(Error::Refused("foreign native settlement")),
+        }
+    }
 }
 
 /// How long a reviewer that has recorded its verdict may stay quiet before its turn is taken as over (ov-1082): a
@@ -367,7 +377,7 @@ impl Exec {
         // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
         // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
         if self.recorded_verdict(binding) { completed = Some(true); }
-        durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement { owner, hooks, completed })?)?;
+        durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks, completed })?)?;
         drop(listener);
         std::fs::remove_file(socket)?;
         Ok(completed.map(|passed| if passed { 0 } else { 1 }))
@@ -377,19 +387,47 @@ impl Exec {
     /// the settlement says of the turn; a settlement already written (the daemon died after it) is kept, and what it
     /// says is returned.
     pub(super) async fn cancel_interrupted_native(&self, binding: &Binding, completed: Option<bool>) -> Result<Option<bool>> {
-        let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
-        if owner.binding != *binding { return Err(Error::Refused("foreign interrupted native owner")); }
         let settled = self.native_path(binding, "settled");
         let completed = if settled.try_exists()? {
             let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&settled)?)?;
-            if settlement.owner.binding != *binding { return Err(Error::Refused("foreign native settlement")); }
-            settlement.completed
+            settlement.completion(binding)?
+        } else if self.native_review_without_owner(binding)? {
+            // Launch waits for a durable owner before releasing the PTY's stdin (ov-1130). No owner and no
+            // panes proves this review never ran. Read every pane, including an untagged, unfinished open.
+            let out = server(&self.root, binding).run(&["list-panes", "-a", "-F", "#{pane_id}"]).await
+                .map_err(|_| Error::Refused("native unstarted inventory unavailable"))?;
+            let absent = out.stderr.contains("no server running") || out.stderr.contains("no current session")
+                || (out.stderr.contains("error connecting") && (out.stderr.contains("No such file or directory")
+                    || out.stderr.contains("Connection refused")));
+            if !(out.ok() && out.stdout.trim().is_empty() || !out.ok() && absent) {
+                return Err(Error::Refused("native review without owner still has an unproved PTY"));
+            }
+            // Verification may have refused before run_coding made the log. Keep any output already saved.
+            if !self.process_log(binding).try_exists()? { durable(&self.process_log(binding), b"")?; }
+            durable(&settled, &serde_json::to_vec(&NativeSettlement::NeverLaunched { binding: binding.clone() })?)?;
+            None
         } else {
+            let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
+            if owner.binding != *binding || owner.terminal != terminal(binding) || owner.tty.is_empty() {
+                return Err(Error::Refused("foreign interrupted native owner"));
+            }
             let tmux = server(&self.root, binding);
-            let output = tmux.capture_scrollback(&owner.pane).await.map_err(|_| Error::Refused("interrupted native output unavailable"))?;
-            std::fs::write(self.process_log(binding), output)?;
-            self.quiesce_native(&owner).await?;
-            durable(&settled, &serde_json::to_vec(&NativeSettlement { owner, hooks: Vec::new(), completed })?)?;
+            let life = tmux.pane_life(&owner.pane, owner.terminal).await
+                .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
+            if life == farcooler_tmux::PaneLife::Gone {
+                let table = tokio::task::spawn_blocking(snapshot).await
+                    .map_err(|_| Error::Refused("native process read failed"))??;
+                if !table.under_tty(owner.tty.trim_start_matches("/dev/")).is_empty() {
+                    return Err(Error::Refused("native vanished pane still has processes"));
+                }
+                // The pane cannot be captured or closed again. Its saved output and verdict survive the install.
+                self.bytes(&self.process_log(binding))?;
+            } else {
+                let output = tmux.capture_scrollback(&owner.pane).await.map_err(|_| Error::Refused("interrupted native output unavailable"))?;
+                std::fs::write(self.process_log(binding), output)?;
+                self.quiesce_native(&owner).await?;
+            }
+            durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed })?)?;
             completed
         };
         // The socket is this build's alone, so a leftover one is stale by construction.
@@ -399,11 +437,16 @@ impl Exec {
     }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<()> {
         let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&self.native_path(binding, "settled"))?)?;
-        if settlement.owner.binding != *binding || settlement.owner.terminal != terminal(binding)
-            || settlement.completed.map(|p| if p { 0 } else { 1 }) != exit {
+        if settlement.completion(binding)?.map(|p| if p { 0 } else { 1 }) != exit {
             return Err(Error::Refused("foreign native settlement"));
         }
         Ok(())
+    }
+    /// Only native reviews can recover a missing owner as never launched (ov-1130). A present but unreadable or
+    /// malformed owner is still uncertain; absence alone is not enough until the private server is checked.
+    pub(super) fn native_review_without_owner(&self, binding: &Binding) -> Result<bool> {
+        Ok(matches!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent)))
+            && !self.native_path(binding, "owner").try_exists()?)
     }
     pub(super) fn native_session(binding: &Binding) -> String { terminal(binding).to_string() }
 }
@@ -725,6 +768,105 @@ mod recovery_tests {
             assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["one"].policy_pin,pin);
             assert!(!dir.path().join("started").exists(),"recovery launched an adapter");
         }
+    }
+    /// ov-1130: an install removed the server after the verdict and output were saved, before settlement.
+    #[tokio::test]
+    async fn workflow_native_review_vanished_server_keeps_output_and_recorded_verdict() {
+        use super::super::gate_tests::{three_gates, held_review, at};
+        for passed in [true, false] {
+            let (dir, mut runtime, _fake) = three_gates("never").await;
+            let binding = held_review(&mut runtime).await;
+            let host = Host(server(&runtime.root, &binding)); let id = terminal(&binding);
+            let window = host.0.create_terminal_window(id, id, "lost reviewer", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
+            let panes = host.0.list_tagged_panes().await.unwrap();
+            let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
+            let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
+            durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
+            let command = runtime.coding_command(&binding).unwrap();
+            super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), passed).unwrap();
+            std::fs::write(runtime.process_log(&binding), b"saved reviewer output").unwrap();
+            assert!(host.0.run(&["kill-server"]).await.unwrap().ok());
+            for _ in 0..100 {
+                if snapshot().unwrap().under_tty(owner.tty.trim_start_matches("/dev/")).is_empty() { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let root = runtime.root.clone(); drop(runtime);
+            let mut runtime = Runtime::open(&root).unwrap();
+            runtime.pump(200).await.unwrap();
+            let expected = if passed { ("orchestrator-review".into(), Phase::WaitingReview) }
+                else { ("agent-review".into(), Phase::Failed) };
+            assert_eq!(at(&runtime.state("w").unwrap().unwrap()), expected);
+            assert_eq!(std::fs::read(runtime.process_log(&binding)).unwrap(), b"saved reviewer output");
+            assert!(runtime.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect))).exists());
+            assert!(runtime.native_path(&binding, "settled").exists());
+            assert!(!dir.path().join("reviews").exists(), "recovery launched another reviewer");
+        }
+    }
+    /// A review refused before opening its PTY has no owner file. Its admitted Stop must still finish.
+    #[tokio::test]
+    async fn workflow_native_review_never_launched_stop_ends_cancelled() {
+        use super::super::gate_tests::{three_gates, held_review};
+        let (dir, mut runtime, _fake) = three_gates("never").await;
+        let binding = held_review(&mut runtime).await;
+        let state = runtime.state("w").unwrap().unwrap();
+        assert!(runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
+            expected_revision: state.revision, sequence: 2,
+            command: Command::Cancel { item: "one".into(), reason: None } }, 200).unwrap().result.is_ok());
+        runtime.pump(201).await.unwrap();
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
+        let fact_path = runtime.root.join("receipts").join(format!("{}.process.json", digest(&binding.effect)));
+        let fact: serde_json::Value = serde_json::from_slice(&runtime.bytes(&fact_path).unwrap()).unwrap();
+        assert!(fact["exit"].is_null());
+        assert!(!dir.path().join("reviews").exists());
+    }
+    /// Without a Stop, that same unstarted effect is safe to retry, including after it was marked Uncertain.
+    #[tokio::test]
+    async fn workflow_native_review_never_launched_runs_again() {
+        use super::super::gate_tests::{three_gates, held_review, at};
+        let (dir, mut runtime, _fake) = three_gates("subdir").await;
+        let binding = held_review(&mut runtime).await;
+        runtime.observe("w", &binding.effect, Outcome::Uncertain, false, 200).unwrap();
+        let root = runtime.root.clone(); drop(runtime);
+        let mut runtime = Runtime::open(&root).unwrap();
+        runtime.pump(201).await.unwrap();
+        assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
+        for time in 202..240 {
+            if at(&runtime.state("w").unwrap().unwrap()).0 == "orchestrator-review" { break; }
+            runtime.pump(time).await.unwrap();
+        }
+        assert_eq!(at(&runtime.state("w").unwrap().unwrap()), ("orchestrator-review".into(), Phase::WaitingReview));
+        assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:sonnet\n");
+    }
+    /// Missing ownership is not proof that nothing launched while the effect's server still has a pane.
+    #[tokio::test]
+    async fn workflow_native_review_without_owner_refuses_an_unfinished_open() {
+        use super::super::gate_tests::{three_gates, held_review};
+        let (_dir, mut runtime, _fake) = three_gates("never").await;
+        let binding = held_review(&mut runtime).await;
+        let host = Host(server(&runtime.root, &binding));
+        // Deliberately untagged: a tagged-only inventory must not mistake it for an empty server.
+        assert!(host.0.run(&["new-session", "-d", "/bin/sleep 30"]).await.unwrap().ok());
+        assert!(runtime.cancel_interrupted_native(&binding, None).await.is_err());
+        assert!(!runtime.native_path(&binding, "settled").exists());
+        assert!(!runtime.process_log(&binding).exists());
+    }
+    /// A tty that still has processes (including one reused since the crash) is never killed or called stopped.
+    #[tokio::test]
+    async fn workflow_native_review_vanished_pane_refuses_a_busy_tty() {
+        use super::super::gate_tests::{three_gates, held_review};
+        let (_dir, mut runtime, _fake) = three_gates("never").await;
+        let binding = held_review(&mut runtime).await;
+        let host = Host(server(&runtime.root, &binding)); let id = terminal(&binding);
+        let window = host.0.create_terminal_window(id, id, "busy tty", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
+        let panes = host.0.list_tagged_panes().await.unwrap();
+        let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
+        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: "%999999".into(), tty: pane.tty.clone() };
+        durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
+        std::fs::write(runtime.process_log(&binding), b"saved output").unwrap();
+        assert!(runtime.cancel_interrupted_native(&binding, Some(true)).await.is_err());
+        assert!(!runtime.native_path(&binding, "settled").exists());
+        assert_eq!(std::fs::read(runtime.process_log(&binding)).unwrap(), b"saved output");
+        assert_eq!(host.0.pane_life(&window.pane_id, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
     }
     /// ov-1082: the daemon died while a reviewer that had recorded its verdict was still in its pane. The restart
     /// settles the review from that verdict and ends the reviewer, instead of leaving the run uncertain.
