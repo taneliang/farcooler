@@ -249,5 +249,6 @@ fn published_send_back_limit_can_exceed_the_old_maximum() {
         log.observe("ov-1", Outcome::Passed(ev("candidate")));
         log.observe("ov-1", Outcome::Passed(ev("candidate")));
     }
-    assert_eq!(log.send_back("ov-1", "Address the next finding"), Err(Refusal::Limit));
+    assert_eq!(log.send_back("ov-1", "Address the next finding"),
+        Err(Refusal::SendBackRefused("The send-back limit of 7 has been reached.".into())));
 }
