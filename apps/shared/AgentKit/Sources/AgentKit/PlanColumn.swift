@@ -9,9 +9,9 @@ import Foundation
 //    much of the board is done;
 // 2. Initiatives (today's themes): the larger goals, each with its goal,
 //    progress and next step;
-// 3. the pipeline: status, then agent, then tickets. Each agent says what it
-//    does now, and its tickets are listed under it. A ticket's initiative is
-//    the ticket's, never the agent's;
+// 3. a unique agent roster with runner-reported activity, then tickets by
+//    their own stage. Assignment and stage age are ticket context; neither
+//    diagnoses an agent's execution or attention;
 // 4. the footer counts, which open the ticket lists.
 //
 // Needs You sits between the facts and Initiatives, but its rows are the
@@ -92,7 +92,7 @@ extension WirePipeStage: CaseIterable {
     /// has emptied; a group in the column says its own (`Group.title`).
     public var title: String {
         switch self {
-        case .stuck: "Stuck"
+        case .stuck: "Needs You"
         case .building: "Building"
         case .reviewing: "Reviewing"
         case .landing: "Landing"
@@ -110,4 +110,10 @@ extension WireRole {
         case .agent: "sparkle"
         }
     }
+}
+
+// A board with only listed workers still has a roster to show. Keep the
+// broader `PlanModel.isEmpty` rule (which chooses board layout) unchanged.
+extension PlanModel {
+    public var hasColumnAgents: Bool { agents.contains { $0.role != .orchestrator } }
 }

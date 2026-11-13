@@ -240,6 +240,8 @@ button.danger { color: var(--danger); }
 .plan-key { font: 13px ui-monospace, "SF Mono", Menlo, monospace; color: var(--text-2); white-space: nowrap; }
 .plan-ticket-title { min-width: 0; overflow-wrap: anywhere; }
 .plan-ticket-for { font-size: 13px; color: var(--text-2); text-align: right; }
+.plan-agent-roster + .plan-title { margin-top: 28px; }
+.plan-ticket-context { grid-column: 2 / -1; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
 .plan-more { margin: 0; padding: 4px 16px 0 52px; font-size: 13px; color: var(--text-2); }
 .plan-agent > .plan-more:first-child { padding-left: 16px; padding-top: 6px; }
 .plan-footer { margin: 24px auto 0; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }

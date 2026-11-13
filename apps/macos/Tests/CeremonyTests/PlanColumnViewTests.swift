@@ -33,32 +33,35 @@ struct PlanColumnViewTests {
     func order() async throws {
         let drawn = try await Self.drawn(width: 720)
         let order = [
-            "plan-facts", "plan-needs-you", "plan-initiatives", "plan-pipeline", "plan-stage-stuck", "plan-stage-building",
+            "plan-facts", "plan-needs-you", "plan-initiatives", "plan-agent-roster", "plan-pipeline", "plan-stage-building",
             "plan-stage-reviewing", "plan-stage-landing", "plan-footer",
         ]
         let frames = try order.map { try #require(drawn[$0], "\($0) in \(drawn.keys.sorted())") }
         for (a, b) in zip(order.indices, order.indices.dropFirst()) where !["plan-pipeline"].contains(order[a]) {
             #expect(frames[a].maxY <= frames[b].minY + 0.5, "\(order[a]) then \(order[b])")
         }
-        #expect(drawn["plan-fact-stuck"] != nil && drawn["plan-fact-nextLanding"] != nil && drawn["plan-fact-done"] != nil)
+        #expect(drawn["plan-fact-stuck"] == nil && drawn["plan-fact-nextLanding"] != nil && drawn["plan-fact-done"] != nil)
     }
 
-    @Test("An agent's tickets are indented under its header, inside its card, each with its own initiative")
-    func ticketsUnderTheirAgent() async throws {
+    @Test("Tickets are in their own stage, outside the unique agent roster")
+    func ticketsStayInTheirStage() async throws {
         let drawn = try await Self.drawn(width: 720)
+        let roster = try #require(drawn["plan-agent-roster"])
         let builder = try #require(drawn["plan-agent-agent:b3"])
         let chat = try #require(drawn["plan-ticket-ov-881"])
         let task = try #require(drawn["plan-ticket-ov-882"])
-        #expect(chat.minY >= builder.maxY - 0.5 && task.minY >= chat.maxY - 0.5, "the tickets follow the header")
-        let glyph = try #require(drawn["plan-agent-glyph-agent:b3"])
+        let building = try #require(drawn["plan-stage-building"])
+        #expect(roster.contains(builder) && !roster.intersects(chat))
+        #expect(building.contains(chat) && building.contains(task), "ticket stage is independent of the roster")
         let key = try #require(drawn["plan-ticket-key-ov-881"])
-        #expect(key.minX >= glyph.maxX, "the tickets are indented past the role glyph: \(glyph) \(key)")
         let other = try #require(drawn["plan-ticket-key-ov-882"])
-        #expect(abs(key.width - other.width) < 0.5 && abs(key.minX - other.minX) < 0.5, "keys share one column and width")
-        #expect(drawn.keys.allSatisfy { !$0.hasPrefix("plan-ticket-mark-") }, "no dot")
+        #expect(abs(key.width - other.width) < 0.5 && abs(key.minX - other.minX) < 0.5)
+        #expect(drawn.keys.allSatisfy { !$0.hasPrefix("plan-ticket-mark-") })
         let lander = try #require(drawn["plan-agent-agent:i1"])
         let landing = try #require(drawn["plan-stage-landing"])
-        #expect(landing.contains(lander), "the lander lands the landing")
+        #expect(roster.contains(lander) && !landing.intersects(lander))
+        let unassigned = try #require(drawn["plan-ticket-ov-877"])
+        #expect(!roster.intersects(unassigned), "section-wide unassigned membership is outside every agent card")
     }
 
     @Test("At a 720-pt column, as at 1,440 wide, no ticket title is cut: a long one wraps")
@@ -135,18 +138,18 @@ struct PlanColumnViewTests {
         return clicking
     }
 
-    @Test("The \"N more\" line under an agent opens its stage's tickets, and a row there opens its task")
+    @Test("The stage’s unassigned list opens its stage's tickets, and a row there opens its task")
     func moreOpensItsList() async throws {
         let store = try await Self.store()
         let column = try #require(store.plan.column(statuses: store.board.statuses, titles: PlanHome.titles(store.board)))
         let reviewing = try #require(column.pipeline.first { $0.stage == .reviewing })
-        let card = try #require(reviewing.agents.first { $0.more > 0 }, "the scenario has a reviewer with more waiting")
+        #expect(!reviewing.unattended.isEmpty)
         var opened: [PlanPage] = []
         let pipeline = await Self.host(
             PlanPipelineSection(column: column, actions: PlanColumnActions(), onOpen: { opened.append($0) }))
         defer { pipeline.window.close() }
-        #expect(pipeline.click("plan-more-\(card.id)"), "the more line is a control: \(pipeline.seen.views.keys.sorted())")
-        #expect(opened == [.stage("reviewing")], "it opens the stage list: \(opened) \(String(describing: pipeline.seen.views["plan-more-\(card.id)"]))")
+        #expect(pipeline.click("plan-more-all-reviewing"), "the more line is a control: \(pipeline.seen.views.keys.sorted())")
+        #expect(opened == [.stage("reviewing")], "it opens the stage list: \(opened) \(String(describing: pipeline.seen.views["plan-more-all-reviewing"]))")
 
         let rows = Dictionary(
             store.board.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })

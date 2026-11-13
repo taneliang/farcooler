@@ -141,7 +141,7 @@ data class Initiative (
 	val asksOwner: Boolean
 )
 
-/// Where an agent's work stands, in the order the pipeline lists them.
+/// A ticket's canonical stage; `Stuck` is the legacy wire name for Needs You.
 @Serializable
 enum class PipeStage(val string: String) {
 	@SerialName("stuck")
@@ -178,20 +178,24 @@ data class ColumnTicket (
 	val initiativeId: String? = null,
 	val stage: PipeStage,
 	/// When it entered its stage, in ms; 0 when nothing says.
-	val since: Long
+	val since: Long,
+	/// Assignment and stage age are ticket context, never execution or liveness.
+	val detail: String? = null
 )
 
 @Serializable
 data class ColumnAgent (
 	val id: String,
 	val role: Role,
+	/// The orchestrator's title, kept separate from current activity.
+	val title: String,
 	/// "Builder 2": its role, numbered when there are several.
 	val name: String,
-	/// What it does now, in its own words; the problem when it is stuck.
+	/// Runner-reported activity, with a qualified fallback when no words were sent.
 	val doing: String,
-	/// `doing` says why it's stuck: drawn in amber.
+	/// Reserved for agent attention with provenance; ticket age cannot set it.
 	val doingIsTrouble: Boolean,
-	/// How long it has been at it, in ms.
+	/// Time since the agent started, not time executing an assigned ticket.
 	val elapsed: Long? = null,
 	/// "47 min".
 	val time: String? = null,
@@ -200,8 +204,9 @@ data class ColumnAgent (
 	/// The first ticket it works, for its page when there's no pane to open.
 	val ticket: String? = null,
 	val tickets: List<ColumnTicket>,
+	val assignmentWords: String,
 	val working: Boolean,
-	/// Tickets in this stage nobody is on, said under the last card.
+	/// Legacy decoder slot, always zero: section membership never belongs to an agent.
 	val more: Long
 )
 
@@ -209,13 +214,16 @@ data class ColumnAgent (
 data class Group (
 	val stage: PipeStage,
 	val title: String,
+	/// Legacy decoder slot, empty; the column's roster owns agent rows.
 	val agents: List<ColumnAgent>,
-	/// Tickets in this stage with no agent on them.
+	/// Assigned tickets in their own stage, each once, outside the agent roster.
+	val assigned: List<ColumnTicket>,
+	/// Tickets in this stage with no known open assignment in either source list.
 	val unattended: List<ColumnTicket>,
 	/// The tickets in this stage, each once.
 	val count: Long,
-	/// The unattended tickets drawn in place: the first few in a stage with no
-	/// agent; none in a stage with agents, whose "more" line opens them all.
+	val countWords: String,
+	/// The first few unattended tickets, independent of the agent roster.
 	val preview: List<ColumnTicket>,
 	/// The unattended tickets only the list shows.
 	val hidden: Long,
@@ -264,6 +272,8 @@ data class Column (
 	val initiativeCount: Long,
 	/// The stages with anything in them, in order.
 	val pipeline: List<Group>,
+	/// Each listed non-orchestrator agent once, including agents with no eligible tickets.
+	val roster: List<ColumnAgent>,
 	/// "10 agents".
 	val agentWords: String,
 	val footer: List<Count>,

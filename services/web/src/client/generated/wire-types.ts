@@ -120,7 +120,7 @@ export interface Initiative {
 	asksOwner: boolean;
 }
 
-/** Where an agent's work stands, in the order the pipeline lists them. */
+/** A ticket's canonical stage; `Stuck` is the legacy wire name for Needs You. */
 export enum PipeStage {
 	Stuck = "stuck",
 	Building = "building",
@@ -147,18 +147,22 @@ export interface ColumnTicket {
 	stage: PipeStage;
 	/** When it entered its stage, in ms; 0 when nothing says. */
 	since: number;
+	/** Assignment and stage age are ticket context, never execution or liveness. */
+	detail?: string | null;
 }
 
 export interface ColumnAgent {
 	id: string;
 	role: Role;
+	/** The orchestrator's title, kept separate from current activity. */
+	title: string;
 	/** "Builder 2": its role, numbered when there are several. */
 	name: string;
-	/** What it does now, in its own words; the problem when it is stuck. */
+	/** Runner-reported activity, with a qualified fallback when no words were sent. */
 	doing: string;
-	/** `doing` says why it's stuck: drawn in amber. */
+	/** Reserved for agent attention with provenance; ticket age cannot set it. */
 	doingIsTrouble: boolean;
-	/** How long it has been at it, in ms. */
+	/** Time since the agent started, not time executing an assigned ticket. */
 	elapsed?: number | null;
 	/** "47 min". */
 	time?: string | null;
@@ -167,23 +171,25 @@ export interface ColumnAgent {
 	/** The first ticket it works, for its page when there's no pane to open. */
 	ticket?: string | null;
 	tickets: ColumnTicket[];
+	assignmentWords: string;
 	working: boolean;
-	/** Tickets in this stage nobody is on, said under the last card. */
+	/** Legacy decoder slot, always zero: section membership never belongs to an agent. */
 	more: number;
 }
 
 export interface Group {
 	stage: PipeStage;
 	title: string;
+	/** Legacy decoder slot, empty; the column's roster owns agent rows. */
 	agents: ColumnAgent[];
-	/** Tickets in this stage with no agent on them. */
+	/** Assigned tickets in their own stage, each once, outside the agent roster. */
+	assigned: ColumnTicket[];
+	/** Tickets in this stage with no known open assignment in either source list. */
 	unattended: ColumnTicket[];
 	/** The tickets in this stage, each once. */
 	count: number;
-	/**
-	 * The unattended tickets drawn in place: the first few in a stage with no
-	 * agent; none in a stage with agents, whose "more" line opens them all.
-	 */
+	countWords: string;
+	/** The first few unattended tickets, independent of the agent roster. */
 	preview: ColumnTicket[];
 	/** The unattended tickets only the list shows. */
 	hidden: number;
@@ -225,6 +231,8 @@ export interface Column {
 	initiativeCount: number;
 	/** The stages with anything in them, in order. */
 	pipeline: Group[];
+	/** Each listed non-orchestrator agent once, including agents with no eligible tickets. */
+	roster: ColumnAgent[];
 	/** "10 agents". */
 	agentWords: string;
 	footer: Count[];

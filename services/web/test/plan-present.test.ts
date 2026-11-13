@@ -37,8 +37,8 @@ describe('asking for the plan view', () => {
 
   it('returns the view the presenter answered: the column’s groups in its order', () => {
     const view = presentPlan(stub(), golden.request.plan, { needsYou: 2 })!
-    expect(view.column.pipeline.map(g => g.title)).toEqual(['Stuck', 'Building', 'Reviewing', 'Landing'])
-    expect(view.column.facts.map(f => f.text)).toEqual(['2 need you', '2 stuck'])
+    expect(view.column.pipeline.map(g => g.title)).toEqual(['Building', 'Reviewing', 'Landing'])
+    expect(view.column.facts.map(f => f.text)).toEqual(['2 need you'])
   })
 
   it('returns nothing for an invalid answer or a presenter that throws, never the runner’s plan as it was', () => {

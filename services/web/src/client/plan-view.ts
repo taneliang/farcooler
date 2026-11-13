@@ -203,18 +203,19 @@ function ticketRow(t: ColumnTicket, stage: string, on: PlanHandlers): HTMLElemen
   const b = make('button', 'plan-ticket')
   b.type = 'button'
   b.dataset.task = t.task
-  b.setAttribute('aria-label', `${t.key}, ${t.title}${t.initiative ? `, for ${t.initiative}` : ''}, ${stage}`)
+  b.setAttribute('aria-label', `${t.key}, ${t.title}${t.initiative ? `, for ${t.initiative}` : ''}, ${stage}${t.detail ? `, ${t.detail}` : ''}`)
   // Its key, in secondary ink at one width so every title starts on one edge;
   // the ticket never reads as progress.
   const key = make('span', 'plan-key', t.key)
   key.setAttribute('aria-hidden', 'true')
   b.append(key, make('span', 'plan-ticket-title', t.title))
   if (t.initiative) b.append(make('span', 'plan-ticket-for', t.initiative))
+  if (t.detail) b.append(make('span', 'plan-ticket-context', t.detail))
   b.onclick = () => on.detail({ task: t.task, key: t.key })
   return b
 }
 
-function agentCard(agent: ColumnAgent, stage: string, more: string | null | undefined, on: PlanHandlers): HTMLElement {
+function agentCard(agent: ColumnAgent, stage: string, more: string | null | undefined, on: PlanHandlers, showTickets = true): HTMLElement {
   const li = make('li', 'plan-soft plan-agent')
   li.dataset.agent = agent.id
   const head = make('button', 'plan-agent-head')
@@ -232,29 +233,40 @@ function agentCard(agent: ColumnAgent, stage: string, more: string | null | unde
     if (first) on.detail({ task: first.task, key: first.key })
   }
   li.append(head)
-  for (const t of agent.tickets) li.append(ticketRow(t, stage, on))
+  if (showTickets) for (const t of agent.tickets) li.append(ticketRow(t, stage, on))
+  else {
+    if (agent.title) li.append(make('p', 'plan-more', agent.title))
+    li.append(make('p', 'plan-more', agent.assignmentWords))
+  }
   if (more) li.append(make('p', 'plan-more', more))
   return li
 }
 
 function pipelineSection(column: Column, on: PlanHandlers): HTMLElement | null {
-  if (column.pipeline.length === 0) return null
+  if (column.pipeline.length === 0 && column.roster.length === 0) return null
   const wrap = make('section', 'plan-section plan-pipeline')
-  wrap.append(heading('Pipeline', column.agentWords, true))
+  if (column.roster.length) {
+    wrap.append(heading('Agents', column.agentWords, true))
+    const roster = make('ul', 'plan-list plan-agent-roster')
+    for (const agent of column.roster) roster.append(agentCard(agent, '', null, on, false))
+    wrap.append(roster)
+  }
+  if (column.pipeline.length) wrap.append(heading('Pipeline', undefined, true))
   for (const group of column.pipeline) {
     const stage = make('div', 'plan-stage')
     stage.dataset.stage = group.stage
-    stage.append(heading(group.title, group.count, false, 'h3'))
+    stage.append(heading(group.title, group.countWords, false, 'h3'))
     const ul = make('ul', 'plan-list')
-    for (const agent of group.agents) ul.append(agentCard(agent, group.title, agent.more > 0 ? group.unattendedWords : null, on))
-    if (group.agents.length === 0 && group.unattendedWords) {
-      const li = make('li', 'plan-soft plan-agent')
+    for (const t of group.assigned) {
+      const li = make('li', 'plan-soft')
+      li.append(ticketRow(t, group.title, on))
+      ul.append(li)
+    }
+    if (group.unattendedWords) {
+      const li = make('li', 'plan-soft plan-unassigned')
       li.append(make('p', 'plan-more', group.unattendedWords))
       for (const t of group.unattended) li.append(ticketRow(t, group.title, on))
       ul.append(li)
-    } else if (group.agents.length > 0 && !group.agents.some(a => a.more > 0) && group.unattendedWords) {
-      // No card has tickets to hang it on: its own line.
-      ul.append(make('li', 'plan-quiet', group.unattendedWords))
     }
     stage.append(ul)
     wrap.append(stage)
@@ -305,7 +317,7 @@ function rulingCard(r: Ruling, view: PlanBoardView, on: PlanHandlers): HTMLEleme
 function draw(plan: Plan, model: PlanViewModel, needs: NeedsRow[], view: PlanBoardView, now: number, on: PlanHandlers): HTMLElement[] {
   const out: HTMLElement[] = []
   const column = model.column
-  const empty = column.facts.length === 0 && column.pipeline.length === 0 && column.initiativeCount === 0 && column.footer.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && needs.length === 0
+  const empty = column.facts.length === 0 && column.pipeline.length === 0 && column.roster.length === 0 && column.initiativeCount === 0 && column.footer.length === 0 && plan.themes.length === 0 && plan.rulings.length === 0 && needs.length === 0
   if (empty) {
     const wrap = make('div', 'plan-none')
     wrap.append(make('h2', 'plan-clear', WORDS.nothingPlanned), make('p', 'plan-empty', WORDS.nothingPlannedDetail))

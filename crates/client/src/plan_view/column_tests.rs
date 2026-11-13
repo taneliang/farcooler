@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use super::column::{Column, CountKind, FactKind, PipeStage, Role};
+use super::column::{Column, CountKind, FactKind, PipeStage};
 
 const NOW: i64 = 1_800_000_000_000;
 const MINUTE: i64 = 60_000;
@@ -49,151 +49,6 @@ fn column(plan: Value, context: Value) -> Column {
 
 fn facts(c: &Column) -> Vec<String> {
     c.facts.iter().map(|f| f.text.clone()).collect()
-}
-
-#[test]
-fn each_agent_is_one_card_in_its_tickets_stage_with_each_tickets_own_initiative() {
-    let mut web = theme("Web client", &["t1"], 1);
-    web["outcome"] = json!("You use Far Cooler from any browser");
-    let c = column(
-        json!({
-            "themes": [web, theme("Mobile experience", &["t2", "t3"], 2)],
-            "lines": [line("t1", "building"), line("t2", "building"), line("t3", "reviewing")],
-            "agents": [
-                agent("orchestrator", "orchestrator", &[], "", 300),
-                with(agent("b", "builder", &["t1", "t2"], "Reading the chat list's scroll code", 30), json!({ "terminal": "term-b" })),
-                agent("r", "reviewer", &["t3"], "", 8),
-            ],
-            "cards": [
-                { "task": "t1", "key": "ov-1", "title": "A paired browser starts after an update", "status": "In Progress" },
-                { "task": "t2", "key": "ov-2", "title": "Chat scrolling stutters", "status": "In Progress" },
-            ],
-        }),
-        json!({}),
-    );
-    assert_eq!(c.pipeline.iter().map(|g| g.stage).collect::<Vec<_>>(), [PipeStage::Building, PipeStage::Reviewing]);
-    let builder = &c.pipeline[0].agents[0];
-    assert_eq!((builder.name.as_str(), builder.role, builder.terminal.as_deref()), ("Builder", Role::Builder, Some("term-b")));
-    assert_eq!((builder.doing.as_str(), builder.time.as_deref()), ("Reading the chat list's scroll code", Some("30 min")));
-    assert_eq!(builder.tickets.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["A paired browser starts after an update", "Chat scrolling stutters"]);
-    assert_eq!(builder.tickets.iter().map(|t| t.initiative.as_deref()).collect::<Vec<_>>(), [Some("Web client"), Some("Mobile experience")]);
-    let reviewer = &c.pipeline[1].agents[0];
-    assert_eq!(reviewer.tickets[0].title, "ov-3", "no title anywhere: the key");
-    assert_eq!(reviewer.doing, "Working", "it said nothing, so it is working");
-    assert_eq!(c.agent_words, "2 agents", "the orchestrator isn't in the pipeline");
-}
-
-#[test]
-fn an_agent_with_no_words_says_its_title_else_working_or_idle_and_several_are_numbered() {
-    let c = column(
-        json!({
-            "lines": [line("t1", "building"), line("t2", "building")],
-            "agents": [
-                with(agent("t", "builder", &["t1"], "", 9), json!({ "title": "Design ov-1" })),
-                with(agent("i", "builder", &["t2"], "", 40), json!({ "working": false })),
-            ],
-        }),
-        json!({}),
-    );
-    let names: Vec<String> = c.pipeline[0].agents.iter().map(|a| format!("{}={}={}", a.id, a.name, a.doing)).collect();
-    assert_eq!(names, ["i=Builder 1=Idle", "t=Builder 2=Design ov-1"], "start order: i started first");
-}
-
-#[test]
-fn a_stale_ticket_puts_its_agent_in_stuck_saying_why_and_the_facts_count_it() {
-    let c = column(
-        json!({
-            "lines": [with(line("t1", "building"), json!({ "stale": true, "stage_since": NOW - 150 * MINUTE })), line("t2", "building")],
-            "agents": [agent("s", "builder", &["t1"], "Running the tests", 47), agent("ok", "builder", &["t2"], "", 3)],
-        }),
-        json!({ "needs_you": 2 }),
-    );
-    let stuck = &c.pipeline[0];
-    assert_eq!(stuck.stage, PipeStage::Stuck);
-    assert_eq!((stuck.agents[0].doing.as_str(), stuck.agents[0].doing_is_trouble), ("No move in 2 h", true));
-    assert_eq!(facts(&c), ["2 need you", "1 stuck, 47 min"]);
-    assert!(c.facts.iter().all(|f| f.attention));
-}
-
-#[test]
-fn tickets_nobody_is_on_are_said_under_their_stage() {
-    let lines: Vec<Value> = ["t1", "t2", "t3"].iter().map(|t| line(t, "reviewing")).chain([line("t4", "building")]).collect();
-    let c = column(json!({ "lines": lines, "agents": [agent("r", "reviewer", &["t1"], "", 8)] }), json!({}));
-    let reviewing = c.pipeline.iter().find(|g| g.stage == PipeStage::Reviewing).unwrap();
-    assert_eq!((reviewing.count, reviewing.unattended.len()), (3, 2));
-    assert_eq!(reviewing.unattended_words.as_deref(), Some("2 more waiting for review"));
-    assert_eq!(reviewing.agents.last().unwrap().more, 2);
-    let building = c.pipeline.iter().find(|g| g.stage == PipeStage::Building).unwrap();
-    assert!(building.agents.is_empty());
-    assert_eq!(building.unattended_words.as_deref(), Some("1 ticket with no builder running"));
-}
-
-#[test]
-fn a_ticket_is_on_one_agent_the_lander_first_then_the_one_whose_job_fits() {
-    let c = column(
-        json!({
-            "lines": [with(line("t1", "landing"), json!({ "landing": 9 })), line("t2", "building")],
-            "landings": [landing(9, "gating", &["t1"], "gating_locally", NOW - MINUTE)],
-            "agents": [
-                agent("b1", "builder", &["t1"], "", 9), agent("i", "lander", &["t1"], "", 20),
-                agent("b2", "builder", &["t2"], "", 8), agent("b3", "builder", &["t2"], "", 7),
-            ],
-        }),
-        json!({}),
-    );
-    let tickets = |id: &str| -> Vec<String> {
-        c.pipeline.iter().flat_map(|g| &g.agents).find(|a| a.id == id).unwrap().tickets.iter().map(|t| t.task.clone()).collect()
-    };
-    assert_eq!(tickets("i"), ["t1"]);
-    assert_eq!(tickets("b2"), ["t2"]);
-    assert!(tickets("b3").is_empty() && tickets("b1").is_empty());
-    assert_eq!(c.pipeline.iter().map(|g| g.count).sum::<u64>(), 2);
-}
-
-#[test]
-fn a_live_landings_lander_and_the_next_landing_on_the_facts_line() {
-    let on = |t: &str, stage: &str| with(line(t, stage), json!({ "landing": 9 }));
-    let c = column(
-        json!({
-            "lines": [on("t1", "landing"), on("t2", "landing"), on("t3", "landing"), on("t4", "building")],
-            "landings": [landing(9, "gating", &["t1", "t2", "t3", "t4"], "gating_locally", NOW - 14 * MINUTE)],
-            "agents": [agent("i", "lander", &["t1", "t2", "t3"], "Checking here", 20)],
-            "board_counts": { "backlog": 20, "todo": 2, "in_progress": 5, "in_review": 3, "done": 282, "cancelled": 4 },
-        }),
-        json!({}),
-    );
-    let lander = &c.pipeline.iter().find(|g| g.stage == PipeStage::Landing).unwrap().agents[0];
-    assert_eq!((lander.role, lander.doing.as_str()), (Role::Lander, "Checking here"));
-    assert_eq!(lander.tickets.iter().map(|t| t.task.as_str()).collect::<Vec<_>>(), ["t1", "t2", "t3"]);
-    assert_eq!(c.pipeline.iter().find(|g| g.stage == PipeStage::Building).unwrap().unattended[0].task, "t4");
-    assert_eq!(facts(&c), ["Next landing: 3 tickets, 14 min", "282 of 312 done"]);
-}
-
-#[test]
-fn a_landing_whose_ci_failed_puts_its_lander_in_stuck_and_is_not_the_next_landing() {
-    let c = column(
-        json!({
-            "lines": [with(line("t1", "landing"), json!({ "landing": 9 }))],
-            "landings": [landing(9, "red", &["t1"], "ci_failed", NOW - 5 * MINUTE)],
-            "agents": [with(agent("i", "lander", &["t1"], "", 20), json!({ "title": "Landing six" }))],
-        }),
-        json!({}),
-    );
-    let lander = &c.pipeline[0].agents[0];
-    assert_eq!(c.pipeline[0].stage, PipeStage::Stuck);
-    assert_eq!((lander.doing.as_str(), lander.doing_is_trouble), ("CI failed", true));
-    assert!(!c.facts.iter().any(|f| f.kind == FactKind::NextLanding));
-}
-
-#[test]
-fn a_stage_with_no_agent_previews_three_and_with_agents_previews_none() {
-    let lines: Vec<Value> = (1..=5).map(|n| line(&format!("t{n}"), "reviewing")).collect();
-    let bare = column(json!({ "lines": lines }), json!({}));
-    assert_eq!(bare.pipeline[0].preview.iter().map(|t| t.task.as_str()).collect::<Vec<_>>(), ["t1", "t2", "t3"]);
-    assert_eq!(bare.pipeline[0].hidden, 2);
-    let staffed = column(json!({ "lines": lines, "agents": [agent("r", "reviewer", &["t1"], "", 8)] }), json!({}));
-    assert!(staffed.pipeline[0].preview.is_empty());
-    assert_eq!(staffed.pipeline[0].hidden, 4);
 }
 
 #[test]
@@ -246,20 +101,6 @@ fn an_empty_plan_has_an_empty_column() {
 }
 
 #[test]
-fn a_ticket_that_needs_the_owner_puts_its_agent_in_stuck() {
-    let c = column(
-        json!({
-            "lines": [line("t1", "needs_you")],
-            "agents": [agent("b", "builder", &["t1"], "Asking about the schema", 5)],
-        }),
-        json!({}),
-    );
-    assert_eq!(c.pipeline.len(), 1);
-    assert_eq!(c.pipeline[0].stage, PipeStage::Stuck);
-    assert_eq!(c.pipeline[0].agents[0].doing, "Asking about the schema");
-}
-
-#[test]
 fn a_live_landing_with_no_ticket_aboard_is_not_the_next_landing() {
     let c = column(
         json!({
@@ -269,4 +110,183 @@ fn a_live_landing_with_no_ticket_aboard_is_not_the_next_landing() {
         json!({}),
     );
     assert!(!c.facts.iter().any(|f| f.kind == FactKind::NextLanding), "{:?}", facts(&c));
+}
+
+
+#[test]
+fn ov895_stage_age_never_replaces_reported_agent_activity() {
+    let c = column(json!({
+        "lines": [with(line("t1", "landing"), json!({ "stale": true, "stage_since": NOW - 180 * MINUTE }))],
+        "agents": [agent("l", "lander", &["t1"], "Checking source CI", 15)],
+    }), json!({}));
+    let a = &c.roster[0];
+    assert_eq!(a.doing, "Checking source CI");
+    assert!(!a.doing_is_trouble && a.working);
+    assert_eq!(c.pipeline[0].stage, PipeStage::Landing);
+    assert_eq!(c.pipeline[0].assigned[0].since, NOW - 180 * MINUTE);
+    assert!(c.pipeline[0].assigned[0].detail.as_ref().unwrap().contains("In stage for 3 h"));
+    assert!(c.facts.is_empty());
+}
+
+#[test]
+fn ov895_section_unassigned_membership_is_never_owned_by_an_agent() {
+    let c = column(json!({
+        "lines": [line("t1", "building"), line("t2", "building")],
+        "agents": [agent("b", "builder", &["t1"], "Compiling", 5)],
+    }), json!({}));
+    assert!(c.roster.iter().all(|a| a.more == 0));
+    let g = &c.pipeline[0];
+    assert!(g.agents.is_empty());
+    assert_eq!(g.assigned[0].task, "t1");
+    assert_eq!(g.unattended[0].task, "t2");
+    assert_eq!(g.preview[0].task, "t2");
+    assert_eq!(g.count as usize, g.assigned.len() + g.unattended.len());
+}
+
+#[test]
+fn ov895_canonical_stages_and_unique_roster_count_different_units() {
+    let c = column(json!({
+        "lines": [line("t1", "building"), line("t2", "reviewing"), line("t3", "needs_you"),
+            line("t2", "reviewing"), line("t4", "reviewing"), line("t5", "landing")],
+        "agents": [agent("b", "builder", &["t1", "t2", "t3"], "Checking tests", 30),
+            agent("r", "reviewer", &[], "Reading guidance", 8),
+            agent("l", "lander", &["t5"], "Publishing", 4),
+            agent("b", "builder", &["t1", "t2", "t3"], "Checking tests", 30),
+            agent("orch", "orchestrator", &[], "", 100)],
+    }), json!({}));
+    assert_eq!(c.agent_words, "3 agents");
+    assert_eq!(c.roster.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["b", "r", "l"]);
+    assert!(c.roster[1].tickets.is_empty());
+    assert_eq!(c.pipeline.iter().map(|g| (g.stage, g.count)).collect::<Vec<_>>(),
+        [(PipeStage::Stuck, 1), (PipeStage::Building, 1), (PipeStage::Reviewing, 2), (PipeStage::Landing, 1)]);
+    assert_eq!(c.pipeline[0].title, "Needs You");
+    assert!(c.pipeline[0].assigned[0].detail.as_ref().unwrap().contains("Why t3"));
+    assert_eq!(c.pipeline[2].assigned[0].task, "t2");
+    assert_eq!(c.pipeline[2].unattended[0].task, "t4");
+    assert_eq!(c.roster[0].doing, "Checking tests", "one activity, not an execution claim for each assignment");
+    let ids: Vec<_> = c.pipeline.iter().flat_map(|g| g.assigned.iter().chain(&g.unattended)).map(|t| &t.task).collect();
+    assert_eq!(ids.len(), 5);
+    assert_eq!(ids.into_iter().collect::<std::collections::BTreeSet<_>>().len(), 5);
+}
+
+#[test]
+fn ov895_absent_assignees_are_retained_and_ended_assignments_do_not_count() {
+    let c = column(json!({ "lines": [
+        with(line("t1", "reviewing"), json!({ "work": [{ "agent": "missing", "role": "review", "ended_at": null }] })),
+        with(line("t2", "reviewing"), json!({ "work": [{ "agent": "old", "role": "review", "ended_at": NOW - MINUTE }, {}] })),
+        with(line("t3", "reviewing"), json!({ "work": [{ "agent": "r", "role": "review" }] })),
+    ], "agents": [agent("r", "reviewer", &[], "Reading", 8)] }), json!({}));
+    let g = &c.pipeline[0];
+    assert_eq!(g.count, 3);
+    assert_eq!(g.assigned.len(), 2);
+    assert!(g.assigned[0].detail.as_ref().unwrap().contains("missing (not listed)"));
+    assert_eq!(g.unattended[0].task, "t2");
+    assert_eq!(c.roster[0].tickets[0].task, "t3");
+}
+
+#[test]
+fn ov895_activity_fallback_does_not_invent_idle_or_blocked() {
+    let c = column(json!({ "agents": [
+        with(agent("a", "builder", &[], "", 20), json!({ "working": false, "title": "Design ticket" })),
+        agent("b", "builder", &[], "", 10),
+        with(agent("c", "reviewer", &[], "Waiting on a decision", 5), json!({ "working": false })),
+    ] }), json!({}));
+    assert!(c.pipeline.is_empty());
+    assert_eq!(c.roster.iter().map(|a| a.doing.as_str()).collect::<Vec<_>>(),
+        ["No activity reported", "Runner reports working", "Waiting on a decision"]);
+    assert_eq!(c.roster[0].name, "Builder 1");
+    assert_eq!(c.roster[1].name, "Builder 2");
+}
+
+#[test]
+fn ov895_eligibility_and_preview_partition_are_explicit() {
+    let mut lines: Vec<_> = (1..=5).map(|n| line(&format!("t{n}"), "reviewing")).collect();
+    lines.extend([line("t6", "waiting"), line("t7", "landed"), line("t8", "dropped"),
+        line("t9", "future_stage"), line("t10", "building"), line("t11", "reviewing")]);
+    let c = column(json!({ "lines": lines, "agents": [agent("r", "reviewer", &[], "Reading", 8)] }),
+        json!({ "statuses": { "t10": "cancelled", "t11": "done" } }));
+    assert_eq!(c.pipeline.len(), 1);
+    assert_eq!(c.pipeline[0].count, 5);
+    assert_eq!(c.pipeline[0].preview.len(), 3);
+    assert_eq!(c.pipeline[0].hidden, 2);
+    assert_eq!(c.waiting.len(), 1);
+}
+
+#[test]
+fn ov895_shared_assignment_does_not_duplicate_a_ticket_and_keeps_its_initiative() {
+    let c = column(json!({ "themes": [theme("Mobile", &["t1"], 1)],
+        "lines": [line("t1", "reviewing")], "agents": [
+            agent("b", "builder", &["t1", "t1"], "Fixing", 10),
+            agent("r", "reviewer", &["t1"], "Reviewing", 5)],
+    }), json!({}));
+    assert_eq!(c.pipeline[0].count, 1);
+    assert_eq!(c.roster.len(), 2);
+    let t = &c.pipeline[0].assigned[0];
+    assert_eq!(t.initiative.as_deref(), Some("Mobile"));
+    assert_eq!(t.initiative_id.as_deref(), Some("theme-Mobile"));
+    assert!(t.detail.as_ref().unwrap().starts_with("Assigned: Builder, Reviewer"));
+    assert!(c.roster.iter().all(|a| a.tickets.len() == 1));
+}
+
+#[test]
+fn ov895_landing_facts_and_agent_identity_survive_the_projection() {
+    let c = column(json!({
+        "lines": [with(line("t1", "landing"), json!({ "landing": 9 })), line("t2", "building")],
+        "landings": [landing(9, "gating", &["t1", "t2"], "waiting_for_ci", NOW - 14 * MINUTE)],
+        "agents": [with(agent("l", "lander", &["t1"], "Watching source checks", 20),
+            json!({ "terminal": "term-l", "title": "Land the mobile fixes" }))],
+        "board_counts": { "done": 8, "in_progress": 2 },
+    }), json!({}));
+    assert_eq!(facts(&c), ["Next landing: 1 ticket, 14 min", "8 of 10 done"]);
+    assert_eq!(c.roster[0].terminal.as_deref(), Some("term-l"));
+    assert_eq!(c.roster[0].title, "Land the mobile fixes");
+    assert_eq!(c.roster[0].doing, "Watching source checks");
+    assert!(c.pipeline[1].assigned[0].detail.as_ref().unwrap().contains("Landing: checking on CI"));
+    let red = column(json!({
+        "lines": [with(line("t1", "landing"), json!({ "landing": 9 }))],
+        "landings": [landing(9, "red", &["t1"], "ci_failed", NOW - 5 * MINUTE)],
+    }), json!({}));
+    assert!(!red.facts.iter().any(|f| f.kind == FactKind::NextLanding));
+    assert_eq!(red.pipeline[0].stage, PipeStage::Landing);
+    assert!(red.pipeline[0].unattended[0].detail.as_ref().unwrap().contains("CI failed"));
+}
+
+/// The actual Rust answer drives the focused DOM and screenshot check on every UI edge.
+#[test]
+fn ov895_ui_fixture_is_current() {
+    let plan = json!({ "now_ms": NOW, "themes": [], "lines": [
+        with(line("t1", "building"), json!({ "title": "Builder's current implementation" })),
+        with(line("t2", "reviewing"), json!({ "title": "Builder's earlier ticket awaiting review" })),
+        with(line("t3", "reviewing"), json!({ "title": "Review ticket with no listed assignee" })),
+        with(line("t4", "landing"), json!({ "title": "Source checks on an older landing", "stale": true,
+            "stage_since": NOW - 180 * MINUTE, "landing": 9 })),
+        with(line("t5", "needs_you"), json!({ "title": "Schema choice", "reason": "Waiting on your schema decision" })),
+        with(line("t6", "reviewing"), json!({ "title": "Assignment retained after agent left the roster",
+            "work": [{ "agent": "previous-reviewer", "role": "review", "ended_at": null }] })),
+    ], "agents": [
+        with(agent("b", "builder", &["t1", "t2"], "Running implementation tests", 30), json!({ "title": "Mobile pipeline fixes" })),
+        with(agent("r", "reviewer", &[], "", 8), json!({ "working": false, "title": "Review available" })),
+        agent("l", "lander", &["t4"], "Checking source CI", 15),
+    ], "landings": [landing(9, "gating", &["t4"], "waiting_for_ci", NOW - 14 * MINUTE)] });
+    let request = json!({ "schema": super::SCHEMA, "plan": plan, "context": { "needs_you": 1 } });
+    let answer: Value = serde_json::from_str(&super::json(&request.to_string())).unwrap();
+    let c: Column = serde_json::from_value(answer["view"]["column"].clone()).unwrap();
+    assert_eq!(c.agent_words, "3 agents");
+    assert_eq!(c.pipeline.iter().map(|g| g.count).sum::<u64>(), 6);
+    assert!(facts(&c).contains(&"1 ticket needs you".into()));
+    let actual = serde_json::to_string_pretty(&json!({ "request": request, "answer": answer })).unwrap() + "\n";
+    let path = format!("{}/../../test/fixtures/plan-pipeline.json", env!("CARGO_MANIFEST_DIR"));
+    if std::env::var_os("UPDATE_PLAN_VIEW_GOLDEN").is_some() { std::fs::write(&path, &actual).unwrap(); }
+    assert_eq!(actual, std::fs::read_to_string(&path).unwrap_or_default(), "regenerate with UPDATE_PLAN_VIEW_GOLDEN=1");
+}
+
+#[test]
+fn ov895_next_landing_and_pipeline_share_status_eligibility() {
+    let on = |t: &str| with(line(t, "landing"), json!({ "landing": 9 }));
+    let c = column(json!({
+        "lines": [on("t1"), on("t2"), on("t3")],
+        "landings": [landing(9, "gating", &["t1", "t2", "t3"], "waiting_for_ci", NOW - MINUTE)],
+    }), json!({ "statuses": { "t2": "done", "t3": "cancelled" } }));
+    assert_eq!(c.pipeline[0].count, 1);
+    assert_eq!(facts(&c), ["Next landing: 1 ticket, 1 min"]);
 }

@@ -85,7 +85,7 @@ struct PlanColumnView: View {
             } else {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, minHeight: 80)
             }
-        } else if plan.plan.isEmpty && needsYou.items.isEmpty {
+        } else if plan.plan.isEmpty && !plan.plan.hasColumnAgents && needsYou.items.isEmpty {
             PlanEmptyNotice().identified("plan-empty")
         } else if let column = plan.column(needsYou: needsYou.items.count + asks.count, statuses: statuses, titles: titles) {
             PlanFactsLine(facts: column.facts)
@@ -310,8 +310,7 @@ struct PlanInitiativeRow: View {
     }
 }
 
-/// The pipeline: Stuck, Building, Reviewing, Landing, each a stack of agent
-/// cards with their tickets under them.
+/// A unique agent roster, followed by canonical ticket stages and their assignments.
 struct PlanPipelineSection: View {
     let column: WireColumn
     let actions: PlanColumnActions
@@ -319,28 +318,28 @@ struct PlanPipelineSection: View {
     var onOpen: (PlanPage) -> Void = { _ in }
 
     var body: some View {
+        if !column.roster.isEmpty {
+            PlanColumnHeading(title: "Agents", count: column.agentWords, prominent: true)
+            VStack(alignment: .leading, spacing: PlanColumnMetrics.cards) {
+                ForEach(column.roster) { agent in
+                    PlanAgentCard(agent: agent, stage: .building, actions: actions, showTickets: false)
+                }
+            }
+            .identified("plan-agent-roster")
+        }
         if !column.pipeline.isEmpty {
-            PlanColumnHeading(title: "Pipeline", count: column.agentWords, prominent: true)
+            PlanColumnHeading(title: "Pipeline", prominent: true)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(column.pipeline.enumerated()), id: \.element.id) { index, group in
                     PlanColumnHeading(
-                        title: group.stage.title, count: "\(group.count)", top: index == 0 ? 0 : PlanColumnMetrics.stage)
+                        title: group.title, count: group.countWords, top: index == 0 ? 0 : PlanColumnMetrics.stage)
                     VStack(alignment: .leading, spacing: PlanColumnMetrics.cards) {
-                        ForEach(group.agents) { agent in
-                            PlanAgentCard(
-                                agent: agent, stage: group.stage, moreWords: agent.more > 0 ? group.unattendedWords : nil, actions: actions,
-                                openMore: { onOpen(.stage(group.stage.rawValue)) })
+                        ForEach(group.assigned) { ticket in
+                            PlanTicketRow(ticket: ticket) { actions.openTicket(ticket.task) }
                         }
-                        if group.agents.isEmpty, let words = group.unattendedWords {
+                        if let words = group.unattendedWords {
                             PlanUnattendedCard(
                                 words: words, group: group, actions: actions, openAll: { onOpen(.stage(group.stage.rawValue)) })
-                        } else if !group.agents.isEmpty, !group.agents.contains(where: { $0.more > 0 }),
-                            let words = group.unattendedWords
-                        {
-                            // No card has tickets to hang it on: its own line.
-                            PlanMoreButton(words: words) { onOpen(.stage(group.stage.rawValue)) }
-                                .padding(.horizontal, Spacing.group)
-                                .identified("plan-more-\(group.stage.rawValue)")
                         }
                     }
                     .identified("plan-stage-\(group.stage.rawValue)")
@@ -360,6 +359,7 @@ struct PlanAgentCard: View {
     var moreWords: String?
     let actions: PlanColumnActions
     var openMore: () -> Void = {}
+    var showTickets = true
     @State private var hovering = false
     @Environment(\.colorScheme) private var scheme
 
@@ -372,8 +372,18 @@ struct PlanAgentCard: View {
                 .accessibilityLabel("\(agent.name), \(agent.doing)\(agent.time.map { ", \($0)" } ?? "")")
                 .accessibilityHint(agent.terminal == nil ? "Opens its ticket" : "Opens its chat")
                 .identified("plan-agent-\(agent.id)")
-            ForEach(agent.tickets) { ticket in
-                PlanTicketRow(ticket: ticket) { actions.open(ticket: ticket.task, under: agent) }
+            if showTickets {
+                ForEach(agent.tickets) { ticket in
+                    PlanTicketRow(ticket: ticket) { actions.open(ticket: ticket.task, under: agent) }
+                }
+            } else {
+                if !agent.title.isEmpty {
+                    Text(agent.title).font(.callout).foregroundStyle(.quietInk)
+                        .padding(.horizontal, Spacing.section)
+                }
+                Text(agent.assignmentWords)
+                    .font(.callout).foregroundStyle(.quietInk)
+                    .padding(.horizontal, Spacing.section)
             }
             if let moreWords {
                 PlanMoreButton(words: moreWords, action: openMore)
@@ -438,7 +448,7 @@ struct PlanUnattendedCard: View {
                 .padding(.top, Spacing.tight)
             ForEach(group.preview) { ticket in PlanTicketRow(ticket: ticket) { actions.openTicket(ticket.task) } }
             // A tall stage shows its first few; the rest are one click away.
-            if group.hidden > 0 {
+            if !group.unattended.isEmpty {
                 PlanMoreButton(words: "Show All \(group.unattended.count)", action: openAll)
                     .padding(.leading, PlanColumnMetrics.ticketIndent)
                     .padding(.trailing, Spacing.section)
@@ -496,9 +506,12 @@ struct PlanTicketRow: View {
                     .frame(minWidth: keyWidth, alignment: .leading)
                     .accessibilityHidden(true)
                     .probed("plan-ticket-key-\(ticket.key)")
-                Text(ticket.title)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: Spacing.tight) {
+                    Text(ticket.title)
+                    if let detail = ticket.detail { Text(detail).font(.caption).foregroundStyle(.quietInk) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
                 if let initiative = ticket.initiative {
                     Text(initiative)
                         .font(.callout)
@@ -517,7 +530,7 @@ struct PlanTicketRow: View {
         // The wash sits a step in from the card's edges.
         .padding(.horizontal, Spacing.group)
         .onHover { hovering = $0 }
-        .accessibilityLabel("\(ticket.key), \(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title)")
+        .accessibilityLabel("\(ticket.key), \(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title), \(ticket.detail ?? "")")
         .accessibilityHint("Opens the ticket")
         .identified("plan-ticket-\(ticket.key)")
     }

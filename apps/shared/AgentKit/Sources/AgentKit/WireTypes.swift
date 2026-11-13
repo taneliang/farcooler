@@ -182,7 +182,7 @@ public struct WireInitiative: Codable, Equatable, Sendable {
 	}
 }
 
-/// Where an agent's work stands, in the order the pipeline lists them.
+/// A ticket's canonical stage; `Stuck` is the legacy wire name for Needs You.
 public enum WirePipeStage: String, Codable, Equatable, Sendable {
 	case stuck
 	case building
@@ -209,8 +209,10 @@ public struct WireColumnTicket: Codable, Equatable, Sendable {
 	public var stage: WirePipeStage
 	/// When it entered its stage, in ms; 0 when nothing says.
 	public var since: Int64
+	/// Assignment and stage age are ticket context, never execution or liveness.
+	public var detail: String?
 
-	public init(task: String, key: String, title: String, initiative: String?, initiativeId: String?, stage: WirePipeStage, since: Int64) {
+	public init(task: String, key: String, title: String, initiative: String?, initiativeId: String?, stage: WirePipeStage, since: Int64, detail: String?) {
 		self.task = task
 		self.key = key
 		self.title = title
@@ -218,19 +220,22 @@ public struct WireColumnTicket: Codable, Equatable, Sendable {
 		self.initiativeId = initiativeId
 		self.stage = stage
 		self.since = since
+		self.detail = detail
 	}
 }
 
 public struct WireColumnAgent: Codable, Equatable, Sendable {
 	public var id: String
 	public var role: WireRole
+	/// The orchestrator's title, kept separate from current activity.
+	public var title: String
 	/// "Builder 2": its role, numbered when there are several.
 	public var name: String
-	/// What it does now, in its own words; the problem when it is stuck.
+	/// Runner-reported activity, with a qualified fallback when no words were sent.
 	public var doing: String
-	/// `doing` says why it's stuck: drawn in amber.
+	/// Reserved for agent attention with provenance; ticket age cannot set it.
 	public var doingIsTrouble: Bool
-	/// How long it has been at it, in ms.
+	/// Time since the agent started, not time executing an assigned ticket.
 	public var elapsed: Int64?
 	/// "47 min".
 	public var time: String?
@@ -239,13 +244,15 @@ public struct WireColumnAgent: Codable, Equatable, Sendable {
 	/// The first ticket it works, for its page when there's no pane to open.
 	public var ticket: String?
 	public var tickets: [WireColumnTicket]
+	public var assignmentWords: String
 	public var working: Bool
-	/// Tickets in this stage nobody is on, said under the last card.
+	/// Legacy decoder slot, always zero: section membership never belongs to an agent.
 	public var more: Int64
 
-	public init(id: String, role: WireRole, name: String, doing: String, doingIsTrouble: Bool, elapsed: Int64?, time: String?, terminal: String?, ticket: String?, tickets: [WireColumnTicket], working: Bool, more: Int64) {
+	public init(id: String, role: WireRole, title: String, name: String, doing: String, doingIsTrouble: Bool, elapsed: Int64?, time: String?, terminal: String?, ticket: String?, tickets: [WireColumnTicket], assignmentWords: String, working: Bool, more: Int64) {
 		self.id = id
 		self.role = role
+		self.title = title
 		self.name = name
 		self.doing = doing
 		self.doingIsTrouble = doingIsTrouble
@@ -254,6 +261,7 @@ public struct WireColumnAgent: Codable, Equatable, Sendable {
 		self.terminal = terminal
 		self.ticket = ticket
 		self.tickets = tickets
+		self.assignmentWords = assignmentWords
 		self.working = working
 		self.more = more
 	}
@@ -262,25 +270,30 @@ public struct WireColumnAgent: Codable, Equatable, Sendable {
 public struct WireGroup: Codable, Equatable, Sendable {
 	public var stage: WirePipeStage
 	public var title: String
+	/// Legacy decoder slot, empty; the column's roster owns agent rows.
 	public var agents: [WireColumnAgent]
-	/// Tickets in this stage with no agent on them.
+	/// Assigned tickets in their own stage, each once, outside the agent roster.
+	public var assigned: [WireColumnTicket]
+	/// Tickets in this stage with no known open assignment in either source list.
 	public var unattended: [WireColumnTicket]
 	/// The tickets in this stage, each once.
 	public var count: Int64
-	/// The unattended tickets drawn in place: the first few in a stage with no
-	/// agent; none in a stage with agents, whose "more" line opens them all.
+	public var countWords: String
+	/// The first few unattended tickets, independent of the agent roster.
 	public var preview: [WireColumnTicket]
 	/// The unattended tickets only the list shows.
 	public var hidden: Int64
 	/// "12 more waiting for review".
 	public var unattendedWords: String?
 
-	public init(stage: WirePipeStage, title: String, agents: [WireColumnAgent], unattended: [WireColumnTicket], count: Int64, preview: [WireColumnTicket], hidden: Int64, unattendedWords: String?) {
+	public init(stage: WirePipeStage, title: String, agents: [WireColumnAgent], assigned: [WireColumnTicket], unattended: [WireColumnTicket], count: Int64, countWords: String, preview: [WireColumnTicket], hidden: Int64, unattendedWords: String?) {
 		self.stage = stage
 		self.title = title
 		self.agents = agents
+		self.assigned = assigned
 		self.unattended = unattended
 		self.count = count
+		self.countWords = countWords
 		self.preview = preview
 		self.hidden = hidden
 		self.unattendedWords = unattendedWords
@@ -335,19 +348,22 @@ public struct WireColumn: Codable, Equatable, Sendable {
 	public var initiativeCount: Int64
 	/// The stages with anything in them, in order.
 	public var pipeline: [WireGroup]
+	/// Each listed non-orchestrator agent once, including agents with no eligible tickets.
+	public var roster: [WireColumnAgent]
 	/// "10 agents".
 	public var agentWords: String
 	public var footer: [WireCount]
 	/// The tickets waiting for a builder, each once, in the plan's order.
 	public var waiting: [WireWaitingTicket]
 
-	public init(facts: [WireFact], initiatives: [WireInitiative], quietInitiatives: [WireInitiative], quietLine: String?, initiativeCount: Int64, pipeline: [WireGroup], agentWords: String, footer: [WireCount], waiting: [WireWaitingTicket]) {
+	public init(facts: [WireFact], initiatives: [WireInitiative], quietInitiatives: [WireInitiative], quietLine: String?, initiativeCount: Int64, pipeline: [WireGroup], roster: [WireColumnAgent], agentWords: String, footer: [WireCount], waiting: [WireWaitingTicket]) {
 		self.facts = facts
 		self.initiatives = initiatives
 		self.quietInitiatives = quietInitiatives
 		self.quietLine = quietLine
 		self.initiativeCount = initiativeCount
 		self.pipeline = pipeline
+		self.roster = roster
 		self.agentWords = agentWords
 		self.footer = footer
 		self.waiting = waiting

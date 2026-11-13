@@ -3,7 +3,10 @@
 // presenter that answers with the golden's own answer, so the check says the
 // renderer draws the view's words and nothing else.
 
-import golden from '../../../../test/fixtures/plan-view-apple.json'
+import original from '../../../../test/fixtures/plan-view-apple.json'
+import focused from '../../../../test/fixtures/plan-pipeline.json'
+
+const golden = (window as any).focused ? focused : original
 import { parsePlan } from '../../src/client/plan'
 import type { PlanPresenter } from '../../src/client/plan-present'
 import { renderPlan } from '../../src/client/plan-view'
@@ -20,5 +23,9 @@ renderPlan(
   [],
   present,
 )
+for (const id of ['work', 'plan']) document.getElementById(id)!.hidden = false
+for (const id of ['status', 'needs', 'pane', 'terminal-list']) document.getElementById(id)!.hidden = true
+document.getElementById('show-terminals')!.setAttribute('aria-pressed', 'false')
+document.getElementById('show-plan')!.setAttribute('aria-pressed', 'true')
 ;(window as any).golden = golden.answer.view
 ;(window as any).done = true

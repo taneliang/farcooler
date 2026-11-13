@@ -67,7 +67,7 @@ struct PlanStackTests {
     func cardsNameTheirAgent() async throws {
         let store = try await PlanColumnViewTests.store()
         let column = try #require(store.plan.column())
-        let agent = try #require(column.pipeline.flatMap(\.agents).first { !$0.tickets.isEmpty })
+        let agent = try #require(column.roster.first { !$0.tickets.isEmpty })
         var under: [String] = []
         var plain: [String] = []
         var actions = PlanColumnActions(openTicket: { plain.append($0) })

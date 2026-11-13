@@ -1,0 +1,821 @@
+{
+  "answer": {
+    "error": null,
+    "schema": 1,
+    "view": {
+      "agents": {
+        "header": "3 agents · 2 working · 0 tokens in the last 24 hours",
+        "rows": [
+          {
+            "accessibility": "Builder · sonnet, “Mobile pipeline fixes”, ov-1, ov-2, Working · 30 min",
+            "cost": null,
+            "doingNow": "Running implementation tests",
+            "id": "b",
+            "second": "“Mobile pipeline fixes” · ov-1, ov-2 · Working · 30 min",
+            "state": "Working · 30 min",
+            "terminal": null,
+            "tokens": null,
+            "who": "Builder · sonnet",
+            "working": true,
+            "worksFor": "ov-1, ov-2"
+          },
+          {
+            "accessibility": "Lander · sonnet, ov-4, Working · 15 min",
+            "cost": null,
+            "doingNow": "Checking source CI",
+            "id": "l",
+            "second": "ov-4 · Working · 15 min",
+            "state": "Working · 15 min",
+            "terminal": null,
+            "tokens": null,
+            "who": "Lander · sonnet",
+            "working": true,
+            "worksFor": "ov-4"
+          },
+          {
+            "accessibility": "Reviewer · sonnet, “Review available”, Not on a ticket, Idle · active just now",
+            "cost": null,
+            "doingNow": "",
+            "id": "r",
+            "second": "“Review available” · Not on a ticket · Idle · active just now",
+            "state": "Idle · active just now",
+            "terminal": null,
+            "tokens": null,
+            "who": "Reviewer · sonnet",
+            "working": false,
+            "worksFor": "Not on a ticket"
+          }
+        ]
+      },
+      "building": [
+        {
+          "accessibility": "Builder's current implementation, Building · ov-1 · Builder · sonnet · 10 min",
+          "agent": {
+            "id": "b",
+            "line": "Builder · sonnet",
+            "model": "sonnet",
+            "terminal": null,
+            "tokens": null,
+            "who": "Builder · sonnet"
+          },
+          "branch": "branch-t1",
+          "heading": "Builder's current implementation",
+          "id": "t1",
+          "key": "ov-1",
+          "landedLanding": null,
+          "mark": "building",
+          "markAttention": false,
+          "note": null,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "Building · ov-1 · Builder · sonnet · 10 min",
+          "stage": "building",
+          "status": "Building",
+          "theme": null,
+          "waitsOnOwner": false
+        }
+      ],
+      "column": {
+        "agentWords": "3 agents",
+        "facts": [
+          {
+            "attention": true,
+            "kind": "needs_you",
+            "runs": [
+              {
+                "strong": true,
+                "text": "1"
+              },
+              {
+                "strong": false,
+                "text": " need you"
+              }
+            ],
+            "text": "1 need you"
+          },
+          {
+            "attention": true,
+            "kind": "stuck",
+            "runs": [
+              {
+                "strong": false,
+                "text": "1 ticket needs you"
+              }
+            ],
+            "text": "1 ticket needs you"
+          },
+          {
+            "attention": false,
+            "kind": "next_landing",
+            "runs": [
+              {
+                "strong": false,
+                "text": "Next landing: "
+              },
+              {
+                "strong": true,
+                "text": "1"
+              },
+              {
+                "strong": false,
+                "text": " ticket"
+              },
+              {
+                "strong": false,
+                "text": ", 14 min"
+              }
+            ],
+            "text": "Next landing: 1 ticket, 14 min"
+          }
+        ],
+        "footer": [],
+        "initiativeCount": 0,
+        "initiatives": [],
+        "pipeline": [
+          {
+            "agents": [],
+            "assigned": [],
+            "count": 1,
+            "countWords": "1 ticket",
+            "hidden": 0,
+            "preview": [
+              {
+                "detail": "No listed assignee · In stage for 10 min · Waiting on your schema decision",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-5",
+                "since": 1799999400000,
+                "stage": "stuck",
+                "task": "t5",
+                "title": "Schema choice"
+              }
+            ],
+            "stage": "stuck",
+            "title": "Needs You",
+            "unattended": [
+              {
+                "detail": "No listed assignee · In stage for 10 min · Waiting on your schema decision",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-5",
+                "since": 1799999400000,
+                "stage": "stuck",
+                "task": "t5",
+                "title": "Schema choice"
+              }
+            ],
+            "unattendedWords": "1 ticket with no listed assignee"
+          },
+          {
+            "agents": [],
+            "assigned": [
+              {
+                "detail": "Assigned: Builder · In stage for 10 min",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-1",
+                "since": 1799999400000,
+                "stage": "building",
+                "task": "t1",
+                "title": "Builder's current implementation"
+              }
+            ],
+            "count": 1,
+            "countWords": "1 ticket",
+            "hidden": 0,
+            "preview": [],
+            "stage": "building",
+            "title": "Building",
+            "unattended": [],
+            "unattendedWords": null
+          },
+          {
+            "agents": [],
+            "assigned": [
+              {
+                "detail": "Assigned: Builder · In stage for 10 min",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-2",
+                "since": 1799999400000,
+                "stage": "reviewing",
+                "task": "t2",
+                "title": "Builder's earlier ticket awaiting review"
+              },
+              {
+                "detail": "Assigned: previous-reviewer (not listed) · In stage for 10 min",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-6",
+                "since": 1799999400000,
+                "stage": "reviewing",
+                "task": "t6",
+                "title": "Assignment retained after agent left the roster"
+              }
+            ],
+            "count": 3,
+            "countWords": "3 tickets",
+            "hidden": 0,
+            "preview": [
+              {
+                "detail": "No listed assignee · In stage for 10 min",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-3",
+                "since": 1799999400000,
+                "stage": "reviewing",
+                "task": "t3",
+                "title": "Review ticket with no listed assignee"
+              }
+            ],
+            "stage": "reviewing",
+            "title": "Reviewing",
+            "unattended": [
+              {
+                "detail": "No listed assignee · In stage for 10 min",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-3",
+                "since": 1799999400000,
+                "stage": "reviewing",
+                "task": "t3",
+                "title": "Review ticket with no listed assignee"
+              }
+            ],
+            "unattendedWords": "1 ticket with no listed assignee"
+          },
+          {
+            "agents": [],
+            "assigned": [
+              {
+                "detail": "Assigned: Lander · In stage for 3 h · Landing: checking on CI",
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-4",
+                "since": 1799989200000,
+                "stage": "landing",
+                "task": "t4",
+                "title": "Source checks on an older landing"
+              }
+            ],
+            "count": 1,
+            "countWords": "1 ticket",
+            "hidden": 0,
+            "preview": [],
+            "stage": "landing",
+            "title": "Landing",
+            "unattended": [],
+            "unattendedWords": null
+          }
+        ],
+        "quietInitiatives": [],
+        "quietLine": null,
+        "roster": [
+          {
+            "assignmentWords": "2 pipeline tickets assigned",
+            "doing": "Running implementation tests",
+            "doingIsTrouble": false,
+            "elapsed": 1800000,
+            "id": "b",
+            "more": 0,
+            "name": "Builder",
+            "role": "builder",
+            "terminal": null,
+            "ticket": "t1",
+            "tickets": [
+              {
+                "detail": null,
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-1",
+                "since": 1799999400000,
+                "stage": "building",
+                "task": "t1",
+                "title": "Builder's current implementation"
+              },
+              {
+                "detail": null,
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-2",
+                "since": 1799999400000,
+                "stage": "reviewing",
+                "task": "t2",
+                "title": "Builder's earlier ticket awaiting review"
+              }
+            ],
+            "time": "Started 30 min ago",
+            "title": "Mobile pipeline fixes",
+            "working": true
+          },
+          {
+            "assignmentWords": "1 pipeline ticket assigned",
+            "doing": "Checking source CI",
+            "doingIsTrouble": false,
+            "elapsed": 900000,
+            "id": "l",
+            "more": 0,
+            "name": "Lander",
+            "role": "lander",
+            "terminal": null,
+            "ticket": "t4",
+            "tickets": [
+              {
+                "detail": null,
+                "initiative": null,
+                "initiativeId": null,
+                "key": "ov-4",
+                "since": 1799989200000,
+                "stage": "landing",
+                "task": "t4",
+                "title": "Source checks on an older landing"
+              }
+            ],
+            "time": "Started 15 min ago",
+            "title": "",
+            "working": true
+          },
+          {
+            "assignmentWords": "0 pipeline tickets assigned",
+            "doing": "No activity reported",
+            "doingIsTrouble": false,
+            "elapsed": 480000,
+            "id": "r",
+            "more": 0,
+            "name": "Reviewer",
+            "role": "reviewer",
+            "terminal": null,
+            "ticket": null,
+            "tickets": [],
+            "time": "Started 8 min ago",
+            "title": "Review available",
+            "working": false
+          }
+        ],
+        "waiting": []
+      },
+      "details": {
+        "tickets": [
+          {
+            "id": "t1",
+            "stage": null,
+            "stale": null,
+            "status": "Building",
+            "statusBesideStage": "Building"
+          },
+          {
+            "id": "t2",
+            "stage": null,
+            "stale": null,
+            "status": "In Review",
+            "statusBesideStage": "In Review"
+          },
+          {
+            "id": "t3",
+            "stage": null,
+            "stale": null,
+            "status": "In Review",
+            "statusBesideStage": "In Review"
+          },
+          {
+            "id": "t4",
+            "stage": null,
+            "stale": "No move in 3 h",
+            "status": "Landing · in Landing 9",
+            "statusBesideStage": "Landing · in Landing 9"
+          },
+          {
+            "id": "t5",
+            "stage": null,
+            "stale": null,
+            "status": "Needs You",
+            "statusBesideStage": "Needs You"
+          },
+          {
+            "id": "t6",
+            "stage": null,
+            "stale": null,
+            "status": "In Review",
+            "statusBesideStage": "In Review"
+          }
+        ],
+        "trackSummary": null
+      },
+      "inReview": [
+        {
+          "accessibility": "Builder's earlier ticket awaiting review, In Review · ov-2 · Builder · sonnet · 10 min",
+          "agent": {
+            "id": "b",
+            "line": "Builder · sonnet",
+            "model": "sonnet",
+            "terminal": null,
+            "tokens": null,
+            "who": "Builder · sonnet"
+          },
+          "branch": "branch-t2",
+          "heading": "Builder's earlier ticket awaiting review",
+          "id": "t2",
+          "key": "ov-2",
+          "landedLanding": null,
+          "mark": "reviewing",
+          "markAttention": false,
+          "note": null,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "In Review · ov-2 · Builder · sonnet · 10 min",
+          "stage": "reviewing",
+          "status": "In Review",
+          "theme": null,
+          "waitsOnOwner": false
+        },
+        {
+          "accessibility": "Review ticket with no listed assignee, In Review · ov-3 · 10 min",
+          "agent": null,
+          "branch": "branch-t3",
+          "heading": "Review ticket with no listed assignee",
+          "id": "t3",
+          "key": "ov-3",
+          "landedLanding": null,
+          "mark": "reviewing",
+          "markAttention": false,
+          "note": null,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "In Review · ov-3 · 10 min",
+          "stage": "reviewing",
+          "status": "In Review",
+          "theme": null,
+          "waitsOnOwner": false
+        },
+        {
+          "accessibility": "Schema choice, Needs You · ov-5, Needs you",
+          "agent": null,
+          "branch": "branch-t5",
+          "heading": "Schema choice",
+          "id": "t5",
+          "key": "ov-5",
+          "landedLanding": null,
+          "mark": "needs_you",
+          "markAttention": true,
+          "note": null,
+          "notes": [
+            {
+              "attention": true,
+              "help": null,
+              "kind": "warning",
+              "text": "Needs you"
+            }
+          ],
+          "rank": null,
+          "run": null,
+          "second": "Needs You · ov-5",
+          "stage": "needs_you",
+          "status": "Needs You",
+          "theme": null,
+          "waitsOnOwner": true
+        },
+        {
+          "accessibility": "Assignment retained after agent left the roster, In Review · ov-6 · 10 min",
+          "agent": null,
+          "branch": "branch-t6",
+          "heading": "Assignment retained after agent left the roster",
+          "id": "t6",
+          "key": "ov-6",
+          "landedLanding": null,
+          "mark": "reviewing",
+          "markAttention": false,
+          "note": null,
+          "notes": [],
+          "rank": null,
+          "run": null,
+          "second": "In Review · ov-6 · 10 min",
+          "stage": "reviewing",
+          "status": "In Review",
+          "theme": null,
+          "waitsOnOwner": false
+        }
+      ],
+      "landedToday": [],
+      "landings": [
+        {
+          "attention": false,
+          "carries": null,
+          "ciUnread": null,
+          "explanation": "Pushed, with CI running its checks.",
+          "id": "landing-9",
+          "label": "Landing 9",
+          "ladder": {
+            "at": 1,
+            "compact": "Checking on CI · step 2 of 3",
+            "steps": [
+              {
+                "explanation": "The full test run, on the runner.",
+                "label": "Checking Here"
+              },
+              {
+                "explanation": "Pushed, with CI running its checks.",
+                "label": "Checking on CI"
+              },
+              {
+                "explanation": "Everything passed and it has landed on main.",
+                "label": "Landed"
+              }
+            ]
+          },
+          "lander": null,
+          "landerWords": null,
+          "number": 9,
+          "phase": "waiting_for_ci",
+          "phaseSentence": "checking on CI",
+          "phaseWord": "Checking on CI",
+          "pushedSha": null,
+          "since": 1799999160000,
+          "subtitle": null,
+          "tickets": [
+            {
+              "accessibility": "Source checks on an older landing, No move in 3 h",
+              "agent": {
+                "id": "l",
+                "line": "Lander · sonnet",
+                "model": "sonnet",
+                "terminal": null,
+                "tokens": null,
+                "who": "Lander · sonnet"
+              },
+              "branch": "branch-t4",
+              "heading": "Source checks on an older landing",
+              "id": "t4",
+              "key": "ov-4",
+              "landedLanding": null,
+              "mark": "landing",
+              "markAttention": true,
+              "note": null,
+              "notes": [
+                {
+                  "attention": true,
+                  "help": null,
+                  "kind": "warning",
+                  "text": "No move in 3 h"
+                }
+              ],
+              "rank": null,
+              "run": null,
+              "second": "ov-4",
+              "stage": "landing",
+              "status": "Landing · in Landing 9",
+              "theme": null,
+              "waitsOnOwner": false
+            }
+          ]
+        }
+      ],
+      "needsYou": 1,
+      "now": 1800000000000,
+      "onLandedLanding": [],
+      "schema": 1,
+      "sections": [
+        {
+          "count": 1,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "needs_you",
+          "title": "Needs You"
+        },
+        {
+          "count": 1,
+          "empty": null,
+          "folded": false,
+          "help": "Reviewed tickets land on main together, after one round of checks.",
+          "kind": "landing",
+          "title": "Landing"
+        },
+        {
+          "count": 4,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "in_review",
+          "title": "In Review"
+        },
+        {
+          "count": 1,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "building",
+          "title": "Building"
+        },
+        {
+          "count": 0,
+          "empty": "Nothing is waiting.",
+          "folded": false,
+          "help": null,
+          "kind": "waiting",
+          "title": "Waiting"
+        },
+        {
+          "count": 3,
+          "empty": null,
+          "folded": false,
+          "help": null,
+          "kind": "agents",
+          "title": "Agents"
+        }
+      ],
+      "themes": {
+        "finished": [],
+        "finishedTitle": null,
+        "finishedWords": null,
+        "tiles": []
+      },
+      "waiting": []
+    },
+    "words": null
+  },
+  "request": {
+    "context": {
+      "needs_you": 1
+    },
+    "plan": {
+      "agents": [
+        {
+          "doing_now": "Running implementation tests",
+          "harness": "claude",
+          "id": "b",
+          "last_at": 1800000000000,
+          "model": "sonnet",
+          "role": "builder",
+          "short": "b",
+          "spend": {
+            "input_tokens": 0
+          },
+          "started_at": 1799998200000,
+          "terminal": null,
+          "tickets": [
+            {
+              "key": "ov-1",
+              "task": "t1"
+            },
+            {
+              "key": "ov-2",
+              "task": "t2"
+            }
+          ],
+          "title": "Mobile pipeline fixes",
+          "working": true
+        },
+        {
+          "doing_now": "",
+          "harness": "claude",
+          "id": "r",
+          "last_at": 1800000000000,
+          "model": "sonnet",
+          "role": "reviewer",
+          "short": "r",
+          "spend": {
+            "input_tokens": 0
+          },
+          "started_at": 1799999520000,
+          "terminal": null,
+          "tickets": [],
+          "title": "Review available",
+          "working": false
+        },
+        {
+          "doing_now": "Checking source CI",
+          "harness": "claude",
+          "id": "l",
+          "last_at": 1800000000000,
+          "model": "sonnet",
+          "role": "lander",
+          "short": "l",
+          "spend": {
+            "input_tokens": 0
+          },
+          "started_at": 1799999100000,
+          "terminal": null,
+          "tickets": [
+            {
+              "key": "ov-4",
+              "task": "t4"
+            }
+          ],
+          "title": "",
+          "working": true
+        }
+      ],
+      "landings": [
+        {
+          "id": "landing-9",
+          "number": 9,
+          "phase": "waiting_for_ci",
+          "phase_since": 1799999160000,
+          "state": "gating",
+          "state_since": 1799999160000,
+          "summary": "",
+          "tickets": [
+            {
+              "key": "ov-4",
+              "task": "t4"
+            }
+          ],
+          "title": "Landing 9"
+        }
+      ],
+      "lines": [
+        {
+          "branch": "branch-t1",
+          "fix_rounds": 0,
+          "key": "ov-1",
+          "reason": "Why t1",
+          "stage": "building",
+          "stage_since": 1799999400000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t1",
+          "title": "Builder's current implementation",
+          "work": []
+        },
+        {
+          "branch": "branch-t2",
+          "fix_rounds": 0,
+          "key": "ov-2",
+          "reason": "Why t2",
+          "stage": "reviewing",
+          "stage_since": 1799999400000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t2",
+          "title": "Builder's earlier ticket awaiting review",
+          "work": []
+        },
+        {
+          "branch": "branch-t3",
+          "fix_rounds": 0,
+          "key": "ov-3",
+          "reason": "Why t3",
+          "stage": "reviewing",
+          "stage_since": 1799999400000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t3",
+          "title": "Review ticket with no listed assignee",
+          "work": []
+        },
+        {
+          "branch": "branch-t4",
+          "fix_rounds": 0,
+          "key": "ov-4",
+          "landing": 9,
+          "reason": "Why t4",
+          "stage": "landing",
+          "stage_since": 1799989200000,
+          "stale": true,
+          "status": "In Progress",
+          "task": "t4",
+          "title": "Source checks on an older landing",
+          "work": []
+        },
+        {
+          "branch": "branch-t5",
+          "fix_rounds": 0,
+          "key": "ov-5",
+          "reason": "Waiting on your schema decision",
+          "stage": "needs_you",
+          "stage_since": 1799999400000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t5",
+          "title": "Schema choice",
+          "work": []
+        },
+        {
+          "branch": "branch-t6",
+          "fix_rounds": 0,
+          "key": "ov-6",
+          "reason": "Why t6",
+          "stage": "reviewing",
+          "stage_since": 1799999400000,
+          "stale": false,
+          "status": "In Progress",
+          "task": "t6",
+          "title": "Assignment retained after agent left the roster",
+          "work": [
+            {
+              "agent": "previous-reviewer",
+              "ended_at": null,
+              "role": "review"
+            }
+          ]
+        }
+      ],
+      "now_ms": 1800000000000,
+      "themes": []
+    },
+    "schema": 1
+  }
+}

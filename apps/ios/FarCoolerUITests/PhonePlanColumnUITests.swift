@@ -47,10 +47,12 @@ final class PhonePlanColumnUITests: XCTestCase {
         return app
     }
 
-    private func scrollDown(_ app: XCUIApplication) {
+    private func scrollDown(_ app: XCUIApplication, largeType: Bool = false) {
         let window = app.windows.firstMatch
-        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        // Large type needs a longer window drag: assignment context can
+        // itself be taller than the old quarter-screen gesture.
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: largeType ? 0.9 : 0.8))
+            .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: largeType ? 0.15 : 0.3)))
     }
 
     /// Scroll down until `id` can be touched.
@@ -68,10 +70,8 @@ final class PhonePlanColumnUITests: XCTestCase {
     private struct Walk {
         /// Each marker the first time it was seen, in the order seen.
         var order: [String] = []
-        /// Each ticket's key, with the agents it was seen under.
-        var agentsOf: [String: Set<String>] = [:]
         var keyWidths: [String: CGFloat] = [:]
-        /// How many tickets were seen, and how many of them with their card in view.
+        /// The unique ticket keys encountered during the walk.
         var tickets = Set<String>()
     }
 
@@ -81,9 +81,8 @@ final class PhonePlanColumnUITests: XCTestCase {
     ]
 
     /// Scroll the Plan top to bottom, noting the headings in the order they
-    /// first come up, and which agent each ticket is under (the agent whose
-    /// card is the nearest above it on the screen).
-    private func walk(_ app: XCUIApplication) -> Walk {
+    /// first come up, and measuring each visible ticket key.
+    private func walk(_ app: XCUIApplication, largeType: Bool = false) -> Walk {
         var walk = Walk()
         func look() {
             let found = Self.markers.compactMap { id -> (String, CGFloat)? in
@@ -96,19 +95,11 @@ final class PhonePlanColumnUITests: XCTestCase {
             let seen = rows.allElementsBoundByIndex.filter { $0.exists }.map { ($0.identifier, $0.frame) }
                 .filter { !$0.0.hasPrefix("plan-agent-glyph-") && !$0.0.hasPrefix("plan-ticket-key-") }
                 .sorted { $0.1.minY < $1.1.minY }
-            // Only the agent on the same screen, above it: a card scrolled off is never guessed.
-            var agent: String?
-            for (id, _) in seen {
-                if id.hasPrefix("plan-agent-") {
-                    agent = id
-                } else {
-                    let key = String(id.dropFirst("plan-ticket-".count))
-                    walk.tickets.insert(key)
-                    if let agent { walk.agentsOf[key, default: []].insert(agent) }
-                }
+            for (id, _) in seen where id.hasPrefix("plan-ticket-") {
+                walk.tickets.insert(String(id.dropFirst("plan-ticket-".count)))
             }
             // Keys, with a widest text that has none the agents can differ in.
-            for key in walk.agentsOf.keys where walk.keyWidths[key] == nil {
+            for key in walk.tickets where walk.keyWidths[key] == nil {
                 let e = element(app, "plan-ticket-key-\(key)")
                 if e.exists, e.frame.width > 0 { walk.keyWidths[key] = e.frame.width }
             }
@@ -116,7 +107,7 @@ final class PhonePlanColumnUITests: XCTestCase {
         for _ in 0..<120 {
             look()
             if walk.order.contains("plan-footer") { break }
-            scrollDown(app)
+            scrollDown(app, largeType: largeType)
         }
         look()
         return walk
@@ -144,15 +135,20 @@ final class PhonePlanColumnUITests: XCTestCase {
         XCTAssertFalse(element(app, "plan-cost-header").exists, "cost in the Plan")
     }
 
-    /// **A ticket is on one agent**, and each key is set in monospace: its text is as wide as
+    /// **A ticket stays outside the agent roster**, and each key is as wide as
     /// the monospaced font says and not as the proportional one does.
-    func testEachTicketIsOnOneAgentAndItsKeyIsMonospaced() {
+    func testTicketsStayOutsideTheRosterAndKeysAreMonospaced() {
         let app = openPlan()
+        // Check the roster before walking the long ticket list, while it is nearby.
+        let cards = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'plan-agent-card-'"))
+        // Its own navigation target survives grouping.
+        XCTAssertTrue(app.reveal(cards.firstMatch))
+        XCTAssertTrue(cards.firstMatch.exists)
+        XCTAssertFalse(cards.firstMatch.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'plan-ticket-ov-'")).firstMatch.exists)
         let walk = walk(app)
-        XCTAssertFalse(walk.agentsOf.isEmpty, "no tickets under any agent: \(walk.order)")
-        for (key, agents) in walk.agentsOf { XCTAssertEqual(agents.count, 1, "\(key) is under \(agents.sorted())") }
-        // Most tickets were seen under their card, so the check above looked at them.
-        XCTAssertGreaterThanOrEqual(walk.agentsOf.count * 2, walk.tickets.count, "few tickets were seen under an agent")
+        XCTAssertFalse(walk.tickets.isEmpty, "no pipeline tickets: \(walk.order)")
         let style = UIFont.preferredFont(forTextStyle: .footnote)
         let mono = UIFont.monospacedSystemFont(ofSize: style.pointSize, weight: .regular)
         XCTAssertFalse(walk.keyWidths.isEmpty, "no key was measured")
@@ -177,25 +173,20 @@ final class PhonePlanColumnUITests: XCTestCase {
         XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "a ticket didn't open its task: \(app.debugDescription)")
     }
 
-    /// **Each footer count opens the list of its tickets, and a ticket in it opens its task**
-    /// (ov-874): a ticket whose initiative is quiet or absent is reached here, and keeps its
-    /// page and its Mark Ready.
-    func testEachFooterCountOpensItsTickets() {
-        var seen = 0
-        for kind in ["waiting", "notStarted", "done"] {
-            let app = openPlan()
-            let count = element(app, "plan-footer-\(kind)")
-            guard app.reveal(count) else { app.terminate(); continue }
-            seen += 1
-            reach(app, count.identifier).tap()
-            XCTAssertTrue(element(app, "board-history").waitForExistence(timeout: 10), "\(kind) opened no list: \(app.debugDescription)")
-            let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'history-row-'")).firstMatch
-            XCTAssertTrue(row.waitForExistence(timeout: 10), "\(kind)'s list has no tickets: \(app.debugDescription)")
-            row.tap()
-            XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "\(kind): a ticket didn't open its task")
-            app.terminate()
-        }
-        XCTAssertGreaterThan(seen, 0, "the fixture has no footer counts")
+    /// **The captured plan's waiting footer opens its list and a ticket opens its task.**
+    /// This capture predates board_counts, so Not Started and Done aren't present;
+    /// their counts and routing are covered by the shared projection and web tests.
+    func testWaitingFooterOpensItsTickets() {
+        let app = openPlan()
+        let count = element(app, "plan-footer-waiting")
+        XCTAssertTrue(app.reveal(count), "the fixture's waiting footer must exist")
+        reach(app, count.identifier).tap()
+        XCTAssertTrue(element(app, "board-history").waitForExistence(timeout: 10), "the footer opened no list: \(app.debugDescription)")
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'history-row-'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "the waiting list has no tickets: \(app.debugDescription)")
+        row.tap()
+        XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "the waiting ticket didn't open its task")
+        app.terminate()
     }
 
     /// **A stage nobody is on shows its first three tickets and a Show All that opens the rest**
@@ -216,9 +207,8 @@ final class PhonePlanColumnUITests: XCTestCase {
         XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10), "a row didn't open its task: \(app.debugDescription)")
     }
 
-    /// **"N more waiting for review" under an agent's card is a button** (ov-874): the tickets
-    /// nobody is on are reached from it.
-    func testAnAgentsMoreLineOpensItsList() throws {
+    /// **Unassigned tickets open their own stage list**, outside every agent card.
+    func testUnassignedTicketsOpenTheirStageList() throws {
         // The seeded plan with one reviewing ticket taken off every agent: nobody is on it.
         var plan = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: Self.fixture))) as? [String: Any])
@@ -226,6 +216,11 @@ final class PhonePlanColumnUITests: XCTestCase {
         let lines = try XCTUnwrap(inner["lines"] as? [[String: Any]])
         let loose = try XCTUnwrap(lines.first { $0["stage"] as? String == "reviewing" }?["task"] as? String)
         let agents = try XCTUnwrap(inner["agents"] as? [[String: Any]])
+        inner["lines"] = lines.map { line -> [String: Any] in
+            var line = line
+            if line["task"] as? String == loose { line["work"] = [] as [Any] }
+            return line
+        }
         inner["agents"] = agents.map { agent -> [String: Any] in
             var agent = agent
             agent["tickets"] = (agent["tickets"] as? [[String: Any]] ?? []).filter { $0["task"] as? String != loose }
@@ -237,8 +232,8 @@ final class PhonePlanColumnUITests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file) }
         let app = openPlan(fixture: file.path)
         let more = app.descendants(matching: .any).matching(
-            NSPredicate(format: "identifier BEGINSWITH 'plan-more-agent:'")).firstMatch
-        XCTAssertTrue(app.reveal(more), "no more line under an agent: \(app.debugDescription)")
+            NSPredicate(format: "identifier == 'plan-more-all-reviewing'")).firstMatch
+        XCTAssertTrue(app.reveal(more), "no unassigned stage list: \(app.debugDescription)")
         reach(app, more.identifier).tap()
         XCTAssertTrue(element(app, "board-history").waitForExistence(timeout: 10), "the more line opened no list: \(app.debugDescription)")
         let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'history-row-'")).firstMatch
@@ -316,7 +311,7 @@ final class PhonePlanColumnUITests: XCTestCase {
     func testItHoldsAtTheLargestAccessibilityTypeSize() {
         let app = openPlan(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let width = app.windows.firstMatch.frame.width
-        let walk = walk(app)
+        let walk = walk(app, largeType: true)
         XCTAssertTrue(walk.order.contains("plan-footer"), "never reached the end: \(walk.order)")
         for key in walk.keyWidths.keys {
             let e = element(app, "plan-ticket-key-\(key)")

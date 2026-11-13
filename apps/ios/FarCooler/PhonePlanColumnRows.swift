@@ -149,43 +149,39 @@ enum PlanStageRoute {
     static func status(_ stage: WirePipeStage) -> String { prefix + stage.rawValue }
 }
 
-/// The pipeline: Stuck, Building, Reviewing, Landing, each stage its agents'
-/// cards with their tickets under them.
+/// A unique agent roster, followed by canonical ticket stages and their assignments.
 struct PhonePlanPipeline: View {
     let column: WireColumn
     let actions: PhonePlanActions
 
     var body: some View {
+        if !column.roster.isEmpty {
+            Section {} header: {
+                PhonePlanHeading(title: "Agents", count: column.agentWords).accessibilityIdentifier("plan-agent-roster")
+            }
+            ForEach(column.roster) { agent in
+                PhoneAgentCard(agent: agent, actions: actions, showTickets: false)
+            }
+        }
         if !column.pipeline.isEmpty {
-            Section {
-            } header: {
-                PhonePlanHeading(title: "Pipeline", count: column.agentWords).accessibilityIdentifier("plan-pipeline")
+            Section {} header: {
+                PhonePlanHeading(title: "Pipeline").accessibilityIdentifier("plan-pipeline")
             }
             ForEach(column.pipeline) { group in
                 Section {
-                } header: {
-                    PhonePlanHeading(title: group.stage.title, count: "\(group.count)", prominent: false)
-                        .accessibilityIdentifier("plan-stage-\(group.stage.rawValue)")
-                }
-                ForEach(group.agents) { agent in
-                    PhoneAgentCard(
-                        agent: agent, moreWords: agent.more > 0 ? group.unattendedWords : nil, actions: actions,
-                        openMore: { actions.openStage(group.stage) })
-                }
-                if group.agents.isEmpty, let words = group.unattendedWords {
-                    Section {
+                    ForEach(group.assigned) { PhoneTicketRow(ticket: $0, open: actions.openTicket) }
+                    if let words = group.unattendedWords {
                         Text(words).font(.subheadline).foregroundStyle(.secondary)
                             .accessibilityIdentifier("plan-more-\(group.stage.rawValue)")
                         ForEach(group.preview) { PhoneTicketRow(ticket: $0, open: actions.openTicket) }
-                        if group.hidden > 0 {
+                        if !group.unattended.isEmpty {
                             PhoneMoreButton(words: "Show All \(group.unattended.count)", indent: 0) { actions.openStage(group.stage) }
                                 .accessibilityIdentifier("plan-more-all-\(group.stage.rawValue)")
                         }
                     }
-                } else if !group.agents.isEmpty, !group.agents.contains(where: { $0.more > 0 }), let words = group.unattendedWords {
-                    PhoneMoreButton(words: words, indent: 0) { actions.openStage(group.stage) }
-                        .listRowBackground(Color.clear)
-                        .accessibilityIdentifier("plan-more-\(group.stage.rawValue)")
+                } header: {
+                    PhonePlanHeading(title: group.title, count: group.countWords, prominent: false)
+                        .accessibilityIdentifier("plan-stage-\(group.stage.rawValue)")
                 }
             }
         }
@@ -221,22 +217,32 @@ struct PhoneAgentCard: View {
     var moreWords: String?
     let actions: PhonePlanActions
     var openMore: () -> Void = {}
+    var showTickets = true
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         Section {
-            Button { actions.openAgent(agent) } label: { header }
-                .buttonStyle(.plain)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(agent.name), \(agent.doing)\(agent.time.map { ", \($0)" } ?? "")")
-                .accessibilityHint(agent.terminal == nil ? "Opens its ticket" : "Opens its chat")
-                .accessibilityAddTraits(.isButton)
-                .accessibilityIdentifier("plan-agent-\(agent.id)")
-            ForEach(agent.tickets) { PhoneTicketRow(ticket: $0, open: actions.openTicket) }
-            if let moreWords {
-                PhoneMoreButton(words: moreWords, indent: PhoneTicketRow.indent, open: openMore)
-                    .accessibilityIdentifier("plan-more-\(agent.id)")
+            VStack(alignment: .leading, spacing: Spacing.group) {
+                Button { actions.openAgent(agent) } label: { header }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(agent.name), \(agent.doing)\(agent.time.map { ", \($0)" } ?? "")")
+                    .accessibilityHint(agent.terminal == nil ? "Opens its ticket" : "Opens its chat")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityIdentifier("plan-agent-\(agent.id)")
+                if showTickets {
+                    ForEach(agent.tickets) { PhoneTicketRow(ticket: $0, open: actions.openTicket) }
+                } else {
+                    if !agent.title.isEmpty { Text(agent.title).font(.footnote).foregroundStyle(.secondary) }
+                    Text(agent.assignmentWords).font(.footnote).foregroundStyle(.secondary)
+                }
+                if let moreWords {
+                    PhoneMoreButton(words: moreWords, indent: PhoneTicketRow.indent, open: openMore)
+                        .accessibilityIdentifier("plan-more-\(agent.id)")
+                }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("plan-agent-card-\(agent.id)")
         }
     }
 
@@ -294,6 +300,7 @@ struct PhoneTicketRow: View {
                     #endif
                 VStack(alignment: .leading, spacing: 1) {
                     Text(ticket.title).font(.subheadline)
+                    if let detail = ticket.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
                     if let initiative = ticket.initiative {
                         Text(initiative).font(.footnote).foregroundStyle(.secondary)
                     }
@@ -306,7 +313,7 @@ struct PhoneTicketRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(ticket.key), \(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title)")
+        .accessibilityLabel("\(ticket.key), \(ticket.title)\(ticket.initiative.map { ", for \($0)" } ?? ""), \(ticket.stage.title), \(ticket.detail ?? "")")
         .accessibilityHint("Opens the ticket")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("plan-ticket-\(ticket.key)")

@@ -44,12 +44,12 @@ struct PlanSectionsColumnTests {
         ["task": task, "key": "ov-\(task.dropFirst())", "title": title, "status": "In Progress"]
     }
 
-    // Two rules the Rust tests don't cover yet, kept here through the bridge.
+    // The generated column decodes, and native callers use the same Rust rules.
 
     @Test("the golden's column decodes into every slot: facts, initiatives, the pipeline and the footer")
     func decodesTheGolden() throws {
         let column = try PlanViewTests.view().column
-        #expect(column.facts.map(\.kind) == [.needsYou, .stuck] && column.facts.map(\.id) == ["needsYou", "stuck"])
+        #expect(column.facts.map(\.kind) == [.needsYou] && column.facts.map(\.id) == ["needsYou"])
         #expect(column.facts[0].runs == [.init(text: "2", strong: true), .init(text: " need you", strong: false)])
         #expect(column.facts[0].text == "2 need you" && column.facts[0].attention)
         #expect(column.initiativeCount == 3 && column.initiatives.map(\.progress) == ["2 of 5", "0 of 3", "0 of 5"])
@@ -57,22 +57,22 @@ struct PlanSectionsColumnTests {
         #expect(marketing.asksOwner && marketing.next == "Waiting on you: How do we ship the site?" && marketing.fraction == 0)
         #expect(column.initiatives[0].fraction == 0.4)
 
-        #expect(column.pipeline.map(\.stage) == [.stuck, .building, .reviewing, .landing])
-        #expect(column.pipeline.map(\.title) == ["Stuck", "Building", "Reviewing", "Landing"])
-        #expect(column.pipeline[3].agents.map(\.role) == [.lander])
+        #expect(column.pipeline.map(\.stage) == [.building, .reviewing, .landing])
+        #expect(column.pipeline.map(\.title) == ["Building", "Reviewing", "Landing"])
+        #expect(column.roster.map(\.role) == [.builder, .lander])
         #expect(column.quietInitiatives.isEmpty && column.quietLine == nil)
-        let stuck = column.pipeline[0]
-        #expect(stuck.agents.isEmpty && stuck.count == 2 && stuck.preview.map(\.key) == ["ov-482", "ov-474"])
-        #expect(stuck.unattendedWords == "2 tickets with no agent on them" && stuck.hidden == 0)
-        let building = column.pipeline[1]
-        let builder = try #require(building.agents.first)
+        let building = column.pipeline[0]
+        let builder = try #require(column.roster.first)
         #expect(builder.role == .builder && builder.role.symbol == "hammer" && builder.name == "Builder")
-        #expect(builder.doing == "Working" && !builder.doingIsTrouble && builder.working)
-        #expect(builder.elapsed == 1_320_000 && builder.time == "22 min" && builder.more == 1 && builder.ticket == "t-ov-310")
-        let ticket = try #require(builder.tickets.first)
+        #expect(builder.doing == "Runner reports working" && !builder.doingIsTrouble && builder.working)
+        #expect(builder.elapsed == 1_320_000 && builder.time == "Started 22 min ago" && builder.more == 0 && builder.ticket == "t-ov-310")
+        let ticket = try #require(building.assigned.first)
         #expect(ticket.title == "The themes grid" && ticket.initiative == "Trustworthy agent view" && ticket.initiativeId == "th-3")
         #expect(ticket.stage == .building && ticket.since == 1_799_996_400_000 && ticket.id == "t-ov-310")
-        #expect(building.preview.isEmpty && building.hidden == 1 && building.unattendedWords == "1 more with no builder running")
+        #expect(building.count == 3 && building.assigned.count == 2 && building.unattended.count == 1)
+        #expect(building.preview.count == 1 && building.hidden == 0 && building.unattendedWords == "1 ticket with no listed assignee")
+        #expect(building.assigned[1].detail?.contains("fix-agent-ro (not listed)") == true)
+        #expect(column.pipeline.allSatisfy { $0.agents.isEmpty && $0.count == $0.assigned.count + $0.unattended.count })
 
         #expect(column.agentWords == "2 agents")
         let waiting = try #require(column.footer.first)
@@ -90,14 +90,14 @@ struct PlanSectionsColumnTests {
         #expect(fact == .nextLanding)
     }
 
-    @Test("a ticket that needs you puts its agent in Stuck too, with the agent's own words")
-    func needsYouIsStuck() throws {
+    @Test("a ticket that needs you retains the agent’s own reported activity")
+    func needsYouKeepsReportedActivity() throws {
         let plan = try Self.plan(
             lines: [PlanModelTests.line("t1", "needs_you")],
             agents: [Self.agent("a", "builder", tickets: ["t1"], doing: "Waiting on a decision", started: 4)])
         let column = try #require(WireColumn.of(plan))
         #expect(column.pipeline.map(\.stage) == [.stuck])
-        #expect(column.pipeline[0].agents[0].doing == "Waiting on a decision" && !column.pipeline[0].agents[0].doingIsTrouble)
+        #expect(column.roster[0].doing == "Waiting on a decision" && !column.roster[0].doingIsTrouble)
     }
 
     @Test("a live landing carrying no ticket yet is not named as the next landing")
@@ -113,13 +113,19 @@ struct PlanSectionsColumnTests {
     func fixture() throws {
         let plan = try PlanModelTests.fixture()
         let column = try #require(WireColumn.of(plan))
-        for group in column.pipeline {
-            for agent in group.agents {
-                #expect(!agent.doing.isEmpty && !agent.name.isEmpty)
-                #expect(plan.agents.contains { $0.id == agent.id }, "\(agent.id) is a real agent")
-            }
+        for agent in column.roster {
+            #expect(!agent.doing.isEmpty && !agent.name.isEmpty)
+            #expect(plan.agents.contains { $0.id == agent.id }, "\(agent.id) is a real agent")
         }
         #expect(column.facts.contains { $0.kind == .done })
+    }
+
+    @Test("an otherwise empty plan retains zero-ticket workers in its roster")
+    func emptyWorkerRoster() throws {
+        let plan = try Self.plan(lines: [], agents: [Self.agent("r", "reviewer", started: 4)])
+        #expect(plan.isEmpty && plan.hasColumnAgents)
+        let column = try #require(WireColumn.of(plan))
+        #expect(column.pipeline.isEmpty && column.roster.count == 1 && column.roster[0].tickets.isEmpty)
     }
 
     @Test("clicking a Needs You row quotes it: a task by key and title, else the words")

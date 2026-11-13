@@ -6,9 +6,8 @@
 //!    much of the board is done;
 //! 2. Initiatives (today's themes): the larger goals, each with its goal,
 //!    progress and next step;
-//! 3. the pipeline: status, then agent, then tickets. Each agent says what it
-//!    does now, and its tickets are listed under it. A ticket's initiative is
-//!    the ticket's, never the agent's;
+//! 3. a unique agent roster with runner-reported activity, then tickets grouped
+//!    by their own stage, with assignment and stage age as ticket context;
 //! 4. the footer counts, which open the ticket lists.
 //!
 //! Needs You sits between the facts and Initiatives, but its rows are the
@@ -77,7 +76,7 @@ pub struct Initiative {
     pub asks_owner: bool,
 }
 
-/// Where an agent's work stands, in the order the pipeline lists them.
+/// A ticket's canonical stage; `Stuck` is the legacy wire name for Needs You.
 #[typeshare]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,7 +92,7 @@ impl PipeStage {
 
     fn title(self) -> &'static str {
         match self {
-            PipeStage::Stuck => "Stuck",
+            PipeStage::Stuck => "Needs You",
             PipeStage::Building => "Building",
             PipeStage::Reviewing => "Reviewing",
             PipeStage::Landing => "Landing",
@@ -139,6 +138,8 @@ pub struct ColumnTicket {
     /// When it entered its stage, in ms; 0 when nothing says.
     #[typeshare(serialized_as = "I54")]
     pub since: i64,
+    /// Assignment and stage age are ticket context, never execution or liveness.
+    pub detail: Option<String>,
 }
 
 #[typeshare]
@@ -147,13 +148,15 @@ pub struct ColumnTicket {
 pub struct ColumnAgent {
     pub id: String,
     pub role: Role,
+    /// The orchestrator's title, kept separate from current activity.
+    pub title: String,
     /// "Builder 2": its role, numbered when there are several.
     pub name: String,
-    /// What it does now, in its own words; the problem when it is stuck.
+    /// Runner-reported activity, with a qualified fallback when no words were sent.
     pub doing: String,
-    /// `doing` says why it's stuck: drawn in amber.
+    /// Reserved for agent attention with provenance; ticket age cannot set it.
     pub doing_is_trouble: bool,
-    /// How long it has been at it, in ms.
+    /// Time since the agent started, not time executing an assigned ticket.
     #[typeshare(serialized_as = "Option<I54>")]
     pub elapsed: Option<i64>,
     /// "47 min".
@@ -163,8 +166,9 @@ pub struct ColumnAgent {
     /// The first ticket it works, for its page when there's no pane to open.
     pub ticket: Option<String>,
     pub tickets: Vec<ColumnTicket>,
+    pub assignment_words: String,
     pub working: bool,
-    /// Tickets in this stage nobody is on, said under the last card.
+    /// Legacy decoder slot, always zero: section membership never belongs to an agent.
     #[typeshare(serialized_as = "I54")]
     pub more: u64,
 }
@@ -175,14 +179,17 @@ pub struct ColumnAgent {
 pub struct Group {
     pub stage: PipeStage,
     pub title: String,
+    /// Legacy decoder slot, empty; the column's roster owns agent rows.
     pub agents: Vec<ColumnAgent>,
-    /// Tickets in this stage with no agent on them.
+    /// Assigned tickets in their own stage, each once, outside the agent roster.
+    pub assigned: Vec<ColumnTicket>,
+    /// Tickets in this stage with no known open assignment in either source list.
     pub unattended: Vec<ColumnTicket>,
     /// The tickets in this stage, each once.
     #[typeshare(serialized_as = "I54")]
     pub count: u64,
-    /// The unattended tickets drawn in place: the first few in a stage with no
-    /// agent; none in a stage with agents, whose "more" line opens them all.
+    pub count_words: String,
+    /// The first few unattended tickets, independent of the agent roster.
     pub preview: Vec<ColumnTicket>,
     /// The unattended tickets only the list shows.
     #[typeshare(serialized_as = "I54")]
@@ -240,6 +247,8 @@ pub struct Column {
     pub initiative_count: u64,
     /// The stages with anything in them, in order.
     pub pipeline: Vec<Group>,
+    /// Each listed non-orchestrator agent once, including agents with no eligible tickets.
+    pub roster: Vec<ColumnAgent>,
     /// "10 agents".
     pub agent_words: String,
     pub footer: Vec<Count>,
@@ -251,17 +260,17 @@ const PREVIEW: usize = 3;
 
 pub(super) fn column(r: &Reader) -> Column {
     let plan = r.plan;
-    let pipeline = pipeline(r);
+    let (pipeline, roster) = pipeline(r);
     let moving: BTreeSet<&str> = pipeline
         .iter()
-        .flat_map(|g| g.agents.iter().flat_map(|a| &a.tickets).chain(&g.unattended))
+        .flat_map(|g| g.assigned.iter().chain(&g.unattended))
         .map(|t| t.task.as_str())
         .collect();
     let (initiatives, quiet) = initiatives(r, &moving);
     let waiting = waiting(r);
     let footer = footer(r, &waiting);
     let facts = facts(r, &pipeline);
-    let agents: usize = pipeline.iter().map(|g| g.agents.len()).sum();
+    let agents = roster.len();
     let _ = plan;
     Column {
         quiet_line: (!quiet.is_empty()).then(|| {
@@ -275,6 +284,7 @@ pub(super) fn column(r: &Reader) -> Column {
         quiet_initiatives: quiet,
         agent_words: if agents == 1 { "1 agent".into() } else { format!("{agents} agents") },
         pipeline,
+        roster,
         footer,
         waiting,
         facts,
@@ -384,8 +394,7 @@ fn facts(r: &Reader, pipeline: &[Group]) -> Vec<Fact> {
         facts.push(fact(FactKind::NeedsYou, vec![run(needs_you.to_string(), true), run(" need you".into(), false)], true));
     }
     if let Some(stuck) = pipeline.iter().find(|g| g.stage == PipeStage::Stuck) {
-        let longest = stuck.agents.iter().filter_map(|a| a.elapsed).max();
-        let words = format!("{} stuck{}", stuck.count, longest.map(|l| format!(", {}", words::span(l))).unwrap_or_default());
+        let words = if stuck.count == 1 { "1 ticket needs you".into() } else { format!("{} tickets need you", stuck.count) };
         facts.push(fact(FactKind::Stuck, vec![run(words, false)], true));
     }
     // A landing carrying no ticket yet is not a landing to name.
@@ -425,224 +434,117 @@ fn next_landing(r: &Reader) -> Option<(usize, Option<i64>)> {
         }
     }
     let (landing, _) = best?;
-    let tickets: BTreeSet<&str> =
-        r.lines_on(landing).into_iter().filter(|l| r.stage(l) == Stage::Landing).map(|l| l.task.as_str()).collect();
+    let tickets: BTreeSet<&str> = r.lines_on(landing).into_iter()
+        .filter(|l| r.stage(l) == Stage::Landing
+            && !matches!(r.status_of(&l.task), Some(Status::Done | Status::Cancelled)))
+        .map(|l| l.task.as_str()).collect();
     let since = r.phase_since(landing);
     Some((tickets.len(), (since > 0).then_some(since)))
 }
 
-struct Card {
-    stage: PipeStage,
-    agent: ColumnAgent,
-    started: i64,
-}
-
-fn pipeline(r: &Reader) -> Vec<Group> {
+/// Ticket stage, assignment, and runner-reported activity are independent facts.
+/// A stage's age cannot diagnose an agent, and an open assignment does not say
+/// which ticket is executing. Keep a canonical ticket partition and a unique roster.
+fn pipeline(r: &Reader) -> (Vec<Group>, Vec<ColumnAgent>) {
     let plan = r.plan;
-    let live: Vec<&Line> = plan
-        .lines
-        .iter()
-        .filter(|l| {
-            let s = r.stage(l);
-            s.is_live() && s != Stage::Waiting && r.status_of(&l.task) != Some(Status::Cancelled)
-        })
-        .collect();
-    let mut by_task: BTreeMap<&str, &Line> = BTreeMap::new();
-    for l in &live {
-        by_task.entry(l.task.as_str()).or_insert(l);
-    }
-    let ticket = |line: &Line, stage: PipeStage| {
+    let mut seen = BTreeSet::new();
+    let live: Vec<&Line> = plan.lines.iter().filter(|l| {
+        matches!(r.stage(l), Stage::Building | Stage::Reviewing | Stage::Landing | Stage::NeedsYou)
+            && !matches!(r.status_of(&l.task), Some(Status::Cancelled | Status::Done))
+            && seen.insert(l.task.as_str())
+    }).collect();
+    let stage_of = |line: &Line| match r.stage(line) {
+        Stage::NeedsYou => PipeStage::Stuck,
+        Stage::Reviewing => PipeStage::Reviewing,
+        Stage::Landing => PipeStage::Landing,
+        _ => PipeStage::Building,
+    };
+    let ticket = |line: &Line, detail: Option<String>| {
         let theme = r.theme_of(&line.task);
         ColumnTicket {
-            task: line.task.clone(),
-            key: line.key.clone(),
-            title: r.heading(line),
-            initiative: theme.map(|t| t.name.clone()),
-            initiative_id: theme.map(|t| t.id.clone()),
-            stage,
-            since: line.stage_since,
-        }
-    };
-    // Where a ticket's own state puts it, whoever works it.
-    let stage_of = |line: &Line| {
-        if line.stale || r.stage(line) == Stage::NeedsYou {
-            return PipeStage::Stuck;
-        }
-        match r.stage(line) {
-            Stage::Reviewing => PipeStage::Reviewing,
-            Stage::Landing => PipeStage::Landing,
-            _ => PipeStage::Building,
+            task: line.task.clone(), key: line.key.clone(), title: r.heading(line),
+            initiative: theme.map(|t| t.name.clone()), initiative_id: theme.map(|t| t.id.clone()),
+            stage: stage_of(line), since: line.stage_since, detail,
         }
     };
 
-    let mut cards: Vec<Card> = Vec::new();
-    let mut attended: BTreeSet<String> = BTreeSet::new();
-    for agent in plan.agents.iter().filter(|a| a.role != "orchestrator") {
+    let mut ids = BTreeSet::new();
+    let mut agents: Vec<_> = plan.agents.iter()
+        .filter(|a| a.role != "orchestrator" && ids.insert(a.id.as_str())).collect();
+    agents.sort_by_key(|a| a.started_at);
+    let mut roles: BTreeMap<u8, usize> = BTreeMap::new();
+    for a in &agents { *roles.entry(Role::of(&a.role) as u8).or_default() += 1; }
+    let mut numbers: BTreeMap<u8, usize> = BTreeMap::new();
+    let roster: Vec<ColumnAgent> = agents.iter().map(|agent| {
         let role = Role::of(&agent.role);
-        let lines: Vec<&Line> = agent.tickets.iter().filter_map(|t| by_task.get(t.task.as_str()).copied()).collect();
-        // The landing a lander works: its phase says if it is stuck.
-        let landing = (role == Role::Lander)
-            .then(|| lines.iter().find_map(|l| l.landing.and_then(|n| plan.landings.iter().find(|x| x.number == n))))
-            .flatten();
-        let mut doing = agent.doing_now.clone();
-        let mut trouble = false;
-        let mut stage = match role {
-            Role::Lander => {
-                let phase = landing.map(|l| r.phase(l));
-                match phase {
-                    Some(p) if matches!(p, LandingPhase::CiFailed | LandingPhase::Stalled) => {
-                        doing = words::capitalize(p.sentence());
-                        trouble = true;
-                        PipeStage::Stuck
-                    }
-                    _ => PipeStage::Landing,
-                }
-            }
-            Role::Reviewer => PipeStage::Reviewing,
-            Role::Builder | Role::Agent => PipeStage::Building,
-        };
-        if stage != PipeStage::Stuck
-            && let Some(stale) = lines.iter().find(|l| l.stale)
-        {
-            stage = PipeStage::Stuck;
-            if let Some(words) = r.stale(stale) {
-                doing = words;
-                trouble = true;
-            }
-        } else if stage != PipeStage::Stuck && lines.iter().any(|l| r.stage(l) == Stage::NeedsYou) {
-            stage = PipeStage::Stuck;
-        }
-        if doing.is_empty() {
-            doing = if !agent.title.is_empty() {
-                agent.title.clone()
-            } else if agent.working {
-                "Working".into()
-            } else {
-                "Idle".into()
-            };
-        }
-        let mine: Vec<ColumnTicket> = lines.iter().map(|l| ticket(l, stage)).collect();
-        attended.extend(mine.iter().map(|t| t.task.clone()));
+        let n = numbers.entry(role as u8).or_default();
+        *n += 1;
+        let name = if roles[&(role as u8)] > 1 { format!("{} {n}", role.word()) } else { role.word() };
+        let mut seen = BTreeSet::new();
+        let mine: Vec<_> = live.iter().filter(|l| {
+            (agent.tickets.iter().any(|t| t.task == l.task)
+                || l.work.iter().any(|w| w.agent == agent.id && w.ended_at.is_none()))
+                && seen.insert(l.task.as_str())
+        }).map(|l| ticket(l, None)).collect();
         let elapsed = (agent.started_at > 0).then(|| (plan.now_ms - agent.started_at).max(0));
-        cards.push(Card {
-            stage,
-            agent: ColumnAgent {
-                id: agent.id.clone(),
-                role,
-                name: role.word(),
-                doing,
-                doing_is_trouble: trouble,
-                time: elapsed.map(words::span),
-                elapsed,
-                terminal: agent.terminal.clone(),
-                ticket: lines.first().map(|l| l.task.clone()),
-                tickets: mine,
-                working: agent.working,
-                more: 0,
-            },
-            started: agent.started_at,
-        });
-    }
-
-    // Each ticket is on one agent: the lander of its landing first, then the
-    // agent whose job matches its stage, then the first to claim it.
-    let rank = |agent: &ColumnAgent, task: &str| {
-        if agent.role == Role::Lander {
-            return 0;
+        ColumnAgent {
+            id: agent.id.clone(), role, title: agent.title.clone(), name,
+            // The Boolean has no idle/blocked provenance. Do not invent it.
+            doing: if agent.doing_now.trim().is_empty() {
+                if agent.working { "Runner reports working".into() } else { "No activity reported".into() }
+            } else { agent.doing_now.clone() },
+            doing_is_trouble: false, elapsed, time: elapsed.map(|e| format!("Started {} ago", words::span(e))),
+            terminal: agent.terminal.clone(), ticket: mine.first().map(|t| t.task.clone()),
+            assignment_words: format!("{} pipeline {} assigned", mine.len(), if mine.len() == 1 { "ticket" } else { "tickets" }),
+            tickets: mine, working: agent.working, more: 0,
         }
-        let wanted = match by_task.get(task).map(|l| r.stage(l)) {
-            Some(Stage::Building) => Some(Role::Builder),
-            Some(Stage::Reviewing) => Some(Role::Reviewer),
-            _ => None,
-        };
-        if wanted == Some(agent.role) { 1 } else { 2 }
-    };
-    let mut owner: BTreeMap<String, (u8, usize)> = BTreeMap::new();
-    for (index, card) in cards.iter().enumerate() {
-        for t in &card.agent.tickets {
-            let mine = (rank(&card.agent, &t.task), index);
-            if owner.get(&t.task).is_some_and(|have| *have <= mine) {
-                continue;
-            }
-            owner.insert(t.task.clone(), mine);
-        }
-    }
-    for (index, card) in cards.iter_mut().enumerate() {
-        card.agent.tickets.retain(|t| owner.get(&t.task).map(|o| o.1) == Some(index));
-    }
+    }).collect();
 
-    // Number each role in the order its agents started: "Builder 1".
-    let mut by_role: BTreeMap<u8, Vec<usize>> = BTreeMap::new();
-    for (index, card) in cards.iter().enumerate() {
-        by_role.entry(card.agent.role as u8).or_default().push(index);
-    }
-    for indices in by_role.values().filter(|i| i.len() > 1) {
-        let mut ordered = indices.clone();
-        ordered.sort_by_key(|i| (cards[*i].started, *i));
-        for (n, index) in ordered.into_iter().enumerate() {
-            cards[index].agent.name = format!("{} {}", cards[index].agent.role.word(), n + 1);
-        }
-    }
-
-    // Tickets nobody is on, by the stage their own state gives them.
+    let mut assigned: BTreeMap<PipeStage, Vec<ColumnTicket>> = BTreeMap::new();
     let mut unattended: BTreeMap<PipeStage, Vec<ColumnTicket>> = BTreeMap::new();
-    let mut seen = attended;
-    for line in &live {
-        if seen.insert(line.task.clone()) {
-            let s = stage_of(line);
-            unattended.entry(s).or_default().push(ticket(line, s));
+    for line in live {
+        // Both wire paths are assignment evidence. Retain an open assignment
+        // even if that agent is absent from the current roster.
+        let mut owners: BTreeSet<String> = line.work.iter().filter(|w| w.ended_at.is_none() && !w.agent.trim().is_empty())
+            .map(|w| w.agent.clone()).collect();
+        owners.extend(agents.iter().filter(|a| a.tickets.iter().any(|t| t.task == line.task)).map(|a| a.id.clone()));
+        let labels: Vec<_> = owners.iter().map(|id| {
+            roster.iter().find(|a| &a.id == id).map(|a| a.name.clone())
+                .unwrap_or_else(|| format!("{id} (not listed)"))
+        }).collect();
+        let mut detail = if labels.is_empty() { "No listed assignee".into() } else { format!("Assigned: {}", labels.join(", ")) };
+        if line.stage_since > 0 {
+            detail.push_str(&format!(" · In stage for {}", words::span((plan.now_ms - line.stage_since).max(0))));
         }
+        if r.stage(line) == Stage::NeedsYou && !line.reason.trim().is_empty() {
+            detail.push_str(&format!(" · {}", line.reason));
+        }
+        // An explicit landing phase is ticket context. The producer may derive
+        // Stalled from age, so that phase must not diagnose agent activity.
+        if let Some(landing) = line.landing.and_then(|n| plan.landings.iter().find(|l| l.number == n))
+            && let Some(phase) = landing.phase.as_deref().and_then(super::build::wire::<LandingPhase>)
+            && !matches!(phase, LandingPhase::Stalled | LandingPhase::Unknown)
+        {
+            detail.push_str(&format!(" · Landing: {}", phase.sentence()));
+        }
+        let stage = stage_of(line);
+        let t = ticket(line, Some(detail));
+        if owners.is_empty() { unattended.entry(stage).or_default().push(t); }
+        else { assigned.entry(stage).or_default().push(t); }
     }
-
-    PipeStage::ALL
-        .into_iter()
-        .filter_map(|stage| {
-            let mut agents: Vec<&Card> = cards.iter().filter(|c| c.stage == stage).collect();
-            // Agents with tickets first, then in start order.
-            agents.sort_by_key(|c| (c.agent.tickets.is_empty(), c.started));
-            let mut agents: Vec<ColumnAgent> = agents.into_iter().map(|c| c.agent.clone()).collect();
-            let loose = unattended.remove(&stage).unwrap_or_default();
-            // Said under the last card that has tickets, never under an empty one.
-            if let Some(last) = agents.iter().rposition(|a| !a.tickets.is_empty()) {
-                agents[last].more = loose.len() as u64;
-            }
-            if agents.is_empty() && loose.is_empty() {
-                return None;
-            }
-            let count = agents
-                .iter()
-                .flat_map(|a| a.tickets.iter().map(|t| t.task.as_str()))
-                .chain(loose.iter().map(|t| t.task.as_str()))
-                .collect::<BTreeSet<_>>()
-                .len() as u64;
-            let preview: Vec<ColumnTicket> =
-                if agents.is_empty() { loose.iter().take(PREVIEW).cloned().collect() } else { Vec::new() };
-            let n = loose.len();
-            let unattended_words = (n > 0).then(|| {
-                let lead = if !agents.is_empty() {
-                    format!("{n} more")
-                } else if n == 1 {
-                    "1 ticket".into()
-                } else {
-                    format!("{n} tickets")
-                };
-                match stage {
-                    PipeStage::Stuck => format!("{lead} with no agent on {}", if n == 1 { "it" } else { "them" }),
-                    PipeStage::Building => format!("{lead} with no builder running"),
-                    PipeStage::Reviewing => format!("{lead} waiting for review"),
-                    PipeStage::Landing => format!("{lead} waiting to land"),
-                }
-            });
-            Some(Group {
-                stage,
-                title: r.style.label(&stage.title().to_lowercase()),
-                hidden: (n - preview.len()) as u64,
-                preview,
-                count,
-                agents,
-                unattended: loose,
-                unattended_words,
-            })
+    let pipeline = PipeStage::ALL.into_iter().filter_map(|stage| {
+        let assigned = assigned.remove(&stage).unwrap_or_default();
+        let loose = unattended.remove(&stage).unwrap_or_default();
+        if assigned.is_empty() && loose.is_empty() { return None; }
+        let n = loose.len();
+        let preview: Vec<_> = loose.iter().take(PREVIEW).cloned().collect();
+        Some(Group {
+            stage, title: stage.title().into(), count: (assigned.len() + n) as u64,
+            count_words: format!("{} {}", assigned.len() + n, if assigned.len() + n == 1 { "ticket" } else { "tickets" }),
+            agents: Vec::new(), assigned, hidden: (n - preview.len()) as u64, preview,
+            unattended: loose,
+            unattended_words: (n > 0).then(|| format!("{n} {} with no listed assignee", if n == 1 { "ticket" } else { "tickets" })),
         })
-        .collect()
+    }).collect();
+    (pipeline, roster)
 }

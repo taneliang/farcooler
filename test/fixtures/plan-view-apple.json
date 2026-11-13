@@ -138,17 +138,6 @@
               }
             ],
             "text": "2 need you"
-          },
-          {
-            "attention": true,
-            "kind": "stuck",
-            "runs": [
-              {
-                "strong": false,
-                "text": "2 stuck"
-              }
-            ],
-            "text": "2 stuck"
           }
         ],
         "footer": [
@@ -198,86 +187,19 @@
         "pipeline": [
           {
             "agents": [],
-            "count": 2,
-            "hidden": 0,
-            "preview": [
+            "assigned": [
               {
+                "detail": "Assigned: Builder · In stage for 1 h",
                 "initiative": "Trustworthy agent view",
                 "initiativeId": "th-3",
-                "key": "ov-482",
-                "since": 1799892000000,
-                "stage": "stuck",
-                "task": "t-ov-482",
-                "title": "Title of ov-482"
+                "key": "ov-310",
+                "since": 1799996400000,
+                "stage": "building",
+                "task": "t-ov-310",
+                "title": "The themes grid"
               },
               {
-                "initiative": "Trustworthy agent view",
-                "initiativeId": "th-3",
-                "key": "ov-474",
-                "since": 1799784000000,
-                "stage": "stuck",
-                "task": "t-ov-474",
-                "title": "Title of ov-474"
-              }
-            ],
-            "stage": "stuck",
-            "title": "Stuck",
-            "unattended": [
-              {
-                "initiative": "Trustworthy agent view",
-                "initiativeId": "th-3",
-                "key": "ov-482",
-                "since": 1799892000000,
-                "stage": "stuck",
-                "task": "t-ov-482",
-                "title": "Title of ov-482"
-              },
-              {
-                "initiative": "Trustworthy agent view",
-                "initiativeId": "th-3",
-                "key": "ov-474",
-                "since": 1799784000000,
-                "stage": "stuck",
-                "task": "t-ov-474",
-                "title": "Title of ov-474"
-              }
-            ],
-            "unattendedWords": "2 tickets with no agent on them"
-          },
-          {
-            "agents": [
-              {
-                "doing": "Working",
-                "doingIsTrouble": false,
-                "elapsed": 1320000,
-                "id": "pane:b1",
-                "more": 1,
-                "name": "Builder",
-                "role": "builder",
-                "terminal": null,
-                "ticket": "t-ov-310",
-                "tickets": [
-                  {
-                    "initiative": "Trustworthy agent view",
-                    "initiativeId": "th-3",
-                    "key": "ov-310",
-                    "since": 1799996400000,
-                    "stage": "building",
-                    "task": "t-ov-310",
-                    "title": "The themes grid"
-                  }
-                ],
-                "time": "22 min",
-                "working": true
-              }
-            ],
-            "count": 2,
-            "hidden": 1,
-            "preview": [],
-            "stage": "building",
-            "title": "Building",
-            "unattended": [
-              {
+                "detail": "Assigned: fix-agent-ro (not listed) · In stage for 30 min",
                 "initiative": "Trustworthy agent view",
                 "initiativeId": "th-3",
                 "key": "ov-312",
@@ -287,14 +209,46 @@
                 "title": "Title of ov-312"
               }
             ],
-            "unattendedWords": "1 more with no builder running"
-          },
-          {
-            "agents": [],
-            "count": 1,
+            "count": 3,
+            "countWords": "3 tickets",
             "hidden": 0,
             "preview": [
               {
+                "detail": "No listed assignee · In stage for 2 d",
+                "initiative": "Trustworthy agent view",
+                "initiativeId": "th-3",
+                "key": "ov-474",
+                "since": 1799784000000,
+                "stage": "building",
+                "task": "t-ov-474",
+                "title": "Title of ov-474"
+              }
+            ],
+            "stage": "building",
+            "title": "Building",
+            "unattended": [
+              {
+                "detail": "No listed assignee · In stage for 2 d",
+                "initiative": "Trustworthy agent view",
+                "initiativeId": "th-3",
+                "key": "ov-474",
+                "since": 1799784000000,
+                "stage": "building",
+                "task": "t-ov-474",
+                "title": "Title of ov-474"
+              }
+            ],
+            "unattendedWords": "1 ticket with no listed assignee"
+          },
+          {
+            "agents": [],
+            "assigned": [],
+            "count": 2,
+            "countWords": "2 tickets",
+            "hidden": 0,
+            "preview": [
+              {
+                "detail": "No listed assignee · In stage for 2 h",
                 "initiative": "Trustworthy agent view",
                 "initiativeId": "th-3",
                 "key": "ov-311",
@@ -302,12 +256,23 @@
                 "stage": "reviewing",
                 "task": "t-ov-311",
                 "title": "Title of ov-311"
+              },
+              {
+                "detail": "No listed assignee · In stage for 1 d",
+                "initiative": "Trustworthy agent view",
+                "initiativeId": "th-3",
+                "key": "ov-482",
+                "since": 1799892000000,
+                "stage": "reviewing",
+                "task": "t-ov-482",
+                "title": "Title of ov-482"
               }
             ],
             "stage": "reviewing",
             "title": "Reviewing",
             "unattended": [
               {
+                "detail": "No listed assignee · In stage for 2 h",
                 "initiative": "Trustworthy agent view",
                 "initiativeId": "th-3",
                 "key": "ov-311",
@@ -315,38 +280,36 @@
                 "stage": "reviewing",
                 "task": "t-ov-311",
                 "title": "Title of ov-311"
+              },
+              {
+                "detail": "No listed assignee · In stage for 1 d",
+                "initiative": "Trustworthy agent view",
+                "initiativeId": "th-3",
+                "key": "ov-482",
+                "since": 1799892000000,
+                "stage": "reviewing",
+                "task": "t-ov-482",
+                "title": "Title of ov-482"
               }
             ],
-            "unattendedWords": "1 ticket waiting for review"
+            "unattendedWords": "2 tickets with no listed assignee"
           },
           {
-            "agents": [
+            "agents": [],
+            "assigned": [
               {
-                "doing": "Working",
-                "doingIsTrouble": false,
-                "elapsed": 480000,
-                "id": "pane:i1",
-                "more": 0,
-                "name": "Lander",
-                "role": "lander",
-                "terminal": null,
-                "ticket": "t-ov-487",
-                "tickets": [
-                  {
-                    "initiative": "Teams and accounts",
-                    "initiativeId": "th-1",
-                    "key": "ov-487",
-                    "since": 1799989200000,
-                    "stage": "landing",
-                    "task": "t-ov-487",
-                    "title": "The team directory"
-                  }
-                ],
-                "time": "8 min",
-                "working": true
+                "detail": "Assigned: Lander · In stage for 3 h · Landing: waiting for tickets",
+                "initiative": "Teams and accounts",
+                "initiativeId": "th-1",
+                "key": "ov-487",
+                "since": 1799989200000,
+                "stage": "landing",
+                "task": "t-ov-487",
+                "title": "The team directory"
               }
             ],
             "count": 1,
+            "countWords": "1 ticket",
             "hidden": 0,
             "preview": [],
             "stage": "landing",
@@ -357,6 +320,62 @@
         ],
         "quietInitiatives": [],
         "quietLine": null,
+        "roster": [
+          {
+            "assignmentWords": "1 pipeline ticket assigned",
+            "doing": "Runner reports working",
+            "doingIsTrouble": false,
+            "elapsed": 1320000,
+            "id": "pane:b1",
+            "more": 0,
+            "name": "Builder",
+            "role": "builder",
+            "terminal": null,
+            "ticket": "t-ov-310",
+            "tickets": [
+              {
+                "detail": null,
+                "initiative": "Trustworthy agent view",
+                "initiativeId": "th-3",
+                "key": "ov-310",
+                "since": 1799996400000,
+                "stage": "building",
+                "task": "t-ov-310",
+                "title": "The themes grid"
+              }
+            ],
+            "time": "Started 22 min ago",
+            "title": "",
+            "working": true
+          },
+          {
+            "assignmentWords": "1 pipeline ticket assigned",
+            "doing": "Runner reports working",
+            "doingIsTrouble": false,
+            "elapsed": 480000,
+            "id": "pane:i1",
+            "more": 0,
+            "name": "Lander",
+            "role": "lander",
+            "terminal": null,
+            "ticket": "t-ov-487",
+            "tickets": [
+              {
+                "detail": null,
+                "initiative": "Teams and accounts",
+                "initiativeId": "th-1",
+                "key": "ov-487",
+                "since": 1799989200000,
+                "stage": "landing",
+                "task": "t-ov-487",
+                "title": "The team directory"
+              }
+            ],
+            "time": "Started 8 min ago",
+            "title": "",
+            "working": true
+          }
+        ],
         "waiting": [
           {
             "key": "ov-485",

@@ -118,7 +118,7 @@ struct PhonePlanColumn<Top: View>: View {
     @ViewBuilder private func loaded(_ plan: PlanModel) -> some View {
         let asks = asks(plan)
         let items = items
-        if plan.isEmpty && items.isEmpty && asks.isEmpty {
+        if plan.isEmpty && !plan.hasColumnAgents && items.isEmpty && asks.isEmpty {
             // Rulings alone plan nothing, but they are something to show.
             if !(connection.keepsRulings && !plan.rulings.isEmpty) {
                 Section {
