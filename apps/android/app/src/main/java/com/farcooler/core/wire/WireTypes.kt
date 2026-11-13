@@ -717,6 +717,7 @@ data class PlanView (
 	/// Live landings, furthest along first.
 	val landings: List<LandingCard>,
 	val landingGroups: List<LandingGroupView>? = null,
+	val landingGroupHeading: String? = null,
 	val inReview: List<TicketCard>,
 	val building: List<TicketCard>,
 	/// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.

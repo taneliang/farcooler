@@ -1017,6 +1017,7 @@ pub(super) fn build(plan: &Plan, context: &input::Context, workflow: Option<&Pre
         sections,
         needs_you: context.needs_you,
         landings,
+        landing_group_heading: (!landing_groups.is_empty()).then(|| style.label("landing")),
         landing_groups,
         in_review,
         building,

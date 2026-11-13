@@ -47,6 +47,7 @@ mod tests {
             assert!(answer["error"].is_null(), "{answer}");
             assert_eq!(answer["view"]["landingGroups"], fixture["expected"]);
             let landing = answer["view"]["sections"].as_array().unwrap().iter().find(|s| s["kind"] == "landing").unwrap();
+            assert_eq!(answer["view"]["landingGroupHeading"], landing["title"]);
             assert_eq!(landing["count"], 4);
             assert!(landing["empty"].is_null(), "groups replace the empty section");
         }

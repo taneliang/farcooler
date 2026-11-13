@@ -604,6 +604,7 @@ export interface PlanView {
 	/** Live landings, furthest along first. */
 	landings: LandingCard[];
 	landingGroups?: LandingGroupView[] | null;
+	landingGroupHeading?: string | null;
 	inReview: TicketCard[];
 	building: TicketCard[];
 	/** Next Up ranked, Not Ranked, then Waiting on You; empty groups left out. */

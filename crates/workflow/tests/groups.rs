@@ -1262,3 +1262,20 @@ fn gate_diagnostics_survive_both_halves_and_replay() {
     let decoded: State = serde_json::from_value(old.clone()).unwrap();
     assert_eq!(serde_json::to_value(decoded).unwrap(), old);
 }
+
+#[test]
+fn ci_diagnostics_survive_a_failed_rerun() {
+    let mut log = Log::new();
+    let group = verb_group(&mut log, flaky_definition());
+    walk_to(&mut log, &group, "ci");
+    ci_answer(&mut log, &group, "rejected", 1, &["iOS UI tests"]);
+    log.pass(&group);
+    let evidence = log.evidence(&group);
+    let result = log.outcome(&group, Outcome::CiResult {
+        label: "rejected".into(), evidence,
+        run: Some(CiRun { id: 73, attempt: 2, failed_jobs: vec!["iOS UI tests".into()] }),
+        failure: Some(GroupFailure { job: "iOS UI tests".into(), first_line: "error: failed".into(), split: false }),
+    });
+    assert_eq!(result.state.items[&group].group_failure.as_ref().unwrap().first_line, "error: failed");
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}

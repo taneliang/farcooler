@@ -326,9 +326,10 @@ function draw(plan: Plan, model: PlanViewModel, needs: NeedsRow[], view: PlanBoa
   }
   if (model.landingGroups?.length) {
     const section = make('section', 'plan-section')
-    section.append(heading(model.sections.find(s => s.kind === 'landing')?.title ?? 'Landings'))
+    section.append(heading(model.landingGroupHeading ?? ''))
     for (const group of model.landingGroups) {
-      const card = make('div', 'plan-soft plan-landing-group')
+      const card = make('div', 'plan-soft')
+      card.classList.add('plan-landing-group')
       card.dataset.testid = `plan-landing-group-${group.id}`
       card.append(make('h3', '', group.title))
       for (const line of group.lines) card.append(make('p', 'plan-line', line))

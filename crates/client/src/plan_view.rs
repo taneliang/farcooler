@@ -380,6 +380,8 @@ pub struct PlanView {
     pub landings: Vec<LandingCard>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub landing_groups: Vec<LandingGroupView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landing_group_heading: Option<String>,
     pub in_review: Vec<TicketCard>,
     pub building: Vec<TicketCard>,
     /// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.

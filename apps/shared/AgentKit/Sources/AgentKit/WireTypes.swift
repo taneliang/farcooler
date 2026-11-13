@@ -900,6 +900,7 @@ public struct WirePlanView: Codable, Equatable, Sendable {
 	/// Live landings, furthest along first.
 	public var landings: [WireLandingCard]
 	public var landingGroups: [WireLandingGroupView]?
+	public var landingGroupHeading: String?
 	public var inReview: [WireTicketCard]
 	public var building: [WireTicketCard]
 	/// Next Up ranked, Not Ranked, then Waiting on You; empty groups left out.
@@ -915,13 +916,14 @@ public struct WirePlanView: Codable, Equatable, Sendable {
 	/// What ticket details and theme tracks say (ov-1038).
 	public var details: WireTicketDetails
 
-	public init(schema: UInt32, now: Int64, sections: [WireSection], needsYou: Int64, landings: [WireLandingCard], landingGroups: [WireLandingGroupView]?, inReview: [WireTicketCard], building: [WireTicketCard], waiting: [WireWaitingGroup], onLandedLanding: [WireTicketCard], landedToday: [WireTicketCard], agents: WireAgents, themes: WireThemes, column: WireColumn, details: WireTicketDetails) {
+	public init(schema: UInt32, now: Int64, sections: [WireSection], needsYou: Int64, landings: [WireLandingCard], landingGroups: [WireLandingGroupView]?, landingGroupHeading: String?, inReview: [WireTicketCard], building: [WireTicketCard], waiting: [WireWaitingGroup], onLandedLanding: [WireTicketCard], landedToday: [WireTicketCard], agents: WireAgents, themes: WireThemes, column: WireColumn, details: WireTicketDetails) {
 		self.schema = schema
 		self.now = now
 		self.sections = sections
 		self.needsYou = needsYou
 		self.landings = landings
 		self.landingGroups = landingGroups
+		self.landingGroupHeading = landingGroupHeading
 		self.inReview = inReview
 		self.building = building
 		self.waiting = waiting

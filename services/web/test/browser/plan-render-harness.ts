@@ -46,6 +46,7 @@ const queueView = {
   column: { ...golden.answer.view.column, facts: [], pipeline: [], roster: [], initiatives: [], quietInitiatives: [], initiativeCount: 0, footer: [] },
   sections: [{ kind: 'landing', title: 'Landings', count: queue.expected.length }],
   landingGroups: queue.expected,
+  landingGroupHeading: 'Landings',
 }
 renderPlan(
   queueRoot,

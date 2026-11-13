@@ -49,7 +49,6 @@ fi
 read -r run attempt <<IDS
 $ids
 IDS
-out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt" --jq '{binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at, run_attempt}}') || exit 1
 jobs=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "stale") | .name]') || exit 1
 export CI_FAILURE_JOB='' CI_FAILURE_LINE=''
 failed=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure")][0] // empty | (.id | tostring) + "|" + .name') || exit 1
@@ -62,8 +61,8 @@ if [ -n "$failed" ]; then
     !error && tolower(line) ~ /(^|[^[:alnum:]_])(error|failed|failure|fatal|panicked)([^[:alnum:]_]|$)/ { error=line }
     END { print error ? error : first }')
 fi
-failure=$(python3 -c 'import json,os; j=os.environ["CI_FAILURE_JOB"]; print(json.dumps({"job":j,"firstLine":os.environ["CI_FAILURE_LINE"]} if j else None))') || exit 1
-printf '%s,"failed_jobs":%s,"failure":%s}\n' "${out%?}" "$jobs" "$failure" > "$FARCOOLER_RECEIPT""#;
+out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt" --jq '{binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at, run_attempt}, failure: (if env.CI_FAILURE_JOB == "" then null else {job: env.CI_FAILURE_JOB, firstLine: env.CI_FAILURE_LINE} end)}') || exit 1
+printf '%s,"failed_jobs":%s}\n' "${out%?}" "$jobs" > "$FARCOOLER_RECEIPT""#;
 
 /// `workflow get`'s reply, for a workspace that has never published: the settings this runner suggests for its first
 /// draft as `suggested_adapter`, or why it can't as `suggested_adapter_refused`. Only a `get` reply carries a
@@ -234,11 +233,14 @@ mod tests {
         std::fs::write(&gh, r#"#!/usr/bin/python3
 import json, os, sys
 args = sys.argv[1:]
+if args[0] == 'run':
+    print('job\tstep\terror: test failed')
+    sys.exit(0)
 endpoint = next(a for a in args if a.startswith('repos/'))
 if '/jobs?' in endpoint:
     assert endpoint == 'repos/o/r/actions/runs/73/attempts/2/jobs?per_page=100', args
     assert '--paginate' in args and '--slurp' in args, args
-    print(json.dumps(['iOS UI tests', 'Other failed job']))
+    print('91|iOS UI tests' if '(.id | tostring)' in args[-1] else json.dumps(['iOS UI tests', 'Other failed job']))
 elif '/attempts/' in endpoint:
     assert endpoint == 'repos/o/r/actions/runs/73/attempts/2', args
     print(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'], repository='o/r', run=dict(id=73, run_attempt=2))))
@@ -270,16 +272,16 @@ else:
         let gh = dir.path().join("gh");
         std::fs::write(&gh, r#"#!/bin/sh
 case "$*" in
-  *'/actions/runs?'*) printf '19|failure\n' ;;
-  *'/19/jobs'*) case "$*" in
+  *'/actions/runs?'*) printf '19\t1\n' ;;
+  *'/19/attempts/1/jobs?'*) case "$*" in
     *'(.id | tostring)'*) printf '91|Rust tests\n' ;;
-    *) printf 'Rust tests\n' ;;
+    *) printf '["Rust tests"]\n' ;;
   esac ;;
   *'--job 91 --log-failed'*)
     [ "${CI_TEST_LOG_UNAVAILABLE:-}" != 1 ] || exit 1
     printf 'Rust tests\tFailure recovery tests\t2026-11-12T01:00:00Z running tests\nRust tests\tFailure recovery tests\t2026-11-12T01:00:01Z error: first failed assertion\nRust tests\tFailure recovery tests\t2026-11-12T01:00:02Z error: later assertion\n' ;;
   *'--log-failed'*) printf 'Other job Check 2026-11-12T01:00:00Z error: unrelated failure\n' ;;
-  *'/actions/runs/19'*) printf '{"binding":"bound","repository":"owner/repo","run":{"id":19},"failure":{"job":"%s","firstLine":"%s"}}' "$CI_FAILURE_JOB" "$CI_FAILURE_LINE" ;;
+  *'/actions/runs/19/attempts/1'*) printf '{"binding":"bound","repository":"owner/repo","run":{"id":19},"failure":{"job":"%s","firstLine":"%s"}}' "$CI_FAILURE_JOB" "$CI_FAILURE_LINE" ;;
   *) exit 1 ;;
 esac
 "#).unwrap();
