@@ -18,6 +18,15 @@ The LFS filter and all rlibs receive no tunnel linker arguments. The FFI
 libraries retain their separate original feature graph. No global RUSTFLAGS
 or optimization override is used. The same optimized commands run in CI and
 shipping; Canary/Release workflows and Cargo profiles remain unchanged.
+Under Rust 1.100, comparing the combined graph to the old CLI graph shows
+only the daemon package's forwarding `tailcat` feature changes; its linked
+dependency was already enabled, and no daemon production source branches on
+that package feature. The native targets, static archive and Security framework
+remain the same, with the original FFI feature graph kept separate.
+
+The lane-gate self-test pins the default release bundle command and rejects
+Rust release optimization overrides. Reintroducing either `build-app.sh debug`
+or disabled release optimization makes the regression checks fail.
 
 A real offline fixture uses the production build scripts, opt-level 3 and
 ThinLTO. It checks one daemon library compilation, executes both tunnel-linked
@@ -66,9 +75,20 @@ The first qualifying warm release run,
 Release FFI preparation took 98 s and the unified native build 382 s. Every
 bundle check passed, and completion guards confirmed 2,113 AgentKit plus all
 2,035 Mac definitions (2,005 + 30). Job durations include setup and post steps
-and exclude queue time, matching the baseline. The report-only repeat is
-pending; production code and optimization settings remain identical. The prior two debug
-runs are retained below for history and no longer count toward acceptance.
+and exclude queue time, matching the baseline.
+
+The report-only repeat [43598509967](https://github.com/taneliang/farcooler/actions/runs/43598509967)
+(e35b12727) passed every check but missed the target: app **947 s (15m47s)**,
+tests **972 s (16m12s)**. It restored the same populated Rust/Swift cache keys.
+Release FFI preparation took 116 s and the unified native build 563 s; the Mac
+step took about 478 s, versus about 260 s on the first qualifying run. This
+records the measured timing variation rather than counting a slow run as a
+success. All 2,113 AgentKit and 2,035 Mac definitions completed. A further
+report-only repeat will supply the second qualifying measurement; production
+code and optimization settings remain unchanged.
+
+The prior two debug runs are retained below for history and no longer count
+toward acceptance.
 
 
 ## Baseline
