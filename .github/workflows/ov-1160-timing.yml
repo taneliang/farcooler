@@ -385,7 +385,7 @@ jobs:
           selection="$(python3 scripts/macos-rust-tests.py)"
           ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
       - uses: actions/upload-artifact@v4
-        if: always() && runner.os == 'Linux'
+        if: always() && matrix.coverage == 'full'
         with:
           name: rust-shadow-${{ matrix.os }}
           path: ${{ runner.temp }}/rust-shadow/
