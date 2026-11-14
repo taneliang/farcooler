@@ -175,7 +175,7 @@ class LandingTests(unittest.TestCase):
         self.assertIn("apps/macos/test.sh", wf["ci"])
         policy.apply(plans, {"full": False, "packages": ["farcooler-fence"]})
         nextest = next(s.run for s in plans["rust"] if "--workspace --no-fail-fast" in s.run)
-        self.assertIn("test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest", nextest)
+        self.assertIn("test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest", nextest)
         self.assertIn("-E 'package(=farcooler-fence)'", nextest)
         self.assertNotIn("rust-shadow.py", nextest)
         for s in plans["swift"]:

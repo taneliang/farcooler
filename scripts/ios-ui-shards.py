@@ -365,7 +365,7 @@ def check_workflows(problems):
             )
     for job in re.findall(r"^  ([\w-]+):\n", text.split("\njobs:\n", 1)[-1], re.M):
         body = job_block(job, NIGHTLY) or ""
-        if re.search(r"^    runs-on: (?:xcode|macos)", body, re.M) and job not in {"ios", "ios-ui", "captures", "mac-perf"}:
+        if re.search(r"^    runs-on: (?:xcode|macos)", body, re.M) and job not in {"rust-macos", "ios", "ios-ui", "captures", "mac-perf"}:
             problems.append(f"{NIGHTLY.name}: `{job}` is outside the macOS slot reservation; add it to the phase chain")
     # ov-1190: the four slots main CI needs must survive a branch Nightly.
     # Both matrix widths AND the phase dependencies matter; limiting either
@@ -553,7 +553,7 @@ def self_test():
         OVERRIDE.clear()
 
     planted("report without issues: write", "issues: write", lambda t: t.replace("      issues: write", "      issues: read"))
-    planted("report without always()", "always()", lambda t: t.replace("if: ${{ always() }}", "if: ${{ failure() }}"))
+    planted("report without always()", "always()", lambda t: t.replace("if: ${{ always() && (", "if: ${{ failure() && ("))
     planted("no workflow_dispatch", "workflow_dispatch", lambda t: t.replace("  workflow_dispatch:\n", ""))
     planted("a cron on the hour", "off-minute", lambda t: t.replace('"23 11 * * *"', '"0 11 * * *"'))
     planted("a cron at noon Pacific", "08:00 and 13:59", lambda t: t.replace('"23 11 * * *"', '"23 20 * * *"'))
@@ -565,7 +565,7 @@ def self_test():
     planted("unbounded nightly matrices", "max-parallel: 1", lambda t: t.replace("      max-parallel: 1\n", ""))
     planted("parallel capture phase", "must wait for `ios-ui`", lambda t: t.replace("needs: [ios, ios-ui, yield-captures]", "needs: [ios, yield-captures]"))
     planted("parallel perf phase", "must wait for `captures`", lambda t: t.replace("    needs: [captures, yield-perf]\n", "    needs: [yield-perf]\n"))
-    planted("failed phase hides coverage", "retain coverage", lambda t: t.replace("if: ${{ !cancelled() }}", "if: ${{ success() }}"))
+    planted("failed phase hides coverage", "retain coverage", lambda t: t.replace("if: ${{ !cancelled() && (", "if: ${{ success() && ("))
     planted("no captures job", "no `captures` job", lambda t: t.replace("shard: ${{ matrix.shard }}\n          capture-out", "shard: shell\n          capture-out"))
     planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2, captures3]", "shard: [captures, captures2]"))
     planted(

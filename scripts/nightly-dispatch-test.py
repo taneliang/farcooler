@@ -9,9 +9,9 @@ options = re.search(r'        options:\n((?:          - .+\n)+)', text).group(1)
 options = re.findall(r'          - (.+)', options)
 assert options[0] == 'all' and len(options) == len(set(options))
 assert 'default: all' in text
-assert 'needs: [ios]' in jobs['ios-ui']
-assert 'needs: [ios, ios-ui]' in jobs['captures']
-assert 'needs: [captures]' in jobs['mac-perf']
+assert 'needs: [ios, yield-ui]' in jobs['ios-ui']
+assert 'needs: [ios, ios-ui, yield-captures]' in jobs['captures']
+assert 'needs: [captures, yield-perf]' in jobs['mac-perf']
 assert "!cancelled()" in jobs['ios-ui'] and "!cancelled()" in jobs['captures'] and "!cancelled()" in jobs['mac-perf']
 matrices = {}
 for job in ('ios-ui', 'captures'):

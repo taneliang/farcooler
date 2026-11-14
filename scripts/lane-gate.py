@@ -347,7 +347,7 @@ def steps_for(job, workflows, ctx):
         _name, run, wd, env = full[0]
         prefix, archive, _remote = run.partition(" --archive-file ")
         match = re.fullmatch(
-            r"(\./scripts/test-leak-check\.py -- \./scripts/tmux-leak-check\.py -- cargo nextest run --profile \S+) --no-fail-fast",
+            r"(\./scripts/test-leak-check\.py -- \./scripts/tmux-leak-check\.py -- (?:python3 scripts/quarantine\.py run -- )?cargo nextest run --profile \S+) --no-fail-fast",
             prefix.strip())
         if not archive or not match:
             raise ValueError("cannot derive an unfiltered local Rust suite from CI's shard command")

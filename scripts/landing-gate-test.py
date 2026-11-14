@@ -67,6 +67,24 @@ class LandingTests(unittest.TestCase):
                 if condition is None:
                     required.add(job)
                     continue
+                if condition == "${{ always() }}":
+                    # An aggregate status job (the android gate): it must run the
+                    # moment any job it waits on does, so follow their conditions.
+                    needed = re.search(r"    needs: \[([^]]+)\]", "\n".join(block))
+                    self.assertIsNotNone(needed, f"{job}: always() without needs")
+                    upstream = []
+                    for dep in (d.strip() for d in needed[1].split(",")):
+                        if dep == "changes":
+                            continue
+                        cond = next((l.strip()[4:] for l in lane.job_block(workflow, dep)
+                                     if l.startswith("    if:")), "")
+                        m = re.fullmatch(r"\$\{\{ !cancelled\(\) && needs.changes.outputs.([a-z_]+) != 'false' \}\}", cond)
+                        self.assertIsNotNone(m, f"unrecognized CI condition for {dep}: {cond}")
+                        upstream.append(m[1])
+                    self.assertTrue(upstream, f"{job}: aggregates no conditional job")
+                    if any(flags[f] for f in upstream):
+                        required.add(job)
+                    continue
                 match = re.fullmatch(
                     r"\$\{\{ !cancelled\(\) && needs.changes.outputs.([a-z_]+) != 'false' \}\}",
                     condition)
@@ -116,7 +134,7 @@ class LandingTests(unittest.TestCase):
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(text)
             git("init", "-q")
-            for name in ["landing-gate", "lane-gate.py", "ci-changes.py", "ios-ui-plan.py", "heavy_lock.py"]:
+            for name in ["landing-gate", "lane-gate.py", "ci-changes.py", "ios-ui-plan.py", "heavy_lock.py", "process_guard.py", "landing_policy.py", "gate_evidence.py"]:
                 target = repo / "scripts" / name
                 target.parent.mkdir(exist_ok=True)
                 shutil.copyfile(ROOT / "scripts" / name, target)
@@ -128,7 +146,7 @@ class LandingTests(unittest.TestCase):
             (repo / "scripts/doc-comment-check.py").chmod(0o755)
             write(".github/workflows/ci.yml", "jobs:\n" + "".join(
                 f"  {job}:\n    steps:\n      - run: {'true' if job == 'wire' else 'exit 92'}\n"
-                for job in lane.JOBS if job != "doc-comments") + "  ios-ui-plan:\n    steps: []\n")
+                for job in lane.JOBS if job != "doc-comments") + "".join(f"  {j}:\n    steps:\n      - run: exit 92\n" for j in ("tunnel-helper", "android-build", "android-ui")) + "  rust-tests:\n    steps:\n      - name: Full Rust workspace shard\n        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --no-fail-fast --archive-file x.tar.zst\n" + "  ios-ui-plan:\n    steps: []\n")
             write(".github/actions/ios-ui-build/action.yml", "runs:\n  steps: []\n")
             git("add", ".")
             git("commit", "-qm", "base")

@@ -121,8 +121,11 @@ def apply(plans, proposal):
                 else:
                     step.skip = "local landing: release bundle and its consumers run in CI"
             if job == "rust" and step.name == "Full Rust workspace (local)":
-                expected = "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast"
-                if step.run.strip() != expected:
+                wrappers = "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- "
+                tail = "cargo nextest run --profile ci --workspace --no-fail-fast"
+                # CI wraps the run in the flaky-test quarantine runner (ov-1229).
+                expected = {wrappers + tail, wrappers + "python3 scripts/quarantine.py run -- " + tail}
+                if step.run.strip() not in expected:
                     raise ValueError("Rust CI command changed; refusing to narrow an unknown shape")
                 if not proposal["full"]:
                     expression = " or ".join(f"package(={p})" for p in proposal["packages"])
