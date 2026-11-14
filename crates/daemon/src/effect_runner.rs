@@ -273,7 +273,7 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     }).await.map_err(|_| std::io::Error::other("owned process leader reap unproved"))??;
     match tokio::time::timeout(Duration::from_secs(1), &mut output).await {
         Ok(result) => result.map_err(std::io::Error::other)??,
-        Err(_) => { output.abort(); return Err(std::io::Error::other("process output did not close")); }
+        Err(_) => { output.abort(); return Err(std::io::Error::other("process output did not close").into()); }
     }
     // A surviving group (including unreaped grandchildren) is not quiescence.
     for _ in 0..100 {

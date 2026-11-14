@@ -486,7 +486,12 @@ impl Runtime {
         running: &mut Vec<Running>, futures: &mut Vec<Slot>) -> Result<usize>
     {
         let started = std::time::Instant::now();
-        let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
+        let continuous_started = tokio::time::Instant::now();
+        let continuous = self.continuous;
+        let clock = || {
+            let elapsed = if continuous { continuous_started.elapsed() } else { started.elapsed() };
+            now_ms.saturating_add(i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+        };
         let mut count = 0;
         let workspaces = self.store.workflow_workspaces()?;
         let mut occupancy = Vec::new();

@@ -39,7 +39,7 @@ async fn script_hooks_good_bad_and_illegal_decisions_are_logged_and_replayed() {
         (response("accept"), false), (response("resolve"), false)] {
         let (_dir, mut runtime) = failed(&body).await;
         // With no build slots a decision still runs. A good retry queues its build behind the cap.
-        runtime.effect_cap = 0;
+        runtime.places().agent = 0;
         runtime.pump(20).await.unwrap();
         let state = runtime.state("w").unwrap().unwrap();
         let item = &state.items["coding"];
@@ -120,7 +120,7 @@ async fn script_hooks_changed_script_falls_back_and_retry_budget_remains_authori
     replay(&runtime);
 
     let (_dir, mut runtime) = failed(&response("retry")).await;
-    runtime.effect_cap = 0;
+    runtime.places().agent = 0;
     runtime.pump(20).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();
     let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap().effect;
