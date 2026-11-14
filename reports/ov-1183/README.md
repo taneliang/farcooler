@@ -49,7 +49,18 @@ filenames from Cargo's JSON output instead of guessing filenames. Both binary
 execution and symbol isolation had already passed on that runner; the app build
 was never started. This run also supplies no acceptance timing.
 
-Fresh release-shaped branch measurements are pending. The prior two debug
+The first complete single-graph release run,
+[43594886875](https://github.com/taneliang/farcooler/actions/runs/43594886875)
+(980a4c290), passed app **1,435 s (23m55s)** and tests **660 s (11m00s)**.
+This is a cold release cache population run, not an under-15-minute result.
+The release FFI build took 241 s and the unified native build 939 s while
+Swift release compilation ran alongside it. The CLI compilation started at
+12:37:45 UTC and the native build finished at 12:49:43 UTC. All bundle checks,
+including both real tunnel checks, passed. The release Swift and native
+caches were saved successfully. Tests completed all 2,113 AgentKit and 2,035
+Mac definitions. Warm release-shaped branch measurements follow.
+
+Two qualifying release-shaped branch measurements are still pending. The prior two debug
 runs are retained below for history and no longer count toward acceptance.
 
 
