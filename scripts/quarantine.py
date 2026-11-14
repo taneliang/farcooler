@@ -2,7 +2,20 @@
 """A checked-in quarantine list for flaky Rust tests (ov-1229).
 
     scripts/quarantine.py --lint                       # the list is well formed, live and matches real tests
+    scripts/quarantine.py --lint --inventory FILE      # ...matched against `cargo nextest list --message-format json`
+    scripts/quarantine.py --lint --nextest             # ...matched against a live `cargo nextest list`
     scripts/quarantine.py run -- cargo nextest run ... # nextest, with listed tests rerun up to twice
+
+Names are checked against the real test inventory when there is one: the JSON from
+`cargo nextest list --workspace --message-format json`, given as `--lint --inventory FILE`
+(or QUARANTINE_INVENTORY=FILE), or produced on the spot by `--lint --nextest` (needs a
+build). That is exactly what nextest will run, so every way of declaring a test is
+covered, `#[path]` modules and `[[test]]` targets included. With no inventory the lint
+falls back to a source scan: it follows `mod x;` and `#[path = "..."]` from each Cargo
+target's root (src/lib.rs, src/main.rs, src/bin, tests/*), and sees `#[test]`,
+`#[tokio::test]`, `#[rstest]` and `#[test_case]` functions. The scan does not expand macros,
+`[[test]]`/`[[bin]]` paths in Cargo.toml (beyond the bin name) or `#[path]` inside an inline
+module, so a test declared that way is only found through an inventory.
 
 `.config/quarantine.txt` lists a test, the ticket that tracks its fix and an
 expiry date (format in that file, notes in docs/ci/quarantine.md). `run` wraps a
@@ -60,8 +73,10 @@ def parse(text, today):
     return entries, problems
 
 
-def _clean(text):
-    """The source with comments, strings and char literals blanked, so braces and keywords inside them are inert."""
+def _clean(text, keep_strings=False):
+    """The source with comments, strings and char literals blanked, so braces and keywords inside them are inert.
+
+    keep_strings leaves plain string literals in place, for reading `#[path = "..."]`."""
     out, i, n = [], 0, len(text)
     while i < n:
         two = text[i:i + 2]
@@ -81,10 +96,13 @@ def _clean(text):
             end = text.find('"' + raw.group(1), i + raw.end())
             i = n if end < 0 else end + 1 + len(raw.group(1))
         elif text[i] == '"':
+            start = i
             i += 1
             while i < n and text[i] != '"':
                 i += 2 if text[i] == "\\" else 1
             i += 1
+            if keep_strings:
+                out.append(text[start:i])
         elif (ch := re.match(r"'(?:\\.[^']*|[^'\\])'", text[i:i + 12])):
             i += ch.end()
         else:
@@ -125,15 +143,28 @@ def _module(parts):
     return parts
 
 
+_MOD_DECL = re.compile(r"(?P<attrs>(?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+(?P<name>\w+)\s*;")
+_PATH_ATTR = re.compile(r'#\[\s*path\s*=\s*"([^"]+)"\s*\]')
+
+
 def _reach(root_file):
-    """(file, module path) of a target's root file and every file its `mod x;` declarations reach."""
-    out, todo = [], [(root_file, [], root_file.parent)]
+    """(file, module path) of a target's root file and every file its `mod x;` declarations reach.
+
+    A `#[path = "..."]` attribute names the file directly, relative to the declaring file's directory;
+    a file loaded that way owns its own directory for the modules it declares, like a mod.rs."""
+    out, seen, todo = [], set(), [(root_file, [], root_file.parent)]
     while todo:
         path, module, children = todo.pop()
-        if not path.exists():
+        if not path.exists() or path.resolve() in seen:
             continue
+        seen.add(path.resolve())
         out.append((path, module))
-        for name in re.findall(r"\bmod\s+(\w+)\s*;", _clean(path.read_text(errors="replace"))):
+        for m in _MOD_DECL.finditer(_clean(path.read_text(errors="replace"), keep_strings=True)):
+            name, explicit = m["name"], _PATH_ATTR.search(m["attrs"])
+            if explicit:
+                target = (path.parent / explicit.group(1)).resolve()
+                todo.append((target, module + [name], target.parent))
+                continue
             flat, nested = children / f"{name}.rs", children / name / "mod.rs"
             if flat.exists():
                 todo.append((flat, module + [name], children / name))
@@ -171,27 +202,47 @@ def real_tests(root):
             for path, module in _reach(root_file):
                 for name in inline_tests(path.read_text(errors="replace")):
                     found.add((binary, "::".join(module + [name])))
-        for path in sorted((crate / "tests").rglob("*.rs")) if (crate / "tests").exists() else []:
-            rel = path.relative_to(crate / "tests").parts
-            module = _module(rel[1:]) if len(rel) > 1 and rel[-1] != "main.rs" else []
-            if len(rel) > 1 and rel[-1] == "main.rs":
-                module = []
-            for name in inline_tests(path.read_text(errors="replace")):
-                found.add((f"{package}::{rel[0].removesuffix('.rs')}", "::".join(module + [name])))
+        tests = crate / "tests"
+        targets = sorted(tests.glob("*.rs")) + sorted(tests.glob("*/main.rs")) if tests.exists() else []
+        for target in targets:  # each integration test is its own binary; `mod x;` and #[path] reach its other files
+            stem = target.stem if target.name != "main.rs" else target.parent.name
+            for path, module in _reach(target):
+                for name in inline_tests(path.read_text(errors="replace")):
+                    found.add((f"{package}::{stem}", "::".join(module + [name])))
     return found
 
 
-def unknown(entries, root):
-    """Entries whose exact binary id and test name match no real test, so a typo or a rename fails the lint."""
-    real = real_tests(root)
+def inventory_tests(text):
+    """(binary id, test name) for every test in the JSON of `cargo nextest list --message-format json`."""
+    suites = json.loads(text).get("rust-suites", {})
+    return {(binary, name) for binary, suite in suites.items() for name in suite.get("testcases", {})}
+
+
+def unknown(entries, root, inventory=None):
+    """Entries whose exact binary id and test name match no real test, so a typo or a rename fails the lint.
+
+    `inventory` is a set from inventory_tests; without one the tests are read from source."""
+    real = inventory if inventory is not None else real_tests(root)
     return [f"line {number}: no test `{test}` in binary `{binary}` (check the binary id, module path and #[test])"
             for binary, test, _ticket, _expiry, number in entries if (binary, test) not in real]
 
 
-def lint(path=LIST, root=ROOT, today=None):
+def lint(path=LIST, root=ROOT, today=None, inventory=None):
     today = today or dt.datetime.now(dt.timezone.utc).date()
     entries, problems = parse(path.read_text(), today)
-    return problems + unknown(entries, root)
+    return problems + unknown(entries, root, inventory)
+
+
+def load_inventory(file=None, live=False):
+    """The real test inventory from a nextest JSON file, or from `cargo nextest list`; None when neither is asked for."""
+    file = file or os.environ.get("QUARANTINE_INVENTORY")
+    if file:
+        return inventory_tests(pathlib.Path(file).read_text())
+    if live:
+        listed = subprocess.run(["cargo", "nextest", "list", "--workspace", "--message-format", "json"],
+                                cwd=ROOT, capture_output=True, text=True, check=True)
+        return inventory_tests(listed.stdout)
+    return None
 
 
 def nextest_config(base, entries, report):
@@ -242,7 +293,13 @@ def run(command, base=None, entries=None, say=print):
 
 def main(argv):
     if argv[:1] == ["--lint"]:
-        problems = lint()
+        rest = argv[1:]
+        file = rest[rest.index("--inventory") + 1] if "--inventory" in rest and rest.index("--inventory") + 1 < len(rest) else None
+        try:
+            problems = lint(inventory=load_inventory(file, "--nextest" in rest))
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            print(f"quarantine: cannot read the test inventory: {error}", file=sys.stderr)
+            return 1
         for problem in problems:
             print(f"quarantine: {problem}", file=sys.stderr)
         return 1 if problems else 0

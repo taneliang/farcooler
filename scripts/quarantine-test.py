@@ -39,7 +39,7 @@ mod tests {
 
 
 class Lint(unittest.TestCase):
-    def check(self, text, today=TODAY):
+    def check(self, text, today=TODAY, inventory=None):
         root = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root)
         crate = root / "crates/x"
@@ -49,20 +49,53 @@ class Lint(unittest.TestCase):
         (crate / "src/lib.rs").write_text(
             '// #[test] fn in_a_comment() {}\nfn plain() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn real() {}\n'
             '    fn helper() {}\n    mod deep {\n        #[tokio::test]\n        async fn nested() {}\n    }\n}\n')
-        (crate / "src/lib.rs").write_text((crate / "src/lib.rs").read_text() + "mod server;\n")
+        (crate / "src/lib.rs").write_text((crate / "src/lib.rs").read_text() + "mod server;\n"
+                                          '// the module is renamed, in a directory its name does not match\n'
+                                          '#[path = "elsewhere/weird.rs"]\nmod renamed;\n')
+        (crate / "src/elsewhere").mkdir()
+        (crate / "src/elsewhere/weird.rs").write_text("mod inner;\n#[test]\nfn in_path_module() {}\n")
+        (crate / "src/elsewhere/inner.rs").write_text("#[test]\nfn deeper() {}\n")
+        (crate / "tests/common").mkdir()
+        (crate / "tests/common/helpers.rs").write_text("#[test]\nfn in_path_helper() {}\n")
         (crate / "src/server/mod.rs").write_text("#[test]\nfn in_a_file_module() {}\n")
         (crate / "src/main.rs").write_text("mod cli;\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn in_main() {}\n}\n")
         (crate / "src/cli.rs").write_text("#[test]\nfn in_cli() {}\n")
         (crate / "src/orphan.rs").write_text("#[test]\nfn never_compiled() {}\n")
-        (crate / "tests/a_bin.rs").write_text("#[test]\nfn integration() {}\n")
+        (crate / "tests/a_bin.rs").write_text(
+            '#[path = "common/helpers.rs"]\nmod helpers;\n#[test]\nfn integration() {}\n')
         entries, problems = q.parse(text, today)
-        return problems + q.unknown(entries, root)
+        return problems + q.unknown(entries, root, inventory)
 
     def test_good_and_empty(self):
         self.assertEqual(self.check(""), [])
         self.assertEqual(self.check(
             "# c\n\nfarcooler-x tests::real ov-1 2026-11-16\nfarcooler-x tests::deep::nested ov-2 2026-12-01\n"
             "farcooler-x server::in_a_file_module ov-3 2026-12-01\nfarcooler-x::a_bin integration ov-4 2026-12-01\n"), [])
+
+    def test_a_test_in_a_path_module_is_found(self):
+        # ov-1237: `#[path = "..."] mod x;` names its file directly, so the scan must follow it.
+        self.assertEqual(self.check(
+            "farcooler-x renamed::in_path_module ov-1 2026-12-01\n"
+            "farcooler-x renamed::inner::deeper ov-2 2026-12-01\n"       # a mod declared by a path-loaded file
+            "farcooler-x::a_bin helpers::in_path_helper ov-3 2026-12-01\n"), [])  # integration test with #[path]
+        for text in [
+            "farcooler-x elsewhere::weird::in_path_module ov-1 2026-12-01\n",   # the directory is not a module
+            "farcooler-x in_path_module ov-1 2026-12-01\n",
+            "farcooler-x::common in_path_helper ov-1 2026-12-01\n",             # a helper file is not its own binary
+            "farcooler-x::a_bin in_path_helper ov-1 2026-12-01\n",
+        ]:
+            with self.subTest(text=text):
+                self.assertTrue(any("no test" in p for p in self.check(text)), self.check(text))
+
+    def test_the_inventory_decides_when_there_is_one(self):
+        inventory = q.inventory_tests('{"rust-suites": {"farcooler-x": {"testcases": {"made_by_a_macro::t": {}}},'
+                                      ' "farcooler-x::custom": {"testcases": {"x": {}}}}}')
+        self.assertEqual(self.check("farcooler-x made_by_a_macro::t ov-1 2026-12-01\nfarcooler-x::custom x ov-2 2026-12-01\n",
+                                    inventory=inventory), [])
+        # The source scan is not consulted: a name only the scan knows is unknown to the inventory.
+        self.assertTrue(any("no test" in p for p in self.check("farcooler-x tests::real ov-1 2026-12-01\n", inventory=inventory)))
+        # No inventory: the scan decides, and cannot see the macro's test.
+        self.assertTrue(any("no test" in p for p in self.check("farcooler-x made_by_a_macro::t ov-1 2026-12-01\n")))
 
     def test_expired_malformed_fail(self):
         for text, word in [
@@ -120,6 +153,13 @@ class Nextest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls.dir)
+
+    def test_the_inventory_reads_real_nextest_output(self):
+        listed = subprocess.run(["cargo", "nextest", "list", "--message-format", "json"], cwd=self.dir,
+                                capture_output=True, text=True, check=True).stdout
+        inventory = q.inventory_tests(listed)
+        self.assertIn(("scratch", "tests::fails_once"), inventory)
+        self.assertEqual({b for b, _ in inventory}, {"scratch"})
 
     def go(self, listed, only):
         state = pathlib.Path(tempfile.mkdtemp(dir=self.dir))

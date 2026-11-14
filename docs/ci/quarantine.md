@@ -11,9 +11,14 @@ up to twice. If a rerun passes, the run prints `flaky (quarantined): <binary> <t
 every rerun, the run fails as before. A test that is not listed gets no rerun. With an empty list the command runs unchanged.
 
 **The lint.** `scripts/quarantine.py --lint` (the wire job) fails on a malformed line, a duplicate, an entry on or after its expiry
-date, or a name that matches no test. The name check is static, so it needs no build: it reads each crate's source the way nextest names tests and requires the exact
-binary id and full test name to exist as a `#[test]` function (`farcooler-tmux` for a unit test, `farcooler-daemon::a_foo`
-for an integration test file). A typo, a rename, a wrong module path or a plain non-test function fails the lint.
+date, or a name that matches no test. The name check resolves each entry against the real test inventory when there is one
+(`--inventory FILE` with the JSON from `cargo nextest list --workspace --message-format json`, or `--nextest` to
+produce it on the spot; it needs a build). That is what nextest will run, so no declaration style is missed.
+With no inventory the lint falls back to a source scan that needs no build: it follows `mod x;` and
+`#[path = "..."]` from each Cargo target's root and requires the exact binary id and full test name to exist as a
+test function (`farcooler-tmux` for a unit test, `farcooler-daemon::a_foo` for an integration test file).
+The scan cannot see macro-generated tests, `[[test]]` paths or `#[path]` inside an inline module; use an inventory for those.
+A typo, a rename, a wrong module path or a plain non-test function fails the lint.
 
 **Removing an entry** when the fix lands is a one-line deletion. To keep one past its expiry, edit the date in the ticket's say-so.
 
