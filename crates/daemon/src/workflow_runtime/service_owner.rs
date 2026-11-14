@@ -73,7 +73,7 @@ impl Runtime {
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         let (send,inbox) = mpsc::channel(32);
-        Ok(Self { exec:Exec { activities: Default::default(), places: Default::default(), root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,seeding:Default::default(),active_trees:Default::default(),
+        Ok(Self { exec:Exec { yielding:crate::yielding::Yielding::at(&root), activities: Default::default(), places: Default::default(), root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,seeding:Default::default(),active_trees:Default::default(),
             #[cfg(test)] user_home:None, #[cfg(test)] build_free_bytes:Some(u64::MAX) },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),

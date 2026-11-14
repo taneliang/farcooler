@@ -431,6 +431,9 @@ impl Exec {
         let stream = runtime.attach_to_fanout(&owner.pane).await
             .map_err(|_| Error::Refused("native output stream unavailable"))?;
         let mut output = tokio::spawn(crate::effect_runner::capture(stream, self.process_log(binding)));
+        // A native builder pauses while a landing gate runs; a review never does (ov-1214).
+        let _builder = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
+            .then(|| self.yielding.builder(crate::yielding::Target::Tty(pane.tty.clone())));
         // Listed for watching only (ov-972); declared after `host`, so it is unlisted before the server is reaped.
         let _watchable = crate::watch_view::publish(&binding.workspace, &binding.effect.item, tmux.clone(), pane.clone());
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;

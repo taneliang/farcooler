@@ -14,26 +14,29 @@ fn local_output(dir: &Path) {
 }
 
 #[tokio::test]
-async fn builder_and_its_children_yield_while_a_landing_gate_runs() {
+async fn a_running_builder_is_paused_while_a_landing_gate_runs_and_resumes_after() {
     let (dir, mut runtime) = lander("pass").await;
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "first", &definition).await;
     let shared = dir.path().to_string_lossy().into_owned();
     adapter(dir.path(), |s| {
-        let setup = format!("import time, pathlib\nshared = pathlib.Path({shared:?})\ndef wait(name):\n    deadline = time.monotonic() + 4\n    while not (shared / name).exists():\n        assert time.monotonic() < deadline, name\n        time.sleep(0.02)\n");
-        let build = "if stage == 'build':\n    wait('gate-nice')\n    nice = os.getpriority(os.PRIO_PROCESS, 0)\n    child = subprocess.check_output(['/usr/bin/python3', '-c', 'import os; print(os.getpriority(os.PRIO_PROCESS, 0))'], text=True).strip()\n    (shared / 'builder-nice').write_text(str(nice) + ' ' + child)\n";
-        let gate = "elif stage == 'gate':\n    (shared / 'gate-nice').write_text(str(os.getpriority(os.PRIO_PROCESS, 0)))\n    wait('builder-nice')\n";
+        let setup = format!("import time, pathlib\nshared = pathlib.Path({shared:?})\ndef wait(name):\n    deadline = time.monotonic() + 4\n    while not (shared / name).exists():\n        assert time.monotonic() < deadline, name\n        (shared / 'beat').write_text(str(time.time()))\n        time.sleep(0.02)\n");
+        // The builder beats while it waits, and can only notice the gate saw it paused once it runs again.
+        let build = "if stage == 'build':\n    wait('gate-saw-it-stopped')\n    (shared / 'resumed').write_text(str(os.getpriority(os.PRIO_PROCESS, 0)))\n";
+        // The gate waits for the builder to have started and then gone quiet: a paused builder stops beating.
+        let gate = "elif stage == 'gate':\n    (shared / 'gate-nice').write_text(str(os.getpriority(os.PRIO_PROCESS, 0)))\n    deadline = time.monotonic() + 3\n    while True:\n        beat = shared / 'beat'\n        if beat.exists() and time.time() - float(beat.read_text() or 0) > 0.5: break\n        assert time.monotonic() < deadline, 'builder was never paused'\n        time.sleep(0.05)\n    (shared / 'gate-saw-it-stopped').write_text('yes')\n    time.sleep(0.3)\n";
         setup + &s.replace("if stage == 'build':\n", build).replace("elif stage == 'gate':\n", gate)
     });
     command(&runtime, Command::Queue { item: "first".into() });
     enqueue_item(&mut runtime, "w", "second", definition);
     runtime.continuous = true;
     runtime.pump(20).await.unwrap();
+    assert!(dir.path().join("gate-saw-it-stopped").exists(), "the gate saw the builder paused");
+    // It was paused, not killed: it ran on after the gate, and it still yields by niceness.
+    let resumed: i32 = std::fs::read_to_string(dir.path().join("resumed")).expect("the builder resumed after the gate").parse().unwrap();
     let gate: i32 = std::fs::read_to_string(dir.path().join("gate-nice")).unwrap().parse().unwrap();
-    let builders = std::fs::read_to_string(dir.path().join("builder-nice")).unwrap();
-    for nice in builders.split_whitespace().map(|n| n.parse::<i32>().unwrap()) {
-        assert!(nice > gate, "builder and compiler must yield: builder={nice}, gate={gate}");
-    }
+    assert!(resumed > gate, "builder={resumed}, gate={gate}");
+    assert!(!runtime.exec.yielding.paused(), "no gate runs now");
 }
 
 #[tokio::test]

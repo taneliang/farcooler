@@ -46,7 +46,8 @@ pub(crate) async fn exited(pid: u32) -> std::io::Result<()> {
     }
 }
 pub(crate) fn has_exited(pid: u32) -> std::io::Result<bool> {
-    exit_info(pid).map(|info| unsafe { info.si_pid() } == pid as i32)
+    exit_info(pid).map(|info| unsafe { info.si_pid() } == pid as i32
+        && matches!(info.si_code, libc::CLD_EXITED | libc::CLD_KILLED | libc::CLD_DUMPED))
 }
 /// A normal exit is still the supervisor's retained result, not a lost process.
 pub(crate) fn present(pid: u32) -> bool {
@@ -75,7 +76,7 @@ async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
     if let Some(environment) = environment {
         command.env_clear().env("PATH", "/usr/bin:/bin").envs(environment.iter().copied());
     }
-    supervise(command, tree, log, limit, None, None).await.map(|status| status == Some(0)).map_err(|failure| failure.error)
+    supervise(command, tree, log, limit, None, None, None).await.map(|status| status == Some(0)).map_err(|failure| failure.error)
 }
 
 /// Only a failure before spawn, or after proven group disappearance, permits a retry.
@@ -106,10 +107,18 @@ pub(crate) async fn configured(tree: &Path, argv: &[String], environment: &std::
 pub(crate) async fn owned(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
     log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>) -> Result<Option<i32>, ProcessFailure>
 {
-    let program = argv.first().ok_or_else(|| ProcessFailure::retry_safe(std::io::Error::other("empty argv")))?;
+    owned_yielding(tree, argv, environment, log, limit, cancel, owner, None).await
+}
+
+/// Like `owned`, and a builder's group pauses while a landing gate runs (ov-1214).
+pub(crate) async fn owned_yielding(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
+    log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>,
+    builder: Option<&crate::yielding::Yielding>) -> Result<Option<i32>, ProcessFailure>
+{
+let program = argv.first().ok_or_else(|| ProcessFailure::retry_safe(std::io::Error::other("empty argv")))?;
     let mut command = Command::new(program);
     command.args(&argv[1..]).env_clear().envs(environment);
-    supervise(command, tree, log, limit, Some(cancel), owner).await
+    supervise(command, tree, log, limit, Some(cancel), owner, builder).await
 }
 
 /// A process this runtime started and may have outlived: its pid, which is also its process group,
@@ -117,7 +126,7 @@ pub(crate) async fn owned(tree: &Path, argv: &[String], environment: &std::colle
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Owner { pub pid: u32, pub started: String }
 impl Owner {
-    fn started_at(pid: u32) -> std::io::Result<String> {
+    pub(crate) fn started_at(pid: u32) -> std::io::Result<String> {
         #[cfg(test)]
         if TEST_START_UNAVAILABLE.try_with(|_| ()).is_ok() {
             return Err(std::io::Error::other("injected unavailable process start identity"));
@@ -208,7 +217,8 @@ pub(crate) async fn capture(mut reader: tokio::net::UnixStream, log: std::path::
 }
 
 async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duration,
-    mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>) -> Result<Option<i32>, ProcessFailure>
+    mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>,
+    builder: Option<&crate::yielding::Yielding>) -> Result<Option<i32>, ProcessFailure>
 {
     save_tail(log, b"").map_err(ProcessFailure::retry_safe)?;
     let (reader, writer) = std::os::unix::net::UnixStream::pair().map_err(ProcessFailure::retry_safe)?;
@@ -233,6 +243,8 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
         TEST_UNSETTLED.with(|held| held.replace(Some(child)));
         return Err(std::io::Error::other("injected unproved process settlement").into());
     }
+    // Forgotten (and continued) before the group is signalled below, so a recycled pgid is never stopped.
+    let paused = builder.map(|y| y.builder(crate::yielding::Target::Group { pid, started: Owner::started_at(pid)? }));
     let result = tokio::select! {
         result = tokio::time::timeout(limit, exited(pid)) => Some(result),
         _ = async {
@@ -253,6 +265,7 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
         pinned.set(unsafe { libc::waitid(libc::P_PID, pid, &mut info,
             libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) } == 0);
     });
+    drop(paused);
     let signal_error = group.kill().err();
     let timed_out = matches!(result, Some(Err(_)));
     let observed = matches!(result, Some(Ok(Ok(()))));

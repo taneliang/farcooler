@@ -89,6 +89,7 @@ pub mod review_ops;
 pub mod runtime;
 pub mod workflow_runtime;
 mod effect_runner;
+mod yielding;
 mod stream_end;
 pub mod service;
 pub mod sessions;

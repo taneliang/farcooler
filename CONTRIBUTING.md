@@ -130,8 +130,12 @@ cd apps/android && ./gradlew installDebug
 
 ### Engine builders
 
-The workflow engine starts builders at niceness 10, inherited by their compilers
-and tests, so landing gates retain priority even when they start later. It refuses
+While a landing gate (a `Run` step of a landing group) is running, the workflow
+engine pauses every running builder and its compilers and tests with SIGSTOP, and
+continues them when the last gate ends. A builder that starts during a gate is
+paused at once. The pause is written to `yielding.json` in the engine root, so a
+daemon that restarts mid-gate continues what it had paused. Builders also start
+at niceness 10. The engine refuses
 a build when either the engine volume or its worktree has less than 25 GB free;
 the run explains the refusal and can be retried after freeing space.
 

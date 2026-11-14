@@ -252,8 +252,8 @@ impl Exec {
         };
         self.pin_context(&mut command, binding, &binding.effect.candidate.clone().unwrap_or_default(), &self.provider_path(binding));
         if managed_build && matches!(kind, StageKind::Build) {
-            // Inherited by the agent's compilers and test runners, including native PTY launches. Always nice:
-            // a gate that starts after this builder also gets priority, without privileged renice or PID discovery.
+            // Inherited by the agent's compilers and test runners, including native PTY launches. Niceness is the
+            // standing bias; while a landing gate runs the builder is also paused (see `yielding.rs`).
             command.argv.splice(0..0, ["/usr/bin/nice".into(), "-n".into(), "10".into()]);
         }
         Ok(command)
@@ -395,6 +395,9 @@ impl Exec {
             }
             None => None,
         };
+        // A landing gate (a Run of a landing group) keeps every builder paused for as long as it runs.
+        let _gate = (matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)) && self.state(&binding.workspace)?
+            .is_some_and(|s| s.items.get(&binding.effect.item).is_some_and(|i| i.group_of.is_some()))).then(|| self.yielding.gate());
         let exit = async {
             Ok::<_, Error>(if self.is_native_agent(binding) {
                 self.run_native(binding, &command, cancel).await?
@@ -402,8 +405,9 @@ impl Exec {
                 // A gate can run for hours and leave the daemon behind it: its owner is recorded so a
                 // recovery can end it before it runs again (a group's gate holds the whole landing target).
                 let owner = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)).then(|| self.owner_path(binding));
-                crate::effect_runner::owned(&self.tree(binding), &command.argv, &command.environment,
-                    &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref()).await.map_err(|failure| {
+                let builder = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)).then_some(&self.yielding);
+                crate::effect_runner::owned_yielding(&self.tree(binding), &command.argv, &command.environment,
+                    &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref(), builder).await.map_err(|failure| {
                         if failure.retry_safe { Error::Io(failure.error) } else {
                             tracing::warn!(error = %failure.error, "configured process settlement remains unproved");
                             Error::Refused("configured process settlement remains unproved")

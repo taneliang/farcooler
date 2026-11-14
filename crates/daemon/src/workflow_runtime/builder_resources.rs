@@ -1,6 +1,6 @@
 //! Builders yield to landing, and a run's build output does not outlive it (ov-1214).
-//! Builders start niced (see `bound_command`), which their compilers and test runners inherit, so a landing gate
-//! keeps priority even when it starts later. A build is refused below 25 GB free. A run's own `target/` is deleted
+//! Builders yield to a running landing gate: they are paused while one runs (see `yielding.rs`) and start niced
+//! (see `bound_command`), which their compilers and test runners inherit. A build is refused below 25 GB free. A run's own `target/` is deleted
 //! when the run reaches WaitingJoin, Failed or Cancelled. Nothing here ever touches a tree a person works in.
 use super::*;
 
