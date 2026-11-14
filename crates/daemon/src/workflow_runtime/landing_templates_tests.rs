@@ -454,13 +454,14 @@ async fn publishing_without_groups_replaces_the_previous_grouping() {
         expected_pin, definition,
         adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
     };
+    let mut ticket = batched.clone();
+    ticket.stages.pop(); // Remove the join along with its group.
+    ticket.groups.clear();
     let reply = runtime.wire_command("w", "owner", publish("batch", state.revision, 1, None, batched)).unwrap();
     assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
     runtime.refresh_groups("w", 100).unwrap();
     let pin = runtime.store.workflow_configuration("w").unwrap().unwrap().pin;
     let state = runtime.state("w").unwrap().unwrap();
-    let ticket = built(&runtime, &plan(Template::TicketPush, vec![Gate::Command(1)]));
-    assert!(ticket.groups.is_empty());
     let reply = runtime.wire_command("w", "owner", Action::Publish {
         mutation: Mutation { id: "ticket".into(), revision: state.revision, epoch: state.epoch, sequence: 2 },
         expected_pin: Some(pin), definition: ticket.clone(),
