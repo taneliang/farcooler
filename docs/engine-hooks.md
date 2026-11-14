@@ -542,22 +542,41 @@ read from the workspace publication grant. Tests of runner admin RPCs do not
 verify those external account permissions; those must be checked at the service
 that owns them.
 
-For ov-1179, the external owner-only requirement in acceptance item 4 remains
-unverified. Neither rejecting unknown protocol fields nor refusing runner admin
-RPCs proves that an orchestrator cannot use credentials available to its shell.
-The relevant implementation paths are:
+### What a granted publication may change (ov-1201)
 
-| Operation | Actual path | Missing evidence |
-| --- | --- | --- |
-| Secret-store writes | Relay secrets are provisioned with `wrangler secret put`, as listed in `services/relay/wrangler.toml`. | Cloudflare must refuse the orchestrator's identity while permitting the owner's on an isolated secret. |
-| Security flags | The ticket names no concrete flag or API. | The owner must identify the protected settings and the service that authorizes writes before a refusal can be tested. |
-| Relay flags | `.github/workflows/relay.yml` reads the GitHub variable `RELAY_DEPLOY`; Worker settings come from `services/relay/wrangler.toml`. | GitHub variable writes and Cloudflare settings writes must refuse the orchestrator's identity while permitting the owner's. |
-| Production deployments | `.github/workflows/relay.yml` deploys stable via `wrangler deploy`; `.github/workflows/promote.yml` uses the GitHub `promote` environment. | The configured GitHub environment rules and Cloudflare token permissions must enforce owner-only deployment, including the direct relay dispatch path. |
+The grant lets the orchestrator change how a workflow routes, never what it
+runs. Every process the engine starts comes from the published adapter
+configuration: check and gate commands with their environments, the harness and
+the hooks files it pins, the reviewer, CI, landing and pull request commands.
+They run as the runner's own Unix user, whose files hold the owner's Cloudflare
+and GitHub credentials. Without a limit, a definition the orchestrator published
+could put `wrangler secret put`, `gh variable set RELAY_DEPLOY`, a branch
+protection change or `wrangler deploy` into a gate command, hand a gate the
+owner's `HOME` and token, or add the command to a Codex hooks file, and the
+engine would run it with the owner's credentials.
 
-These workflows use GitHub and Cloudflare credentials, not the runner's caller
-seat or publication grant. Repository source does not establish the live account
-permissions or configured environment protections. No external refusal test has
-been run, and the grant must not be described as enforcing these restrictions.
-Completing item 4 requires either isolated external authorization tests with the
-grant enabled or an owner decision to narrow the acceptance item and track those
-tests separately. Until that decision or evidence exists, item 4 stays open.
+So an orchestrator's publication is refused unless its adapter configuration is
+exactly the one it replaces (the bundle at its `--expected-pin`, which the write
+accepts only while it is still the workspace's), and no step gains an
+environment its same step didn't already have. Routes, models, deciders, limits,
+groups and notifications still change freely. A change to commands, environment
+or hooks goes through `workflow propose`, and publishes when a person approves
+the draft. The owner publishes them directly as before.
+
+| Owner-only action | Gate command | Environment | Hook |
+| --- | --- | --- | --- |
+| Secret-store write (`wrangler secret put`) | refused | refused | refused |
+| Security flag (branch protection via `gh api`) | refused | refused | refused |
+| Relay flag (`gh variable set RELAY_DEPLOY`) | refused | refused | refused |
+| Production deploy (`wrangler deploy`) | refused | refused | refused |
+
+`ov1201_owner_only_actions_stay_out_of_orchestrator_publications` publishes each
+of these twelve through the orchestrator's grant and checks that the
+configuration did not change. Each one published before the check existed. A
+step's own `operation.environment` cannot carry them either: the coding adapter
+refuses any step whose operation differs from the one it pins.
+
+This covers what publication adds. The orchestrator's own shell runs as the same
+Unix user, so the runner does not stop an agent that runs these commands
+directly. That limit comes from the Cloudflare and GitHub accounts, not from
+this grant.

@@ -144,14 +144,26 @@ impl Admission {
             self.require_person()?;
             self.require_owner()?;
         }
-        if let Action::Publish { reason, .. } = action {
+        if let Action::Publish { reason, expected_pin, definition, adapter, .. } = action {
             if self.seat != Seat::Person {
-                if !self.service.store.orchestrator_publishes_workflow(&self.workspace())
-                    .map_err(|_| DomainError::OperationFailed)? {
+                let store = &self.service.store;
+                if !store.orchestrator_publishes_workflow(&self.workspace()).map_err(|_| DomainError::OperationFailed)? {
                     return Err(DomainError::ScopeDenied { needed: "person" });
                 }
                 if !reason.as_ref().is_some_and(|r| farcooler_protocol::workflow_commands::valid_rework_reason(r)) {
                     return Err(DomainError::InvalidArgument { what: "reason" });
+                }
+                // The grant changes how the workflow routes, never what it runs (ov-1201): a gate command, an
+                // environment or a hook is how a definition would reach the owner's secrets, flags and deploys.
+                // Judged against the configuration this one replaces, which the write takes only while it is
+                // still the workspace's (`expected_pin`), so nothing published in between slips past.
+                let previous = match expected_pin {
+                    Some(pin) => Some(store.workflow_bundle(pin).map_err(|_| DomainError::OperationFailed)?
+                        .ok_or(DomainError::ScopeDenied { needed: "person" })?),
+                    None => None,
+                };
+                if !farcooler_store::workflow_publication::runs_the_same(previous.as_ref(), definition, adapter.as_deref()) {
+                    return Err(DomainError::ScopeDenied { needed: "a person's approval of a draft that changes commands, environment or hooks" });
                 }
             }
         }

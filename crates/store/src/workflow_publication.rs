@@ -13,6 +13,22 @@ pub fn configuration_pin(definition: &Definition, adapter: Option<&AdapterConfig
 pub fn notification_configuration_pin(definition: &Definition, adapter: Option<&AdapterConfiguration>, notifications: Option<&NotificationPolicy>) -> String {
     notifications.map_or_else(|| configuration_pin(definition, adapter), |p| farcooler_workflow::digest(&("workflow-bundle/v2", definition, adapter, p)))
 }
+/// ov-1201: whether a publication runs exactly what `previous` (the configuration it replaces) runs. Every process
+/// the engine starts comes from the adapter configuration: gate and check commands with their environments, the
+/// harness with the hooks files it pins, the reviewer, CI, landing and pull request commands. All of them run as the
+/// runner's Unix user, with whatever credentials its files hold, so only a person may change them. A step's own
+/// `operation.environment` may be dropped, or kept as the same step had it, never added to. Routes, models,
+/// deciders, limits and notifications are free to change.
+pub fn runs_the_same(previous: Option<&Configuration>, definition: &Definition, adapter: Option<&AdapterConfiguration>) -> bool {
+    fn environments(definition: &Definition) -> std::collections::BTreeMap<(&str, &str), &std::collections::BTreeMap<String, String>> {
+        definition.stages.iter().map(|s| ("", s))
+            .chain(definition.groups.iter().flat_map(|(group, g)| g.steps.iter().map(move |s| (group.as_str(), s))))
+            .map(|(group, s)| ((group, s.id.as_str()), &s.operation.environment)).collect()
+    }
+    let before = previous.map(|c| environments(&c.definition)).unwrap_or_default();
+    previous.and_then(|c| c.adapter.as_ref()) == adapter
+        && environments(definition).into_iter().all(|(step, e)| e.is_empty() || before.get(&step) == Some(&e))
+}
 pub enum Write<'a> {
     PublicationGrant { enabled: bool, revision: u64 },
     Rollback { expected_pin: &'a str, reason: &'a str, revision: u64 },
@@ -325,5 +341,25 @@ mod ov1179_rollback_tests {
         store.workflow_wire_write_by("ws","revoke","off",Some(&actor),Write::PublicationGrant {enabled:false,revision:0}).unwrap();
         assert!(!store.orchestrator_publishes_workflow("ws").unwrap());
         assert!(store.workflow_bundle(&second.pin()).unwrap().is_some(),"rollback retains the replaced bundle");
+    }
+    /// ov-1201: a step's environment may be dropped or kept as it was, never added to, on a ticket step or a
+    /// group's; no adapter is the same as none, and any other adapter is a change.
+    #[test]
+    fn ov1201_runs_the_same_only_with_the_same_commands_and_environments() {
+        let mut before = Definition::tracker("owner");
+        before.stages[0].operation.environment.insert("KEEP".into(), "1".into());
+        let previous = Configuration { pin: "p".into(), definition: before.clone(), adapter: None, notifications: None };
+        assert!(runs_the_same(Some(&previous), &before, None));
+        let mut dropped = before.clone(); dropped.stages[0].operation.environment.clear();
+        assert!(runs_the_same(Some(&previous), &dropped, None));
+        let mut added = before.clone(); added.stages[0].operation.environment.insert("GH_TOKEN".into(), "t".into());
+        assert!(!runs_the_same(Some(&previous), &added, None));
+        let mut moved = before.clone(); moved.stages[0].id = "elsewhere".into();
+        assert!(!runs_the_same(Some(&previous), &moved, None), "another step's environment");
+        let mut grouped = before.clone();
+        grouped.groups.insert("g".into(), farcooler_workflow::GroupDef { limit: None, exclusive: "main".into(), steps: before.stages.clone() });
+        assert!(!runs_the_same(Some(&previous), &grouped, None), "a group step's environment is its own");
+        assert!(!runs_the_same(None, &before, None), "nothing to keep");
+        assert!(runs_the_same(None, &Definition::tracker("orchestrator"), None));
     }
 }
