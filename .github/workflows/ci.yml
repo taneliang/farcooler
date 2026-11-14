@@ -433,7 +433,16 @@ jobs:
           targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.os }}
+          # This job runs a fixed suite of default, helper, linked and tailcat
+          # feature builds, in debug/test profiles for the host and aarch64
+          # Linux check target. Keep its workspace artifacts out of every other
+          # job's cache; changing this workflow changes the suite's identity.
+          # rust-cache also keys on the installed compiler and runner platform.
+          key: ${{ matrix.os }}-ci-suite-debug-test-host-aarch64-default-helper-linked-tailcat-${{ hashFiles('.github/workflows/ci.yml') }}
+          cache-workspace-crates: ${{ matrix.os == 'macos-latest' }}
+          # Permit a PR's first run to populate its own scoped cache so a rerun
+          # can measure reuse; GitHub does not expose PR caches to main.
+          save-if: ${{ matrix.os == 'macos-latest' || github.ref == 'refs/heads/main' }}
 
       # cargo-nextest runs the tests below (ov-540). `cargo test` ran this
       # workspace's ~90 test binaries one after another, so a binary whose
