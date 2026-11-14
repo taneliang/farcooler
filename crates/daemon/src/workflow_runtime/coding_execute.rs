@@ -513,6 +513,11 @@ impl Exec {
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
+                // A repeated Run may still have a writer. Check before touching its tree:
+                // even a preparation failure cannot authorize a retry of that invocation.
+                if matches!(kind, StageKind::Run) && self.process_log(binding).try_exists()? {
+                    return Err(Error::Refused("configured process already has launch evidence"));
+                }
                 // Nothing in preparation launches a gate process. A group's private tree can
                 // safely retry these failures; errors after launch still need ownership settlement.
                 let prepared = async {

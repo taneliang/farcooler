@@ -1285,8 +1285,14 @@ async fn an_unproved_gate_settlement_refuses_retry_until_ownership_is_settled() 
     }).await;
     let pid = child.id().unwrap();
     let alive = !crate::effect_runner::Group::gone(pid).unwrap();
+    // Make preparation fail deterministically if it is reached before checking the
+    // existing launch. The old gate is still alive, so even this failure is unsafe.
+    let git_link = runtime.tree(&binding).join(".git");
+    let original = std::fs::read(&git_link).unwrap();
+    std::fs::write(&git_link, "gitdir: missing-gate-git-dir\n").unwrap();
     let (_cancel, cancelled) = tokio::sync::watch::channel(false);
     let repeated = runtime.execute_coding("w", &binding, cancelled).await;
+    std::fs::write(&git_link, original).unwrap();
     // Keep the leader reaped as ownership reconciliation stops the old group.
     let reaped = tokio::spawn(async move { child.wait().await.unwrap() });
     let outcome = result.unwrap_or(Outcome::Uncertain);
