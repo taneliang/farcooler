@@ -45,8 +45,9 @@ jobs:
   # time for the daily site-proof refresh. They `needs:` this job and test its
   # output with `!cancelled()` and `!= 'false'`, so anything else (this job
   # failing, an empty output) runs them, and a skipped job reports as passed,
-  # so the run still ends green. The lints in `wire`, the tunnel, the relay,
-  # the site and the web jobs always run.
+  # so the run still ends green. Wire always runs; relay and web use their
+  # family flags. Tunnel and site run for every non-doc change (ov-1189);
+  # docs/report-only groups skip both here and in the landing gate.
   #
   # Judged against the nearest green CI run on main, not `before`, exactly as
   # `ios-ui-plan` does: a code push whose run was cancelled or went red must
@@ -60,6 +61,7 @@ jobs:
       actions: read
       contents: read
     outputs:
+      non_docs: ${{ steps.changes.outputs.non_docs }}
       app: ${{ steps.changes.outputs.app }}
       rust: ${{ steps.changes.outputs.rust }}
       apple: ${{ steps.changes.outputs.apple }}
@@ -332,6 +334,8 @@ jobs:
   # bills at ten times the minutes for the same answer.
   tunnel:
     name: Tunnel (Go)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.non_docs != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -1611,6 +1615,8 @@ jobs:
 
   site:
     name: Site
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.non_docs != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:

@@ -48,7 +48,17 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # never match. No test reads docs/ or a root-level .md (checked for ov-507:
 # the Rust and Swift tests that name a README.md write their own into a
 # scratch repository).
+# Only documentation and investigation artifacts may skip tunnel and site.
+# Keep this narrower than SITE_ONLY, which also includes executable web inputs.
+DOCS_ONLY = [
+    r"docs/.+",
+    r"\.claude/agent/reports/.+",
+    r"reports/.+",
+    r"[^/]+\.md",
+]
+
 SITE_ONLY = [
+    *DOCS_ONLY,
     r"services/site/.+",
     # The web client's Worker and the session code it shares with the site
     # (ov-764): TypeScript Workers that no app job builds or tests. Its wasm
@@ -56,12 +66,6 @@ SITE_ONLY = [
     r"services/web/.+",
     r"services/common/.+",
     r"\.github/workflows/web\.yml",
-    r"docs/.+",
-    # Investigation artifacts are not build inputs (ov-1189). Keep this in CI
-    # too, so the landing gate never invents a weaker report-only exception.
-    r"\.claude/agent/reports/.+",
-    r"reports/.+",
-    r"[^/]+\.md",
     r"\.github/workflows/site\.yml",
     r"\.github/workflows/site-analytics\.yml",
     r"scripts/site-proof-milestones\.json",
@@ -77,6 +81,7 @@ def pattern(names):
 
 
 SITE = pattern(SITE_ONLY)
+DOCS = pattern(DOCS_ONLY)
 
 
 # Which job families a path reaches (ov-1021). `app` stays what it was: any file off the
@@ -85,7 +90,7 @@ SITE = pattern(SITE_ONLY)
 # wire in proto/, Cargo.*, every crate the apps link, the toolchain, scripts, the
 # workflows and actions), reaches ALL of them: a job a change can break never skips.
 FAMILIES = ["rust", "apple", "android", "web", "relay"]
-FLAGS = [*FAMILIES, "docs", "app"]
+FLAGS = [*FAMILIES, "docs", "app", "non_docs"]
 # crates/android (farcooler-jni) is linked by Android only; crates/cli is built by the Mac
 # (apps/macos/test.sh `cargo build --bins`) and not by Android; crates/web is its own
 # wasm workspace, linked by neither app (checked with `cargo metadata`, ov-1021). Every
@@ -122,7 +127,8 @@ def families(files):
         else:
             app = True
             hit |= narrow if narrow is not None else set(FAMILIES)
-    return {**{k: k in hit for k in FAMILIES}, "docs": docs, "app": app}
+    return {**{k: k in hit for k in FAMILIES}, "docs": docs, "app": app,
+            "non_docs": any(not DOCS.fullmatch(f) for f in files)}
 
 
 def canary_plan():
@@ -289,7 +295,16 @@ def self_test():
         expect(f"{path} selects only cheap jobs", families([path]),
                {**{k: False for k in ALL}, "docs": True, "app": False})
     expect("a Swift change leaves docs off", families(["apps/macos/a.swift"])["docs"], False)
-    expect("every flag is on when nothing is known", families(None), {k: True for k in [*ALL, "docs", "app"]})
+    for files, want in [
+        (["docs/a.md", "README.md", "reports/run.txt", ".claude/agent/reports/a.md"], False),
+        (["docs/a.md", "apps/android/a.kt"], True),
+        (["services/site/a.ts"], True),
+        (["scripts/site-proof.py"], True),
+        (["reportsx/a.md"], True),
+        ([".claude/agent/reports"], True),
+    ]:
+        expect(f"non-doc CI suites for {files}", families(files)["non_docs"], want)
+    expect("every flag is on when nothing is known", families(None), {k: True for k in [*ALL, "docs", "app", "non_docs"]})
 
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp)
@@ -353,15 +368,22 @@ def self_test():
         env.pop("CANDIDATES_ERROR", None)
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("the script exits 0", done.returncode, 0)
-        expect("and writes every flag off but docs", outputs.read_text() if outputs.exists() else None,
-               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\n")
+        expect("site files keep non-doc suites on", outputs.read_text() if outputs.exists() else None,
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=true\n")
         outputs.unlink()
+        env.update(EVENT="pull_request", BASE=b, HEAD=c)
+        done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
+        expect("a docs-only PR exits 0", done.returncode, 0)
+        expect("docs-only writes non-doc suites off", outputs.read_text() if outputs.exists() else None,
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=false\n")
+        outputs.unlink()
+        env.update(EVENT="push", AFTER=c)
         env["CANDIDATES_ERROR"] = "gh: Server Error (HTTP 502)"
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("a failed listing exits 0", done.returncode, 0)
         expect("with a notice", done.stdout.startswith("::notice::could not list the green CI runs"), True)
         expect("and writes every flag on", outputs.read_text() if outputs.exists() else None,
-               "rust=true\napple=true\nandroid=true\nweb=true\nrelay=true\ndocs=true\napp=true\n")
+               "rust=true\napple=true\nandroid=true\nweb=true\nrelay=true\ndocs=true\napp=true\nnon_docs=true\n")
 
     for failure in failures:
         print(f"ci-changes self-test: {failure}", file=sys.stderr)

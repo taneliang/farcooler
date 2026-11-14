@@ -34,7 +34,8 @@ not know fails the self-test.
 
 Which jobs a change reaches (ov-1189). ci-changes.py's families are the minimum
 coverage: their union over the combined diff selects the platform suites.
-Wire and doc-comments always run; docs and reports need no builds. Cross-cutting
+Wire and doc-comments always run; docs and reports need no builds. Tunnel and
+site retain CI coverage for every non-doc change. Cross-cutting
 inputs (Cargo.lock, the protocol crate, workflows, unknown paths) run everything.
 The ov-1116 reverse crate closure is printed for Rust changes. It remains an
 impact diagnostic: CI still runs the full Rust suite, so this gate retains it,
@@ -389,10 +390,8 @@ def jobs_for(files, site, ios_relevant, commands, families):
                 add(jobs, f)
         if all(flags[k] for k in FAMILY_JOBS):
             add(set(JOBS), f)
-        if f.startswith(("services/site/", "services/web/", "services/common/")):
-            add({"site"}, f)
-        if f.startswith("crates/tailcat/"):
-            add({"tunnel"}, f)
+        if flags["non_docs"]:
+            add({"site", "tunnel"}, f)
     return reach
 
 
@@ -1230,31 +1229,32 @@ def _self_test():
         return set(jobs_for(list(paths), changes.SITE, ios_rel, commands, changes.families))
 
     always = {"wire", "doc-comments"}
+    non_docs = always | {"site", "tunnel"}
     expect("docs only: the lints alone", reaches("docs/releasing.md", "README.md"), always)
-    expect("a site-proof file: the lints alone", reaches("scripts/site-proof.py"), always)
+    expect("site-proof retains non-doc CI jobs", reaches("scripts/site-proof.py"), non_docs)
     expect("an unknown script: full fallback", reaches("scripts/nonexistent-lane-script.sh"), set(JOBS))
     expect("a script a job names reaches that job", "swift-tests" in reaches("scripts/swift-test-guard.sh"), True)
     expect("scripts retain CI coverage", "android" in reaches("scripts/swift-test-guard.sh"), True)
     expect("the nextest wrapper reaches rust", "rust" in reaches("scripts/tmux-leak-check.py"), True)
-    expect("relay", reaches("services/relay/src/index.ts"), always | {"relay"})
-    expect("site", reaches("services/site/src/index.ts"), always | {"site"})
-    expect("common reaches web, site and relay", reaches("services/common/session.ts"), always | {"web", "site", "relay"})
-    expect("web", reaches("services/web/src/a.ts"), always | {"web", "site"})
-    expect("android", reaches("apps/android/app/src/A.kt"), always | {"android", "relay"})
-    expect("ios retains the Apple family", reaches("apps/ios/FarCooler/App.swift"), always | FAMILY_JOBS["apple"])
-    expect("macos retains the Apple family", reaches("apps/macos/Sources/x.swift"), always | FAMILY_JOBS["apple"])
-    expect("agentkit reaches the iOS app and the Android tests that read it", reaches("apps/shared/AgentKit/Sources/a.swift"), always | {"swift", "swift-tests", "ios", "android"})
+    expect("relay", reaches("services/relay/src/index.ts"), non_docs | {"relay"})
+    expect("site", reaches("services/site/src/index.ts"), non_docs | {"site"})
+    expect("common reaches web, site and relay", reaches("services/common/session.ts"), non_docs | {"web", "site", "relay"})
+    expect("web", reaches("services/web/src/a.ts"), non_docs | {"web", "site"})
+    expect("android", reaches("apps/android/app/src/A.kt"), non_docs | {"android", "relay"})
+    expect("ios retains the Apple family", reaches("apps/ios/FarCooler/App.swift"), non_docs | FAMILY_JOBS["apple"])
+    expect("macos retains the Apple family", reaches("apps/macos/Sources/x.swift"), non_docs | FAMILY_JOBS["apple"])
+    expect("agentkit reaches the iOS app and the Android tests that read it", reaches("apps/shared/AgentKit/Sources/a.swift"), non_docs | {"swift", "swift-tests", "ios", "android"})
     expect("tailcat reaches the tunnel", "tunnel" in reaches("crates/tailcat/go/a.go"), True)
     expect("a daemon change reaches every family (ci-changes.py)",
            reaches("crates/daemon/src/git.rs"), set(JOBS))
-    expect("the JNI crate reaches Android and Rust, not the Mac", reaches("crates/android/src/lib.rs"), always | {"rust", "android"})
-    expect("the CLI crate reaches the Mac and Rust, not Android", reaches("crates/cli/src/main.rs"), always | {"rust", "swift", "swift-tests", "ios"})
+    expect("the JNI crate reaches Android and Rust, not the Mac", reaches("crates/android/src/lib.rs"), non_docs | {"rust", "android"})
+    expect("the CLI crate reaches the Mac and Rust, not Android", reaches("crates/cli/src/main.rs"), non_docs | {"rust", "swift", "swift-tests", "ios"})
     expect("core reaches iOS", "ios" in reaches("crates/core/src/lib.rs"), True)
-    expect("the lockfile reaches every app job", reaches("Cargo.lock") >= always | APP_JOBS - {"tunnel"}, True)
+    expect("the lockfile reaches every app job", reaches("Cargo.lock") >= non_docs | APP_JOBS - {"tunnel"}, True)
     expect("ci.yml reaches every job", reaches(".github/workflows/ci.yml"), set(JOBS))
     expect("another workflow: full fallback", reaches(".github/workflows/canary.yml"), set(JOBS))
     expect("an action: full fallback", reaches(".github/actions/ios-ui-shard/action.yml"), set(JOBS))
-    expect("an unknown path takes the safe side", reaches("mystery/file.txt") >= always | APP_JOBS, True)
+    expect("an unknown path takes the safe side", reaches("mystery/file.txt") >= non_docs | APP_JOBS, True)
 
     # The diff: commits, uncommitted edits and untracked files all count.
     with tempfile.TemporaryDirectory() as t:

@@ -231,7 +231,9 @@ covers the combined diff of every folded ticket even if `origin/main` moves.
 An explicit `--base` overrides it. CI's path families are the minimum coverage;
 shared inputs and unclassified paths select everything. Docs and reports under
 `docs/`, `reports/` and `.claude/agent/reports/` run only the cheap checks, without
-queuing a build. Rust changes print the ov-1116 reverse crate closure when
+queuing a build. Tunnel and site run for every non-doc change in both CI and
+the landing gate; CI uses the shared `non_docs` output to skip them only for
+docs/report-only diffs. Rust changes print the ov-1116 reverse crate closure when
 metadata is available, while retaining CI's full Rust suites, feature checks and
 doctests: the shadow selector's skips remain disabled.
 

@@ -2,6 +2,7 @@
 """ov-1189: combined group selection, CI coverage floor and build-free reports."""
 import importlib.util
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -47,6 +48,36 @@ class LandingTests(unittest.TestCase):
                 required = set().union(*(v for k, v in jobs.items() if flags[k]))
                 self.assertLessEqual(required, selected([path]))
 
+    def test_gate_covers_ci_job_conditions_including_unconditional_jobs(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("      non_docs: ${{ steps.changes.outputs.non_docs }}", workflow.splitlines())
+        for path in ["apps/android/a.kt", "apps/macos/a.swift", "services/site/a.ts",
+                     "services/common/a.ts", "services/relay/a.ts", "scripts/site-proof.py",
+                     "crates/android/src/lib.rs", "Cargo.lock", "docs/spike.md",
+                     "reports/result.txt", ".claude/agent/reports/result.md"]:
+            flags = changes.families([path])
+            required = set()
+            for job in lane.JOBS:
+                if job == "doc-comments":  # Separate, unconditional workflow.
+                    required.add(job)
+                    continue
+                block = lane.job_block(workflow, job)
+                condition = next((line.strip()[4:] for line in block
+                                  if line.startswith("    if:")), None)
+                if condition is None:
+                    required.add(job)
+                    continue
+                match = re.fullmatch(
+                    r"\$\{\{ !cancelled\(\) && needs.changes.outputs.([a-z_]+) != 'false' \}\}",
+                    condition)
+                self.assertIsNotNone(match, f"unrecognized CI condition for {job}: {condition}")
+                if job != "ios":
+                    self.assertIn("    needs: changes", block)
+                if flags[match[1]]:
+                    required.add(job)
+            with self.subTest(path=path):
+                self.assertLessEqual(required, selected([path]))
+
     def test_cross_cutting_paths_select_every_suite(self):
         for path in ["Cargo.lock", "Cargo.toml", "crates/protocol/src/lib.rs",
                      "proto/farcooler.proto", ".github/workflows/ci.yml",
@@ -56,7 +87,7 @@ class LandingTests(unittest.TestCase):
 
     def test_mixed_group_unions_families(self):
         self.assertEqual(selected(["apps/android/a.kt", "apps/macos/a.swift", "docs/spike.md"]),
-                         {"wire", "doc-comments", "android", "relay", "swift", "swift-tests", "ios"})
+                         {"wire", "doc-comments", "site", "tunnel", "android", "relay", "swift", "swift-tests", "ios"})
         for path in ["docs/spike.md", ".claude/agent/reports/ov-1189/result.md", "reports/ov-1189/run.txt"]:
             self.assertEqual(selected([path]), {"wire", "doc-comments"})
 
@@ -133,7 +164,7 @@ class LandingTests(unittest.TestCase):
                                   "--base", "HEAD", "--dry-run"], env=env,
                                  capture_output=True, text=True)
             self.assertEqual(dry.returncode, 0, dry.stderr)
-            self.assertIn("1 changed file(s) against HEAD; jobs: wire, doc-comments, swift-tests, swift, ios", dry.stdout)
+            self.assertIn("1 changed file(s) against HEAD; jobs: wire, doc-comments, site, tunnel, swift-tests, swift, ios", dry.stdout)
             git("add", ".")
             git("commit", "-qm", "fourth ticket")
             git("mv", "apps/android/a.kt", "docs/moved.kt")
