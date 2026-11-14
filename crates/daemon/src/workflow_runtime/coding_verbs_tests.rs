@@ -1214,3 +1214,55 @@ async fn a_fold_tree_deleted_mid_gate_retries_the_gate_without_split() {
     assert_eq!(outbox(&runtime, StageKind::Fold), 2, "one fold per original group, no split");
     assert_eq!(outbox(&runtime, StageKind::Run), 4, "the deleted tree and ENOSPC each retry only the gate");
 }
+
+#[tokio::test]
+async fn prelaunch_gate_enospc_retries_boundedly_without_split_or_rework() {
+    use std::os::unix::fs::PermissionsExt;
+    struct RestoreGit;
+    impl Drop for RestoreGit {
+        fn drop(&mut self) { crate::git::PROGRAM.with(|p| *p.borrow_mut() = None); }
+    }
+    for persistent in [false, true] {
+        let (dir, mut runtime) = lander("pass").await;
+        let definition = batched_push(&runtime, "any", 5000);
+        for item in ["ahead", "one", "two"] { at_join(&mut runtime, item, &definition).await; }
+        let wrapper = dir.path().join("git-prelaunch-enospc.py");
+        let marker = dir.path().join("prelaunch-failures");
+        // Only the batch's pre-launch settlement fails. No gate process has started,
+        // and the real Git error is returned through git_recorded as Error::Refused.
+        std::fs::write(&wrapper, format!(r#"#!/usr/bin/python3
+import os, pathlib, sys
+args = sys.argv[1:]
+marker = pathlib.Path({marker:?})
+if args == ['reset', '--hard', '--quiet'] and len(list(pathlib.Path.cwd().glob('result-*.txt'))) > 1:
+    count = int(marker.read_text()) if marker.exists() else 0
+    if {persistent} or count == 0:
+        marker.write_text(str(count + 1))
+        print('fatal: cannot write index: No space left on device', file=sys.stderr)
+        sys.exit(128)
+os.execv('/usr/bin/git', ['/usr/bin/git', *args])
+"#, marker = marker.to_str().unwrap(), persistent = if persistent { "True" } else { "False" })).unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _restore = RestoreGit;
+        crate::git::PROGRAM.with(|p| *p.borrow_mut() = Some(wrapper.into_os_string()));
+        for item in ["ahead", "one", "two"] { command(&runtime, Command::Queue { item: item.into() }); }
+        let mut finished = None;
+        for time in 2..200 {
+            runtime.pump(time).await.unwrap();
+            let effects = runtime.store.workflow_outbox("w").unwrap();
+            assert!(effects.iter().filter(|s| s.effect.kind == EffectKind::Execute(StageKind::Run))
+                .all(|s| s.dispatch_state != "uncertain"), "a pre-launch failure must be settled as safe immediately");
+            let state = runtime.state("w").unwrap().unwrap();
+            if matches!(phase_of(&state, "two"), Some(Phase::Done | Phase::Failed)) { finished = Some(state); break; }
+        }
+        let state = finished.expect("bounded gate retries must settle");
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), if persistent { "3" } else { "1" });
+        assert_eq!(phase_of(&state, "ahead"), Some(Phase::Done));
+        for item in ["one", "two"] {
+            assert_eq!(phase_of(&state, item), Some(if persistent { Phase::Failed } else { Phase::Done }));
+        }
+        assert_eq!(outbox(&runtime, StageKind::Run), if persistent { 4 } else { 3 }, "at most two gate retries");
+        assert_eq!(outbox(&runtime, StageKind::Fold), 2, "only the original groups fold, no Split");
+        assert_eq!(outbox(&runtime, StageKind::Build), 3, "no member rework");
+    }
+}

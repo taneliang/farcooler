@@ -70,3 +70,32 @@ terminal recovery test passed when rerun separately (1 passed, 0 failed).
 All other targets in the five-crate command passed, including doctests. The
 process/tmux leak wrapper reported no leaks. The full command exited 101 because
 of the single native terminal test failure above; it was not a clean full run.
+
+## Fix round 2: gate preparation failures
+
+The review identified errors before the landing gate launches that escaped
+`execute_coding` and were observed as `Uncertain`. Preparation now has a separate
+result boundary covering missing-tree restoration, tree settlement, candidate
+verification, and command construction. For a landing group's private Run tree,
+these failures return `SafeFailure` and spend the existing bounded retry budget.
+The boundary ends before `run_coding`; process ownership and reconciliation keep
+their existing handling. Named trees retain their existing refusal behavior.
+
+The regression injects ENOSPC at the Git boundary during the multi-member gate's
+pre-launch settlement. It checks every pump for an erroneous `uncertain`
+dispatch, then checks that a transient fault finishes and a persistent fault
+fails after three total gate attempts. Both cases retain the two original fold
+groups and three original builds: no split or member rework.
+
+Before the fix, the test failed with `a pre-launch failure must be settled as
+safe immediately`. With the fix, both fault cases passed (1 test, 0 failures).
+The command was `cargo test -p farcooler-daemon --lib prelaunch_gate_enospc --
+--nocapture`, using the same clean environment and worktree-local target as above.
+
+Round 2 full affected verification: the five-crate `cargo test` command above,
+including doctests and the process/tmux leak wrapper, exited 0. The daemon library
+suite reported 3,084 passed, 0 failed, and 13 ignored. All four landing regressions
+(pre-launch ENOSPC, cherry-pick ENOSPC, deleted fold tree, and interrupted CI)
+passed, as did the native terminal recovery test that failed in round 1.
+Workspace clippy (`--workspace --all-targets -- -D warnings`) also exited 0.
+File-size budget, doc-comment, and whitespace checks passed.

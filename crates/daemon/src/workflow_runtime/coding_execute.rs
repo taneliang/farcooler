@@ -497,38 +497,52 @@ impl Exec {
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
-                // A missing engine tree is infrastructure damage. Restore the exact folded commit,
-                // never re-fold members against a newer base or recreate a person's named tree.
-                if matches!(kind, StageKind::Run) && !binding.effect.members.is_empty() && !tree.try_exists()? {
-                    let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c))
-                        .ok_or(Error::Refused("missing gate candidate"))?;
-                    self.git_recorded(binding, &self.repository(), &["worktree", "prune"]).await?;
-                    let branch = format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]);
-                    let exists = self.try_git(binding, &self.repository(),
-                        &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await?.0;
-                    if exists {
-                        self.git_recorded(binding, &self.repository(),
-                            &["worktree", "add", &tree.to_string_lossy(), &branch]).await?;
-                    } else {
-                        self.git_recorded(binding, &self.repository(),
-                            &["worktree", "add", "-b", &branch, &tree.to_string_lossy(), candidate]).await?;
+                // Nothing in preparation launches a gate process. A group's private tree can
+                // safely retry these failures; errors after launch still need ownership settlement.
+                let prepared = async {
+                    // A missing engine tree is infrastructure damage. Restore the exact folded commit,
+                    // never re-fold members against a newer base or recreate a person's named tree.
+                    if matches!(kind, StageKind::Run) && !binding.effect.members.is_empty() && !tree.try_exists()? {
+                        let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c))
+                            .ok_or(Error::Refused("missing gate candidate"))?;
+                        self.git_recorded(binding, &self.repository(), &["worktree", "prune"]).await?;
+                        let branch = format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]);
+                        let exists = self.try_git(binding, &self.repository(),
+                            &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await?.0;
+                        if exists {
+                            self.git_recorded(binding, &self.repository(),
+                                &["worktree", "add", &tree.to_string_lossy(), &branch]).await?;
+                        } else {
+                            self.git_recorded(binding, &self.repository(),
+                                &["worktree", "add", "-b", &branch, &tree.to_string_lossy(), candidate]).await?;
+                        }
                     }
-                }
-                spotlight::exclude_builds(&tree).await;
-                if matches!(kind, StageKind::Run) && tree.try_exists()? { self.settle_run_tree(binding, &tree).await?; }
-                if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
-                if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
-                if matches!(kind, StageKind::Review(Reviewer::Agent)) { self.choose_review_model(binding, &tree).await?; }
-                if matches!(kind, StageKind::Build | StageKind::Review(Reviewer::Agent)) { self.install_codex_hooks(binding, &tree).await?; }
+                    spotlight::exclude_builds(&tree).await;
+                    if matches!(kind, StageKind::Run) && tree.try_exists()? { self.settle_run_tree(binding, &tree).await?; }
+                    if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
+                    if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
+                    if matches!(kind, StageKind::Review(Reviewer::Agent)) { self.choose_review_model(binding, &tree).await?; }
+                    if matches!(kind, StageKind::Build | StageKind::Review(Reviewer::Agent)) { self.install_codex_hooks(binding, &tree).await?; }
+                    self.coding_command(binding)
+                }.await;
+                let command = match prepared {
+                    Ok(command) => command,
+                    Err(error) if matches!(kind, StageKind::Run) && !binding.effect.members.is_empty()
+                        && binding.effect.tree.is_none() => {
+                        tracing::warn!(%error, "landing gate preparation failed");
+                        return Ok(Outcome::SafeFailure);
+                    }
+                    Err(error) => return Err(error),
+                };
                 if let Some(check) = self.review_check(binding) {
                     // No cleanup while the reviewer reads: both see the same candidate. Both futures are
                     // drained even on failure, so neither writer survives the stage's result.
                     let (review, gate) = tokio::join!(
-                        self.run_coding(binding, self.coding_command(binding)?, cancel.clone()),
+                        self.run_coding(binding, command, cancel.clone()),
                         self.run_coding(&check, self.coding_command(&check)?, cancel));
                     review?; gate?;
                 } else {
-                    if let Err(error) = self.run_coding(binding, self.coding_command(binding)?, cancel).await {
+                    if let Err(error) = self.run_coding(binding, command, cancel).await {
                     if matches!(kind, StageKind::Run) && matches!(&error, Error::Io(_)) {
                         return Ok(Outcome::SafeFailure);
                     }
