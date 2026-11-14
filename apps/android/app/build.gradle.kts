@@ -320,7 +320,18 @@ android {
                 }
                 if (capturing) {
                     test.maxParallelForks = 2
-                    test.filter.includeTestsMatching("com.farcooler.capture.*")
+                    // The two CI shards partition every class by its initial. The
+                    // complement also catches new classes with non-letter initials.
+                    val shard = project.findProperty("farcooler.captureShard") as String?
+                    require(shard == null || shard == "first" || shard == "rest")
+                    if (shard == "first") {
+                        ('A'..'M').forEach { test.filter.includeTestsMatching("com.farcooler.capture.$it*") }
+                    } else {
+                        test.filter.includeTestsMatching("com.farcooler.capture.*")
+                        if (shard == "rest") {
+                            ('A'..'M').forEach { test.filter.excludeTestsMatching("com.farcooler.capture.$it*") }
+                        }
+                    }
                     (project.findProperty("farcooler.captureJdk") as String?)?.let {
                         test.executable = "$it/bin/java"
                     }
