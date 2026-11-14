@@ -1,0 +1,16 @@
+# Flaky-test quarantine (ov-1229). See docs/ci/quarantine.md.
+#
+# One test per line, four fields separated by whitespace:
+#
+#   <binary-id>  <test-name>  <ticket>  <expiry>
+#
+#   binary-id   nextest's binary id: `farcooler-daemon::a_foo` for an integration test,
+#               `farcooler-tmux` for a unit test inside a package
+#   test-name   the full test path nextest prints, e.g. `server::tests::it_attaches`
+#   ticket      the ticket that tracks the fix, e.g. `ov-1200`
+#   expiry      YYYY-MM-DD; on or after this day the lint fails until the entry is
+#               fixed and removed (or, with the ticket's say-so, renewed)
+#
+# Blank lines and lines starting with # are ignored. Example:
+#
+#   farcooler-daemon::a_foo  tests::it_waits  ov-9999  2026-12-01

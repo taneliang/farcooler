@@ -1005,7 +1005,7 @@ def _self_test():
         ("wire", "./scripts/proto-lint.py --channel canary"),
         ("wire", "./scripts/copy-lint.py"),
         ("wire", "./scripts/test-leak-check.py --lint"),
-        ("rust", "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace"),
+        ("rust", "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest run --profile ci --workspace"),
         ("rust", "cargo clippy --workspace --all-targets -- -D warnings"),
         ("rust", "cargo test --workspace --doc"),
         ("swift-tests", "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit"),
