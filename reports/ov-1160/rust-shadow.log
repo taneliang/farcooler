@@ -1,0 +1,31 @@
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.861s
+
+OK
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: accepted; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.01281462500000008; warm wall savings: -0.01s.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.011832416999999928; warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: accepted; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.012846874999999924; warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+

@@ -1,0 +1,18 @@
+{
+  "collected_at": "2026-11-14T05:25:57.251314+00:00",
+  "machine": "arm64",
+  "cpu_count": 10,
+  "tools": {
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+    "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)",
+    "nextest": "cargo-nextest 0.9.148 (cd1d6d546 2026-10-07)\nrelease: 0.9.148\ncommit-hash: cd1d6d5467322dbc0d39a80cb671d000ac302798\ncommit-date: 2026-10-07\nhost: aarch64-apple-darwin",
+    "tmux": "tmux 3.8",
+    "actionlint": "1.7.12\ninstalled from Homebrew\nbuilt with go1.26.3 compiler for darwin/arm64"
+  },
+  "sha256": {
+    "Cargo.lock": "7af6be68e45604c1c695cfa919adb005a82f7576e1619f0904c60c791bbd2ac3",
+    "scripts/macos-rust-tests.py": "e2058d29dbe97a39fddf7d6d15f7ca9b3e17ceef954cce2f0104b402cb5f0935",
+    "scripts/macos-rust-tests.json": "826c76b6b34617e94f52818b5cb512ae196db1aa72cdc85e00fa6339dc27179f",
+    "reports/ov-1160/measure.py": "415f30979f7e564dfbe02ee4b2568c4f6700ec88272e59745e49e9880b68a34a"
+  }
+}

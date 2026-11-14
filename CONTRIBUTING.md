@@ -151,6 +151,12 @@ how to build on the runner itself instead.
 | Relay | `cd services/relay && npm ci && npm test` |
 | Tunnel | `cd crates/tailcat/go && gofmt -l . && go vet ./... && go test ./...`, once with `CGO_ENABLED=1` and once with `0` |
 
+Per-push Rust CI runs the full workspace suite on Linux and builds every
+workspace test target on macOS, where it runs the native selection in
+`scripts/macos-rust-tests.json`. `python3 scripts/macos-rust-tests.py --self-test --check`
+rejects uncovered Mac-specific source scopes. Nightly on main runs the full
+Mac suite. The local lane gate keeps one full workspace run.
+
 A few things that save time:
 
 - `cargo test --workspace` stops at the first failing test binary unless you

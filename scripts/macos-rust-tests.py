@@ -5,7 +5,7 @@
 scope mentioning target_os=macos (including cfg!, cfg_attr, all/any and file
 level cfg) must be selected in its entirety. No Rust parser guessing where
 an attribute ends: select the whole top-level module, or whole package for
-crate roots. Separate *_tests files belong to the corresponding module.
+crate roots. Explicit #[path] test files belong to the module which includes them.
 The JSON also records native coverage which has no explicit cfg in our code
 (e.g. notify's FSEvents backend). Linux and nightly Mac run everything.
 """
@@ -22,13 +22,25 @@ SELECTION = ROOT / 'scripts/macos-rust-tests.json'
 MAC = re.compile(r'(?:target_os\s*=\s*"macos"|target_vendor\s*=\s*"apple")')
 
 
-def scope(path):
+def scope(path, aliases=None, seen=(), roots=()):
+    if path in roots:
+        return 'packages', None
+    aliases = aliases or {}
+    if path in seen:
+        return 'packages', None
+    if path in aliases:
+        if aliases[path] is None:
+            return 'packages', None
+        owner, name = aliases[path]
+        if owner in roots or owner.as_posix() in ('src/lib.rs', 'src/main.rs'):
+            return 'modules', name
+        return scope(owner, aliases, (*seen, path), roots)
     parts = path.parts
     if parts[0] == 'tests':
-        return 'binaries', parts[1].removesuffix('.rs')
-    if parts[0] == 'src' and parts[1] not in ('lib.rs', 'main.rs'):
-        # All nested files are covered by the top-level module's prefix.
-        return 'modules', parts[1].removesuffix('.rs').removesuffix('_tests')
+        # Shared integration helpers can be included by many binaries.
+        return ('binaries', path.stem) if len(parts) == 2 else ('packages', None)
+    if parts[0] == 'src' and parts[1] not in ('lib.rs', 'main.rs', 'bin'):
+        return 'modules', parts[1].removesuffix('.rs')
     return 'packages', None
 
 
@@ -52,13 +64,29 @@ def check(root, selection):
         body = manifest.read_text()
         package = re.search(r'(?m)^name\s*=\s*"([^"]+)"', body).group(1)
         crate = manifest.parent
-        for source in sorted(crate.rglob('*.rs')):
-            if 'target' in source.relative_to(crate).parts:
-                continue
-            if MAC.search(source.read_text()):
-                kind, name = scope(source.relative_to(crate))
+        # Custom Cargo target roots have root-level test names too; a file
+        # named src/darwin.rs is not necessarily a `darwin::` module.
+        roots = {Path('src/lib.rs'), Path('src/main.rs')}
+        roots.update(Path(p) for p in re.findall(r'\bpath\s*=\s*"([^"]+\.rs)"', body))
+        sources = {p.relative_to(crate): p.read_text() for p in sorted(crate.rglob('*.rs'))
+                   if 'target' not in p.relative_to(crate).parts}
+        aliases = {}
+        for path, content in sources.items():
+            for relative, name in re.findall(r'#\[path\s*=\s*"([^"]+)"\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;', content):
+                target = (crate / path.parent / relative).resolve()
+                try:
+                    target = target.relative_to(crate.resolve())
+                except ValueError:
+                    if target.exists() and MAC.search(target.read_text()) and package not in selection['packages']:
+                        errors.append(f'{target}: shared Mac-specific source requires whole package {package}')
+                    continue
+                owner = (path, name)
+                aliases[target] = owner if target not in aliases or aliases[target] == owner else None
+        for source, content in sources.items():
+            if MAC.search(content):
+                kind, name = scope(source, aliases, roots=roots)
                 if not covered(selection, package, kind, name):
-                    errors.append(f'{source.relative_to(root)}: select {package} {kind} {name or "(whole crate)"}')
+                    errors.append(f'{(crate / source).relative_to(root)}: select {package} {kind} {name or "(whole crate)"}')
         if MAC.search(body) and not (package in selection['packages'] or any(
                 selection.get(kind, {}).get(package) for kind in ('modules', 'binaries'))):
             errors.append(f'{manifest.relative_to(root)}: Mac-specific crate has no selection')
@@ -69,8 +97,7 @@ def expression(selection):
     terms = [f'package(={p})' for p in sorted(selection['packages'])]
     for package, modules in sorted(selection['modules'].items()):
         for module in sorted(modules):
-            # binary kind avoids a coincidentally named integration test.
-            terms.append(f'(package(={package}) and kind(lib) and test(/^{module}::/))')
+            terms.append(f'(package(={package}) and test(/^{module}::/))')
     for package, binaries in sorted(selection['binaries'].items()):
         for binary in sorted(binaries):
             terms.append(f'(package(={package}) and binary(={binary}))')
@@ -116,6 +143,13 @@ def self_test():
         fixed['packages']['new-mac'] = 'Mac-only crate'
         assert not check(root, fixed)
         assert 'package(=new-mac)' in expression(fixed)
+        (crate / 'src/lib.rs').unlink()
+        (crate / 'Cargo.toml').write_text('[package]\nname = "new-mac"\n[lib]\npath = "src/darwin.rs"\n')
+        (crate / 'src/darwin.rs').write_text('#![cfg(target_os = "macos")]\n#[test] fn added() {}')
+        narrow = copy.deepcopy(selected)
+        narrow['modules']['new-mac'] = {'darwin': 'wrong: this is a crate root'}
+        assert check(root, narrow)
+        assert not check(root, fixed)
     # Mac-only integration tests must be selected by binary, not just a
     # similarly named unit module.
     with tempfile.TemporaryDirectory(prefix='ov1160-integration-') as tmp:
@@ -130,7 +164,11 @@ def self_test():
         assert not check(root, fixed)
     assert scope(Path('tests/new_case.rs')) == ('binaries', 'new_case')
     assert scope(Path('src/fs_watch/offload_tests.rs')) == ('modules', 'fs_watch')
-    assert scope(Path('src/rpc_agent_answer_tests.rs')) == ('modules', 'rpc_agent_answer')
+    assert scope(Path('src/rpc_agent_answer_tests.rs'), {Path('src/rpc_agent_answer_tests.rs'): (Path('src/rpc_agent_answer.rs'), 'tests')}) == ('modules', 'rpc_agent_answer')
+    assert scope(Path('src/extra_tests.rs')) == ('modules', 'extra_tests')
+    assert scope(Path('src/shared.rs'), {Path('src/shared.rs'): None}) == ('packages', None)
+    assert scope(Path('tests/common/helper.rs')) == ('packages', None)
+    assert scope(Path('src/bin/mac.rs')) == ('packages', None)
     ci = (ROOT / '.github/workflows/ci.yml').read_text()
     nightly = (ROOT / '.github/workflows/nightly.yml').read_text()
     assert not workflow_errors(ci, nightly)

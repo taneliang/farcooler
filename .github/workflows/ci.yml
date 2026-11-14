@@ -418,6 +418,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Green bases for Rust shadow (ov-1116)
+        if: runner.os == 'Linux'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
