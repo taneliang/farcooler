@@ -32,6 +32,12 @@ on:
     - cron: "37 9 * * *"
   workflow_dispatch:
 
+# Share the single background Mac slot with shipping and Nightly.
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
+
 permissions:
   contents: read
 

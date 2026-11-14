@@ -21,11 +21,10 @@
 # (scripts/nightly-report.py). An issue, not a board card: the board is a local
 # tool on the owner's Mac and a runner cannot reach it.
 #
-# Use at most ONE macOS runner (ov-1190, following the ov-1134 queue report).
-# CI needs four at its widest point. Separate phases and max-parallel on BOTH
-# matrices reserve the other four slots even when main lands during a Nightly.
-# Do not use job concurrency groups: their pending-job replacement can discard
-# matrix entries. The full suite still runs, taking longer overnight.
+# Reserve four macOS slots for landing CI (ov-1190). Each Apple job takes
+# background-macos, shared with Canary, Release and tunnel E2E. queue: max
+# preserves pending shards instead of replacing them. Other workflows can
+# take the slot between shards; no whole-night lock delays shipping.
 name: Nightly
 
 on:
@@ -37,6 +36,7 @@ concurrency:
   # Never cancel a night for another; a manual run waits its turn.
   group: nightly
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
@@ -150,6 +150,10 @@ jobs:
   ios:
     name: iOS
     runs-on: xcode-27
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -172,6 +176,10 @@ jobs:
     needs: [ios]
     if: ${{ !cancelled() }}
     runs-on: xcode-27
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -197,6 +205,10 @@ jobs:
     needs: [ios, ios-ui]
     if: ${{ !cancelled() }}
     runs-on: xcode-27
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -297,6 +309,10 @@ jobs:
     # A failed shard must not suppress unrelated perf coverage.
     if: ${{ !cancelled() }}
     runs-on: xcode-27
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     timeout-minutes: 40
     env:
       FARCOOLER_PERF: "1"

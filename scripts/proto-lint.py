@@ -338,7 +338,13 @@ def canary_gate_problems(text):
     for job, keys in jobs.items():
         if job == gate:
             continue
-        if re.search(r"\b(always|cancelled|failure)\(\)", keys.get("if", "")):
+        # macOS waits for iOS only to share one runner. A failed/disabled iOS
+        # build may not hide the independent Mac shipment; wire and Linux must
+        # explicitly pass before bypassing the implicit success() condition.
+        mac_gate = "${{ !cancelled() && needs.wire.result == 'success' && needs.linux.result == 'success' && needs.plan.outputs.build == 'true' }}"
+        safe_mac = (job == "macos" and keys.get("if") == mac_gate
+                    and {"wire", "linux", "plan", "ios"} <= needs_of(keys.get("needs")))
+        if re.search(r"\b(always|cancelled|failure)\(\)", keys.get("if", "")) and not safe_mac:
             problems.append(f"`{job}`'s `if` uses a status function, so it can run after the lint failed")
         seen, todo = set(), [job]
         while todo:
@@ -475,8 +481,8 @@ def canary_trigger_problems(text):
         problems.append("its workflow_run types must be exactly [completed]")
     if re.search(r"^  push:", trigger, re.M) or "push:" in trigger.splitlines():
         problems.append("it still triggers on push, beside CI instead of after it")
-    if "concurrency" in top:
-        problems.append("it has a workflow-level concurrency group, which a red or docs-only CI run would use to cancel a build in flight")
+    if top.get("concurrency", "").strip() != "group: background-macos\ncancel-in-progress: false\nqueue: max":
+        problems.append("its workflow concurrency must queue background-macos without cancelling a green build for a red/docs-only run")
     jobs = workflow_jobs(text)
     plan = jobs.get("plan", {})
     gate_if = plan.get("if", "")
@@ -870,7 +876,7 @@ def self_test():
     # `needs` line still reads correctly, plus a valid spelling it must accept.
     gate_cases = [
         ("ios's needs removed", "    runs-on: xcode-27\n    needs: [wire, plan, quiet]\n", "    runs-on: xcode-27\n    needs: plan\n", 1),
-        ("macos's needs removed", "    needs: [linux, plan, quiet]\n", "    needs: plan\n", 1),
+        ("macos's needs removed", "    needs: [linux, plan, quiet, ios, wire]\n", "    needs: plan\n", 1),
         ("always() on ios", "    if: needs.plan.outputs.build == 'true' && vars.CANARY_TESTFLIGHT == 'true'\n", "    if: always() && vars.CANARY_TESTFLIGHT == 'true'\n", 1),
         ("!cancelled() on linux", "  linux:\n    needs: [wire, plan]\n    if: needs.plan.outputs.build == 'true'\n", "  linux:\n    needs: [wire, plan]\n    if: ${{ !cancelled() }}\n", 1),
         ("|| true on the lint", "--channel canary --since-baseline\n", "--channel canary --since-baseline || true\n", 1),
@@ -880,9 +886,10 @@ def self_test():
         ("--since-baseline dropped", "--channel canary --since-baseline\n", "--channel canary\n", 1),
         ("a shallow checkout", "          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test\n",
          "      - run: ./scripts/proto-lint.py --self-test\n", 1),
-        ("needs as a flow list", "    needs: [linux, plan, quiet]\n", "    needs: [wire, linux, plan, quiet]\n", 0),
+        ("needs as a flow list", "    needs: [linux, plan, quiet, ios, wire]\n", "    needs: [wire, linux, plan, quiet, ios]\n", 0),
         ("a new job that skips the lint", "\njobs:\n", "\njobs:\n  extra:\n    needs: plan\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo\n", 1),
     ]
+    gate_cases.append(("Mac ships after failed wire", "needs.wire.result == 'success' && ", "", 1))
     for what, old, new, want in gate_cases:
         count += 1
         if old not in canary:
@@ -903,7 +910,8 @@ def self_test():
         ("success dropped", "github.event.workflow_run.conclusion == 'success' &&", "true &&", 1),
         ("the push check dropped", "      github.event.workflow_run.event == 'push' &&\n", "", 1),
         ("the repository check dropped", " &&\n      github.event.workflow_run.head_repository.full_name == github.repository)", ")", 1),
-        ("a workflow-level concurrency group", "env:\n  FARCOOLER_CHANNEL", "concurrency:\n  group: canary\n\nenv:\n  FARCOOLER_CHANNEL", 1),
+        ("a cancelling workflow group", "  cancel-in-progress: false\n  queue: max", "  cancel-in-progress: true\n  queue: max", 1),
+        ("a replacing workflow queue", "  queue: max\n", "", 1),
         ("a checkout of main's head", "          ref: ${{ needs.plan.outputs.sha }}\n          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test",
          "          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test", 1),
         ("github.sha in the release notes", "commit/${{ needs.plan.outputs.sha }}", "commit/${{ github.sha }}", 1),

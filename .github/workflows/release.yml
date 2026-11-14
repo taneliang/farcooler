@@ -68,6 +68,12 @@ env:
   # say which one it means.
   FARCOOLER_TAG: ${{ inputs.tag }}
 
+# All non-CI Apple work shares one slot; landing CI retains four.
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   # The static musl CLI and daemon, in linux-binaries.yml because canary.yml
   # needs the identical thing and had none — see that file. The channel comes
@@ -466,6 +472,9 @@ jobs:
 
   ios:
     name: iOS (TestFlight)
+    # Keep the independent iOS shipment even if the Mac build failed.
+    needs: [macos]
+    if: ${{ !cancelled() }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.

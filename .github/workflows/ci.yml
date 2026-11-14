@@ -1434,6 +1434,7 @@ jobs:
       - name: Every UI test class is placed
         run: ./scripts/ios-ui-shards.py --check
       - run: ./scripts/ios-ui-shards.py --self-test
+      - run: python3 scripts/ci-macos-capacity.py --self-test
       - run: ./scripts/ios-ui-pick-simulator.py --self-test
       - name: List the green CI runs
         if: github.event_name == 'push'

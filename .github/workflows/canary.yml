@@ -48,20 +48,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# No workflow-level `concurrency`. It would cancel the run in flight when ANY
-# newer run starts, and every CI completion starts one, red and docs-only ones
-# included, which would cancel a build for nothing. The ship jobs each hold a
-# group of their own below, so a newer green commit supersedes an older one
-# that is still building. App Store Connect takes whichever upload finishes
-# last rather than whichever is newer, which is why one at a time matters.
-#
-# `cancel-in-progress` is an expression, true only when this run builds
-# (`needs.plan.outputs.build`). GitHub's documentation does not say whether a
-# SKIPPED job enters its concurrency group, and a red CI run produces a Canary
-# run whose build jobs are all skipped; if skipped jobs did enter the group
-# they would cancel the previous green commit's build for nothing. With the
-# expression, a run that does not build cannot cancel one that does, whichever
-# way GitHub behaves. proto-lint.py's self-test fails if it goes.
+# Share one background Mac slot with Nightly, Release and tunnel E2E.
+# A non-cancelling FIFO queue cannot let a red/docs-only CI completion cancel
+# a green build. Keep the per-job supersession groups below as well.
+# Holding this slot for the workflow also prevents different Canary runs from
+# each taking a Mac. The two Apple jobs are ordered below, so CI retains four.
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
 
 env:
   FARCOOLER_CHANNEL: canary
@@ -666,7 +661,10 @@ jobs:
     # reason — release.yml pays it too, and says why at length: the app carries
     # those binaries, so a Mac job that started before they existed would build
     # an app that silently cannot install to a Linux host.
-    needs: [linux, plan, quiet]
+    # iOS may be disabled or fail; that must not suppress the Mac shipment.
+    # Explicit wire/Linux success keeps the shipping gates despite !cancelled().
+    needs: [linux, plan, quiet, ios, wire]
+    if: ${{ !cancelled() && needs.wire.result == 'success' && needs.linux.result == 'success' && needs.plan.outputs.build == 'true' }}
     concurrency:
       group: canary-macos
       cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}
