@@ -29,8 +29,9 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
   Restore an input timestamp only when its SHA-256 matches; delete executable
   products before the build so current Rust libraries always relink. Keep the
   staged C header's source timestamp (`cp -p`); its bytes are unchanged.
-- Disable cross-crate ThinLTO only in the two CI Swift jobs. All sources,
-  release optimizations, linked tunnel features and bundle checks still run.
+- Use Rust opt-level 1 without cross-crate ThinLTO in the two CI Swift jobs,
+  and omit Rust debug symbols in the test job. All sources, optimized-code
+  compilation, linked tunnel features, assertions and bundle checks still run.
   Canary/Release workflows, Cargo profiles and build-app.sh are unchanged.
   build-vt.sh's only shipping change is preserving the copied header's metadata;
   the same source header is still copied to the same destination.
@@ -61,6 +62,13 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
 
 ## Branch measurements
 
-Pending. A temporary push trigger for this branch collects ordinary CI job
+The initial no-ThinLTO candidate (ca144e87e),
+[run 43573737154](https://github.com/taneliang/farcooler/actions/runs/43573737154),
+missed the target. Its bundle job passed in 1,452 seconds: libraries 242 seconds,
+daemon 378 seconds, CLI 481 seconds and LFS filter 119 seconds. These costs show
+that CI also needs to avoid opt-level 3's per-crate optimization, not only LTO.
+The profile change invalidated the existing dependency cache (cold Rust build).
+
+Final candidate measurements pending. A temporary push trigger for this branch collects ordinary CI job
 measurements without opening a PR or adding runner jobs. Remove that trigger
 once two successful under-15-minute runs have been recorded.
