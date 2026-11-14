@@ -680,7 +680,9 @@ if mode == 'barrier':
     while len(list(d.iterdir())) < 2:
         if time.time() - t > 4: sys.exit(9)
         time.sleep(0.05)
-if mode == 'no-changes':
+if mode in ('no-changes', 'dirty-no-commit'):
+    if mode == 'dirty-no-commit':
+        pathlib.Path('result.txt').write_text('work kept without a commit')
     hook('Stop', last_assistant_message='I could not read the ticket; the runner request hung.')
     time.sleep(30)
 if mode in ('background', 'abandon'):
@@ -836,6 +838,20 @@ else:
         assert!(item.candidate.is_none());
     }
     #[tokio::test]
+    async fn ov_1217_dirty_build_without_a_commit_reports_reason_files_and_last_message() {
+        let (_dir, mut runtime, _fake) = native_agent("dirty-no-commit", "codex").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        let state = finish(&mut runtime, "w").await;
+        let item = &state.items["one"];
+        assert_eq!(item.phase, Phase::Failed, "{state:?}");
+        assert_eq!(item.failure.as_deref(), Some("The build ended without changes: it made no new commit.\n\n\
+            The build ended its turn with changes it hadn't committed: result.txt. \
+            They're still in its worktree, and the build carries on from them.\n\n\
+            The agent's last message:\nI could not read the ticket; the runner request hung."));
+        assert!(item.candidate.is_none());
+        assert_eq!(std::fs::read_to_string(runtime.item_tree("w", "one").join("result.txt")).unwrap(), "work kept without a commit");
+    }
+    #[tokio::test]
     async fn ov_1217_no_commit_does_not_reuse_work_already_ahead_of_base() {
         let (_dir, mut runtime, _fake) = native_agent("no-changes", "codex").await;
         let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
@@ -887,7 +903,8 @@ else:
         let state = finish(&mut runtime, "w").await;
         let item = &state.items["one"];
         assert_eq!(item.phase, Phase::Failed, "{state:?}");
-        assert_eq!(item.failure.as_deref(), Some("The build ended its turn with changes it hadn't committed: result.txt. \
+        assert_eq!(item.failure.as_deref(), Some("The build ended without changes: it made no new commit.\n\n\
+            The build ended its turn with changes it hadn't committed: result.txt. \
             They're still in its worktree, and the build carries on from them."));
         assert_eq!(std::fs::read_to_string(runtime.item_tree("w", "one").join("result.txt")).unwrap(), "started before the wait");
     }

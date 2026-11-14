@@ -699,13 +699,6 @@ impl Exec {
     /// does (ov-1090): changes left uncommitted, or a HEAD still at the base or at the candidate it was given.
     pub(super) async fn unfinished_build(&self, binding: &Binding, tree: &Path) -> Result<Option<String>> {
         let changed = self.tree_changes(binding, tree).await?;
-        if !changed.is_empty() {
-            let shown = changed.iter().take(3).map(String::as_str).collect::<Vec<_>>().join(", ");
-            let (shown, _) = cut_at(&shown, 1000);
-            let more = if changed.len() > 3 { format!(" and {} more", changed.len() - 3) } else { String::new() };
-            return Ok(Some(format!("The build ended its turn with changes it hadn't committed: {shown}{more}. \
-                They're still in its worktree, and the build carries on from them.")));
-        }
         let head = self.git_recorded(binding, tree, &["rev-parse", "HEAD"]).await?;
         let started = match self.bytes(&self.build_start_path(binding)) {
             Ok(raw) => {
@@ -717,10 +710,18 @@ impl Exec {
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
+        let mut reasons = Vec::new();
         if started.as_ref() == Some(&head) || head == binding.base || binding.effect.candidate.as_ref() == Some(&head) {
-            return Ok(Some("The build ended without changes: it made no new commit.".into()));
+            reasons.push("The build ended without changes: it made no new commit.".to_string());
         }
-        Ok(None)
+        if !changed.is_empty() {
+            let shown = changed.iter().take(3).map(String::as_str).collect::<Vec<_>>().join(", ");
+            let (shown, _) = cut_at(&shown, 1000);
+            let more = if changed.len() > 3 { format!(" and {} more", changed.len() - 3) } else { String::new() };
+            reasons.push(format!("The build ended its turn with changes it hadn't committed: {shown}{more}. \
+                They're still in its worktree, and the build carries on from them."));
+        }
+        Ok((!reasons.is_empty()).then(|| reasons.join("\n\n")))
     }
     async fn verify_landing(&self, binding: &Binding) -> Result<()> {
         self.verify_remote_landing(binding).await?;
