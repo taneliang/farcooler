@@ -113,3 +113,10 @@ maintained native selection in two independent Mac partitions. The generic
 inventory guard now checks both Linux's four full-workspace partitions and
 Mac's two filtered-native partitions. No native case or compilation target
 is removed. Mac's archive cache shares the previous native-build namespace.
+
+Mac-sharded final measurement run 1 is
+[43581462181](https://github.com/taneliang/farcooler/actions/runs/43581462181)
+at `5a532b873`. The final workflow has ten Rust jobs: two platform checks,
+two platform archives, four Linux full-workspace shards and two Mac native
+shards. The second measurement changes report text only; measured job commands,
+profiles, runners and partition counts stay identical.
