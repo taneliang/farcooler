@@ -75,3 +75,34 @@ mod tests {
         assert!(accepts(&coexist), "other pinned hooks may coexist");
     }
 }
+
+#[cfg(test)]
+mod claude_context_tests {
+    use super::*;
+
+    #[test]
+    fn native_claude_requires_synchronous_context_hooks_for_every_tool() {
+        let socket = Path::new("/private/engine/h.sock");
+        let settings = super::super::claude_settings(socket);
+        let accepts = |value: &serde_json::Value| native_completion_targets(&value.to_string(), "claude", socket);
+        assert!(accepts(&settings), "the settings the engine supplies must work");
+        for mode in ["missing", "non-gating", "async", "matcher", "timeout", "disabled", "redirected"] {
+            let mut broken = settings.clone();
+            match mode {
+                "missing" => { broken["hooks"].as_object_mut().unwrap().remove("PreToolUse"); }
+                "non-gating" => broken["hooks"]["PreToolUse"][0]["hooks"][0]["command"] =
+                    hook_command("claude", "PreToolUse", socket, false).into(),
+                "async" => broken["hooks"]["PreToolUse"][0]["hooks"][0]["async"] = true.into(),
+                "matcher" => broken["hooks"]["PreToolUse"][0]["matcher"] = "Bash".into(),
+                "timeout" => broken["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 0.into(),
+                "disabled" => broken["disableAllHooks"] = true.into(),
+                "redirected" => {
+                    let command = hook_command("claude", "PreToolUse", socket, true);
+                    broken["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = format!("{command} | cat >/dev/null").into();
+                }
+                _ => unreachable!(),
+            }
+            assert!(!accepts(&broken), "accepted {mode} context hook");
+        }
+    }
+}

@@ -878,6 +878,32 @@ else:
     }
 
     #[tokio::test]
+    async fn native_claude_configuration_refuses_missing_or_non_gating_context_hooks() {
+        let (_dir, runtime, _fake) = native("pass").await;
+        runtime.exec.validate_native_host().unwrap();
+        let CodingHarness::Native { settings: Some(file), .. } = &runtime.coding.as_ref().unwrap().harness else { unreachable!() };
+        let settings: serde_json::Value = serde_json::from_slice(&std::fs::read(&file.path).unwrap()).unwrap();
+        for gating in [None, Some(false)] {
+            let mut config = runtime.coding.clone().unwrap();
+            let CodingHarness::Native { settings: Some(file), .. } = &mut config.harness else { unreachable!() };
+            let mut broken = settings.clone();
+            match gating {
+                None => { broken["hooks"].as_object_mut().unwrap().remove("PreToolUse"); }
+                Some(_) => {
+                    let command = broken["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+                    broken["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command.replace(" --gating", "").into();
+                }
+            }
+            let bytes = serde_json::to_vec(&broken).unwrap();
+            std::fs::write(&file.path, &bytes).unwrap();
+            file.digest = digest(&bytes);
+            assert!(runtime.exec.validate_native_configuration(&config).is_err(), "accepted {gating:?} hook");
+            std::fs::write(runtime.root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+            assert!(Runtime::open(&runtime.root).is_err(), "reopened {gating:?} hook");
+        }
+        assert!(!runtime.root.parent().unwrap().join("started").exists(), "a refused configuration never launches");
+    }
+    #[tokio::test]
     async fn workflow_coding_native_real_pty_normalized_hooks_and_quiescence() {
         for agent in ["claude", "codex", "cursor", "codex-engine"] {
             let (dir, mut runtime, _fake) = native_agent("pass", agent).await;
