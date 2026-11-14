@@ -4,7 +4,8 @@
 //! Each verb ends by writing one fact (its label, its candidate and what it saw) and then settles
 //! from that fact, so the first run and a recovery after a crash take the same road. What a verb may
 //! do with no fact after a crash depends on its class: a read is read again and a fold is made again
-//! (`SafeFailure` runs the step anew), but a push is never repeated and stays uncertain.
+//! (`SafeFailure` runs the step anew), but an attempted push is never repeated and stays uncertain.
+//! A durable pre-send record lets a push interrupted while waiting for predecessor CI resume safely.
 use super::*;
 use super::coding::{sha, wait_times};
 use farcooler_store::board_ci::CiStatus;
@@ -50,6 +51,20 @@ const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.em
 impl Exec {
     pub(super) fn verb_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.verb.json", digest(&binding.effect)))
+    }
+    fn push_phase_path(&self, binding: &Binding, phase: &str) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.push-{phase}.json", digest(&binding.effect)))
+    }
+    /// Only an authenticated pre-send record without send intent proves that replay is safe.
+    /// Missing legacy records, unreadable records and any send intent retain push uncertainty.
+    fn reconcile_unsent_push(&self, binding: &Binding) -> Result<Outcome> {
+        if self.push_phase_path(binding, "send").try_exists()? {
+            return Err(Error::Refused("push send was admitted; whether it landed is unknown"));
+        }
+        let raw = self.bytes(&self.push_phase_path(binding, "waiting"))?;
+        let recorded: Binding = serde_json::from_slice(&raw)?;
+        if recorded != *binding { return Err(Error::Refused("foreign push pre-send record")); }
+        Ok(Outcome::Interrupted)
     }
     /// Which base a folded commit was made on: a push leases the target against exactly that.
     pub(super) fn fold_index(&self, binding: &Binding, folded: &str) -> PathBuf {
@@ -135,14 +150,14 @@ impl Exec {
     }
 
     /// Read the settled fact: never runs a command. With no fact, a read is read again and a fold is
-    /// made again (the step runs anew); a push is never repeated, so its outcome stays unknown.
+    /// made again (the step runs anew); a push stays unknown unless its pre-send record proves it never sent.
     pub(super) async fn reconcile_verb(&self, binding: &Binding, kind: &StageKind) -> Result<Outcome> {
         let raw = match self.bytes(&self.verb_path(binding)) {
             Ok(raw) => raw,
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 return match kind {
                     StageKind::RerunCi => self.reconcile_ci_rerun(binding).await,
-                    StageKind::Push => Err(Error::Refused("push has no settlement; whether it landed is unknown")),
+                    StageKind::Push => self.reconcile_unsent_push(binding),
                     // A wait cut short only looks again; a fold or a route cut short is made anew and spends an attempt.
                     StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr => Ok(Outcome::Interrupted),
                     _ => Ok(Outcome::SafeFailure),
@@ -457,6 +472,12 @@ impl Exec {
     /// The push is a plain fast-forward, never forced, and a candidate that doesn't build on the base in the
     /// private landing repository is `rejected` before anything is sent.
     async fn push(&self, binding: &Binding, cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
+        // Never re-enter a send. A recovered pre-send effect is rescheduled with a fresh fence.
+        if self.verb_path(binding).try_exists()? || self.push_phase_path(binding, "waiting").try_exists()?
+            || self.push_phase_path(binding, "send").try_exists()? {
+            return self.reconcile_verb(binding, &StageKind::Push).await;
+        }
+        durable(&self.push_phase_path(binding, "waiting"), &serde_json::to_vec(binding)?)?;
         let identity = self.landing()?.clone();
         let url = super::coding::landing_url(&identity).map(str::to_string);
         let url = url.as_deref();
@@ -519,10 +540,13 @@ impl Exec {
                 }
                 Err(error) => {
                     tracing::warn!(%error, "previous landing has not passed; nothing was sent");
-                    return Ok(Outcome::SafeFailure);
+                    return Ok(if *cancel.borrow() { Outcome::Interrupted } else { Outcome::SafeFailure });
                 }
             }
         }
+        if *cancel.borrow() { return Ok(Outcome::Interrupted); }
+        // Fsync intent before invoking either transport. A crash from here on can never retry the send.
+        durable(&self.push_phase_path(binding, "send"), &serde_json::to_vec(binding)?)?;
         let log = self.remote_log(binding);
         let (argv, environment, exit) = if let Some(url) = url {
             self.push_remote(url, &identity, &candidate, &log, cancel).await?

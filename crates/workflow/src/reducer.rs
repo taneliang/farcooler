@@ -247,10 +247,11 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             }
                         }
                         Outcome::Interrupted => {
-                            // Only a wait is read again for free, and only because a restart cut it short, not
-                            // because it failed. Its patience is kept, so a loop still ends in `timeout`.
+                            // A wait, including a push proven still in its pre-send wait, resumes for free
+                            // after interruption. Its patience is kept, so restarts cannot extend the deadline.
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
-                            if !is_wait(&item.definition.stages[item.stage].kind) {
+                            if !is_wait(&item.definition.stages[item.stage].kind)
+                                && item.definition.stages[item.stage].kind != StageKind::Push {
                                 return Err(Refusal::Phase);
                             }
                             item.pending = None;
@@ -628,7 +629,8 @@ pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, e
     let effect_id = digest(&("effect/v1", &input.workspace, &input.id, effects.len()));
     item.pending = Some(effect_id.clone());
     // A wait looked at again after a restart keeps its first deadline.
-    let created_ms = if is_wait(&item.definition.stages[item.stage].kind) {
+    let created_ms = if is_wait(&item.definition.stages[item.stage].kind)
+        || item.definition.stages[item.stage].kind == StageKind::Push {
         *item.wait_since.get_or_insert(input.now_ms)
     } else { input.now_ms };
     effects.push(Effect { id: effect_id, item: id.into(), run: item.run.clone(),

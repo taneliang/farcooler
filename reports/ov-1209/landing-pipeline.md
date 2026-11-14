@@ -15,6 +15,36 @@ The existing ability to land a repair on an already-red base remains.
 
 No gate command, CI command, workflow list, or CI success criterion changed.
 
+## Fix round 1: recovery during the CI barrier
+
+The push writes and fsyncs a binding-specific pre-send record before its checks
+and CI barrier. Before either transport can send, it writes and fsyncs separate
+send intent. Reconciliation with no settlement resumes only when the pre-send
+record matches the full binding and no send intent exists. Missing legacy
+records, damaged or foreign records, and attempted sends remain uncertain.
+An interrupted pre-send wait gets a new effect fence without spending an
+attempt or extending its original deadline.
+
+The pipeline regression now reconciles the pending second push, drops the live
+runtime futures, reopens the runtime, and releases the predecessor's CI. Both
+red and green paths finish, with exactly two actual push-process receipts and
+event replay matching the persisted state. Before this fix, the test failed
+at reconciliation with `push has no settlement; whether it landed is unknown`.
+The reducer's restart test also covers repeated pre-send interruptions and
+checks that the attempt and deadline are retained.
+
+Fix-round validation (with `TMPDIR=/tmp` and the same temporary target directory):
+
+- `cargo test -p farcooler-workflow`: all tests and doctests passed.
+- `cargo nextest run --lib -p farcooler-daemon -E 'test(workflow_runtime)' --test-threads 8`:
+  297 passed, including the restart regression, damaged/foreign pre-send records,
+  partial send intent, re-entry prevention, and existing lost-push settlement tests.
+- `cargo clippy -p farcooler-workflow -p farcooler-daemon --lib --tests -- -D warnings`: passed.
+- File-size budget, doc-comment check against `HEAD`, and `git diff --check`: passed.
+
+An earlier runtime-suite run was invalidated by a concurrent rebuild replacing
+its executable; the complete clean rerun above passed without failures.
+
 ## Acceptance evidence
 
 `next_group_gates_during_ci_and_rebases_after_red` uses two separate landing

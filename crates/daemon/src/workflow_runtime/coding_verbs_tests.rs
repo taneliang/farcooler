@@ -311,6 +311,20 @@ async fn a_push_with_no_settlement_after_a_crash_stays_uncertain_and_sends_nothi
     assert_eq!(state.items[&group_id(&state)].phase, Phase::Uncertain);
     assert_eq!(remote_head(&runtime).await, first);
     assert_eq!(runtime.pump(51).await.unwrap(), 0);
+    let waiting = runtime.root.join("receipts").join(format!("{}.push-waiting.json", digest(&binding.effect)));
+    let mut foreign = binding.clone(); foreign.workspace = "other".into();
+    for raw in [b"{".to_vec(), serde_json::to_vec(&foreign).unwrap()] {
+        std::fs::write(&waiting, raw).unwrap();
+        assert!(runtime.reconcile_verb(&binding, &StageKind::Push).await.is_err(), "damaged or foreign pre-send records prove nothing");
+    }
+    std::fs::write(&waiting, serde_json::to_vec(&binding).unwrap()).unwrap();
+    assert!(matches!(runtime.reconcile_verb(&binding, &StageKind::Push).await.unwrap(), Outcome::Interrupted));
+    // Even a partial send-intent write must close recovery's retry path.
+    std::fs::write(runtime.root.join("receipts").join(format!("{}.push-send.json", digest(&binding.effect))), b"{").unwrap();
+    assert!(runtime.reconcile_verb(&binding, &StageKind::Push).await.is_err());
+    let (_hold, cancel) = tokio::sync::watch::channel(false);
+    assert!(runtime.execute_coding("w", &binding, cancel).await.is_err(), "re-entry cannot resend an attempted push");
+    assert_eq!(remote_head(&runtime).await, first);
 }
 
 #[tokio::test]
@@ -888,7 +902,8 @@ async fn next_group_gates_during_ci_and_rebases_after_red() {
         let first_ci = dir.path().join("first-ci");
         let remote = runtime.coding.as_ref().unwrap().landing.as_ref().unwrap().repository.clone();
         let second_id = second.clone();
-        let observer = tokio::spawn(async move {
+        let recovery = runtime.exec.clone();
+        let mut observer = tokio::spawn(async move {
             let deadline = std::time::Instant::now() + Duration::from_secs(20);
             loop {
                 let state = store.workflow_state("w").unwrap().unwrap();
@@ -899,7 +914,13 @@ async fn next_group_gates_during_ci_and_rebases_after_red() {
                     let first = std::fs::read_to_string(&first_ci).unwrap();
                     assert_eq!(adapters::git(&remote, &["rev-parse", "refs/heads/main"]).await.unwrap(), first,
                         "the second gate finished while the first CI was pending, without a second push");
-                    std::fs::write(&release, "go").unwrap();
+                    let stored = store.workflow_outbox("w").unwrap().into_iter().find(|s|
+                        s.active && s.effect.item == second_id && s.effect.kind == EffectKind::Execute(StageKind::Push)).unwrap();
+                    let binding = Binding::new("w", &stored.effect, stored.resource_generation.unwrap(), second.iteration,
+                        &recovery.item_base("w", &stored.effect).unwrap());
+                    assert!(matches!(recovery.reconcile_verb(&binding, &StageKind::Push).await.unwrap(), Outcome::Interrupted),
+                        "recovery during the pre-send CI wait must safely resume, without spending an attempt");
+                    assert!(!recovery.remote_log(&binding).exists(), "no push process started during the wait");
                     return true;
                 }
                 if std::time::Instant::now() >= deadline {
@@ -910,14 +931,25 @@ async fn next_group_gates_during_ci_and_rebases_after_red() {
             }
         });
         runtime.continuous = true;
-        runtime.pump(2).await.unwrap();
-        let overlapped = observer.await.unwrap();
-        let state = runtime.state("w").unwrap().unwrap();
+        let overlapped = tokio::select! {
+            result = &mut observer => result.unwrap(),
+            result = runtime.pump(2) => { result.unwrap(); panic!("CI finished before the restart"); }
+        };
+        assert!(overlapped, "the next group must finish its gate before the previous CI is released");
+        // Drop the live futures as a daemon crash would, then recover from the admitted effects.
+        let root = runtime.root.clone(); drop(runtime);
+        let mut runtime = Runtime::open(&root).unwrap();
+        std::fs::write(dir.path().join("release-ci"), "go").unwrap();
+        runtime.continuous = true;
+        let state = until(&mut runtime, |s| phase_of(s, "two") == Some(Phase::Done)).await;
         assert_eq!(phase_of(&state, "two"), Some(Phase::Done));
         let bases = runtime.store.workflow_outbox("w").unwrap().iter().filter(|s|
             s.effect.item == second && s.effect.kind == EffectKind::Execute(StageKind::AwaitBase)).count();
         assert_eq!(bases, if red { 2 } else { 1 }, "red previous CI returns the waiting group to base");
-        assert!(overlapped, "the next group must finish its gate before the previous CI is released");
+        assert_eq!(outbox(&runtime, StageKind::Push), if red { 4 } else { 3 }, "only the interrupted pre-send effect was retried");
+        let sends = std::fs::read_dir(runtime.root.join("receipts")).unwrap().filter(|e|
+            e.as_ref().unwrap().path().to_string_lossy().ends_with(".push-process.json")).count();
+        assert_eq!(sends, 2, "exactly one actual push per group, including after recovery");
         let mut replay = State::empty("w".into(), state.epoch);
         for event in runtime.store.workflow_events("w").unwrap() {
             replay = farcooler_workflow::step(&replay, &event).unwrap().state;

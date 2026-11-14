@@ -656,7 +656,7 @@ fn a_group_cannot_be_cancelled_while_it_pushes_or_after_it_has() {
 }
 #[test]
 fn a_wait_that_a_restart_interrupted_looks_again_spends_no_attempt_and_keeps_its_patience() {
-    for step in ["base", "ci"] {
+    for step in ["base", "push", "ci"] {
         let mut log = Log::new();
         let group = verb_group(&mut log, verb_ticket());
         walk_to(&mut log, &group, step);
@@ -673,7 +673,7 @@ fn a_wait_that_a_restart_interrupted_looks_again_spends_no_attempt_and_keeps_its
         let later: Vec<_> = second.effects.iter().filter(|e| e.item == group).collect();
         assert_eq!(later[0].created_ms, again[0].created_ms, "{step}: patience survives a restart");
     }
-    // Only a wait can be interrupted; a fold is made again and a restart there is a failure.
+    // A fold is made again and a restart there is a failure, unlike a proven pre-send push wait.
     let mut log = Log::new();
     let group = verb_group(&mut log, verb_ticket());
     walk_to(&mut log, &group, "fold");
