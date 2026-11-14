@@ -14,7 +14,7 @@ NOTE = ("Approximate seconds: effect creation to terminal receipt mtime includes
         "receipt-writing delay; copied or touched files can change mtimes. Effects are grouped by item across runs; repeated effects are "
         "summed, even if they overlap. Wait to join is the gap from the last review receipt "
         "to the first group effect, matched by ticket and candidate; it includes routing and "
-        "scheduling; inconsistent timestamps leave it unknown. Missing stages are unknown, not zero. Group build, review and join sum matched members; group stages are shared, not divided "
+        "scheduling; inconsistent timestamps leave it unknown. Missing stages are unknown, not zero. Group build uses member builds since the previous landing for that ticket, up to this group start; review uses the matching candidate in that window. Receipt creation times may be coarse, so attribution is approximate. Group build, review and join sum matched members; group stages are shared, not divided "
         "among tickets. Percentiles use available group-stage totals (nearest rank), including "
         "failed or incomplete landings. Gate step seconds come from the gate's rounded table.")
 
@@ -81,7 +81,9 @@ def report(directory):
             row['stages'][stage] = row['stages'].get(stage, 0) + end - start
         if is_group and kind == 'Run':
             row.setdefault('gate_steps', []).extend(gate_steps(path))
-    for group in groups.values():
+    # Process in start order so earlier landings bound later member histories.
+    previous_landing = {}
+    for group in sorted(groups.values(), key=lambda g: min(x[1] for x in g['_effects'])):
         effects = group['_effects']
         group_start = min(x[1] for x in effects)
         members = {(m.get('item'), m.get('candidate')) for e, _, _ in effects
@@ -89,27 +91,34 @@ def report(directory):
         group['members'] = sorted({m[0] for m in members if m[0]})
         group['gate_steps'] = sorted(group.get('gate_steps', []), key=lambda x: -x['seconds'])[:5]
         for item, candidate in sorted(members, key=lambda x: str(x)):
-            # Candidate binds a group member to the reviewed ticket run, not just its key.
-            matches = []
-            for ticket in tickets.values():
-                if ticket['item'] != item:
-                    continue
-                reviews = [(e, end) for e, _, end in ticket['_effects']
-                           if isinstance(e['kind'].get('Execute'), dict)
-                           and 'Review' in e['kind']['Execute']]
-                if candidate and any(e.get('candidate') == candidate for e, _ in reviews):
-                    matches.append((max(end for e, end in reviews if e.get('candidate') == candidate), ticket))
-            if matches:
-                review_end, ticket = max(matches, key=lambda x: x[0])
-                ticket.setdefault('groups', []).append(group['item'])
-                if review_end <= group_start:
-                    ticket['stages']['wait_join'] = group_start - review_end
-                for stage in ('build', 'review', 'wait_join'):
-                    if stage in ticket['stages']:
-                        group['stages'][stage] = group['stages'].get(stage, 0) + ticket['stages'][stage]
-                for stage in ('fold', 'gate', 'push', 'ci'):
-                    if stage in group['stages']:
-                        ticket['stages'][stage] = group['stages'][stage]
+            ticket = tickets.get(item)
+            if not ticket or not candidate:
+                continue
+            lower = previous_landing.get(item, float('-inf'))
+            history = [(e, start, end) for e, start, end in ticket['_effects']
+                       if lower < start <= group_start]
+            reviews = [(e, start, end) for e, start, end in history
+                       if isinstance(e['kind'].get('Execute'), dict)
+                       and 'Review' in e['kind']['Execute']
+                       and e.get('candidate') == candidate]
+            if not reviews:
+                continue
+            ticket.setdefault('groups', []).append(group['item'])
+            builds = [(start, end) for e, start, end in history
+                      if e['kind'].get('Execute') == 'Build']
+            if builds:
+                group['stages']['build'] = group['stages'].get('build', 0) + sum(end - start for start, end in builds)
+            group['stages']['review'] = group['stages'].get('review', 0) + sum(end - start for _, start, end in reviews)
+            completed = [end for _, _, end in reviews if end <= group_start]
+            if completed:
+                wait = group_start - max(completed)
+                ticket['stages']['wait_join'] = wait
+                group['stages']['wait_join'] = group['stages'].get('wait_join', 0) + wait
+            for stage in ('fold', 'gate', 'push', 'ci'):
+                if stage in group['stages']:
+                    ticket['stages'][stage] = group['stages'][stage]
+        for item in group['members']:
+            previous_landing[item] = group_start
     for row in list(groups.values()) + list(tickets.values()):
         del row['_effects']
         row['stages'] = {k: round(v, 3) for k, v in row['stages'].items()}
@@ -170,12 +179,21 @@ def self_test():
             path = synthetic / (name + '.json')
             path.write_text(json.dumps({'binding': {'effect': effect}, 'outcome': 'Passed'}))
             os.utime(path, (end, end))
+        receipt('build', 'ticket-1', 'Build', 70, 90)
         receipt('review', 'ticket-1', {'Review': 'Agent'}, 100, 120, 'abc')
         receipt('fold', 'group-1', 'Fold', 150, 160, members=[{'item': 'ticket-1', 'candidate': 'abc'}])
         result = report(synthetic)
         assert result['tickets'][0]['stages']['wait_join'] == 30
+        assert result['groups'][0]['stages']['build'] == 20
         assert result['groups'][0]['stages']['review'] == 20
         assert result['percentiles']['fold'] == {'n': 1, 'p50': 10.0, 'p95': 10.0}
+        before = result['groups'][0]['stages'].copy()
+        receipt('later-build', 'ticket-1', 'Build', 200, 220)
+        receipt('later-review', 'ticket-1', {'Review': 'Agent'}, 230, 250, 'abc')
+        later = report(synthetic)
+        assert later['groups'][0]['stages'] == before
+        assert later['tickets'][0]['stages']['wait_join'] == 30
+        assert later['tickets'][0]['stages']['review'] == 40
     print('landing-timing self-test: ok')
 
 
