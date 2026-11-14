@@ -925,6 +925,7 @@ def _self_test():
         ("swift-tests", "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit"),
         ("swift-tests", "./apps/macos/test.sh"),
         ("swift", "apps/macos/build-app.sh"),
+        ("swift", "python3 scripts/macos-bundle-native-test.py"),
         ("android", "./gradlew testInstrumentedUnitTest"),
         ("android", "-Pfarcooler.captures"),
         ("relay", "npm test"),

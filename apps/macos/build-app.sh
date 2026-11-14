@@ -125,91 +125,31 @@ set +m
 # because the code that fixed it was never in the bundle. A stale binary must
 # not be a thing this script is capable of producing.
 #
-# Separate cargo invocations, because the daemon and the CLI need link flags
-# (`cargo rustc --`) that the LFS filter must not get — see the blocks below.
+# One Cargo graph for the CLI, daemon and LFS filter (ov-1183). Separate
+# invocations resolve different crypto dependency features and optimize the
+# daemon library repeatedly. The bin-scoped link arguments in each package's
+# build.rs let Cargo build all three together without linking Go into the LFS
+# filter or any library. No global RUSTFLAGS: -l static there would duplicate
+# the Go archive into every rlib. The Swift FFI libraries above stay separate,
+# without the tunnel feature, exactly as before.
 ROOT="$(cd ../.. && pwd)"
-
-# The daemon, with the tunnel actually linked into it.
-#
-# This is the binary that SERVES a tunnel, and until this was split out every
-# Mac release shipped one built from the plain `cargo build` above — no
-# feature, no archive — so `farcooler-tailcat`'s stub answered every tunnel
-# with `no_tailcat` and the feature reached nobody. The stub exists so the tree
-# compiles without Go and so `cargo test --workspace` can run; it was never
-# meant to ship.
-#
-# Unconditional, deliberately. A version of this that quietly fell back to the
-# plain build when Go was absent would ship exactly the daemon this replaces,
-# and CI would stay green while it did — the workflows that run this script
-# install Go for it (`actions/setup-go`, pinned by `crates/tailcat/go/go.mod`).
-# `build-tailcat.sh` refuses with its own actionable message when Go is
-# missing, so this script does not repeat that check.
-#
-# `cargo rustc` and `--bin farcoolerd`, not `cargo build`: the trailing `--`
-# flags are only accepted when exactly one target is selected, and
-# `farcooler-daemon` carries a lib beside the bin.
-#
-# NOT a global `RUSTFLAGS`, and that is the expensive half of this comment.
-# `-l static=` bundles the named archive's objects into whichever crate the
-# flag is attached to at compile time, so a plain `RUSTFLAGS` applies it to
-# every crate rustc compiles for the target: it duplicated a 47.6 MB archive
-# into all 142 rlibs in the dependency graph and produced a 6.4 GB artifact,
-# found the hard way while wiring the iOS build. Scoping the flags to this one
-# `rustc` invocation is what keeps the archive to a single copy.
-# `scripts/build-linux.sh` and `scripts/build-ios-frameworks.sh` carry the same
-# warning at their own call sites, because the trap is per-call-site.
-#
-# `-L` absolute, not relative: a relative one silently fails to resolve and the
-# link fails on missing symbols rather than on a missing directory.
-#
-# `-l framework=Security` is macOS-only and not optional. Go's `crypto/x509`
-# verifies against the system roots through Security.framework on darwin, so
-# the archive arrives carrying undefined `SecTrustEvaluateWithError`,
-# `SecKeyCreateSignature` and two dozen `kSec*` constants. Nothing in the Rust
-# graph links that framework, so without this the build dies on
-# "Undefined symbols for architecture arm64" listing symbols no Rust or Go
-# source in this repository mentions. The iOS build needs no equivalent because
-# Xcode links Security into the app that consumes the xcframework.
 TAILCAT_TARGET="darwin-$(uname -m)"
-echo "==> Building the daemon with the tunnel linked (release)"
+echo "==> Building the tunnel archive"
 (cd "$ROOT" && ./scripts/build-tailcat.sh "$TAILCAT_TARGET") || {
   echo "    the tunnel archive did not build; refusing to bundle a daemon that serves no tunnel"
   exit 1
 }
-(cd "$ROOT" && cargo rustc --release -p farcooler-daemon --bin farcoolerd \
-  --features tailcat -- -L "$ROOT/dist/tailcat/$TAILCAT_TARGET" -l static=tailcat \
-  -l framework=Security) || {
-  echo "    the Rust build failed; refusing to bundle a stale binary"
-  exit 1
-}
 
-# The CLI, with the tunnel linked, for the same reason and by the same flags.
-#
-# `farcooler runner pipe` is what `~/.ssh/config` runs as a ProxyCommand to
-# reach a tunneled runner, and `runner mint-node-key` is how the app makes this
-# Mac's tunnel identity (the app links the client core without the archive). A
-# plain `cargo build --bin farcooler` — which this script used to run — has the
-# stub, so both answered `no_tailcat` and no Mac could dial a tunnel. The archive
-# adds about 47 MB to the CLI; that is the price of a Mac that can dial.
-echo "==> Building the CLI with the tunnel linked (release)"
-(cd "$ROOT" && cargo rustc --release -p farcooler-cli --bin farcooler \
-  --features tailcat,farcooler-daemon/tailcat -- -L "$ROOT/dist/tailcat/$TAILCAT_TARGET" -l static=tailcat \
-  -l framework=Security) || {
-  echo "    the Rust build failed; refusing to bundle a stale binary"
-  exit 1
-}
-
-# Keep the daemon library's feature identity across the CLI and LFS builds.
-# Its tailcat feature only enables farcooler-tailcat/linked; the CLI already
-# enables that dependency feature. No daemon production source uses cfg(tailcat).
-# Without the matching package feature, Cargo optimizes the same daemon library
-# again under a different hash (ov-1183). The filter uses no daemon/tunnel code.
-#
-# The Git LFS filter the daemon's own gits run (`crates/daemon/src/git_lfs.rs`).
-# The daemon looks for it beside itself; without it, a worktree of an LFS
-# repository holds pointer files. Plain `cargo build`: it links nothing of Go's.
-echo "==> Building the daemon's LFS filter (release)"
-(cd "$ROOT" && cargo build --release -p farcooler-daemon --bin farcooler-lfs-filter --features tailcat) || {
+# The daemon serves tunnels; the CLI dials them and mints the Mac's node key.
+# Both must link the real archive, including Security.framework for Go's system
+# certificate verification. The filter uses no tunnel code. These are the same
+# release targets and linker inputs as the former per-binary cargo rustc calls.
+# The archive directory is scoped to this command so other builds keep their
+# existing linkage (including the plain builds used by Rust and Mac tests).
+echo "==> Building the CLI, daemon and LFS filter (release)"
+(cd "$ROOT" && FARCOOLER_BUNDLE_TAILCAT_DIR="$ROOT/dist/tailcat/$TAILCAT_TARGET" \
+  cargo build --release -p farcooler-cli -p farcooler-daemon --bins \
+  --features farcooler-cli/tailcat,farcooler-daemon/tailcat) || {
   echo "    the Rust build failed; refusing to bundle a stale binary"
   exit 1
 }

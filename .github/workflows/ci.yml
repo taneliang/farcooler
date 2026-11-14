@@ -894,6 +894,8 @@ jobs:
       # building one — so the assembly step is what CI should exercise.
       # Keep the shipping configuration: Swift release optimization and Rust
       # opt-level 3 + ThinLTO, including the release-only conditional code.
+      - name: Check native bundle linkage isolation
+        run: python3 scripts/macos-bundle-native-test.py
       - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
 
