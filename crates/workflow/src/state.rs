@@ -67,8 +67,8 @@ pub struct Item {
     /// A joined ticket only: the group item it is queued into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grouped_in: Option<String>,
-    /// A wait step only: the start of its patience window. Landing reads interrupted by downtime
-    /// start a fresh window on resumption; other waits keep their original deadline.
+    /// A wait step only: when its first effect was made. A restart looks again with the same deadline,
+    /// measured from the real stage entry rather than the start of an earlier sweep.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_since: Option<i64>,
     /// The model each build step runs with, by step id: the orchestrator's pick at Start, or the step's

@@ -655,7 +655,7 @@ fn a_group_cannot_be_cancelled_while_it_pushes_or_after_it_has() {
     early.run(Command::Cancel { item: group , reason: None }, Grant::Controller);
 }
 #[test]
-fn a_landing_wait_interrupted_by_restart_gets_fresh_patience_on_the_same_candidate() {
+fn a_landing_wait_interrupted_by_restart_keeps_its_patience_and_candidate() {
     for step in ["base", "push", "ci"] {
         let mut log = Log::new();
         let group = verb_group(&mut log, verb_ticket());
@@ -667,11 +667,11 @@ fn a_landing_wait_interrupted_by_restart_gets_fresh_patience_on_the_same_candida
         assert!(after.fence > before.fence);
         let again: Vec<_> = first.effects.iter().filter(|e| e.item == group).collect();
         assert_eq!(again.len(), 1, "{step}: read again");
-        // Downtime spends no patience; the candidate stays pinned.
+        // Neither the deadline nor the candidate changes when the read resumes.
         log.now = 5000;
         let second = log.outcome(&group, Outcome::Interrupted);
         let later: Vec<_> = second.effects.iter().filter(|e| e.item == group).collect();
-        assert_eq!(later[0].created_ms, if step == "push" { again[0].created_ms } else { 5000 }, "{step}: only landing waits refresh patience after downtime");
+        assert_eq!(later[0].created_ms, again[0].created_ms, "{step}: original stage deadline");
         assert_eq!(later[0].candidate, again[0].candidate);
     }
     // A fold is made again and a restart there is a failure, unlike a proven pre-send push wait.

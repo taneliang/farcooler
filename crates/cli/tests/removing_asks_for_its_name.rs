@@ -91,6 +91,9 @@ fn a_dirty_worktree_and_a_wrong_root_name_are_refused_with_the_confirmation_word
     std::fs::create_dir_all(&demo).unwrap();
     git(&demo, &["init", "-q"]);
     git(&demo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    let engine = s.home.join("h/workflow/tree-wf1-cli-test");
+    std::fs::create_dir_all(engine.parent().unwrap()).unwrap();
+    git(&demo, &["worktree", "add", "-q", "-b", "engine", engine.to_str().unwrap()]);
 
     let (ok, _, e) = s.run(&["--json", "daemon", "ensure"]);
     assert!(ok, "{e}");
@@ -98,6 +101,21 @@ fn a_dirty_worktree_and_a_wrong_root_name_are_refused_with_the_confirmation_word
     assert!(ok, "{e}");
     let (ok, _, e) = s.run(&["repo", "register", demo.to_str().unwrap()]);
     assert!(ok, "{e}");
+    let (ok, out, e) = s.run(&["--json", "worktree", "list"]);
+    assert!(ok, "{e}");
+    let listed: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    let canonical_engine = engine.canonicalize().unwrap();
+    let row = listed["worktrees"].as_array().unwrap().iter()
+        .find(|row| row["worktree"].as_str() == canonical_engine.to_str()).unwrap();
+    let engine_short = row["short"].as_str().unwrap();
+    let (ok, _, e) = s.run(&["worktree", "remove", engine_short, "--confirm", "tree wf1 cli test"]);
+    assert!(!ok, "an engine tree must survive manual removal");
+    assert!(e.contains("managed by the workflow engine"), "{e}");
+    assert!(engine.is_dir());
+    assert_eq!(row["engine_owned"], true);
+    let (ok, out, e) = s.run(&["worktree", "list"]);
+    assert!(ok && out.contains("managed by the workflow engine"), "{out}\n{e}");
+
     let (ok, out, e) = s.run(&["--json", "worktree", "create", "demo", "wt1", "--branch", "wt1", "--fork-only"]);
     assert!(ok, "{e}");
     let made: serde_json::Value = serde_json::from_str(out.trim()).unwrap();

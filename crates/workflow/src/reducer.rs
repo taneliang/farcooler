@@ -318,16 +318,15 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             }
                         }
                         Outcome::Interrupted => {
-                            // Interrupted waits and proven pre-send pushes resume for free; landing waits
-                            // get fresh patience after downtime, while pre-send pushes keep their deadline.
+                            // Interrupted waits and proven pre-send pushes resume for free;
+                            // patience starts at real stage entry and survives downtime.
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             if !is_wait(&item.definition.stages[item.stage].kind)
                                 && item.definition.stages[item.stage].kind != StageKind::Push {
                                 return Err(Refusal::Phase);
                             }
                             item.pending = None;
-                            item.wait_since = if matches!(item.definition.stages[item.stage].kind,
-                                StageKind::AwaitBase | StageKind::AwaitCi) { None } else { wait_since };
+                            item.wait_since = wait_since;
                             item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                             // Keep the read's identity so its recorded base SHA survives the restart.
                             launch(&mut item, id, input, &mut effects)?;
@@ -815,7 +814,7 @@ fn launch(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -
 pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mut Vec<Effect>) {
     let effect_id = digest(&("effect/v1", &input.workspace, &input.id, effects.len()));
     item.pending = Some(effect_id.clone());
-    // A wait carries its current patience window; landing restarts open a fresh one.
+    // A resumed wait keeps the deadline stamped at its real stage entry.
     let created_ms = if !matches!(kind, EffectKind::Decide { .. })
         && (is_wait(&item.definition.stages[item.stage].kind)
             || item.definition.stages[item.stage].kind == StageKind::Push) {

@@ -1116,24 +1116,33 @@ async fn tickets_that_apply_alone_but_conflict_together_return_the_conflicting_m
 #[tokio::test]
 async fn interrupted_ci_later_green_finishes_on_the_pushed_sha() {
     let (dir, mut runtime) = lander("ci-pending").await;
+    use std::os::unix::fs::PermissionsExt;
     let definition = batched_push(&runtime, "any", 400);
+    // Push takes longer than CI patience. CI's own clock must begin after this push,
+    // rather than at the start of the sweep that ran it.
+    let hook = dir.path().join("private-remote.git/hooks/pre-receive");
+    std::fs::write(&hook, "#!/bin/sh\nsleep 1\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
     at_join(&mut runtime, "one", &definition).await;
     command(&runtime, Command::Queue { item: "one".into() });
-    for time in 2..6 { runtime.pump(time).await.unwrap(); }
+    for time in 2..5 { runtime.pump(time).await.unwrap(); }
+    let started = std::time::Instant::now();
+    runtime.pump(5).await.unwrap();
+    let resume_at = 5 + i64::try_from(started.elapsed().as_millis()).unwrap() + 10;
     let binding = admitted(&runtime).await;
     assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::AwaitCi));
     let pushed = remote_head(&runtime).await;
     let root = runtime.root.clone(); drop(runtime);
-    // After an outage longer than patience, CI is still pending on the first resumed poll,
-    // then finishes green. The resumed wait must get a real chance to see it.
+    // CI is pending on the first resumed poll, then green. The original, accurately
+    // stamped CI deadline still has patience left: a restart never refunds it.
     let script = dir.path().join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
     let marker = dir.path().join("resumed-ci");
     let text = text.replace("elif stage == 'ci':", &format!("elif stage == 'ci':\n    marker = pathlib.Path({:?})\n    if marker.exists(): mode = 'pass'\n    marker.write_text('poll')", marker.to_str().unwrap()));
     std::fs::write(script, text).unwrap();
     let mut runtime = Runtime::open(&root).unwrap();
-    runtime.pump(50_000).await.unwrap();
-    runtime.pump(50_001).await.unwrap();
+    runtime.pump(resume_at).await.unwrap();
+    runtime.pump(resume_at + 1).await.unwrap();
     let state = until(&mut runtime, |s| matches!(phase_of(s, "one"), Some(Phase::Done | Phase::Failed))).await;
     assert_eq!(phase_of(&state, "one"), Some(Phase::Done));
     assert_eq!(candidate_of(&state, "one"), Some(pushed.as_str()));
