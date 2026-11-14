@@ -44,6 +44,11 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
   than regenerate/encode them on every scroll session's MainActor setup.
   Each source still delays image delivery 400 ms; dimensions, bytes, session
   rows, parameter cases and production timing checks are preserved.
+- Fix the hover-delay test's impossible wait: after setting a one-hour delay,
+  it polled 200 times for the pending wait to finish. First-candidate CI spent
+  122.755 seconds there. Yield and briefly suspend once instead; all assertions
+  about delayed visibility, pending state, cancellation and zero-delay display
+  remain. The zero-delay branch still waits for actual completion.
 
 ## Local validation
 
@@ -68,6 +73,14 @@ missed the target. Its bundle job passed in 1,452 seconds: libraries 242 seconds
 daemon 378 seconds, CLI 481 seconds and LFS filter 119 seconds. These costs show
 that CI also needs to avoid opt-level 3's per-crate optimization, not only LTO.
 The profile change invalidated the existing dependency cache (cold Rust build).
+Its test job was superseded by the revised candidate after all 2,113 AgentKit
+and 2,035 Mac definitions passed their completion guards; the outer Mac leak
+check was cancelled, so this is not counted as a successful test job. Mac
+Swift compilation took 327.28 seconds. The two-process test region took
+232.215 seconds (30 and 2,005 definitions), versus the baseline's 517.958-second
+CeremonyTests region plus its other four bundles. Both shards met their exact
+inventory counts and five-minute load criterion. This comparison motivates the
+partition but does not substitute for two successful final job measurements.
 
 Final candidate measurements pending. A temporary push trigger for this branch collects ordinary CI job
 measurements without opening a PR or adding runner jobs. Remove that trigger

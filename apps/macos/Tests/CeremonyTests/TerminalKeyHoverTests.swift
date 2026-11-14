@@ -131,7 +131,12 @@ struct TerminalKeyHoverTests {
         // 60 s was not (main CI 37409958732 took 86 s to settle on 4db7160e).
         view.keyHover.delay = .seconds(3600)
         try Self.move(view, row: 0, column: 2)
-        await Self.settle(view)
+        // Waiting is the expected state here. settle() would poll 200 times
+        // for it to end, with every poll queued behind other MainActor tests
+        // (123 seconds in CI, ov-1183). Give the scheduled task a turn, then
+        // check it is still waiting; the zero-delay case below still settles.
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(10))
         #expect(view.keyHover.shown == nil, "not before the delay")
         #expect(view.keyHover.isWaiting)
         try Self.move(view, row: 0, column: 7)
