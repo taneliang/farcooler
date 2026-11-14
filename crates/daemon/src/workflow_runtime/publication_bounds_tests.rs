@@ -42,9 +42,11 @@ fn carrying(root: &std::path::Path, scratch: &std::path::Path, config: &CodingCo
             config.checks[0].environment.insert("PYTHONSTARTUP".into(), command.into());
         }
         Carrier::Hook => {
-            // Codex's hooks, reporting to this host as the engine requires, with one more command beside them.
-            let theirs = serde_json::json!({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}});
-            let text = crate::hook_install::merge_codex(&theirs.to_string(), &root.join("h.sock"));
+            // The engine's Codex hooks, lifecycle and steering, reporting to this host, with one more command beside them.
+            let mut hooks = crate::hook_install::native_codex_hooks(&root.join("h.sock"));
+            hooks["hooks"]["SessionStart"].as_array_mut().unwrap()
+                .push(serde_json::json!({"hooks": [{"type": "command", "command": command}]}));
+            let text = hooks.to_string();
             let file = scratch.join(format!("hooks-{}.json", farcooler_workflow::digest(&command)));
             std::fs::write(&file, &text).unwrap();
             config.harness = CodingHarness::Native { preset: "codex".into(), settings: None, project_hooks: None, plugin_dir: None,
