@@ -3,6 +3,7 @@ use super::*;
 use super::coding::FileValidation;
 use super::coding::sha;
 use farcooler_store::board_ci::CiStatus;
+use farcooler_protocol::workflow_config::AgentHooks;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -185,21 +186,24 @@ impl Exec {
             StageKind::Build | StageKind::Review(Reviewer::Agent) => match &config.harness {
                 CodingHarness::Command(command) if matches!(kind, StageKind::Build) => command.clone(),
                 CodingHarness::Command(_) => return Err(Error::Refused("an agent's review gate needs a native harness")),
-                CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt: _, process, codex_hooks } => {
+                harness @ CodingHarness::Native { preset, settings, plugin_dir, prompt: _, process, .. } => {
                     // The model the run picked at Start, or the configured preset when the workflow lists none (ov-966).
                     // A review whose options choose by path runs with the model its paths earned (ov-1071).
                     let model = self.run_model(binding);
                     let preset = model.as_deref().unwrap_or(preset);
                     let agent = preset.split(':').next().unwrap_or("");
-                    let claude = agent == "claude";
-                    if let Some(settings) = settings.as_ref().filter(|_| launch && claude) { settings.verify()?; }
-                    // Codex reads the runner's copy of its hooks from the worktree, where `install_codex_hooks` wrote it (ov-1088).
-                    if let Some(hooks) = codex_hooks.as_ref().filter(|_| launch && agent == "codex") {
-                        LaunchFile { path: self.tree(binding).join(crate::hook_install::CODEX_HOOKS), digest: hooks.digest.clone() }.verify()?;
-                    } else if let Some(hooks) = project_hooks.as_ref().filter(|_| launch && !claude) {
-                        let relative = hooks.path.strip_prefix(&config.repository)
-                            .map_err(|_| Error::Refused("foreign native project hooks"))?;
-                        LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
+                    // The hooks this agent runs with, as publication judges them (ov-1206).
+                    match harness.agent_hooks(agent).filter(|_| launch) {
+                        Some(AgentHooks::Settings(settings)) => settings.verify()?,
+                        // Codex reads the runner's copy of its hooks from the worktree, where `install_codex_hooks` wrote it (ov-1088).
+                        Some(AgentHooks::Codex(hooks)) =>
+                            LaunchFile { path: self.tree(binding).join(crate::hook_install::CODEX_HOOKS), digest: hooks.digest.clone() }.verify()?,
+                        Some(AgentHooks::Project(hooks)) => {
+                            let relative = hooks.path.strip_prefix(&config.repository)
+                                .map_err(|_| Error::Refused("foreign native project hooks"))?;
+                            LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
+                        }
+                        None => {}
                     }
                     let mut extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
                         codex_hooks: self.codex_hook_override(binding)?,

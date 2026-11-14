@@ -30,6 +30,30 @@ pub enum CodingHarness {
         codex_hooks: Option<LaunchFile> },
 }
 
+/// The hooks file a native agent runs with, and how it reaches the agent (ov-1206).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum AgentHooks<'a> {
+    /// Claude's `--settings`, which carry its hooks.
+    Settings(&'a LaunchFile),
+    /// Codex's hooks, which the engine copies into the worktree (ov-1088).
+    Codex(&'a LaunchFile),
+    /// The repository's own hooks file, for any agent but Claude.
+    Project(&'a LaunchFile),
+}
+impl CodingHarness {
+    /// The hooks `agent` (a model's harness: `claude`, `codex`, …) runs with under this harness: what the engine
+    /// verifies and hands it at launch, and so what a change of model can start running. `None` for a command
+    /// harness, which runs its command whatever the model.
+    pub fn agent_hooks(&self, agent: &str) -> Option<AgentHooks<'_>> {
+        let CodingHarness::Native { settings, project_hooks, codex_hooks, .. } = self else { return None };
+        match agent {
+            "claude" => settings.as_ref().map(AgentHooks::Settings),
+            "codex" => codex_hooks.as_ref().map(AgentHooks::Codex).or(project_hooks.as_ref().map(AgentHooks::Project)),
+            _ => project_hooks.as_ref().map(AgentHooks::Project),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodingReviewer { pub identity: String, pub command: CodingCommand }

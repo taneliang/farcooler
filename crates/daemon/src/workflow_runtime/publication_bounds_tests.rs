@@ -248,3 +248,74 @@ fn refused_as(response: &farcooler_protocol::v1::Response) -> Option<String> {
         _ => None,
     }
 }
+
+/// ov-1206 (finding 2ad2bf7a): which hooks run follows from the model a step picks, not only from the adapter. The
+/// owner publishes a native harness that launches Claude, with a Codex hooks file pinned beside it that no step
+/// uses. Changing only `models["build"]` to a Codex model, or adding one the orchestrator may pick at Start, would
+/// start running that file's command. Each published before ov-1206. Another Claude model still publishes.
+#[tokio::test]
+async fn ov1206_a_model_change_cannot_activate_an_unused_hook() {
+    let (_coding, configured) = super::coding_tests::configured(false, "pass").await;
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let mut config = configured.coding.clone().unwrap();
+    let git = std::path::PathBuf::from(svc.store.get_repository(repo).unwrap().canonical_git_dir).canonicalize().unwrap();
+    config.repository = git.parent().unwrap().to_path_buf();
+    config.base = adapters::git(&config.repository, &["rev-parse", "HEAD"]).await.unwrap();
+    adapters::git(&config.repository, &["update-ref", &config.landing_ref, &config.base]).await.unwrap();
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let w = ws.to_string();
+    let (_pane, pid) = alices_pane(&svc, repo, ws, true).await;
+    let short = tempfile::Builder::new().prefix("p").tempdir_in("/tmp").unwrap();
+    let mut runtime = Runtime::open_service(&short.path().join("r"), svc.store.clone()).unwrap();
+    let peer = Peer { client_id: None, scope: Scope::Control };
+    let agent = factory(&svc, &runtime, peer.clone(), Some(pid));
+    let owner = factory(&svc, &runtime, peer, None);
+    ok(&sent(&mut runtime, &owner, ws, &Action::PublicationGrant { mutation: mutation("grant", 0, 1), enabled: true }).await.0);
+    let models = |definition: &Definition, list: &[&str]| {
+        let mut definition = definition.clone();
+        definition.models = [("build".to_string(), list.iter().map(|m| m.to_string()).collect())].into();
+        definition
+    };
+    let mut published_anyway = Vec::new();
+    for (action, command, credential) in OWNER_ONLY {
+        let slug = action.replace(' ', "-");
+        let (mut changed, _) = carrying(&runtime.root, short.path(), &config, Carrier::Hook, command, credential);
+        // The owner's harness launches Claude, with the engine's own settings; the Codex hooks file is configured and unused.
+        let text = crate::hook_install::claude_settings(&runtime.root.join("h.sock")).to_string();
+        let file = short.path().join("claude-settings.json");
+        std::fs::write(&file, &text).unwrap();
+        let CodingHarness::Native { preset, settings, .. } = &mut changed.harness else { unreachable!() };
+        *preset = "claude".into();
+        *settings = Some(LaunchFile { path: file.canonicalize().unwrap(), digest: farcooler_workflow::digest(&text.into_bytes()) });
+        let definition = changed.definition().unwrap();
+        let adapter = AdapterConfiguration::Coding(changed.clone());
+        for (owners, attempts) in [
+            (definition.clone(), vec![("codex", models(&definition, &["codex:gpt-5.5"])),
+                ("codex-pickable", models(&definition, &["claude:opus", "codex:gpt-5.5"]))]),
+            (models(&definition, &["claude:opus"]), vec![("codex-instead", models(&definition, &["codex:gpt-5.5"])),
+                ("codex-added", models(&definition, &["claude:opus", "codex:gpt-5.5"]))]),
+        ] {
+            runtime.validate_publication(&owners, Some(&adapter)).unwrap_or_else(|e| panic!("{action}: {e:?}"));
+            let expected = runtime.store.workflow_configuration(&w).unwrap().map(|c| c.pin);
+            ok(&published(&mut runtime, &owner, ws, &format!("{slug}-owner-{}", owners.models.len()), expected, owners.clone(), changed.clone()).await);
+            let current = runtime.store.workflow_configuration(&w).unwrap();
+            for (what, attempt) in attempts {
+                attempt.validate().unwrap_or_else(|e| panic!("{action}, {what}: {e:?}"));
+                runtime.validate_publication(&attempt, Some(&adapter))
+                    .unwrap_or_else(|e| panic!("{action}, {what}, isn't otherwise publishable: {e:?}"));
+                let expected = runtime.store.workflow_configuration(&w).unwrap().map(|c| c.pin);
+                let name = format!("{slug}-{what}-{}", owners.models.len());
+                let reply = published(&mut runtime, &agent, ws, &name, expected, attempt, changed.clone()).await;
+                // Every bypass that publishes is listed, not just the first.
+                if refused_as(&reply).as_deref() != Some("scope-denied") { published_anyway.push(name); continue }
+                assert_eq!(runtime.store.workflow_configuration(&w).unwrap(), current, "{action}, {what}");
+            }
+            if runtime.store.workflow_configuration(&w).unwrap() != current { continue }
+            // The grant still does what it is for: another Claude model runs the same hooks, and publishes.
+            let expected = current.as_ref().map(|c| c.pin.clone());
+            ok(&published(&mut runtime, &agent, ws, &format!("{slug}-sonnet-{}", owners.models.len()), expected,
+                models(&definition, &["claude:sonnet", "claude:opus"]), changed.clone()).await);
+        }
+    }
+    assert!(published_anyway.is_empty(), "the orchestrator published {published_anyway:#?}");
+}

@@ -27,6 +27,11 @@ pub fn notification_configuration_pin(definition: &Definition, adapter: Option<&
 /// dropped or swapped, and a configured command no step ran stays unrun. Each decision counts on its own, by the
 /// step it is made at (review f65a4a83), and one made before the candidate changed covers no step it covered
 /// on the same candidate.
+///
+/// Which hooks run is decided by both (finding 2ad2bf7a): a native harness pins Claude's settings and Codex's
+/// hooks side by side, and a step's models choose between them. So each step is judged by what it can launch,
+/// each agent its models (or the preset) select with the hooks that agent resolves to, and every one of those
+/// must be one a matching step of `previous` could launch (ov-1206).
 pub fn runs_the_same(previous: Option<&Configuration>, definition: &Definition, adapter: Option<&AdapterConfiguration>) -> bool {
     fn environments(definition: &Definition) -> std::collections::BTreeMap<(&str, &str), &std::collections::BTreeMap<String, String>> {
         definition.stages.iter().map(|s| ("", s))
@@ -34,16 +39,33 @@ pub fn runs_the_same(previous: Option<&Configuration>, definition: &Definition, 
             .map(|(group, s)| ((group, s.id.as_str()), &s.operation.environment)).collect()
     }
     let before = previous.map(|c| environments(&c.definition)).unwrap_or_default();
-    let earlier = previous.map(|c| guarded::steps(&c.definition)).unwrap_or_default();
+    let earlier: Vec<_> = previous.map(|c| guarded::steps(&c.definition).into_iter()
+        .map(|(group, s, had)| (s, had, launches(&c.definition, group, s, adapter))).collect()).unwrap_or_default();
     previous.and_then(|c| c.adapter.as_ref()) == adapter
         && environments(definition).into_iter().all(|(step, e)| e.is_empty() || before.get(&step) == Some(&e))
-        && guarded::steps(definition).into_iter().filter(|(s, _)| !guarded::runs_nothing(s)).all(|(s, guards)|
-            earlier.iter().any(|(was, had)| was.kind == s.kind && was.operation == s.operation && match (&guards, had) {
-                // A step no run reaches still runs nothing new.
-                (None, _) => true,
-                (Some(now), Some(had)) => guarded::keeps(had, now),
-                (Some(_), None) => false,
-            }))
+        && guarded::steps(definition).into_iter().filter(|(_, s, _)| !guarded::runs_nothing(s)).all(|(group, s, guards)|
+            launches(definition, group, s, adapter).iter().all(|launch| earlier.iter().any(|(was, had, could)|
+                was.kind == s.kind && was.operation == s.operation && could.contains(launch) && match (&guards, had) {
+                    // A step no run reaches still runs nothing new.
+                    (None, _) => true,
+                    (Some(now), Some(had)) => guarded::keeps(had, now),
+                    (Some(_), None) => false,
+                })))
+}
+/// What step `stage` of `definition` (in `group`, or `""`) can start under `adapter` (ov-1206): for an agent on a
+/// native harness, each agent its models select, or the preset's when it lists none, with the hooks that agent
+/// runs with, by digest; for anything else its one command, which the adapter and the step's operation fix. A
+/// group's items pick no models and run the preset. An agent review's path rules, in its operation, are left out:
+/// a matching step has the same operation and so the same rules, and leaving them out only refuses more.
+fn launches(definition: &Definition, group: &str, stage: &farcooler_workflow::Stage, adapter: Option<&AdapterConfiguration>) -> std::collections::BTreeSet<(String, Option<String>)> {
+    let Some(AdapterConfiguration::Coding(config)) = adapter else { return [Default::default()].into() };
+    let farcooler_protocol::workflow_config::CodingHarness::Native { preset, .. } = &config.harness else { return [Default::default()].into() };
+    if !farcooler_workflow::starts_agent(&stage.kind) { return [Default::default()].into() }
+    let listed = Some(group).filter(|g| g.is_empty()).and_then(|_| definition.models.get(&stage.id));
+    listed.map_or_else(|| vec![preset.as_str()], |models| models.iter().map(String::as_str).collect()).into_iter()
+        .map(|model| model.split(':').next().unwrap_or("").to_string())
+        .map(|agent| { let hooks = config.harness.agent_hooks(&agent).map(|h| farcooler_workflow::digest(&h)); (agent, hooks) })
+        .collect()
 }
 /// Who must have said yes before each step of a definition starts (ov-1201).
 mod guarded {
@@ -85,17 +107,17 @@ mod guarded {
     pub(super) fn keeps(had: &BTreeMap<Decision, bool>, now: &BTreeMap<Decision, bool>) -> bool {
         had.iter().all(|(d, current)| now.get(d).is_some_and(|now| *now || !current))
     }
-    /// Every step of `definition` and its groups, with its guards: the decisions on every way to it, its own
+    /// Every step of `definition` and its groups, by group (`""` for the top), with its guards: the decisions on every way to it, its own
     /// approval included. A group's steps also have the ones on every way to a join that queues into it.
-    pub(super) fn steps(definition: &Definition) -> Vec<(&Stage, Guards)> {
+    pub(super) fn steps(definition: &Definition) -> Vec<(&str, &Stage, Guards)> {
         let top = must_pass(definition, "", Some(BTreeMap::new()));
-        let mut out: Vec<(&Stage, Guards)> = definition.stages.iter().zip(top.iter().cloned()).collect();
+        let mut out: Vec<(&str, &Stage, Guards)> = definition.stages.iter().zip(top.iter().cloned()).map(|(s, g)| ("", s, g)).collect();
         for (name, group) in &definition.groups {
             let entry = definition.stages.iter().zip(&top)
                 .filter(|(s, _)| matches!(&s.kind, StageKind::Join { group, .. } if group == name))
                 .fold(None, |all: Guards, (_, g)| meet(all, g.clone()));
             let inner = definition.group_definition(name).map_or_else(|| vec![None; group.steps.len()], |d| must_pass(&d, name, entry));
-            out.extend(group.steps.iter().zip(inner));
+            out.extend(group.steps.iter().zip(inner).map(|(s, g)| (name.as_str(), s, g)));
         }
         out
     }
@@ -603,5 +625,67 @@ mod ov1179_rollback_tests {
         assert!(runs_the_same(Some(&previous), &definition(vec![build.clone(), lint.clone(), review.clone(),
             step("lint-again", StageKind::Check, "lint"), deploy.clone()]), None), "another check between the review and the deploy");
     }
-}
+    /// ov-1206 (finding 2ad2bf7a): the boundary is what each step can launch, the agents its models select with
+    /// the hooks each resolves to, not which fields changed. A model of another agent is a change of hooks with the
+    /// adapter untouched; another model of the same agent is not; a command harness runs its command whatever the
+    /// model; and a changed harness or hooks file is a changed adapter.
+    #[test]
+    fn ov1206_runs_the_same_only_launching_the_same_hooks() {
+        use farcooler_protocol::workflow_config::{AgentHooks, CodingCi, CodingCommand, CodingConfig, CodingHarness, LaunchFile};
+        use farcooler_workflow::{GroupDef, OperationSpec, Progression, Reviewer, Stage, StageKind};
+        let command = || CodingCommand { argv: vec!["/bin/true".into()], environment: Default::default(), timeout_ms: 1000 };
+        let file = |name: &str| Some(LaunchFile { path: format!("/runner/{name}.json").into(), digest: name.into() });
+        let native = |preset: &str, codex_hooks: Option<LaunchFile>| CodingHarness::Native { preset: preset.into(),
+            settings: file("claude-settings"), project_hooks: None, plugin_dir: None, prompt: "build".into(), process: command(), codex_hooks };
+        let adapter = |harness: CodingHarness| AdapterConfiguration::Coding(CodingConfig { repository: "/repo".into(), base: "main".into(),
+            landing_ref: "refs/heads/main".into(), landing: None, pull_request: None, harness, checks: vec![command()], reviewer: None,
+            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: command() } });
+        // The finding's configuration: Claude launches, and a Codex hooks file running a deploy sits unused beside it.
+        let owners = adapter(native("claude", file("codex-hooks-with-deploy")));
+        let step = |id: &str, kind: StageKind| Stage { id: id.into(), kind, progression: Progression::Automatic, max_attempts: 1,
+            operation: OperationSpec { adapter_version: "coding/v1".into(), arguments: vec![id.into()], environment: Default::default() },
+            routes: Default::default(), limit: 0 };
+        let mut base = Definition::tracker("owner");
+        base.stages = vec![step("build", StageKind::Build), step("gate", StageKind::Review(Reviewer::Agent))];
+        let models = |list: &[(&str, &[&str])]| { let mut d = base.clone();
+            d.models = list.iter().map(|(s, m)| (s.to_string(), m.iter().map(|m| m.to_string()).collect())).collect(); d };
+        let same = |previous: &Definition, adapter: &AdapterConfiguration, now: &Definition| runs_the_same(
+            Some(&Configuration { pin: "p".into(), definition: previous.clone(), adapter: Some(adapter.clone()), notifications: None }), now, Some(adapter));
 
+        // Models: the agent a step can launch, not the field, decides.
+        assert!(same(&base, &owners, &base));
+        assert!(same(&base, &owners, &models(&[("build", &["claude:opus"])])), "another Claude model runs Claude's hooks");
+        assert!(!same(&base, &owners, &models(&[("build", &["codex:gpt-5.5"])])), "finding 2ad2bf7a: Codex's hooks start running");
+        assert!(!same(&base, &owners, &models(&[("build", &["claude:opus", "codex:gpt-5.5"])])), "Codex pickable at Start");
+        assert!(!same(&base, &owners, &models(&[("gate", &["codex:gpt-5.5"])])), "an agent's review gate launches Codex too");
+        let either = models(&[("build", &["claude:opus", "codex:gpt-5.5"])]);
+        assert!(same(&either, &owners, &models(&[("build", &["codex:gpt-5.5"])])), "Codex was already selectable here");
+        assert!(same(&either, &owners, &base), "dropping the list falls back to the preset's Claude");
+        assert!(!same(&either, &owners, &models(&[("build", &["claude:opus"]), ("gate", &["codex:gpt-5.5"])])),
+            "Codex selectable at the build stands in for none at the gate");
+        // Harness by model: an agent with no hooks of its own still launches another program.
+        assert!(!same(&base, &owners, &models(&[("build", &["cursor:auto"])])), "another agent's program");
+        // A group's steps list no models and run the preset.
+        let mut grouped = base.clone();
+        grouped.groups.insert("g".into(), GroupDef { limit: None, exclusive: "main".into(), steps: vec![step("build", StageKind::Build)] });
+        assert!(same(&grouped, &owners, &grouped));
+        // Hooks resolve per agent as the engine launches them: Codex falls back to the repository's own file.
+        let CodingHarness::Native { codex_hooks, .. } = native("claude", file("c")) else { unreachable!() };
+        assert_eq!(native("claude", file("c")).agent_hooks("codex"), codex_hooks.as_ref().map(AgentHooks::Codex));
+        let mut project = native("claude", None);
+        if let CodingHarness::Native { project_hooks, .. } = &mut project { *project_hooks = file("repo-hooks"); }
+        assert!(matches!(project.agent_hooks("codex"), Some(AgentHooks::Project(_))));
+        assert!(matches!(project.agent_hooks("claude"), Some(AgentHooks::Settings(_))));
+        assert_eq!(CodingHarness::Command(command()).agent_hooks("codex"), None);
+
+        // A command harness runs its command whatever the model.
+        let commanded = adapter(CodingHarness::Command(command()));
+        assert!(same(&base, &commanded, &models(&[("build", &["codex:gpt-5.5"])])));
+
+        // Adapters: a changed preset or hooks file is a change, whatever the definition.
+        let previous = Configuration { pin: "p".into(), definition: base.clone(), adapter: Some(owners.clone()), notifications: None };
+        assert!(!runs_the_same(Some(&previous), &base, Some(&adapter(native("codex", file("codex-hooks-with-deploy"))))), "preset");
+        assert!(!runs_the_same(Some(&previous), &base, Some(&adapter(native("claude", file("other-hooks"))))), "hooks file");
+        assert!(!runs_the_same(Some(&previous), &base, Some(&adapter(native("claude", None)))), "hooks dropped");
+    }
+}

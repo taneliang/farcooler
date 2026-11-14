@@ -588,6 +588,23 @@ can't be moved behind a rebuild. That refuses a publication that:
 - routes a step past the owner's review, or sends the review's rejection on to
   the command
 - runs a configured command that no step of the replaced definition ran
+- lets a step launch an agent, and so its hooks, that the step couldn't before
+
+The adapter alone also doesn't say which hooks run (finding 2ad2bf7a, ov-1206).
+A native harness pins Claude's settings and Codex's hooks file side by side, and
+a step's models choose which agent launches. With an owner's harness that
+launches Claude, changing only `models["build"]` to a Codex model would start
+running a Codex hooks file nothing ran before, with whatever command it holds.
+So each build step and agent review gate is judged by what it can launch: every
+agent its models select (or the preset's agent, when the step lists none, as a
+group's steps never do), each with the hooks file that agent runs with under the
+harness. The engine uses the same resolution when it launches the agent:
+Claude's `--settings`, Codex's own hooks or else the repository's, and the
+repository's for any other agent. Every agent and hooks pair a step can launch
+must be one a matching step of the replaced definition could launch. Another
+Claude model publishes; adding a Codex model, even only as one the orchestrator
+may pick at Start, or a model of an agent with no hooks of its own, does not. A
+command harness runs its command whatever the model, so models there stay free.
 
 Routes, models, deciders, limits, groups and notifications still change freely
 within that, so adding another approval or review publishes. A change to
@@ -622,6 +639,14 @@ now.
 `ov1201_runs_the_same_only_behind_the_same_deciders` covers the same rules on
 plain definitions, including a group reached through a join and a split, two
 approvals by the owner, and a step that changes the candidate after a review.
+
+`ov1206_a_model_change_cannot_activate_an_unused_hook` publishes, for each of
+the four actions, a Claude harness with the action in an unused Codex hooks
+file, then has the orchestrator switch the build to Codex or make Codex
+pickable, from no models and from a Claude model. All 16 published before
+ov-1206 and are refused now, while another Claude model still publishes.
+`ov1206_runs_the_same_only_launching_the_same_hooks` covers model, harness and
+adapter changes on plain configurations.
 
 This covers what publication adds. The orchestrator's own shell runs as the same
 Unix user, so the runner does not stop an agent that runs these commands
