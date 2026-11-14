@@ -1,0 +1,24 @@
+Python: Homebrew Python 3.14.10 via /tmp/ov1182-bin/python3 (system PATH's
+/usr/local/bin/python3 is an incompatible binary on this host).
+
+PASS actionlint (all repository workflows)
+PASS scripts/ci-changes.py --self-test
+PASS scripts/rust-shards.py --self-test (missing, duplicate, extra, changed
+     ignored flag, invalid status, wrong shard count, empty inventory rejected)
+PASS scripts/macos-rust-tests.py --self-test --check (ov-1181 coverage guard)
+PASS scripts/rust-shadow-test.py (9 tests)
+PASS scripts/test-leak-check.py --self-test
+PASS scripts/test-leak-check.py --lint
+PASS scripts/nightly-report.py --self-test
+PASS scripts/file-size-budget.py --self-test
+PASS scripts/file-size-budget.py
+PASS git diff --check
+PASS reports/ov-1182/verify-hosted.py (measurement job parity)
+
+Real nextest 0.9.148 archive smoke test built under this worktree's target/:
+65 cases: 64 runnable, 1 ignored. All partition inventories covered exactly
+64 cases once. The actual four hash partition runs passed: 13 + 20 + 16 + 15.
+An initial four-test fixture had an empty hash partition and nextest failed
+closed as intended; the larger fixture exercised execution in every partition.
+No workspace Rust source changed. Hosted runs exercise the actual full suite,
+feature suites, platform checks, doctests, runtime aliases and leak wrappers.

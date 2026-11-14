@@ -1,0 +1,18 @@
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T04:41:35.0509990Z ^[[32;1m     Summary^[[0m [   0.653s] ^[[1m21^[[0m tests run: ^[[1m21^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T04:42:51.4550100Z ^[[32;1m     Summary^[[0m [   0.149s] ^[[1m3^[[0m tests run: ^[[1m3^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T04:43:02.5484990Z ^[[32;1m     Summary^[[0m [   3.784s] ^[[1m14^[[0m tests run: ^[[1m14^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T04:43:04.9191010Z ^[[32;1m     Summary^[[0m [   0.159s] ^[[1m2^[[0m tests run: ^[[1m2^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T04:43:08.1285630Z ^[[32;1m     Summary^[[0m [   0.975s] ^[[1m3^[[0m tests run: ^[[1m3^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T04:43:11.0690800Z ^[[32;1m     Summary^[[0m [   0.534s] ^[[1m2^[[0m tests run: ^[[1m2^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T05:12:30.6591520Z ^[[32;1m     Summary^[[0m [1034.879s] ^[[1m7000^[[0m tests run: ^[[1m7000^[[0m ^[[32;1mpassed^[[0m, ^[[1m35^[[0m ^[[33;1mskipped^[[0m
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T05:12:33.4673010Z Rust shadow: accepted; skips disabled.
+Rust (macos-latest)	UNKNOWN STEP	2026-11-14T05:12:33.4675400Z Full wall: 1040.50s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:38:35.7447883Z ^[[32;1m     Summary^[[0m [   0.510s] ^[[1m21^[[0m tests run: ^[[1m21^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:39:33.3160604Z ^[[32;1m     Summary^[[0m [   0.226s] ^[[1m3^[[0m tests run: ^[[1m3^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:39:41.7376982Z ^[[32;1m     Summary^[[0m [   3.120s] ^[[1m14^[[0m tests run: ^[[1m14^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:39:43.6985999Z ^[[32;1m     Summary^[[0m [   0.317s] ^[[1m2^[[0m tests run: ^[[1m2^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:39:46.3756191Z ^[[32;1m     Summary^[[0m [   0.863s] ^[[1m3^[[0m tests run: ^[[1m3^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:39:48.2308410Z ^[[32;1m     Summary^[[0m [   0.247s] ^[[1m2^[[0m tests run: ^[[1m2^[[0m ^[[32;1mpassed^[[0m, ^[[1m0^[[0m ^[[33;1mskipped^[[0m
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:57:43.7966978Z ^[[32;1m     Summary^[[0m [ 584.716s] ^[[1m6977^[[0m tests run: ^[[1m6977^[[0m ^[[32;1mpassed^[[0m (^[[1m2^[[0m ^[[33;1mleaky^[[0m), ^[[1m35^[[0m ^[[33;1mskipped^[[0m
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:57:46.2296480Z Rust shadow: accepted; skips disabled.
+Rust (ubuntu-24.04)	UNKNOWN STEP	2026-11-14T04:57:46.2297436Z Full wall: 588.47s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.

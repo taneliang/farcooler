@@ -19,8 +19,35 @@ with inventories, host-load waits and a possible sequential selected replay,
 not a required coverage check. Hosted before/after evidence follows below.
 
 Local validation: actionlint for changed workflows, ci-changes self-test,
-partition mutation tests and a real five-case nextest archive (four runnable,
-one ignored), Mac selection guard/self-tests and leak-wrapper self-tests.
+partition mutation tests and a real 65-case nextest archive (64 runnable,
+one ignored; all four partitions executed successfully), Mac selection guard/self-tests and leak-wrapper self-tests.
 
 A temporary branch-only push workflow copies the production Rust jobs, removing
 only the changes/path-selection dependency. It will be removed after timing.
+
+## Shadow measurement limits
+
+The baseline Linux full command took 588.47 s (584.716 s in nextest execution)
+inside a 935 s step. Mac took 1040.50 s (1034.879 s execution) inside a 1564 s
+step. Neither replayed a narrowed proposal on this workflow-changing commit.
+The remaining 346.53/523.50 s include test compilation during inventory and
+planner/load/bookkeeping time; they cannot all be attributed to shadow overhead.
+Moving shadow removes optional sequential replays from per-push critical paths;
+the baseline alone does not prove minutes saved by removing its bookkeeping.
+
+## Initial experiment and follow-up
+
+Run 43573567048 measured the first split. By roughly 12 minutes the Mac job
+was still in feature/check setup, before its default suite. The final design
+therefore runs native Mac tests independently of the unchanged platform
+lint/feature checks. The initial harness is initial-hosted-timing.yml and is
+not counted toward acceptance for the final job layout.
+
+Rust CI sets CARGO_PROFILE_DEV_DEBUG=0 and CARGO_PROFILE_TEST_DEBUG=0 to reduce
+binary/link/archive costs. These settings change debug symbols, leaving Cargo's
+optimization settings and debug assertions unchanged. Artifact binaries retain
+panic messages and test names but do not carry full debug symbols. No source,
+test filters, retry policy, required verdict or test timeout changed.
+
+The inherited ov-1181 repository-wide actionlint annotations are included so
+plain `actionlint` passes, including the custom xcode-27 runner label.

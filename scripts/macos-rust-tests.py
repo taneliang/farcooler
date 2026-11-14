@@ -188,7 +188,7 @@ def expression(selection):
 
 def workflow_errors(ci, nightly):
     errors = []
-    linux = ci.split('  rust-tests:', 1)[-1].split('  # TWO JOBS', 1)[0]
+    linux = ci.split('  rust-tests:', 1)[-1].split('\n  rust-macos-tests:', 1)[0]
     if ('cargo nextest run --profile ci --no-fail-fast --archive-file' not in linux
             or ' -E ' in linux or '--partition hash:${{ matrix.shard }}/4' not in linux
             or 'shard: [1, 2, 3, 4]' not in linux or 'scripts/rust-shards.py --archive' not in linux):

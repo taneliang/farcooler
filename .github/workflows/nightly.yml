@@ -94,6 +94,9 @@ jobs:
       - run: cargo test --workspace --doc
 
   rust-shadow:
+    permissions:
+      contents: read
+      actions: read
     name: Rust shadow measurement (Linux)
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04

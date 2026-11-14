@@ -15,6 +15,10 @@ jobs:
     # macOS 60: its runners have run 2-3x slower, the crash-matrix binary alone takes about 6 min, and 35 min cut main off about 4900 of 6665 tests in (ov-992).
     # Ubuntu 45 (ov-1056): the last five green main runs took 24.8-31.1 min (gh run view, Nov 9). The leak-checked nextest step went 11.1 to 14.0 min and clippy 3.2 to 4.2 across them. 45 is 45% over the slowest.
     timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 45 }}
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     strategy:
       fail-fast: false
       matrix:
@@ -347,19 +351,6 @@ jobs:
       # `cargo test` they had never run on 3.8, because an earlier binary had
       # already failed and `cargo test` stops at the first.
       # Linux default-feature tests run from one archive in rust-tests below.
-      - name: Python for macOS coverage guard
-        if: runner.os == 'macOS'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: macOS native Rust tests
-        if: runner.os == 'macOS'
-        run: |
-          # --workspace compiles ALL test binaries before nextest filters tests.
-          # Keep this explicit so a future change to nextest cannot narrow builds.
-          cargo nextest run --profile ci --workspace --no-run
-          selection="$(python3 scripts/macos-rust-tests.py)"
-          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
       # nextest does not run doctests, so this is the only thing that would.
       # There are none today (checked: every `Doc-tests` target reports zero),
       # and the step costs a few seconds of empty rustdoc runs; it is here so
@@ -371,6 +362,10 @@ jobs:
     name: Rust test archive
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -402,6 +397,8 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       FARCOOLER_TEST_SHELL: /bin/sh
     steps:
       - uses: actions/checkout@v4
@@ -412,18 +409,6 @@ jobs:
         with:
           name: rust-tests
           path: target
-      # tmux is not a test double here. The tmux crate drives the real binary,
-      # because a fake tmux would agree with whatever this code believed.
-      # Bounded, and it has to be. This step hung for an hour on two
-      # consecutive runs — `apt-get update` against a mirror that accepts the
-      # connection and then stops answering, which has no timeout of its own
-      # and no output, so the job reads as "still working" until someone looks
-      # at the step list. A run that fails in five minutes can be re-run; one
-      # that hangs holds a runner until the six-hour ceiling.
-      #
-      # And a KNOWN tmux, one per runner (ov-554): see the header of
-      # `scripts/ci-install-tmux.sh` for which, why, and how to move one. The
-      # Swift job's Mac tests use the same script and the same build.
       - name: Cache the pinned tmux build
         if: runner.os == 'macOS'
         uses: actions/cache@v4
@@ -434,13 +419,6 @@ jobs:
         timeout-minutes: 10
         run: ./scripts/ci-install-tmux.sh
 
-      # git-lfs, for the two daemon tests that use it
-      # (`crates/daemon/tests/lfs_content_under_the_git_sandbox.rs`): one makes
-      # the repository the daemon's own LFS filter reads, and one shows that a
-      # planted `lfs.extension` does run under git-lfs, which is the control
-      # for the test that it runs nothing under the daemon. The daemon itself
-      # never runs git-lfs. With `CI` set, a missing git-lfs fails them rather
-      # than skipping. Both runner images usually have it; bounded like tmux.
       - name: Install git-lfs
         timeout-minutes: 5
         env:
@@ -459,14 +437,6 @@ jobs:
           fi
           git-lfs version
 
-      # fish, because it is a login shell people have and the one whose quoting
-      # differs: inside single quotes it reads `\\` and `\'`, which sh does not.
-      # A pane's command is parsed by the login shell, so the daemon's launch
-      # tests run every quoting case through fish as well as sh, bash and zsh
-      # — and with `CI` set, a missing fish FAILS them rather than skipping
-      # its half (`launch_prompt_tests::shells`). Bounded like tmux above.
-      # Ubuntu's fish is 3.7 and Homebrew's is 4.x; the launch needs 3.4 or
-      # later for `"$(…)"`.
       - name: Install fish
         timeout-minutes: 5
         env:
@@ -483,29 +453,6 @@ jobs:
           fi
           fish --version
 
-      # `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` stands up a real
-      # loopback sshd, and `cargo nextest run --workspace` below runs it. It is the
-      # closest thing this repository has to a security guard: sshd, not the
-      # daemon, is what makes a `read` device unable to ask for `host_admin`,
-      # and only a real sshd can be asked whether that is true.
-      #
-      # It was `#[ignore]`d for four months behind a reason that named a
-      # scheduled lane that did not exist. Nothing ran it. The attribute is gone; this step is the one
-      # thing the runner has to supply that is not universal.
-      #
-      # NOT root, and that was the open question — whether a non-root sshd
-      # starts on a GitHub runner. It was tried before this line was written, on
-      # macOS 26.6 (OpenSSH 10.3p1) and Ubuntu 26.04 (OpenSSH 10.2p1):
-      # `restrict`, `command=` and `environment=` all behave, and OpenSSH skips
-      # privilege separation outright when `getuid()` is not 0, which is the
-      # only part that would have wanted a privileged runner.
-      #
-      # `command -v` first for the same reason the tmux step does it: the
-      # Ubuntu image ships `openssh-server` already and the macOS one ships
-      # sshd with the OS, so this is normally free. The test asserts on
-      # `/usr/sbin/sshd` by absolute path — it will not take one off PATH,
-      # because a runner is entitled to know which sshd it authenticated
-      # against — so that is the path this checks.
       - name: Make sure there is an sshd to test the fence against
         timeout-minutes: 5
         env:
@@ -538,4 +485,107 @@ jobs:
         with:
           name: rust-inventory-${{ matrix.shard }}
           path: target/shard-inventories
+
+  # Native suite and feature/lint checks overlap on independent Mac runners.
+  rust-macos-tests:
+    name: Rust native tests (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-latest
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Cache the pinned tmux build
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
+      - name: Install tmux
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
+
+      - name: Install git-lfs
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v git-lfs >/dev/null 2>&1; then
+            git-lfs version
+            exit 0
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+            sudo apt-get "${APT_OPTS[@]}" update
+            sudo apt-get "${APT_OPTS[@]}" install -y git-lfs
+          else
+            brew install git-lfs
+          fi
+          git-lfs version
+
+      - name: Install fish
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if ! command -v fish >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y fish
+            else
+              brew install fish
+            fi
+          fi
+          fish --version
+
+      - name: Make sure there is an sshd to test the fence against
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y openssh-server
+            else
+              echo "no /usr/sbin/sshd on a macOS runner, which ships one with the OS" >&2
+              exit 1
+            fi
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
+
+      - name: Put this channel's CLI where the daemon tests look for it
+        run: |
+          set -euo pipefail
+          cargo build --workspace --bins
+          for name in farcooler-local farcooler-preview farcooler-canary; do
+            ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
+          done
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+
+      - name: Python for macOS coverage guard
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: macOS native Rust tests
+        if: runner.os == 'macOS'
+        run: |
+          # --workspace compiles ALL test binaries before nextest filters tests.
+          # Keep this explicit so a future change to nextest cannot narrow builds.
+          cargo nextest run --profile ci --workspace --no-run
+          selection="$(python3 scripts/macos-rust-tests.py)"
+          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
 
