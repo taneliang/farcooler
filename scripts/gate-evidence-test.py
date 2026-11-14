@@ -30,7 +30,7 @@ class EvidenceTest(unittest.TestCase):
         self.repo.mkdir()
         self.scripts = self.repo / "scripts"
         self.scripts.mkdir()
-        for name in ("gate_evidence.py", "lane-gate.py", "heavy_lock.py", "ci-changes.py", "ios-ui-plan.py", "gate-summary-check.py"):
+        for name in ("gate_evidence.py", "lane-gate.py", "process_guard.py", "heavy_lock.py", "ci-changes.py", "ios-ui-plan.py", "gate-summary-check.py"):
             shutil.copyfile(ROOT / "scripts" / name, self.scripts / name)
         (self.repo / ".github/actions/ios-ui-build").mkdir(parents=True)
         (self.repo / ".github/actions/ios-ui-build/action.yml").write_text("runs:\n  steps:\n")

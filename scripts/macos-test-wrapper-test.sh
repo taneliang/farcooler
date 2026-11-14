@@ -20,7 +20,7 @@ trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/apps/macos" "$scratch/bin" "$scratch/scripts"
 mkdir -p "$scratch/home/.cargo/bin"
 cp "$real" "$scratch/apps/macos/test.sh"
-cp scripts/tmux-leak-check.py scripts/test-leak-check.py scripts/swift-test-guard.sh "$scratch/scripts/"
+cp scripts/tmux-leak-check.py scripts/test-leak-check.py scripts/process_guard.py scripts/swift-test-guard.sh "$scratch/scripts/"
 echo 1 >"$scratch/apps/macos/test-floor.txt"
 
 cat >"$scratch/apps/macos/build-vt.sh" <<'STUB'
