@@ -154,7 +154,9 @@ how to build on the runner itself instead.
 Per-push Rust CI runs the full workspace suite on Linux and builds every
 workspace test target on macOS, where it runs the native selection in
 `scripts/macos-rust-tests.json`. `python3 scripts/macos-rust-tests.py --self-test --check`
-rejects uncovered Mac-specific source scopes. Nightly on main runs the full
+requires Python 3.11+ and rejects uncovered Mac-specific source scopes and
+unselected Mac-only dependency crates. Mac-only crates require a whole-package
+rule, including when their own source contains no platform cfg. Nightly on main runs the full
 Mac suite. The local lane gate keeps one full workspace run.
 
 A few things that save time:

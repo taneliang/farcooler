@@ -148,6 +148,9 @@ jobs:
       # scratch repository.
       - run: ./scripts/ci-changes.py --self-test
       - run: python3 scripts/rust-shadow-test.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - run: python3 scripts/macos-rust-tests.py --self-test --check
       # Reproduce a gate launched by scripts/heavy: private test queues must
       # still lock even though the parent already holds the machine queue.
@@ -751,6 +754,11 @@ jobs:
         env:
           CANDIDATES: ${{ runner.temp }}/rust-green.ndjson
         run: python3 scripts/rust-shadow.py --out "${{ runner.temp }}/rust-shadow" -- ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
+      - name: Python for macOS coverage guard
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: macOS native Rust tests
         if: runner.os == 'macOS'
         run: |

@@ -30,7 +30,7 @@ as supporting evidence from the initial build.
 ## Guard and validation
 
 `python3 scripts/macos-rust-tests.py --self-test --check` runs in CI's always-on
-wire job, without Cargo or a Mac. It scans every crate plus nonstandard
+wire job, without Cargo or a Mac (Python 3.11+ for stdlib TOML parsing). It scans every crate plus nonstandard
 workspace member paths for Mac/Apple cfg predicates, including crate roots,
 nested `all`/`any`, `cfg!`, `cfg_attr`, and platform-specific manifests. Custom
 Cargo target roots are recognized as crate roots.
@@ -49,6 +49,41 @@ with inherited Work-session variables removed, outside the sandbox: their
 Git helper merges stderr into stdout, so the sandbox's `confstr()` warnings
 otherwise corrupt fixture commit IDs. The excluded failed setup attempt is
 retained in `validation-environment-attempt.zip`.
+
+### Dependency guard correction (fix round 2)
+
+The review reproduction exposed a gap: an otherwise cfg-free workspace crate
+used only by a caller's Mac-target dependency table escaped the source scan.
+The guard now reads Cargo TOML and resolves local dependency paths, including
+renamed dependencies, inherited workspace dependencies, member globs and
+implicit path members. Workspace dependency declarations are templates;
+the actual consumer supplies the platform constraint. Normal, dev, build and
+optional edges all participate. Exclusivity propagates through transitive
+dependencies and cycles; a shared consumer removes it. Mac/Apple target
+mentions (including mixed predicates) conservatively count as native edges.
+
+A crate reached only through native dependency paths requires a **whole-package**
+selection. Selecting one real module or integration binary cannot satisfy it.
+A shared caller such as the daemon can still select its native modules;
+having a Mac dependency does not make that caller a Mac-only crate.
+
+`fix-round-2-red.log` records the new regression self-test failing against the
+old guard, plus reproductions where no selection, one module, and one binary
+all incorrectly returned no errors. The corrected self-test plants cfg-free
+crates with actual unit and integration tests, requires rejection before
+adding complete package rules, and verifies shared-consumer handling.
+`fix-round-2-validation.log` records the passing selector, CI changes,
+actionlint, local lane, Rust shadow, Nightly report, iOS shard and file budget
+checks. The iOS shard check was rerun with its two modes separately after an
+invalid combined invocation. Fixtures use isolated Git configuration and no
+inherited Work session variables. Validation used Python 3.14.10.
+
+The selected nextest expression is unchanged from `8a7a48fd2`; the hosted
+42m40s / 12m04s evidence above remains the existing branch measurement.
+CI's wire and Mac Rust jobs and the full Mac Nightly job now explicitly set up
+Python 3.11 for stdlib TOML parsing. The historical hosted timings exclude that
+new bootstrap step; the parity verifier excludes only its exact declaration.
+No Rust source, test expectation or Cargo workflow command changed in this round.
 
 [selection-red.log](selection-red.log) records an actual exit-1 check after
 removing FSEvents coverage, and an exit-1 check for a new Mac-only crate outside

@@ -16,6 +16,10 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+try:
+    import tomllib
+except ImportError:
+    sys.exit('macos-rust-tests.py requires Python 3.11 or later (stdlib tomllib)')
 
 ROOT = Path(__file__).resolve().parent.parent
 SELECTION = ROOT / 'scripts/macos-rust-tests.json'
@@ -48,21 +52,95 @@ def covered(selection, package, kind, name):
     return package in selection['packages'] or name in selection.get(kind, {}).get(package, {})
 
 
+def crate_manifests(root):
+    """Read workspace members (including globs) and crates outside that list."""
+    manifests = set((root / 'crates').rglob('Cargo.toml'))
+    workspace = root / 'Cargo.toml'
+    config = tomllib.loads(workspace.read_text()).get('workspace', {}) if workspace.exists() else {}
+    if workspace.exists():
+        manifests.add(workspace)
+    for member in config.get('members', []):
+        manifests.update(root.glob(member + '/Cargo.toml'))
+    crates = {}
+    pending = sorted(manifest.resolve() for manifest in manifests)
+    seen = set()
+    while pending:
+        manifest = pending.pop()
+        if manifest in seen:
+            continue
+        seen.add(manifest)
+        data = tomllib.loads(manifest.read_text())
+        if 'package' in data:
+            crates[manifest] = data
+            # Path dependencies within the workspace can be implicit members,
+            # without appearing in members or living below crates/.
+            pending.extend(dependency for dependency, _ in local_dependencies(
+                manifest, data, config.get('dependencies', {}), root)
+                           if dependency.is_relative_to(root) and dependency.exists())
+    return crates, config.get('dependencies', {})
+
+
+def local_dependencies(manifest, data, workspace_deps, root):
+    for target, table in [(None, data), *data.get('target', {}).items()]:
+        mac = bool(target and (MAC.search(target) or '-apple-darwin' in target))
+        for kind in ('dependencies', 'dev-dependencies', 'build-dependencies'):
+            for name, spec in table.get(kind, {}).items():
+                if not isinstance(spec, dict):
+                    continue
+                base = manifest.parent
+                if spec.get('workspace'):
+                    spec = workspace_deps.get(name, {})
+                    base = root
+                if isinstance(spec, dict) and 'path' in spec:
+                    yield (base / spec['path'] / 'Cargo.toml').resolve(), mac
+
+
+def mac_dependency_crates(crates, workspace_deps, root):
+    """Find local crates whose incoming dependency paths all require a Mac.
+
+    Cargo's workspace dependency declarations are templates, not incoming
+    edges. Resolve them at each consumer, retaining that consumer's target.
+    Include optional, dev and build edges so features cannot hide a consumer.
+    Treat any Apple/Mac target mention as native conservatively (including
+    mixed predicates); an extra whole-package run is safer than an omission.
+    """
+    incoming = {manifest: [] for manifest in crates}
+    edges = []
+    for manifest, data in crates.items():
+        for dependency, mac in local_dependencies(manifest, data, workspace_deps, root):
+            if dependency in crates:
+                incoming[dependency].append((manifest, mac))
+                edges.append((manifest, dependency, mac))
+    # Start at Mac-target edges, then follow transitive paths. Prune anything
+    # with a shared consumer until stable. This also handles dependency cycles
+    # without accidentally classifying an unrelated, unreferenced crate.
+    native = {dependency for _, dependency, mac in edges if mac}
+    while True:
+        expanded = native | {dependency for parent, dependency, _ in edges if parent in native}
+        if expanded == native:
+            break
+        native = expanded
+    while True:
+        shared = {dependency for dependency in native
+                  if any(not mac and parent not in native for parent, mac in incoming[dependency])}
+        if not shared:
+            break
+        native -= shared
+    return native
+
+
 def check(root, selection):
+    root = root.resolve()
     errors = []
     # Scan every crate, not only today's workspace list: a new Mac-only crate
     # or a crate-level cfg must demand a package selection too.
-    manifests = set((root / 'crates').rglob('Cargo.toml'))
-    workspace = root / 'Cargo.toml'
-    if workspace.exists():
-        body = workspace.read_text()
-        members = re.search(r'(?s)members\s*=\s*\[(.*?)\]', body)
-        if members:
-            for member in re.findall(r'"([^"]+)"', members[1]):
-                manifests.update(root.glob(member + '/Cargo.toml'))
-    for manifest in sorted(manifests):
+    manifests, workspace_deps = crate_manifests(root)
+    native = mac_dependency_crates(manifests, workspace_deps, root)
+    for manifest, data in manifests.items():
         body = manifest.read_text()
-        package = re.search(r'(?m)^name\s*=\s*"([^"]+)"', body).group(1)
+        package = data['package']['name']
+        if manifest in native and package not in selection['packages']:
+            errors.append(f'{manifest.relative_to(root)}: Mac-only dependency crate requires whole package {package}')
         crate = manifest.parent
         # Custom Cargo target roots have root-level test names too; a file
         # named src/darwin.rs is not necessarily a `darwin::` module.
@@ -87,9 +165,12 @@ def check(root, selection):
                 kind, name = scope(source, aliases, roots=roots)
                 if not covered(selection, package, kind, name):
                     errors.append(f'{(crate / source).relative_to(root)}: select {package} {kind} {name or "(whole crate)"}')
+        # A shared caller's Mac dependency table needs native coverage, but
+        # does not make the caller Mac-only. Complete selection for the actual
+        # Mac-only dependency is enforced independently above.
         if MAC.search(body) and not (package in selection['packages'] or any(
                 selection.get(kind, {}).get(package) for kind in ('modules', 'binaries'))):
-            errors.append(f'{manifest.relative_to(root)}: Mac-specific crate has no selection')
+            errors.append(f'{manifest.relative_to(root)}: Mac-specific configuration has no native selection')
     return errors
 
 
@@ -121,6 +202,7 @@ def workflow_errors(ci, nightly):
 
 def self_test():
     selected = {'packages': {}, 'modules': {}, 'binaries': {}}
+    dependency_self_test()
     with tempfile.TemporaryDirectory(prefix='ov1160-') as tmp:
         root = Path(tmp)
         (root / 'Cargo.toml').write_text('[workspace]\nmembers = ["platform/new-mac"]\n')
@@ -176,6 +258,72 @@ def self_test():
     assert workflow_errors(ci, nightly.replace('--workspace --no-fail-fast', '-p farcooler-cli'))
     assert workflow_errors(ci.replace('--workspace --no-run', '-p farcooler-cli --no-run'), nightly)
     print('macOS Rust selection self-test: planted uncovered cfg tests and Mac-only crate rejected')
+
+
+def dependency_self_test():
+    """Real workspace crates with no Mac cfg in their own source/manifest."""
+    with tempfile.TemporaryDirectory(prefix='ov1160-dependencies-') as tmp:
+        root = Path(tmp)
+        (root / 'Cargo.toml').write_text('''[workspace]
+members = ["app", "platform/*"]
+[workspace.dependencies]
+native-alias = { package = "mac-only", path = "platform/native" }
+''')
+        for directory, name in (('app', 'app'), ('platform/native', 'mac-only'),
+                                ('platform/helper', 'helper')):
+            crate = root / directory
+            (crate / 'src').mkdir(parents=True)
+            (crate / 'Cargo.toml').write_text(f'[package]\nname = "{name}"\n')
+            (crate / 'src/lib.rs').write_text('mod one;\n#[test] fn native_test() {}\n')
+            (crate / 'src/one.rs').write_text('#[test] fn module_test() {}\n')
+            (crate / 'tests').mkdir()
+            (crate / 'tests/native.rs').write_text('#[test] fn integration_test() {}\n')
+        app = root / 'app/Cargo.toml'
+        native = root / 'platform/native/Cargo.toml'
+        helper = root / 'platform/helper/Cargo.toml'
+        selected = {'packages': {'app': 'Mac caller'}, 'modules': {}, 'binaries': {}}
+        # Direct/renamed paths, workspace inheritance, dependency subtables,
+        # target triples, all dependency kinds, and nested target predicates.
+        for dependency in ('''[target.'cfg(target_os = "macos")'.dependencies]
+mac-only = { path = "../platform/native" }
+''', '''[target.'cfg(all(unix, target_os = "macos"))'.dev-dependencies]
+renamed = { package = "mac-only", path = "../platform/native" }
+''', '''[target.aarch64-apple-darwin.build-dependencies.native-alias]
+workspace = true
+''', '''[target.'cfg(target_vendor = "apple")'.dependencies]
+native-alias.workspace = true
+native-alias.optional = true
+'''):
+            app.write_text('[package]\nname = "app"\n' + dependency)
+            errors = check(root, selected)
+            assert any('mac-only' in error for error in errors), errors
+            for kind, name in (('modules', 'one'), ('binaries', 'native')):
+                partial = copy.deepcopy(selected)
+                partial[kind]['mac-only'] = {name: 'incomplete coverage'}
+                errors = check(root, partial)
+                assert any('mac-only' in error for error in errors), errors
+            fixed = copy.deepcopy(selected)
+            fixed['packages']['mac-only'] = 'whole Mac-only crate'
+            assert not check(root, fixed)
+        workspace = root / 'Cargo.toml'
+        workspace.write_text(workspace.read_text().replace('"app", "platform/*"', '"app"'))
+        assert any('mac-only' in error for error in check(root, selected))
+        assert not check(root, fixed)
+        # Propagate platform exclusivity through ordinary transitive edges,
+        # even a dependency cycle; a partial helper rule is still insufficient.
+        native.write_text(native.read_text() + '[dependencies]\nhelper = { path = "../helper" }\n')
+        helper.write_text(helper.read_text() + '[dependencies]\nmac-only = { path = "../native" }\n')
+        errors = check(root, fixed)
+        assert any('helper' in error for error in errors), errors
+        fixed['modules']['helper'] = {'one': 'incomplete'}
+        assert check(root, fixed)
+        fixed['packages']['helper'] = 'whole transitive Mac-only crate'
+        assert not check(root, fixed)
+        # An unconditional consumer makes both dependencies shared. The Mac
+        # caller still has native coverage, but these crates need no Mac rule.
+        app.write_text(app.read_text() + '[dependencies]\nhelper = { path = "../platform/helper" }\n')
+        assert not check(root, selected)
+    print('Mac-only dependency self-test: unselected and partially selected crates rejected before whole-package selection')
 
 
 def main():

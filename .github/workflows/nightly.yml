@@ -85,6 +85,9 @@ jobs:
             ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
           done
           echo "$PWD/target/debug" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - run: python3 scripts/macos-rust-tests.py --self-test --check
       - name: Full leak-checked workspace suite
         run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast

@@ -1,0 +1,16 @@
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1160-mac-rust-only/scripts/macos-rust-tests.py", line 260, in <module>
+    sys.exit(main())
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1160-mac-rust-only/scripts/macos-rust-tests.py", line 246, in main
+    self_test()
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1160-mac-rust-only/scripts/macos-rust-tests.py", line 124, in self_test
+    dependency_self_test()
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1160-mac-rust-only/scripts/macos-rust-tests.py", line 214, in dependency_self_test
+    assert any('mac-only' in error for error in errors), errors
+AssertionError: []
+
+Reproduction against HEAD before fix (8a7a48fd2):
+no selection: old check returned []; BUG: expected whole-crate rejection
+modules: old check returned []; BUG: expected whole-crate rejection
+binaries: old check returned []; BUG: expected whole-crate rejection

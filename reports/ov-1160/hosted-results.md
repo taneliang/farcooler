@@ -49,7 +49,10 @@ The experiment removes only the `changes` dependency/path gate, runs only Mac,
 and switches the before/after coverage steps and their bookkeeping.
 
 `verify-hosted.py` reverses those switches and requires a byte-for-byte match
-with the complete current CI Rust job. It also checks the baseline uses the
+with the current CI Rust job after excluding the explicit Python setup added
+in fix round 2 for TOML parsing. That setup step is not part of these historical
+measurements; all measured Cargo steps and the selection are unchanged.
+It also checks the baseline uses the
 exact full-suite command (including shadow) retained by Linux, both jobs used
 one source SHA, and both completed successfully. Run:
 

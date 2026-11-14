@@ -7,6 +7,16 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 ci = (ROOT / '.github/workflows/ci.yml').read_text().split('\n  rust:\n', 1)[1].split('\n  # TWO JOBS, NOT ONE', 1)[0]
+# Fix round 2 adds an explicit interpreter for stdlib TOML parsing. The
+# historical job predates that bootstrap; keep every measured Cargo step exact.
+bootstrap = '''      - name: Python for macOS coverage guard
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+'''
+assert ci.count(bootstrap) == 1, 'Expected the declared Python bootstrap only once'
+ci = ci.replace(bootstrap, '')
 timing = (HERE / 'hosted-timing.yml').read_text().split('\n  rust:\n', 1)[1]
 # Undo only the experiment's declared matrix, dependency and coverage switches.
 timing = timing.replace('name: Rust (${{ matrix.os }}, ${{ matrix.coverage }})', 'name: Rust (${{ matrix.os }})')
@@ -23,7 +33,7 @@ timing = timing[:start] + timing[end:]
 timing = timing.replace("if: runner.os == 'macOS' && matrix.coverage == 'selected'", "if: runner.os == 'macOS'")
 timing = timing.replace("if: always() && matrix.coverage == 'full'", "if: always() && runner.os == 'Linux'")
 assert timing == ci, 'Hosted job differs from ci.yml beyond the declared experiment switches'
-print('PASS: hosted workflow matches the complete CI Rust job and original full-suite command')
+print('PASS: hosted workflow matches the CI Rust job except the later Python bootstrap; original full-suite command matches exactly')
 
 
 def seconds(start, end):
