@@ -188,9 +188,11 @@ def expression(selection):
 
 def workflow_errors(ci, nightly):
     errors = []
-    linux = ci.split('      - name: Full Rust tests and shadow measurement', 1)[-1].split('      - name:', 1)[0]
-    if "if: runner.os == 'Linux'" not in linux or 'cargo nextest run --profile ci --workspace --no-fail-fast' not in linux or ' -E ' in linux:
-        errors.append('Linux must retain the full workspace suite')
+    linux = ci.split('  rust-tests:', 1)[-1].split('  # TWO JOBS', 1)[0]
+    if ('cargo nextest run --profile ci --no-fail-fast --archive-file' not in linux
+            or ' -E ' in linux or '--partition hash:${{ matrix.shard }}/4' not in linux
+            or 'shard: [1, 2, 3, 4]' not in linux or 'scripts/rust-shards.py --archive' not in linux):
+        errors.append('Linux must retain the full workspace suite with checked partition coverage')
     mac = ci.split('      - name: macOS native Rust tests', 1)[-1].split('      - uses:', 1)[0]
     if "if: runner.os == 'macOS'" not in mac or 'cargo nextest run --profile ci --workspace --no-run' not in mac or 'macos-rust-tests.py' not in mac:
         errors.append('Mac must build the full workspace and run the selection')
@@ -254,7 +256,7 @@ def self_test():
     ci = (ROOT / '.github/workflows/ci.yml').read_text()
     nightly = (ROOT / '.github/workflows/nightly.yml').read_text()
     assert not workflow_errors(ci, nightly)
-    assert workflow_errors(ci.replace('--workspace --no-fail-fast', '-p farcooler-cli'), nightly)
+    assert workflow_errors(ci.replace('--no-fail-fast --archive-file', '-p farcooler-cli --archive-file'), nightly)
     assert workflow_errors(ci, nightly.replace('--workspace --no-fail-fast', '-p farcooler-cli'))
     assert workflow_errors(ci.replace('--workspace --no-run', '-p farcooler-cli --no-run'), nightly)
     print('macOS Rust selection self-test: planted uncovered cfg tests and Mac-only crate rejected')
