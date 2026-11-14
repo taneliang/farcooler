@@ -8,8 +8,8 @@
 # plan would be worth the move.
 #
 # Independent jobs cover Rust, Swift, iOS, Android, and the services. Rust
-# builds one Linux test archive for four shards; its platform checks and native
-# Mac suite run alongside that build.
+# builds one archive per platform: four full Linux shards and two native Mac
+# shards, alongside platform and feature checks.
 #
 # Android is on Linux, unlike the two Apple jobs: nothing in that build needs a
 # Mac, and a macOS runner for it would be ten times the minutes for the same
@@ -893,9 +893,9 @@ jobs:
           overwrite: true
           path: target/shard-inventories
 
-  # Native suite and feature/lint checks overlap on independent Mac runners.
-  rust-macos-tests:
-    name: Rust native tests (macOS)
+  # Build every Mac test target once, then shard the maintained native set.
+  rust-macos-build:
+    name: Rust native test archive (macOS)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: macos-latest
@@ -910,9 +910,46 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-latest
+          shared-key: rust-macos-tests
       - uses: taiki-e/install-action@v2.87.28
         with:
           tool: cargo-nextest@0.9.148
+      - name: Build the runtime binaries and test archive
+        run: |
+          cargo build --locked --workspace --bins
+          cargo nextest archive --locked --profile ci --workspace --archive-file target/rust-macos-tests.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-macos-tests
+          overwrite: true
+          path: target/rust-macos-tests.tar.zst
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+
+  rust-macos-tests:
+    name: Rust native tests (macOS ${{ matrix.shard }}/2)
+    needs: [changes, rust-macos-build]
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-macos-build.result == 'success' }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      FARCOOLER_TEST_SHELL: /bin/sh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-macos-tests
+          path: target
       - name: Cache the pinned tmux build
         if: runner.os == 'macOS'
         uses: actions/cache@v4
@@ -975,28 +1012,27 @@ jobs:
           fi
           /usr/sbin/sshd -V 2>&1 | head -1
 
-      - name: Put this channel's CLI where the daemon tests look for it
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Extract archive and prove native partition coverage
         run: |
-          set -euo pipefail
-          cargo build --workspace --bins
+          selection="$(python3 scripts/macos-rust-tests.py)"
+          python3 scripts/rust-shards.py --archive target/rust-macos-tests.tar.zst --out target/native-inventories --shards 2 --filterset "$selection"
           for name in farcooler-local farcooler-preview farcooler-canary; do
             ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
           done
           echo "$PWD/target/debug" >> "$GITHUB_PATH"
-
-      - name: Python for macOS coverage guard
-        if: runner.os == 'macOS'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
       - name: macOS native Rust tests
-        if: runner.os == 'macOS'
         run: |
-          # --workspace compiles ALL test binaries before nextest filters tests.
-          # Keep this explicit so a future change to nextest cannot narrow builds.
-          cargo nextest run --profile ci --workspace --no-run
           selection="$(python3 scripts/macos-rust-tests.py)"
-          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
+          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --no-fail-fast --archive-file target/rust-macos-tests.tar.zst --extract-to . --extract-overwrite --workspace-remap "$PWD" --partition hash:${{ matrix.shard }}/2 -E "$selection"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-native-inventory-${{ matrix.shard }}
+          overwrite: true
+          path: target/native-inventories
 
   # TWO JOBS, NOT ONE (ov-301). This was one job, "Swift (shared + macOS)", 27 minutes
   # at the median: the bundle build and its checks (about 13) and then the AgentKit

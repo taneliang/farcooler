@@ -188,14 +188,22 @@ def expression(selection):
 
 def workflow_errors(ci, nightly):
     errors = []
-    linux = ci.split('  rust-tests:', 1)[-1].split('\n  rust-macos-tests:', 1)[0]
+    def section(name):
+        found = re.search(rf'^  {name}:\n(.*?)(?=^  [\w-]+:\n|\Z)', ci, re.M | re.S)
+        return found[1] if found else ''
+    linux = section('rust-tests')
     if ('cargo nextest run --profile ci --no-fail-fast --archive-file' not in linux
             or ' -E ' in linux or '--partition hash:${{ matrix.shard }}/4' not in linux
             or 'shard: [1, 2, 3, 4]' not in linux or 'scripts/rust-shards.py --archive' not in linux):
         errors.append('Linux must retain the full workspace suite with checked partition coverage')
-    mac = ci.split('      - name: macOS native Rust tests', 1)[-1].split('      - uses:', 1)[0]
-    if "if: runner.os == 'macOS'" not in mac or 'cargo nextest run --profile ci --workspace --no-run' not in mac or 'macos-rust-tests.py' not in mac:
-        errors.append('Mac must build the full workspace and run the selection')
+    build = section('rust-macos-build')
+    mac = section('rust-macos-tests')
+    if ('cargo nextest archive --locked --profile ci --workspace --archive-file target/rust-macos-tests.tar.zst' not in build
+            or 'runs-on: macos-latest' not in build or 'runs-on: macos-latest' not in mac
+            or 'macos-rust-tests.py' not in mac or '--shards 2 --filterset "$selection"' not in mac
+            or '--partition hash:${{ matrix.shard }}/2 -E "$selection"' not in mac
+            or 'shard: [1, 2]' not in mac):
+        errors.append('Mac must archive the full workspace and run the checked native selection in two shards')
     night = nightly.split('  rust-macos:', 1)[-1].split('\n  #', 1)[0]
     if 'runs-on: macos-latest' not in night or 'cargo nextest run --profile ci --workspace --no-fail-fast' not in night or ' -E ' in night:
         errors.append('Nightly must retain the full Mac workspace suite')
@@ -258,7 +266,7 @@ def self_test():
     assert not workflow_errors(ci, nightly)
     assert workflow_errors(ci.replace('--no-fail-fast --archive-file', '-p farcooler-cli --archive-file'), nightly)
     assert workflow_errors(ci, nightly.replace('--workspace --no-fail-fast', '-p farcooler-cli'))
-    assert workflow_errors(ci.replace('--workspace --no-run', '-p farcooler-cli --no-run'), nightly)
+    assert workflow_errors(ci.replace('archive --locked --profile ci --workspace', 'archive --locked --profile ci -p farcooler-cli'), nightly)
     print('macOS Rust selection self-test: planted uncovered cfg tests and Mac-only crate rejected')
 
 

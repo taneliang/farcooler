@@ -95,7 +95,7 @@ APP_JOBS = {"rust", "swift-tests", "swift", "ios", "android", "tunnel"}
 # ci.yml jobs this script covers under another name, or on purpose does not.
 CI_JOB_ALIASES = {
     "wire": "wire", "tunnel": "tunnel", "rust": "rust", "swift": "swift", "swift-tests": "swift-tests",
-    "rust-build": "rust", "rust-tests": "rust", "rust-macos-tests": "rust",
+    "rust-build": "rust", "rust-tests": "rust", "rust-macos-tests": "rust", "rust-macos-build": "rust",
     "ios": "ios", "ios-ui-plan": "ios", "android": "android", "relay": "relay", "site": "site", "web": "web",
 }
 CI_JOBS_NOT_RUN = {

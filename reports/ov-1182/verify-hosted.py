@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import sys
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -15,8 +16,10 @@ def measured_jobs(ci):
     jobs = ci[start:end]
     jobs = jobs.replace('    needs: changes\n', '')
     jobs = jobs.replace('    needs: [changes, rust-build]\n', '    needs: rust-build\n')
+    jobs = jobs.replace('    needs: [changes, rust-macos-build]\n', '    needs: rust-macos-build\n')
     jobs = jobs.replace("    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}\n", '')
-    return jobs.replace("    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-build.result == 'success' }}\n", '')
+    jobs = jobs.replace("    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-build.result == 'success' }}\n", '')
+    return jobs.replace("    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-macos-build.result == 'success' }}\n", '')
 
 
 def main():
@@ -26,11 +29,20 @@ def main():
     if len(sys.argv) == 1:
         return
     assert len(sys.argv) == 3, 'provide job JSON for two distinct runs'
-    expected = {'Rust (ubuntu-24.04)', 'Rust (macos-latest)', 'Rust test archive', 'Rust native tests (macOS)',
+    expected = {'Rust (ubuntu-24.04)', 'Rust (macos-latest)', 'Rust test archive', 'Rust native test archive (macOS)',
+                *(f'Rust native tests (macOS {i}/2)' for i in range(1, 3)),
                 *(f'Rust tests ({i}/4)' for i in range(1, 5))}
     seen_ids = set()
+    seen_runs = set()
     for file in sys.argv[1:]:
         data = json.loads(Path(file).read_text())
+        assert data['databaseId'] not in seen_runs, 'two distinct workflow runs are required'
+        seen_runs.add(data['databaseId'])
+        assert data['conclusion'] == 'success', data.get('url', file)
+        measured = subprocess.check_output(
+            ['git', 'show', f"{data['headSha']}:.github/workflows/ov-1182-timing.yml"],
+            cwd=ROOT, text=True)
+        assert measured == (HERE / 'hosted-timing.yml').read_text(), 'run used a different workflow'
         jobs = data['jobs']
         assert {j['name'] for j in jobs} == expected
         ids = {j['databaseId'] for j in jobs}

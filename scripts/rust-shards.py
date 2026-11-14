@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ov-1182: prove the actual nextest hash partitions cover the full archive.
 
-Every shard checks the full inventory against all four partition inventories
+Every shard checks its unpartitioned inventory against every partition inventory
 before running. Ignored tests retain their normal nextest policy; a missing,
 filtered, changed, duplicated, or unexpected runnable test fails closed.
 """
@@ -31,10 +31,10 @@ def cases(inventory):
     return result
 
 
-def verify(full, partitions):
+def verify(full, partitions, shards=SHARDS):
     full = cases(full)
     expected = {key for key, (_, match) in full.items() if match == 'matches'}
-    if not expected or len(partitions) != SHARDS:
+    if not expected or len(partitions) != shards:
         raise ValueError('empty full inventory or wrong shard count')
     counts = Counter()
     for inventory in partitions:
@@ -50,11 +50,13 @@ def verify(full, partitions):
     return len(expected)
 
 
-def inventory(archive, out, partition=None):
+def inventory(archive, out, partition=None, filterset=None):
     command = ['cargo', 'nextest', 'list', '--profile', 'ci',
                '--archive-file', str(archive), '--extract-to', '.',
                '--extract-overwrite', '--workspace-remap', str(ROOT),
                '--message-format', 'json']
+    if filterset:
+        command += ['-E', filterset]
     if partition:
         command += ['--partition', partition]
     result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
@@ -95,12 +97,23 @@ class CoverageTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 verify(full, bad)
 
+    def test_two_shards_preserve_a_native_filter(self):
+        full = self.fixture('ab')
+        parts = [self.fixture('a'), self.fixture('b')]
+        self.assertEqual(verify(full, parts, 2), 2)
+        parts[1]['rust-suites']['binary']['testcases']['c']['filter-match']['status'] = 'matches'
+        with self.assertRaises(ValueError):
+            verify(full, parts, 2)
+
     def test_workflow_runs_all_partitions_and_guard(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         self.assertIn('cargo nextest archive --locked --profile ci --workspace --archive-file', workflow)
         self.assertIn('shard: [1, 2, 3, 4]', workflow)
         self.assertIn('--partition hash:${{ matrix.shard }}/4', workflow)
         self.assertIn('python3 scripts/rust-shards.py --archive', workflow)
+        self.assertIn('shard: [1, 2]', workflow)
+        self.assertIn('--partition hash:${{ matrix.shard }}/2 -E "$selection"', workflow)
+        self.assertIn('--shards 2 --filterset "$selection"', workflow)
 
 
 def main():
@@ -108,17 +121,19 @@ def main():
     parser.add_argument('--self-test', action='store_true')
     parser.add_argument('--archive', type=Path)
     parser.add_argument('--out', type=Path)
+    parser.add_argument('--shards', type=int, choices=(2, 4), default=SHARDS)
+    parser.add_argument('--filterset')
     args = parser.parse_args()
     if args.self_test:
         return not unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(CoverageTests)).wasSuccessful()
     if not args.archive or not args.out:
         parser.error('--archive and --out are required')
     args.out.mkdir(parents=True, exist_ok=True)
-    full = inventory(args.archive, args.out / 'full.json')
-    partitions = [inventory(args.archive, args.out / f'{i}.json', f'hash:{i}/{SHARDS}')
-                  for i in range(1, SHARDS + 1)]
-    count = verify(full, partitions)
-    print(f'Partition coverage: {count} runnable tests, each in exactly one of {SHARDS} shards')
+    full = inventory(args.archive, args.out / 'full.json', filterset=args.filterset)
+    partitions = [inventory(args.archive, args.out / f'{i}.json', f'hash:{i}/{args.shards}', args.filterset)
+                  for i in range(1, args.shards + 1)]
+    count = verify(full, partitions, args.shards)
+    print(f'Partition coverage: {count} runnable tests, each in exactly one of {args.shards} shards')
     return 0
 
 

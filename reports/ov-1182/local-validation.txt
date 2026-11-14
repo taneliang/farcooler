@@ -26,7 +26,7 @@ feature suites, platform checks, doctests, runtime aliases and leak wrappers.
 PASS ios-ui-shards.py --self-test and --check (iOS-only matrix rule; generic
      Nightly report-needs mutation includes new Rust jobs)
 PASS lane-gate.py --self-test (one derived full workspace suite locally;
-     rejects narrowed CI prefixes; recognizes all three new Rust job IDs)
+     rejects narrowed CI prefixes; recognizes all four new Rust job IDs)
 PASS gate-evidence-test.py: 16 tests
 PASS engine-gate-test.py: 9 tests
 Gate integration suites ran unsandboxed because macOS confstr warnings in
@@ -35,3 +35,7 @@ Temporary fixture commits used commit.gpgsign=false; branch commits retained
 the repository's normal signing configuration.
 Shadow self-tests were also rerun with CARGO_TARGET_DIR set to the worktree's
 target/rust-shadow-self-test.
+
+PASS real filtered archive: 10 selected cases, two partitions, union checked
+and both actual nextest runs passed. Unfiltered four-partition behavior retains
+its existing default and mutation tests.
