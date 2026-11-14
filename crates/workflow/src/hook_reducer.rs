@@ -107,12 +107,11 @@ pub(super) fn decide(state: &State, input: &Input) -> Result<Transition, Refusal
                 if dest.phase != Phase::Blocked || dest.deciding.is_some() || dest.stage != 0
                     || dest.group_of != item.group_of || dest.pin != item.pin || dest.resource != item.resource
                     || dest.policy_pin != item.policy_pin
-                    || dest.members.len() + item.members.len() > usize::from(MAX_GROUP_MEMBERS)
                 { return Err(Refusal::Phase); }
-                let limit = dest.members.first().and_then(|m| base.items.get(&m.item))
+                let group_def = dest.members.first().and_then(|m| base.items.get(&m.item))
                     .and_then(|t| dest.group_of.as_ref().and_then(|g| t.definition.groups.get(&g.name)))
-                    .map(|g| usize::from(g.limit)).ok_or(Refusal::Definition)?;
-                if dest.members.len() + item.members.len() > limit { return Err(Refusal::Limit); }
+                    .ok_or(Refusal::Definition)?;
+                if group_def.limit.is_some_and(|limit| dest.members.len() + item.members.len() > limit as usize) { return Err(Refusal::Limit); }
                 let mut merged = base.clone();
                 for m in &item.members { merged.items.get_mut(&m.item).ok_or(Refusal::Missing)?.grouped_in = Some(group.clone()); }
                 merged.items.get_mut(group).ok_or(Refusal::Missing)?.members.extend(item.members.clone());

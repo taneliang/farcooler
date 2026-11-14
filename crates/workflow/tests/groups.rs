@@ -935,34 +935,36 @@ fn a_script_decides_the_split_half_before_it_can_acquire_the_resource() {
 
 #[test]
 fn a_split_rule_rejoins_only_a_waiting_group_with_the_same_pins_and_room() {
-    let mut log = Log::new();
-    let mut definition = ticket();
-    definition.groups.get_mut("landing").unwrap().limit = 3;
-    definition.script_policies.insert("split".into(), ScriptPolicy { point: HookPoint::GroupSplits,
-        script: "/tmp/split".into(), digest: digest(&vec![0u8]), timeout_ms: 30, max_calls: 1, fallback: HookMove::OwnGroup });
-    for name in ["x", "a", "b", "c"] {
-        log.enqueue(name, definition.clone());
-        while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
+    for limit in [Some(3), None] {
+        let mut log = Log::new();
+        let mut definition = ticket();
+        definition.groups.get_mut("landing").unwrap().limit = limit;
+        definition.script_policies.insert("split".into(), ScriptPolicy { point: HookPoint::GroupSplits,
+            script: "/tmp/split".into(), digest: digest(&vec![0u8]), timeout_ms: 30, max_calls: 1, fallback: HookMove::OwnGroup });
+        for name in ["x", "a", "b", "c"] {
+            log.enqueue(name, definition.clone());
+            while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
+        }
+        log.queue("x"); let ahead = log.group_of("x");
+        log.queue("a"); log.queue("b"); let pair = log.group_of("a");
+        pass_group(&mut log, &ahead, 3);
+        log.queue("c"); let waiting = log.group_of("c");
+        pass_group(&mut log, &pair, 2);
+        log.reject(&pair); let rest = log.group_of("b");
+        let i = &log.state.items[&rest]; let call = i.deciding.as_ref().unwrap().input.call.clone();
+        assert!(i.deciding.as_ref().unwrap().input.groups.iter().any(|g| g.item == waiting));
+        let grant = Grant::Operation { effect: i.pending.clone().unwrap(), run: i.run.clone(), fence: i.fence };
+        let command = |group: &str| Command::Decide { item: rest.clone(), call: call.clone(), fence: i.fence, policy_pin: i.policy_pin.clone(),
+            result: HookResult::Receipt { raw: serde_json::json!({"schema":"hook-decision/v1","call":call,"decision":"rejoin","group":group}).to_string(), manifest: "m".into() } };
+        let invalid = step(&log.state, &log.input(command(&pair), grant.clone())).unwrap();
+        assert!(invalid.state.items[&rest].hook_refused.is_some(), "a running group cannot take more members");
+        let valid = command(&waiting);
+        log.run(valid, grant);
+        assert_eq!(log.group_of("b"), waiting);
+        assert_eq!(log.state.items[&waiting].members.len(), 2);
+        assert_eq!(log.state.archive[&rest].phase, Phase::Cancelled);
+        assert_eq!(log.replay_digest(), digest(&log.state));
     }
-    log.queue("x"); let ahead = log.group_of("x");
-    log.queue("a"); log.queue("b"); let pair = log.group_of("a");
-    pass_group(&mut log, &ahead, 3);
-    log.queue("c"); let waiting = log.group_of("c");
-    pass_group(&mut log, &pair, 2);
-    log.reject(&pair); let rest = log.group_of("b");
-    let i = &log.state.items[&rest]; let call = i.deciding.as_ref().unwrap().input.call.clone();
-    assert!(i.deciding.as_ref().unwrap().input.groups.iter().any(|g| g.item == waiting));
-    let grant = Grant::Operation { effect: i.pending.clone().unwrap(), run: i.run.clone(), fence: i.fence };
-    let command = |group: &str| Command::Decide { item: rest.clone(), call: call.clone(), fence: i.fence, policy_pin: i.policy_pin.clone(),
-        result: HookResult::Receipt { raw: serde_json::json!({"schema":"hook-decision/v1","call":call,"decision":"rejoin","group":group}).to_string(), manifest: "m".into() } };
-    let invalid = step(&log.state, &log.input(command(&pair), grant.clone())).unwrap();
-    assert!(invalid.state.items[&rest].hook_refused.is_some(), "a running group cannot take more members");
-    let valid = command(&waiting);
-    log.run(valid, grant);
-    assert_eq!(log.group_of("b"), waiting);
-    assert_eq!(log.state.items[&waiting].members.len(), 2);
-    assert_eq!(log.state.archive[&rest].phase, Phase::Cancelled);
-    assert_eq!(log.replay_digest(), digest(&log.state));
 }
 
 #[test]
