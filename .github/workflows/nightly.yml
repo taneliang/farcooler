@@ -35,6 +35,26 @@ on:
   schedule:
     - cron: "23 11 * * *"
   workflow_dispatch:
+    inputs:
+      shard:
+        description: UI shard or capture set (all runs the full Nightly)
+        type: choice
+        default: all
+        required: true
+        options:
+          - all
+          - shell
+          - agent
+          - phone
+          - phone2
+          - phone3
+          - phone4
+          - phone5
+          - phone6
+          - pad
+          - captures
+          - captures2
+          - captures3
 
 concurrency:
   # Never cancel a night for another; a manual run waits its turn.
@@ -245,7 +265,7 @@ jobs:
   ios-ui:
     name: iOS UI (${{ matrix.shard }})
     needs: [ios, yield-ui]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (inputs.shard == '' || inputs.shard == 'all' || !startsWith(inputs.shard, 'captures')) }}
     runs-on: xcode-27
     concurrency:
       group: background-macos
@@ -257,6 +277,16 @@ jobs:
       max-parallel: 1
       matrix:
         shard: [shell, agent, phone, phone2, phone3, phone4, phone5, phone6, pad]
+        exclude:
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'shell' && 'shell' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'agent' && 'agent' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone' && 'phone' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone2' && 'phone2' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone3' && 'phone3' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone4' && 'phone4' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone5' && 'phone5' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'phone6' && 'phone6' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'pad' && 'pad' || '__none__' }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
@@ -274,7 +304,7 @@ jobs:
   captures:
     name: iOS UI ${{ matrix.shard }}
     needs: [ios, ios-ui, yield-captures]
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (inputs.shard == '' || inputs.shard == 'all' || startsWith(inputs.shard, 'captures')) }}
     runs-on: xcode-27
     concurrency:
       group: background-macos
@@ -286,6 +316,10 @@ jobs:
       max-parallel: 1
       matrix:
         shard: [captures, captures2, captures3]
+        exclude:
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'captures' && 'captures' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'captures2' && 'captures2' || '__none__' }}
+          - shard: ${{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != 'captures3' && 'captures3' || '__none__' }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
@@ -312,6 +346,7 @@ jobs:
       group: background-macos
       cancel-in-progress: false
       queue: max
+    if: ${{ inputs.shard == '' || inputs.shard == 'all' }}
     name: iOS UI shard budget
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -323,6 +358,7 @@ jobs:
         with:
           # Each run's shard lists come from its own commit.
           fetch-depth: 0
+      - run: python3 ./scripts/nightly-dispatch-test.py
       - run: ./scripts/ios-ui-shards.py --check
       - run: ./scripts/ios-ui-shard-budget.py --self-test
       - run: ./scripts/ios-ui-shard-budget.py
@@ -348,6 +384,7 @@ jobs:
       group: background-macos
       cancel-in-progress: false
       queue: max
+    if: ${{ inputs.shard == '' || inputs.shard == 'all' }}
     name: Claude rewake fields
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -385,6 +422,8 @@ jobs:
   # nothing fails rather than passing empty. A red job files the nightly issue
   # through `report`, which names it.
   mac-perf:
+    needs: [captures]
+    if: ${{ !cancelled() && (inputs.shard == '' || inputs.shard == 'all') }}
     name: Mac perf gates
     needs: [captures, yield-perf]
     # A failed shard must not suppress unrelated perf coverage.
@@ -460,6 +499,7 @@ jobs:
       group: background-macos
       cancel-in-progress: false
       queue: max
+    if: ${{ inputs.shard == '' || inputs.shard == 'all' }}
     name: Daemon production timing
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -497,7 +537,7 @@ jobs:
       queue: max
     name: Report
     needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing, rust-macos, rust-shadow, yield-ios, yield-ui, yield-captures, yield-perf]
-    if: ${{ always() }}
+    if: ${{ always() && (inputs.shard == '' || inputs.shard == 'all') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -176,7 +176,11 @@ A few things that save time:
   (`scripts/ios-ui-shards.py smoke`), and `.github/workflows/nightly.yml` runs
   the whole suite on main every night, opening an issue labeled
   `nightly-ui-red` when it goes red. Before landing a change to an iOS screen,
-  run its own classes and the smoke set locally.
+  run its own classes and the smoke set locally. For a branch proof on Actions,
+  choose one shard or capture set explicitly, for example
+  `gh workflow run nightly.yml --ref MY_BRANCH -f shard=phone3`. Use
+  `-f shard=all` for a full run; the default and scheduled run are full.
+  Targeted runs do not update the nightly failure issue.
 - Android's unit-test task is `testInstrumentedUnitTest`. `testDebugUnitTest`
   doesn't exist in this project.
 - A test that spawns a daemon needs a short temporary directory on macOS,
