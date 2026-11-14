@@ -21,13 +21,21 @@ No merge commits.
    (`ios-ui` needs `[ios, yield-ui]`, `captures` needs
    `[ios, ios-ui, yield-captures]`, `mac-perf` needs `[captures, yield-perf]`).
 2. actionlint: `concurrency.queue: max` is valid GitHub syntax, so the
-   workflows stay as they are. actionlint 1.7.12 (Homebrew, the latest release)
-   rejects it, and `.github/actionlint.yaml` cannot whitelist a key. I ran
-   upstream actionlint main `011a6d15e749` with a local parser patch that
-   accepts only scalar `queue: max` or `queue: single` (the ov-1239 build), with
-   the repo config: `actionlint` exits 0 on all of `.github/workflows/*.yml`,
-   nothing ignored. That is a patched build, not a release; the unpatched
-   1.7.12 reports only the 50 `queue` diagnostics and nothing else.
+   workflows keep it. No release knows it: the latest, 1.7.12, reports only the
+   `queue` diagnostics (upstream issues #654, #657 open; #746 closed not-planned),
+   and `.github/actionlint.yaml` cannot whitelist a key. The fix is now committed
+   and reproducible:
+   - `scripts/actionlint/queue.patch` against upstream
+     `011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7`, built and run by
+     `scripts/actionlint.sh` (needs git and Go).
+   - The patch accepts `queue` only as the literal `single` or `max`. Any other
+     value or a misspelled key still fails; `scripts/actionlint.sh --self-test`
+     proves it (`queue: max`/`single` pass, `queue: all` and `queu: max` fail).
+   - Command run: `scripts/actionlint.sh`, i.e.
+     `actionlint -config-file .github/actionlint.yaml .github/workflows/*.yml`
+     with the patched build `v1.7.13-0.20260419144658-011a6d15e749+dirty`.
+     Exit 0 on every workflow, nothing ignored. Release 1.7.12 with the same
+     command still exits 1 on `queue`.
 
 ## Scripts that read ci.yml or nightly.yml, run against the merged files
 

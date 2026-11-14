@@ -1,0 +1,34 @@
+diff --git a/ast.go b/ast.go
+index 335f5c3..f53bdfc 100644
+--- a/ast.go
++++ b/ast.go
+@@ -400,6 +400,8 @@ type Concurrency struct {
+ 	Group *String
+ 	// CancelInProgress is a flag that shows if canceling this workflow cancels other jobs in progress.
+ 	CancelInProgress *Bool
++	// Queue is the optional pending-run queue mode (`single` or `max`).
++	Queue *String
+ 	// Pos is a position in source.
+ 	Pos *Pos
+ }
+diff --git a/parse.go b/parse.go
+index 77c8921..09e2089 100644
+--- a/parse.go
++++ b/parse.go
+@@ -820,8 +820,15 @@ func (p *parser) parseConcurrency(pos *Pos, n *yaml.Node) *Concurrency {
+ 			ret.Group = p.parseString(e.val, false)
+ 		case "cancel-in-progress":
+ 			ret.CancelInProgress = p.parseBool(e.val)
++		case "queue":
++			// Local patch (ov-1240): GitHub's documented `queue` key. Only the
++			// literals `single` and `max` are accepted; an expression is not.
++			ret.Queue = p.parseString(e.val, false)
++			if ret.Queue != nil && ret.Queue.Value != "single" && ret.Queue.Value != "max" {
++				p.error(e.val,"\"queue\" in \"concurrency\" must be \"single\" or \"max\"")
++			}
+ 		default:
+-			p.unexpectedKey(e.key, "concurrency", []string{"group", "cancel-in-progress"})
++			p.unexpectedKey(e.key, "concurrency", []string{"group", "cancel-in-progress", "queue"})
+ 		}
+ 	}
+ 	if ret.Group == nil {
