@@ -1,0 +1,79 @@
+PASS: hosted workflow matches the complete CI Rust job and original full-suite command
+Rust (macos-latest, full): success, 2560 s, https://github.com/taneliang/farcooler/actions/runs/43563607545/job/132363691556
+       2 s  success  Set up job
+       9 s  success  Run actions/checkout@v4
+       3 s  success  Green bases for Rust shadow (ov-1116)
+      13 s  success  Run dtolnay/rust-toolchain@stable
+      27 s  success  Run Swatinem/rust-cache@v2
+       1 s  success  Run taiki-e/install-action@v2.87.28
+       1 s  success  Cache the pinned tmux build
+       8 s  success  Install tmux
+       0 s  success  Install git-lfs
+       5 s  success  Install fish
+       0 s  success  Make sure there is an sshd to test the fence against
+      96 s  success  Run cargo clippy --workspace --all-targets -- -D warnings
+       9 s  success  Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings
+       1 s  success  Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings
+      91 s  success  Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings
+      72 s  success  Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings
+      47 s  success  Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings
+      41 s  success  Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings
+       7 s  success  Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings
+       0 s  success  Run cargo check -p farcooler-tailcat --features linked
+       1 s  success  Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl
+       8 s  success  Run cargo nextest run --profile ci -p farcooler-tailcat --features helper
+      60 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel
+      12 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked
+       2 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
+       2 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once
+       1 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel
+      71 s  success  Run cargo check -p farcooler-daemon --features tailcat --all-targets
+      95 s  success  Put this channel's CLI where the daemon tests look for it
+      24 s  success  Run ./scripts/tmux-leak-check.py --self-test
+       1 s  success  Run ./scripts/tmux-stale-sockets.py --self-test
+      10 s  success  Run ./scripts/test-leak-check.py --self-test
+    1818 s  success  macOS full Rust tests (before)
+       3 s  success  Run actions/upload-artifact@v4
+       7 s  success  Run cargo test --workspace --doc
+       0 s  success  Post Cache the pinned tmux build
+       0 s  success  Post Run Swatinem/rust-cache@v2
+       1 s  success  Post Run actions/checkout@v4
+       8 s  success  Complete job
+Rust (macos-latest, selected): success, 724 s, https://github.com/taneliang/farcooler/actions/runs/43563607545/job/132363693267
+       3 s  success  Set up job
+       8 s  success  Run actions/checkout@v4
+       8 s  success  Run dtolnay/rust-toolchain@stable
+      13 s  success  Run Swatinem/rust-cache@v2
+       1 s  success  Run taiki-e/install-action@v2.87.28
+       0 s  success  Cache the pinned tmux build
+       5 s  success  Install tmux
+       0 s  success  Install git-lfs
+       4 s  success  Install fish
+       0 s  success  Make sure there is an sshd to test the fence against
+      42 s  success  Run cargo clippy --workspace --all-targets -- -D warnings
+       3 s  success  Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings
+       1 s  success  Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings
+      36 s  success  Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings
+      31 s  success  Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings
+      23 s  success  Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings
+      23 s  success  Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings
+       6 s  success  Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings
+       0 s  success  Run cargo check -p farcooler-tailcat --features linked
+       0 s  success  Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl
+       7 s  success  Run cargo nextest run --profile ci -p farcooler-tailcat --features helper
+      35 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel
+       7 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked
+       0 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
+       2 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once
+       2 s  success  Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel
+      37 s  success  Run cargo check -p farcooler-daemon --features tailcat --all-targets
+      33 s  success  Put this channel's CLI where the daemon tests look for it
+      23 s  success  Run ./scripts/tmux-leak-check.py --self-test
+       1 s  success  Run ./scripts/tmux-stale-sockets.py --self-test
+      10 s  success  Run ./scripts/test-leak-check.py --self-test
+     353 s  success  macOS native Rust tests
+       4 s  success  Run cargo test --workspace --doc
+       0 s  success  Post Cache the pinned tmux build
+       0 s  success  Post Run Swatinem/rust-cache@v2
+       0 s  success  Post Run actions/checkout@v4
+       2 s  success  Complete job

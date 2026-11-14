@@ -19,6 +19,14 @@ modules and binaries are selected so an added test in one stays selected.
 JSON entries record each scope's reason. Pure protocol, state, rendering,
 parsing and workflow coverage continues on Linux and in the full Mac Nightly.
 
+## Hosted job timing (fix round 1)
+
+The hosted before/after measurement requested in review is **42m40s →
+12m04s** (both jobs green). It is recorded in
+[hosted-results.md](hosted-results.md), with job links, outcomes, complete
+job wall times and per-step durations, plus the failed first baseline attempt. The local results below are retained
+as supporting evidence from the initial build.
+
 ## Guard and validation
 
 `python3 scripts/macos-rust-tests.py --self-test --check` runs in CI's always-on
@@ -73,8 +81,8 @@ this worktree's own `target/`. Run with:
 This is a **local Mac job reproduction**, not a GitHub-hosted wall-time
 measurement. It excludes runner provisioning, package/tool downloads, cache
 restore/upload, the green-base API call and shadow-planner bookkeeping.
-No branch was pushed or Nightly dispatched for this ticket. Hosted before/after
-job timing remains unmeasured. Historical hosted context is 41.5 minutes
+The initial build did not push the branch or dispatch Nightly. The fix-round-1
+hosted comparison above now supplies the separate end-to-end measurement. Historical hosted context is 41.5 minutes
 median for Mac Rust in `reports/ov-1134/macos-queue.md`; it is not the baseline
 of this local comparison.
 
@@ -140,8 +148,8 @@ The shared host was busy: a mid-baseline spot check saw load averages
 
 Host contention differed, so 48% is an observed local reduction, not a
 causal estimate for a GitHub runner or a promised pipeline improvement.
-Hosted branch job timings remain a follow-up measurement; no hosted
-before/after result is claimed here.
+See the separate hosted comparison above for branch job timings; the local
+figures in this section do not describe hosted runner performance.
 
 ## Evidence
 
