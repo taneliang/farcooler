@@ -71,6 +71,7 @@ The first foreground run exposed these semantic overlaps, resolved without dropp
 | Tickets | Observed conflict | Resolution |
 | --- | --- | --- |
 | ov-1213 / ov-1236 | The old target sweep ran before the durable cleanup, losing byte counts and bypassing open-file retry. | A retained cleanup intent owns its item’s policy and deletion; the old sweep remains a fallback for items with no durable intent. |
+| queued ov-1209 / ov-1213 | A split-half deadline fixture expected its base effect only after the previous CI; pipelining now emits it after the previous push. | Collect the emitted effect across push and CI, retaining the assertion that its deadline starts at the half’s real admission time. |
 | ov-1236 / ov-1213 | The capacity fixture waited for a builder to execute while a landing gate deliberately paused it. | The gate now waits for simultaneous admission to separate pools, then checks the admitted builder executes after yielding. Both capacity and pause behavior remain required. |
 | ov-1178 / queued ov-1205 | The native delivery fixture had separate watcher/runtime stores; explicit direction also now fences a tool instead of printing informational context. | Share the runner store in the fixture. Explicit direction denies the pending tool; informational runner acceptance notices return context. Both are consumed once through the authenticated hook before Stop. |
 

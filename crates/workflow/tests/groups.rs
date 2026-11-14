@@ -1301,9 +1301,15 @@ fn split_halves_queued_past_patience_start_a_full_base_wait() {
     let half = log.group_of("c");
     assert_eq!(log.state.items[&half].wait_since, None);
     log.now = 20_000_000;
-    walk_to(&mut log, &group, "ci");
+    // Gate-during-CI (ov-1209) can launch the waiting half as soon as the preceding push settles.
+    let mut created = None;
+    while log.stage(&group) != "ci" {
+        let next = log.pass(&group);
+        if let Some(effect) = next.effects.iter().find(|e| e.item == half) { created = Some(effect.created_ms); }
+    }
     let next = log.pass(&group);
-    assert_eq!(next.effects.iter().find(|e| e.item == half).unwrap().created_ms, log.now);
+    if let Some(effect) = next.effects.iter().find(|e| e.item == half) { created = Some(effect.created_ms); }
+    assert_eq!(created, Some(log.now), "the half starts its own full patience window, even if it overlaps CI");
 }
 
 #[test]
