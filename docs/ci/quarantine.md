@@ -10,15 +10,18 @@ that tracks its fix and an expiry date (the format is documented at the top of t
 up to twice. If a rerun passes, the run prints `flaky (quarantined): <binary> <test> ... (<ticket>)` and stays green. If it fails
 every rerun, the run fails as before. A test that is not listed gets no rerun. With an empty list the command runs unchanged.
 
-**The lint.** `scripts/quarantine.py --lint` (the wire job) fails on a malformed line, a duplicate, an entry on or after its expiry
-date, or a name that matches no test. The name check resolves each entry against the real test inventory when there is one
-(`--inventory FILE` with the JSON from `cargo nextest list --workspace --message-format json`, or `--nextest` to
-produce it on the spot; it needs a build). That is what nextest will run, so no declaration style is missed.
-With no inventory the lint falls back to a source scan that needs no build: it follows `mod x;` and
-`#[path = "..."]` from each Cargo target's root and requires the exact binary id and full test name to exist as a
-test function (`farcooler-tmux` for a unit test, `farcooler-daemon::a_foo` for an integration test file).
-The scan cannot see macro-generated tests, `[[test]]` paths or `#[path]` inside an inline module; use an inventory for those.
-A typo, a rename, a wrong module path or a plain non-test function fails the lint.
+**Name resolution.** Names are checked where a build exists. `quarantine.py run` resolves every listed
+`<binary-id> <test-name>` against `cargo nextest list --workspace --message-format json` before testing, in CI's Rust job and
+in the lane gate, and refuses to run on a name that is not there. That is what nextest will run, so every way of declaring a
+test is covered: inline modules, file modules (`mod x;`), `#[path = "..."]` modules (also inside an inline module),
+integration tests and custom `[[test]]`/`[[bin]]` targets, and macro-generated tests. Doctests are not in
+nextest's inventory and cannot be quarantined.
+
+**The lint.** `scripts/quarantine.py --lint` (the wire job, no build) fails on a malformed line, a duplicate or an entry on or
+after its expiry date. With no inventory it does not judge names, so it never rejects a valid inventory-only entry; give it
+`--inventory FILE` (nextest's JSON) or `--nextest` to match names too. `--source` is the fallback source scan: it follows
+`mod x;` and `#[path]` from each Cargo target's root and needs the exact binary id and full name to be a test function. It cannot see
+macro-generated tests, `[[test]]` paths or `#[path]` inside an inline module.
 
 **Removing an entry** when the fix lands is a one-line deletion. To keep one past its expiry, edit the date in the ticket's say-so.
 

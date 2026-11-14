@@ -19,6 +19,10 @@ spec.loader.exec_module(q)
 
 TODAY = dt.date(2026, 11, 15)
 CRATE = """
+mod inner {
+    #[path = "case.rs"]
+    mod custom;
+}
 #[cfg(test)]
 mod tests {
     // Fails on its first run in a fresh state directory, passes after.
@@ -131,6 +135,15 @@ class Lint(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(any("no test" in p for p in self.check(text)), self.check(text))
 
+    def test_without_an_inventory_the_lint_leaves_names_to_run(self):
+        # ov-1237: the no-build lint must not reject an entry only the inventory can see.
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        listing = root / "quarantine.txt"
+        listing.write_text("farcooler-x made_by_a_macro::t ov-1 2026-12-01\n")
+        self.assertEqual(q.lint(listing, root, TODAY), [])
+        self.assertTrue(any("no test" in p for p in q.lint(listing, root, TODAY, source=True)))
+
     def test_the_checked_in_list_is_clean(self):
         # Whatever the list holds, it must be valid today. It may be empty or hold entries.
         self.assertEqual(q.lint(), [])
@@ -149,6 +162,8 @@ class Nextest(unittest.TestCase):
         (cls.dir / "src").mkdir()
         (cls.dir / "Cargo.toml").write_text('[package]\nname = "scratch"\nversion = "0.0.0"\nedition = "2021"\n')
         (cls.dir / "src/lib.rs").write_text(CRATE)
+        (cls.dir / "src/inner").mkdir()
+        (cls.dir / "src/inner/case.rs").write_text("#[test]\nfn real() {}\n")
 
     @classmethod
     def tearDownClass(cls):
@@ -166,15 +181,28 @@ class Nextest(unittest.TestCase):
         os.environ["QUARANTINE_STATE"] = str(state)
         entries = [("scratch", t, "ov-1", "2026-12-01", 1) for t in listed]
         out = []
+        listed_json = subprocess.run(["cargo", "nextest", "list", "--message-format", "json"], cwd=self.dir,
+                                     capture_output=True, text=True, check=True).stdout
         cwd = os.getcwd()
         os.chdir(self.dir)
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 rc = q.run(["cargo", "nextest", "run", "--profile", "ci", "-E", only],
-                           base="[profile.ci]\nfail-fast = false\n", entries=entries, say=out.append)
+                           base="[profile.ci]\nfail-fast = false\n", entries=entries, say=out.append,
+                           inventory=q.inventory_tests(listed_json))
         finally:
             os.chdir(cwd)
         return rc, out
+
+    def test_the_gate_path_accepts_a_test_only_the_inventory_sees(self):
+        # ov-1237: `#[path]` inside an inline module is invisible to the source scan; `run` still takes it.
+        rc, out = self.go(["inner::custom::real"], "test(real)")
+        self.assertEqual(rc, 0)
+
+    def test_the_gate_path_rejects_an_unknown_name(self):
+        with self.assertRaises(ValueError) as caught:
+            self.go(["tests::gone"], "test(real)")
+        self.assertIn("no test `tests::gone`", str(caught.exception))
 
     def test_listed_flake_passes_and_is_reported(self):
         rc, out = self.go(["tests::fails_once"], "test(fails_once)")

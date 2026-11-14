@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A checked-in quarantine list for flaky Rust tests (ov-1229).
 
-    scripts/quarantine.py --lint                       # the list is well formed, live and matches real tests
+    scripts/quarantine.py --lint                       # the list is well formed and unexpired (names: see below)
+    scripts/quarantine.py --lint --source              # ...and every name found by the source scan
     scripts/quarantine.py --lint --inventory FILE      # ...matched against `cargo nextest list --message-format json`
     scripts/quarantine.py --lint --nextest             # ...matched against a live `cargo nextest list`
     scripts/quarantine.py run -- cargo nextest run ... # nextest, with listed tests rerun up to twice
@@ -11,7 +12,8 @@ Names are checked against the real test inventory when there is one: the JSON fr
 (or QUARANTINE_INVENTORY=FILE), or produced on the spot by `--lint --nextest` (needs a
 build). That is exactly what nextest will run, so every way of declaring a test is
 covered, `#[path]` modules and `[[test]]` targets included. With no inventory the lint
-falls back to a source scan: it follows `mod x;` and `#[path = "..."]` from each Cargo
+has no build to ask, so it checks only form and expiry, and `run` (CI's Rust job and the lane gate) resolves
+every name against `cargo nextest list` before testing. `--lint --source` is the fallback source scan: it follows `mod x;` and `#[path = "..."]` from each Cargo
 target's root (src/lib.rs, src/main.rs, src/bin, tests/*), and sees `#[test]`,
 `#[tokio::test]`, `#[rstest]` and `#[test_case]` functions. The scan does not expand macros,
 `[[test]]`/`[[bin]]` paths in Cargo.toml (beyond the bin name) or `#[path]` inside an inline
@@ -227,9 +229,16 @@ def unknown(entries, root, inventory=None):
             for binary, test, _ticket, _expiry, number in entries if (binary, test) not in real]
 
 
-def lint(path=LIST, root=ROOT, today=None, inventory=None):
+def lint(path=LIST, root=ROOT, today=None, inventory=None, source=False):
+    """Problems with the list. Names are matched against `inventory` when there is one.
+
+    With no inventory the source scan is only advisory (it cannot see macro-generated tests, `[[test]]`
+    paths or `#[path]` in an inline module), so it rejects nothing unless `source=True`: the authoritative
+    name check is `run`, which resolves entries against the real inventory before any test runs."""
     today = today or dt.datetime.now(dt.timezone.utc).date()
     entries, problems = parse(path.read_text(), today)
+    if inventory is None and not source:
+        return problems
     return problems + unknown(entries, root, inventory)
 
 
@@ -267,8 +276,15 @@ def flaky(report):
     return sorted(found)
 
 
-def run(command, base=None, entries=None, say=print):
-    """Run a nextest command with the listed tests rerun; return its exit code."""
+def live_inventory():
+    return load_inventory(live=True)
+
+
+def run(command, base=None, entries=None, say=print, inventory=None):
+    """Run a nextest command with the listed tests rerun; return its exit code.
+
+    Listed names are first resolved against the real nextest inventory (`inventory`, else a live
+    `cargo nextest list`), so a typo or a stale name fails here, where the build exists."""
     base = base if base is not None else (ROOT / ".config/nextest.toml").read_text()
     if entries is None:
         entries, problems = parse(LIST.read_text(), dt.datetime.now(dt.timezone.utc).date())
@@ -278,6 +294,9 @@ def run(command, base=None, entries=None, say=print):
         return subprocess.call(command)
     if command[:3] != ["cargo", "nextest", "run"] or command[command.index("--profile") + 1:][:1] != ["ci"]:
         raise ValueError("expected cargo nextest run --profile ci ...")
+    missing = unknown(entries, ROOT, inventory if inventory is not None else live_inventory())
+    if missing:
+        raise ValueError("; ".join(missing))
     with tempfile.TemporaryDirectory(prefix="quarantine-") as tmp:
         report, config = pathlib.Path(tmp, "junit.xml"), pathlib.Path(tmp, "nextest.toml")
         config.write_text(nextest_config(base, entries, report))
@@ -296,10 +315,12 @@ def main(argv):
         rest = argv[1:]
         file = rest[rest.index("--inventory") + 1] if "--inventory" in rest and rest.index("--inventory") + 1 < len(rest) else None
         try:
-            problems = lint(inventory=load_inventory(file, "--nextest" in rest))
+            problems = lint(inventory=load_inventory(file, "--nextest" in rest), source="--source" in rest)
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             print(f"quarantine: cannot read the test inventory: {error}", file=sys.stderr)
             return 1
+        if "--source" not in rest and not (file or "--nextest" in rest or os.environ.get("QUARANTINE_INVENTORY")):
+            print("quarantine: no inventory, so names are checked when the tests run (`run`), not here; --source scans source", file=sys.stderr)
         for problem in problems:
             print(f"quarantine: {problem}", file=sys.stderr)
         return 1 if problems else 0
