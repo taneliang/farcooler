@@ -320,7 +320,8 @@ mod tests {
         // Restart reads the policy from the durable publication; no in-memory enable switch.
         drop(runtime);
         let mut runtime = Runtime::open(&root).unwrap();
-        runtime.pump(200).await.unwrap();
+        // Main bounds provisions with the work pool; a one-shot pump drains one admitted wave.
+        for _ in 0..3 { runtime.pump(200).await.unwrap(); }
         let state = runtime.state("w").unwrap().unwrap();
         assert_eq!(state.items.values().filter(|i| active(i)).count(), 5);
         assert!(state.items.values().all(|i| i.stage == 1), "all five provisions executed");

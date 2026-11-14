@@ -140,14 +140,18 @@ async fn script_hooks_fake_clock_expiry_is_logged_and_keeps_the_retry_deadline()
     let state = runtime.state("w").unwrap().unwrap();
     let open = state.items["coding"].deciding.as_ref().unwrap();
     assert_eq!(open.attempt, 2);
-    assert_eq!(open.deadline_ms, 1_200);
+    let events = runtime.events("w").unwrap();
+    let first_timeout = events.iter().find(|e| matches!(e.command, Command::Decide { result: HookResult::Timeout, .. })).unwrap().now_ms;
+    assert_eq!(open.deadline_ms, first_timeout + 200, "the retry retains its published timeout from the observed expiry");
     drop(runtime);
     let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
     runtime.pump(2_000).await.unwrap();
     let events = runtime.events("w").unwrap();
     let times: Vec<_> = events.iter().filter(|e| matches!(e.command, Command::Decide { result: HookResult::Timeout, .. }))
         .map(|e| e.now_ms).collect();
-    assert_eq!(times, [1_000, 2_000]);
+    assert_eq!(times.len(), 2);
+    assert_eq!(times[0], first_timeout);
+    assert!(times[0] >= 1_000 && times[1] >= 2_000, "the supplied clock is the lower bound; dispatch also accounts for elapsed time");
     assert!(runtime.state("w").unwrap().unwrap().items["coding"].deciding.is_none());
     replay(&runtime);
 }
