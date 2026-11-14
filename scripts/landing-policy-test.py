@@ -40,6 +40,7 @@ class LandingTests(unittest.TestCase):
 
     def test_cpu_budget_reaches_real_steps_without_changing_the_checks(self):
         command = ('test "$CARGO_BUILD_JOBS" = 4 && test "$GOMAXPROCS" = 2 && '
+                   'test "$GIT_OPTIONAL_LOCKS" = 0 && '
                    'test "$NEXTEST_TEST_THREADS" = 6 && test "$GOFLAGS" = "-p=2" && '
                    'test "$GRADLE_OPTS" = "-Dorg.gradle.workers.max=2" && '
                    'test "$CARGO_PROFILE_DEV_DEBUG" = 0\n')
@@ -62,6 +63,38 @@ class LandingTests(unittest.TestCase):
             self.assertEqual(env["NEXTEST_TEST_THREADS"], "1")
             self.assertEqual(env["GOFLAGS"], "-mod=readonly -p=2")
             self.assertEqual(env["GRADLE_OPTS"], "-Dkeep=true -Dorg.gradle.workers.max=2")
+
+    def test_git_reads_keep_the_watched_index_stable_and_real_writes_work(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            env = dict(os.environ)
+            env.pop("GIT_OPTIONAL_LOCKS", None)
+            policy.budget_worker(env, 4)
+            def git(*args, optional=None):
+                return subprocess.check_output(
+                    ["git", "-c", "commit.gpgsign=false", "-c", "user.name=Test",
+                     "-c", "user.email=t@t", *args], cwd=repo,
+                    env=env if optional is None else {**env, "GIT_OPTIONAL_LOCKS": optional},
+                    stderr=subprocess.DEVNULL)
+            git("init", "-q")
+            source = repo / "input"
+            source.write_text("same")
+            git("add", "input")
+            git("commit", "-qm", "initial")
+            git("status", "--porcelain", optional="1")
+            index = repo / ".git/index"
+            before = index.stat().st_mtime_ns
+            stat = source.stat()
+            os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns - 2_000_000_000))
+            self.assertEqual(git("status", "--porcelain"), b"")
+            self.assertEqual(index.stat().st_mtime_ns, before)
+            self.assertEqual(git("status", "--porcelain", optional="1"), b"")
+            self.assertNotEqual(index.stat().st_mtime_ns, before)
+            source.write_text("changed")
+            self.assertIn(b" M input", git("status", "--porcelain"))
+            git("add", "input")
+            git("commit", "-qm", "real write")
+            self.assertEqual(git("show", "HEAD:input"), b"changed")
 
     def test_plain_runner_can_be_loaded_without_optional_landing_policy(self):
         # Evidence consumers copy the canonical plain runner and heavy lock,

@@ -18,6 +18,11 @@ def budget_worker(env, workers):
     Tests still use CI's profile and groups. Only local scheduling changes;
     Cargo and Go compilation concurrency do not alter artifact contents.
     """
+    # gen-wire-types rewrites identical tracked outputs, then git status/diff
+    # refresh their stat cache. Protocol watches the index for its build stamp;
+    # that optional refresh otherwise invalidates its entire reverse closure.
+    # Reads still inspect the worktree and real git writes still take locks.
+    env.setdefault("GIT_OPTIONAL_LOCKS", "0")
     share = max(1, (os.cpu_count() or 1) // workers)
     # Cargo serializes writers to a shared profile. A per-family fraction
     # leaves that single active compiler underfed while other families test.
