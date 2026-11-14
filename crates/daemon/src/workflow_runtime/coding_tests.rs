@@ -56,7 +56,7 @@ elif stage == 'ci':
             .into_iter().map(|(k,v)| (k.into(), v.into())).collect(), timeout_ms: 5000 };
     let mut build = command("build");
     build.environment.insert("STARTED".into(), dir.path().join("started").to_string_lossy().into_owned());
-    let config = CodingConfig { repository: repo.canonicalize().unwrap(), base,
+    let config = CodingConfig { security_reviews: vec![], repository: repo.canonicalize().unwrap(), base,
         landing_ref: "refs/heads/workflow-target".into(), landing: None, pull_request: None, harness: CodingHarness::Command(build),
         checks: vec![command("check"), command("check")],
         reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: command("review") }),

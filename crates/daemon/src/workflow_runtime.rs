@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 
 mod adapters;
 mod coding;
+mod coding_review_policy;
 mod service_owner;
 mod coding_execute;
 mod coding_native;

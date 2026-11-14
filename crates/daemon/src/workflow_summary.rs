@@ -294,8 +294,9 @@ fn runs(config: &CodingConfig) -> Vec<String> {
 /// is shown here.
 fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
     let exactly = |c: &CodingCommand, name: &str| exactly(c, before(live, config, name));
-    let CodingConfig { repository, base, landing_ref, landing, pull_request, harness, checks, reviewer, ci } = config;
+    let CodingConfig { repository, base, landing_ref, landing, pull_request, harness, checks, reviewer, ci, security_reviews } = config;
     let mut lines = Vec::new();
+    if !security_reviews.is_empty() { lines.push(format!("Required security review sequence: {}.", code(&serde_json::to_string(security_reviews).unwrap_or_default()))); }
     match harness {
         CodingHarness::Command(c) => lines.push(format!("The agent runs {}.", exactly(c, "the agent"))),
         CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process, codex_hooks } => {
@@ -388,7 +389,7 @@ mod tests {
 
     fn cmd(text: &str) -> CodingCommand { CodingCommand { argv: vec!["/bin/sh".into(), "-c".into(), text.into()], environment: BTreeMap::new(), timeout_ms: 1000 } }
     fn config() -> CodingConfig {
-        CodingConfig { repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
+        CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Command(CodingCommand { argv: vec!["/usr/bin/claude".into()], environment: BTreeMap::new(), timeout_ms: 1000 }),
             checks: vec![], reviewer: None, ci: farcooler_protocol::workflow_config::CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd("true") } }
     }
@@ -483,7 +484,7 @@ mod tests {
     fn everything(harness: CodingHarness) -> CodingConfig {
         use farcooler_protocol::workflow_config::*;
         let c = |tag: &str| CodingCommand { argv: vec![format!("/opt/{tag}/bin"), format!("--{tag}-flag")], environment: [(format!("{}_VAR", tag.to_uppercase()), format!("{tag}-value"))].into(), timeout_ms: 90_000 };
-        CodingConfig { repository: "/code/repository".into(), base: "b".repeat(40), landing_ref: "refs/heads/the-landing-ref".into(),
+        CodingConfig { security_reviews: vec![], repository: "/code/repository".into(), base: "b".repeat(40), landing_ref: "refs/heads/the-landing-ref".into(),
             landing: Some(CodingLanding { job: "landing-job".into(), repository: "/mirror/bare.git".into(), target: "refs/heads/the-target".into(), config_digest: "config-digest".into() }),
             pull_request: Some(CodingPullRequest { repository: "owner/pr-repo".into(), base: "pr-base".into(), remote: Some("ssh://git@example.com/elsewhere.git".into()), gh: c("gh") }),
             harness, checks: vec![c("check"), cmd("make check")], reviewer: Some(CodingReviewer { identity: "reviewer-identity".into(), command: c("reviewer") }),

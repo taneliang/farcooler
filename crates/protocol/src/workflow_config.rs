@@ -73,9 +73,22 @@ pub struct CodingPullRequest {
     pub gh: CodingCommand,
 }
 
+/// A full-review gate approved in adapter configuration, independent of route labels.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecurityReview {
+    pub step: String,
+    pub models: Vec<String>,
+    /// Exact review options, including the prompt and any path-dependent model rules.
+    pub options: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CodingConfig {
+    /// Trusted full-review sequence. Definitions may skip it only after a light diff classification.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub security_reviews: Vec<SecurityReview>,
     pub repository: PathBuf,
     pub base: String,
     pub landing_ref: String,
@@ -116,4 +129,27 @@ impl Default for NotificationPolicy {
 }
 impl NotificationPolicy {
     pub fn pin(&self) -> String { farcooler_workflow::digest(&("workflow-notifications/v1", self)) }
+}
+
+#[cfg(test)]
+mod security_review_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_adapter_bytes_keep_their_pin_and_security_policy_changes_it() {
+        let command = serde_json::json!({"argv":["/bin/true"],"environment":{},"timeout_ms":1000});
+        let legacy = serde_json::json!({"repository":"/repo","base":"a".repeat(40),"landing_ref":"refs/heads/main",
+            "landing":null,"harness":{"Command":command},"checks":[],"reviewer":null,
+            "ci":{"repository":"owner/repo","workflow":"CI","event":"push","command":command}});
+        let mut config: CodingConfig = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(config.security_reviews.is_empty());
+        assert_eq!(serde_json::to_value(&config).unwrap(), legacy);
+        let legacy_pin = config.pin();
+        config.security_reviews.push(SecurityReview { step: "full".into(), models: vec!["claude:opus".into()], options: None });
+        assert_ne!(config.pin(), legacy_pin);
+        let pinned = config.pin();
+        assert_eq!(serde_json::from_slice::<CodingConfig>(&serde_json::to_vec(&config).unwrap()).unwrap().pin(), pinned);
+        config.security_reviews[0].models = vec!["claude:sonnet".into()];
+        assert_ne!(config.pin(), pinned);
+    }
 }

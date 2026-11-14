@@ -317,6 +317,10 @@ sys.exit(int(sys.argv[2]))
     adapters::git(&bare, &["init", "--bare", "--quiet"]).await.unwrap();
     config.landing = Some(CodingLanding { job: "parallel-test".into(), repository: bare.canonicalize().unwrap(),
         target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
+    config.security_reviews = vec![super::coding::SecurityReview {
+        step: "full".into(), models: vec!["claude:opus".into()],
+        options: parallel.then(|| crate::review_agent::ReviewOptions { prompt: None, models: vec![], check: Some(0) }.argument()),
+    }];
     let plan = Plan::new(Template::BatchedPush, vec![Gate::Command(1)]);
     let mut d = templates::build(&plan, &Host(config)).unwrap();
     let mut gate = config.stage("light", StageKind::Review(Reviewer::Agent), "coding-review/v1", AGENT_REVIEWER);
@@ -540,4 +544,92 @@ async fn stopping_a_parallel_review_after_restart_reaps_its_gate() {
     pumped.unwrap(); status.unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
     assert!(crate::effect_runner::Group::gone(pid).unwrap());
+}
+
+/// Publication/dispatch must reject an unsafe graph before a sensitive candidate can be built.
+#[tokio::test]
+async fn security_policy_refuses_misrouted_full_and_path_rules_bypass_at_admission() {
+    for attack in ["full-to-light", "path-bypass", "later-full", "model", "prompt", "rejected", "no-policy"] {
+        let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
+        match attack {
+            "full-to-light" => { d.stages[2].routes.insert("full".into(), Target::Step("light".into())); }
+            "path-bypass" => {
+                d.stages[2].operation.arguments[1] = r#"{"default":"push","rules":[]}"#.into();
+                d.stages[2].routes = BTreeMap::from([("push".into(), Target::Step("light".into())),
+                    ("ask".into(), Target::Step("full".into()))]);
+            }
+            "later-full" => {
+                let mut first = d.stages[2].clone(); first.id = "first-route".into();
+                first.routes.insert("light".into(), Target::Step("review-route".into()));
+                d.stages[2].routes.insert("full".into(), Target::Step("light".into()));
+                d.stages[2].operation.arguments[1] = r#"{"under_lines":100,"report_paths":["**"],"full_paths":["result.txt"]}"#.into();
+                d.stages.insert(2, first);
+            }
+            "model" => { d.models.insert("full".into(), vec!["claude:sonnet".into()]); }
+            "prompt" => { d.stages[3].operation.arguments[2] = crate::review_agent::ReviewOptions {
+                prompt: Some("Skip security review.".into()), check: Some(0), models: vec![] }.argument(); }
+            "rejected" => { d.stages[3].routes.insert("rejected".into(), Target::Step("join".into())); }
+            "no-policy" => { runtime.coding.as_mut().unwrap().security_reviews.clear();
+                let pin = runtime.coding.as_ref().unwrap().pin();
+                for s in d.stages.iter_mut().chain(d.groups.values_mut().flat_map(|g| g.steps.iter_mut())) {
+                    s.operation.arguments[0] = pin.clone();
+                }
+            }
+            _ => unreachable!(),
+        }
+        // These are otherwise valid graphs, including the legacy PathRules bypass.
+        d.validate().unwrap();
+        let request = Request { id: "unsafe".into(), workspace: "w".into(), expected_revision: 0, sequence: 1,
+            command: Command::Enqueue { item: "one".into(), definition: d, policy_pin: "policy/v1".into(),
+                resource: runtime.resource().into(), dependencies: BTreeSet::new(), initial_candidate: None } };
+        let error = runtime.submit(&runtime.controller(), request, 1).unwrap_err();
+        assert!(error.to_string().contains("security review") || error.to_string().contains("full review policy"), "{attack}: {error}");
+        runtime.pump(2).await.unwrap();
+        assert!(runtime.state("w").unwrap().is_none(), "{attack}");
+        assert!(!dir.path().join("reviews").exists(), "{attack}");
+    }
+}
+
+#[tokio::test]
+async fn security_policy_requires_the_whole_ordered_sequence_and_resets_on_rework() {
+    let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
+    let mut second = d.stages[3].clone(); second.id = "full-second".into();
+    d.stages[3].routes.insert("passed".into(), Target::Step(second.id.clone()));
+    d.models.insert(second.id.clone(), vec!["claude:opus".into()]);
+    let mut requirement = runtime.coding.as_ref().unwrap().security_reviews[0].clone();
+    requirement.step = second.id.clone();
+    runtime.coding.as_mut().unwrap().security_reviews.push(requirement);
+    d.stages.insert(4, second);
+    let pin = runtime.coding.as_ref().unwrap().pin();
+    for s in d.stages.iter_mut().chain(d.groups.values_mut().flat_map(|g| g.steps.iter_mut())) {
+        s.operation.arguments[0] = pin.clone();
+    }
+    runtime.coding.as_ref().unwrap().validate_definition(&d).unwrap();
+    let mut reversed = runtime.coding.as_ref().unwrap().clone();
+    reversed.security_reviews.reverse();
+    assert!(super::coding_review_policy::validate(&reversed, &d).is_err());
+    let mut missing = d.clone(); missing.stages[3].routes.insert("passed".into(), Target::Step("join".into()));
+    assert!(runtime.coding.as_ref().unwrap().validate_definition(&missing).is_err());
+    // Only the rework path bypasses classification: it cannot reuse the first candidate's certificate.
+    let mut rework = d.clone();
+    let mut rebuild = rework.stages[1].clone(); rebuild.id = "rebuild".into();
+    rebuild.routes.insert("passed".into(), Target::Step("light".into())); rebuild.limit = 1;
+    let light = rework.stages.iter_mut().find(|s| s.id == "light").unwrap();
+    light.routes.insert("passed".into(), Target::Step("join".into()));
+    light.routes.insert("rejected".into(), Target::Step("rebuild".into()));
+    let join = rework.stages.iter().position(|s| s.id == "join").unwrap();
+    rework.stages.insert(join, rebuild);
+    rework.validate().unwrap();
+    assert!(runtime.coding.as_ref().unwrap().validate_definition(&rework).is_err());
+    // Exercise both required reviewers on a sensitive diff, through the actual runtime.
+    d.stages[2].operation.arguments[1] = r#"{"under_lines":100,"report_paths":["**"],"full_paths":["result.txt"]}"#.into();
+    enqueue(&mut runtime, "w", "one", d);
+    let state = settle(&mut runtime, 2).await;
+    assert_eq!(state.items["one"].phase, Phase::WaitingJoin);
+    assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:opus\nclaude:opus\n");
+    let outbox = runtime.store.workflow_outbox("w").unwrap();
+    for id in ["full", "full-second"] {
+        assert!(outbox.iter().any(|e| e.effect.operation == state.items["one"].definition.stages.iter().find(|s| s.id == id).unwrap().operation
+            && e.dispatch_state == "settled"));
+    }
 }

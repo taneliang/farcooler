@@ -102,7 +102,7 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
     let mut look = environment;
     look.extend([("CI_GH".to_string(), gh.to_string_lossy().into_owned()), ("CI_REPOSITORY".into(), ci_repository.clone()),
         ("CI_WORKFLOW".into(), CI_WORKFLOW.into()), ("CI_EVENT".into(), "push".into())]);
-    Ok(CodingConfig { repository, base, landing_ref, landing: Some(landing), pull_request: None,
+    Ok(CodingConfig { security_reviews: vec![], repository, base, landing_ref, landing: Some(landing), pull_request: None,
         harness: CodingHarness::Native { preset: HARNESS.into(), settings: Some(settings), project_hooks: None, codex_hooks: Some(codex_hooks), plugin_dir: None, prompt: PROMPT.into(),
             process: CodingCommand { argv: Vec::new(), environment: agent, timeout_ms: MAX_COMMAND_MS } },
         checks: Vec::new(), reviewer: None,
@@ -196,7 +196,7 @@ mod tests {
 
     fn config(preset: &str) -> CodingConfig {
         let cmd = || CodingCommand { argv: vec!["/usr/bin/true".into()], environment: Default::default(), timeout_ms: 1000 };
-        CodingConfig { repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
+        CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Native { preset: preset.into(), settings: Some(LaunchFile { path: "/s.json".into(), digest: "wf1:s".into() }),
                 project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: super::PROMPT.into(), process: CodingCommand { argv: vec![], ..cmd() } },
             checks: vec![], reviewer: None, ci: CodingCi { repository: "o/r".into(), workflow: "CI".into(), event: "push".into(), command: cmd() } }

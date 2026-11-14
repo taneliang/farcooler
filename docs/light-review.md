@@ -8,13 +8,31 @@ argument 1:
 {"under_lines":100,"report_paths":["reports/**","docs/**"],"full_paths":["private/**"]}
 ```
 
+Before enabling this route, approve `security_reviews` in the coding adapter
+configuration. It pins the existing full sequence by step id, allowed models,
+and exact review-options text. For example, a full gate with no options:
+
+```json
+{"security_reviews":[{"step":"full","models":["claude:opus"],"options":null}]}
+```
+
+The adapter pin covers this policy; definition authors cannot redefine it through
+route labels. Admission checks every graph path to joining, landing, branch
+publication, or completion. Each path must pass the entire pinned sequence in
+order, or carry a `light` classification from the diff classifier. Legacy
+`PathRules` provide no such exemption. Rebuilding resets both review coverage
+and the classification. A missing or changed full gate, a misrouted `full`, or a
+bypass route is refused before any agent launches. Adapters without this trusted
+policy retain their existing behavior and cannot enable `ReviewRoute`.
+
 Route `light` to one agent review with a fast default in `definition.models`
 (for example, `claude:sonnet`), and `full` to the existing full review sequence.
 Set the light step's `max_attempts` to 1 for a single launch per candidate.
 Route the light review's `passed` directly to `join`, skipping the full reviews;
 route rejection to `Fail` or the existing bounded build rework edge. Each new
 candidate goes through the route again, including after rework. The definition
-chooses the threshold, models, number of reviews, and rework budget.
+chooses the threshold, light-review model, and rework budget; the adapter pins
+the required full review sequence.
 
 The threshold is exclusive and counts additions plus deletions across the
 base-to-candidate diff. Renames count as deletion plus addition. A change is
@@ -55,6 +73,13 @@ source files. The landing group's gate still judges the folded result.
 
 ## Measuring
 
+The numbers below are an artificial scheduling experiment, **not** the requested
+real before/after outcome. No production definition in the inspected event
+store has enabled light review or concurrent ticket checks, so there is no
+after cohort to measure yet. A real comparison remains pending publication and
+completed runs. See `reports/ov-1194-stage-timing.md` for the observed baseline
+and the reproducible extraction command.
+
 Run the controlled runtime experiment:
 
 ```sh
@@ -75,6 +100,6 @@ Measured on November 14, 2026, with the command above (milliseconds):
 | Before: sequential ticket gate, then review | 1766, 1800, 1819, 1901, 2082 | 1819 |
 | After: ticket gate alongside review | 985, 1084, 1096, 1216, 1281 | 1096 |
 
-The median fell by 723 ms (39.7%). Both variants use the same single fast-model
+The simulated median fell by 723 ms (39.7%). Both variants use the same single fast-model
 review definition; this measures the overlap, without attributing any simulated
 latency benefit to a model change.

@@ -161,7 +161,7 @@ mod tests {
 
     fn cmd() -> CodingCommand { CodingCommand { argv: vec!["/usr/bin/true".into()], environment: Default::default(), timeout_ms: 1000 } }
     fn config() -> CodingConfig {
-        CodingConfig { repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
+        CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Command(cmd()), checks: vec![], reviewer: None,
             ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd() } }
     }

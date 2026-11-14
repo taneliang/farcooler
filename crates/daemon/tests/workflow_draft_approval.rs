@@ -34,7 +34,7 @@ async fn configured() -> (tempfile::TempDir, CodingConfig) {
     let landing = CodingLanding { job: "landing-971".into(), repository: bare.canonicalize().unwrap(), target: "refs/heads/main".into(),
         config_digest: farcooler_workflow::digest(&std::fs::read(bare.join("config")).unwrap()) };
     let command = || CodingCommand { argv: vec!["/usr/bin/true".into()], environment: [("PATH".to_string(), "/usr/bin:/bin".to_string())].into(), timeout_ms: 5000 };
-    let config = CodingConfig { repository: repo.canonicalize().unwrap(), base, landing_ref: "refs/heads/workflow-target".into(), landing: Some(landing), pull_request: None,
+    let config = CodingConfig { security_reviews: vec![], repository: repo.canonicalize().unwrap(), base, landing_ref: "refs/heads/workflow-target".into(), landing: Some(landing), pull_request: None,
         harness: CodingHarness::Command(command()), checks: vec![], reviewer: None,
         ci: CodingCi { repository: "offline/repository".into(), workflow: "ci".into(), event: "push".into(), command: command() } };
     (dir, config)

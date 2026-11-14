@@ -294,6 +294,7 @@ impl Pinned for CodingConfig {
             }
         }
         if in_group { return Ok(()); }
+        super::coding_review_policy::validate(self, definition)?;
         // A model the runtime can't launch never reaches a run: a typo, or a harness whose hooks aren't pinned (ov-966).
         if definition.models.values().flatten().any(|model| !launchable(self, model)) {
             return Err(Error::Refused("a listed model's harness isn't set up on this runtime"));

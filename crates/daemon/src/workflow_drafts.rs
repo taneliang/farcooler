@@ -421,7 +421,7 @@ mod hidden_tests {
     fn adapter(value: &str) -> AdapterConfiguration {
         let cmd = |env: &[(&str, &str)]| CodingCommand { argv: vec!["/bin/true".into()], timeout_ms: 1000,
             environment: env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
-        AdapterConfiguration::Coding(CodingConfig { repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None,
+        AdapterConfiguration::Coding(CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None,
             pull_request: None, harness: CodingHarness::Command(cmd(&[])), checks: vec![cmd(&[("TOKEN", value)])], reviewer: None,
             ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd(&[]) } })
     }
