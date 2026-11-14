@@ -1266,3 +1266,62 @@ os.execv('/usr/bin/git', ['/usr/bin/git', *args])
         assert_eq!(outbox(&runtime, StageKind::Build), 3, "no member rework");
     }
 }
+
+/// ov-1164: an I/O error after launch is not permission to run another writer.
+#[tokio::test]
+async fn an_unproved_gate_settlement_refuses_retry_until_ownership_is_settled() {
+    let (_dir, mut runtime) = lander("gate-slow").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..4 { runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Run));
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let (result, mut child) = crate::effect_runner::TEST_UNSETTLED.scope(std::cell::RefCell::new(None), async {
+        let result = runtime.execute_coding("w", &binding, cancelled).await;
+        let child = crate::effect_runner::TEST_UNSETTLED.with(|held| held.borrow_mut().take().unwrap());
+        (result, child)
+    }).await;
+    let pid = child.id().unwrap();
+    let alive = !crate::effect_runner::Group::gone(pid).unwrap();
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let repeated = runtime.execute_coding("w", &binding, cancelled).await;
+    // Keep the leader reaped as ownership reconciliation stops the old group.
+    let reaped = tokio::spawn(async move { child.wait().await.unwrap() });
+    let outcome = result.unwrap_or(Outcome::Uncertain);
+    runtime.observe("w", &binding.effect, outcome.clone(), false, 20).unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    let phase = state.items[&binding.effect.item].phase.clone();
+    let runs = outbox(&runtime, StageKind::Run);
+    let settled = runtime.reconcile_coding(&binding).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), reaped).await.unwrap().unwrap();
+    assert!(alive, "fault must leave a real gate alive");
+    assert_eq!(repeated.unwrap_or(Outcome::Uncertain), Outcome::Uncertain,
+        "existing launch evidence also requires reconciliation, never a safe retry");
+    assert_eq!(outcome, Outcome::Uncertain, "unproved settlement must not authorize a retry");
+    assert_eq!(phase, Phase::Uncertain);
+    assert_eq!(runs, 1, "no second gate may be queued while the old gate lives");
+    assert_eq!(settled, Outcome::SafeFailure, "retry is safe only after ownership reconciliation");
+    assert!(crate::effect_runner::Group::gone(pid).unwrap());
+    runtime.observe("w", &binding.effect, settled, true, 21).unwrap();
+    assert_eq!(outbox(&runtime, StageKind::Run), 2, "settlement permits the retry");
+}
+
+#[tokio::test]
+async fn a_gate_owner_write_failure_keeps_recovery_uncertain() {
+    let (_dir, mut runtime) = lander("gate-slow").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..4 { runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Run));
+    // The child exists before the atomic owner write fails. No durable PID remains.
+    std::fs::create_dir(runtime.owner_path(&binding).with_extension("tmp")).unwrap();
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let result = runtime.execute_coding("w", &binding, cancelled).await;
+    assert_eq!(result.unwrap_or(Outcome::Uncertain), Outcome::Uncertain);
+    assert!(runtime.reconcile_coding(&binding).await.is_err(),
+        "a missing owner record after a possible launch is not proof that writers stopped");
+}

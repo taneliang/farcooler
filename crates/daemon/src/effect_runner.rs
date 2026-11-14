@@ -75,7 +75,21 @@ async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
     if let Some(environment) = environment {
         command.env_clear().env("PATH", "/usr/bin:/bin").envs(environment.iter().copied());
     }
-    supervise(command, tree, log, limit, None, None).await.map(|status| status == Some(0))
+    supervise(command, tree, log, limit, None, None).await.map(|status| status == Some(0)).map_err(|failure| failure.error)
+}
+
+/// Only a failure before spawn, or after proven group disappearance, permits a retry.
+/// Ordinary I/O conversion is deliberately conservative: errors after launch stay unsettled.
+#[derive(Debug)]
+pub(crate) struct ProcessFailure {
+    pub error: std::io::Error,
+    pub retry_safe: bool,
+}
+impl ProcessFailure {
+    fn retry_safe(error: std::io::Error) -> Self { Self { error, retry_safe: true } }
+}
+impl From<std::io::Error> for ProcessFailure {
+    fn from(error: std::io::Error) -> Self { Self { error, retry_safe: false } }
 }
 
 /// Configured argv uses the same group ownership/quiescence boundary as gates.
@@ -83,16 +97,16 @@ async fn supervised(tree: &Path, script: &str, log: &Path, limit: Duration,
 pub(crate) async fn configured(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
     log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>) -> std::io::Result<Option<i32>>
 {
-    owned(tree, argv, environment, log, limit, cancel, None).await
+    owned(tree, argv, environment, log, limit, cancel, None).await.map_err(|failure| failure.error)
 }
 
 /// Like `configured`, but records who the process is in `owner` as soon as it exists, so that a
 /// later run that finds the process still going (the daemon died and left it) can end it. The
 /// record is a pid and the process's start time; see `Owner::reap`.
 pub(crate) async fn owned(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
-    log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>) -> std::io::Result<Option<i32>>
+    log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>) -> Result<Option<i32>, ProcessFailure>
 {
-    let program = argv.first().ok_or_else(|| std::io::Error::other("empty argv"))?;
+    let program = argv.first().ok_or_else(|| ProcessFailure::retry_safe(std::io::Error::other("empty argv")))?;
     let mut command = Command::new(program);
     command.args(&argv[1..]).env_clear().envs(environment);
     supervise(command, tree, log, limit, Some(cancel), owner).await
@@ -177,18 +191,18 @@ pub(crate) async fn capture(mut reader: tokio::net::UnixStream, log: std::path::
 }
 
 async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duration,
-    mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>) -> std::io::Result<Option<i32>>
+    mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>) -> Result<Option<i32>, ProcessFailure>
 {
-    save_tail(log, b"")?;
-    let (reader, writer) = std::os::unix::net::UnixStream::pair()?;
-    reader.set_nonblocking(true)?;
-    let reader = tokio::net::UnixStream::from_std(reader)?;
-    let stderr = writer.try_clone()?;
+    save_tail(log, b"").map_err(ProcessFailure::retry_safe)?;
+    let (reader, writer) = std::os::unix::net::UnixStream::pair().map_err(ProcessFailure::retry_safe)?;
+    reader.set_nonblocking(true).map_err(ProcessFailure::retry_safe)?;
+    let reader = tokio::net::UnixStream::from_std(reader).map_err(ProcessFailure::retry_safe)?;
+    let stderr = writer.try_clone().map_err(ProcessFailure::retry_safe)?;
     command.current_dir(tree)
         .stdin(Stdio::null()).stdout(Stdio::from(OwnedFd::from(writer)))
         .stderr(Stdio::from(OwnedFd::from(stderr))).kill_on_drop(true);
     command.process_group(0);
-    let mut child = command.spawn()?;
+    let mut child = command.spawn().map_err(ProcessFailure::retry_safe)?;
     // Command retains its configured stdio handles; release them so EOF follows the child.
     drop(command);
     let mut output = tokio::spawn(capture(reader, log.to_path_buf()));
@@ -196,6 +210,12 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     let presence = crate::workflow_runtime::execution::process(pid);
     let mut group = Group(Some(pid));
     if let Some(owner) = owner { Owner::write(owner, pid)?; }
+    #[cfg(test)]
+    if owner.is_some() && TEST_UNSETTLED.try_with(|_| ()).is_ok() {
+        group.0.take();
+        TEST_UNSETTLED.with(|held| held.replace(Some(child)));
+        return Err(std::io::Error::other("injected unproved process settlement").into());
+    }
     let result = tokio::select! {
         result = tokio::time::timeout(limit, exited(pid)) => Some(result),
         _ = async {
@@ -241,8 +261,8 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     // A surviving group (including unreaped grandchildren) is not quiescence.
     for _ in 0..100 {
         if matches!(Group::gone(pid), Ok(true)) {
-            if let Some(Ok(Err(error))) = result { return Err(error); }
-            return if timed_out { Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "process deadline exceeded")) }
+            if let Some(Ok(Err(error))) = result { return Err(ProcessFailure::retry_safe(error)); }
+            return if timed_out { Err(ProcessFailure::retry_safe(std::io::Error::new(std::io::ErrorKind::TimedOut, "process deadline exceeded"))) }
                 else { Ok(if observed { status.code() } else { None }) };
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -250,11 +270,13 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     if let Some(error) = signal_error {
         tracing::warn!(pid, %error, "owned process signal failed and disappearance remains unproved");
     }
-    Err(std::io::Error::other("process group did not become quiescent"))
+    Err(std::io::Error::other("process group did not become quiescent").into())
 }
 
 #[cfg(test)]
 tokio::task_local! { static TEST_SIGNAL_PINNED: std::cell::Cell<bool>; }
+#[cfg(test)]
+tokio::task_local! { pub(crate) static TEST_UNSETTLED: std::cell::RefCell<Option<tokio::process::Child>>; }
 
 #[cfg(test)]
 mod tests {

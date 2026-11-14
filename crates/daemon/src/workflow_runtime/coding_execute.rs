@@ -340,7 +340,12 @@ impl Exec {
         let log = self.process_log(binding);
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
-        durable(&log, b"")?;
+        if let Err(error) = durable(&log, b"") {
+            if matches!(&error, Error::Io(error) if error.kind() == std::io::ErrorKind::AlreadyExists) {
+                return Err(Error::Refused("configured process already has launch evidence"));
+            }
+            return Err(error);
+        }
         // A named tree is one people edit in: what a Run gate changes there is noted as it runs, so a crash that
         // stops the run can name what changed while the gate ran (ov-979). They are only named, never cleared.
         let ledger = (binding.effect.tree.is_some() && matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)))
@@ -366,11 +371,22 @@ impl Exec {
                 // recovery can end it before it runs again (a group's gate holds the whole landing target).
                 let owner = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Run)).then(|| self.owner_path(binding));
                 crate::effect_runner::owned(&self.tree(binding), &command.argv, &command.environment,
-                    &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref()).await?
+                    &log, Duration::from_millis(command.timeout_ms), cancel, owner.as_deref()).await.map_err(|failure| {
+                        if failure.retry_safe { Error::Io(failure.error) } else {
+                            tracing::warn!(error = %failure.error, "configured process settlement remains unproved");
+                            Error::Refused("configured process settlement remains unproved")
+                        }
+                    })?
             })
         }.await;
         // However the gate ended, its ledger goes with it; only a crash leaves one behind.
         if let Some(looking) = looking { looking.abort(); let _ = looking.await; }
+        // Never let a ledger write error hide an unproved settlement as retryable I/O.
+        // Safe failures (including a quiescent timeout) still close the ledger as before.
+        let exit = match exit {
+            Err(error @ Error::Refused(_)) => return Err(error),
+            settled => settled,
+        };
         if let Some(ledger) = &ledger { named_tree::end_gate(ledger)?; }
         let exit = exit?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
@@ -543,6 +559,7 @@ impl Exec {
                     review?; gate?;
                 } else {
                     if let Err(error) = self.run_coding(binding, command, cancel).await {
+                    // run_coding exposes I/O as retryable only before launch or after quiescence.
                     if matches!(kind, StageKind::Run) && matches!(&error, Error::Io(_)) {
                         return Ok(Outcome::SafeFailure);
                     }
@@ -582,6 +599,11 @@ impl Exec {
         let raw = match self.bytes(&self.fact_path(binding)) {
             Ok(raw) => raw,
             Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                // The log is created before spawn. Without an owner record, a crash or failed
+                // owner write may have left a process we cannot identify; absence is no proof.
+                if self.process_log(binding).try_exists()? && !self.owner_path(binding).try_exists()? {
+                    return Err(Error::Refused("the gate launch has no ownership receipt"));
+                }
                 if !crate::effect_runner::Owner::reap(&self.owner_path(binding)).await? {
                     return Err(Error::Refused("the gate's process could not be ended"));
                 }
