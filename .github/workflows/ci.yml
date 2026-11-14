@@ -29,8 +29,8 @@ on:
   pull_request:
 
 concurrency:
-  # Superseded branch runs can stop, but main needs a verdict for each commit.
-  group: ci-${{ github.ref }}
+  # Main runs need distinct groups: GitHub also replaces pending runs in a group.
+  group: ci-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.run_id || 'shared' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -146,6 +146,7 @@ jobs:
       # the code paths it must never swallow, and the green-base rule against a
       # scratch repository.
       - run: ./scripts/ci-changes.py --self-test
+      - run: python3 ./scripts/ci-concurrency-test.py
       - run: python3 scripts/rust-shadow-test.py
       - uses: actions/setup-python@v5
         with:

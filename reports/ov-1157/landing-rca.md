@@ -158,7 +158,7 @@ Hours are lane-hours per day at today's arrival rate (~12-15 tickets/day), estim
 | Q3 | Raise `base` timeout to 12 h and route `timeout → Step base` instead of `Fail` (until E2 lands) | landing definition, `/groups/landing/steps/0` (`arguments[3]`, `routes.timeout`) | prevents 7-group mass failures (~15 tickets rework) | a long red main just waits | workflow get shows the new route; a simulated red main leaves groups Waiting, not Failed |
 | Q4 | Small groups, sorted by file overlap: limit 3-4, and never put two tickets that touch `crates/workflow/src/{reducer,state}.rs`, `workflow_runtime/coding_*.rs` or `wire_commands.rs` in one group | landing definition `/groups/landing/limit`; manager skill grouping guidance | fewer conflicts and smaller blast radius | more groups (fine once pipelined) | fold-conflict receipts per day trend down |
 | Q5 | Serialize or stack engine tickets that edit the hot files before building them (planning rule) | manager skill / lessons | most of the 16 conflicting tickets | less parallelism on engine work | count of `conflict` receipts naming those files |
-| Q6 | `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` so every main commit gets a verdict. **Highest-value quick fix**: base treats a cancelled run as Unknown and waits, so supersession caused G643's 3 h stall | `.github/workflows/ci.yml` concurrency | 1-3 h per busy period; no more masked reds (b8ab1dd24) | more runner minutes, more mac queueing (pair with Q9) | a superseded main push still shows success/failure |
+| Q6 | Give each main run a distinct concurrency group using `github.run_id`, and set `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`. Disabling cancellation alone still allows a newer pending run to replace an older pending run. **Highest-value quick fix**: base treats a cancelled run as Unknown and waits, so supersession caused G643's 3 h stall | `.github/workflows/ci.yml` concurrency | 1-3 h per busy period; no more masked reds from supersession (b8ab1dd24) | more runner minutes, more mac queueing (pair with Q9) | three overlapping main pushes retain distinct groups; branch runs still cancel |
 | Q7 | Raise `CARGO_BUILD_JOBS` to 8 for the gate and cap builder lanes instead (or gate at nice 0, lanes at nice 10) | engine config `adapter.config.checks[0].environment`; lane briefs | 10-15 min/gate (rust 11-31 min under load) | lanes slower | gate rust-step seconds in the summary table, median per day |
 | Q8 | Add `reports/**` and `.claude/agent/reports/**` to the docs allowlist | `scripts/ci-changes.py` (SITE_ONLY / docs patterns + self-test) | minor (keeps narrow plans narrow) | a test reading reports/ would be skipped (none found) | self-test case "report-only change runs only cheap jobs" |
 | Q9 | Keep branch Nightly dispatches off the 5 mac slots while landing is busy | orchestrator; `nightly.yml` concurrency group shared with CI's mac jobs | 15-70 min CI queue on overlap | slower nightlies | mac queue p90 on main CI |
@@ -193,7 +193,7 @@ Titles follow "<Area>: <outcome>". **Parallel lanes**: T1, T2, T3 (policy/config
    - Accept: the auto-update routine checks `workflow get` for a running gate/ci and waits; noted in the manager skill as a default.
 3. **Landing: base waits, never fails on timeout** (definition, today)
    - Intent: stop mass group failures on a long red main.
-   - Accept: `/groups/landing/steps/0` timeout 12 h and `routes.timeout → Step base`; group limit 4; `ci.yml` `cancel-in-progress` off for main; `workflow get` shows all three.
+   - Accept: `/groups/landing/steps/0` timeout 12 h and `routes.timeout → Step base`; group limit 4; `ci.yml` uses distinct groups for main runs and has `cancel-in-progress` off for main; `workflow get` shows the definition changes.
    - Constraints: definition change via the reviewed owner path; ci.yml change through a normal lane.
 4. **Engine: eject the conflicting member at fold** (code)
    - Intent: a conflict removes `detail.member` and re-folds the rest at once.
@@ -208,7 +208,7 @@ Titles follow "<Area>: <outcome>". **Parallel lanes**: T1, T2, T3 (policy/config
 7. **Engine: gate next group while CI runs** (code, after 5)
    - Intent: speculative stack; N+1 folds/gates on N's pushed SHA; pushes after N is green; restarts if N is red.
    - Accept: two-group scratch-daemon e2e shows N+1's gate overlapping N's CI; red N re-bases N+1; lane-hours per landed ticket measured before/after.
-   - Constraints: needs T3's cancel-in-progress change; scratch daemons by PID, short FARCOOLER_HOME.
+   - Constraints: needs T3's main concurrency changes; scratch daemons by PID, short FARCOOLER_HOME.
 8. **Landing: thin gate once CI runs behind it** (scripts, after 7)
    - Intent: gate = clippy + targeted nextest + wire/doc-comments + changed family builds, ~15 min; CI stays full.
    - Accept: median gate under 20 min for a week; count of main reds the full gate would have caught (re-run full gate nightly on main as the canary).
