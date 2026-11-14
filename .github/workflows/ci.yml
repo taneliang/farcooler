@@ -1210,8 +1210,12 @@ jobs:
         with:
           shard: smoke
 
-  android:
-    name: Android
+  android-build:
+    name: Android ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [unit tests, release build]
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.android != 'false' }}
     runs-on: ubuntu-latest
@@ -1240,6 +1244,7 @@ jobs:
       # what the NDK ships, so an unpinned one changes the floor the `.so` links
       # against without anybody asking for it.
       - name: Install the NDK
+        if: matrix.part == 'release build'
         run: |
           echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             'ndk;29.0.14206865' 'platforms;android-37.1' 'build-tools;37.0.0'
@@ -1250,6 +1255,7 @@ jobs:
       # of this step: an image bump that drops Go fails with an error that
       # never mentions Go.
       - uses: actions/setup-go@v5
+        if: matrix.part == 'release build'
         with:
           go-version-file: crates/tailcat/go/go.mod
           # The module lives under crates/, and setup-go looks for go.sum at
@@ -1263,20 +1269,23 @@ jobs:
       # ships for an ABI with no core in it and the failure arrives as an
       # UnsatisfiedLinkError on the first screen rather than here.
       - name: Build the Rust core and the tunnel for Android
+        if: matrix.part == 'release build'
         run: ./scripts/build-android-libs.sh
 
       # The Plan's view model is Rust's (ov-1016), and the phone's glance, sidebar and
       # screen tests ask the host build of the JNI core for it. Without
       # `-Pfarcooler.nativeLibDir` they fail on the first ask, which is the point.
       - name: Build the Rust core for the host
+        if: matrix.part == 'unit tests'
         run: cargo build -p farcooler-jni
 
       # The ported logic, against the same fixtures the Swift suite uses. This
       # is the job that catches the transcript reducer drifting from the Apple
       # apps', which is the one thing about this client that must not happen.
       - name: Test
+        if: matrix.part == 'unit tests'
         working-directory: apps/android
-        run: ./gradlew testInstrumentedUnitTest "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug"
+        run: ./gradlew testInstrumentedUnitTest "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug" --configuration-cache
 
       # Both, in one invocation, and the second half is new.
       #
@@ -1300,8 +1309,9 @@ jobs:
       #
       # It does NOT run them. See the note below.
       - name: Build, including the instrumented test bundle
+        if: matrix.part == 'release build'
         working-directory: apps/android
-        run: ./gradlew assembleDebug assembleAndroidTest
+        run: ./gradlew assembleDebug assembleAndroidTest --configuration-cache
 
       # NOT run here: everything under `app/src/androidTest/`. The suite is
       # COMPILED by the step above and executed by none, and the two halves of
@@ -1354,8 +1364,39 @@ jobs:
       # that has drifted from the Apple apps' should be reported by the step
       # named for it, not out of the middle of a minified build.
       - name: Build the release APK
+        if: matrix.part == 'release build'
         working-directory: apps/android
-        run: ./gradlew assembleRelease
+        run: ./gradlew assembleRelease --configuration-cache
+
+  android-ui:
+    name: Android UI tests (${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [first, rest]
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.android != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-host
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android SDK
+        run: |
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'platforms;android-37.1' 'build-tools;37.0.0'
+      - name: Build the Rust core for the host
+        run: cargo build -p farcooler-jni
 
       # The Robolectric UI tests: everything in `com.farcooler.capture`, which
       # the plain `Test` step above excludes (app/build.gradle.kts) because they
@@ -1381,18 +1422,21 @@ jobs:
         run: |
           ./gradlew testInstrumentedUnitTest \
             -Pfarcooler.captures \
+            -Pfarcooler.captureShard=${{ matrix.shard }} \
             "-Pfarcooler.captureJdk=$CAPTURE_JDK" \
             "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug" \
-            --max-workers=2
+            --max-workers=2 --configuration-cache
       # Gradle prints no test count, and a filter that matches nothing passes.
       # Read the result files, print the count, and fail on none, or on a
       # missing `NativeAgentViewTest` or `AppearanceViewTest`, which must run.
       - name: Count the UI tests that ran
         if: success() || failure()
         working-directory: apps/android/app/build/test-results/testInstrumentedUnitTest
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           python3 - <<'PY'
-          import glob, xml.etree.ElementTree as ET
+          import glob, os, xml.etree.ElementTree as ET
           total = failed = skipped = 0
           classes = []
           for f in sorted(glob.glob("TEST-com.farcooler.capture.*.xml")):
@@ -1405,10 +1449,33 @@ jobs:
               print(f"{r.get('name')}: {n} tests")
           print(f"UI tests that ran: {total} in {len(classes)} classes, {failed} failed, {skipped} skipped")
           # AppearanceViewTest holds the Appearance setting's effect (ov-690).
-          required = ("NativeAgentViewTest", "AppearanceViewTest")
+          required = ("AppearanceViewTest",) if os.environ["SHARD"] == "first" else ("NativeAgentViewTest",)
           if total == 0 or any(c not in classes for c in required):
               raise SystemExit("The capture/UI tests did not run; " + " and ".join(required) + " must.")
           PY
+
+  # Preserve the existing required Android check: all matrix jobs must pass,
+  # unless the unchanged changes filter skipped them.
+  android:
+    name: Android
+    needs: [changes, android-build, android-ui]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Android jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          ANDROID_CHANGED: ${{ needs.changes.outputs.android }}
+          BUILD_RESULT: ${{ needs.android-build.result }}
+          UI_RESULT: ${{ needs.android-ui.result }}
+        run: |
+          if [[ "$BUILD_RESULT" == success && "$UI_RESULT" == success ]] || \
+             [[ "$CHANGES_RESULT" == success && "$ANDROID_CHANGED" == false && \
+                "$BUILD_RESULT" == skipped && "$UI_RESULT" == skipped ]]; then
+            exit 0
+          fi
+          echo "Android build: $BUILD_RESULT; Android UI: $UI_RESULT"
+          exit 1
 
   relay:
     name: Relay
