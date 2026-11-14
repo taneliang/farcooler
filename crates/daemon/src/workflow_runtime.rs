@@ -418,7 +418,6 @@ impl Runtime {
     /// Rebind only idle landing work; executing effects keep the bundle they were admitted under.
     fn refresh_groups(&self, workspace: &str, now_ms: i64) -> Result<()> {
         if let Some(published) = self.store.workflow_configuration(workspace)? {
-            if published.definition.groups.is_empty() { return Ok(()); }
             let grouping = Grouping { definition: published.definition, policy_pin: published.pin };
             if self.state(workspace)?.is_some_and(|s| s.grouping.as_ref() != Some(&grouping)) {
                 self.internal(workspace, Command::RefreshGroups { definition: grouping.definition,

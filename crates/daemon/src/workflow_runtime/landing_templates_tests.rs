@@ -443,6 +443,35 @@ async fn published_unlimited_batch_merges_old_waiters_on_restart_and_lands_once(
 }
 
 #[tokio::test]
+async fn publishing_without_groups_replaces_the_previous_grouping() {
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+    let (_dir, mut runtime) = lander("pass").await;
+    let batched = built(&runtime, &plan(Template::BatchedPush, vec![Gate::Command(1)]));
+    at_join(&mut runtime, "a", &batched).await;
+    let state = runtime.state("w").unwrap().unwrap();
+    let publish = |id: &str, revision, sequence, expected_pin, definition| Action::Publish {
+        mutation: Mutation { id: id.into(), revision, epoch: state.epoch, sequence },
+        expected_pin, definition,
+        adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
+    };
+    let reply = runtime.wire_command("w", "owner", publish("batch", state.revision, 1, None, batched)).unwrap();
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    runtime.refresh_groups("w", 100).unwrap();
+    let pin = runtime.store.workflow_configuration("w").unwrap().unwrap().pin;
+    let state = runtime.state("w").unwrap().unwrap();
+    let ticket = built(&runtime, &plan(Template::TicketPush, vec![Gate::Command(1)]));
+    assert!(ticket.groups.is_empty());
+    let reply = runtime.wire_command("w", "owner", Action::Publish {
+        mutation: Mutation { id: "ticket".into(), revision: state.revision, epoch: state.epoch, sequence: 2 },
+        expected_pin: Some(pin), definition: ticket.clone(),
+        adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
+    }).unwrap();
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    runtime.refresh_groups("w", 101).unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().grouping.unwrap().definition, ticket);
+}
+
+#[tokio::test]
 async fn a_template_accepts_published_large_and_unlimited_batch_sizes() {
     let (_dir, runtime) = lander("pass").await;
     for batch in [0, 40] {
