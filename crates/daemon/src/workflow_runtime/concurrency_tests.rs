@@ -87,7 +87,9 @@ async fn workflow_execution_phases_follow_claims_and_slots() {
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
     assert!(Box::pin(next_finished(&mut futures)).as_mut().poll(&mut context).is_pending());
     assert_eq!(read(&runtime)["state"]["items"].as_object().unwrap().values().filter(|i| i["phase"] == "Running").count(), 4);
-    // Each freed slot takes the next queued run, in the reported order.
+    // Keep follow-on builds in their own pool queued while this loop drains provisions.
+    runtime.places().agent = 0;
+    // Each freed work place takes the next queued provision, in the reported order.
     for n in 4..7 {
         let (index, outcome) = next_finished(&mut futures).await;
         let job = running.remove(index);
