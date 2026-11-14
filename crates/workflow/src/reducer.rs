@@ -502,6 +502,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 rest.phase = Phase::Blocked; rest.run = String::new(); rest.pending = None; rest.candidate = None;
                 rest.last_evidence = None; rest.stopping = None; rest.rework_history = Vec::new();
                 rest.back_edges = BTreeMap::new(); rest.retries = 0;
+                // This is a new run; its rules have not spent any calls or refused a decision.
+                rest.hook_calls.clear(); rest.hook_refused = None;
                 crate::hooks::fire(&mut rest, &gid, input, HookPoint::GroupSplits, None, &mut effects);
                 next.items.insert(gid, rest);
             }

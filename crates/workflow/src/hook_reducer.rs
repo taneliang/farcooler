@@ -108,8 +108,12 @@ pub(super) fn decide(state: &State, input: &Input) -> Result<Transition, Refusal
                     || dest.group_of != item.group_of || dest.pin != item.pin || dest.resource != item.resource
                     || dest.policy_pin != item.policy_pin
                 { return Err(Refusal::Phase); }
-                let group_def = dest.members.first().and_then(|m| base.items.get(&m.item))
-                    .and_then(|t| dest.group_of.as_ref().and_then(|g| t.definition.groups.get(&g.name)))
+                let origin = dest.group_of.as_ref().ok_or(Refusal::Definition)?;
+                // Idle groups may have adopted a publication newer than their members' build pins.
+                let definition = base.grouping.as_ref().filter(|p| p.definition.pin() == origin.pin)
+                    .map(|p| &p.definition)
+                    .or_else(|| dest.members.first().and_then(|m| base.items.get(&m.item)).map(|t| &t.definition));
+                let group_def = definition.and_then(|d| d.groups.get(&origin.name))
                     .ok_or(Refusal::Definition)?;
                 if group_def.limit.is_some_and(|limit| dest.members.len() + item.members.len() > limit as usize) { return Err(Refusal::Limit); }
                 let mut merged = base.clone();

@@ -94,3 +94,35 @@ The first full test run inherited this engine agent's
 `FARCOOLER_NATIVE_HOOK_SOCKET`, redirecting CLI hook fixtures to the live socket.
 Verification clears that and the inherited native session and workflow run
 variables; no product change is needed for this test-environment issue.
+
+## Fix round 1: scripted splits across publication and repeated splits
+
+The review identified two interactions between ov-1153's split decisions and
+ov-1142's waiting-group publication behavior. Rejoin checked the first member's
+old build definition even after the destination adopted a newer grouping pin.
+It now resolves the group limit from the publication matching the destination's
+origin pin, retaining the member-definition path for unpublished groups. The
+existing same-pin, policy, resource and waiting-phase checks still apply.
+
+A split also cloned the parent's spent hook-call counters into a new group run.
+New split groups now clear those counters and any inherited refusal before
+firing their own decision. The parent's counters remain spent.
+
+The rejoin regression covers both legacy groups and old limit-1 tickets whose
+waiting destination is upgraded to unlimited or limit 3. It verifies the new
+grouping pin and unchanged member build definition. The repeated-split
+regression settles an own-group decision, then splits that child and verifies a
+fresh decision effect, distinct call identity, and independent max_calls=1
+budgets. Both regression cases failed before the fixes and passed afterward;
+both also verify deterministic replay.
+
+Fix-round validation:
+
+- The full four-crate command documented above passed (exit 0), including the
+  tmux leak wrapper; default ignored tests remained ignored. Its output is in
+  `target/ov-1154-fix-tests.log` locally.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed (exit 0);
+  output is in `target/ov-1154-fix-clippy.log` locally.
+- The strengthened existing-destination publication regression passed in a
+  separate targeted run after its final fixture refinement.
+- File-size budget and `git diff --check` passed.

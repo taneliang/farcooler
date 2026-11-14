@@ -935,7 +935,7 @@ fn a_script_decides_the_split_half_before_it_can_acquire_the_resource() {
 
 #[test]
 fn a_split_rule_rejoins_only_a_waiting_group_with_the_same_pins_and_room() {
-    for limit in [Some(3), None] {
+    for (limit, published_limit) in [(Some(3), None), (None, None), (Some(1), Some(None)), (Some(1), Some(Some(3)))] {
         let mut log = Log::new();
         let mut definition = ticket();
         definition.groups.get_mut("landing").unwrap().limit = limit;
@@ -945,10 +945,27 @@ fn a_split_rule_rejoins_only_a_waiting_group_with_the_same_pins_and_room() {
             log.enqueue(name, definition.clone());
             while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
         }
+        if let Some(limit) = published_limit {
+            let mut published = definition.clone();
+            published.groups.get_mut("landing").unwrap().limit = limit;
+            log.run(Command::RefreshGroups { definition: published, policy_pin: "policy-1".into() }, Grant::Controller);
+        }
         log.queue("x"); let ahead = log.group_of("x");
         log.queue("a"); log.queue("b"); let pair = log.group_of("a");
         pass_group(&mut log, &ahead, 3);
+        if published_limit.is_some() {
+            // Create the destination under the old limit, then upgrade it while the pair runs.
+            log.run(Command::RefreshGroups { definition: definition.clone(), policy_pin: "policy-1".into() }, Grant::Controller);
+        }
         log.queue("c"); let waiting = log.group_of("c");
+        if let Some(limit) = published_limit {
+            assert_eq!(log.state.items[&waiting].group_of.as_ref().unwrap().pin, definition.pin());
+            let mut published = definition.clone();
+            published.groups.get_mut("landing").unwrap().limit = limit;
+            log.run(Command::RefreshGroups { definition: published.clone(), policy_pin: "policy-1".into() }, Grant::Controller);
+            assert_eq!(log.state.items[&waiting].group_of.as_ref().unwrap().pin, published.pin());
+            assert_eq!(log.state.items["c"].definition, definition, "build evidence retains the old pin");
+        }
         pass_group(&mut log, &pair, 2);
         log.reject(&pair); let rest = log.group_of("b");
         let i = &log.state.items[&rest]; let call = i.deciding.as_ref().unwrap().input.call.clone();
@@ -1170,5 +1187,45 @@ fn a_split_scripts_own_group_decision_survives_builtin_consolidation() {
     assert_eq!(log.group_of("b"), rest, "consolidation must preserve the script's choice");
     assert_ne!(rest, waiting);
     assert_eq!(log.state.items[&waiting].members.len(), 1);
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn every_new_split_group_gets_its_own_script_call_budget() {
+    let mut log = Log::new();
+    let mut definition = ticket();
+    definition.groups.get_mut("landing").unwrap().limit = None;
+    definition.script_policies.insert("split".into(), ScriptPolicy { point: HookPoint::GroupSplits,
+        script: "/tmp/split".into(), digest: digest(&vec![0u8]), timeout_ms: 30,
+        max_calls: 1, fallback: HookMove::OwnGroup });
+    for name in ["x", "a", "b", "c", "d"] {
+        log.enqueue(name, definition.clone());
+        while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
+    }
+    log.queue("x"); let ahead = log.group_of("x");
+    for name in ["a", "b", "c", "d"] { log.queue(name); }
+    let parent = log.group_of("a");
+    pass_group(&mut log, &ahead, 3);
+    pass_group(&mut log, &parent, 2);
+    log.reject(&parent);
+    let child = log.group_of("c");
+    let item = &log.state.items[&child];
+    let call = item.deciding.as_ref().unwrap().input.call.clone();
+    let grant = Grant::Operation { effect: item.pending.clone().unwrap(), run: item.run.clone(), fence: item.fence };
+    let command = Command::Decide { item: child.clone(), call: call.clone(), fence: item.fence,
+        policy_pin: item.policy_pin.clone(), result: HookResult::Receipt { manifest: "m".into(),
+            raw: serde_json::json!({"schema":"hook-decision/v1","call":call,"decision":"own_group"}).to_string() } };
+    log.run(command, grant);
+    pass_group(&mut log, &parent, 3);
+    pass_group(&mut log, &child, 2);
+    let split = log.reject(&child);
+    let grandchild = log.group_of("d");
+    let item = &log.state.items[&grandchild];
+    let open = item.deciding.as_ref().expect("a new split must not inherit the parent's exhausted budget");
+    assert_ne!(open.input.call, call);
+    assert_eq!(item.hook_calls["split"], 1);
+    assert_eq!(log.state.items[&child].hook_calls["split"], 1);
+    assert_eq!(item.phase, Phase::Blocked);
+    assert!(split.effects.iter().any(|e| e.item == grandchild && matches!(e.kind, EffectKind::Decide { .. })));
     assert_eq!(log.replay_digest(), digest(&log.state));
 }
