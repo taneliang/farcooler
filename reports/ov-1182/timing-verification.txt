@@ -1,0 +1,21 @@
+Measured Rust jobs match production; only path-selection gates removed
+run1-jobs.json: Rust test archive: 491s
+run1-jobs.json: Rust (macos-latest): 335s
+run1-jobs.json: Rust native test archive (macOS): 259s
+run1-jobs.json: Rust (ubuntu-24.04): 679s
+run1-jobs.json: Rust native tests (macOS 2/2): 332s
+run1-jobs.json: Rust native tests (macOS 1/2): 370s
+run1-jobs.json: Rust tests (3/4): 271s
+run1-jobs.json: Rust tests (2/4): 218s
+run1-jobs.json: Rust tests (1/4): 261s
+run1-jobs.json: Rust tests (4/4): 241s
+run2-jobs.json: Rust (ubuntu-24.04): 368s
+run2-jobs.json: Rust test archive: 208s
+run2-jobs.json: Rust native test archive (macOS): 533s
+run2-jobs.json: Rust (macos-latest): 436s
+run2-jobs.json: Rust tests (1/4): 271s
+run2-jobs.json: Rust tests (2/4): 226s
+run2-jobs.json: Rust tests (3/4): 248s
+run2-jobs.json: Rust tests (4/4): 232s
+run2-jobs.json: Rust native tests (macOS 2/2): 363s
+run2-jobs.json: Rust native tests (macOS 1/2): 375s
