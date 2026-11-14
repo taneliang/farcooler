@@ -7,9 +7,9 @@
 # (they bill at 10× Linux), and that is the point at which CircleCI's open-source
 # plan would be worth the move.
 #
-# Five jobs because there are five things that can independently break: the Rust
-# workspace, the Swift that both Apple apps share, the iOS app, the Android app,
-# and the relay. They run in parallel; none depends on another's artefacts.
+# Independent jobs cover Rust, Swift, iOS, Android, and the services. Rust
+# builds one Linux test archive for four shards; its platform checks and native
+# Mac suite run alongside that build.
 #
 # Android is on Linux, unlike the two Apple jobs: nothing in that build needs a
 # Mac, and a macOS runner for it would be ten times the minutes for the same
