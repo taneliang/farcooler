@@ -8,6 +8,19 @@ its default release configuration and no Rust optimization overrides. Swift
 whole-module optimization, release-only conditional code, Rust opt-level 3
 and ThinLTO, tunnel linkage and every existing bundle check are restored.
 
+| Required job | Main baseline | Release run 43596969322 | Release run 43600461522 |
+| --- | ---: | ---: | ---: |
+| App build + bundle checks | 22m22s | **11m27s** | **10m34s** |
+| AgentKit + Mac tests | 22m37s | **10m44s** | **10m05s** |
+
+Both qualifying runs passed every Swift job step, including post steps, with
+identical production code; only reports changed between their commits. Queue
+time is excluded. Every qualifying run completed 2,113 AgentKit definitions
+and all 2,035 Mac definitions. Main retains the full unfiltered commands and
+partition/completion/leak guards. These are warm-cache results: the cold run
+and an over-target warm repeat are retained below. The temporary branch push
+trigger has been removed.
+
 The first release retry only aligned the daemon's forwarding feature. A full
 `cargo tree` comparison showed additional crypto feature differences between
 separate CLI and daemon invocations, so that is insufficient to share their
@@ -83,9 +96,25 @@ tests **972 s (16m12s)**. It restored the same populated Rust/Swift cache keys.
 Release FFI preparation took 116 s and the unified native build 563 s; the Mac
 step took about 478 s, versus about 260 s on the first qualifying run. This
 records the measured timing variation rather than counting a slow run as a
-success. All 2,113 AgentKit and 2,035 Mac definitions completed. A further
-report-only repeat will supply the second qualifying measurement; production
+success. All 2,113 AgentKit and 2,035 Mac definitions completed. The further
+report-only repeat below supplies the second qualifying measurement; production
 code and optimization settings remain unchanged.
+
+The further repeat [43600461522](https://github.com/taneliang/farcooler/actions/runs/43600461522)
+(955db6666) passed app **634 s (10m34s)** and tests **605 s (10m05s)**.
+Release FFI preparation took 56 s and the unified native build 400 s. Both
+real tunnel checks, signing/version checks, the native linkage fixture and all
+other bundle checks passed. Completion summaries are in `test-completion.txt`;
+full job/step timestamps and verdicts are retained in the two qualifying run
+JSON files.
+
+Fix-round validation: the production linkage fixture passed locally on Rust
+1.98 and CI's Rust 1.100, including forced-color/no-incremental settings, and
+in every qualifying app job. The lane-gate self-test and negative release
+configuration mutations passed. The full Linux Rust job, including workspace
+tests and feature clippy checks, passed on run 43598509967. A recovery assertion
+in untouched Linux code had failed on the earlier cold run and cleared on that
+repeat without a source change.
 
 The prior two debug runs are retained below for history and no longer count
 toward acceptance.
