@@ -422,7 +422,7 @@ async fn published_unlimited_batch_merges_old_waiters_on_restart_and_lands_once(
     assert_eq!(before.items.values().filter(|g| g.group_of.is_some() && g.phase == Phase::Blocked).count(), 3);
     p.batch = None;
     let published = built(&runtime, &p);
-    let reply = runtime.wire_command("w", "owner", Action::Publish {
+    let reply = runtime.wire_command("w", "owner", Action::Publish { reason: None,
         mutation: Mutation { id: "unlimited-publication".into(), revision: before.revision, epoch: before.epoch, sequence: 1 },
         expected_pin: None, definition: published.clone(),
         adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
@@ -449,7 +449,7 @@ async fn publishing_without_groups_replaces_the_previous_grouping() {
     let batched = built(&runtime, &plan(Template::BatchedPush, vec![Gate::Command(1)]));
     at_join(&mut runtime, "a", &batched).await;
     let state = runtime.state("w").unwrap().unwrap();
-    let publish = |id: &str, revision, sequence, expected_pin, definition| Action::Publish {
+    let publish = |id: &str, revision, sequence, expected_pin, definition| Action::Publish { reason: None,
         mutation: Mutation { id: id.into(), revision, epoch: state.epoch, sequence },
         expected_pin, definition,
         adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
@@ -462,7 +462,7 @@ async fn publishing_without_groups_replaces_the_previous_grouping() {
     runtime.refresh_groups("w", 100).unwrap();
     let pin = runtime.store.workflow_configuration("w").unwrap().unwrap().pin;
     let state = runtime.state("w").unwrap().unwrap();
-    let reply = runtime.wire_command("w", "owner", Action::Publish {
+    let reply = runtime.wire_command("w", "owner", Action::Publish { reason: None,
         mutation: Mutation { id: "ticket".into(), revision: state.revision, epoch: state.epoch, sequence: 2 },
         expected_pin: Some(pin), definition: ticket.clone(),
         adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
@@ -502,7 +502,7 @@ async fn staggered_ready_tickets_join_one_waiter_while_an_active_landing_keeps_i
     let state = runtime.state("w").unwrap().unwrap();
     let waiting = state.items["b"].grouped_in.clone().unwrap();
     let mut published = definition.clone(); published.groups.get_mut("landing").unwrap().limit = None;
-    let reply = runtime.wire_command("w", "owner", Action::Publish {
+    let reply = runtime.wire_command("w", "owner", Action::Publish { reason: None,
         mutation: Mutation { id: "staggered-publication".into(), revision: state.revision, epoch: state.epoch, sequence: 1 },
         expected_pin: None, definition: published.clone(),
         adapter: Some(Box::new(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()))), notifications: None,
@@ -545,7 +545,7 @@ async fn an_ungrouped_publication_does_not_create_a_grouping_revision() {
     let adapter = Some(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_ref());
     let mutation = |id: &str| Mutation { id: id.into(), revision: 0, epoch: 1, sequence: 1 };
-    let reply = runtime.wire_command("w", "owner", Action::Publish { mutation: mutation("p"),
+    let reply = runtime.wire_command("w", "owner", Action::Publish { reason: None, mutation: mutation("p"),
         expected_pin: None, definition, adapter: adapter.map(Box::new), notifications: None }).unwrap();
     assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
     let reply = runtime.wire_command("w", "owner", Action::Enqueue { mutation: mutation("e"),

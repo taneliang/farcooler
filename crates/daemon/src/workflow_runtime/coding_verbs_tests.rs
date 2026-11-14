@@ -989,7 +989,7 @@ async fn a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_c
     let mut manual = definition.clone();
     manual.start_policy = None;
     let state = runtime.state("w").unwrap().unwrap();
-    let publication = farcooler_protocol::workflow_commands::Action::Publish {
+    let publication = farcooler_protocol::workflow_commands::Action::Publish { reason: None,
         mutation: farcooler_protocol::workflow_commands::Mutation {
             id: "remove-start-policy".into(), revision: state.revision, epoch: state.epoch, sequence: 1,
         }, expected_pin: None, definition: manual, adapter: None, notifications: None,

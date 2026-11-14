@@ -176,7 +176,7 @@ mod tests {
     fn publish(runtime: &Runtime, definition: Definition) { publish_on(runtime, "w", definition); }
     fn publish_on(runtime: &Runtime, workspace: &str, definition: Definition) {
         let state = runtime.state(workspace).unwrap();
-        let action = Action::Publish { mutation: Mutation { id: format!("pub-{}", definition.pin()), revision: state.map_or(0, |s| s.revision),
+        let action = Action::Publish { reason: None, mutation: Mutation { id: format!("pub-{}", definition.pin()), revision: state.map_or(0, |s| s.revision),
             epoch: 1, sequence: 1 }, expected_pin: runtime.store.workflow_configuration(workspace).unwrap().map(|c| c.pin),
             definition, adapter: None, notifications: None };
         let answer = runtime.wire_command(workspace, "owner", action).unwrap();
