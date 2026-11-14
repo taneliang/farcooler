@@ -496,7 +496,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     name: Report
-    needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing, rust-macos, rust-shadow]
+    needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing, rust-macos, rust-shadow, yield-ios, yield-ui, yield-captures, yield-perf]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
