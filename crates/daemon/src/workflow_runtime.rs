@@ -471,14 +471,8 @@ impl Runtime {
     async fn sweep_loop(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>,
         running: &mut Vec<Running>, futures: &mut Vec<Slot>) -> Result<usize>
     {
-        // A service sweep can stay open for hours. Advance its supplied clock with monotonic
-        // elapsed time so admission gaps, leases and observations do not freeze behind a long gate.
-        // One-shot fixture pumps retain their caller-controlled timestamp.
-        let started = tokio::time::Instant::now();
-        let continuous = self.continuous;
-        let clock = || if continuous {
-            now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX))
-        } else { now_ms };
+        let started = std::time::Instant::now();
+        let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
         let mut count = 0;
         let workspaces = self.store.workflow_workspaces()?;
         let mut occupancy = Vec::new();
@@ -500,7 +494,7 @@ impl Runtime {
             let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
             if released_or_recovered && state.items.values().any(|i| i.phase == Phase::Blocked) {
                 // Store stamps actual cross-workspace occupancy in the same transaction.
-                self.internal(workspace, Command::Advance, Grant::Controller, now_ms)?;
+                self.internal(workspace, Command::Advance, Grant::Controller, clock())?;
             }
         }
         // Nobody can decide a run on a board that was deleted, so it stops, with the reason on the run (ov-1047).
@@ -515,7 +509,7 @@ impl Runtime {
                 .map(|(id, i)| (id.clone(), i.phase.clone())).collect();
             for (id, phase) in asks {
                 let reason = Some("This run was cancelled because its board was deleted.".to_string());
-                match self.internal(workspace, Command::Cancel { item: id.clone(), reason }, Grant::Controller, now_ms) {
+                match self.internal(workspace, Command::Cancel { item: id.clone(), reason }, Grant::Controller, clock()) {
                     Ok(Receipt { result: Err(refusal), .. }) => {
                         tracing::warn!(%workspace, item = %id, phase = ?phase, ?refusal, "the engine refused to cancel a run on a deleted board");
                         self.cancel_refused.insert((workspace.clone(), id));
@@ -621,6 +615,8 @@ impl Runtime {
         futures: &mut Vec<Slot>, count: &mut usize, waiting: &mut Vec<Placed>) -> Result<()>
     {
         self.schedule_ready(workspaces, now_ms)?;
+        let started = std::time::Instant::now();
+        let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
         for workspace in workspaces {
             for stored in self.store.workflow_outbox(workspace)? {
                 if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
@@ -635,7 +631,7 @@ impl Runtime {
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     if let Err(error) = selected {
                         tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
-                        if stored.dispatch_state != "uncertain" && self.observe(workspace, &effect, Outcome::Uncertain, false, now_ms)? {
+                        if stored.dispatch_state != "uncertain" && self.observe(workspace, &effect, Outcome::Uncertain, false, clock())? {
                             *count += 1;
                         }
                         continue;
@@ -659,7 +655,7 @@ impl Runtime {
                         }
                     };
                     if stored.dispatch_state == "uncertain" && outcome == Outcome::Uncertain { continue; }
-                    if self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", now_ms)? { *count += 1; }
+                    if self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", clock())? { *count += 1; }
                     continue;
                 }
                 if item.deciding.is_none() && !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { continue; }
@@ -678,8 +674,8 @@ impl Runtime {
                 }
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
                     &format!("runtime:{}", self.instance), state.revision, state.epoch,
-                    now_ms, now_ms.saturating_add(30_000))? else {
-                    if let Some(deadline) = stored.lease_until.filter(|t| *t > now_ms) {
+                    clock(), clock().saturating_add(30_000))? else {
+                    if let Some(deadline) = stored.lease_until.filter(|t| *t > clock()) {
                         self.next_lease = Some(self.next_lease.map_or(deadline, |t| t.min(deadline)));
                     }
                     continue;
@@ -702,19 +698,19 @@ impl Runtime {
                         // No external operation was invoked. Persist the refusal
                         // through the normal admission/observation fence, so Get
                         // exposes Failed rather than silently abandoning the item.
-                        if self.store.workflow_admit_effect(&claim, now_ms)? {
+                        if self.store.workflow_admit_effect(&claim, clock())? {
                             // A refusal that is a sentence (an unreadable landing remote, ov-1059) stays on the run.
                             let outcome = if matches!(effect.kind, EffectKind::Stop { .. }) {
                                 Outcome::Uncertain
                             } else if let Error::Domain(refused) = &error {
                                 Outcome::SafeFailureBecause(refused.to_string())
                             } else { Outcome::SafeFailure };
-                            if self.observe(workspace, &effect, outcome, false, now_ms)? { *count += 1; }
+                            if self.observe(workspace, &effect, outcome, false, clock())? { *count += 1; }
                         }
                         continue;
                     }
                 };
-                if !self.store.workflow_admit_effect(&claim, now_ms)? { continue; }
+                if !self.store.workflow_admit_effect(&claim, clock())? { continue; }
                 let activity = std::sync::Arc::new(execution::Activity::default());
                 self.activities.lock().unwrap().insert((workspace.clone(), effect.id.clone()), activity.clone());
                 let binding = Binding::new(workspace, &effect, claim.resource_generation, item.iteration, &base);
@@ -723,7 +719,7 @@ impl Runtime {
                 // This effect runs on its own copy of the item's configuration, so the next
                 // item's selection cannot change what it sees.
                 let mut exec = self.exec.clone();
-                exec.launched = Some((now_ms, std::time::Instant::now()));
+                exec.launched = Some((clock(), std::time::Instant::now()));
                 let (run_workspace, run_binding) = (workspace.clone(), binding.clone());
                 futures.push(Some(Box::pin(execution::ACTIVITY.scope(activity.clone(), async move {
                     // Internal adapters own an async session; native agents and configured commands

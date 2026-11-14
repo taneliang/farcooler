@@ -2179,8 +2179,7 @@ async fn worktree(runner: Option<&str>, cmd: WorktreeCmd, json: bool) -> Fallibl
         WorktreeCmd::Remove { worktree, confirm } => {
             let all = list_worktrees(&mut link).await?;
             let ws = resolve(&all, &worktree, |w| &w.id, "worktree")?;
-            // The daemon checks this too, and its check is the one that counts:
-            // a client that skips the prompt must still be refused.
+            farcooler_core::names::check_tree_removal(ws.worktree_path.as_deref().unwrap_or_default())?;
             use farcooler_client::actions::RemoveWorktreeOutcome;
             match farcooler_client::actions::remove_worktree(
                 link.client_mut(),
@@ -3086,6 +3085,7 @@ fn worktree_list_row(
         "short": short_bytes(&w.id),
         "task": w.task_name,
         "branch": w.branch,
+        "engine_owned": w.worktree_path.as_deref().is_some_and(farcooler_core::names::engine_owned_tree),
         // Which project this belongs to. A fleet is grouped
         // by project in the UI, and a client cannot join
         // ids to names by itself.
@@ -3166,6 +3166,9 @@ fn worktree_list_lines(w: &Worktree, workspaces: &[farcooler_protocol::v1::Works
         w.branch,
         owner.unwrap_or_default()
     )];
+    if farcooler_core::names::engine_owned_tree(w.worktree_path.as_deref().unwrap_or_default()) {
+        lines.push("    managed by the workflow engine".into());
+    }
     let foreign = workspaces_json::foreign_writers(w, workspaces);
     if !foreign.is_empty() {
         lines.push(format!("    also writing here: {}", foreign.join(", ")));

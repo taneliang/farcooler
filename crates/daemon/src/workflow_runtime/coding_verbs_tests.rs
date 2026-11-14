@@ -1112,3 +1112,51 @@ async fn tickets_that_apply_alone_but_conflict_together_return_the_conflicting_m
     assert_eq!(adapters::git(remote, &["show", "refs/heads/main:partial.txt"]).await.unwrap(),
         adapters::git(&runtime.repository(), &["show", &format!("{tail}:partial.txt")]).await.unwrap());
 }
+
+#[tokio::test]
+async fn interrupted_ci_later_green_finishes_on_the_pushed_sha() {
+    let (dir, mut runtime) = lander("ci-pending").await;
+    let definition = batched_push(&runtime, "any", 400);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..6 { runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::AwaitCi));
+    let pushed = remote_head(&runtime).await;
+    let root = runtime.root.clone(); drop(runtime);
+    // After an outage longer than patience, CI is still pending on the first resumed poll,
+    // then finishes green. The resumed wait must get a real chance to see it.
+    let script = dir.path().join("adapter.py");
+    let text = std::fs::read_to_string(&script).unwrap();
+    let marker = dir.path().join("resumed-ci");
+    let text = text.replace("elif stage == 'ci':", &format!("elif stage == 'ci':\n    marker = pathlib.Path({:?})\n    if marker.exists(): mode = 'pass'\n    marker.write_text('poll')", marker.to_str().unwrap()));
+    std::fs::write(script, text).unwrap();
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(50_000).await.unwrap();
+    runtime.pump(50_001).await.unwrap();
+    let state = until(&mut runtime, |s| matches!(phase_of(s, "one"), Some(Phase::Done | Phase::Failed))).await;
+    assert_eq!(phase_of(&state, "one"), Some(Phase::Done));
+    assert_eq!(candidate_of(&state, "one"), Some(pushed.as_str()));
+}
+
+#[tokio::test]
+async fn a_fold_tree_deleted_mid_gate_retries_the_gate_without_split() {
+    let (dir, mut runtime) = lander("pass").await;
+    let script = dir.path().join("adapter.py");
+    let text = std::fs::read_to_string(&script).unwrap();
+    let marker = dir.path().join("deleted-once");
+    let text = text.replace("elif stage == 'gate':", &format!("elif stage == 'gate':\n    marker = pathlib.Path({:?})\n    if not marker.exists() and len(list(pathlib.Path('.').glob('result-*.txt'))) > 1:\n        marker.write_text('deleted')\n        __import__('shutil').rmtree(pathlib.Path.cwd())\n        sys.exit(5)\n    if marker.exists() and marker.read_text() == 'deleted':\n        marker.write_text('disk-full')\n        print('OSError: [Errno 28] No space left on device', file=sys.stderr)\n        sys.exit(5)", marker.to_str().unwrap()));
+    std::fs::write(script, text).unwrap();
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "ahead", &definition).await;
+    at_join(&mut runtime, "one", &definition).await;
+    at_join(&mut runtime, "two", &definition).await;
+    command(&runtime, Command::Queue { item: "ahead".into() });
+    command(&runtime, Command::Queue { item: "one".into() });
+    command(&runtime, Command::Queue { item: "two".into() });
+    let state = until(&mut runtime, |s| matches!(phase_of(s, "two"), Some(Phase::Done | Phase::Failed))).await;
+    assert_eq!(phase_of(&state, "one"), Some(Phase::Done));
+    assert_eq!(phase_of(&state, "two"), Some(Phase::Done));
+    assert_eq!(outbox(&runtime, StageKind::Fold), 2, "one fold per original group, no split");
+    assert_eq!(outbox(&runtime, StageKind::Run), 4, "the deleted tree and ENOSPC each retry only the gate");
+}

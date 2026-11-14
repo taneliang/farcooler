@@ -1309,3 +1309,16 @@ fn the_macs_set_node_key_parses() {
     };
     assert_eq!(node_key, key);
 }
+
+#[test]
+fn engine_trees_cannot_be_removed_and_are_marked_in_both_lists() {
+    let mut w = Worktree { id: vec![0; 16].into(),
+        worktree_path: Some("/runtime/workflow/tree-wf1-abc123".into()), ..Default::default() };
+    let error = farcooler_core::names::check_tree_removal(w.worktree_path.as_deref().unwrap_or_default()).unwrap_err().to_string();
+    assert_eq!(error, "This worktree is managed by the workflow engine and cannot be removed.");
+    assert_eq!(worktree_list_row(&w, None, &[], &[], &[])["engine_owned"], true);
+    assert!(worktree_list_lines(&w, &[]).iter().any(|s| s.contains("managed by the workflow engine")));
+    w.worktree_path = Some("/worktrees/ordinary".into());
+    assert!(farcooler_core::names::check_tree_removal(w.worktree_path.as_deref().unwrap_or_default()).is_ok());
+    assert_eq!(worktree_list_row(&w, None, &[], &[], &[])["engine_owned"], false);
+}

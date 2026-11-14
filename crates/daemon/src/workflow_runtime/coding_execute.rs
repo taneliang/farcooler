@@ -497,6 +497,23 @@ impl Exec {
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
+                // A missing engine tree is infrastructure damage. Restore the exact folded commit,
+                // never re-fold members against a newer base or recreate a person's named tree.
+                if matches!(kind, StageKind::Run) && !binding.effect.members.is_empty() && !tree.try_exists()? {
+                    let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c))
+                        .ok_or(Error::Refused("missing gate candidate"))?;
+                    self.git_recorded(binding, &self.repository(), &["worktree", "prune"]).await?;
+                    let branch = format!("wf-{}", &digest(&(&binding.workspace, &binding.effect.item))[4..]);
+                    let exists = self.try_git(binding, &self.repository(),
+                        &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).await?.0;
+                    if exists {
+                        self.git_recorded(binding, &self.repository(),
+                            &["worktree", "add", &tree.to_string_lossy(), &branch]).await?;
+                    } else {
+                        self.git_recorded(binding, &self.repository(),
+                            &["worktree", "add", "-b", &branch, &tree.to_string_lossy(), candidate]).await?;
+                    }
+                }
                 spotlight::exclude_builds(&tree).await;
                 if matches!(kind, StageKind::Run) && tree.try_exists()? { self.settle_run_tree(binding, &tree).await?; }
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
@@ -511,7 +528,12 @@ impl Exec {
                         self.run_coding(&check, self.coding_command(&check)?, cancel));
                     review?; gate?;
                 } else {
-                    self.run_coding(binding, self.coding_command(binding)?, cancel).await?;
+                    if let Err(error) = self.run_coding(binding, self.coding_command(binding)?, cancel).await {
+                    if matches!(kind, StageKind::Run) && matches!(&error, Error::Io(_)) {
+                        return Ok(Outcome::SafeFailure);
+                    }
+                    return Err(error);
+                }
                 }
             }
             StageKind::Land => {
@@ -562,6 +584,12 @@ impl Exec {
         // Killed, timed out or cancelled: no verdict on the candidate.
         let Some(code) = fact.exit else { return Ok(Outcome::SafeFailure); };
         let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing candidate"))?;
+        let log = self.bytes(&self.process_log(binding))?;
+        let log = String::from_utf8_lossy(&log);
+        if !self.tree(binding).try_exists()?
+            || (code != 0 && (log.contains("No space left on device") || log.contains("ENOSPC"))) {
+            return Ok(Outcome::SafeFailure);
+        }
         let unchanged = code == 0 && self.verify_candidate(binding, &self.tree(binding)).await.is_ok();
         let manifest = digest(&(binding, &candidate, &raw, unchanged));
         let evidence = Evidence { candidate, manifest: manifest.clone(), receipt: digest(&("coding-receipt/v1", manifest)),

@@ -3195,6 +3195,8 @@ impl Service {
     /// to lose.
     pub async fn removal_needs_confirmation(&self, id: Uuid) -> Result<bool> {
         let ws = self.store.get_worktree(id)?;
+        farcooler_core::names::check_tree_removal(&ws.worktree_path)
+            .map_err(|message| DomainError::refused(message.into()))?;
         if !std::path::Path::new(&ws.worktree_path).is_dir() {
             return Ok(false);
         }
@@ -3243,6 +3245,8 @@ impl Service {
     /// confirmed, decided by `removal_needs_confirmation`.
     pub async fn remove_worktree(&self, id: Uuid) -> Result<()> {
         let ws = self.store.get_worktree(id)?;
+        farcooler_core::names::check_tree_removal(&ws.worktree_path)
+            .map_err(|message| DomainError::refused(message.into()))?;
         let repo = self.store.get_repository(ws.repository_id)?;
         let repo_path = self.repository_worktree(&repo);
 

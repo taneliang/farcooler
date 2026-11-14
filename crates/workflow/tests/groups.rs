@@ -655,7 +655,7 @@ fn a_group_cannot_be_cancelled_while_it_pushes_or_after_it_has() {
     early.run(Command::Cancel { item: group , reason: None }, Grant::Controller);
 }
 #[test]
-fn a_wait_that_a_restart_interrupted_looks_again_spends_no_attempt_and_keeps_its_patience() {
+fn a_landing_wait_interrupted_by_restart_gets_fresh_patience_on_the_same_candidate() {
     for step in ["base", "push", "ci"] {
         let mut log = Log::new();
         let group = verb_group(&mut log, verb_ticket());
@@ -667,11 +667,12 @@ fn a_wait_that_a_restart_interrupted_looks_again_spends_no_attempt_and_keeps_its
         assert!(after.fence > before.fence);
         let again: Vec<_> = first.effects.iter().filter(|e| e.item == group).collect();
         assert_eq!(again.len(), 1, "{step}: read again");
-        // The clock moves on; a second interruption must still carry the first deadline.
+        // Downtime spends no patience; the candidate stays pinned.
         log.now = 5000;
         let second = log.outcome(&group, Outcome::Interrupted);
         let later: Vec<_> = second.effects.iter().filter(|e| e.item == group).collect();
-        assert_eq!(later[0].created_ms, again[0].created_ms, "{step}: patience survives a restart");
+        assert_eq!(later[0].created_ms, if step == "push" { again[0].created_ms } else { 5000 }, "{step}: only landing waits refresh patience after downtime");
+        assert_eq!(later[0].candidate, again[0].candidate);
     }
     // A fold is made again and a restart there is a failure, unlike a proven pre-send push wait.
     let mut log = Log::new();
@@ -685,7 +686,7 @@ fn a_wait_that_fails_for_a_real_reason_spends_attempts_and_ends() {
         let mut log = Log::new();
         let group = verb_group(&mut log, verb_ticket());
         walk_to(&mut log, &group, step);
-        let budget = log.state.items[&group].definition.stages[log.state.items[&group].stage].max_attempts;
+        let budget = 3;
         for round in 0..budget {
             assert_eq!(log.state.items[&group].phase, Phase::Running, "{step} round {round}");
             log.outcome(&group, Outcome::SafeFailure);
@@ -1278,4 +1279,44 @@ fn ci_diagnostics_survive_a_failed_rerun() {
     });
     assert_eq!(result.state.items[&group].group_failure.as_ref().unwrap().first_line, "error: failed");
     assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn split_halves_queued_past_patience_start_a_full_base_wait() {
+    let mut log = Log::new();
+    let mut d = verb_ticket();
+    d.groups.get_mut("landing").unwrap().steps[2].routes.insert("rejected".into(),
+        Target::Split { step: "base".into(), otherwise: Box::new(Target::Fail) });
+    d.groups.get_mut("landing").unwrap().steps[2].limit = 3;
+    for id in ["a", "b", "c"] {
+        log.enqueue(id, d.clone());
+        while log.state.items[id].phase != Phase::WaitingJoin { log.pass(id); }
+    }
+    log.queue("a"); log.queue("b"); log.queue("c");
+    let ahead = log.group_of("a");
+    walk_to(&mut log, &ahead, "ci"); log.pass(&ahead);
+    let group = log.group_of("b");
+    walk_to(&mut log, &group, "gate");
+    log.reject(&group);
+    let half = log.group_of("c");
+    assert_eq!(log.state.items[&half].wait_since, None);
+    log.now = 20_000_000;
+    walk_to(&mut log, &group, "ci");
+    let next = log.pass(&group);
+    assert_eq!(next.effects.iter().find(|e| e.item == half).unwrap().created_ms, log.now);
+}
+
+#[test]
+fn landing_safe_failures_retry_twice_without_splitting() {
+    let mut log = Log::new();
+    let group = verb_group(&mut log, verb_ticket());
+    walk_to(&mut log, &group, "gate");
+    for _ in 0..2 {
+        let next = log.outcome(&group, Outcome::SafeFailure);
+        assert_eq!(next.state.items[&group].phase, Phase::Running);
+        assert_eq!(log.stage(&group), "gate");
+        assert_eq!(log.groups().len(), 1);
+    }
+    log.outcome(&group, Outcome::SafeFailure);
+    assert_eq!(log.state.items[&group].phase, Phase::Failed);
 }

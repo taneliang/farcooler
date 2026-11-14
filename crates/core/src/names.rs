@@ -64,6 +64,21 @@ pub fn display(worktree_path: &str) -> String {
         .unwrap_or_else(|| worktree_path.to_string())
 }
 
+/// Private workflow trees belong to the engine until its own cleanup releases them.
+pub fn engine_owned_tree(path: &str) -> bool {
+    let path = Path::new(path);
+    path.parent().and_then(Path::file_name).is_some_and(|p| p == "workflow")
+        && path.file_name().and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("tree-wf1-") || n.starts_with("tree-wf1:"))
+}
+
+/// Refuse manual removal before checking dirtiness or asking for confirmation.
+pub fn check_tree_removal(path: &str) -> Result<(), &'static str> {
+    if engine_owned_tree(path) {
+        Err("This worktree is managed by the workflow engine and cannot be removed.")
+    } else { Ok(()) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

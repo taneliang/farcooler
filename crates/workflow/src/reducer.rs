@@ -303,7 +303,13 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 else if resolving { return Err(Refusal::Invalid); }
                             }
                             item.pending = None;
-                            if item.attempt >= item.definition.stages[item.stage].max_attempts {
+                            // Landing infrastructure gets two retries, independent of code-rejection routes.
+                            let stage = &item.definition.stages[item.stage];
+                            let attempts = if item.group_of.is_some() && matches!(stage.kind,
+                                StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::AwaitCi) {
+                                3
+                            } else { stage.max_attempts };
+                            if item.attempt >= attempts {
                                 item.phase = Phase::Failed;
                             } else {
                                 item.attempt += 1;
@@ -312,17 +318,19 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             }
                         }
                         Outcome::Interrupted => {
-                            // A wait, including a push proven still in its pre-send wait, resumes for free
-                            // after interruption. Its patience is kept, so restarts cannot extend the deadline.
+                            // Interrupted waits and proven pre-send pushes resume for free; landing waits
+                            // get fresh patience after downtime, while pre-send pushes keep their deadline.
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             if !is_wait(&item.definition.stages[item.stage].kind)
                                 && item.definition.stages[item.stage].kind != StageKind::Push {
                                 return Err(Refusal::Phase);
                             }
                             item.pending = None;
-                            item.wait_since = wait_since;
+                            item.wait_since = if matches!(item.definition.stages[item.stage].kind,
+                                StageKind::AwaitBase | StageKind::AwaitCi) { None } else { wait_since };
                             item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
-                            enter(&mut item, id, input, &mut effects)?;
+                            // Keep the read's identity so its recorded base SHA survives the restart.
+                            launch(&mut item, id, input, &mut effects)?;
                         }
                     }
                 }
@@ -540,7 +548,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 rest.members = members; rest.stage = 0; rest.iteration = 0; rest.attempt = 1; rest.fence = 1;
                 rest.phase = Phase::Blocked; rest.run = String::new(); rest.pending = None; rest.candidate = None;
                 rest.last_evidence = None; rest.stopping = None; rest.rework_history = Vec::new();
-                rest.back_edges = BTreeMap::new(); rest.retries = 0;
+                rest.back_edges = BTreeMap::new(); rest.retries = 0; rest.wait_since = None;
                 // This is a new run; its rules have not spent any calls or refused a decision.
                 rest.hook_calls.clear(); rest.hook_refused = None;
                 crate::hooks::fire(&mut rest, &gid, input, HookPoint::GroupSplits, None, &mut effects);
@@ -807,7 +815,7 @@ fn launch(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -
 pub(crate) fn emit(item: &mut Item, id: &str, input: &Input, kind: EffectKind, effects: &mut Vec<Effect>) {
     let effect_id = digest(&("effect/v1", &input.workspace, &input.id, effects.len()));
     item.pending = Some(effect_id.clone());
-    // A wait looked at again after a restart keeps its first deadline.
+    // A wait carries its current patience window; landing restarts open a fresh one.
     let created_ms = if !matches!(kind, EffectKind::Decide { .. })
         && (is_wait(&item.definition.stages[item.stage].kind)
             || item.definition.stages[item.stage].kind == StageKind::Push) {

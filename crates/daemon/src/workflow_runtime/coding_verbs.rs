@@ -121,7 +121,8 @@ impl Exec {
             StageKind::AwaitBase => Ok(self.await_base(binding, cancel).await.unwrap_or_else(|error| {
                 tracing::warn!(%error, "await-base failed"); Outcome::SafeFailure })),
             StageKind::RerunCi => self.rerun_ci(binding, cancel).await,
-            StageKind::Fold => self.fold(binding, cancel).await,
+            StageKind::Fold => Ok(self.fold(binding, cancel).await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "fold infrastructure failed"); Outcome::SafeFailure })),
             StageKind::Push => self.push(binding, cancel).await,
             StageKind::AwaitCi => Ok(self.await_ci(binding, cancel).await.unwrap_or_else(|error| {
                 tracing::warn!(%error, "await-ci failed"); Outcome::SafeFailure })),
@@ -217,10 +218,28 @@ impl Exec {
         let (every, patience) = wait_times(&binding.effect.operation).ok_or(Error::Refused("unsound wait times"))?;
         let green = binding.effect.operation.arguments.get(1).map(String::as_str) == Some("green");
         let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
-        let mut last = binding.base.clone();
+        // A resumed read keeps the head it first observed, even if main moved during downtime.
+        // Interrupted preserves `run`; a new stage attempt or back edge has a new run.
+        let head_path = self.root.join("receipts").join(format!("base-{}.json",
+            digest(&(&binding.workspace, &binding.effect.item, &binding.effect.run))));
+        let mut pinned: Option<String> = match self.bytes(&head_path) {
+            Ok(raw) => Some(serde_json::from_slice(&raw)?),
+            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        if pinned.as_ref().is_some_and(|s| !sha(s)) { return Err(Error::Refused("invalid saved base SHA")); }
+        let mut last = pinned.clone().unwrap_or_else(|| binding.base.clone());
         for poll in 0u32.. {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
-            if let Some(head) = self.fetch_base(binding, poll, &cancel).await? {
+            let head = match &pinned {
+                Some(head) => Some(head.clone()),
+                None => self.fetch_base(binding, poll, &cancel).await?,
+            };
+            if let Some(head) = head {
+                if pinned.is_none() {
+                    durable(&head_path, &serde_json::to_vec(&head)?)?;
+                    pinned = Some(head.clone());
+                }
                 last = head.clone();
                 let predecessor = self.pending_landing(&head, &binding.effect.resource)?;
                 let ci = if green && predecessor.is_none() { Some(self.ci_poll(binding, &head, poll, &cancel).await?.0) } else { None };
