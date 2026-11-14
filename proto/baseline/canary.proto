@@ -1,4 +1,4 @@
-// Shipped by Canary at 04feea924350183633d2ea9e99fdf055bd692bb9. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 4a0fee927818006c4b8e0c9f3753eb3b33e4c44b. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -96,6 +96,7 @@ message Request {
   optional StepUp step_up = 9;
 
   oneof payload {
+    CeremonyAuthorityRequest ceremony_authority = 650;
     WorkflowCommand workflow_command = 640;
     Empty empty = 20;
     RepositoryRootAdd repository_root_add = 21;
@@ -440,6 +441,7 @@ message Error {
 
 message Result {
   oneof value {
+    CeremonyAuthorityReply ceremony_authority = 650;
     WorkflowReply workflow_reply = 640;
     Host host = 1;
     RepositoryRoot repository_root = 2;
@@ -6577,3 +6579,7 @@ message CheckInHold {
   int64 created_at_ms = 8;
 }
 message CheckInHoldList { repeated CheckInHold items = 1; }
+
+// Ceremony-bound proof that this connection may administer the runner (ov-1020).
+message CeremonyAuthorityRequest { string offer = 1; }
+message CeremonyAuthorityReply { string runner_key = 1; string device = 2; string signature = 3; }
