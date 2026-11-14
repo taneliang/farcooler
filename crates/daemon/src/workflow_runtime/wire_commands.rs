@@ -73,7 +73,7 @@ impl Exec {
         let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
             .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
         Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
-            "back_edge_budgets":budgets, "process_logs":self.failed_process_logs(workspace)?, "places":self.places().view(workspace), "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}))
+            "build_cleanup":self.store.workflow_cleanups(workspace)?, "back_edge_budgets":budgets, "process_logs":self.failed_process_logs(workspace)?, "places":self.places().view(workspace), "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}))
     }
 }
 impl CommandHandle {

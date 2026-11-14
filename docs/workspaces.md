@@ -36,6 +36,23 @@ worktree no workspace owns is **Unclaimed**. Worktrees are disposable: the
 orchestrator makes one when it dispatches a task and removes it when the work
 lands.
 
+The engine releases a run's build output when it enters review, join or
+landing, or ends. Build output remains available to its checks. The published workflow's `build_folders`
+list selects the folders; omitting it defaults to `target`,
+`apps/android/app/build`, `apps/*/build` and `.build`. An empty list disables
+cleanup. Patterns are relative to the run's own worktree, and `*` matches one
+directory component. Groups inherit the same published folder policy and record
+cleanup on the same transitions as ticket runs. Ended groups release output
+instead of parking it for another fold. Source checkouts, reports and Git
+references remain available after a group ends, including during recovery.
+
+Cleanup preserves tracked files, git metadata and everything outside those
+folders. It skips folders with open files, trees another live run uses, and
+Uncertain runs. Each attempt records bytes freed or a skip reason in the
+`workflow get` response's `build_cleanup` results, keyed by item and run. Repeating an engine read or recovering an
+interrupted attempt doesn't repeat deletion; an interrupted attempt reports
+that its byte count is unknown.
+
 ## What needs you
 
 **Needs You** is one list of everything waiting on you, from every workspace on

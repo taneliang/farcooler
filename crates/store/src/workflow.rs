@@ -366,6 +366,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
                     params![input.workspace, revision, input.epoch, serde_json::to_string(&transition.state)?],
                 )?;
                 crate::engine_stage::sync(tx, &input.workspace, &transition.state)?;
+                crate::workflow_cleanup::select(tx, &state, &transition.state)?;
                 crate::workflow_notices::select(tx, &admitted, &state, &transition.state)?;
                 moved.extend(crate::workflow_projection::project(tx, &input.workspace, &transition.state, by)?);
                 crate::workflow_effects::reserve(tx, &transition.state)?;

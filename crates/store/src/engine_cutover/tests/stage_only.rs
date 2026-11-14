@@ -230,7 +230,7 @@ fn registry68_catalog_is_pinned_and_narrows_only_the_four_guards() {
     let m65 = Manifest::capture(&c65).unwrap();
     let store = Store::open_in_memory().unwrap().legacy_for_tests();
     let plan = preflight(&store.conn()).unwrap();
-    assert_eq!(plan.registry, 68);
+    assert_eq!(plan.registry, crate::migrate::CURRENT_SCHEMA_VERSION);
     assert_eq!(catalog_hash(&plan.raw), SOURCE68_SCHEMA_HASH, "the composed registry-68 catalog");
     assert!(!plan.quarantines.iter().any(|q| q.resource == "schema:unknown"), "a fresh install is a known source");
     // `meta` has two equivalent spellings, which `catalog_hash` already treats as one.
@@ -263,7 +263,7 @@ fn a_released_install_at_67_carries_its_tickets_forward() {
     assert_eq!(startup::ordinary_admission(&path).unwrap(), startup::Admission::Existing, "a released 67 is admitted");
     let store = Store::open(&path).expect("and migrates forward");
     let version: String = store.conn().query_row("SELECT value FROM meta WHERE key='schema_version'", [], |r| r.get(0)).unwrap();
-    assert_eq!(version, "68");
+    assert_eq!(version, crate::migrate::CURRENT_SCHEMA_VERSION.to_string());
     let phase: String = store.conn().query_row("SELECT phase FROM engine_cutover_authority", [], |r| r.get(0)).unwrap();
     assert_eq!(phase, "released");
     let resting: Vec<Vec<u8>> = { let c = store.conn(); let mut q = c.prepare("SELECT task_id FROM engine_stage_tickets").unwrap();
@@ -283,7 +283,7 @@ fn roll_back_to_67(path: &std::path::Path) {
     reference.execute_batch("CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT);").unwrap();
     crate::migrate::migrate_only_to(&mut reference, 67);
     let conn = Connection::open(path).unwrap();
-    conn.execute_batch("DROP TRIGGER engine_task_wait_fence; DROP TABLE engine_stage_tickets;").unwrap();
+    conn.execute_batch("DROP TRIGGER engine_task_wait_fence; DROP TABLE engine_stage_tickets; DROP TABLE engine_build_cleanup;").unwrap();
     let mut names: Vec<String> = crate::engine_stage::EXCLUDES.iter().map(|(t, s, _)| format!("workflow_excludes_{t}_{s}")).collect();
     names.extend(["engine_fence_ticket_lines_d", "engine_fence_ticket_work_d", "engine_fence_task_blocks_d", "engine_fence_task_blocks_i",
         "engine_fence_task_blocks_u", "engine_task_execution_fence"].map(String::from));
@@ -338,7 +338,7 @@ fn a_legacy_67_source_cuts_over_through_the_named_delta_only() {
         else { assert!(matches!(done, Ok(Ok(()))), "{done:?}"); }
         if !tampered {
             let store = Store::open(&path).unwrap().legacy_for_tests();
-            assert_eq!(store.schema().unwrap().version, 68);
+            assert_eq!(store.schema().unwrap().version, crate::migrate::CURRENT_SCHEMA_VERSION);
             assert_eq!(store.engine_authority().unwrap().phase, "released");
         }
     }
@@ -420,7 +420,7 @@ fn a_legacy_67_file_prepares_and_commits_through_the_real_path() {
     roll_back_to_67(&path);
     let (store, plan) = transfer::begin(&path, join_db(&path, "a")).unwrap();
     assert_eq!(plan.registry, 67);
-    assert_eq!(store.schema().unwrap().version, 68, "the freeze took registry 68");
+    assert_eq!(store.schema().unwrap().version, crate::migrate::CURRENT_SCHEMA_VERSION, "the freeze took registry 68");
     drop(store);
     closing::commit(&path, join_db(&path, "a")).expect("the commit conserves the source through the named delta");
     let owners = join_db(&path, "a");

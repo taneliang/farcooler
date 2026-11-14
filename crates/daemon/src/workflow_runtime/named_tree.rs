@@ -20,7 +20,7 @@ pub struct WorktreeHost {
     pub locks: RepoLocks,
 }
 impl WorktreeHost {
-    fn lock(&self, repository: Uuid) -> Arc<tokio::sync::Mutex<()>> {
+    pub(super) fn lock(&self, repository: Uuid) -> Arc<tokio::sync::Mutex<()>> {
         let mut locks = self.locks.lock().unwrap_or_else(|e| e.into_inner());
         Arc::clone(locks.entry(repository).or_default())
     }

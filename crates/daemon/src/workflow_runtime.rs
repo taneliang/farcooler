@@ -37,6 +37,9 @@ mod spotlight;
 mod places;
 pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES};
 use places::{Placed, Places, Pool};
+mod build_cleanup;
+#[cfg(test)]
+mod build_cleanup_tests;
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict};
 mod wire_commands;
@@ -170,6 +173,9 @@ pub struct Exec {
     /// When this copy was started, by the sweep's clock and by the monotonic one, so a wait measures
     /// its patience on the same clock its effect was created on.
     launched: Option<(i64, std::time::Instant)>,
+    /// Every executing effect's tree, including stops and short work with no agent place.
+    /// Cleanup runs on the same dispatch loop and defers until those futures have settled.
+    active_trees: std::sync::Arc<std::sync::Mutex<BTreeSet<PathBuf>>>,
     /// Set by the Service: makes a run's named worktree one the app lists (ov-967).
     pub host: Option<WorktreeHost>,
     /// One first download of a landing remote's main at a time, per remote, shared by every copy (ov-1058 review 3):
@@ -344,7 +350,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { activities: Default::default(), places: Default::default(), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                seeding: Default::default(), #[cfg(test)] user_home: None },
+                seeding: Default::default(), active_trees: Default::default(), #[cfg(test)] user_home: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -355,6 +361,7 @@ impl Runtime {
     pub fn set_effect_cap(&mut self, cap: usize) { self.places().agent = cap.max(1); }
     /// Record what holds a place now, for `workflow get`.
     fn note_holding(&self, running: &[Running]) {
+        *self.active_trees.lock().unwrap() = running.iter().map(|j| self.tree(&j.binding)).collect();
         self.places().holding = running.iter().filter_map(|j| j.pool.map(|pool| Placed::new(&j.workspace, &j.effect, pool))).collect();
     }
     pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
@@ -527,6 +534,7 @@ impl Runtime {
         let mut stopping = false;
         let mut scan = true;
         loop {
+            self.exec.release_builds(&workspaces).await?;
             if scan {
                 scan = self.continuous;
                 let current = self.store.workflow_workspaces()?;

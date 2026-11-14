@@ -75,6 +75,7 @@ pub use pane_launches::Launch;
 pub mod waits;
 pub mod workers;
 pub mod workflow;
+pub mod workflow_cleanup;
 mod workflow_deciders;
 pub mod workflow_effects;
 pub mod engine_cutover;

@@ -1,0 +1,65 @@
+//! Transactional outbox for non-gating build cleanup (ov-1126). Results remain readable by the board.
+use crate::{Store, workflow::Result};
+use farcooler_workflow::{cleanup::{CleanupEffect, CleanupResult}, State};
+use rusqlite::{params, Transaction};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CleanupRecord { pub effect: CleanupEffect, pub result: Option<CleanupResult> }
+/// Older writers are refused: they cannot retain and honor an explicit build-output deletion policy.
+pub(crate) fn migration(tx: &Transaction<'_>) -> rusqlite::Result<()> {
+    tx.execute_batch("CREATE TABLE engine_build_cleanup (
+        workspace TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, result TEXT,
+        PRIMARY KEY(workspace, id));")
+}
+pub(crate) fn select(tx: &Transaction<'_>, before: &State, after: &State) -> Result<()> {
+    for effect in farcooler_workflow::cleanup::effects(before, after) {
+        tx.execute("INSERT INTO engine_build_cleanup(workspace,id,payload) VALUES (?1,?2,?3)",
+            params![effect.workspace, effect.id, serde_json::to_string(&effect)?])?;
+    }
+    Ok(())
+}
+impl Store {
+    /// A stale cleanup must not consume a later build's output, or bypass cutover quarantine.
+    pub fn workflow_cleanup_skip(&self, effect: &CleanupEffect) -> Result<Option<String>> {
+        let conn = self.conn();
+        if !crate::engine_cutover::engine_allowed(&conn, self.engine_incarnation)? {
+            return Ok(Some("engine authority unavailable".into()));
+        }
+        let blocked: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM engine_cutover_quarantine
+            WHERE resource='workspace:'||?1 OR resource IN
+                (SELECT json_extract(state,'$.items.'||json_quote(?2)||'.resource') FROM workflow_states WHERE workspace=?1))",
+            params![effect.workspace, effect.item], |r| r.get(0))?;
+        if blocked { return Ok(Some("resource quarantined".into())); }
+        let newer: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM workflow_outbox WHERE workspace=?1
+            AND revision>=?2 AND json_extract(payload,'$.item')=?3
+            AND json_extract(payload,'$.kind.Execute') IN ('Provision','Build'))",
+            params![effect.workspace, effect.revision, effect.item], |r| r.get(0))?;
+        Ok(newer.then(|| "a later build owns this tree".into()))
+    }
+
+    pub fn workflow_cleanups(&self, workspace: &str) -> Result<Vec<CleanupRecord>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT payload,result FROM engine_build_cleanup WHERE workspace=?1 ORDER BY rowid")?;
+        let rows = stmt.query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
+        rows.map(|r| { let (effect, result) = r?;
+            Ok(CleanupRecord { effect: serde_json::from_str(&effect)?, result: result.map(|s| serde_json::from_str(&s)).transpose()? })
+        }).collect()
+    }
+    /// Persist before any filesystem mutation. An interrupted attempt is never replayed against a
+    /// path a later build may have repopulated. Its byte count is unknown, so report a reason, not bytes.
+    pub fn workflow_cleanup_begin(&self, effect: &CleanupEffect) -> Result<bool> {
+        Ok(self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result IS NULL",
+            params![effect.workspace, effect.id, serde_json::to_string(&interrupted())?])? == 1)
+    }
+    /// Only the caller which successfully began this attempt may settle it. A later release has a new id.
+    pub fn workflow_cleanup_result(&self, effect: &CleanupEffect, result: &CleanupResult) -> Result<()> {
+        self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result=?4",
+            params![effect.workspace, effect.id, serde_json::to_string(result)?, serde_json::to_string(&interrupted())?])?;
+        Ok(())
+    }
+}
+
+fn interrupted() -> CleanupResult {
+    CleanupResult { bytes_freed: 0, skipped: vec!["cleanup attempt interrupted; bytes freed unknown; deletion will not be replayed".into()] }
+}
