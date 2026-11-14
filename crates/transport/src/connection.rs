@@ -553,6 +553,7 @@ where
                     }
                 }
                 if let Err(err) = sent {
+                    tracing::warn!(error = %err, "request response could not be sent");
                     break (Err(err), Ending::Unanswerable);
                 }
             }
@@ -634,19 +635,26 @@ where
     // rather than cancelled — see `Ending` for why, and for which of it.
     drop(pushes);
     drop(events);
+    if in_flight > 0 && ending != Ending::NoMoreRequests {
+        tracing::warn!(in_flight, reason = ?ending, error = ?outcome.as_ref().err(), "requests cannot be answered after the connection ended");
+    }
     let drain = async {
         let mut answering = ending == Ending::NoMoreRequests;
         if ending == Ending::Revoked {
+            let queued: usize = lanes.values().map(VecDeque::len).sum();
+            if queued > 0 {
+                tracing::warn!(queued, "queued requests dropped because the connection was revoked");
+            }
             lanes.clear();
         }
         while !running.is_empty() {
             let (lane, request_id, mut response) = next_finished(&mut running).await;
             if answering {
                 response.request_id = request_id;
-                answering = conn
-                    .send_response(response)
-                    .await
-                    .is_ok();
+                if let Err(err) = conn.send_response(response).await {
+                    tracing::warn!(error = %err, "request response could not be sent while draining");
+                    answering = false;
+                }
             }
             if let Some(request) = lanes.get_mut(&lane).and_then(VecDeque::pop_front) {
                 running.push(Box::pin(dispatch(handler, lane, request)));
@@ -828,7 +836,8 @@ async fn run_writer<W>(
     let mut writer = FrameWriter::new(writer);
     while let Some(bytes) = rx.recv().await {
         let len = bytes.len() as u64;
-        if writer.write_raw(&bytes).await.is_err() {
+        if let Err(err) = writer.write_raw(&bytes).await {
+            tracing::warn!(error = %err, "queued frames could not be written");
             break;
         }
         queued_bytes.fetch_sub(len, Ordering::SeqCst);

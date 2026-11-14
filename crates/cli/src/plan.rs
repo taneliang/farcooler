@@ -496,6 +496,19 @@ async fn ids_of<L: DispatchLink>(
     Ok(out)
 }
 
+async fn cards_named<L: DispatchLink>(link: &mut L, board: &Board, given: &[String]) -> Result<Vec<pb::Task>, Failed> {
+    let mut out = Vec::new();
+    for key in given {
+        let task = find_task(link, Some(&board.repository.to_string()), key).await
+            .map_err(|_| -> Failed { format!("No card here is called {key:?}.").into() })?;
+        if board.workspace.as_ref().is_some_and(|workspace| workspace.id != task.workspace_id) {
+            return Err(format!("{} is on another board.", task.key).into());
+        }
+        out.push(task);
+    }
+    Ok(out)
+}
+
 /// The card the plan names by `key`, by its key or its short id.
 fn plan_card<'a>(plan: &'a pb::Plan, key: &str) -> Option<&'a pb::PlanCard> {
     let wanted = key.trim().to_lowercase();
@@ -597,8 +610,8 @@ async fn theme<L: DispatchLink>(
             })
         }
         ThemeCmd::Create { name, outcome, cards } => {
-            let items = board_in(link, board, None, None).await?.items;
-            let task_ids = ids_of(link, board, &items, &cards).await?;
+            let items = cards_named(link, board, &cards).await?;
+            let task_ids = items.iter().map(|task| task.id.clone()).collect();
             let p = request::Payload::BoardThemeCreate(pb::BoardThemeCreate {
                 workspace_id: ws,
                 name,
@@ -655,11 +668,15 @@ async fn theme<L: DispatchLink>(
                 return Err("Name a card with --add or --remove.".into());
             }
             let id = find_theme(&plan, &name)?.theme.as_ref().map(|t| t.id.clone()).unwrap_or_default();
-            let items = board_in(link, board, None, None).await?.items;
+            let mut items = cards_named(link, board, &add).await?;
+            let add = items.iter().map(|task| task.id.clone()).collect();
+            let removed = cards_named(link, board, &remove).await?;
+            let remove = removed.iter().map(|task| task.id.clone()).collect();
+            items.extend(removed);
             let p = request::Payload::BoardThemeCards(pb::BoardThemeCards {
                 theme_id: id,
-                add: ids_of(link, board, &items, &add).await?,
-                remove: ids_of(link, board, &items, &remove).await?,
+                add,
+                remove,
                 actor: actor.into(),
             });
             let result::Value::BoardThemeView(view) = send(link, board, "board_theme.cards", p).await? else {

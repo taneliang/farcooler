@@ -287,6 +287,7 @@ struct Runner {
     events: Vec<pb::PlanEvent>,
     /// A plan to answer in place of `the_plan()`.
     plan: Option<pb::Plan>,
+    large_board: bool,
 }
 
 fn runner() -> Runner {
@@ -308,6 +309,7 @@ fn runner() -> Runner {
         refuse: None,
         events: vec![],
         plan: None,
+        large_board: false,
     }
 }
 
@@ -329,6 +331,9 @@ impl DispatchLink for Runner {
                 message: String::new(),
                 what: what.into(),
             });
+        }
+        if self.large_board && method == "task.list" {
+            panic!("the runner dropped the oversized task.list response");
         }
         let plan = self.plan.clone().unwrap_or_else(the_plan);
         Ok(pb::Result {
@@ -409,8 +414,8 @@ impl DispatchLink for Runner {
                     open.iter_mut().for_each(|r| r.state = pb::BoardRulingState::Confirmed as i32);
                     result::Value::RulingsKept(pb::RulingsKept { rulings: open })
                 }
-                ("task.get_by_key", _) => result::Value::TaskList(pb::TaskList {
-                    items: vec![task(40, "ov-40", pb::TaskStatus::Backlog, OTHER_BOARD)],
+                ("task.get_by_key", Some(request::Payload::TaskGetByKey(p))) => result::Value::TaskList(pb::TaskList {
+                    items: items().into_iter().chain([task(40, "ov-40", pb::TaskStatus::Backlog, OTHER_BOARD)]).filter(|t| t.key == p.key).collect(),
                     reads: None,
                 }),
                 ("repository.list", _) => result::Value::RepositoryList(pb::RepositoryList {
@@ -1268,4 +1273,31 @@ async fn the_plan_a_rep_reads_calls_only_what_a_rep_may() {
             assert!(farcooler_daemon::people::rep_may(req), "{} isn't a rep's to call", req.method);
         }
     }
+}
+
+#[tokio::test]
+async fn theme_card_writes_on_a_large_board() {
+    let cards = (0..1200).map(|n| {
+        let mut card = task(n, &format!("ov-{n}"), pb::TaskStatus::Backlog, WORKSPACE);
+        card.intent = "x".repeat(1024);
+        card
+    }).collect();
+    let envelope = pb::WireEnvelope {
+        body: Some(pb::wire_envelope::Body::Response(pb::Response {
+            outcome: Some(pb::response::Outcome::Result(pb::Result {
+                value: Some(result::Value::TaskList(pb::TaskList { items: cards, reads: None })),
+            })),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    assert!(farcooler_protocol::framing::encode(&envelope).is_err(), "fixture must exceed the frame limit");
+    let mut link = runner();
+    link.large_board = true;
+    say(&mut link, "theme create Reliability --outcome Fixed. --card ov-1").await.unwrap();
+    let Some(request::Payload::BoardThemeCreate(create)) = &last(&link).payload else { panic!() };
+    assert_eq!(create.task_ids, vec![tid(0x1001)]);
+    say(&mut link, "theme cards Visual --add ov-2").await.unwrap();
+    let Some(request::Payload::BoardThemeCards(cards)) = &last(&link).payload else { panic!() };
+    assert_eq!(cards.add, vec![tid(0x1002)]);
 }
