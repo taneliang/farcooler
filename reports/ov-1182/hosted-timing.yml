@@ -393,6 +393,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: rust-tests
+          overwrite: true
           path: target/rust-tests.tar.zst
           compression-level: 0
           retention-days: 2
@@ -495,6 +496,7 @@ jobs:
         if: always()
         with:
           name: rust-inventory-${{ matrix.shard }}
+          overwrite: true
           path: target/shard-inventories
 
   # Native suite and feature/lint checks overlap on independent Mac runners.

@@ -91,3 +91,10 @@ and selection. This follows the ticket's cheapest-platform instruction without
 removing any test or Clippy feature variant from per-push CI. The earlier
 symbol-only workflow is symbols-hosted-timing.yml; final acceptance uses the
 Linux-Clippy workflow in hosted-timing.yml.
+
+Archive and inventory uploads use `overwrite: true` so an entire job/workflow
+can be rerun without failing at a same-name artifact upload. This replaces
+measurement files, not test verdicts or per-attempt GitHub logs. See the
+[upload action's overwrite contract](https://github.com/actions/upload-artifact).
+Final measurement runs include this setting; earlier in-flight trials were
+superseded before counting acceptance.
