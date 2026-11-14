@@ -23,16 +23,18 @@ pub(super) fn validate(config: &CodingConfig, definition: &Definition) -> Result
         { return Err(Error::Refused("required security review changed")); }
         required.push(index);
     }
-    // Candidate-specific abstract execution. Only ReviewRoute's light edge certifies a non-sensitive
-    // diff. All other labels (including PathRules) preserve the obligation. A new build resets it.
+    // Candidate-specific abstract execution. ReviewRoute's light edge only classifies a non-sensitive
+    // diff; a passed agent review afterwards is what covers it, so nothing reaches join unreviewed.
+    // All other labels (including PathRules) preserve the obligation. A new build resets it.
     // Track the ordered successful reviews, so a missing, rejected or reversed sequence cannot qualify.
-    let mut pending = vec![(0usize, 0usize, false)];
+    let mut pending = vec![(0usize, 0usize, 0u8)];
     let mut seen = BTreeSet::new();
     while let Some((index, mut completed, mut light)) = pending.pop() {
         if !seen.insert((index, completed, light)) { continue; }
         let stage = &definition.stages[index];
-        if stage.kind == StageKind::Build { completed = 0; light = false; }
-        let covered = |count: usize, light: bool| light || count == required.len();
+        if stage.kind == StageKind::Build { completed = 0; light = 0; }
+        // light: 0 unclassified, 1 classified light (not yet reviewed), 2 light and reviewed.
+        let covered = |count: usize, light: u8| light == 2 || count == required.len();
         if matches!(stage.kind, StageKind::Join { .. } | StageKind::Land | StageKind::PushBranch)
             && !covered(completed, light)
         { return Err(Error::Refused("a candidate can bypass required security reviews")); }
@@ -44,7 +46,10 @@ pub(super) fn validate(config: &CodingConfig, definition: &Definition) -> Result
                 if label == "passed" && required.get(count) == Some(&index) { count += 1; }
                 else if label != "passed" { count = 0; }
             }
-            let certified = if light_route(stage) { label == "light" } else { light };
+            let is_light_review = stage.kind == StageKind::Review(Reviewer::Agent)
+                && !required.contains(&index) && light == 1 && label == "passed";
+            let certified = if light_route(stage) { u8::from(label == "light") }
+                else if is_light_review { 2 } else { light };
             // A route has no implicit success: the executor only returns its classified labels.
             // Ignore impossible labels rather than requiring policy on fictitious route fallthroughs.
             if stage.kind == StageKind::Route && !stage.routes.contains_key(label) { continue; }

@@ -19,9 +19,11 @@ and exact review-options text. For example, a full gate with no options:
 The adapter pin covers this policy; definition authors cannot redefine it through
 route labels. Admission checks every graph path to joining, landing, branch
 publication, or completion. Each path must pass the entire pinned sequence in
-order, or carry a `light` classification from the diff classifier. Legacy
-`PathRules` provide no such exemption. Rebuilding resets both review coverage
-and the classification. A missing or changed full gate, a misrouted `full`, or a
+order, or carry a `light` classification from the diff classifier **and then
+pass an agent review**. A `light` classification alone covers nothing: a route
+from `light` straight to `join` is refused at admission. Legacy `PathRules`
+provide no such exemption. Rebuilding resets both review coverage and the
+classification. A missing or changed full gate, a misrouted `full`, or a
 bypass route is refused before any agent launches. Adapters without this trusted
 policy retain their existing behavior and cannot enable `ReviewRoute`.
 
@@ -71,7 +73,28 @@ or cancellation can release the ticket. Commands must allow concurrent reads
 of the candidate; use the landing group's existing gate for checks that edit
 source files. The landing group's gate still judges the folded result.
 
+## Light review in each lifecycle state
+
+Classification happens only when a ticket is `Running` at the `Route` step.
+What a light classification does in each state:
+
+| State | Light review |
+| --- | --- |
+| `Blocked` | Nothing classified; the ticket has not built. |
+| `WaitingApproval` | Classification waits for the approval; the route then runs normally. |
+| `Running` at the route | Classifies the candidate diff; `light` leads to the light agent review, never to `join`. |
+| `Running` at the light review | Runs one reviewer (cheaper model); only its `passed` verdict covers the ticket. |
+| `WaitingReview` | A human review is not a light review; it does not cover a light ticket. |
+| `Uncertain` | Recovery replays the route on the candidate; classification and coverage are re-derived, never assumed. |
+| `Cancelling`, `Cancelled`, `Failed` | Classification has no effect; light review's `rejected` fails or reworks. |
+| `WaitingJoin`, `Joined` | Reachable only after a passed review (full sequence or light review). |
+| `Done` | Same rule: completion without coverage is refused at admission. |
+
 ## Measuring
+
+Timing is unmeasured. The real before-and-after comparison will come from the
+receipts report (ov-1215) after this lands; the figures below are a scheduling
+simulation only.
 
 The numbers below are an artificial scheduling experiment, **not** the requested
 real before/after outcome. No production definition in the inspected event

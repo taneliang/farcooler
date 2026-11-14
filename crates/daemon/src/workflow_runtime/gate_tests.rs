@@ -549,7 +549,7 @@ async fn stopping_a_parallel_review_after_restart_reaps_its_gate() {
 /// Publication/dispatch must reject an unsafe graph before a sensitive candidate can be built.
 #[tokio::test]
 async fn security_policy_refuses_misrouted_full_and_path_rules_bypass_at_admission() {
-    for attack in ["full-to-light", "path-bypass", "later-full", "model", "prompt", "rejected", "no-policy"] {
+    for attack in ["full-to-light", "path-bypass", "later-full", "model", "prompt", "rejected", "no-policy", "light-skips-review"] {
         let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
         match attack {
             "full-to-light" => { d.stages[2].routes.insert("full".into(), Target::Step("light".into())); }
@@ -564,6 +564,13 @@ async fn security_policy_refuses_misrouted_full_and_path_rules_bypass_at_admissi
                 d.stages[2].routes.insert("full".into(), Target::Step("light".into()));
                 d.stages[2].operation.arguments[1] = r#"{"under_lines":100,"report_paths":["**"],"full_paths":["result.txt"]}"#.into();
                 d.stages.insert(2, first);
+            }
+            // A light classification routed straight to join, never running the light review.
+            "light-skips-review" => {
+                d.stages[2].routes.insert("light".into(), Target::Step("join".into()));
+                // Keep the light review reachable (and harmless) so the definition still validates.
+                d.stages[3].routes.insert("rejected".into(), Target::Step("light".into()));
+                d.stages[4].routes.insert("passed".into(), Target::Fail);
             }
             "model" => { d.models.insert("full".into(), vec!["claude:sonnet".into()]); }
             "prompt" => { d.stages[3].operation.arguments[2] = crate::review_agent::ReviewOptions {
