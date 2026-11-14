@@ -5,7 +5,7 @@ Use `coding-route/v1`, with the adapter pin as argument 0 and this JSON as
 argument 1:
 
 ```json
-{"under_lines":100,"report_paths":["reports/**","docs/**"],"full_paths":["crates/workflow/**","crates/daemon/**","crates/protocol/**","crates/store/**","crates/client/**","crates/fence/**","crates/transport/**","services/relay/**",".github/**","scripts/**"]}
+{"under_lines":100,"report_paths":["reports/**","docs/**"],"full_paths":["private/**"]}
 ```
 
 Route `light` to one agent review with a fast default in `definition.models`
@@ -21,13 +21,20 @@ base-to-candidate diff. Renames count as deletion plus addition. A change is
 report-only when every changed path matches a report glob. Report paths can
 qualify regardless of size. Binary changes always take `full`.
 
-Security takes precedence over size and report paths: `full_paths` names the
-repository's security-sensitive paths and must contain at least one glob.
-The example above protects Far Cooler's engine and security boundaries. Extend
-it to cover all security-sensitive paths in the repository before publishing.
-These rules are pinned with the definition; a report glob and a small diff
-cannot override a protected path. Binary changes also take full review.
-Unreadable Git output fails the route rather than reducing review.
+Security takes precedence over size and report paths. The runtime always sends
+Far Cooler's implementation trees (`apps/**`, `crates/**`, `services/**`,
+`proto/**`, and `scripts/**`) to full review, including their tests. It also
+protects automation and build configuration (`.github/**`, `.cargo/**`,
+`.config/**`, `.claude/**`, `.codex/**`, `.agents/**`, `Cargo.toml`, `Cargo.lock`,
+`Cross.toml`, `typeshare.toml`, `.gitmodules`, and `.gitattributes`). This broad
+repository policy avoids guessing which implementation files handle credentials
+or cross trust boundaries. Small changes outside these paths can take light
+review; report-only changes can qualify regardless of size.
+
+`full_paths` must contain at least one glob and adds protection to that mandatory
+policy. The example adds `private/**`. Omitting a mandatory path or matching it
+with `report_paths` cannot downgrade its review. Binary changes also take full
+review. Unreadable Git output fails the route rather than reducing review.
 
 To overlap a ticket's gate and review, add `check` to the agent review's third
 operation argument (the existing review-options JSON):

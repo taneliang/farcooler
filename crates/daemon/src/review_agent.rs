@@ -76,6 +76,15 @@ mod tests {
     }
 }
 
+/// Far Cooler's mandatory review floor. Protect whole implementation trees, including tests:
+/// a filename heuristic cannot tell a UI change from credential handling or a trust-boundary change.
+/// Definition globs may extend this policy, but an omission must never weaken it (ov-1194).
+const SECURITY_REVIEW_PATHS: &[&str] = &[
+    "apps/**", "crates/**", "services/**", "proto/**", "scripts/**",
+    ".github/**", ".cargo/**", ".config/**", ".claude/**", ".codex/**", ".agents/**",
+    "Cargo.toml", "Cargo.lock", "Cross.toml", "typeshare.toml", ".gitmodules", ".gitattributes",
+];
+
 /// A Route step may choose `light` or `full` before entering distinct review steps (ov-1194).
 /// Security rules take precedence over both size and report paths. Binary changes always get full review.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,7 +112,8 @@ impl ReviewRoute {
             let mut fields = record.splitn(3, '\t');
             let (added, removed, path) = (fields.next()?, fields.next()?, fields.next()?);
             if path.is_empty() { return None; }
-            full |= path.contains('\u{fffd}') || self.full_paths.iter().any(|g| glob_matches(g, path));
+            full |= path.contains('\u{fffd}') || SECURITY_REVIEW_PATHS.iter().any(|g| glob_matches(g, path))
+                || self.full_paths.iter().any(|g| glob_matches(g, path));
             reports &= self.report_paths.iter().any(|g| glob_matches(g, path));
             if added == "-" || removed == "-" { full = true; continue; }
             lines = lines.checked_add(added.parse::<u64>().ok()?)?.checked_add(removed.parse::<u64>().ok()?)?;
@@ -116,10 +126,34 @@ impl ReviewRoute {
 mod routing_tests {
     use super::*;
     #[test]
+    fn repository_security_policy_cannot_be_omitted_or_overridden_by_report_rules() {
+        // Both an incomplete definition and the published example must preserve the security floor.
+        let docs = include_str!("../../../docs/light-review.md");
+        let documented = docs.split("```json\n").nth(1).unwrap().split("\n```").next().unwrap();
+        let omitted = r#"{"under_lines":100,"report_paths":["**"],"full_paths":["unrelated/**"]}"#;
+        for argument in [omitted, documented] {
+            let rules = ReviewRoute::read(argument).unwrap();
+            for path in [
+                "apps/shared/AgentKit/Tests/AgentKitTests/AccountKeychainWriteTests.swift",
+                "apps/shared/AgentKit/Sources/AgentKit/AccountKeychain.swift",
+                "apps/android/app/src/main/java/com/farcooler/Account.kt",
+                "crates/core/src/auth.rs", "crates/cli/src/main.rs", "crates/daemon/src/review_agent.rs",
+                "crates/workflow/src/lib.rs", "services/relay/src/index.ts", "services/web/src/auth.ts",
+                "proto/farcooler.proto", "scripts/release.sh", ".github/workflows/ci.yml",
+                ".cargo/config.toml", ".codex/hooks.json", "Cargo.toml", "Cargo.lock",
+            ] {
+                assert_eq!(rules.route(&format!("1\t0\t{path}\0")), Some("full"), "{argument}: {path}");
+            }
+            assert_eq!(rules.route("1\t0\tdocs/guide.md\0"), Some("light"));
+            assert_eq!(rules.route("1\t0\tREADME.md\0"), Some("light"));
+        }
+    }
+
+    #[test]
     fn light_review_size_reports_security_and_binary_precedence() {
         let r = ReviewRoute { under_lines: 10, report_paths: vec!["reports/**".into()], full_paths: vec!["private/**".into(), "**/auth*".into(), "apps/Security.swift".into()] };
-        for (stat, expected) in [("4\t5\tapps/ui.swift\0", "light"), ("5\t5\tapps/ui.swift\0", "full"),
-            ("100\t0\treports/findings.md\0", "light"), ("100\t0\treports/a.md\00\t1\tapps/ui.swift\0", "full"),
+        for (stat, expected) in [("4\t5\tnotes/ui.txt\0", "light"), ("5\t5\tnotes/ui.txt\0", "full"),
+            ("100\t0\treports/findings.md\0", "light"), ("100\t0\treports/a.md\00\t1\tnotes/ui.txt\0", "full"),
             ("1\t0\tcrates/daemon/src/auth.rs\0", "full"), ("1\t0\tprivate/a\0", "full"),
             ("1\t0\treports/auth.md\0", "full"), ("1\t0\tapps/Security.swift\0", "full"), ("-\t-\treports/image.png\0", "full"), ("", "light")] {
             assert_eq!(r.route(stat), Some(expected), "{stat:?}");

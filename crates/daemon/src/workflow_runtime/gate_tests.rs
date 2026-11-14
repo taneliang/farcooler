@@ -491,6 +491,29 @@ async fn security_paths_require_full_review_even_for_small_report_only_changes()
     assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:opus\n");
 }
 
+/// The actual candidate diff obeys the repository policy even when the definition omits it.
+#[tokio::test]
+async fn omitted_keychain_path_and_documented_definition_require_full_review() {
+    let docs = include_str!("../../../../docs/light-review.md");
+    let documented = docs.split("```json\n").nth(1).unwrap().split("\n```").next().unwrap();
+    let omitted = r#"{"under_lines":100,"report_paths":["**"],"full_paths":["unrelated/**"]}"#;
+    for argument in [omitted, documented] {
+        let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
+        d.stages[2].operation.arguments[1] = argument.into();
+        runtime.coding.as_ref().unwrap().validate_definition(&d).unwrap();
+        let script = dir.path().join("gates.py");
+        let text = std::fs::read_to_string(&script).unwrap()
+            .replace("    pathlib.Path('result.txt').write_text",
+                "    pathlib.Path('apps/shared/AgentKit/Tests/AgentKitTests').mkdir(parents=True)\n    pathlib.Path('result.txt').write_text")
+            .replace("'result.txt'", "'apps/shared/AgentKit/Tests/AgentKitTests/AccountKeychainWriteTests.swift'");
+        std::fs::write(script, text).unwrap();
+        enqueue(&mut runtime, "w", "one", d);
+        let state = settle(&mut runtime, 2).await;
+        assert_eq!(state.items["one"].phase, Phase::WaitingJoin);
+        assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:opus\n", "{argument}");
+    }
+}
+
 #[tokio::test]
 async fn stopping_a_parallel_review_after_restart_reaps_its_gate() {
     let (_dir, mut runtime, _fake, d) = parallel_fixture(false, true).await;
