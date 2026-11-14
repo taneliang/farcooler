@@ -43,6 +43,17 @@ echo "Test run with 2 tests in 1 suite passed after 1 second."
 STUB
 chmod +x "$scratch/apps/macos/build-vt.sh" "$scratch/bin/swift" "$scratch/home/.cargo/bin/cargo" "$scratch/apps/macos/test.sh"
 
+cat >"$scratch/scripts/heavy" <<'STUB'
+#!/bin/bash
+[ "$1" = -- ] && shift
+exec "$@"
+STUB
+cat >"$scratch/scripts/macos-test-partitions.py" <<'STUB'
+#!/bin/bash
+echo "partitions $*" >>"$LOG"
+STUB
+chmod +x "$scratch/scripts/heavy" "$scratch/scripts/macos-test-partitions.py"
+
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 export LOG="$scratch/log"
@@ -65,3 +76,14 @@ if out="$(BINS_FAIL=1 "$scratch/apps/macos/test.sh" 2>&1)"; then fail "a failed 
 grep -q "farcoolerd does not compile" <<<"$out" || fail "the binaries' own error was swallowed: $out"
 
 echo "ok: test.sh builds the Rust cores and every binary first, passes its arguments on under the tmux leak check, and stops when they fail"
+
+: >"$LOG"
+FARCOOLER_MAC_TEST_PROCESSES=2 "$scratch/apps/macos/test.sh" >/dev/null
+head -3 "$LOG" | diff -u <(printf '%s\n' build-vt 'cargo build --bins' 'swift build --build-tests  ') - \
+  || fail "parallel mode must build cores, binaries and test bundles once"
+grep -q '^partitions --repeat 1 --out ../../target/macos-test-partitions-' "$LOG" \
+  || fail "parallel mode did not run the complete inventory in the worktree target"
+if FARCOOLER_MAC_TEST_PROCESSES=2 "$scratch/apps/macos/test.sh" --filter CeremonyTests >/dev/null 2>&1; then
+  fail "parallel mode silently ignored a filter"
+fi
+echo "ok: parallel mode builds once, runs the guarded complete inventory, and refuses filters"

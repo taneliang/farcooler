@@ -5,7 +5,7 @@ Run under scripts/heavy. Builds are deliberately outside the timed region:
   apps/macos/test.sh
   scripts/heavy -- scripts/macos-test-partitions.py --out /tmp/mac-partitions
 
-No CI/default runner changes until repeated green comparisons justify them.
+CI uses this after one build via test.sh (ov-1183); local use stays opt-in.
 Suites remain intact: AppKit and NativeAgents globals never cross processes.
 All test IDs, including disabled captures and parameterized methods, come from
 SwiftPM's built inventory; no hand-maintained skip list. The outer file leak
@@ -28,6 +28,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "apps/macos"
+FLOOR = PACKAGE / "test-floor.txt"
 ISOLATED = "CeremonyTests.NativeSelectionTests/TranscriptScrollerTests"
 
 
@@ -93,6 +94,10 @@ def experiment(args):
     listed = subprocess.run(["swift", "test", "list", "--skip-build"], cwd=PACKAGE,
                             capture_output=True, text=True, check=True)
     discovered = sorted(line.strip() for line in listed.stdout.splitlines() if "/" in line)
+    ceremony = sum(test.startswith("CeremonyTests.") for test in discovered)
+    floor = int(FLOOR.read_text().strip())
+    if ceremony < floor:
+        raise ValueError(f"CeremonyTests inventory {ceremony} below the floor {floor}")
     inventory = discovered
     if args.suite:
         if args.processes != 1:
@@ -144,6 +149,8 @@ def experiment(args):
                     break
                 except subprocess.TimeoutExpired:
                     pass
+        # Retain ordinary CI test evidence, including failures and summaries.
+        print((args.out / f"{i}.log").read_text(), flush=True)
         return {"shard": i, "rc": rc, "seconds": time.monotonic() - start,
                 "started_at": start,
                 "load_start": load, "load_end": os.getloadavg(), "load_peak": peak,
@@ -200,6 +207,8 @@ def self_test():
         bundle.parent.mkdir(parents=True)
         bundle.touch()
         runtime = dict(helper=str(swift), bin_dir=str(base), frameworks=str(base), libraries=str(base))
+        floor = base / "test-floor.txt"
+        floor.write_text("3\n")
         env = {**os.environ, "PATH": str(base) + os.pathsep + os.environ["PATH"],
                "HEAVY_LOCK_HELD": "1"}
         for omit in (False, True):
@@ -207,6 +216,7 @@ def self_test():
             # Only fake Swift runs here: their correctness must not depend on
             # the host's current load. Actual measurements always sample it.
             with mock.patch.dict(os.environ, {**env, "OMIT_TEST": "1" if omit else ""}), \
+                    mock.patch(__name__ + ".FLOOR", floor), \
                     mock.patch("os.getloadavg", return_value=(0., 0., 0.)), \
                     mock.patch(__name__ + ".discover_runtime", return_value=runtime), \
                     (base / "run.log").open("w") as log, contextlib.redirect_stdout(log):
@@ -233,7 +243,7 @@ def main():
     if args.self_test:
         self_test()
         return 0
-    if not os.environ.get("HEAVY_LOCK_HELD"):
+    if not (os.environ.get("HEAVY_LOCK_HELD") or os.environ.get("CI")):
         ap.error("run through scripts/heavy to preserve resource limits")
     if args.run_shard:
         return execute_shard(args)

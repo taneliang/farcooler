@@ -96,7 +96,10 @@ enum RealSession {
     /// over a network.
     actor Photos: PromptImageSource {
         let png: Data
-        init() { png = Photos.photo() }
+        // Every session uses the same deterministic bytes. Encode them once
+        // per process, outside the repeated MainActor window setup (ov-1183).
+        private static let fixture = photo()
+        init() { png = Self.fixture }
         func promptImage(terminal: String, row: String, index: Int) async throws -> Data {
             try await Task.sleep(for: .milliseconds(400))
             return png

@@ -45,4 +45,19 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # a `farcooler-*` entry in TMPDIR, or a UUID-named plist in
 # ~/Library/Preferences, fails the run (scripts/test-leak-check.py). Tests make
 # defaults suites with `ScratchDefaults.suite`, which removes them at exit.
+# The CI partition uses two processes on this runner, never extra runners.
+# Build once: two `swift test --skip-build` calls would still take SwiftPM's
+# workspace lock. The runner discovers every method and checks exact shard
+# counts, plus the checked-in CeremonyTests floor, under the same leak guards.
+case "${FARCOOLER_MAC_TEST_PROCESSES:-1}" in
+  1) ;;
+  2)
+    [ "$#" -eq 0 ] || { echo "parallel test.sh runs the full inventory; omit filters" >&2; exit 2; }
+    swift build --build-tests
+    out="../../target/macos-test-partitions-$(date +%s)-$$"
+    exec ../../scripts/heavy -- ../../scripts/macos-test-partitions.py --repeat 1 --out "$out"
+    ;;
+  *) echo "FARCOOLER_MAC_TEST_PROCESSES must be 1 or 2" >&2; exit 2 ;;
+esac
+
 exec ../../scripts/swift-test-guard.sh test-floor.txt -- ../../scripts/test-leak-check.py -- ../../scripts/tmux-leak-check.py -- swift test "$@"

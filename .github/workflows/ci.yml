@@ -22,7 +22,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ov-1183-ci-swift-15]
     # The canary workflow's own baseline commit touches only this file. Without
     # this, its run supersedes and cancels the CI of the commit it records.
     paths-ignore: ['proto/baseline/canary.proto']
@@ -777,6 +777,10 @@ jobs:
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
     timeout-minutes: 35
+    # Bundle/test validation keeps optimizations, but pays no cross-crate LTO
+    # link on every source edit (ov-1183). Canary and Release retain ThinLTO.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: "false"
     steps:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
@@ -937,6 +941,10 @@ jobs:
     # 42662865971, cancelled at 35 two seconds after all 1970 Mac tests passed;
     # ov-1052). 45 leaves at least 25% over the slower of the two.
     timeout-minutes: 45
+    # Bundle/test validation keeps optimizations, but pays no cross-crate LTO
+    # link on every source edit (ov-1183). Canary and Release retain ThinLTO.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: "false"
     steps:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
@@ -1035,6 +1043,8 @@ jobs:
         timeout-minutes: 10
         run: ./scripts/ci-install-tmux.sh
       - name: Test the Mac app
+        env:
+          FARCOOLER_MAC_TEST_PROCESSES: "2"
         run: ./apps/macos/test.sh
 
   ios:
