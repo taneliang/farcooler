@@ -50,6 +50,47 @@ of those same changes over their reviewed adaptations.
 
 All four acceptance items are met: the twelve tickets are included on current main, the requested test selections pass, the per-ticket conflict table is above, and no ticket was omitted or forced through an unresolved conflict.
 
+## Fix round 1 audit
+
+Read the ticket again through the installed Canary CLI, including its full JSON
+history. The history records the return from review to in progress but contains
+no reviewer note or requested correction. The workflow evidence read was refused
+with `scope-denied: known caller required`.
+
+Fetched `origin/main` again: it remains `73974f898`, an ancestor of this branch.
+Rechecked `git cherry` for all twelve recorded source tips. Every remaining
+non-equivalent patch has its original subject represented on this branch except
+the already-empty ov-1150 prerequisite described above. Main's `places.rs` is
+unchanged, and the prohibited documentation paths have no delta.
+
+The fresh Rust selection passed 2,004 of 2,005 tests. The only failure was
+`interrupted_ci_later_green_finishes_on_the_pushed_sha`: the resumed pending CI
+poll reached Failed instead of Done with only 400 ms of patience, while host
+load exceeded 40. The unchanged test passed alone. The combined fixture now
+allows 5 seconds for its real Python polls and directly asserts that CI's
+creation timestamp follows the one-second push. This preserves the clock
+regression check independently of subprocess speed. Production behavior is
+unchanged.
+
+The strengthened test passed with the current clock, then failed at the new
+timestamp assertion when the finished-effect observation temporarily used the
+old frozen sweep time (`created_ms: 5`). The temporary production mutation was
+removed before final validation.
+
+Fresh validation:
+
+- Final daemon workflow-runtime selection: 395/395 passed, including the
+  repaired fixture, in 168.138 seconds with six test threads. The original
+  selection passed all 1,610 other cases: workflow 188, CLI 695, store 658,
+  and client Plan/presentation 69. All 2,005 selected cases therefore passed
+  across the initial run and affected-module rerun.
+- Shared Swift Plan selection: 178 tests in 33 suites passed.
+- Mac Plan selection: 37 tests in 5 suites passed.
+- The prior iOS log was checked directly: 13 collected, 1 skipped, 12 executed,
+  zero failures. No app or production files changed in this round.
+- `git diff --check origin/main...HEAD` passed.
+- The doc-comment and file-size checks passed.
+
 ## Reproduction
 
 The Rust commands clear this dispatched agent's native hook and workflow-run

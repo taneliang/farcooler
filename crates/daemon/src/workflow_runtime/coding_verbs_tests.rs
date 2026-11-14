@@ -1117,9 +1117,9 @@ async fn tickets_that_apply_alone_but_conflict_together_return_the_conflicting_m
 async fn interrupted_ci_later_green_finishes_on_the_pushed_sha() {
     let (dir, mut runtime) = lander("ci-pending").await;
     use std::os::unix::fs::PermissionsExt;
-    let definition = batched_push(&runtime, "any", 400);
-    // Push takes longer than CI patience. CI's own clock must begin after this push,
-    // rather than at the start of the sweep that ran it.
+    let definition = batched_push(&runtime, "any", 5000);
+    // Check the post-push timestamp directly, leaving real Python CI polls enough
+    // patience under shared-host load rather than depending on a 400 ms deadline.
     let hook = dir.path().join("private-remote.git/hooks/pre-receive");
     std::fs::write(&hook, "#!/bin/sh\nsleep 1\n").unwrap();
     std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1131,6 +1131,7 @@ async fn interrupted_ci_later_green_finishes_on_the_pushed_sha() {
     let resume_at = 5 + i64::try_from(started.elapsed().as_millis()).unwrap() + 10;
     let binding = admitted(&runtime).await;
     assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::AwaitCi));
+    assert!(binding.effect.created_ms >= 1005, "CI must start after the one-second push: {:?}", binding.effect);
     let pushed = remote_head(&runtime).await;
     let root = runtime.root.clone(); drop(runtime);
     // CI is pending on the first resumed poll, then green. The original, accurately
