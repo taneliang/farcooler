@@ -53,6 +53,7 @@ class ProcessGuardTests(unittest.TestCase):
             runner.write_text("import os, pathlib, subprocess, sys, time\n"
                               "pathlib.Path('runner').write_text(str(os.getpid()))\n"
                               "if 'TMUX_TMPDIR' in os.environ: pathlib.Path('base').write_text(os.environ['TMUX_TMPDIR'])\n"
+                              "if os.environ.get('FC_GUARD_OUTER'): pathlib.Path('outer-base').write_text(os.environ['TMPDIR'])\n"
                               "subprocess.Popen([sys.executable, 'test.py'], preexec_fn=os.setpgrp)\n"
                               "while not pathlib.Path('leaf').exists(): time.sleep(.01)\n"
                               "if os.environ.get('FC_GUARD_FINISH'): sys.exit(0)\n"
@@ -65,6 +66,11 @@ class ProcessGuardTests(unittest.TestCase):
                 body = ("m = load('lane-gate')\n"
                         f"m.run_step(m.Step('rust', 'test', {command!r}), "
                         "Path.cwd(), dict(os.environ), Path.cwd(), Path.cwd())\n")
+            elif entry == 'leak-wrapper':
+                body = ("m = load('test-leak-check')\n"
+                        "m.run([sys.executable, "
+                        f"{str(SCRIPTS / 'tmux-leak-check.py')!r}, "
+                        "'--', sys.executable, 'nextest.py'], grace=0)\n")
             else:
                 body = ("m = load('tmux-leak-check')\n"
                         "m.run([sys.executable, 'nextest.py'], kill=False, grace=0)\n")
@@ -72,7 +78,8 @@ class ProcessGuardTests(unittest.TestCase):
                           "from process_guard_test import load\n" + body)
             bystander = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
             owner = subprocess.Popen([sys.executable, '-c', owner_code], cwd=root,
-                                     env={**os.environ, 'FC_GUARD_FINISH': '1' if killed == 'finished' else ''},
+                                     env={**os.environ, 'FC_GUARD_FINISH': '1' if killed == 'finished' else '',
+                                          'FC_GUARD_OUTER': '1' if entry == 'leak-wrapper' else ''},
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             pids = []
             try:
@@ -100,6 +107,8 @@ class ProcessGuardTests(unittest.TestCase):
                 bystander.wait()
                 if (root / 'base').exists():
                     shutil.rmtree((root / 'base').read_text(), ignore_errors=True)
+                if (root / 'outer-base').exists():
+                    shutil.rmtree((root / 'outer-base').read_text(), ignore_errors=True)
 
     def test_killed_gate_reaps_its_tests(self):
         for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -108,6 +117,11 @@ class ProcessGuardTests(unittest.TestCase):
 
     def test_killed_nextest_wrapper_reaps_its_tests(self):
         self.exercise('wrapper', signal.SIGKILL)
+
+    def test_killed_outer_leak_wrapper_reaps_its_tests(self):
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            with self.subTest(signal=sig):
+                self.exercise('leak-wrapper', sig)
 
     def test_killed_nextest_reaps_its_test(self):
         self.exercise('wrapper', 'runner')
@@ -120,6 +134,73 @@ class ProcessGuardTests(unittest.TestCase):
 
     def test_finished_runner_reaps_its_remaining_test(self):
         self.exercise('wrapper', 'finished')
+
+    def exercise_real_cargo_runner(self, runner):
+        cargo = shutil.which('cargo')
+        self.assertIsNotNone(cargo, 'cargo is required for the real-runner regression')
+        with tempfile.TemporaryDirectory(prefix='fc-cargo-', dir='/tmp') as scratch:
+            root = Path(scratch)
+            (root / 'src').mkdir()
+            (root / 'Cargo.toml').write_text('[package]\nname = "guard-fixture"\nversion = "0.1.0"\nedition = "2021"\n')
+            (root / 'src/lib.rs').write_text(
+                '#[test] fn stays_alive() { '
+                'std::fs::write(std::env::var("FC_BASE_FILE").unwrap(), std::env::var("TMPDIR").unwrap_or_default()).unwrap(); '
+                'std::fs::write(std::env::var("FC_TEST_PID").unwrap(), std::process::id().to_string()).unwrap(); '
+                'loop { std::thread::sleep(std::time::Duration::from_secs(1)); } }')
+            subprocess.run([cargo, 'test', '--offline', '--no-run'], cwd=root, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for entry in ('gate', 'leak-wrapper'):
+                for sig in (signal.SIGTERM, signal.SIGKILL):
+                    with self.subTest(runner=runner, entry=entry, signal=sig):
+                        pidfile = root / 'test-pid'
+                        pidfile.unlink(missing_ok=True)
+                        basefile = root / 'base'
+                        basefile.unlink(missing_ok=True)
+                        args = [cargo, 'test', '--offline'] if runner == 'test' else [cargo, 'nextest', 'run', '--offline']
+                        command = shlex.join(args)
+                        if entry == 'gate':
+                            body = ("m = load('lane-gate')\n"
+                                    f"m.run_step(m.Step('rust', 'test', {command!r}), "
+                                    "Path.cwd(), dict(os.environ), Path.cwd(), Path.cwd())\n")
+                        else:
+                            body = ("m = load('test-leak-check')\n"
+                                    f"m.run({args!r}, grace=0)\n")
+                        code = (f"import sys, os\nfrom pathlib import Path\nsys.path.insert(0, {str(SCRIPTS)!r})\n"
+                                "from process_guard_test import load\n" + body)
+                        with (root / 'owner.log').open('w') as log:
+                            owner = subprocess.Popen([sys.executable, '-c', code], cwd=root,
+                                                     env={**os.environ, 'FC_TEST_PID': str(pidfile),
+                                                          'FC_BASE_FILE': str(basefile)},
+                                                     stdout=log, stderr=subprocess.STDOUT)
+                        test_pid = None
+                        try:
+                            self.assertTrue(until(lambda: (pidfile.exists() and pidfile.read_text()) or owner.poll() is not None, 30)
+                                            and pidfile.exists() and pidfile.read_text(),
+                                            f'{runner} test did not start: ' + (root / 'owner.log').read_text())
+                            test_pid = int(pidfile.read_text())
+                            os.kill(owner.pid, sig)
+                            owner.wait(timeout=8)
+                            self.assertTrue(until(lambda: not running(test_pid)),
+                                            f'{entry} left {runner} test {test_pid} alive after {sig}')
+                        finally:
+                            if owner.poll() is None:
+                                owner.kill()
+                            owner.wait()
+                            if test_pid and running(test_pid):
+                                os.kill(test_pid, signal.SIGKILL)
+                            if entry == 'leak-wrapper' and basefile.exists():
+                                base = Path(basefile.read_text())
+                                if base.parent == Path('/tmp') and base.name.startswith('fcl-'):
+                                    shutil.rmtree(base, ignore_errors=True)
+
+    @unittest.skipUnless(shutil.which('cargo'), 'real-runner regression needs cargo')
+    def test_real_cargo_test_dies_with_owner(self):
+        self.exercise_real_cargo_runner('test')
+
+    @unittest.skipUnless(shutil.which('cargo') and shutil.which('cargo-nextest'),
+                         'real-runner regression needs cargo and cargo-nextest')
+    def test_real_nextest_dies_with_owner(self):
+        self.exercise_real_cargo_runner('nextest')
 
     def test_normal_result_and_environment_survive(self):
         import process_guard

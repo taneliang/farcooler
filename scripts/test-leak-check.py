@@ -60,7 +60,7 @@ import os
 import re
 import uuid as _uuid
 import shutil
-import subprocess
+import process_guard
 import sys
 import tempfile
 import time
@@ -344,7 +344,9 @@ def run(command, grace=GRACE_SECONDS):
     # joins with `NSTemporaryDirectory() + "name"` relies on it.
     env = dict(os.environ, TMPDIR=base + os.sep)
     try:
-        rc = subprocess.call(command, env=env)
+        # CI nests the tmux checker here. Its lifetime pipe alone cannot
+        # notice this outer wrapper dying while that checker is still alive.
+        rc = process_guard.run(command, env=env).returncode
         temp, prefs, strict, sys_new = leaks(base, before, grace, system)
         if sys_new and not strict:
             print(
