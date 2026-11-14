@@ -570,9 +570,21 @@ a step are its own approver, the approvers of the steps before it, and a
 person's or the orchestrator's review whose `passed` route leads on. A group's
 steps also count the deciders on every way to a join that queues into the
 group. Each route counts, including a split's restart step, a rework, and the
-orchestrator's send-back to a build step. That refuses a publication that:
+orchestrator's send-back to a build step.
 
-- drops the approval in front of a command, or hands it to someone else
+Each decision counts on its own, named by the step it is made at, whether it
+approves the step or is a review's verdict, who makes it, and what that step
+runs. So the owner's approval of the build does not stand in for the owner's
+separate approval of the deploy, or for the owner's review in front of it. A
+decision also covers only the candidate it was made on: after a step that may
+change the candidate (a provision, a build, a fold, an adopting join, a base or
+pull request wait, or an action), the decisions before it still count as having
+been made, but no longer as made on what the next step gets. A deploy the owner reviewed
+can't be moved behind a rebuild. That refuses a publication that:
+
+- drops the approval in front of a command, or hands it to someone else, even
+  while an earlier approval by the same person stays
+- puts a step that may change the candidate between a decision and the command
 - routes a step past the owner's review, or sends the review's rejection on to
   the command
 - runs a configured command that no step of the replaced definition ran
@@ -602,9 +614,14 @@ one, the owner publishes the command in a gate command, environment or hook,
 behind the owner's approval or review. The orchestrator then tries to drop the
 approval, reassign it, route past the review, route the review's rejection to
 the command, and run a configured check no step ran. All 48 attempts published
-before this check, and all are refused now.
+before this check, and all are refused now. Each drop, reassignment, skip and
+overrule is tried again with the owner also approving the first step, which
+an earlier check counted as the same approval (review f65a4a83). All 40 of
+those published before each decision counted on its own, and all are refused
+now.
 `ov1201_runs_the_same_only_behind_the_same_deciders` covers the same rules on
-plain definitions, including a group reached through a join and a split.
+plain definitions, including a group reached through a join and a split, two
+approvals by the owner, and a step that changes the candidate after a review.
 
 This covers what publication adds. The orchestrator's own shell runs as the same
 Unix user, so the runner does not stop an agent that runs these commands

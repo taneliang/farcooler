@@ -24,7 +24,9 @@ pub fn notification_configuration_pin(definition: &Definition, adapter: Option<&
 /// adapter unchanged each step that runs something must be one a step of `previous` ran, behind at least the
 /// approvals and person reviews that step was behind on every way to it. Routes, models, deciders, limits and
 /// notifications are free to change within that: a new route may not pass a decider by, a decider may not be
-/// dropped or swapped, and a configured command no step ran stays unrun.
+/// dropped or swapped, and a configured command no step ran stays unrun. Each decision counts on its own, by the
+/// step it is made at (review f65a4a83), and one made before the candidate changed covers no step it covered
+/// on the same candidate.
 pub fn runs_the_same(previous: Option<&Configuration>, definition: &Definition, adapter: Option<&AdapterConfiguration>) -> bool {
     fn environments(definition: &Definition) -> std::collections::BTreeMap<(&str, &str), &std::collections::BTreeMap<String, String>> {
         definition.stages.iter().map(|s| ("", s))
@@ -39,49 +41,74 @@ pub fn runs_the_same(previous: Option<&Configuration>, definition: &Definition, 
             earlier.iter().any(|(was, had)| was.kind == s.kind && was.operation == s.operation && match (&guards, had) {
                 // A step no run reaches still runs nothing new.
                 (None, _) => true,
-                (Some(now), Some(had)) => had.is_subset(now),
+                (Some(now), Some(had)) => guarded::keeps(had, now),
                 (Some(_), None) => false,
             }))
 }
 /// Who must have said yes before each step of a definition starts (ov-1201).
 mod guarded {
     use farcooler_workflow::{Definition, Progression, Reviewer, Stage, StageKind, Target};
-    use std::collections::{BTreeMap, BTreeSet};
-    /// The principals every way to a step passes; `None` when no run reaches it.
-    pub(super) type Guards = Option<BTreeSet<String>>;
+    use std::collections::BTreeMap;
+    /// One decision: the step it is made at, by its group and id, whether it is an approval to start the step or
+    /// a review's verdict, who makes it, and what the step is. Two decisions by one person are two decisions
+    /// (review f65a4a83): the owner's approval of a build stands in for none of the owner's later ones.
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub(super) struct Decision { group: String, step: String, review: bool, principal: String, what: String }
+    /// The decisions every way to a step passes, each `true` while the candidate it was made on is still the one
+    /// the step gets; `None` when no run reaches the step.
+    pub(super) type Guards = Option<BTreeMap<Decision, bool>>;
     /// A step that starts no process: a ticket's column, a join, a path route, a person's or the orchestrator's review.
     pub(super) fn runs_nothing(stage: &Stage) -> bool {
         matches!(stage.kind, StageKind::Tracker | StageKind::Join { .. } | StageKind::Route
             | StageKind::Review(Reviewer::Person(_) | Reviewer::Orchestrator(_)))
     }
-    fn approver(stage: &Stage) -> Option<String> {
-        match &stage.progression { Progression::AwaitApproval { principal } => Some(principal.clone()), Progression::Automatic => None }
+    /// A step after which the candidate may be another commit than the one decided on before it. Anything that
+    /// is not known only to read, run on or move the candidate counts.
+    fn changes_candidate(stage: &Stage) -> bool {
+        !matches!(stage.kind, StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Evaluate(_)
+            | StageKind::Ci | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Tracker | StageKind::Route
+            | StageKind::Join { adopt: false, .. } | StageKind::Push | StageKind::PushBranch | StageKind::OpenPr
+            | StageKind::PrReady | StageKind::Land)
+    }
+    fn decision(group: &str, stage: &Stage, review: bool, principal: &str) -> Decision {
+        Decision { group: group.into(), step: stage.id.clone(), review, principal: principal.into(),
+            what: farcooler_workflow::digest(&(&stage.kind, &stage.operation)) }
+    }
+    fn approver(group: &str, stage: &Stage) -> Option<Decision> {
+        match &stage.progression { Progression::AwaitApproval { principal } => Some(decision(group, stage, false, principal)), Progression::Automatic => None }
     }
     /// A review's decider, whose verdict is behind its `passed` route only.
-    fn reviewer(stage: &Stage) -> Option<String> {
-        match &stage.kind { StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(p.clone()), _ => None }
+    fn reviewer(group: &str, stage: &Stage) -> Option<Decision> {
+        match &stage.kind { StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(decision(group, stage, true, p)), _ => None }
     }
-    /// Every step of `definition` and its groups, with its guards: the deciders on every way to it, its own approver
-    /// included. A group's steps also have the ones on every way to a join that queues into it.
+    /// Whether `now` keeps every decision `had` holds, each on a candidate at least as current.
+    pub(super) fn keeps(had: &BTreeMap<Decision, bool>, now: &BTreeMap<Decision, bool>) -> bool {
+        had.iter().all(|(d, current)| now.get(d).is_some_and(|now| *now || !current))
+    }
+    /// Every step of `definition` and its groups, with its guards: the decisions on every way to it, its own
+    /// approval included. A group's steps also have the ones on every way to a join that queues into it.
     pub(super) fn steps(definition: &Definition) -> Vec<(&Stage, Guards)> {
-        let top = must_pass(definition, Some(BTreeSet::new()));
+        let top = must_pass(definition, "", Some(BTreeMap::new()));
         let mut out: Vec<(&Stage, Guards)> = definition.stages.iter().zip(top.iter().cloned()).collect();
         for (name, group) in &definition.groups {
             let entry = definition.stages.iter().zip(&top)
                 .filter(|(s, _)| matches!(&s.kind, StageKind::Join { group, .. } if group == name))
                 .fold(None, |all: Guards, (_, g)| meet(all, g.clone()));
-            let inner = definition.group_definition(name).map_or_else(|| vec![None; group.steps.len()], |d| must_pass(&d, entry));
+            let inner = definition.group_definition(name).map_or_else(|| vec![None; group.steps.len()], |d| must_pass(&d, name, entry));
             out.extend(group.steps.iter().zip(inner));
         }
         out
     }
-    /// The deciders both ways pass.
+    /// The decisions both ways pass, current only where both have them current.
     fn meet(a: Guards, b: Guards) -> Guards {
-        match (a, b) { (None, x) | (x, None) => x, (Some(a), Some(b)) => Some(a.intersection(&b).cloned().collect()) }
+        match (a, b) {
+            (None, x) | (x, None) => x,
+            (Some(a), Some(b)) => Some(a.into_iter().filter_map(|(d, c)| b.get(&d).map(|o| (d, c && *o))).collect()),
+        }
     }
     /// Each step's guards, from the first step's `entry`. Every route out counts, a split's step and its fallback,
     /// falling forward on an unrouted `passed`, a rework, and the orchestrator's send-back to any build step.
-    fn must_pass(definition: &Definition, entry: Guards) -> Vec<Guards> {
+    fn must_pass(definition: &Definition, group: &str, entry: Guards) -> Vec<Guards> {
         let stages = &definition.stages;
         let index: BTreeMap<&str, usize> = stages.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
         let edges = |i: usize| -> Vec<(usize, bool)> {
@@ -111,24 +138,26 @@ mod guarded {
             out.extend(stages.iter().enumerate().filter(|(_, s)| s.kind == StageKind::Build).map(|(j, _)| (j, false)));
             out
         };
+        let mine = |i: usize| approver(group, &stages[i]).map(|d| (d, true));
         let mut at: Vec<Guards> = vec![None; stages.len()];
         if let Some(first) = at.first_mut() { *first = entry; }
-        // Sets only shrink, from unreached to smaller, so this settles.
+        // Each step's guards only lose decisions, or have them go from current to not, so this settles.
         loop {
             let mut changed = false;
             for i in 0..stages.len() {
                 let Some(mut through) = at[i].clone() else { continue };
-                through.extend(approver(&stages[i]));
+                through.extend(mine(i));
+                if changes_candidate(&stages[i]) { through.values_mut().for_each(|c| *c = false); }
                 for (j, passed) in edges(i) {
                     let mut out = through.clone();
-                    if passed { out.extend(reviewer(&stages[i])); }
+                    if passed { out.extend(reviewer(group, &stages[i]).map(|d| (d, true))); }
                     let next = meet(at[j].clone(), Some(out));
                     if at[j] != next { at[j] = next; changed = true; }
                 }
             }
             if !changed { break }
         }
-        at.into_iter().zip(stages).map(|(g, s)| g.map(|mut g| { g.extend(approver(s)); g })).collect()
+        at.into_iter().enumerate().map(|(i, g)| g.map(|mut g| { g.extend(mine(i)); g })).collect()
     }
 }
 pub enum Write<'a> {
@@ -532,6 +561,47 @@ mod ov1179_rollback_tests {
         let mut unjoined = grouped(vec![build.clone(), lint.clone(), review.clone()]);
         unjoined.stages.push(step("other", StageKind::Join { group: "h".into(), adopt: false }, "h"));
         assert!(runs_the_same(Some(&previous), &unjoined, None), "a group no join queues into runs nothing");
+
+        // Review f65a4a83: the owner approves the build and, separately, the deploy. Keeping the first
+        // approval keeps neither the second nor a review by the same person.
+        let previous = configuration(definition(vec![approved(build.clone(), "owner"), approved(deploy.clone(), "owner")]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(!runs_the_same(Some(&previous), &definition(vec![approved(build.clone(), "owner"), deploy.clone()]), None),
+            "the deploy's approval dropped, the build's kept");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![approved(build.clone(), "owner"), approved(deploy.clone(), "orchestrator")]), None),
+            "the deploy's approval reassigned, the build's kept");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![approved(build.clone(), "owner"), approved(lint.clone(), "owner"),
+            step("deploy", StageKind::Check, "deploy")]), None), "the deploy's approval moved to another step");
+        // The same with nothing that changes the candidate between the two.
+        let previous = configuration(definition(vec![build.clone(), approved(lint.clone(), "owner"), approved(deploy.clone(), "owner")]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), approved(lint.clone(), "owner"), deploy.clone()]), None),
+            "the deploy's approval dropped, the lint's kept");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), approved(lint.clone(), "owner"),
+            approved(deploy.clone(), "orchestrator")]), None), "the deploy's approval reassigned, the lint's kept");
+        let previous = configuration(definition(vec![build.clone(), approved(lint.clone(), "owner"), review.clone(), deploy.clone()]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(),
+            route(route(approved(lint.clone(), "owner"), "passed", "deploy"), "rejected", "review"), review.clone(), deploy.clone()]), None),
+            "routed past the review, the lint's approval kept");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), approved(lint.clone(), "owner"),
+            route(review.clone(), "rejected", "deploy"), deploy.clone()]), None), "routed through a rejection, the lint's approval kept");
+        let previous = configuration(definition(vec![approved(build.clone(), "owner"), lint.clone(), review.clone(), deploy.clone()]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(!runs_the_same(Some(&previous), &definition(vec![approved(build.clone(), "owner"),
+            route(route(lint.clone(), "passed", "deploy"), "rejected", "review"), review.clone(), deploy.clone()]), None),
+            "routed past the review, the build's approval kept");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![approved(build.clone(), "owner"), lint.clone(),
+            route(review.clone(), "rejected", "deploy"), deploy.clone()]), None), "routed through a rejection, the build's approval kept");
+        // The review is of the candidate the deploy gets.
+        // An action may change it; a build would also be a send-back target, which reaches the deploy unreviewed.
+        let action = step("prepare", StageKind::Action("prepare".into()), "prepare");
+        let previous = configuration(definition(vec![action.clone(), build.clone(), lint.clone(), review.clone(), deploy.clone()]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), lint.clone(), review.clone(),
+            action.clone(), deploy.clone()]), None), "reviewed, then changed, then deployed");
+        assert!(runs_the_same(Some(&previous), &definition(vec![build.clone(), lint.clone(), review.clone(),
+            step("lint-again", StageKind::Check, "lint"), deploy.clone()]), None), "another check between the review and the deploy");
     }
 }
 

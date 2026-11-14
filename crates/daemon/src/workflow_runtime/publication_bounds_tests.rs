@@ -141,6 +141,7 @@ fn approved_by(mut definition: Definition, id: &str, principal: Option<&str>) ->
 /// Acceptance 4, with the adapter the owner published left exactly as it is (review a2472ebc): the orchestrator
 /// can't take away or reassign the owner's approval of the step that runs an owner-only action, route around the
 /// owner's review in front of it, or start running a configured command no step ran before. Each published before.
+/// The same holds when the owner also approves an earlier step (review f65a4a83): each of those published too.
 #[tokio::test]
 async fn ov1201_orchestrator_cannot_unguard_an_owner_published_command() {
     let (_coding, configured) = super::coding_tests::configured(false, "pass").await;
@@ -174,6 +175,14 @@ async fn ov1201_orchestrator_cannot_unguard_an_owner_published_command() {
                 ("unapproved", approved_by(definition.clone(), step, None)),
                 ("reassigned", approved_by(definition.clone(), step, Some("orchestrator"))),
             ])];
+            // Review f65a4a83: the owner also approves the first step; the orchestrator keeps that one only.
+            let first = definition.stages[0].id.clone();
+            assert_ne!(first, step);
+            let twice = approved_by(definition.clone(), &first, Some("owner"));
+            forms.push((approved_by(twice.clone(), step, Some("owner")), vec![
+                ("unapproved-after-approval", approved_by(twice.clone(), step, None)),
+                ("reassigned-after-approval", approved_by(twice.clone(), step, Some("orchestrator"))),
+            ]));
             if step == "check-0" {
                 // The owner's review in front of the check, which the orchestrator routes around or through.
                 let mut reviewed = definition.clone();
@@ -193,6 +202,10 @@ async fn ov1201_orchestrator_cannot_unguard_an_owner_published_command() {
                 skipped.stages[at - 1].routes.insert("rejected".into(), farcooler_workflow::Target::Step("owner-review".into()));
                 let mut overruled = reviewed.clone();
                 overruled.stages[at].routes.insert("rejected".into(), farcooler_workflow::Target::Step("check-0".into()));
+                // Review f65a4a83: the owner's approval of an earlier step stands in for none of the owner's later ones.
+                let earlier = |d: &Definition| approved_by(d.clone(), &d.stages[0].id.clone(), Some("owner"));
+                forms.push((earlier(&reviewed), vec![("skipped-after-approval", earlier(&skipped)),
+                    ("overruled-after-approval", earlier(&overruled))]));
                 forms.push((reviewed, vec![("skipped", skipped), ("overruled", overruled)]));
                 // A configured check no step of the owner's ran.
                 let mut unused = definition.clone();
@@ -204,6 +217,7 @@ async fn ov1201_orchestrator_cannot_unguard_an_owner_published_command() {
                 let expected = pin(&runtime);
                 ok(&published(&mut runtime, &owner, ws, &name(&format!("owner{form}")), expected, owners.clone(), changed.clone()).await);
                 let current = runtime.store.workflow_configuration(&w).unwrap();
+                let listed = published_anyway.len();
                 for (what, attempt) in attempts {
                     runtime.validate_publication(&attempt, Some(&adapter))
                         .unwrap_or_else(|e| panic!("{action} via {path:?}, {what}, isn't otherwise publishable: {e:?}"));
@@ -213,9 +227,12 @@ async fn ov1201_orchestrator_cannot_unguard_an_owner_published_command() {
                     if refused_as(&reply).as_deref() != Some("scope-denied") { published_anyway.push(name(what)); continue; }
                     assert_eq!(runtime.store.workflow_configuration(&w).unwrap(), current, "{action} via {path:?}, {what}");
                 }
-                // The grant still does what it is for: another approval, with the owner's kept, publishes.
+                // The grant still does what it is for: another approval, with the owner's kept, publishes. After a
+                // bypass published, the configuration is that bypass, so there is nothing to keep.
+                if published_anyway.len() > listed { continue }
                 let mut more = owners.clone();
-                more.stages[0].progression = farcooler_workflow::Progression::AwaitApproval { principal: "orchestrator".into() };
+                let open = more.stages.iter_mut().find(|s| s.progression == farcooler_workflow::Progression::Automatic).unwrap();
+                open.progression = farcooler_workflow::Progression::AwaitApproval { principal: "orchestrator".into() };
                 let expected = pin(&runtime);
                 ok(&published(&mut runtime, &agent, ws, &name(&format!("more{form}")), expected, more, changed.clone()).await);
             }
