@@ -561,6 +561,12 @@ def self_test():
         r"(?m)^    needs: \[ios, ios-ui, captures,[^\n]*\]$", "    needs: [ios, ios-ui]", t, count=1))
     planted("iOS smoke becoming a shard matrix", "full shards run", lambda t: t.replace(
         "  ios-ui:\n", "  ios-ui:\n    strategy:\n      matrix:\n        shard: [shell, agent]\n"), WORKFLOW)
+    # ov-1242: an Android UI job shards per push (ov-1184), and that is not an iOS shard matrix.
+    # Planted next to the real android-ui job so the case holds even if that job is renamed.
+    planted("an Android shard matrix in ci.yml passes", None, lambda t: t.replace(
+        "\n  android-ui:\n",
+        "\n  android-planted:\n    name: Android planted (${{ matrix.shard }})\n    strategy:\n"
+        "      matrix:\n        shard: [first, rest]\n    steps:\n      - run: ./gradlew test\n\n  android-ui:\n", 1), WORKFLOW)
     planted("another Mac job", "outside the macOS slot reservation", lambda t: t.replace("    runs-on: ubuntu-latest", "    runs-on: xcode-27", 1))
     planted("unbounded nightly matrices", "max-parallel: 1", lambda t: t.replace("      max-parallel: 1\n", ""))
     planted("parallel capture phase", "must wait for `ios-ui`", lambda t: t.replace("needs: [ios, ios-ui, yield-captures]", "needs: [ios, yield-captures]"))
