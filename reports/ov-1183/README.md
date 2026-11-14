@@ -8,14 +8,24 @@ its default release configuration and no Rust optimization overrides. Swift
 whole-module optimization, release-only conditional code, Rust opt-level 3
 and ThinLTO, tunnel linkage and every existing bundle check are restored.
 
-The remaining native optimization keeps the daemon package feature `tailcat`
-consistent in the daemon, CLI and filter invocations. The CLI already enabled
-the same dependency feature (`farcooler-tailcat/linked`); `cargo tree` confirms
-the sole difference is `farcooler-daemon` gaining its forwarding feature. No
-production source in that package branches on `cfg(feature = "tailcat")`.
-The LFS filter uses only std, sha2 and libc, not the daemon library or tunnel.
-The same fully optimized native commands run in CI and shipping; Canary and
-Release workflow files and Cargo profiles remain unchanged.
+The first release retry only aligned the daemon's forwarding feature. A full
+`cargo tree` comparison showed additional crypto feature differences between
+separate CLI and daemon invocations, so that is insufficient to share their
+optimized dependencies. The revised bundle builds all three binaries in one
+release Cargo invocation. Package build scripts add the absolute static archive path
+and Security.framework only to the CLI and daemon final links.
+The LFS filter and all rlibs receive no tunnel linker arguments. The FFI
+libraries retain their separate original feature graph. No global RUSTFLAGS
+or optimization override is used. The same optimized commands run in CI and
+shipping; Canary/Release workflows and Cargo profiles remain unchanged.
+
+A real offline fixture uses the production build scripts, opt-level 3 and
+ThinLTO. It checks one daemon library compilation, executes both tunnel-linked
+binaries, inspects symbols to prove the filter contains no tunnel code, and
+checks the library contains no archive object. A repeated build is fresh;
+changing the native archive relinks both binaries. Plain builds without the
+bundle environment keep their original linkage. Artifacts stay under this
+worktree's `target/`. The fixture also runs in the required app CI job.
 
 Fresh release-shaped branch measurements are pending. The prior two debug
 runs are retained below for history and no longer count toward acceptance.
