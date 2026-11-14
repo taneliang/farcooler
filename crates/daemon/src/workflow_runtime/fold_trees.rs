@@ -8,10 +8,7 @@ impl Exec {
         if let Err(error) = self.prune_process_logs(workspaces) {
             tracing::warn!(%error, "could not prune orphan process logs");
         }
-        if _recovering && self.root.join("builder-targets").is_dir() {
-            if let Err(error) = self.trim_builder_targets().await { tracing::warn!(%error, "could not trim recovered builder cache"); }
-        }
-        if let Err(error) = self.prune_builder_targets(workspaces).await {
+        if let Err(error) = self.release_run_targets().await {
             tracing::warn!(%error, "could not prune ended builders’ output");
         }
         if let Err(error) = self.release_builds(workspaces).await {

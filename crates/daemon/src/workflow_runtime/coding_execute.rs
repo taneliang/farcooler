@@ -255,7 +255,6 @@ impl Exec {
             // Inherited by the agent's compilers and test runners, including native PTY launches. Always nice:
             // a gate that starts after this builder also gets priority, without privileged renice or PID discovery.
             command.argv.splice(0..0, ["/usr/bin/nice".into(), "-n".into(), "10".into()]);
-            command.environment.insert("CARGO_TARGET_DIR".into(), self.builder_target(&self.tree(binding)).to_string_lossy().into_owned());
         }
         Ok(command)
     }
@@ -593,13 +592,6 @@ impl Exec {
                 if build && !self.build_has_space(&tree)? {
                     return self.refuse_unstarted(binding, builder_resources::LOW_DISK.into());
                 }
-                if build && self.builder_target_conflicts(&tree, &binding.effect)? {
-                    return self.refuse_unstarted(binding, builder_resources::EXISTING_TARGET.into());
-                }
-                let managed = build || std::fs::read_link(tree.join("target")).is_ok_and(|p| p == self.builder_target(&tree));
-                let _lease = if managed {
-                    Some(self.prepare_builder_target(&tree, &binding.effect).await?)
-                } else { None };
                 if let Some(check) = self.review_check(binding) {
                     // No cleanup while the reviewer reads: both see the same candidate. Both futures are
                     // drained even on failure, so neither writer survives the stage's result.

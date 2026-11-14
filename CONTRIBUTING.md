@@ -135,22 +135,9 @@ and tests, so landing gates retain priority even when they start later. It refus
 a build when either the engine volume or its worktree has less than 25 GB free;
 the run explains the refusal and can be retried after freeing space.
 
-Builders receive `CARGO_TARGET_DIR` under the engine's `builder-targets/` cache.
-Absent, ignored `target/` paths link to their managed buckets so existing build
-scripts can still find their binaries and libraries. Git’s private excludes keep
-these build-output links ignored. Worktrees use separate buckets because sharing
-Cargo workspace fingerprints between different checkouts has produced stale
-artifacts (ov-837). Idle buckets
-are evicted least recently used first above 20 GB; live builders hold leases and
-are never evicted. The cache is checked before and after a build. At WaitingJoin,
-Failed or Cancelled, the engine releases that run's bucket and its recorded
-compatibility link, preserving source files and branches. Pre-existing local output is preserved,
-including ignored directories and symlinks in adopted worktrees. A build with a
-pre-existing target is refused with a notice to move it aside, so scripts cannot
-consume stale personal artifacts while Cargo writes elsewhere. Compatibility links
-are staged and their ownership is durable before target/ is published. Durable cleanup
-receipts prevent later sweeps from deleting output a person creates after a run
-finishes. Interrupted deletions are retried when the daemon restarts.
+When a run reaches WaitingJoin, Failed or Cancelled, the engine deletes the
+`target/` directory in its own worktree, keeping source files and branches. It
+never touches named or adopted worktrees, tracked files or symlinks.
 
 ### A Linux runner
 
