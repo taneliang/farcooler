@@ -260,6 +260,12 @@ impl Watcher {
         }
     }
 
+    /// Drive one retry explicitly in tests, without a timer racing the writer.
+    #[cfg(test)]
+    pub(in crate::watch) async fn tell_held_once_for_test(&self, id: Uuid) -> bool {
+        self.tell_held_once(id).await
+    }
+
     /// How long `id`'s registry has read torn, try after try: started by a
     /// `torn` try, and ended by anything else.
     fn torn_for(&self, id: Uuid, torn: bool) -> Duration {

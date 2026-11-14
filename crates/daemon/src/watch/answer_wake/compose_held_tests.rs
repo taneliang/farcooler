@@ -316,18 +316,30 @@ async fn a_command_is_held_through_a_registry_being_written() {
     a_command_is_held_until_the_turn_ends(&b, &agent, &si).await;
 }
 
-/// Written in place, with the file empty for 0.3 s each time (the stand-in's
-/// `STAND_IN_TORN_REGISTRY`): a retry that meets it reads a file that exists
-/// but doesn't parse, which is claude mid-write, not no claude (ov-645). Red
-/// before: that read was "no live entry", and the command was given up.
+/// A retry during an in-place write sees a torn file, not a missing claude
+/// (ov-645). Drive the retry while the file is empty, then finish the write
+/// before another retry: a delayed writer cannot exhaust the real-time cap.
 #[tokio::test]
 async fn a_command_is_held_through_a_registry_written_in_place() {
     let b = board().await;
-    let agent = b.agent("Agent 2", "claude").await;
-    let si = b.stand_in_with(&agent, "claude", "claude", "STAND_IN_TORN_REGISTRY=0.3").await;
+    b.watcher.with_timing(|t| t.held_retry = Duration::from_secs(3600));
+    let (agent, si) = idle_claude(&b).await;
+    si.show("working").await;
+    b.screen_with(agent.id, "esc to interrupt").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    let _hook = hook_on_submit(&b, &si);
+    assert_eq!(b.watcher.compose_into(agent.id, "/init", &[]).await.expect("held"), Turn::During);
+    let file = registry_of(&si);
+    let whole = std::fs::read(&file).unwrap();
+    std::fs::write(&file, "").unwrap();
+    assert!(b.watcher.tell_held_once_for_test(agent.id).await);
+    assert!(b.svc.store.holds_compose(agent.id).unwrap());
+    nothing_typed(&si);
+    std::fs::write(&file, whole).unwrap();
+    si.show("idle").await;
     b.doing(agent.id, AgentActivity::Idle).await;
-    super::compose_tests::hooked(&b);
-    a_command_is_held_until_the_turn_ends(&b, &agent, &si).await;
+    assert!(!b.watcher.tell_held_once_for_test(agent.id).await);
+    assert!(si.log().contains("COMMAND /init"), "{}", si.log());
 }
 
 /// The registry file of the one claude stand-in `si` is.
