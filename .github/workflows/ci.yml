@@ -406,6 +406,10 @@ jobs:
     # macOS 60: its runners have run 2-3x slower, the crash-matrix binary alone takes about 6 min, and 35 min cut main off about 4900 of 6665 tests in (ov-992).
     # Ubuntu 45 (ov-1056): the last five green main runs took 24.8-31.1 min (gh run view, Nov 9). The leak-checked nextest step went 11.1 to 14.0 min and clippy 3.2 to 4.2 across them. 45 is 45% over the slowest.
     timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 45 }}
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     strategy:
       fail-fast: false
       matrix:
@@ -738,19 +742,6 @@ jobs:
       # `cargo test` they had never run on 3.8, because an earlier binary had
       # already failed and `cargo test` stops at the first.
       # Linux default-feature tests run from one archive in rust-tests below.
-      - name: Python for macOS coverage guard
-        if: runner.os == 'macOS'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: macOS native Rust tests
-        if: runner.os == 'macOS'
-        run: |
-          # --workspace compiles ALL test binaries before nextest filters tests.
-          # Keep this explicit so a future change to nextest cannot narrow builds.
-          cargo nextest run --profile ci --workspace --no-run
-          selection="$(python3 scripts/macos-rust-tests.py)"
-          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
       # nextest does not run doctests, so this is the only thing that would.
       # There are none today (checked: every `Doc-tests` target reports zero),
       # and the step costs a few seconds of empty rustdoc runs; it is here so
@@ -764,6 +755,10 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -796,6 +791,8 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       FARCOOLER_TEST_SHELL: /bin/sh
     steps:
       - uses: actions/checkout@v4
@@ -806,18 +803,6 @@ jobs:
         with:
           name: rust-tests
           path: target
-      # tmux is not a test double here. The tmux crate drives the real binary,
-      # because a fake tmux would agree with whatever this code believed.
-      # Bounded, and it has to be. This step hung for an hour on two
-      # consecutive runs — `apt-get update` against a mirror that accepts the
-      # connection and then stops answering, which has no timeout of its own
-      # and no output, so the job reads as "still working" until someone looks
-      # at the step list. A run that fails in five minutes can be re-run; one
-      # that hangs holds a runner until the six-hour ceiling.
-      #
-      # And a KNOWN tmux, one per runner (ov-554): see the header of
-      # `scripts/ci-install-tmux.sh` for which, why, and how to move one. The
-      # Swift job's Mac tests use the same script and the same build.
       - name: Cache the pinned tmux build
         if: runner.os == 'macOS'
         uses: actions/cache@v4
@@ -828,13 +813,6 @@ jobs:
         timeout-minutes: 10
         run: ./scripts/ci-install-tmux.sh
 
-      # git-lfs, for the two daemon tests that use it
-      # (`crates/daemon/tests/lfs_content_under_the_git_sandbox.rs`): one makes
-      # the repository the daemon's own LFS filter reads, and one shows that a
-      # planted `lfs.extension` does run under git-lfs, which is the control
-      # for the test that it runs nothing under the daemon. The daemon itself
-      # never runs git-lfs. With `CI` set, a missing git-lfs fails them rather
-      # than skipping. Both runner images usually have it; bounded like tmux.
       - name: Install git-lfs
         timeout-minutes: 5
         env:
@@ -853,14 +831,6 @@ jobs:
           fi
           git-lfs version
 
-      # fish, because it is a login shell people have and the one whose quoting
-      # differs: inside single quotes it reads `\\` and `\'`, which sh does not.
-      # A pane's command is parsed by the login shell, so the daemon's launch
-      # tests run every quoting case through fish as well as sh, bash and zsh
-      # — and with `CI` set, a missing fish FAILS them rather than skipping
-      # its half (`launch_prompt_tests::shells`). Bounded like tmux above.
-      # Ubuntu's fish is 3.7 and Homebrew's is 4.x; the launch needs 3.4 or
-      # later for `"$(…)"`.
       - name: Install fish
         timeout-minutes: 5
         env:
@@ -877,29 +847,6 @@ jobs:
           fi
           fish --version
 
-      # `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` stands up a real
-      # loopback sshd, and `cargo nextest run --workspace` below runs it. It is the
-      # closest thing this repository has to a security guard: sshd, not the
-      # daemon, is what makes a `read` device unable to ask for `host_admin`,
-      # and only a real sshd can be asked whether that is true.
-      #
-      # It was `#[ignore]`d for four months behind a reason that named a
-      # scheduled lane that did not exist. Nothing ran it. The attribute is gone; this step is the one
-      # thing the runner has to supply that is not universal.
-      #
-      # NOT root, and that was the open question — whether a non-root sshd
-      # starts on a GitHub runner. It was tried before this line was written, on
-      # macOS 26.6 (OpenSSH 10.3p1) and Ubuntu 26.04 (OpenSSH 10.2p1):
-      # `restrict`, `command=` and `environment=` all behave, and OpenSSH skips
-      # privilege separation outright when `getuid()` is not 0, which is the
-      # only part that would have wanted a privileged runner.
-      #
-      # `command -v` first for the same reason the tmux step does it: the
-      # Ubuntu image ships `openssh-server` already and the macOS one ships
-      # sshd with the OS, so this is normally free. The test asserts on
-      # `/usr/sbin/sshd` by absolute path — it will not take one off PATH,
-      # because a runner is entitled to know which sshd it authenticated
-      # against — so that is the path this checks.
       - name: Make sure there is an sshd to test the fence against
         timeout-minutes: 5
         env:
@@ -933,6 +880,111 @@ jobs:
           name: rust-inventory-${{ matrix.shard }}
           path: target/shard-inventories
 
+  # Native suite and feature/lint checks overlap on independent Mac runners.
+  rust-macos-tests:
+    name: Rust native tests (macOS)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-latest
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Cache the pinned tmux build
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
+      - name: Install tmux
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
+
+      - name: Install git-lfs
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v git-lfs >/dev/null 2>&1; then
+            git-lfs version
+            exit 0
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+            sudo apt-get "${APT_OPTS[@]}" update
+            sudo apt-get "${APT_OPTS[@]}" install -y git-lfs
+          else
+            brew install git-lfs
+          fi
+          git-lfs version
+
+      - name: Install fish
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if ! command -v fish >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y fish
+            else
+              brew install fish
+            fi
+          fi
+          fish --version
+
+      - name: Make sure there is an sshd to test the fence against
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y openssh-server
+            else
+              echo "no /usr/sbin/sshd on a macOS runner, which ships one with the OS" >&2
+              exit 1
+            fi
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
+
+      - name: Put this channel's CLI where the daemon tests look for it
+        run: |
+          set -euo pipefail
+          cargo build --workspace --bins
+          for name in farcooler-local farcooler-preview farcooler-canary; do
+            ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
+          done
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+
+      - name: Python for macOS coverage guard
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: macOS native Rust tests
+        if: runner.os == 'macOS'
+        run: |
+          # --workspace compiles ALL test binaries before nextest filters tests.
+          # Keep this explicit so a future change to nextest cannot narrow builds.
+          cargo nextest run --profile ci --workspace --no-run
+          selection="$(python3 scripts/macos-rust-tests.py)"
+          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
+
   # TWO JOBS, NOT ONE (ov-301). This was one job, "Swift (shared + macOS)", 27 minutes
   # at the median: the bundle build and its checks (about 13) and then the AgentKit
   # and Mac tests (about 13), one after the other. They share nothing but the
@@ -951,8 +1003,6 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 35
     steps:
-      # The label promises Xcode 27. This makes the log say which one, and
-      # stops the job if the image ever hands it a different major.
       - name: Check the runner has Xcode 27
         run: |
           xcodebuild -version
@@ -966,10 +1016,6 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # SwiftPM's downloads (ov-1030): Sparkle's release zip is a binary target
-      # fetched from github.com, and an anonymous download of it 504ed in
-      # GitHub's Nov 9 incident. Keyed by Package.resolved, so a warm run
-      # resolves from disk and makes no network request for it.
       - name: Cache SwiftPM downloads
         uses: actions/cache@v4
         with:
@@ -981,12 +1027,6 @@ jobs:
             apps/macos/.build/repositories
           key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
 
-      # Go, for the tunnel archive `build-app.sh` links into `farcoolerd`.
-      # This job runs the whole bundle assembly, which is the point of it —
-      # so it needs everything that assembly needs. Pinned by `go-version-file`
-      # rather than trusted to the image: the macOS runner happens to ship a
-      # Go, and an image bump that drops it fails with an error that never
-      # mentions Go.
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
@@ -996,15 +1036,6 @@ jobs:
           # (about a minute in each job that builds it; ov-301).
           cache-dependency-path: crates/tailcat/go/go.sum
 
-      # Resolved ONCE, here, before the build step below runs `cargo build
-      # --release`. That build rewrites the tracked `Cargo.lock` whenever it and
-      # `Cargo.toml` have drifted — an ordinary version bump does exactly that —
-      # and `version.sh channel` answers `local` for a dirty tree. A step below
-      # that re-asked `version.sh app-name` after the build would then go looking
-      # for `Far Cooler Local.app` while the bundle on disk is named for the real
-      # channel, and fail on a missing path. Resolving it up front and passing it
-      # through `$GITHUB_ENV` means every step below agrees with the one that
-      # built the bundle.
       - name: Resolve this channel's app name
         run: |
           set -euo pipefail
@@ -1012,28 +1043,12 @@ jobs:
           [ -n "$name" ] || { echo "version.sh app-name returned nothing; refusing to continue"; exit 1; }
           echo "APP_NAME=$name" >> "$GITHUB_ENV"
 
-      # The full bundle, not `swift build`. `build-app.sh` is the thing that has
-      # gone wrong before — it once copied a stale Rust binary instead of
-      # building one — so the assembly step is what CI should exercise.
       - name: Build Far Cooler.app
         run: apps/macos/build-app.sh
 
-      # The bundled daemon, actually run. `build-app.sh` links the tunnel
-      # archive into `farcoolerd`, and until it did, every Mac release carried
-      # a daemon that answered `no_tailcat` to every tunnel it was asked to
-      # serve — while building, signing, notarising and passing every check
-      # there was. This is the check that would have caught it, and it runs
-      # here rather than only in the release workflows because it is the same
-      # `build-app.sh` producing the same binary, on every pull request.
       - name: Check the bundled daemon has the tunnel linked
         run: scripts/tunnel-smoke.sh "apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd"
 
-      # The bundled CLI, asked for a tunnel identity. The same trap as the
-      # daemon's, one binary over: built plain, `farcooler` still builds, still
-      # runs every command, and answers `no_tailcat` to `runner pipe` and to
-      # this — so no Mac can dial a tunnel and nothing else goes red. The
-      # release workflow assembles its bundle with this same `build-app.sh`, so
-      # this is the check on what it ships too.
       - name: Check the bundled CLI has the tunnel linked
         run: |
           set -euo pipefail
@@ -1052,12 +1067,6 @@ jobs:
           [ "$expected" = "$actual" ] || {
             echo "bundle says $actual, the workspace says $expected"; exit 1; }
 
-      # Every component must report the same build stamp. This is the check that
-      # would have caught a Mac driving a host running different source.
-      #
-      # It compares them, which the first version of this step did not: it ran
-      # `farcooler --version`, threw the output away, and asserted only that the
-      # process exited 0. The regression it names would have sailed through.
       - name: Check the CLI and daemon agree
         run: |
           app="apps/macos/build/$APP_NAME.app"
@@ -1072,27 +1081,11 @@ jobs:
             *) echo "neither matches the workspace version $(scripts/version.sh)"; exit 1 ;;
           esac
 
-      # That four channels draw four labeled icons and stable draws none — a
-      # test nobody runs is not a test, and stable shipping a re-encoded (rather
-      # than byte-identical) copy of the one icon every channel shares would
-      # otherwise pass on nobody's machine but this one. Here, not in `wire`:
-      # icon-label.swift is AppKit, and AppKit does not exist on the Linux
-      # runner `wire` uses.
       - run: ./scripts/icon-test.sh
 
-      # That we can derive a Sparkle public key from its private half, checked
-      # against RFC 8032's published vectors rather than against a pair we made
-      # up. The release workflows use that derivation to refuse to sign with a
-      # key the shipped apps do not trust — a mismatch that fails nowhere in CI
-      # and is rejected on every client instead. Here rather than in `wire` for
-      # the same reason as the icon test: CryptoKit is macOS-only.
       - run: ./scripts/sparkle-key-test.sh
-      # The release downloader retries and checks sums (ov-1030).
       - run: ./scripts/gh-download-test.sh
 
-      # Hardened Runtime blocks camera access before macOS can show the consent
-      # prompt unless the final app signature carries the camera entitlement.
-      # Check every signing path, not only the local bundle assembled above.
       - run: ./scripts/macos-entitlements-test.sh "apps/macos/build/$APP_NAME.app"
 
   # The AgentKit and Mac tests, beside `swift` (see the note above it). The Mac
@@ -1111,8 +1104,6 @@ jobs:
     # ov-1052). 45 leaves at least 25% over the slower of the two.
     timeout-minutes: 45
     steps:
-      # The label promises Xcode 27. This makes the log say which one, and
-      # stops the job if the image ever hands it a different major.
       - name: Check the runner has Xcode 27
         run: |
           xcodebuild -version
@@ -1124,10 +1115,6 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # SwiftPM's downloads (ov-1030): Sparkle's release zip is a binary target
-      # fetched from github.com, and an anonymous download of it 504ed in
-      # GitHub's Nov 9 incident. Keyed by Package.resolved, so a warm run
-      # resolves from disk and makes no network request for it.
       - name: Cache SwiftPM downloads
         uses: actions/cache@v4
         with:
@@ -1139,29 +1126,14 @@ jobs:
             apps/macos/.build/repositories
           key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
 
-      # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
-      # The landing gate waits while the screen is locked (ov-1089).
       - run: ./scripts/wait-for-unlock-test.sh
-      # A test run that ends early, or counts fewer tests than its floor, fails
-      # (ov-324): a test that exited the process once ended `swift test` with
-      # exit 0 and left every later test unrun.
       - run: ./scripts/swift-test-guard-test.sh
-      # Only the stand-in checks, not the opt-in process experiment (ov-1119).
       - run: ./scripts/macos-test-partitions.py --self-test
-      # A run that leaves a plist in ~/Library/Preferences or a farcooler-* entry
-      # in TMPDIR fails (ov-541); both Swift test runs below are wrapped in it.
       - run: ./scripts/test-leak-check.py --self-test
-      # The capture harness's stop ends its daemon and tmux with no CLI (ov-278).
       - run: ./scripts/mac-capture-stop-test.sh
-      # Two captures of one run with the same bytes under different names are reported (ov-642).
       - run: ./scripts/capture-duplicates-test.sh
 
-      # AgentKit's tests link the Rust client library for the Plan's view
-      # (ov-1016), which the package never links itself: the watch and the
-      # widgets compile AgentKit without it. The same command as
-      # apps/macos/build-vt.sh, so the Mac step's build is a no-op and this
-      # costs nothing extra (ov-1052: `-p farcooler-client` alone added 2.4 min).
       - name: Build the Rust client library for AgentKit's tests
         run: cargo build --release -p farcooler-vt -p farcooler-client
       - name: Test AgentKit
@@ -1169,36 +1141,6 @@ jobs:
         # that adds tests raises the floor in apps/shared/AgentKit/test-floor.txt.
         run: ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit
 
-      # The Mac app's own four test targets, which had never run here.
-      #
-      # `swift test --package-path apps/shared/AgentKit` above is the only Swift
-      # test line this workflow has ever had, so `CeremonyTests`, `GlanceTests`,
-      # `TilingTests` and `RenderBenchTests` — 196 tests across 33 suites —
-      # executed nowhere but the machine that wrote them. That covers the
-      # `~/.ssh/config` writer, whose failure modes its own Package.swift
-      # comment names as "a runner taking over `github.com` for every push on
-      # this Mac", and the glance vocabulary, which rasterises a mark and reads
-      # the ink back out because "a view asked what it is will happily answer
-      # correctly while rendering something else". Both are things that CANNOT
-      # be caught by looking, which is the reason those targets exist at all.
-      #
-      # Last in the job, and it has to stay last. `swift test` can rewrite
-      # `Package.resolved`, and a dirty tree makes `scripts/version.sh channel`
-      # answer `local` — every step above that asks it must have asked already.
-      #
-      # It needs the `target/release` static libraries and the debug CLI and
-      # daemon, which `apps/macos/test.sh` builds itself now that `build-app.sh`
-      # runs in the other job (ov-301): the Rust cores, `cargo build --bins` and
-      # a debug `swift build`, about five minutes before the tests start.
-      # RenderBenchTests asserts nothing and stays silent unless
-      # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
-      #
-      # tmux, so `RealCLIConfirmationTests` runs here rather than reporting a
-      # skip: it starts the bundle's real daemon, which needs tmux, and feeds
-      # the Mac's parser what the real CLI prints (ov-160). The image has no
-      # tmux of its own. The same pinned tmux as the Rust job, from the same
-      # script (ov-554): the daemon behaves differently on 3.7 and 3.8.
-      # Outside the work tree, so the channel stays clean.
       - name: Cache the pinned tmux build
         uses: actions/cache@v4
         with:
@@ -1226,54 +1168,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # The action checks the label's promise first (Xcode 27, and the log says
-      # which). Everything that makes the app and its UI test bundle, and the upload of
-      # the products, is in the action (ov-534), because nightly.yml builds the
-      # same thing for the full shards. `package` is the plan's answer: when the
-      # smoke set will not run, nothing wants the products.
       - uses: ./.github/actions/ios-ui-build
         with:
           package: ${{ needs.ios-ui-plan.outputs.run }}
 
-      # Here rather than beside the other shell tests in the `swift` job because
-      # what it covers is the iOS archive's signing, and it needs a Mac to have
-      # a keychain to cover it with.
       - run: ./scripts/import-ios-certificate-test.sh
 
-      # What the generated project must be true of, and none of it is something
-      # the build above can catch. A watch app embedded in the extensions' slot,
-      # a bundle identifier that stops nesting, a target that names a different
-      # App Group — each compiles, links and signs, then fails at INSTALL, at
-      # launch, or as a widget that is permanently and silently empty. There is
-      # no `error:` line for any of them.
-      #
-      # After the build and its upload rather than before the xcframeworks
-      # (ov-301): a failure here then still leaves the UI shards their
-      # products, so they report on the app instead of on a missing artifact.
-      # It costs a red here two minutes later, which is the trade.
-      #
-      # Here rather than in `wire`: the generator shells out to
-      # scripts/icon-label.swift, which is AppKit, and AppKit does not exist on
-      # the Linux runner that job uses — the same reason icon-test.sh lives in
-      # `swift` instead.
       - run: ./scripts/generator-test.sh
 
-      # Run by the `ios-ui` job below (the smoke set) and by nightly.yml (every
-      # class that stands on an in-app harness and needs no runner). The rest
-      # of FarCoolerUITests needs a
-      # live runner — an sshd, a daemon and a tmux fleet, which is what
-      # scripts/demo-host.sh stands up on a laptop and what CI has none of —
-      # so that half stays a LOCAL guarantee. Run it before landing anything
-      # that touches a pane:
-      #
-      #   ./scripts/demo-host.sh
-      #   ./scripts/ios-ui-tests.sh
-      #
-      # Use that script and not xcodebuild directly. It puts the TEST_RUNNER_*
-      # assignments where xcodebuild actually reads them, and it fails a run in
-      # which every test skipped — which xcodebuild calls a success, and which
-      # is how eight green scroll tests once covered for a terminal that would
-      # not scroll.
 
   # Whether `ios-ui` runs, and that its class lists are complete.
   #
@@ -1316,11 +1218,6 @@ jobs:
         run: ./scripts/ios-ui-shards.py --check
       - run: ./scripts/ios-ui-shards.py --self-test
       - run: ./scripts/ios-ui-pick-simulator.py --self-test
-      # Main's successful CI runs, for a push: the base is the nearest one in
-      # this commit's history (scripts/ios-ui-plan.py). Without the list, or
-      # with an empty one, everything runs. When gh fails (a 502, a timeout) the
-      # step does not fail the job: it records why in CANDIDATES_ERROR, and the
-      # plan runs the smoke set with a notice (ov-340).
       - name: List the green CI runs
         if: github.event_name == 'push'
         env:
@@ -1376,8 +1273,6 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
-      # Only the scripts, and the action below: the app comes from the `ios`
-      # job.
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
         with:
@@ -1408,20 +1303,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: gradle/actions/setup-gradle@v4
 
-      # The NDK is not in the runner image by default, and the version is
-      # pinned: `build-android-libs.sh` discovers which API wrapper to use from
-      # what the NDK ships, so an unpinned one changes the floor the `.so` links
-      # against without anybody asking for it.
       - name: Install the NDK
         run: |
           echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             'ndk;29.0.14206865' 'platforms;android-37.1' 'build-tools;37.0.0'
 
-      # The tunnel is Go, and `build-android-libs.sh` builds it before the
-      # crate that links it. Pinned by `go-version-file` rather than trusted to
-      # the image, for the reason release.yml's iOS job gives at its own copy
-      # of this step: an image bump that drops Go fails with an error that
-      # never mentions Go.
       - uses: actions/setup-go@v5
         with:
           go-version-file: crates/tailcat/go/go.mod
@@ -1431,117 +1317,25 @@ jobs:
           # (about a minute in each job that builds it; ov-301).
           cache-dependency-path: crates/tailcat/go/go.sum
 
-      # Both `.so` are gitignored — they are build output — so CI has to build
-      # them before the Gradle project that packages them. Without this the APK
-      # ships for an ABI with no core in it and the failure arrives as an
-      # UnsatisfiedLinkError on the first screen rather than here.
       - name: Build the Rust core and the tunnel for Android
         run: ./scripts/build-android-libs.sh
 
-      # The Plan's view model is Rust's (ov-1016), and the phone's glance, sidebar and
-      # screen tests ask the host build of the JNI core for it. Without
-      # `-Pfarcooler.nativeLibDir` they fail on the first ask, which is the point.
       - name: Build the Rust core for the host
         run: cargo build -p farcooler-jni
 
-      # The ported logic, against the same fixtures the Swift suite uses. This
-      # is the job that catches the transcript reducer drifting from the Apple
-      # apps', which is the one thing about this client that must not happen.
       - name: Test
         working-directory: apps/android
         run: ./gradlew testInstrumentedUnitTest "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug"
 
-      # Both, in one invocation, and the second half is new.
-      #
-      # `app/src/androidTest/` was neither run nor COMPILED by this job.
-      # `testInstrumentedUnitTest` above builds `app/src/test/` and nothing
-      # else, `assembleDebug` builds the app, and no workflow in this
-      # repository mentioned `androidTest` anywhere — so 348 lines, including
-      # the `NativeBridgeTest` case that exists to catch
-      # `libfarcooler_jni.so` failing to load at all, could stop compiling
-      # while this job stayed green. That is this repository's own defining
-      # failure: a check that cannot fail. The iOS job above had the identical
-      # hole and closed it the identical way, with `build-for-testing`.
-      #
-      # `assembleAndroidTest` and not `assembleInstrumentedAndroidTest`: the
-      # variant task's name is spelled out of `testBuildType`, which
-      # `app/build.gradle.kts` sets to `instrumented` for a reason of its own
-      # and could set differently tomorrow. The lifecycle task is the name AGP
-      # keeps, and a job that named the variant would fail with
-      # `Task '…' not found`, which reads like the build breaking rather than
-      # like a rename.
-      #
-      # It does NOT run them. See the note below.
       - name: Build, including the instrumented test bundle
         working-directory: apps/android
         run: ./gradlew assembleDebug assembleAndroidTest
 
-      # NOT run here: everything under `app/src/androidTest/`. The suite is
-      # COMPILED by the step above and executed by none, and the two halves of
-      # that are worth keeping apart: a test that does not build is a defect
-      # this job can catch for nothing, and a test that does not run is a
-      # guarantee this job cannot give at all.
-      #
-      # Running it needs an emulator, and unlike the iOS suite there is no
-      # subset that would not — `NativeBridgeTest` exists precisely because
-      # there is no `libfarcooler_jni.so` on a desktop JVM's library path, and
-      # mocking it would test the mock. Booting one in CI is a real option and
-      # deliberately not taken here, so CI's silence about that suite is
-      # absence of evidence rather than evidence of absence. Run it against a
-      # connected device or emulator before landing anything that touches the
-      # JNI boundary:
-      #
-      #   ./scripts/build-android-libs.sh --emulator
-      #   ./gradlew connectedInstrumentedAndroidTest
-      #
-      # That task, and not `connectedAndroidTest`: `testBuildType` is
-      # `instrumented`, and the separate application id is what keeps a test
-      # run from uninstalling the debug app someone is using — which would take
-      # its Keystore SSH identity with it.
 
-      # The only build that reads `proguard-rules.pro` or runs `lintVital`, and
-      # neither had ever run at all.
-      #
-      # `build.gradle.kts` named a rules file that was never committed, and R8
-      # fails outright on a config that is not there — so `assembleRelease` had
-      # not once succeeded, while `apps/android/README.md` documents it as a
-      # command to run. Behind that sat a second failure nothing could reach:
-      # `lintVitalRelease` runs on release and not on debug. `4a0ba97` fixed
-      # both, and this step is what keeps them fixed. A debug build reads
-      # neither, which is exactly why nobody noticed for the life of the
-      # project.
-      #
-      # It needs nothing this job does not already have. The release block has
-      # no signing config, so what comes out is `app-release-unsigned.apk` and
-      # no keystore is involved; the Firebase plugin is applied only when
-      # `google-services.json` is present, which it is in no checkout; and the
-      # WorkOS client id is a Gradle property that defaults to empty. That is
-      # the same configuration the debug build above already runs under — the
-      # question here is whether it BUILDS, not whether it could ship, and a
-      # release anyone installs is built with the property the README names.
-      #
-      # Last, because it costs the most and answers the narrowest question: the
-      # release variant compiles from source again and then pays for R8 and
-      # resource shrinking on top — 24 s for the whole task on a developer's
-      # Mac, and more on a cold runner. A Kotlin error or a transcript reducer
-      # that has drifted from the Apple apps' should be reported by the step
-      # named for it, not out of the middle of a minified build.
       - name: Build the release APK
         working-directory: apps/android
         run: ./gradlew assembleRelease
 
-      # The Robolectric UI tests: everything in `com.farcooler.capture`, which
-      # the plain `Test` step above excludes (app/build.gradle.kts) because they
-      # need the merged resources and a newer JVM than the build's. That
-      # includes `NativeAgentViewTest`, the conversation view's UI tests, so a
-      # regression there (reconnect, off to on) failed no job until now (ov-398).
-      #
-      # Robolectric's sandbox for SDK 37 needs JDK 21, while the build stays on
-      # 17. So this installs 21 as a second JDK and hands its path to the test
-      # task alone, through `farcooler.captureJdk`; Gradle itself keeps running
-      # on 17. This is last, so the JDK 21 step cannot change what the builds
-      # above ran on. Animation scale stays 0 in the harness; nothing here
-      # touches it.
       - uses: actions/setup-java@v4
         id: jdk21
         with:
@@ -1557,9 +1351,6 @@ jobs:
             "-Pfarcooler.captureJdk=$CAPTURE_JDK" \
             "-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug" \
             --max-workers=2
-      # Gradle prints no test count, and a filter that matches nothing passes.
-      # Read the result files, print the count, and fail on none, or on a
-      # missing `NativeAgentViewTest` or `AppearanceViewTest`, which must run.
       - name: Count the UI tests that ran
         if: success() || failure()
         working-directory: apps/android/app/build/test-results/testInstrumentedUnitTest
@@ -1601,12 +1392,7 @@ jobs:
           cache-dependency-path: services/relay/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
-      # Inside workerd against a real D1, not against fakes: the account scoping
-      # on revoke and the expiry predicate on notify are SQL, and a fake would
-      # agree with whatever this code believed.
       - run: npm test
-      # A dry run compiles and bundles the worker without deploying it, which
-      # catches the class of error that only appears at upload time.
       - run: npx wrangler deploy --dry-run --outdir /tmp/relay-build
 
   site:
@@ -1625,11 +1411,7 @@ jobs:
           cache-dependency-path: services/site/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
-      # Inside workerd: the redirect's host check, its fallback and the
-      # analytics beacon are all behavior the tests have to be able to fail.
       - run: npm test
-      # Compiles and bundles the Worker and its assets without deploying, for
-      # each channel's site (ov-521): www is the top level, so no --env.
       - run: npx wrangler deploy --dry-run --outdir /tmp/site-build
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary
       - run: npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview
@@ -1648,9 +1430,6 @@ jobs:
       run:
         working-directory: services/web
     env:
-      # crates/web/build.sh's tools: rustc's wasm32 target, and these two,
-      # pinned by version and checksum. wasm-bindgen must equal the crate
-      # version in crates/web/Cargo.lock, and build.sh refuses another.
       WASM_BINDGEN_VERSION: 0.2.129
       WASM_BINDGEN_SHA256: 82d12bb940e2d4e72e0d5605387fc1b8ca179044e012b620f0ce4e7440e8320e
       BINARYEN_VERSION: version_133
@@ -1680,11 +1459,6 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: services/web/package-lock.json
-      # Cached by version and checksum, and fetched with `gh release download`,
-      # which is authenticated (GITHUB_TOKEN) where a bare curl of the release
-      # URL is anonymous and was the first thing throttled in GitHub's Nov 9
-      # incident (ov-1030). scripts/gh-download.sh retries with a growing wait
-      # and checks the sha256 before anything is unpacked.
       - name: Cache wasm-bindgen and wasm-opt
         id: wasm-tools
         uses: actions/cache@v4
@@ -1711,12 +1485,6 @@ jobs:
         run: |
           echo "WASM_BINDGEN=$RUNNER_TEMP/wasm-tools/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen" >> "$GITHUB_ENV"
           echo "WASM_OPT=$RUNNER_TEMP/wasm-tools/binaryen-$BINARYEN_VERSION/bin/wasm-opt" >> "$GITHUB_ENV"
-      # The client core a browser runs (ov-768): farcooler-client at its web
-      # feature, russh on ring, for the browser's target. Then its resolved
-      # tree, held to neither aws-lc (C a page cannot build) nor mio (tokio's
-      # sockets), each of which one feature on one dependency brings back
-      # without a compile error on a desktop; the self-test first, so a
-      # checker that cannot fail is caught before it is trusted.
       - run: cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown
         working-directory: .
       - run: ./scripts/web-client-tree-check.py --self-test
@@ -1725,15 +1493,8 @@ jobs:
         working-directory: .
       - run: npm ci
       - run: npx tsc --noEmit -p tsconfig.json
-      # Inside workerd: the flag, the CSP, the host check and the API's CSRF
-      # checks each have a test that goes red without them.
       - run: npm test
-      # The workflow card's two Node tests (vitest leaves them out): the
-      # client modules compiled by esbuild, then each test against them.
       - run: npm run test:workflow
-      # A real sshd, for crates/web's passkey test below and the browser check:
-      # only sshd verifies a passkey's webauthn-sk signature. The image ships
-      # openssh-server; this installs it if one ever doesn't.
       - name: Make sure there is an sshd for the passkey login
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -1744,20 +1505,11 @@ jobs:
             sudo apt-get -o Acquire::Retries=3 install -y openssh-server
           fi
           /usr/sbin/sshd -V 2>&1 | head -1
-      # crates/web: against an in-process SSH server, the pinned host key (an
-      # altered one is refused before any auth) and the two-channel pane;
-      # against the real sshd above, the passkey's login (ECDSA-SK, one touch
-      # per connect, a false or replayed signature refused); and the passkey's
-      # encoding against the relay's browser fixture. Then the tunnel's browser
-      # half in a JS engine: one writer, in order.
       - run: cargo test --locked --manifest-path ../../crates/web/Cargo.toml
       - run: GOOS=js GOARCH=wasm go test -exec "$(go env GOROOT)/lib/wasm/go_js_wasm_exec" .
         working-directory: crates/tailcat/go
-      # The gate's own limits, proved against a build that breaks each one.
       - run: node scripts/size-gate.mjs --self-test
       - run: ../../crates/web/build.sh --channel stable --out "$RUNNER_TEMP/wasm-stable"
-      # The client's types need the wasm-bindgen glue only through wasm.d.ts,
-      # so this checks against the declarations the page relies on.
       - run: npx tsc --noEmit -p tsconfig.client.json
       - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-stable" ./build.sh --channel stable --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
@@ -1766,25 +1518,8 @@ jobs:
       - run: WEB_WASM_DIR="$RUNNER_TEMP/wasm-canary" ./build.sh --channel canary --build "$GITHUB_SHA"
       - run: node scripts/size-gate.mjs dist
       - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary
-      # The canary shell in headless Chromium under its production CSP, its
-      # passkey in Chromium's virtual authenticator: boot, Make Passkey,
-      # enrollment, the camera, and a terminal through a real sshd (the only
-      # verifier of a passkey's webauthn-sk signature) in front of crates/web's
-      # fake daemon, at one touch per connect, refused with its pin altered and
-      # from canary.farcooler.com. Any violation fails it.
       - run: cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon
       - run: npx playwright-core install --with-deps --only-shell chromium
-      # The plan page draws the Rust view model's column (ov-1016): every
-      # fact, pipeline group, agent, ticket and footer count the golden view
-      # names is on the page, in its order, and nothing words or sorts it again.
       - run: node test/browser/plan-render-check.mjs
-      # --tunnel-delay holds each tunnel message 100 ms, so the pane is still
-      # attaching when the check types: keystrokes typed then must be held
-      # and sent, never dropped (train 307 found them dropped on this runner).
       - run: node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100
-      # A tab that sleeps (ov-840): idle past the probe's nine seconds, hidden
-      # and woken after 1 and 10 minutes on the page's clock, with the tunnel
-      # alive (no help needed) and dead (the notice within 5 s of waking, one
-      # touch back to a working pane). Chromium only here; WebKit passes the
-      # same cases locally (--engines webkit).
       - run: node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium

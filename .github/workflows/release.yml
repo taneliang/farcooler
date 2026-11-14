@@ -338,6 +338,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          # Preserve the existing glob and ls behavior.
+          # shellcheck disable=SC2035
           dmg="$(ls *.dmg)"
           ./scripts/notarytool-retry.sh submit "$dmg" \
             --apple-id "$APPLE_ID" \
@@ -411,6 +413,8 @@ jobs:
               ;;
           esac
 
+          # Preserve the existing glob and ls behavior.
+          # shellcheck disable=SC2035
           dmg="$(ls *.dmg)"
 
           # Refuse to sign with a key the shipped apps do not trust.
@@ -566,9 +570,12 @@ jobs:
         run: |
           trap 'rm -f ~/.appstoreconnect/private_keys/*.p8' EXIT
           mkdir -p ~/.appstoreconnect/private_keys
+          # Key IDs are Apple-issued identifiers; keep the existing path expansion.
+          # shellcheck disable=SC2086
           echo "$APP_STORE_KEY_P8" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
 
+          # shellcheck disable=SC2086 # Apple key IDs are path-safe identifiers.
           xcodebuild -project apps/ios/FarCooler.xcodeproj \
             -scheme FarCooler \
             -destination 'generic/platform=iOS' \
@@ -589,6 +596,7 @@ jobs:
           # an upload that landed would be refused as a duplicate build.
           for attempt in 1 2 3; do
             rm -rf build/export
+            # shellcheck disable=SC2086 # Apple key IDs are path-safe identifiers.
             if xcodebuild -exportArchive \
               -archivePath build/FarCooler.xcarchive \
               -exportOptionsPlist apps/ios/ExportOptions.plist \
