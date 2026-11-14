@@ -33,11 +33,18 @@ def peak(jobs, weights):
     for job in jobs:
         visit(job)
     names = [n for n in jobs if weights[n]]
-    return max((sum(weights[n] for n in subset)
-                for size in range(len(names) + 1)
-                for subset in itertools.combinations(names, size)
-                if all(a not in ancestors[b] and b not in ancestors[a]
-                       for a, b in itertools.combinations(subset, 2))), default=0)
+    # Maximum-weight independent set of the comparability graph. Branch on
+    # each job and discard its relatives; this avoids enumerating all subsets.
+    conflicts = {n: {m for m in names if m != n and
+                    (m in ancestors[n] or n in ancestors[m])} for n in names}
+    def search(remaining):
+        if not remaining:
+            return 0
+        n = max(remaining, key=lambda item: len(conflicts[item] & remaining))
+        rest = remaining - {n}
+        return max(search(rest), weights[n] + search(rest - conflicts[n]))
+    return search(set(names))
+
 
 
 def widths(keys, texts):
@@ -64,9 +71,20 @@ def widths(keys, texts):
                 or not re.fullmatch(r"matrix:\ninclude:(?:\n- arch: [^\n]+\ntarget: [^\n]+\nmusl_sha256: [^\n]+)+", strategy)):
             raise ValueError("unmodelled include matrix: " + strategy)
         return len(re.findall(r"^- arch:", strategy, re.M)), 0
-    axes = re.findall(r"^(?:os|shard): \[([^\]]+)\]$", strategy, re.M)
+    # Exclusions can only reduce capacity. Validate this known targeted-shard
+    # form, then count the full scheduled matrix as the conservative bound.
+    if "\nexclude:" in strategy:
+        strategy, excludes = strategy.split("\nexclude:", 1)
+        axis = re.search(r"^shard: \[([^\]]+)\]$", strategy, re.M)
+        if not axis:
+            raise ValueError("unmodelled targeted matrix")
+        labels = [label.strip() for label in axis[1].split(",")]
+        expected = [f"- shard: ${{{{ inputs.shard != '' && inputs.shard != 'all' && inputs.shard != '{label}' && '{label}' || '__none__' }}}}" for label in labels]
+        if excludes.strip().splitlines() != expected:
+            raise ValueError("unmodelled matrix exclusions: " + excludes)
+    axes = re.findall(r"^(?:os|shard|part): \[([^\]]+)\]$", strategy, re.M)
     known_strategy = all(re.fullmatch(
-        r"(?:fail-fast: (?:false|true)|max-parallel: [1-9]\d*|matrix:|(?:os|shard): \[[^\]]+\])", line)
+        r"(?:fail-fast: (?:false|true)|max-parallel: [1-9]\d*|matrix:|(?:os|shard|part): \[[^\]]+\])", line)
         for line in strategy.splitlines())
     if not known_strategy or ("matrix:" in strategy and len(axes) != 1):
         raise ValueError("unmodelled matrix: " + strategy)
@@ -204,6 +222,18 @@ def main():
         new_workflow = dict(texts, **{"new.yml": "on:\n  push:\njobs:\n  job:\n    runs-on: ubuntu-latest\n"})
         if not check(new_workflow)[0]:
             problems.append("a newly discovered workflow escaped the budget")
+        # Scheduled/full runs retain every shard; targeted exclusions may only
+        # reduce that width, and changes to their shape require review.
+        targeted = proto.workflow_jobs(texts["nightly.yml"])["ios-ui"]
+        if widths(targeted, texts) != (1, 1):
+            problems.append("targeted Nightly matrix lost its conservative full-run bound")
+        malformed = dict(targeted, strategy=targeted["strategy"].replace("'__none__'", "'shell'", 1))
+        try:
+            widths(malformed, texts)
+        except ValueError:
+            pass
+        else:
+            problems.append("unreviewed Nightly exclusions escaped the model")
         # Exercise graph width independently of current hardcoded job counts.
         graph = {"a": {}, "b": {}, "c": {"needs": "[a, b]"}}
         if peak(graph, {"a": 2, "b": 1, "c": 4}) != 4:

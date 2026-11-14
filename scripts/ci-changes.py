@@ -293,7 +293,7 @@ def self_test():
     expect("docs-only leaves app off", families(["docs/a.md"])["app"], False)
     for path in ["reports/ov-1157/landing-rca.md", ".claude/agent/reports/ov-1157/landing-rca.md"]:
         expect(f"{path} selects only cheap jobs", families([path]),
-               {**{k: False for k in ALL}, "docs": True, "app": False})
+               {**{k: False for k in ALL}, "docs": True, "app": False, "non_docs": False})
     expect("a Swift change leaves docs off", families(["apps/macos/a.swift"])["docs"], False)
     for files, want in [
         (["docs/a.md", "README.md", "reports/run.txt", ".claude/agent/reports/a.md"], False),

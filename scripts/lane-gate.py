@@ -82,6 +82,7 @@ import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import process_guard
 import heavy_lock as hl  # noqa: E402  the machine-wide lock, shared with scripts/heavy
 from heavy_lock import LOCK_POLL, machine_lock  # noqa: E402
 
@@ -538,16 +539,10 @@ def run_step(step, repo, env, logdir, tmp, fail_fast=False):
     log = logdir / f"{step.job}-{abs(hash(step.run)) % 10**8}.log"
     started = time.time()
     with open(log, "w") as f:
-        # A private process group lets a failed landing step stop any children it
-        # left running, without touching processes belonging to another gate.
-        proc = subprocess.Popen(["bash", "-e", "-c", step.run], cwd=cwd, env=e,
-                                stdout=f, stderr=subprocess.STDOUT, start_new_session=fail_fast)
-        code = proc.wait()
-        if fail_fast and code != 0:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        # The supervisor owns the step's session, including when the gate dies.
+        # It also reaps children before returning a failure to fail-fast callers.
+        code = process_guard.run(["bash", "-e", "-c", step.run], cwd=cwd, env=e,
+                                 stdout=f, stderr=subprocess.STDOUT).returncode
     secs = time.time() - started
     output = log.read_text(errors="replace")
     # What the step left for the ones after it, as GitHub's files do.
@@ -962,6 +957,9 @@ def print_summary(rows, repo, base, logdir, failed, left_out=(), write_to=None):
 def self_test():
     from unittest.mock import patch
 
+    if subprocess.call([sys.executable, str(ROOT / "scripts/process_guard_test.py")]):
+        return 1
+
     # An outer scripts/heavy owns the machine queue, not these scratch queues.
     # Restore its marker afterward; production nested gates must still bypass it.
     with patch.dict(os.environ):
@@ -1028,8 +1026,12 @@ def _self_test():
     expect("local gate runs one full Rust workspace suite", sum(
         "cargo nextest run --profile ci --workspace" in s.run and not s.skip
         for s in plans["rust"]), 1)
-    expect("filtered Mac CI tests do not duplicate the full local suite", any(
-        s.name == "macOS native Rust tests" and bool(s.skip) for s in plans["rust"]), True)
+    native = parse_steps(job_block(text, "rust-macos-tests") or [])
+    expect("CI retains its filtered Mac native tests", sum(
+        name == "macOS native Rust tests" and "--partition" in run and "-E" in run
+        for name, run, _wd, _env in native), 1)
+    expect("local gate does not replay filtered Mac CI tests", any(
+        s.name == "macOS native Rust tests" and not s.skip for s in plans["rust"]), False)
     expect("local Rust runs the full workspace exactly once", sum(
         "cargo nextest run --profile ci --workspace" in step.run and not step.skip
         for step in plans["rust"]), 1)

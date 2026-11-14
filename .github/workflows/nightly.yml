@@ -422,12 +422,10 @@ jobs:
   # nothing fails rather than passing empty. A red job files the nightly issue
   # through `report`, which names it.
   mac-perf:
-    needs: [captures]
-    if: ${{ !cancelled() && (inputs.shard == '' || inputs.shard == 'all') }}
     name: Mac perf gates
     needs: [captures, yield-perf]
     # A failed shard must not suppress unrelated perf coverage.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (inputs.shard == '' || inputs.shard == 'all') }}
     runs-on: xcode-27
     concurrency:
       group: background-macos

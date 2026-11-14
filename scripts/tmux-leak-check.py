@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import process_guard
 
 GRACE_SECONDS = 5
 # Every private dir `run` made, for the self-test to remove once it has ended
@@ -109,7 +110,7 @@ def run(argv, kill, grace=GRACE_SECONDS):
     base = tempfile.mkdtemp(prefix="fc-leak-", dir="/tmp")
     BASES.append(base)
     try:
-        status = subprocess.run(argv, env={**os.environ, "TMUX_TMPDIR": base}).returncode
+        status = process_guard.run(argv, env={**os.environ, "TMUX_TMPDIR": base}).returncode
         servers, daemons = leaked(base, grace)
         for pid in sorted(servers):
             print(f"tmux-leak-check: LEAKED tmux server {pid} (socket under {base})", file=sys.stderr)
@@ -186,7 +187,12 @@ def self_test():
         with open(fake, "w") as f:
             f.write("import time\ntime.sleep(600)\n")
         python = sys.executable
-        leave = ["sh", "-c", f"{python} {fake} </dev/null >/dev/null 2>&1 &"]
+        # Cover a daemon that leaves the session. An ordinary background
+        # child now belongs to process_guard's session and is reaped there
+        # before this detached-daemon check runs (ov-1138).
+        leave = [python, "-c", "import subprocess, sys; subprocess.Popen("
+                 "[sys.executable, sys.argv[1]], start_new_session=True, "
+                 "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)", fake]
         rc6, pids6 = run(leave, kill=False, grace=1)
         if rc6 != 1 or len(pids6) != 1:
             failures.append(f"a leaked farcoolerd was not caught (rc={rc6}, pids={pids6})")

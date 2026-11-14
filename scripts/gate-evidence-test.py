@@ -36,7 +36,7 @@ class EvidenceTest(unittest.TestCase):
         (self.repo / ".github/actions/ios-ui-build/action.yml").write_text("runs:\n  steps:\n")
         (self.repo / ".github/workflows").mkdir()
         jobs = []
-        for job in [j for j in evidence.load_lane().JOBS if j != "doc-comments"] + ["ios-ui-plan", "android-build", "android-ui"]:
+        for job in [j for j in evidence.load_lane().JOBS if j != "doc-comments"] + ["ios-ui-plan", "android-build", "android-ui", "tunnel-helper"]:
             jobs.append(f"  {job}:\n    steps:\n      - run: printf '{job} output\\n'\n")
         # The local Rust plan is derived from CI's archive consumer even when
         # this fixture executes only wire/doc-comments jobs.
