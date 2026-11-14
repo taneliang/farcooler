@@ -8,6 +8,55 @@ use farcooler_store::{PendingWake, WakeKind, models::{Actor, Task}};
 
 use super::{Held, Pass, Watcher, codex_turn, foreground, now_millis};
 
+struct QueuedContext {
+    terminal: uuid::Uuid,
+    watcher: std::sync::Weak<Watcher>,
+    wake: PendingWake,
+    task: Task,
+    text: String,
+}
+static CONTEXT: std::sync::Mutex<Vec<QueuedContext>> = std::sync::Mutex::new(Vec::new());
+
+pub(crate) fn forget_context(terminal: uuid::Uuid) {
+    CONTEXT.lock().unwrap().retain(|q| q.terminal != terminal);
+}
+
+/// Called only after the native host validates the hook's agent, tree and session. Unclaimed
+/// messages remain in the durable wake queue until a hook capable of printing context takes them.
+pub(crate) async fn context_reply(
+    terminal: uuid::Uuid, line: &farcooler_agent_hooks::wire::HookLine,
+    write: &mut (impl tokio::io::AsyncWrite + Unpin),
+) -> bool {
+    use tokio::io::AsyncWriteExt;
+    if line.agent != farcooler_agent_hooks::Agent::Claude || line.event != "PreToolUse"
+        || !line.takes.iter().any(|t| t == farcooler_agent_hooks::wire::TAKES_CONTEXT)
+        || line.payload.get("agent_id").is_some() { return false; }
+    let queued = {
+        let mut queue = CONTEXT.lock().unwrap();
+        let Some(index) = queue.iter().position(|q| q.terminal == terminal) else { return false };
+        queue.remove(index)
+    };
+    let Some(watcher) = queued.watcher.upgrade() else { return false };
+    // Serialize the claim and handoff with the ordinary pump: it must not mistake an in-flight
+    // hook write for a claim left behind by a crashed process. Never delay a hook behind that pump.
+    let Ok(_one_pass) = watcher.wake_pump.try_lock() else {
+        let mut queue = CONTEXT.lock().unwrap();
+        if !queue.iter().any(|q| q.wake.note == queued.wake.note) { queue.insert(0, queued); }
+        return false;
+    };
+    if !watcher.service.store.get_workspace(queued.task.workspace_id).is_ok_and(|w| w.wake_on_answer) {
+        return false;
+    }
+    if !matches!(watcher.service.store.claim_wake(&queued.wake), Ok(true)) { return false; }
+    let reply = farcooler_agent_hooks::wire::encode_line(&farcooler_agent_hooks::wire::Reply::Context {
+        additional_context: queued.text,
+    }).expect("context reply encodes");
+    let sent = write.write_all(reply.as_bytes()).await.is_ok();
+    watcher.settle(&queued.wake, Some(&queued.task),
+        (!sent).then(|| "Couldn't confirm the message reached its engine agent".into()));
+    true
+}
+
 impl Watcher {
     /// Only an actual acceptance revision on a currently running engine card warrants a notice.
     /// The short notice makes the agent re-read the card, so even a long replacement isn't truncated.
@@ -25,7 +74,7 @@ impl Watcher {
         }
     }
 
-    /// The ordinary pump owns claims and ordering. Nothing is retried after a claim, including an
+    /// The ordinary pump owns ordering; a native context hook claims at handoff. Nothing is retried after a claim, including an
     /// uncertain queue handoff or a paste left behind. The pane must still belong to the addressed run.
     pub(super) async fn tell_engine(&self, wake: &PendingWake, task: &Task) -> Option<Pass> {
         if wake.kind != WakeKind::Message { return None; }
@@ -36,6 +85,16 @@ impl Watcher {
         if runtime.tmux.pane_life(&pane.pane_id, pane.terminal_id).await.ok()
             != Some(farcooler_tmux::PaneLife::Live) { return waiting(); }
         let text = self.message_text(wake, task);
+        // A busy Claude takes context on its next tool call. No Enter, draft modification or
+        // permission decision: the native host owns and authenticates this run's hook connection.
+        if preset == "claude" && !between(preset, pid).await {
+            let mut queue = CONTEXT.lock().unwrap();
+            if !queue.iter().any(|q| q.wake.note == wake.note) {
+                queue.push(QueuedContext { terminal: pane.terminal_id, watcher: self.me.clone(),
+                    wake: wake.clone(), task: task.clone(), text });
+            }
+            return waiting();
+        }
         // Codex's native queue reaches a working turn without an Enter that might answer a dialog.
         // Discover the live process's own thread and home, never a card's old transcript.
         if preset == "codex" {
@@ -134,7 +193,21 @@ mod tests {
     async fn scratch(dir: &std::path::Path, agent: &str) -> (Scratch, farcooler_core::inventory::TaggedPane) {
         let program = dir.join(agent);
         std::fs::copy(farcooler_core::programs::find("perl").unwrap(), &program).unwrap();
-        std::fs::write(dir.join("agent.pl"), include_str!("stand_in.pl")).unwrap();
+        // Optional native hook endpoint: the same working TUI keeps drawing while its tool hooks
+        // receive context. No paid agent, and no terminal keys needed to read a message.
+        let script = include_str!("stand_in.pl").replace("while (1) {", r#"while (1) {
+    if (-S 'engine-hook.sock') {
+        require IO::Socket::UNIX;
+        require JSON::PP;
+        my $s = IO::Socket::UNIX->new(Type => Socket::SOCK_STREAM(), Peer => 'engine-hook.sock') or die;
+        print $s JSON::PP::encode_json({agent=>'claude',event=>'PreToolUse',takes=>['additional_context'],payload=>{}}) . "\n";
+        my $reply = <$s>;
+        close $s;
+        my $out = JSON::PP::decode_json($reply);
+        logit('CONTEXT ' . $out->{additional_context}) if $out->{additional_context};
+    }
+"#);
+        std::fs::write(dir.join("agent.pl"), script).unwrap();
         let mode = if agent == "codex" { "working" } else { "idle" };
         std::fs::write(dir.join("control"), mode).unwrap();
         let rollout = dir.join(".codex/sessions/2026/11/14/rollout-engine.jsonl");
@@ -181,6 +254,96 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         panic!("message never submitted: {}", std::fs::read_to_string(dir.join("log")).unwrap_or_default());
+    }
+
+    #[tokio::test]
+    async fn working_claude_receives_message_and_acceptance_through_native_hooks() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        let (dir, svc, repo) = crate::test_support::fixture().await;
+        let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let task = svc.store.create_task(ws, "working engine", Actor::Manager).unwrap();
+        let watcher = Watcher::new(svc.clone());
+        let (server, pane) = scratch(dir.path(), "claude").await;
+        let _listed = crate::watch_view::publish(&ws.to_string(), &task.key, server.0.clone(), pane.clone());
+        std::fs::write(dir.path().join("control"), "working").unwrap();
+        for _ in 0..300 {
+            if std::fs::read_to_string(dir.path().join("log")).unwrap().contains("MODE working") { break; }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        send(&watcher, &task, "Rebase while you work").await;
+        watcher.pump_wakes().await;
+        assert_eq!(svc.store.pending_message_wakes().unwrap().len(), 1, "held until a hook takes it");
+        // Older hooks cannot print context; subagents must not consume the main agent's queue.
+        let mut hook: farcooler_agent_hooks::wire::HookLine = serde_json::from_value(serde_json::json!({
+            "agent": "claude", "event": "PreToolUse", "payload": {}, "takes": []
+        })).unwrap();
+        let mut output = Vec::new();
+        assert!(!context_reply(pane.terminal_id, &hook, &mut output).await);
+        hook.takes.push("additional_context".into());
+        hook.payload = serde_json::json!({"agent_id": "child"});
+        assert!(!context_reply(pane.terminal_id, &hook, &mut output).await);
+        hook.payload = serde_json::json!({});
+        assert!(!context_reply(Uuid::now_v7(), &hook, &mut output).await);
+        let pumping = watcher.wake_pump.lock().await;
+        assert!(!context_reply(pane.terminal_id, &hook, &mut output).await, "a busy pump leaves context queued");
+        drop(pumping);
+        assert!(output.is_empty());
+        let listener = tokio::net::UnixListener::bind(dir.path().join("engine-hook.sock")).unwrap();
+        let host = tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut stream = tokio::io::BufReader::new(stream);
+                let mut raw = String::new();
+                stream.read_line(&mut raw).await.unwrap();
+                let line = serde_json::from_str(&raw).unwrap();
+                if !context_reply(pane.terminal_id, &line, stream.get_mut()).await {
+                    stream.get_mut().write_all(b"{}\n").await.unwrap();
+                }
+            }
+        });
+        for text in ["Rebase while you work", "Acceptance changed on"] {
+            if text.starts_with("Acceptance") {
+                crate::task_ops::update(&svc, &watcher, &pb::TaskUpdate {
+                    task_id: task.id.as_bytes().to_vec().into(), expected_version: task.resource_version,
+                    title: task.title.clone(), intent: task.intent.clone(), actor: "manager".into(),
+                    acceptance: vec![pb::TaskAcceptanceItem { text: "Changed mid-turn".into(), ..Default::default() }],
+                    ..Default::default()
+                }).unwrap();
+            }
+            for _ in 0..300 {
+                watcher.pump_wakes().await;
+                if std::fs::read_to_string(dir.path().join("log")).unwrap().lines()
+                    .any(|line| line.starts_with("CONTEXT ") && line.contains(text)) { break; }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
+            assert_eq!(log.lines().filter(|l| l.starts_with("CONTEXT ") && l.contains(text)).count(), 1, "{log}");
+            assert_eq!(std::fs::read_to_string(dir.path().join("control")).unwrap(), "working");
+            assert!(!log.contains("PASTE") && !log.contains("ENTER") && !log.contains("ANSWERED"), "{log}");
+            assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+        }
+        std::fs::remove_file(dir.path().join("engine-hook.sock")).unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        send(&watcher, &task, "Uncertain hook handoff").await;
+        watcher.pump_wakes().await;
+        let (mut write, read) = tokio::io::duplex(64);
+        drop(read);
+        assert!(context_reply(pane.terminal_id, &hook, &mut write).await);
+        assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+        assert!(svc.store.notes_for(task.id, None).unwrap().iter().any(|n| n.body.contains("Couldn't confirm")));
+        assert!(!context_reply(pane.terminal_id, &hook, &mut Vec::new()).await, "an uncertain handoff is never retried");
+        send(&watcher, &task, "Only this run").await;
+        watcher.pump_wakes().await;
+        drop(_listed);
+        let mut output = Vec::new();
+        assert!(!context_reply(pane.terminal_id, &hook, &mut output).await, "ending a run removes its context queue");
+        let replacement = farcooler_core::inventory::TaggedPane { terminal_id: Uuid::now_v7(), ..pane };
+        let _next = crate::watch_view::publish(&ws.to_string(), &task.key, server.0.clone(), replacement);
+        watcher.pump_wakes().await;
+        assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+        assert!(!std::fs::read_to_string(dir.path().join("log")).unwrap().contains("Only this run"));
+        host.abort();
+        let _ = host.await;
     }
 
     #[tokio::test]

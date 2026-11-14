@@ -38,7 +38,10 @@ pub fn publish(workspace: &str, item: &str, server: TmuxServer, pane: TaggedPane
 impl Drop for Listed {
     fn drop(&mut self) {
         if let Ok(mut live) = LIVE.lock() {
-            live.remove(&self.0);
+            if let Some((_, pane)) = live.remove(&self.0)
+                && !live.values().any(|(_, p)| p.terminal_id == pane.terminal_id) {
+                crate::watch::answer_wake::engine::forget_context(pane.terminal_id);
+            }
         }
     }
 }

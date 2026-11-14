@@ -233,6 +233,9 @@ async fn with_input(
     let native_stop = gating && event == "Stop" && matches!(agent, Agent::Claude | Agent::Codex);
     if native_stop { takes.push(TAKES_FOLLOWUP.to_string()); }
     let pre_tool = event == "PreToolUse";
+    if gating && agent == Agent::Claude && pre_tool {
+        takes.push(farcooler_agent_hooks::wire::TAKES_CONTEXT.to_string());
+    }
     let launch = pane_launch(std::env::var_os(farcooler_core::pane_env::LAUNCH));
     let line = HookLine { agent, event, payload, takes, launch };
     let Ok(encoded) = encode_line(&line) else {
@@ -286,6 +289,11 @@ async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant, pre_t
             verdict
         }
     };
+    if pre_tool && let Some(context) = verdict.additional_context {
+        return serde_json::json!({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "additionalContext": context,
+        }}).to_string();
+    }
     // Cursor's own shape: its `stop` hook queues `followup_message` as the
     // next user message.
     if let Some(message) = verdict.followup_message {
@@ -426,6 +434,28 @@ mod tests {
         .await;
 
         assert_eq!(out, "", "a hook with nowhere to send must print nothing at all");
+    }
+
+    #[tokio::test]
+    async fn pre_tool_context_prints_without_granting_permission() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("h.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let host = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(stream);
+            let mut raw = String::new();
+            reader.read_line(&mut raw).await.unwrap();
+            let line: HookLine = serde_json::from_str(&raw).unwrap();
+            assert!(line.takes.iter().any(|t| t == "additional_context"));
+            reader.get_mut().write_all(b"{\"additional_context\":\"Acceptance changed\"}\n").await.unwrap();
+        });
+        let out = run_with_input(Agent::Claude, "PreToolUse".into(), socket, true,
+            b"{\"session_id\":\"engine\"}".to_vec(), SHAPE_NOT_SPEED).await;
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap(), serde_json::json!({
+            "hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "Acceptance changed"}
+        }));
+        host.await.unwrap();
     }
 
     /// A refusal on the fence (`PreToolUse`), as a subagent asked to stop

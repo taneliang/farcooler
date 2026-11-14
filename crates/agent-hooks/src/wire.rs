@@ -45,6 +45,9 @@ pub const TAKES_UPDATED_INPUT: &str = "updated_input";
 /// settles a message the moment it hands it over.
 pub const TAKES_FOLLOWUP: &str = "followup";
 
+/// A waiting Claude PreToolUse hook can print context without deciding permissions.
+pub const TAKES_CONTEXT: &str = "additional_context";
+
 impl HookLine {
     /// Whether the hook that sent this prints a decision's `updatedInput`.
     pub fn takes_updated_input(&self) -> bool {
@@ -77,6 +80,9 @@ impl HookLine {
 /// `Reply`, which cannot carry a decision and a hold together.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct HookVerdict {
+    /// Context delivered by a waiting Claude PreToolUse hook, without a permission decision.
+    #[serde(default)]
+    pub additional_context: Option<String>,
     #[serde(default)]
     pub decision: Option<Decision>,
     #[serde(default)]
@@ -104,6 +110,8 @@ pub enum Reply {
     /// Cursor's `stop` hook (`FOLLOWUPS`): the hook prints it as the agent's
     /// `followup_message`, which cursor queues as the next user message.
     Followup { followup_message: String },
+    /// Claude's PreToolUse hook adds context to the active turn without a permission decision.
+    Context { additional_context: String },
 }
 
 impl Reply {
@@ -233,7 +241,7 @@ mod tests {
         let encoded = encode_line(&Reply::hold(LONGEST_HOLD)).expect("encodes");
         assert_eq!(
             decode_line::<HookVerdict>(encoded.trim()).expect("decodes"),
-            HookVerdict { decision: None, hold_ms: Some(60_000), followup_message: None }
+            HookVerdict { decision: None, hold_ms: Some(60_000), followup_message: None, additional_context: None }
         );
     }
 

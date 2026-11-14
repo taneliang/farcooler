@@ -345,12 +345,18 @@ impl Exec {
             let fact = facts(line.agent, &line.payload);
             // An agent's hooks name the directory it is in now, which is wherever it last moved to: ov-1064's reviewer
             // ended its turn in `apps/android`, and a hook that had to name the worktree itself was never heard (ov-1082).
-            if line.agent != agent || !fact.cwd.as_deref().is_some_and(|cwd| cwd.starts_with(&tree)) { continue; }
+            if line.agent != agent || !fact.cwd.as_deref().is_some_and(|cwd| cwd.starts_with(&tree)) {
+                let _ = stream.get_mut().write_all(b"{}\n").await;
+                continue;
+            }
             let Some(sid) = &fact.session_id else { continue };
             if session.is_none() && matches!(line.event.as_str(), "SessionStart" | "sessionStart") {
                 session = Some(sid.clone());
             }
-            if session.as_ref() != Some(sid) { continue; }
+            if session.as_ref() != Some(sid) {
+                let _ = stream.get_mut().write_all(b"{}\n").await;
+                continue;
+            }
             heard = clock.now();
             heard_from.store(true, std::sync::atomic::Ordering::Relaxed);
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
@@ -377,7 +383,9 @@ impl Exec {
             } else { None };
             let continued = followup.is_some();
             if keyed_stop && let Some(reply) = followup { continued_stop = Some((line.payload.clone(), reply)); }
-            if !continued { let _ = stream.get_mut().write_all(b"{}\n").await; }
+            if !continued && !crate::watch::answer_wake::engine::context_reply(terminal(binding), &line, stream.get_mut()).await {
+                let _ = stream.get_mut().write_all(b"{}\n").await;
+            }
             hooks.push(line);
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
             if continued { unfinished = None; continue; }
