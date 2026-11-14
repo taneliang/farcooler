@@ -75,8 +75,11 @@ failure mechanism is missing the short healthy observation window under load;
 this is a hypothesis from the fixture and production retry code, not a proven
 product fix. No Rust code or test assertion, timeout, filter or retry policy
 was changed in response. The complete first-attempt job log is retained.
-The whole failed shard will be rerun unchanged, including its coverage guard
-and both leak wrappers; any passing rerun will be reported as a separate attempt.
+GitHub refused a single-job rerun while the workflow was still active. The
+symbol-only layout was then superseded and cancelled for Clippy placement.
+The final branch runs rerun the entire workspace with unchanged assertions,
+including every shard guard and both leak wrappers; the failed attempt is
+retained and is not counted as a passing acceptance run.
 
 ## Clippy placement refinement
 
