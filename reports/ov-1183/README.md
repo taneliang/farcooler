@@ -40,7 +40,14 @@ The initial single-graph run [43593998335](https://github.com/taneliang/farcoole
 stopped in the new fixture before building the app: CI's forced Cargo colors
 broke its compiler-command counter. This reproduced locally with
 `CARGO_TERM_COLOR=always`; the fixture now passes `--color never` explicitly.
-That failed run supplies no app timing or acceptance evidence.
+That failed run supplies no app timing or acceptance evidence. Run
+[43594410661](https://github.com/taneliang/farcooler/actions/runs/43594410661)
+then exposed a second fixture assumption: Rust 1.100 changed the library
+artifact naming relative to the local default Rust 1.98. The failure reproduces
+with the installed 1.100 toolchain. The fixture now reads `compiler-artifact`
+filenames from Cargo's JSON output instead of guessing filenames. Both binary
+execution and symbol isolation had already passed on that runner; the app build
+was never started. This run also supplies no acceptance timing.
 
 Fresh release-shaped branch measurements are pending. The prior two debug
 runs are retained below for history and no longer count toward acceptance.

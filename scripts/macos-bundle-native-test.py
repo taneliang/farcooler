@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify the real bundle build scripts with a tiny, fully optimized workspace."""
+import json
 import os
 from pathlib import Path
 import shutil
@@ -79,7 +80,7 @@ pub fn answer() -> i32 {
         archive(41)
         env = dict(os.environ, FARCOOLER_BUNDLE_TAILCAT_DIR=str(archive_dir))
         # CI forces ANSI color; compiler-command assertions need plain output.
-        command = ["cargo", "build", "--color", "never", "--offline", "--release", "-p", "farcooler-cli",
+        command = ["cargo", "build", "--color", "never", "--offline", "--message-format=json", "--release", "-p", "farcooler-cli",
                    "-p", "farcooler-daemon", "--bins", "--features",
                    "farcooler-cli/tailcat,farcooler-daemon/tailcat", "-vv"]
         log = run(command, cwd=root, env=env)
@@ -93,7 +94,12 @@ pub fn answer() -> i32 {
             assert "_tailcat_fixture" in run(["nm", "-gU", str(products / binary)], cwd=root)
         assert run([str(products / "farcooler-lfs-filter")], cwd=root).strip() == "filter"
         assert "_tailcat_fixture" not in run(["nm", "-gU", str(products / "farcooler-lfs-filter")], cwd=root)
-        libraries = list((products / "deps").glob("libfarcooler_daemon-*.rlib"))
+        # Cargo's artifact names/layout vary by toolchain; use its public output.
+        artifacts = [json.loads(line) for line in log.splitlines() if line.startswith("{")]
+        libraries = sorted({Path(name) for event in artifacts
+                            if event.get("reason") == "compiler-artifact"
+                            and event["target"]["name"] == "farcooler_daemon"
+                            for name in event["filenames"] if name.endswith(".rlib")})
         assert len(libraries) == 1, libraries
         assert "fixture.o" not in run(["ar", "t", str(libraries[0])], cwd=root)
         repeat = run(command, cwd=root, env=env)
