@@ -88,9 +88,13 @@ pub struct Request {
     pub command: Command,
 }
 
-/// Bounded local inbox. Capability checks still occur on the owning runtime.
+/// Bounded mutation inbox and committed reads. Both paths recheck caller admission before use.
 #[derive(Clone)]
-pub struct CommandHandle { send: mpsc::Sender<Inbox> }
+pub struct CommandHandle {
+    send: mpsc::Sender<Inbox>,
+    // Reads use the committed store without waiting for the effect owner or its git/cleanup work.
+    reader: Exec,
+}
 enum Authority { Controller(Uuid), Decision(Uuid, String) }
 enum Inbox {
     Apply(Authority, Box<Request>, i64, oneshot::Sender<Result<Receipt>>),
@@ -153,6 +157,10 @@ impl CommandHandle {
 /// concurrent effect gets its own copy with its own item's configuration (ov-952).
 #[derive(Clone)]
 pub struct Exec {
+    /// Shared observations for reads outside the writer inbox.
+    activities: execution::Activities,
+    /// Each pool's places, what holds them and what waits for one (ov-1198).
+    places: std::sync::Arc<std::sync::Mutex<Places>>,
     root: PathBuf,
     store: std::sync::Arc<Store>,
     service_mode: bool,
@@ -172,6 +180,9 @@ pub struct Exec {
     pub(super) user_home: Option<PathBuf>,
 }
 impl Exec {
+    fn places(&self) -> std::sync::MutexGuard<'_, Places> {
+        self.places.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
     /// The sweep's clock, moved on by the time this effect has been running.
     pub(super) fn clock_ms(&self) -> i64 {
         match self.launched {
@@ -204,7 +215,6 @@ impl std::ops::Deref for Runtime { type Target = Exec; fn deref(&self) -> &Exec 
 impl std::ops::DerefMut for Runtime { fn deref_mut(&mut self) -> &mut Exec { &mut self.exec } }
 
 pub struct Runtime {
-    activities: execution::Activities,
     exec: Exec,
     pub(crate) notice_wake: Option<std::sync::Arc<tokio::sync::Notify>>,
     configuration_locks: std::collections::BTreeMap<PathBuf, File>,
@@ -220,8 +230,6 @@ pub struct Runtime {
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
     next_lease: Option<i64>,
-    /// Each pool's places, what holds them and what waits for one (ov-1198).
-    places: std::sync::Arc<std::sync::Mutex<Places>>,
     continuous: bool,
     #[cfg(test)]
     sweeps: usize,
@@ -333,9 +341,9 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { activities: Default::default(), inbox, send, next_lease: None, places: Default::default(), continuous: false,
+        let runtime = Self { inbox, send, next_lease: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
-            exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
+            exec: Exec { activities: Default::default(), places: Default::default(), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), #[cfg(test)] user_home: None },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
@@ -345,16 +353,13 @@ impl Runtime {
     /// Most agent sessions (builds and reviews) that run at once across all workspaces. A landing group's steps and
     /// short steps such as provisions have places of their own, so they never wait behind these (ov-1198).
     pub fn set_effect_cap(&mut self, cap: usize) { self.places().agent = cap.max(1); }
-    fn places(&self) -> std::sync::MutexGuard<'_, Places> {
-        self.places.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
     /// Record what holds a place now, for `workflow get`.
     fn note_holding(&self, running: &[Running]) {
         self.places().holding = running.iter().filter_map(|j| j.pool.map(|pool| Placed::new(&j.workspace, &j.effect, pool))).collect();
     }
     pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
         self.authorize(controller.instance)?;
-        Ok(CommandHandle { send: self.send.clone() })
+        Ok(CommandHandle { send: self.send.clone(), reader: self.exec.clone() })
     }
     pub fn resource(&self) -> &str { &self.resource }
     pub fn controller(&self) -> Controller { Controller { instance: self.instance } }

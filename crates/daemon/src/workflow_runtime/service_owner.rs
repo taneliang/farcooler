@@ -73,11 +73,11 @@ impl Runtime {
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         let (send,inbox) = mpsc::channel(32);
-        Ok(Self { activities: Default::default(), exec:Exec { root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,seeding:Default::default(),
+        Ok(Self { exec:Exec { activities: Default::default(), places: Default::default(), root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,seeding:Default::default(),
             #[cfg(test)] user_home:None },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
-            last_occupancy:None,trees_recovered:false,cancel_refused:Default::default(),scheduling:Default::default(),inbox,send,next_lease:None,places:Default::default(),continuous:false,
+            last_occupancy:None,trees_recovered:false,cancel_refused:Default::default(),scheduling:Default::default(),inbox,send,next_lease:None,continuous:false,
             #[cfg(test)] sweeps:0, #[cfg(test)] fail_observe:Default::default(), #[cfg(test)] drained:0,
             _writer:writer,_repository_writer:None,_landing_writer:None })
     }

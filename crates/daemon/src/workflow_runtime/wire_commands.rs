@@ -29,7 +29,73 @@ pub(super) use crate::workflow_summary::HIDDEN;
 #[derive(Default)]
 pub(super) struct Prepared { pub tree: Option<RunTree>, pub close_verified: bool }
 
+/// The CLI's small view is a projection only: no durable item or archive is changed.
+fn summarize(mut value:serde_json::Value) -> serde_json::Value {
+    if let Some(config) = value.get_mut("configuration").and_then(|v| v.as_object_mut()) {
+        config.remove("definition"); config.remove("adapter");
+    }
+    if let Some(state) = value.get_mut("state").and_then(|v| v.as_object_mut()) {
+        state.remove("seen");
+        if let Some(archive) = state.get_mut("archive").and_then(|v| v.as_object_mut()) {
+            archive.retain(|_, item| item.get("group").is_none_or(|g| g.is_null()));
+        }
+        if let Some(items) = state.get_mut("items").and_then(|v| v.as_object_mut()) {
+            items.retain(|_, item| !(item.get("group_of").is_some_and(|g| !g.is_null())
+                && matches!(item["phase"].as_str(), Some("Done" | "Failed" | "Cancelled"))));
+            for item in items.values_mut().filter_map(|v| v.as_object_mut()) {
+                item.remove("definition");
+                item.entry("members").or_insert_with(|| serde_json::json!([]));
+                for field in ["grouped_in", "tree"] { item.entry(field).or_insert(serde_json::Value::Null); }
+            }
+        }
+    }
+    value.as_object_mut().unwrap().remove("notice_deliveries");
+    value.as_object_mut().unwrap().remove("notices");
+    value
+}
+
+impl Exec {
+    /// Reads committed records and local stop receipts only; never executes git or drives effects.
+    fn read_get(&self, workspace:&str) -> Result<serde_json::Value> {
+        let deliveries=self.store.workflow_notice_deliveries(workspace)?;
+        let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
+            id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
+        }).collect();
+        let state = self.execution_state(workspace)?;
+        // Why a run's named tree stopped it, for the run it stopped (ov-979).
+        let mut stops = serde_json::Map::new();
+        for (item, live) in state.iter().flat_map(|s| &s.items) {
+            let Ok(bytes) = std::fs::read(self.tree_stop_path(workspace, item)) else { continue };
+            if let Ok(stop) = serde_json::from_slice::<named_tree::TreeStop>(&bytes) {
+                if stop.run == live.run { stops.insert(item.clone(), serde_json::json!(stop)); }
+            }
+        }
+        let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
+            .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
+        Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
+            "back_edge_budgets":budgets, "process_logs":self.failed_process_logs(workspace)?, "places":self.places().view(workspace), "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}))
+    }
+}
 impl CommandHandle {
+    /// A read has no receipt or reducer input, so it need not join the single writer's inbox.
+    /// SQLite, file reads and JSON construction run on a blocking worker; authority is rechecked
+    /// after the wait before any reply (including owner-only configuration values) is released.
+    pub(crate) async fn read_get(&self, admission:Admission, full:bool) -> Result<serde_json::Value> {
+        if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
+        admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
+        let reader = self.reader.clone();
+        let workspace = admission.workspace();
+        let mut value = tokio::task::spawn_blocking(move || {
+            let value = reader.read_get(&workspace)?;
+            Ok::<_, Error>(if full { value } else { summarize(value) })
+        }).await.map_err(|_| Error::Refused("workflow read worker failed"))??;
+        admission.recheck().and_then(|()| admission.permits(&Action::Get)).map_err(Error::Domain)?;
+        if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
+        let epoch = value.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);
+        value["context"] = admission.context(epoch);
+        if !admission.is_owner() { hide_environment(&mut value); }
+        Ok(value)
+    }
     pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {
         let (send, receive) = oneshot::channel();
         self.send.send(Inbox::Wire(Box::new(admission), Box::new(action), send)).await
@@ -55,25 +121,7 @@ impl Runtime {
         // A proposal is filed and answered by the daemon before the engine is involved (`workflow_drafts`).
         if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return Err(Error::Refused("a proposal is not an engine command")); }
         if matches!(action, Action::Get) {
-            let deliveries=self.store.workflow_notice_deliveries(workspace)?;
-            let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
-                id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
-            }).collect();
-            let state = self.execution_state(workspace)?;
-            // Why a run's named tree stopped it, for the run it stopped (ov-979).
-            let mut stops = serde_json::Map::new();
-            for (item, live) in state.iter().flat_map(|s| &s.items) {
-                let Ok(bytes) = std::fs::read(self.tree_stop_path(workspace, item)) else { continue };
-                if let Ok(stop) = serde_json::from_slice::<named_tree::TreeStop>(&bytes) {
-                    if stop.run == live.run { stops.insert(item.clone(), serde_json::json!(stop)); }
-                }
-            }
-            let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
-                .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
-            return Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
-                "back_edge_budgets":budgets, "process_logs":self.failed_process_logs(workspace)?, "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops,
-                // What holds each pool's places and what waits for one, so a queued effect is never silent (ov-1198).
-                "places": self.places().view(workspace)}));
+            return self.exec.read_get(workspace);
         }
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
@@ -294,6 +342,125 @@ mod tests {
     use farcooler_protocol::workflow_commands::Mutation;
     fn m(id:&str,revision:u64,sequence:u64) -> Mutation { Mutation { id:id.into(),revision,epoch:1,sequence } }
     fn ok(value:&serde_json::Value) { assert!(value.pointer("/receipt/result/Ok").is_some(),"{value}"); }
+    #[test]
+    fn workflow_get_summary_hides_definitions_and_finished_groups_without_changing_tickets() {
+        let input = serde_json::json!({"configuration":{"pin":"config", "definition":{"stages":[]}, "adapter":{}},
+            "state":{"revision":17,"epoch":2,"source_sequences":{"wire:owner":9},"seen":["old"],
+                "items":{"ticket":{"definition":{},"phase":"Done","run":"r","pin":"p"},
+                    "active":{"definition":{},"group_of":{"name":"landing"},"phase":"Running"},
+                    "finished":{"definition":{},"group_of":{"name":"landing"},"phase":"Failed"}},
+                "archive":{"old":{"phase":"Done","group":{}}}},"notice_deliveries":[{"body":"large"}]});
+        let summary = summarize(input.clone());
+        assert!(summary.pointer("/state/items/finished").is_none());
+        assert!(summary.pointer("/state/items/active").is_some());
+        assert_eq!(summary["state"]["items"]["ticket"]["run"], "r");
+        assert!(summary.pointer("/state/items/ticket/definition").is_none());
+        assert!(summary.pointer("/configuration/definition").is_none());
+        assert!(summary.pointer("/state/archive/old").is_none());
+        assert_eq!(summary["state"]["revision"], input["state"]["revision"]);
+    }
+    // Opt-in measurement through the actual CLI and socket, with fifteen CPU-active build adapters.
+    // Build target/debug/farcooler first. The scratch runner never reaches an installed daemon.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore]
+    async fn workflow_get_cli_p95_with_fifteen_builds() {
+        use super::super::{coding_tests::configured, concurrency_tests::enqueue_item};
+        use farcooler_transport::{UnixListenerServer, HandshakeConfig, Peer};
+        use farcooler_protocol::v1::Scope;
+        use std::sync::Arc;
+        let cli = std::env::current_dir().unwrap().join("../../target/debug/farcooler").canonicalize().unwrap();
+        let (dir, mut runtime) = configured(false, "pass").await;
+        let script = dir.path().join("adapter.py");
+        let original = std::fs::read_to_string(&script).unwrap();
+        let busy = "if stage == 'build':\n    import hashlib, time\n    started = pathlib.Path(os.environ['STARTED']).parent / 'builds'\n    started.mkdir(exist_ok=True)\n    (started / os.environ['FARCOOLER_WORKFLOW_RUN']).write_text(str(os.getpid()))\n    until = time.monotonic() + 110\n    while time.monotonic() < until: hashlib.sha256(b'x' * 1048576).digest()\n";
+        std::fs::write(&script, original.replacen("if stage == 'build':\n", busy, 1)).unwrap();
+        if let CodingHarness::Command(build) = &mut runtime.coding.as_mut().unwrap().harness { build.timeout_ms = 120_000; }
+        runtime.exec.coding = runtime.coding.clone();
+        runtime.set_effect_cap(15);
+        let home = dir.path().join("home");
+        let service = Arc::new(crate::service::Service::open_in(home.clone()).await.unwrap());
+        let root = service.store.create_repository_root(service.host_id, dir.path().to_str().unwrap(), 0).unwrap();
+        let repo = service.store.create_repository(service.host_id, root.id, "load", "/fixture/.git", "").unwrap();
+        let workspace = service.store.ensure_main_workspace(repo.id).unwrap().id;
+        let definition = runtime.configured_definition().unwrap();
+        for n in 0..15 { enqueue_item(&mut runtime, &workspace.to_string(), &format!("load-{n}"), definition.clone()); }
+        let handle = runtime.command_handle(&runtime.controller()).unwrap();
+        let (stop, signal) = tokio::sync::watch::channel(false);
+        let worker = tokio::spawn(async move { runtime.run(signal).await });
+        let server = UnixListenerServer::bind(&home.join("farcoolerd.sock")).unwrap();
+        let serve = tokio::spawn(async move { server.serve(move |_| Some((HandshakeConfig { daemon_version:"load-fixture".into() },
+            crate::rpc::RpcFactory::new(service.clone(), crate::watch::Watcher::new(service.clone()), Arc::new(tokio::sync::Notify::new()),
+                Peer { client_id:None, scope:Scope::Control }).with_workflow_fixture(handle.clone())))).await });
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                if std::fs::read_dir(dir.path().join("builds")).map(|d| d.count()).unwrap_or(0) == 15 { break; }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }).await.expect("fifteen real build processes started");
+        let full = tokio::process::Command::new(&cli).env("FARCOOLER_HOME", &home)
+            .args(["workflow", "get", &workspace.to_string(), "--full", "--json"]).output().await.unwrap();
+        assert!(full.status.success(), "{}", String::from_utf8_lossy(&full.stderr));
+        let full_value:serde_json::Value = serde_json::from_slice(&full.stdout).unwrap();
+        assert!(full_value.pointer("/state/items/load-0/definition/stages").is_some());
+        let full_bytes = full.stdout.len();
+        let mut samples = Vec::new();
+        let mut bytes = 0;
+        for _ in 0..40 {
+            let start = std::time::Instant::now();
+            let output = tokio::process::Command::new(&cli).env("FARCOOLER_HOME", &home)
+                .args(["workflow", "get", &workspace.to_string(), "--json"]).output().await.unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let value:serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            let items = value["state"]["items"].as_object().unwrap();
+            assert_eq!(items.len(), 15);
+            assert!(items.values().all(|i| i["phase"] == "Running" && i["stage"] == 1), "all fifteen builds remain active");
+            assert!(value.pointer("/state/items/load-0/definition").is_none());
+            bytes = output.stdout.len();
+            samples.push(start.elapsed().as_secs_f64());
+        }
+        stop.send_replace(true);
+        worker.await.unwrap().unwrap();
+        serve.abort(); let _ = serve.await;
+        samples.sort_by(f64::total_cmp);
+        println!("ov-1159 builds=15 samples=40 bytes={bytes} full_bytes={full_bytes} median={:.4}s p95={:.4}s max={:.4}s", samples[19], samples[37], samples[39]);
+        assert!(samples[37] < 2.0, "CLI p95 must be under two seconds");
+    }
+    #[tokio::test]
+    async fn workflow_get_summary_does_not_wait_for_the_effect_inbox() {
+        use super::super::admission_tests::{factory, request, receipt};
+        use farcooler_transport::{Handler, Peer};
+        use farcooler_protocol::v1::Scope;
+        let (_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
+        let ws = workspace.to_string();
+        runtime.wire_command(&ws, "owner", Action::Track {
+            mutation: farcooler_protocol::workflow_commands::Mutation { id:"track".into(), revision:0, epoch:1, sequence:1 },
+            item:"ov-1".into(), column:None,
+        }).unwrap();
+        let rpc = factory(&svc, &runtime, Peer { client_id:None, scope:Scope::Control }, None);
+        // Leave the actor inbox deliberately unconsumed: a read cannot depend on any effect's progress.
+        let mut req = request(workspace, &Action::Get);
+        req.accepts.push("workflow_summary_v1".into());
+        let reply = tokio::time::timeout(Duration::from_secs(2), rpc.handle(req)).await
+            .expect("workflow get waited on the effect inbox");
+        let summary = receipt(&reply);
+        let full = runtime.wire_command(&ws, "owner", Action::Get).unwrap();
+        for field in ["revision", "epoch", "source_sequences"] {
+            assert_eq!(summary["state"][field], full["state"][field]);
+        }
+        for field in ["run", "pin", "phase", "stage", "members", "grouped_in", "candidate", "tree"] {
+            let expected = if field == "members" { serde_json::json!([]) } else { full["state"]["items"]["ov-1"][field].clone() };
+            assert!(summary["state"]["items"]["ov-1"].get(field).is_some(), "{field} stays present");
+            assert_eq!(summary["state"]["items"]["ov-1"][field], expected);
+        }
+        assert!(summary.pointer("/state/items/ov-1/definition").is_none());
+        let mut req = request(workspace, &Action::Get);
+        req.accepts.push("workflow_full_v1".into());
+        let reply = tokio::time::timeout(Duration::from_secs(2), rpc.handle(req)).await.unwrap();
+        assert_eq!(receipt(&reply)["state"], full["state"]);
+    }
     #[tokio::test]
     async fn workflow_owner_can_resolve_a_lost_provision_cancellation_then_reopen() {
         lost_cancellation(false).await;

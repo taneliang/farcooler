@@ -48,7 +48,7 @@ impl Drop for Process {
     }
 }
 
-impl Runtime {
+impl Exec {
     /// Same launch order and slot holders across boards. A missing runtime owner never means Running.
     pub(super) fn execution_state(&self, workspace: &str) -> Result<Option<State>> {
         let Some(mut state) = self.state(workspace)? else { return Ok(None) };

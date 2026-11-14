@@ -43,8 +43,8 @@ impl Publication {
 }
 #[derive(Subcommand)]
 pub enum WorkflowCmd {
-    /// Read raw shared state, configuration and notification history.
-    Get { workspace: Uuid },
+    /// Read current state; --full includes definitions and notification history.
+    Get { workspace: Uuid, #[arg(long)] full: bool },
     /// Admit against the exact configuration pin selected from get.
     Enqueue { workspace: Uuid, item: String, #[arg(long)] pin:String, #[command(flatten)] identity:Identity },
     /// Approve only the run, candidate and definition that were inspected.
@@ -123,7 +123,7 @@ pub enum WorkflowCmd {
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
         Ok(match self {
-            Self::Get { workspace } => (workspace,Action::Get),
+            Self::Get { workspace, .. } => (workspace,Action::Get),
             Self::Enqueue { workspace,item,pin,identity } => (workspace,Action::Enqueue { mutation:identity.mutation(),item,pin }),
             Self::Approve { workspace,item,run,pin,candidate,identity } => (workspace,Action::Approve { mutation:identity.mutation(),item,run,pin,candidate }),
             Self::Review { workspace,item,run,pin,evidence,passed,identity } => {
@@ -198,11 +198,17 @@ pub fn request(workspace:Uuid, action:&Action) -> Result<pb::Request, Box<dyn st
     farcooler_protocol::workflow_commands::parse(&json)?;
     let mut r = with(req_for(action.method(),workspace),request::Payload::WorkflowCommand(pb::WorkflowCommand { schema:1,json }));
     r.required_capabilities.push(capability::WORKFLOW_COMMANDS.into());
+    if matches!(action, Action::Get) { r.accepts.push("workflow_summary_v1".into()); }
     Ok(r)
+}
+async fn read_deadline<T>(future:impl std::future::Future<Output=T>) -> Result<T, Box<dyn std::error::Error>> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), future).await
+        .map_err(|_| "Workflow read timed out after 10 seconds. The runner may be busy; try workflow get again.".into())
 }
 pub async fn send(link:&mut crate::Link, workspace:Uuid, action:Action, json:bool) -> Fallible {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
-    let reply = link.call(request(workspace,&action)?).await?;
+    let call = link.call(request(workspace,&action)?);
+    let reply = if matches!(action, Action::Get) { read_deadline(call).await?? } else { call.await? };
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     if reply.schema != 1 { return Err("unsupported workflow reply schema".into()); }
     let value:serde_json::Value = serde_json::from_str(&reply.json)?;
@@ -220,7 +226,9 @@ pub async fn ask(link:&mut crate::Link, workspace:Uuid, action:&Action) -> Resul
 /// The runner's `workflow get` reply, unprinted, for the commands that draft from it.
 pub async fn get(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
-    let reply = link.call(request(workspace,&Action::Get)?).await?;
+    let mut req = request(workspace,&Action::Get)?;
+    req.accepts = vec!["workflow_full_v1".into()];
+    let reply = read_deadline(link.call(req)).await??;
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
 }
@@ -277,8 +285,14 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
         println!("{}", if passed { "Recorded: passed." } else { "Recorded: not passed." });
         return Ok(());
     }
+    let full = matches!(&cmd, WorkflowCmd::Get { full:true, .. });
     let (workspace,action) = cmd.action()?;
     let mut link = crate::connect_to(runner).await?;
+    if full {
+        let value = get(&mut link,workspace).await?;
+        if json { println!("{value}"); } else { println!("{}",serde_json::to_string_pretty(&value)?); }
+        return Ok(());
+    }
     send(&mut link,workspace,action,json).await
 }
 
@@ -286,6 +300,18 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
 mod tests {
     use super::*;
     use clap::Parser;
+    #[tokio::test(start_paused = true)]
+    async fn workflow_get_deadline_explains_the_timeout() {
+        let result = tokio::time::timeout(std::time::Duration::from_secs(11),
+            read_deadline(std::future::pending::<()>())).await;
+        assert!(result.is_ok(), "a read must have its own deadline");
+        assert!(result.unwrap().unwrap_err().to_string().contains("timed out after 10 seconds"));
+    }
+    #[test]
+    fn workflow_get_accepts_full() {
+        let args = ["farcooler", "workflow", "get", "00000000-0000-0000-0000-000000000000", "--full", "--json"];
+        assert!(crate::Cli::try_parse_from(args).is_ok());
+    }
     #[test]
     fn watch_asks_for_the_item_only_and_announces_the_panes_size() {
         let r = watch_request(Uuid::nil(), "ov-9");

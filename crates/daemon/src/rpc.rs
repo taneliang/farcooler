@@ -783,8 +783,17 @@ impl Rpc {
                 let admission = self.admit(workspace).await?;
                 admission.permits(&action)?;
                 if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)
-                let value = handle.wire_command(admission, action).await
+                // Opt-in keeps shipped apps' full schema intact. CLI reads never enter the effect
+                // inbox, whose per-message cleanup may run git status and prune finished trees.
+                let summary = req.accepts.iter().any(|v| v == "workflow_summary_v1");
+                let full = req.accepts.iter().any(|v| v == "workflow_full_v1");
+                let value = if matches!(action, Action::Get) && (summary || full) {
+                    handle.read_get(admission, full).await
+                } else { handle.wire_command(admission, action).await }
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
+                if summary && !full {
+                    return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
+                }
                 Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,json:crate::workflow_starter::add_to_get(svc, workspace, value).await.to_string() }))
             }
             // Watch a running engine agent's terminal, read-only (ov-972). Addressed by workspace and
