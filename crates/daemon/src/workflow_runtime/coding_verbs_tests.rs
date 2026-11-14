@@ -1331,3 +1331,73 @@ async fn a_gate_owner_write_failure_keeps_recovery_uncertain() {
     assert!(runtime.reconcile_coding(&binding).await.is_err(),
         "a missing owner record after a possible launch is not proof that writers stopped");
 }
+
+/// ov-1164: neither an empty saved identity nor a failed identity lookup proves quiescence.
+#[tokio::test]
+async fn a_gate_with_missing_start_identity_refuses_retry_until_its_group_is_gone() {
+    gate_with_missing_start_identity(true).await;
+}
+
+#[tokio::test]
+async fn a_gate_with_unreadable_start_identity_refuses_retry_until_its_group_is_gone() {
+    gate_with_missing_start_identity(false).await;
+}
+
+async fn gate_with_missing_start_identity(empty_record: bool) {
+    let (_dir, mut runtime) = lander("pass").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    for time in 2..4 { runtime.pump(time).await.unwrap(); }
+    let binding = admitted(&runtime).await;
+    assert_eq!(binding.effect.kind, EffectKind::Execute(StageKind::Run));
+    let mut gate = tokio::process::Command::new("/bin/sleep").arg("600")
+        .process_group(0).kill_on_drop(true).spawn().unwrap();
+    let pid = gate.id().unwrap();
+    let path = runtime.owner_path(&binding);
+    crate::effect_runner::Owner::write(&path, pid).unwrap();
+    if empty_record {
+        std::fs::write(&path, serde_json::to_vec(&crate::effect_runner::Owner {
+            pid, started: String::new(),
+        }).unwrap()).unwrap();
+    }
+    let root = runtime.root.clone();
+    drop(runtime);
+    let runtime = Runtime::open(&root).unwrap();
+    let recovered = if empty_record {
+        runtime.reconcile_coding(&binding).await
+    } else {
+        crate::effect_runner::TEST_START_UNAVAILABLE.scope((), runtime.reconcile_coding(&binding)).await
+    };
+    let alive = !crate::effect_runner::Group::gone(pid).unwrap();
+    let outcome = recovered.unwrap_or(Outcome::Uncertain);
+    runtime.observe("w", &binding.effect, outcome.clone(), false, 20).unwrap();
+    let phase = runtime.state("w").unwrap().unwrap().items[&binding.effect.item].phase.clone();
+    let runs = outbox(&runtime, StageKind::Run);
+    // Clean up before assertions, including when run against the unsafe implementation.
+    gate.kill().await.unwrap();
+    assert!(crate::effect_runner::Group::gone(pid).unwrap());
+    assert!(alive, "unknown identity must leave the live process alone");
+    assert_eq!(outcome, Outcome::Uncertain, "missing identity cannot authorize a gate retry");
+    assert_eq!(phase, Phase::Uncertain);
+    assert_eq!(runs, 1, "no retry while ownership is uncertain");
+    // Group disappearance is independent proof, even with the identity still unavailable.
+    let settled = crate::effect_runner::TEST_START_UNAVAILABLE.scope((), runtime.reconcile_coding(&binding)).await.unwrap();
+    assert_eq!(settled, Outcome::SafeFailure);
+    runtime.observe("w", &binding.effect, settled, true, 21).unwrap();
+    assert_eq!(outbox(&runtime, StageKind::Run), 2, "proven quiescence permits the retry");
+}
+
+#[tokio::test]
+async fn a_gate_owner_write_requires_a_readable_start_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("owner.json");
+    let mut gate = tokio::process::Command::new("/bin/sleep").arg("600")
+        .process_group(0).kill_on_drop(true).spawn().unwrap();
+    let result = crate::effect_runner::TEST_START_UNAVAILABLE.scope((), async {
+        crate::effect_runner::Owner::write(&path, gate.id().unwrap())
+    }).await;
+    gate.kill().await.unwrap();
+    assert!(result.is_err(), "unreadable identity must fail the post-launch owner write");
+    assert!(!path.exists(), "never persist an owner receipt with an empty identity");
+}

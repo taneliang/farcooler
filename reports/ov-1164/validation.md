@@ -152,3 +152,71 @@ check, and `git diff --check` passed on the final changes.
 
 Status: **DONE**. This clean full-suite run supersedes the earlier
 DONE_WITH_CONCERNS result; acceptance item 3 now has a complete exit-0 run.
+
+
+## Fix round 2: missing process identity is not quiescence
+
+The newest review found a separate unsafe recovery path in `Owner::reap`:
+`started_at` collapsed a failed `/bin/ps` invocation or empty output into an
+empty string. A live leader with an empty recorded identity, or a nonempty
+record whose current lookup failed, was then treated as a different process.
+Recovery returned SafeFailure while the old gate group was still alive.
+
+Start identity lookup now returns an error for execution failure, unsuccessful
+status, invalid UTF-8, or empty output. Owner writes propagate that error after
+spawn, keeping the existing conservative post-launch failure classification.
+Recovery checks whole-group disappearance first. A legacy empty/whitespace
+identity refuses recovery while the group remains; a failed current lookup
+propagates uncertainty. Only a readable, nonempty differing identity establishes
+PID reuse. Leader-probe errors other than ESRCH also refuse settlement rather
+than authorizing a signal based on an unproved absence.
+
+New regression evidence, before the production fix:
+
+- `a_gate_with_missing_start_identity_refuses_retry_until_its_group_is_gone`:
+  **FAIL**, SafeFailure instead of Uncertain with a live gate and empty saved identity.
+- `a_gate_with_unreadable_start_identity_refuses_retry_until_its_group_is_gone`:
+  **FAIL**, SafeFailure instead of Uncertain when the live gate's current identity
+  lookup is unavailable (task-local injection, no global environment mutation).
+- `a_gate_owner_write_requires_a_readable_start_identity`: **FAIL**, owner write
+  accepted an unavailable identity and persisted an empty receipt.
+
+The pre-fix `a_gate_` run reported 23 passed, 3 failed, exit 101. An initial
+sandboxed attempt could not invoke Git; the regression failures above came from
+normal local subprocess access. Both recovery regressions reopen the runtime,
+keep the old gate alive while recording its uncertain outcome and unchanged
+Run count, then explicitly kill/reap that exact child and verify group
+disappearance permits the stage retry. They clean up before their assertions,
+including against the unsafe implementation. The first fixed focused run
+exposed an incorrect fixture observation mode (Resolve on a still-Running item);
+the fixture now uses Observe first, then Resolve after proven disappearance,
+matching production dispatch. The other 38 landing tests passed in that run.
+
+### Final verification for fix round 2
+
+The complete required run on the final source **passed, exit 0**:
+
+```sh
+python3 scripts/tmux-leak-check.py -- cargo test \
+  -p farcooler-workflow -p farcooler-store -p farcooler-daemon \
+  -p farcooler-cli --no-fail-fast -- --test-threads=1
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Clippy also **passed, exit 0**, after the final fixture correction. All builds
+used this worktree's own `target/`, four build jobs, TMPDIR=/tmp, system tools
+first on PATH, and cleared inherited FARCOOLER_* variables. Plain cargo ran
+serially to honor the existing PTY fixture isolation guidance. No concurrent
+PTY test suite was started by this agent; no process/tmux leaks were reported.
+
+The daemon library passed **3,089 tests, 0 failed, 13 ignored**, including all
+three new regressions, both earlier ov-1164 regressions, the ov-1158 landing
+regressions, vanished-server native recovery, busy-tty refusal, zombie-group
+recovery, and recycled-PID protection. All three pane resize integration tests
+passed in this same invocation. Workflow, store (655 library tests passed,
+3 ignored), CLI, all integration suites, and all doctests also passed.
+File-size budget, doc-comment check, and `git diff --check` passed.
+
+Status: **DONE**. Missing identity no longer authorizes a gate retry. The new
+tests demonstrate fail-before-fix behavior and permit retry only after the old
+group is proven gone. Acceptance items 1–3 have passing final-source evidence.

@@ -117,12 +117,21 @@ pub(crate) async fn owned(tree: &Path, argv: &[String], environment: &std::colle
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Owner { pub pid: u32, pub started: String }
 impl Owner {
-    fn started_at(pid: u32) -> String {
-        std::process::Command::new("/bin/ps").args(["-o", "lstart=", "-p", &pid.to_string()]).env_clear().output()
-            .ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+    fn started_at(pid: u32) -> std::io::Result<String> {
+        #[cfg(test)]
+        if TEST_START_UNAVAILABLE.try_with(|_| ()).is_ok() {
+            return Err(std::io::Error::other("injected unavailable process start identity"));
+        }
+        let output = std::process::Command::new("/bin/ps")
+            .args(["-o", "lstart=", "-p", &pid.to_string()]).env_clear().output()?;
+        let started = String::from_utf8(output.stdout).map_err(std::io::Error::other)?.trim().to_string();
+        if !output.status.success() || started.is_empty() {
+            return Err(std::io::Error::other("process start identity unavailable"));
+        }
+        Ok(started)
     }
     pub(crate) fn write(path: &Path, pid: u32) -> std::io::Result<()> {
-        let bytes = serde_json::to_vec(&Owner { pid, started: Self::started_at(pid) }).map_err(std::io::Error::other)?;
+        let bytes = serde_json::to_vec(&Owner { pid, started: Self::started_at(pid)? }).map_err(std::io::Error::other)?;
         let temporary = path.with_extension("tmp");
         std::fs::write(&temporary, bytes)?;
         std::fs::File::open(&temporary)?.sync_all()?;
@@ -130,7 +139,8 @@ impl Owner {
     }
     /// End whatever the record at `path` still owns. True when nothing of it is left. A group that is
     /// alive with its leader gone is ours (a pid is never reused while its group lives); a live leader
-    /// that started at another time is someone else's, and left alone.
+    /// that provably started at another time is someone else's, and left alone. Missing identity
+    /// stays uncertain unless the whole group is gone; a failed lookup is never a different identity.
     pub(crate) async fn reap(path: &Path) -> std::io::Result<bool> {
         let raw = match std::fs::read(path) {
             Ok(raw) => raw,
@@ -140,8 +150,15 @@ impl Owner {
         let owner: Owner = serde_json::from_slice(&raw).map_err(std::io::Error::other)?;
         // macOS answers EPERM for a group holding only a zombie; that is a group on its way out, not an error.
         if matches!(Group::gone(owner.pid), Ok(true)) { return Ok(true); }
-        let leader_alive = unsafe { libc::kill(owner.pid as i32, 0) } == 0;
-        if leader_alive && (owner.started.is_empty() || Self::started_at(owner.pid) != owner.started) { return Ok(true); }
+        // An old/partial receipt or failed lookup cannot distinguish our live writer
+        // from a recycled PID. Neither signal it nor authorize another gate.
+        if owner.started.trim().is_empty() { return Ok(false); }
+        if unsafe { libc::kill(owner.pid as i32, 0) } == 0 {
+            if Self::started_at(owner.pid)? != owner.started { return Ok(true); }
+        } else {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) { return Err(error); }
+        }
         if let Err(error) = Group::new(owner.pid).kill() { tracing::warn!(pid = owner.pid, %error, "signalling an old group failed; waiting to see it go"); }
         for _ in 0..100 {
             if matches!(Group::gone(owner.pid), Ok(true)) { return Ok(true); }
@@ -273,6 +290,8 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     Err(std::io::Error::other("process group did not become quiescent").into())
 }
 
+#[cfg(test)]
+tokio::task_local! { pub(crate) static TEST_START_UNAVAILABLE: (); }
 #[cfg(test)]
 tokio::task_local! { static TEST_SIGNAL_PINNED: std::cell::Cell<bool>; }
 #[cfg(test)]
