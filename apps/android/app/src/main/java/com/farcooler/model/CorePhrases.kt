@@ -46,4 +46,7 @@ object CorePhrases {
 
     /** What a blocked agent is doing, in the middle of a sentence. */
     val blockedDoing: String? get() = word("blocked_doing")
+
+    /** What the step-up prompt says before this phone signs for a browser on [runner] (ov-1020). */
+    fun confirmBrowserAccess(runner: String): String? = word("confirm_browser_access")?.replace("{runner}", runner)
 }

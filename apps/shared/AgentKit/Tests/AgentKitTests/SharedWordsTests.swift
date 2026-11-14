@@ -26,5 +26,6 @@ struct SharedWordsTests {
         #expect(SharedWords.blockedDoing == golden["blocked_doing"])
         #expect(ShellClose.doing(activity: "blocked") == "waiting on you")
         #expect(ShellClose.doing(activity: "working") == "working")
+        #expect(SharedWords.confirmBrowserAccess(runner: "studio") == "Confirm this browser\u{2019}s access to studio.")
     }
 }

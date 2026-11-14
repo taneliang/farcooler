@@ -172,6 +172,9 @@ pub struct Words {
     pub blocked_doing: String,
     /// Why a handle can't be reused yet (ov-1002), in the one sentence every platform shows.
     pub handle_waited_on: String,
+    /// What a phone's step-up prompt says before it signs for a browser's
+    /// teammate reply (ov-1020): `{runner}` is the runner's name, which the app fills.
+    pub confirm_browser_access: String,
 }
 
 impl Words {
@@ -182,6 +185,7 @@ impl Words {
             waiting_on_you: style.label("waiting on you"),
             blocked_doing: "waiting on you".to_string(),
             handle_waited_on: "A workflow or a run still names someone who had that handle. Choose another handle, or ask the Owner to cancel those runs and publish a workflow that doesn\u{2019}t name them.".to_string(),
+            confirm_browser_access: "Confirm this browser\u{2019}s access to {runner}.".to_string(),
         }
     }
 }

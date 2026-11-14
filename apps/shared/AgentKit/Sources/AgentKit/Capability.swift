@@ -81,6 +81,7 @@ public enum Capability: String, CaseIterable, Sendable {
     case workspaceMaintainers = "workspace_maintainers"
     case personAccess = "person_access"
     case stepUp = "step_up"
+    case ceremonyAuthority = "ceremony_authority"
     case phoneApproval = "phone_approval"
     case agentStop = "agent_stop"
     case workspaceCheckIn = "workspace_check_in"

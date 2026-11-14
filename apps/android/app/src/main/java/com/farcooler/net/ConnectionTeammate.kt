@@ -7,6 +7,7 @@ import com.farcooler.ceremony.TeammateChoice
 import com.farcooler.ceremony.TeammateRunnerFacts
 import com.farcooler.core.CoreException
 import com.farcooler.model.Capability
+import com.farcooler.model.CorePhrases
 import com.farcooler.model.StepUpFailure
 import com.farcooler.model.StepUpWords
 import kotlinx.serialization.json.JsonObject
@@ -57,8 +58,9 @@ suspend fun Connection.enrollTeammate(
 /** A proof by the runner's registered identity, behind its live admin and step-up gate. */
 suspend fun Connection.ceremonyAuthority(context: Context, offer: String): JsonObject? {
     val flow = stepUp(context) ?: return null
+    val reason = CorePhrases.confirmBrowserAccess(host.label) ?: return null
     return try {
         flow.perform("ceremony.authority", JsonObject(mapOf("offer" to JsonPrimitive(offer))),
-            "Confirm this browser’s access to ${host.label}.", teammateFacts("")?.signs == true)
+            reason, teammateFacts("")?.signs == true)
     } catch (_: StepUpFailure) { null } catch (_: CoreException) { null }
 }

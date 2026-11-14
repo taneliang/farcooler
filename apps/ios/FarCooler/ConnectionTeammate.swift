@@ -8,7 +8,7 @@ extension Connection {
         let signs = await teammateFacts(account: "")?.signs == true
         do {
             let data = try await stepUp.perform("ceremony.authority", ["offer": offer],
-                reason: "Confirm this browser’s access to \(hostLabel).", hasTrustedKey: signs)
+                reason: SharedWords.confirmBrowserAccess(runner: hostLabel), hasTrustedKey: signs)
             return try JSONSerialization.jsonObject(with: data) as? [String: Any]
         } catch {
             return nil

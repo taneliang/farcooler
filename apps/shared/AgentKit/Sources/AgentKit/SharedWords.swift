@@ -12,12 +12,14 @@ public enum SharedWords {
             var needsYou: String
             var blockedDoing: String
             var handleWaitedOn: String
+            var confirmBrowserAccess: String
 
             enum CodingKeys: String, CodingKey {
                 case agentsNone = "agents_none"
                 case needsYou = "needs_you"
                 case blockedDoing = "blocked_doing"
                 case handleWaitedOn = "handle_waited_on"
+                case confirmBrowserAccess = "confirm_browser_access"
             }
         }
         var words: Words?
@@ -53,4 +55,8 @@ public enum SharedWords {
     public static var blockedDoing: String? { words?.blockedDoing }
     /// Why a removed member's handle can't be reused while a workflow or run names it.
     public static var handleWaitedOn: String { words?.handleWaitedOn ?? "" }
+    /// What the step-up prompt says before this device signs for a browser on `runner` (ov-1020).
+    public static func confirmBrowserAccess(runner: String) -> String {
+        (words?.confirmBrowserAccess ?? "").replacingOccurrences(of: "{runner}", with: runner)
+    }
 }
