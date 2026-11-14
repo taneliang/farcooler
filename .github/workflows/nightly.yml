@@ -45,6 +45,51 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Full default-feature Mac coverage, including the platform-independent tests
+  # which per-push CI runs on Linux only (ov-1160). Scheduled runs use main.
+  rust-macos:
+    name: Full Rust (macOS)
+    if: github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-latest
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Cache the pinned tmux build
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
+      - name: Install tmux
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
+      - name: Native test prerequisites
+        timeout-minutes: 5
+        run: |
+          for tool in fish git-lfs; do
+            command -v "$tool" >/dev/null 2>&1 || brew install "$tool"
+          done
+          /usr/sbin/sshd -V
+      - name: Build workspace and provide the channel CLI
+        run: |
+          cargo build --workspace --bins
+          for name in farcooler-local farcooler-preview farcooler-canary; do
+            ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
+          done
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+      - run: python3 scripts/macos-rust-tests.py --self-test --check
+      - name: Full leak-checked workspace suite
+        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
+      - run: cargo test --workspace --doc
+
   # The iOS app and its UI test bundle, built once for every job below, as ci.yml's
   # `ios` job does for the smoke set (the steps are the action's).
   ios:
