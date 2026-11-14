@@ -480,6 +480,9 @@ impl Watcher {
             }
             return self.settle(wake, Some(&task), Some(given_up));
         }
+        if let Some(pass) = self.tell_engine(wake, &task).await {
+            return pass;
+        }
         let (to, text) = match self.addressed(wake, &task).await {
             Ok(Some(addressed)) => addressed,
             Ok(None) => return self.settle(wake, Some(&task), left(Some(nobody(wake.kind)))),
@@ -1232,6 +1235,7 @@ mod check_in;
 pub(in crate::watch) mod bring;
 pub(crate) mod codex_turn;
 pub(crate) mod compose;
+pub(crate) mod engine;
 mod cursor;
 mod deliver;
 pub(crate) mod draft_hold;

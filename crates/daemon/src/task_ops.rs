@@ -527,6 +527,9 @@ pub fn update(svc: &Service, watcher: &Watcher, req: &pb::TaskUpdate) -> Result<
     let before = svc.store.get_task(id)?;
     let task = svc.store.update_task(id, req.expected_version, &update)?;
     announce(watcher, &task, actor);
+    if before.acceptance != task.acceptance {
+        watcher.engine_acceptance_changed(&task);
+    }
     // A worktree names its open tasks, so a task moving lanes changes both,
     // and a new title changes the one it's on.
     if before.worktree_id != task.worktree_id || before.title != task.title {

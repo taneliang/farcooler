@@ -1,9 +1,10 @@
-//! A running engine agent's terminal, found by workspace and item, for watching only (ov-972).
+//! A running engine agent's terminal, found by workspace and item (ov-972, ov-1171).
 //!
 //! The engine runs each native build in a tmux server of its own, which the daemon's `Runtime` never
 //! lists. So no terminal id the wire knows can name that pane, and `terminal.write`, `terminal.resize`,
-//! `terminal.tell` and `terminal.paste_file` cannot reach it. This registry is the one door in, and it
-//! hands out a `Runtime` for `attach` (output only) and nothing that types.
+//! `terminal.tell` and `terminal.paste_file` cannot reach it. The watch handler uses this registry for
+//! `attach` (output only). The authorized message pump separately uses the same endpoint, bound to
+//! this run's terminal id, to deliver queued messages; watching grants no input authority.
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
