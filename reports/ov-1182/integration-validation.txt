@@ -1,0 +1,7 @@
+before: unfiltered local Rust suite count=0; unknown CI jobs=['rust-build', 'rust-tests', 'rust-macos-tests']
+after: unfiltered local Rust suite count=1; unknown CI jobs=[]
+PASS ios-ui-shards.py --self-test and --check
+PASS lane-gate.py --self-test
+PASS gate-evidence-test.py: 16 tests
+PASS engine-gate-test.py: 9 tests
+Fixture CI includes the shard source command; no real Rust gate runs in those fixtures.

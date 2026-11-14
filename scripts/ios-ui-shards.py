@@ -307,8 +307,13 @@ def smoke_targets():
 
 def check_workflows(problems):
     """What ci.yml (per push) and nightly.yml (nightly) must be true of."""
-    # Per push: the smoke set in one job, and no shard matrix at all.
-    if re.search(MATRIX, read(WORKFLOW)):
+    # Per push: iOS runs smoke once. Other families may shard independently.
+    ci = read(WORKFLOW)
+    ios_matrices = [job for job in re.findall(r"^  ([\w-]+):\n", ci, re.M)
+                    if (block := job_block(job)) and MATRIX.search(block)
+                    and (job == "ios-ui" or ".github/actions/ios-ui-shard" in block
+                         or "scripts/ios-ui-tests.sh" in block)]
+    if ios_matrices:
         problems.append(
             f"{WORKFLOW.name} has a `shard: [...]` matrix; the full shards run in "
             f"{NIGHTLY.name} only (ov-534), and per push runs SMOKE"
@@ -535,7 +540,10 @@ def self_test():
     planted("no workflow_dispatch", "workflow_dispatch", lambda t: t.replace("  workflow_dispatch:\n", ""))
     planted("a cron on the hour", "off-minute", lambda t: t.replace('"23 11 * * *"', '"0 11 * * *"'))
     planted("a cron at noon Pacific", "08:00 and 13:59", lambda t: t.replace('"23 11 * * *"', '"23 20 * * *"'))
-    planted("report not waiting for a job", "does not wait for", lambda t: t.replace("needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing]", "needs: [ios, ios-ui]"))
+    planted("report not waiting for a job", "does not wait for", lambda t: re.sub(
+        r"(?m)^    needs: \[ios, ios-ui, captures,[^\n]*\]$", "    needs: [ios, ios-ui]", t, count=1))
+    planted("iOS smoke becoming a shard matrix", "full shards run", lambda t: t.replace(
+        "  ios-ui:\n", "  ios-ui:\n    strategy:\n      matrix:\n        shard: [shell, agent]\n"), WORKFLOW)
     planted("no captures job", "no `captures` job", lambda t: t.replace("shard: ${{ matrix.shard }}\n          capture-out", "shard: shell\n          capture-out"))
     planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2, captures3]", "shard: [captures, captures2]"))
     planted(

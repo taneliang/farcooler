@@ -95,6 +95,7 @@ APP_JOBS = {"rust", "swift-tests", "swift", "ios", "android", "tunnel"}
 # ci.yml jobs this script covers under another name, or on purpose does not.
 CI_JOB_ALIASES = {
     "wire": "wire", "tunnel": "tunnel", "rust": "rust", "swift": "swift", "swift-tests": "swift-tests",
+    "rust-build": "rust", "rust-tests": "rust", "rust-macos-tests": "rust",
     "ios": "ios", "ios-ui-plan": "ios", "android": "android", "relay": "relay", "site": "site", "web": "web",
 }
 CI_JOBS_NOT_RUN = {
@@ -314,6 +315,26 @@ def steps_for(job, workflows, ctx):
                 env = {k: expand(v, ctx) for k, v in env.items()}
                 run = expand(run, ctx)
             steps.append(Step(job, name, run, wd, env, skip))
+    if job == "rust":
+        # CI runs one prebuilt archive in partitions. The local equivalent is
+        # one unfiltered workspace run, under the same wrappers and profile.
+        # Read the command from CI; reject an unfamiliar or narrowed prefix.
+        shard = job_block(text, "rust-tests")
+        full = [p for p in parse_steps(shard or []) if p[0] == "Full Rust workspace shard"]
+        if len(full) != 1:
+            raise ValueError("CI must define exactly one full Rust workspace shard command")
+        _name, run, wd, env = full[0]
+        prefix, archive, _remote = run.partition(" --archive-file ")
+        match = re.fullmatch(
+            r"(\./scripts/test-leak-check\.py -- \./scripts/tmux-leak-check\.py -- cargo nextest run --profile \S+) --no-fail-fast",
+            prefix.strip())
+        if not archive or not match:
+            raise ValueError("cannot derive an unfiltered local Rust suite from CI's shard command")
+        local = Step(job, "Full Rust workspace (local)",
+                     match[1] + " --workspace --no-fail-fast\n", wd, env)
+        before_doc = next((i for i, step in enumerate(steps)
+                           if step.run.strip() == "cargo test --workspace --doc"), len(steps))
+        steps.insert(before_doc, local)
     if job == "web":
         web_asset_skips(steps)
     return steps
@@ -898,6 +919,19 @@ def _self_test():
         ("doc-comments", "--base origin/main --head HEAD"),
     ]:
         expect(f"{job} runs {needle}", has(job, needle), True)
+    expect("local Rust runs the full workspace exactly once", sum(
+        "cargo nextest run --profile ci --workspace" in step.run and not step.skip
+        for step in plans["rust"]), 1)
+    expect("local Rust needs neither CI archives nor partition filters", any(
+        "--archive-file" in step.run or "--partition" in step.run
+        for step in plans["rust"] if not step.skip), False)
+    narrowed = dict(wf, ci=text.replace("--no-fail-fast --archive-file", "-E package(farcooler-cli) --no-fail-fast --archive-file", 1))
+    try:
+        steps_for("rust", narrowed, ctx)
+    except ValueError:
+        pass
+    else:
+        failures.append("a narrowed CI prefix silently narrowed the local Rust gate")
     # Nothing that only installs on a CI runner is run, and the skip is recorded.
     for j in JOBS:
         for s in plans[j]:

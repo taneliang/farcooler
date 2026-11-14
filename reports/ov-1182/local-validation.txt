@@ -22,3 +22,16 @@ An initial four-test fixture had an empty hash partition and nextest failed
 closed as intended; the larger fixture exercised execution in every partition.
 No workspace Rust source changed. Hosted runs exercise the actual full suite,
 feature suites, platform checks, doctests, runtime aliases and leak wrappers.
+
+PASS ios-ui-shards.py --self-test and --check (iOS-only matrix rule; generic
+     Nightly report-needs mutation includes new Rust jobs)
+PASS lane-gate.py --self-test (one derived full workspace suite locally;
+     rejects narrowed CI prefixes; recognizes all three new Rust job IDs)
+PASS gate-evidence-test.py: 16 tests
+PASS engine-gate-test.py: 9 tests
+Gate integration suites ran unsandboxed because macOS confstr warnings in
+sandboxed Git stderr contaminate the fixtures' combined Git SHA output.
+Temporary fixture commits used commit.gpgsign=false; branch commits retained
+the repository's normal signing configuration.
+Shadow self-tests were also rerun with CARGO_TARGET_DIR set to the worktree's
+target/rust-shadow-self-test.

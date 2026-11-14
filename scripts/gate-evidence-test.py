@@ -38,6 +38,10 @@ class EvidenceTest(unittest.TestCase):
         jobs = []
         for job in [j for j in evidence.load_lane().JOBS if j != "doc-comments"] + ["ios-ui-plan"]:
             jobs.append(f"  {job}:\n    steps:\n      - run: printf '{job} output\\n'\n")
+        # The local Rust plan is derived from CI's archive consumer even when
+        # this fixture executes only wire/doc-comments jobs.
+        jobs.append("  rust-tests:\n    steps:\n      - name: Full Rust workspace shard\n"
+                    "        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --no-fail-fast --archive-file target/tests.tar.zst --partition hash:1/4\n")
         jobs[0] = "  wire:\n    steps:\n      - run: mkdir -p .fixture; printf 'wire\\n' >> .fixture/wire-count\n      - run: printf 'raw wire output\\n'\n"
         (self.repo / ".github/workflows/ci.yml").write_text("jobs:\n" + "".join(jobs))
         # The producer is deliberately stateful, like a transient first-attempt
