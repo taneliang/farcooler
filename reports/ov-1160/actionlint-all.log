@@ -1,0 +1,44 @@
+.github/workflows/canary.yml:367:9: shellcheck reported issue in this script: SC2086:info:33:66: Double quote to prevent globbing and word splitting [shellcheck]
+    |
+367 |         run: |
+    |         ^~~~
+.github/workflows/canary.yml:367:9: shellcheck reported issue in this script: SC2086:info:4:45: Double quote to prevent globbing and word splitting [shellcheck]
+    |
+367 |         run: |
+    |         ^~~~
+.github/workflows/canary.yml:367:9: shellcheck reported issue in this script: SC2086:info:57:68: Double quote to prevent globbing and word splitting [shellcheck]
+    |
+367 |         run: |
+    |         ^~~~
+.github/workflows/canary.yml:885:9: shellcheck reported issue in this script: SC2035:info:2:11: Use ./*glob* or -- *glob* so names with dashes won't become options [shellcheck]
+    |
+885 |         run: |
+    |         ^~~~
+.github/workflows/canary.yml:936:9: shellcheck reported issue in this script: SC2035:info:2:11: Use ./*glob* or -- *glob* so names with dashes won't become options [shellcheck]
+    |
+936 |         run: |
+    |         ^~~~
+.github/workflows/doc-comments.yml:53:9: shellcheck reported issue in this script: SC2016:info:7:15: Expressions don't expand in single quotes, use double quotes for that [shellcheck]
+   |
+53 |         run: |
+   |         ^~~~
+.github/workflows/release.yml:339:9: shellcheck reported issue in this script: SC2035:info:2:11: Use ./*glob* or -- *glob* so names with dashes won't become options [shellcheck]
+    |
+339 |         run: |
+    |         ^~~~
+.github/workflows/release.yml:387:9: shellcheck reported issue in this script: SC2035:info:27:11: Use ./*glob* or -- *glob* so names with dashes won't become options [shellcheck]
+    |
+387 |         run: |
+    |         ^~~~
+.github/workflows/release.yml:566:9: shellcheck reported issue in this script: SC2086:info:13:66: Double quote to prevent globbing and word splitting [shellcheck]
+    |
+566 |         run: |
+    |         ^~~~
+.github/workflows/release.yml:566:9: shellcheck reported issue in this script: SC2086:info:33:68: Double quote to prevent globbing and word splitting [shellcheck]
+    |
+566 |         run: |
+    |         ^~~~
+.github/workflows/release.yml:566:9: shellcheck reported issue in this script: SC2086:info:4:45: Double quote to prevent globbing and word splitting [shellcheck]
+    |
+566 |         run: |
+    |         ^~~~

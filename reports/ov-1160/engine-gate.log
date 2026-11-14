@@ -1,0 +1,6 @@
+....{"cold_seconds": 1.621573917, "hit_seconds": 1.22453575, "observed_wall_saved_seconds": 0.39703816700000005, "operational_fixture": "clean-real-shell-pair", "pair_job_hit_rate": 0.5, "repeat_job_hit_rate": 1.0}
+.....
+----------------------------------------------------------------------
+Ran 9 tests in 44.006s
+
+OK

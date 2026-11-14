@@ -1,0 +1,8 @@
+Expected red (exit 1), remove fs_watch from selection:
+crates/daemon/src/fs_watch/backend.rs: select farcooler-daemon modules fs_watch
+crates/daemon/src/fs_watch/offload_tests.rs: select farcooler-daemon modules fs_watch
+crates/daemon/src/fs_watch/settle.rs: select farcooler-daemon modules fs_watch
+crates/daemon/src/fs_watch.rs: select farcooler-daemon modules fs_watch
+
+Expected red (exit 1), add unselected Mac-only workspace crate:
+platform/mac-only/src/lib.rs: select mac-only packages (whole crate)

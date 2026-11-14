@@ -1,0 +1,1030 @@
+{
+  "source": "1b6373e5f0d4939edb040aeb53765c49a9a09db1",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "removed_session_variables": [
+    "FARCOOLER_BASE",
+    "FARCOOLER_CANDIDATE",
+    "FARCOOLER_DEFINITION_PIN",
+    "FARCOOLER_ITERATION",
+    "FARCOOLER_NATIVE_HOOK_SOCKET",
+    "FARCOOLER_NATIVE_SESSION",
+    "FARCOOLER_OPERATION_BINDING",
+    "FARCOOLER_POLICY_PIN",
+    "FARCOOLER_RECEIPT",
+    "FARCOOLER_RESOURCE_GENERATION",
+    "FARCOOLER_WORKFLOW_FENCE",
+    "FARCOOLER_WORKFLOW_ITEM",
+    "FARCOOLER_WORKFLOW_MODEL",
+    "FARCOOLER_WORKFLOW_RUN",
+    "FARCOOLER_WORKOS_CLIENT_ID",
+    "FARCOOLER_WORKSPACE"
+  ],
+  "threads": 3,
+  "target": "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1160-mac-rust-only/target",
+  "selection_sha256": "826c76b6b34617e94f52818b5cb512ae196db1aa72cdc85e00fa6339dc27179f",
+  "note": "Local reproduction; runner provisioning and cache restore/upload excluded.",
+  "runs": [
+    {
+      "label": "prepare",
+      "steps": [
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.8161069160000001,
+          "exit": 0,
+          "log": "prepare-00.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "helper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.15815175000000004,
+          "exit": 0,
+          "log": "prepare-01.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.11289837499999988,
+          "exit": 0,
+          "log": "prepare-02.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.39066675000000006,
+          "exit": 0,
+          "log": "prepare-03.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.37483395799999997,
+          "exit": 0,
+          "log": "prepare-04.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-client",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.24444524999999984,
+          "exit": 0,
+          "log": "prepare-05.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-cli",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.24699291700000003,
+          "exit": 0,
+          "log": "prepare-06.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-jni",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.19847887499999972,
+          "exit": 0,
+          "log": "prepare-07.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked"
+          ],
+          "seconds": 0.1565974579999998,
+          "exit": 0,
+          "log": "prepare-08.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked",
+            "--target",
+            "aarch64-unknown-linux-musl"
+          ],
+          "seconds": 0.10575974999999982,
+          "exit": 0,
+          "log": "prepare-09.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "helper"
+          ],
+          "seconds": 0.8618439160000002,
+          "exit": 0,
+          "log": "prepare-10.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "an_empty_allowlist_starts_no_tunnel"
+          ],
+          "seconds": 0.7348818330000002,
+          "exit": 0,
+          "log": "prepare-11.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "revocation_closes_what_it_revoked"
+          ],
+          "seconds": 3.629584166999999,
+          "exit": 0,
+          "log": "prepare-12.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_pairing_gives_the_runner_a_tunnel"
+          ],
+          "seconds": 0.6539070420000002,
+          "exit": 0,
+          "log": "prepare-13.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_sweep_rebuilds_the_tunnel_once"
+          ],
+          "seconds": 1.4383366249999998,
+          "exit": 0,
+          "log": "prepare-14.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_configured_derp_map_reaches_the_tunnel"
+          ],
+          "seconds": 0.7039782500000005,
+          "exit": 0,
+          "log": "prepare-15.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat",
+            "--all-targets"
+          ],
+          "seconds": 0.3269540419999988,
+          "exit": 0,
+          "log": "prepare-16.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--workspace",
+            "--bins"
+          ],
+          "seconds": 0.22490591700000095,
+          "exit": 0,
+          "log": "prepare-17.log"
+        }
+      ],
+      "start_load": [
+        9.5693359375,
+        11.9404296875,
+        12.54248046875
+      ],
+      "seconds": 11.387071292000002,
+      "end_load": [
+        9.40771484375,
+        11.8271484375,
+        12.49462890625
+      ]
+    },
+    {
+      "label": "before",
+      "steps": [
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.47840883399999967,
+          "exit": 0,
+          "log": "before-00.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "helper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.13684395800000004,
+          "exit": 0,
+          "log": "before-01.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.13399612499999947,
+          "exit": 0,
+          "log": "before-02.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.36867704099999976,
+          "exit": 0,
+          "log": "before-03.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.44528091699999983,
+          "exit": 0,
+          "log": "before-04.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-client",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.2943876250000006,
+          "exit": 0,
+          "log": "before-05.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-cli",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.27567979199999826,
+          "exit": 0,
+          "log": "before-06.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-jni",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.24258458399999938,
+          "exit": 0,
+          "log": "before-07.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked"
+          ],
+          "seconds": 0.14482941699999863,
+          "exit": 0,
+          "log": "before-08.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked",
+            "--target",
+            "aarch64-unknown-linux-musl"
+          ],
+          "seconds": 0.10739495800000043,
+          "exit": 0,
+          "log": "before-09.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "helper"
+          ],
+          "seconds": 0.8786229579999993,
+          "exit": 0,
+          "log": "before-10.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "an_empty_allowlist_starts_no_tunnel"
+          ],
+          "seconds": 0.5717924169999993,
+          "exit": 0,
+          "log": "before-11.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "revocation_closes_what_it_revoked"
+          ],
+          "seconds": 3.4914071250000003,
+          "exit": 0,
+          "log": "before-12.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_pairing_gives_the_runner_a_tunnel"
+          ],
+          "seconds": 0.5397962920000019,
+          "exit": 0,
+          "log": "before-13.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_sweep_rebuilds_the_tunnel_once"
+          ],
+          "seconds": 1.4077039170000027,
+          "exit": 0,
+          "log": "before-14.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_configured_derp_map_reaches_the_tunnel"
+          ],
+          "seconds": 0.7046334999999999,
+          "exit": 0,
+          "log": "before-15.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat",
+            "--all-targets"
+          ],
+          "seconds": 0.3586727080000003,
+          "exit": 0,
+          "log": "before-16.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--workspace",
+            "--bins"
+          ],
+          "seconds": 0.23897004100000174,
+          "exit": 0,
+          "log": "before-17.log"
+        },
+        {
+          "command": [
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+            "scripts/test-leak-check.py",
+            "--",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+            "scripts/tmux-leak-check.py",
+            "--",
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "--workspace",
+            "--no-fail-fast"
+          ],
+          "seconds": 951.6925675,
+          "exit": 100,
+          "log": "before-18.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--doc"
+          ],
+          "seconds": 4.574283166999976,
+          "exit": 0,
+          "log": "before-19.log"
+        }
+      ],
+      "start_load": [
+        9.40771484375,
+        11.8271484375,
+        12.49462890625
+      ],
+      "seconds": 967.1026845409999,
+      "end_load": [
+        7.8046875,
+        16.9736328125,
+        17.70947265625
+      ]
+    },
+    {
+      "label": "after",
+      "steps": [
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.8781844999999748,
+          "exit": 0,
+          "log": "after-00.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "helper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.1876984169999787,
+          "exit": 0,
+          "log": "after-01.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.10341716699997505,
+          "exit": 0,
+          "log": "after-02.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.5222996669999702,
+          "exit": 0,
+          "log": "after-03.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.40741170900003,
+          "exit": 0,
+          "log": "after-04.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-client",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.33496208300005037,
+          "exit": 0,
+          "log": "after-05.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-cli",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.34228458300003695,
+          "exit": 0,
+          "log": "after-06.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "clippy",
+            "-p",
+            "farcooler-jni",
+            "--features",
+            "tailcat",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings"
+          ],
+          "seconds": 0.27888933299993823,
+          "exit": 0,
+          "log": "after-07.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked"
+          ],
+          "seconds": 0.13610458300001937,
+          "exit": 0,
+          "log": "after-08.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "linked",
+            "--target",
+            "aarch64-unknown-linux-musl"
+          ],
+          "seconds": 0.15380029100003867,
+          "exit": 0,
+          "log": "after-09.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-tailcat",
+            "--features",
+            "helper"
+          ],
+          "seconds": 0.9498526250000623,
+          "exit": 0,
+          "log": "after-10.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "an_empty_allowlist_starts_no_tunnel"
+          ],
+          "seconds": 0.7062845839999454,
+          "exit": 0,
+          "log": "after-11.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "revocation_closes_what_it_revoked"
+          ],
+          "seconds": 3.876490874999945,
+          "exit": 0,
+          "log": "after-12.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_pairing_gives_the_runner_a_tunnel"
+          ],
+          "seconds": 0.7678127919999724,
+          "exit": 0,
+          "log": "after-13.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_sweep_rebuilds_the_tunnel_once"
+          ],
+          "seconds": 1.6879662079999207,
+          "exit": 0,
+          "log": "after-14.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat-helper",
+            "--test",
+            "a_configured_derp_map_reaches_the_tunnel"
+          ],
+          "seconds": 0.8585835420000194,
+          "exit": 0,
+          "log": "after-15.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "check",
+            "-p",
+            "farcooler-daemon",
+            "--features",
+            "tailcat",
+            "--all-targets"
+          ],
+          "seconds": 0.5127516250000781,
+          "exit": 0,
+          "log": "after-16.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "build",
+            "--workspace",
+            "--bins"
+          ],
+          "seconds": 0.26495158299997,
+          "exit": 0,
+          "log": "after-17.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "--workspace",
+            "--no-run"
+          ],
+          "seconds": 1.1959474999999884,
+          "exit": 0,
+          "log": "after-18.log"
+        },
+        {
+          "command": [
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+            "scripts/test-leak-check.py",
+            "--",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+            "scripts/tmux-leak-check.py",
+            "--",
+            "cargo",
+            "nextest",
+            "run",
+            "--profile",
+            "ci",
+            "--workspace",
+            "--no-fail-fast",
+            "-E",
+            "package(=farcooler-ceremony) or package(=farcooler-cli) or package(=farcooler-client) or package(=farcooler-tmux) or package(=farcooler-transport) or (package(=farcooler-core) and test(/^local_time::/)) or (package(=farcooler-core) and test(/^programs::/)) or (package(=farcooler-core) and test(/^scratch::/)) or (package(=farcooler-core) and test(/^shell::/)) or (package(=farcooler-daemon) and test(/^caller_seat::/)) or (package(=farcooler-daemon) and test(/^claude_registry::/)) or (package(=farcooler-daemon) and test(/^code_identity::/)) or (package(=farcooler-daemon) and test(/^daemon_log::/)) or (package(=farcooler-daemon) and test(/^foreground::/)) or (package(=farcooler-daemon) and test(/^fs_watch::/)) or (package(=farcooler-daemon) and test(/^git_launch::/)) or (package(=farcooler-daemon) and test(/^git_sandbox::/)) or (package(=farcooler-daemon) and test(/^log_watch::/)) or (package(=farcooler-daemon) and test(/^paths::/)) or (package(=farcooler-daemon) and test(/^proc_cwd::/)) or (package(=farcooler-daemon) and test(/^proc_table::/)) or (package(=farcooler-daemon) and test(/^push::/)) or (package(=farcooler-daemon) and test(/^rpc_agent_answer::/)) or (package(=farcooler-daemon) and test(/^service::/)) or (package(=farcooler-daemon) and test(/^session_projectors::/)) or (package(=farcooler-daemon) and test(/^session_watch::/)) or (package(=farcooler-daemon) and test(/^transcript_tail::/)) or (package(=farcooler-daemon) and test(/^workflow_runtime::/)) or (package(=farcooler-store) and test(/^engine_cutover::/)) or (package(=farcooler-daemon) and binary(=a_change_set_tells_the_truth_about_a_worktree)) or (package(=farcooler-daemon) and binary(=a_cutover_survives_every_crash)) or (package(=farcooler-daemon) and binary(=a_forced_command_still_streams)) or (package(=farcooler-daemon) and binary(=a_forgotten_projector_lets_its_watch_go)) or (package(=farcooler-daemon) and binary(=a_real_sshd_admits_a_passkey)) or (package(=farcooler-daemon) and binary(=a_real_sshd_forces_the_scope)) or (package(=farcooler-daemon) and binary(=a_real_sshd_master_outlives_a_revoke)) or (package(=farcooler-daemon) and binary(=a_real_tunnel_carries_the_scope)) or (package(=farcooler-daemon) and binary(=a_resized_pane_says_so)) or (package(=farcooler-daemon) and binary(=a_running_agent_reaches_every_client)) or (package(=farcooler-daemon) and binary(=a_stdio_relay_ends_when_the_daemon_hangs_up)) or (package(=farcooler-daemon) and binary(=agent_panes_over_the_socket)) or (package(=farcooler-daemon) and binary(=agent_rows_over_every_transport)) or (package(=farcooler-daemon) and binary(=agent_stop_over_the_socket)) or (package(=farcooler-daemon) and binary(=git_runs_nothing_a_repository_plants)) or (package(=farcooler-daemon) and binary(=lfs_content_under_the_git_sandbox)) or (package(=farcooler-daemon) and binary(=one_daemon_per_home)) or (package(=farcooler-daemon) and binary(=passkey_keys_follow_the_sshd)) or (package(=farcooler-daemon) and binary(=projector_setting)) or (package(=farcooler-daemon) and binary(=rpc_over_socket)) or (package(=farcooler-daemon) and binary(=stdio_transport)) or (package(=farcooler-daemon) and binary(=the_daemon_keeps_its_log)) or (package(=farcooler-daemon) and binary(=the_daemon_log_holds_stderr)) or (package(=farcooler-daemon) and binary(=the_owners_orchestrator_runs_a_cutover))"
+          ],
+          "seconds": 486.0905099170001,
+          "exit": 0,
+          "log": "after-19.log"
+        },
+        {
+          "command": [
+            "cargo",
+            "test",
+            "--workspace",
+            "--doc"
+          ],
+          "seconds": 2.8748024169999553,
+          "exit": 0,
+          "log": "after-20.log"
+        }
+      ],
+      "start_load": [
+        7.8046875,
+        16.9736328125,
+        17.70947265625
+      ],
+      "seconds": 503.16827550000005,
+      "end_load": [
+        7.564453125,
+        10.669921875,
+        14.119140625
+      ]
+    }
+  ]
+}

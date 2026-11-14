@@ -306,6 +306,8 @@ def steps_for(job, workflows, ctx):
                 skip = "installs a toolchain on a CI runner"
             elif name == "Green bases for Rust shadow (ov-1116)":
                 skip = "CI lists verified green bases; local shadow safely proposes full without that evidence"
+            elif job == "rust" and name == "macOS native Rust tests":
+                skip = "local gate runs the full Rust suite; the filtered Mac CI replay would duplicate it"
             elif job == "web" and WEB_LINUX_ONLY.search(hay):
                 skip = "needs the Linux x86 wasm toolchain CI downloads; left to CI"
             elif job == "ios" and not IOS_KEEP.search(run):
@@ -898,6 +900,11 @@ def _self_test():
         ("doc-comments", "--base origin/main --head HEAD"),
     ]:
         expect(f"{job} runs {needle}", has(job, needle), True)
+    expect("local gate runs one full Rust workspace suite", sum(
+        "cargo nextest run --profile ci --workspace" in s.run and not s.skip
+        for s in plans["rust"]), 1)
+    expect("filtered Mac CI tests do not duplicate the full local suite", any(
+        s.name == "macOS native Rust tests" and bool(s.skip) for s in plans["rust"]), True)
     # Nothing that only installs on a CI runner is run, and the skip is recorded.
     for j in JOBS:
         for s in plans[j]:

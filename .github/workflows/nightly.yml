@@ -325,7 +325,7 @@ jobs:
   # timed-out job (no verdict from the tests) is reported too.
   report:
     name: Report
-    needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing]
+    needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing, rust-macos]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
