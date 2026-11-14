@@ -1,0 +1,117 @@
+   Compiling syn v3.0.3
+   Compiling serde_derive v1.0.229
+   Compiling displaydoc v0.2.7
+   Compiling thiserror-impl v2.0.19
+   Compiling tinystr v0.8.3
+   Compiling icu_locale_core v2.1.1
+   Compiling zerotrie v0.2.4
+   Compiling icu_collections v2.1.1
+   Compiling thiserror v2.0.19
+   Compiling icu_provider v2.1.1
+   Compiling farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/tailcat)
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling russh v0.62.4
+   Compiling idna_adapter v1.2.1
+   Compiling idna v1.1.0
+   Compiling url v2.5.8
+   Compiling tower-http v0.6.11
+   Compiling serde v1.0.229
+   Compiling typeshare v1.0.4
+   Compiling serde_spanned v0.6.9
+   Compiling farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/workflow)
+   Compiling toml_datetime v0.6.11
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/agent-core)
+   Compiling toml_edit v0.22.27
+   Compiling serde_urlencoded v0.7.1
+   Compiling reqwest v0.12.28
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/protocol)
+   Compiling toml v0.8.23
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/core)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/fence)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/ceremony)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/transport)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/store)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/tmux)
+   Compiling farcooler-agent-hooks v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/agent-hooks)
+   Compiling farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/review)
+   Compiling vte v0.15.0
+   Compiling alacritty_terminal v0.26.0
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/daemon)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/client)
+   Compiling farcooler-vt v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1244-engine-train-2/crates/vt)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 45s
+────────────
+ Nextest run ID 882eac7a-937a-4481-8f99-995e991d3ec9 with nextest profile: default
+    Starting 69 tests across 93 binaries (4278 tests skipped)
+        PASS [   0.021s] ( 1/69) farcooler-client plan_json::tests::workflow_enrichment_keeps_compatibility_without_hiding_read_failures
+        PASS [   0.022s] ( 2/69) farcooler-client plan_view::landing_queue::tests::no_workflow_and_future_clocks_do_not_invent_time_or_groups
+        PASS [   0.377s] ( 3/69) farcooler-client session::workflow::tests::socket::workflow_session_selection_route_stale_auth_and_retry
+        PASS [   0.437s] ( 4/69) farcooler-client session::workflow::tests::socket::landing_group_reaches_the_plan_over_the_socket
+        PASS [   0.009s] ( 5/69) farcooler-client session::workflow::tests::workflow_a_maintainer_cancels_on_their_own_source
+        PASS [   0.007s] ( 6/69) farcooler-client session::workflow::tests::workflow_prepared_validation_is_shared_and_preserves_bytes
+        PASS [   0.010s] ( 7/69) farcooler-client session::workflow::tests::workflow_reasoned_selection_validation_and_immutable_bytes
+        PASS [   0.009s] ( 8/69) farcooler-client session::workflow::tests::workflow_selection_allocates_once_and_preserves_observation
+        PASS [   0.009s] ( 9/69) farcooler-client session::workflow::tests::workflow_selection_readonly_ignores_all_sequence_exhaustion
+        PASS [   0.007s] (10/69) farcooler-client session::workflow::tests::workflow_session_prepared_retains_exact_observation_and_bytes
+        PASS [   0.011s] (11/69) farcooler-client session::workflow::tests::workflow_session_review_and_inspection_keep_exact_evidence
+        PASS [   0.010s] (12/69) farcooler-client session::workflow::tests::workflow_session_stale_observation_and_admission_binding
+        PASS [   0.007s] (13/69) farcooler-client workflow_presentation::style::tests::a_small_word_is_capitalized_at_either_edge_only
+        PASS [   0.007s] (14/69) farcooler-client workflow_presentation::style::tests::a_style_is_never_assumed
+        PASS [   0.006s] (15/69) farcooler-client workflow_presentation::style::tests::apple_and_web_set_title_case_and_material_keeps_sentence_case
+        PASS [   0.007s] (16/69) farcooler-client workflow_presentation::tests::a_cancelled_run_says_why
+        PASS [   0.007s] (17/69) farcooler-client workflow_presentation::tests::a_failed_runs_page_leads_with_its_sentence
+        PASS [   0.007s] (18/69) farcooler-client workflow_presentation::tests::a_landed_runs_page_is_all_done
+        PASS [   0.008s] (19/69) farcooler-client workflow_presentation::tests::a_request_without_a_style_is_refused
+        PASS [   0.008s] (20/69) farcooler-client workflow_presentation::tests::a_runs_page_holds_the_gate_every_reason_and_plain_words
+        PASS [   0.007s] (21/69) farcooler-client workflow_presentation::tests::a_runs_page_reads_like_a_person_wrote_it
+        PASS [   0.007s] (22/69) farcooler-client workflow_presentation::tests::a_schema_two_split_is_presented_with_its_members_and_kept_failure
+        PASS [   0.007s] (23/69) farcooler-client workflow_presentation::tests::a_sent_back_run_with_no_rework_budget_has_no_reworks_left_line
+        PASS [   0.008s] (24/69) farcooler-client workflow_presentation::tests::a_stop_does_not_replace_a_kept_failure_sentence
+        PASS [   0.009s] (25/69) farcooler-client workflow_presentation::tests::a_stopped_run_shows_why
+        PASS [   0.007s] (26/69) farcooler-client workflow_presentation::tests::a_tracker_only_ticket_offers_a_person_no_action
+        PASS [   0.008s] (27/69) farcooler-client workflow_presentation::tests::actions_follow_the_outcome
+        PASS [   0.008s] (28/69) farcooler-client workflow_presentation::tests::an_action_is_matched_in_the_style_it_was_shown_in
+        PASS [   0.008s] (29/69) farcooler-client workflow_presentation::tests::each_platform_shows_its_own_case_and_the_sentences_do_not_move
+        PASS [   0.007s] (30/69) farcooler-client workflow_presentation::tests::every_variant_is_listed
+        PASS [   0.008s] (31/69) farcooler-client workflow_presentation::tests::execution_facts_drive_every_shared_run_slot
+        PASS [   0.006s] (32/69) farcooler-client workflow_presentation::tests::short_ids_drop_the_scheme_and_keep_the_front
+        PASS [   0.006s] (33/69) farcooler-client workflow_presentation::tests::short_leaves_a_name_alone
+        PASS [   0.012s] (34/69) farcooler-client workflow_presentation::tests::status_words_are_sentence_case_on_every_platform
+        PASS [   0.680s] (35/69) farcooler-client session::workflow::tests::socket::workflow_reasoned_socket_selection_loss_and_reconnect
+        PASS [   0.008s] (36/69) farcooler-client workflow_presentation::tests::stored_uncertainty_keeps_its_own_explanation
+        PASS [   0.008s] (37/69) farcooler-client workflow_presentation::tests::workflow_label_golden_per_platform
+        PASS [   0.010s] (38/69) farcooler-client workflow_presentation::tests::workflow_presentation_errors_and_c_buffer
+        PASS [   0.010s] (39/69) farcooler-client workflow_presentation::tests::workflow_presentation_generic_display_slots
+        PASS [   0.308s] (40/69) farcooler-client session::workflow::tests::socket::workflow_session_socket_lost_reply_reconnect_stale_and_auth_change
+        PASS [   0.010s] (41/69) farcooler-client workflow_presentation::tests::workflow_presentation_invalidated_inspection_and_rework
+        PASS [   0.017s] (42/69) farcooler-client workflow_presentation::tests::workflow_presentation_golden
+        PASS [   0.009s] (43/69) farcooler-client workflow_presentation::tests::workflow_presentation_stale_and_auth_boundaries
+        PASS [   0.012s] (44/69) farcooler-client workflow_presentation::tests::workflow_presentation_selected_and_every_stage_approval
+        PASS [   0.696s] (45/69) farcooler-client session::workflow::tests::socket::workflow_session_socket_effectful_approval_retry_does_not_reexecute
+        PASS [   0.028s] (46/69) farcooler-daemon effect_runner::tests::native_output_uses_the_same_cap_and_refuses_aliased_logs
+        PASS [   0.051s] (47/69) farcooler-daemon effect_runner::tests::process_output_keeps_the_bounded_tail_of_both_streams
+        PASS [   0.077s] (48/69) farcooler-daemon effect_runner::tests::workflow_runtime_exited_leader_keeps_group_owned_until_descendant_stops
+        PASS [   0.169s] (49/69) farcooler-daemon effect_runner::tests::workflow_runtime_process_timeout_and_cancel_kill_owned_group
+        PASS [   0.300s] (50/69) farcooler-daemon yielding::tests::a_builder_that_ends_is_continued_and_never_signalled_again
+        PASS [   0.299s] (51/69) farcooler-daemon yielding::tests::a_builder_that_starts_during_a_gate_is_stopped_at_once
+        PASS [   0.315s] (52/69) farcooler-daemon yielding::tests::a_daemon_that_died_during_a_gate_continues_what_it_stopped_when_it_starts_again
+        PASS [   0.197s] (53/69) farcooler-daemon yielding::tests::a_first_pause_that_cannot_be_recorded_stops_nothing
+        PASS [   0.280s] (54/69) farcooler-daemon yielding::tests::a_pid_that_started_at_another_time_is_not_stopped
+        PASS [   0.961s] (55/69) farcooler-daemon yielding::tests::a_builder_paused_by_gate_and_hand_resumes_only_after_both_are_lifted_in_either_order
+        PASS [   0.512s] (56/69) farcooler-daemon yielding::tests::a_manually_paused_builder_stays_paused_when_a_gate_ends
+        PASS [   0.009s] (57/69) farcooler-daemon yielding::tests::an_unreadable_record_is_kept_not_deleted
+        PASS [   0.405s] (58/69) farcooler-daemon yielding::tests::a_restart_after_an_update_resumes_every_stopped_builder
+        PASS [   0.298s] (59/69) farcooler-daemon yielding::tests::an_update_that_cannot_be_recorded_continues_what_was_stopped_and_keeps_the_old_record
+        PASS [   0.011s] (60/69) farcooler-protocol workflow_commands::publication_grant_boundaries::ov1179_publication_grant_rejects_unknown_fields_and_actions
+        PASS [   0.514s] (61/69) farcooler-daemon yielding::tests::a_running_gate_stops_a_builder_and_its_children_and_the_end_of_it_resumes_them
+        PASS [   0.006s] (62/69) farcooler-protocol workflow_commands::publication_grant_tests::ov1179_publication_grant_and_rollback_are_closed_commands
+        PASS [   0.006s] (63/69) farcooler-protocol workflow_commands::tests::workflow_reasoned_wire_preserves_legacy_and_refuses_unknown_fields
+        PASS [   0.007s] (64/69) farcooler-protocol workflow_commands::tests::workflow_wire_carries_retry_and_routed_definitions_exactly
+        PASS [   0.006s] (65/69) farcooler-protocol workflow_commands::tests::workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields
+        PASS [   0.007s] (66/69) farcooler-protocol workflow_config::security_review_tests::legacy_adapter_bytes_keep_their_pin_and_security_policy_changes_it
+        PASS [   0.006s] (67/69) farcooler-protocol workflow_cutover::tests::cutover_vocabulary_is_closed_and_carries_no_authority
+        PASS [   1.618s] (68/69) farcooler-daemon effect_runner::tests::a_cancel_during_a_fork_leaves_nothing_of_the_group_running
+        PASS [   0.308s] (69/69) farcooler-daemon yielding::tests::builders_resume_only_when_the_last_of_several_gates_ends
+────────────
+     Summary [   2.413s] 69 tests run: 69 passed, 4278 skipped

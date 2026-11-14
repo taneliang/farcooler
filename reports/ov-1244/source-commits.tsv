@@ -1,0 +1,218 @@
+phase	source	subject
+ci	2febc431c4eff24f8e6a30993654a0febe64f2fa	build: prototype local-to-CI archive reuse for ov-1186
+ci	7fb952cc3b7a97f376597141302560b4c0e9bf6b	docs: report measured cache tradeoffs and CI reuse for ov-1186
+ci	0a3d896b8a06a0f61fcc50aeeea766a5d7b8cc69	ov-1200: reserve vanished review tty in recovery test
+ci	82c5784cf08777987f9246a8a14405005830c5fe	ov-1200: document recovery flake reproduction and stress validation
+ci	f8e7dd06685452582ef419a3eb96e3d3040f5690	workflow: steer engine agents (ov-1188)
+ci	2acd52d5fa532498a2bdca22436f3fd8e1f1f16b	workflow: deliver active direction and fence message handoff (ov-1188)
+ci	08e35d4a999e34319b5a69238e1c61576bc931cf	workflow: require active Claude steering hooks (ov-1188)
+ci	3b9fe5e74e8f1a46aaa2762aa1cc436a772468f5	ov-1205: steer Codex engine agents at tool boundaries
+ci	4fa637188e5ca9fa7889d89315079a41345c4487	workflow: deliver native direction with answer wake off (ov-1205)
+ci	cc197cdfaf8e6fc7e85f809eb15ea3b7a46f985e	ov-1207: synchronize torn registry retry test
+ci	e9bf52dc1f64e7c80566e0bad9e5c504174eb43c	ov-1211 Exclude engine build outputs from Spotlight
+ci	f30756cfd561eb4a4ae4e77c2cc6848d5f96390f	ov-1211 Preserve Spotlight exclusion during target cleanup
+ci	a2f4da5c4b2be329bdeb2fc4d921f29a23a9a683	ov-1216: stop landing gates on first failure
+ci	9c71fdb2a636ff92393a5a88bf1cd5b142354d1f	workflow: gate next landing group during CI (ov-1209)
+ci	3090ec72ad1b3ce7f06a3c64a87611a5d740f34b	workflow: resume pre-send CI waits after restart (ov-1209)
+ci	ec9094689629318e0e93f449355cdca7348006b8	ov-1184: parallelize Android CI checks
+ci	d176c7bf1b11989477224849c56a26dfd803168b	ov-1184: record first Android CI measurement
+ci	7a29497ad364364162ec98acda401c3fd50fb2b0	ov-1184: split Android build and capture work
+ci	0315e47c2143a83388b8becb5e02ca5432c6d26b	ov-1184: record revised Android CI timing
+ci	3c839f7b0b509ae9afe9409727b7ad0dc2496d08	ov-1184: record repeat CI results
+ci	ddb6ff07eb019c2253fd8cde6a5327ab454ef57b	ov-1184: plan split Android jobs in lane gate
+ci	4928c3add1b2df563bee84aa18f11d2bd8c97739	research: propose Rust daemon crate split (ov-1219)
+ci	2ad2e1e6b4e1dd2a8256f517ed4e1273e62d4de5	ov-1183: reduce Swift CI linking and isolate the Mac test tail
+ci	ceabe9dfd0034705b6f9dfc616e66f878d791871	ov-1183: cache Swift compilation and keep release optimisation in shipping workflows
+ci	ffa77e958d8307a9d580041b694ec3b008595654	ov-1183: avoid shipping-only Rust optimisation in Swift CI checks
+ci	3a0495d9635dc0d0da7401b1904e2ba18caf8259	ov-1183: stop polling for the deliberately pending hover delay
+ci	2c13a8bb91b8ea9a336fab647f75d3b496cc5cf5	ov-1183: record cold CI results and measure the populated caches
+ci	af9d6c6e24b812c042b4e9ee6a372f4b0759f0fe	ov-1183: share one native test profile and feature graph
+ci	e72b23501fcaab609c2ab9f287116632aa57236b	ov-1183: stabilize Cargo fingerprints after restoring source timestamps
+ci	f257bc9056dedc782a70b1f7fc873de5cec313cc	ov-1183: remove remaining CI optimization and display wake overhead
+ci	1b3b79b5bb6a904e7f47f3f1c79f0cbaa3f56ce2	ov-1183: record first successful sub-15-minute Swift CI run
+ci	72bb99d420bae070f726e4d5407e5966c6f98c0e	ov-1183: verify two sub-15-minute Swift runs and remove trial trigger
+ci	f27c01dd3035fb5829392e92daf4d716b2f95e29	ov-1183: restore release CI coverage and reuse daemon feature graph
+ci	d49af78a2b6da2b91251da46f4e9baccbcc0d516	ov-1183: build release bundle binaries in one native feature graph
+ci	33e93a4376d5f50997ffa6ad2ffb5f3652784ef0	ov-1183: make native linkage fixture robust to CI color output
+ci	fdfd98acae1fb39679a1b2ed2dd34d8929a8e46b	ov-1183: read native fixture artifacts from Cargo metadata
+ci	f60b1b3e32c9162d4cdaa9a4ace11dcc27c80418	ov-1183: record cold release build and measure populated caches
+ci	53d8734af360ea514823e46cd664fc4b6eb69b52	ov-1183: record first qualifying fully optimized release run
+ci	e07c27ff9a79742dfab1033cd954e1b04de36d30	ov-1183: record over-target release repeat and preserve timing variation
+ci	3f791d63cd71252579e59db9eca32f2c4af188af	ov-1183: verify two optimized release runs and remove trial trigger
+ci	6a44aa39a1e2c575a796d029fd1090e77c42cb75	ov-1183: provide GITHUB_OUTPUT to local lane-gate steps
+ci	ece85a49e2c494e5a060c27a4e6eee3fd6d228ef	ov-1215 report landing timing from receipts
+ci	ee1e3e40dc25b34d050d0a4002c837392250e858	ov-1215 scope landing timings to relevant receipts
+ci	51ec261d8434f65a5fd14e896c54bb96ff73ff80	ov-1215 accumulate ticket timings across landing retries
+ci	76708a92ba8d9733e78a0bdb0b9f5bf5d43e1acf	workflow: add light review and parallel ticket gates (ov-1194)
+ci	e63b3c909ad3695cc53b23f50ae7f70621334814	workflow: enforce mandatory security review paths (ov-1194)
+ci	72ef8a3d2256787706d92e71658ed6a83af464b7	workflow: enforce pinned full review coverage (ov-1194)
+ci	55db55a4992a7a5446304f9e59af5f65f4bc3176	workflow: a light classification needs a passed review before join (ov-1225)
+ci	6bc2d0786f4a1b85bfd7cbca97fd8e6cee9219e8	Fix matrix job time matching (ov-1230)
+ci	c6c3e0d18495cdb9761875beda397012fb1d389d	ov-1223: design one pipeline that tickets flow through
+ci	21539ea2327d1c767da01ee9faad0f0ae1f8b3a1	ov-1223: close the review's three gaps in the pipeline design
+ci	da3465e5fca02b4221cbe801d4c71dfee1f01215	ov-1223: settle a landing before an intervention moves it; fix the capacity rehearsal
+ci	d3a9106518d73dac6527245b6979bad7bdb517f1	workflow: ov-1185 parallelize local landing gate and select affected Rust tests
+ci	f9637931f33ba03ae04ab34b9fbb37248ae02fcd	workflow: ov-1185 measure real landing gates and bound worker contention
+ci	d700247e2b3c654f900fa55913a5df2bf0fe53d8	test: ov-1185 keep planted-failure proof runnable without nextest
+ci	765eb526dc8cf08090f73bbec8954a655722cf3a	workflow: ov-1185 prevent optional Git refreshes invalidating warm builds
+ci	e9772b70579155f5f2a59bae5d587e5481864969	workflow: ov-1185 preserve warm builds during planning and timing reads
+ci	fe90cdea36275c9350e36901af59e2f825c298bc	workflow: ov-1185 preserve interrupted gate evidence and verify engine entry
+ci	1ef5b7e241b4c52df4735c6691898cae4a615923	docs: record ov-1218 landing gate evidence
+ci	8c769879b9b22a59b004508abd699e4cfbadac96	ov-1218: stop parallel landing families after failure
+ci	daaeeb4a577f572ca64d203d8f07d65cc01805df	ov-1224: copy process guard into script fixtures
+ci	dc57762ff7f7b5dee6b5c909c389c758ab189e1d	landing: select affected group gate suites (ov-1189)
+ci	33e1ce8f4b8371cf4b436d7139dc69b70aac2b4b	fix(landing): retain non-doc CI gate coverage (ov-1189)
+ci	b67406d09cb36e43e468a704e3083beb56b58bc7	ov-1182: build Rust tests once and verify parallel shard coverage
+ci	b0f27a89d73e99d43fed1b7606673498b5ccd748	ov-1182: overlap Mac native tests and reduce Rust archive symbol cost
+ci	ff133897674d41f2c274a630053d789a29780a98	ov-1182: record initial hosted timings and exercise duplicate coverage rejection
+ci	a0d5af44eb4d2e3e752bb055c9c02d9a062a9bc6	ov-1182: run all Clippy variants once on Linux
+ci	d642ebaab0f282ab9168797bb142e327f3024b83	ov-1182: preserve symbol-only timing attempts and test failure evidence
+ci	7f8f7d39cba378addd7e61967fbe380c84f47526	ov-1182: let full Rust job reruns replace their artifacts
+ci	7ad5c408d95de5e51e5e931f85f537a44c5fb8f9	ov-1182: record final measurement setup and superseded trials
+ci	1d699f17aaf1556747a0ae15b4908a9b6ed15879	ov-1182: preserve full local Rust gates and scope the iOS shard guard
+ci	acc3d53639c7ed7c1df8b5408ef9ab63a4e7bc9c	ov-1182: archive Mac test targets once and partition native coverage
+ci	b2ff2a257c80f9a3e31b1c94566617d3a9800e66	ov-1182: pin the two-platform archive measurement configuration
+ci	e46755ed53f55b610b87930ed6950896e2a989da	ov-1182: record two green sub-15-minute Rust CI runs and remove timing workflow
+ci	e0554c160f9cddd5b70bffc410b65bbe6fb9f143	ci: shard free runners and reserve landing capacity (ov-1190)
+ci	cfcf73835354a5ccf2934c3b3075ba808526ce2d	ci: coordinate background macOS capacity (ov-1190)
+ci	3b96404b8d913609ecf8b5f56f93d3b969016f30	ci: budget every overlapping workflow (ov-1190)
+ci	c51c03bc6465a20fb7becfae3f71eab0700751e5	ci: Nightly yields to main CI before each Apple phase (ov-1226)
+ci	d7c77471d846b6327572d34b0973e5a752ba6cb8	ci: Nightly report waits for yield jobs; fix planner mutations (ov-1226)
+ci	854479bd1397e5790bff52dd447bb886c0f2f2a0	ov-1156: serialize and target Nightly runs
+ci	288fb2dd2b488eabe1e464bf4ff87bfe359affca	ov-1239: record CI train integration status
+ci	7c73e97a798e8f62289ee114c539ffdd965c8695	ov-1239: repair initial CI train integration failures
+ci	ccfb4827863674229588711ff35a7afc9cb86e18	ov-1239: reconcile CI train runner reservations and gate policy
+ci	a899fe7821a7372de55495ca29b7fcfe56b739bc	ov-1229: a checked-in quarantine list for flaky tests
+ci	0e76d0b751b610cf6b266c36610338c7e22d59a0	ov-1240: drop merge markers left by the ov-1229 cherry-pick in ci.yml
+ci	da774d1566ed627579a5a2007925b7c96abc69f8	ov-1229: validate quarantine names exactly; test a nonempty list
+ci	413123781fd0c71e3b579492f3fb75ff641b0eef	ov-1229: resolve quarantine tests through each Cargo target's mod tree
+ci	98ae3f8895ae92da9d6b97dbade28d22b907d39c	ov-1237: resolve quarantine names against the real nextest inventory
+ci	26e6a5171c6a9fff52320c9cfdfdb8cf58bd29a0	ov-1237: resolve quarantine names against the real inventory in run, the gate path
+ci	d0db6d8a9692b816b07bd22ed04f5124d9e0b32d	ov-1237: PR description text covering every test-declaration form the resolver handles
+ci	0a5639d309325d6b9cb032f23917b74b699b35f0	ov-1240: fix nightly-dispatch, gate and shard checks against the merged workflows
+ci	7c49fea4203b2bfea0cd82dd21496cb9db6d8d12	ov-1240: commit the actionlint queue patch, pinned revision and reproducible lint script
+ci	ab0be07a75dc62ac39b74034eabe63e3d5932cf5	ov-1242: self-test an Android shard matrix in ci.yml against the iOS shard check
+ci	37d63250774e464d0d0479b6e3b351dee86ff372	ov-1242: report the rebuilt CI train
+engine	d13d64811b4de8d94d92755f625875dbe5506c2a	wave A preview: ov-1152
+engine	10602945a9c8c082e3b4f2d1dd4df486d126272e	wave A preview: ov-1143
+engine	e50cea277284a7d19160481fd6a3cbdf6a567e92	wave A preview: ov-1009
+engine	f0a1a6096b1c93e5237f1e33b9d651c5c8d3c3b1	ov-1127: retain bounded engine process logs and expose failure tails
+engine	d91887e2aea7b50e849cb1920bcad6b49761cac4	ov-1127: retain visible terminal output in native process logs
+engine	7906a4b830c3a9b2729019f18d86dd35f68199b1	ov-1127: preserve native process output across terminal clears
+engine	8a6d42a881a83a5a77d842e3c3cfcf37f1caeb61	ov-1127: bound failed process tails and workflow reply log budget
+engine	2aa597aa4e723689eaf31b6c3bff8b4a7f029982	tests: verify bounded workflow failure evidence (ov-1128)
+engine	c7d5dc872ca7b16ea6ffd3bb567da56c14744751	ov-1128: verify bounded legacy log tails preserve UTF-8 evidence
+engine	e9b4e322134beac6a8cfa5362b31f998ee3f0558	tests: verify captured failure output stays bounded (ov-1128)
+engine	7fbc080c617ec334e27c50fa6a68053b504dde28	ov-1146: verify workflow logs and budgets coexist
+engine	9e2b25f30fa653e250dde760c5afaeb98a41b26a	engine: add pinned script decisions at rare points (ov-1114)
+engine	4e2ed7648a164b40da710b05f09e2072ece439b6	engine: reject ambiguous script receipts (ov-1114)
+engine	f97b0775271f4eb2700bd05d5e4585473df9c6ef	ov-1114: validate CI observations before invoking script rules
+engine	a27bed03711ec1a601ffd9b0faed696e822005da	engine: apply fallback to unpinned hook answers (ov-1114)
+engine	c1d98d6fc1c6590d9f4a918702503f65f988c979	ov-1132: clean up script hook worktrees on early exit
+engine	524cda46d25f15dd014e2b32ac5914f182cb3258	ov-1153: reconcile script hooks with optional group limits
+engine	758b063519a879b20325366af71f44cafac3443e	workflow: ov-1106 start ready tickets from published policy
+engine	9dbff64ea7861eb65a39ac7b6281a1e1c49d5595	workflow: ov-1106 verify scheduling across boards and policy changes
+engine	057feb544be565f825f4b139f89d2c882b233676	workflow: ov-1106 verify policy removal and pinned auto-queue
+engine	f35dd0d8adfa0288832b7eb4d57b480e5bf4d6b4	fix: ov-1106 enforce runner-wide scheduling admission
+engine	0141fb8f779d1e4573c7f2d0ad1d511878c83a6d	fix: ov-1106 retain load admission gap across scans
+engine	8416370755c6e76862e4efa37110ea841e91c9e8	workflow: ov-1106 honor budgets published on empty boards
+engine	72d56bd4d0b5f0dff2d2550f98f6ad5005add898	workflow: ov-1131 retain load admission across runtime restarts
+engine	e23f8b85f85c55f9dd2334f44f5bc95201dabf84	workflow: ov-1131 advance admission clock during continuous sweeps
+engine	71e0a9f030532e1823fd524b7b7e883ea7737f22	workflow: ov-1131 record acceptance audit and fresh verification
+engine	86facc1f6aaa64ab3211b06774c6be33c111d58c	ov-1147: align send-back test with current refusal
+engine	c569abc78461ff763d9f53153fff2553ac7f1017	workflow: ov-1108 merge waiting landing groups
+engine	e075894ebd509dad19ec6cb0f9a7fc9c8a90a43e	workflow: ov-1108 isolate fold conflicts without splitting batches
+engine	3008e81b1fb14375830f14a0f0d8e31c5c00eb2f	ov-1108: diagnose all landing batch conflicts in one fold
+engine	cd2628e7f16bf1a129589bec279290a791fa2120	workflow: ov-1108 cover staggered landing arrivals across publication
+engine	b637c6d8244726d72f5b6066286a7bcf00c7086f	ov-1142: refresh grouping when published groups are removed
+engine	bb33ebc54f331e4489582f5f75d32678a9a61e87	ov-1142: correct ungrouped publication fixture
+engine	d1956b1c19aca772074debb2406e89b6c0cc0602	engine: reconcile fold evidence and published hook limits (ov-1154)
+engine	f78311623874bc9de36f1fe7296cf86c4269f304	tests: require rebuilds after diagnosed fold conflicts (ov-1154)
+engine	e706f745ea5e1aa77fb1ad7a550f68d35c4177f1	engine: avoid grouping revisions for ungrouped workflows (ov-1154)
+engine	a54476e1b066e7587bfb86e44e04ced69fcc1ecf	tests: pin the ungrouped refresh fixture to its coding adapter (ov-1154)
+engine	6dcbd25bd5b650f58f81980be4a3dbd7f5a9e84e	engine: preserve scripted split decisions during consolidation (ov-1154)
+engine	72ed9de42a49056adbfee8925665127b35dfbee9	docs: record engine stack conflicts and verification (ov-1154)
+engine	d6f1e43ef0204291a1c8b176beebbe00c8577b62	ov-1154: preserve split decisions across publication and repeated splits
+engine	070b581c5f7f4e8da24e274129ed70be79cf1491	workflow: close externally completed runs (ov-1139)
+engine	8dda9ce6d10eddbdc0611879d9a38316f2ed0950	workflow: refuse impossible closes before Git (ov-1139)
+engine	2638aba79cb413bbfc6043debf5552f1f73c70c4	plan: show engine landing groups across apps (ov-1105)
+engine	25e33f2be5086510141be3d585092ce206370f60	plan: retain the matching CI failure for landing groups (ov-1105)
+engine	bd74ec35bf4785b03d4081cf7636264d9fc386ae	plan: expose landing groups in current Plan homes (ov-1105)
+engine	7883aaec9533c28905522966da701b3ac8fe2fe7	ov-1105: verify landing queue on the narrow web Plan screen
+engine	51e0d2a47554e30b974aa03db319f79a386e09f9	plan: validate landing groups on Plan reads (ov-1105)
+engine	780710aa53a8cdb22c5af5de968c06b8c442727c	ov-1105: enrich CLI Plan reads through the shared workflow path
+engine	967cfe6dfd1e0220a789509957fddce02fffec2b	docs: record ov-1105 acceptance verification
+engine	7308590c01592665fa1143bf2b12a76558d453af	ov-1145: reconcile landing queue with CI reruns
+engine	0e1b8e23bad39faad45b9d8e67a11eb1af3afd49	apps: reconcile reviewed stacks on wave-a-preview (ov-1155)
+engine	2be7e2e21105356ee32934e7a284cdeb9532d9fb	apps: adapt landing queue fixture to optional limits (ov-1155)
+engine	45ecfc1704c3bca1f763db1f2e2d0023e376e3bd	apps: refresh queue fixture for execution observations (ov-1155)
+engine	dd946c7e6cd8f01b1fbab04df885771295e65986	apps: record ov-1155 validation and remaining gate blockers
+engine	77b2e9f20808a5421f3d3465f130cb4cc1b24506	ov-1155: classify enrollment and browser recovery platform copy
+engine	4807dbbd5ae5eb45138e58ad8b15b65344daa060	ov-1155: record passing iOS execution and acceptance gates
+engine	4b156b14045fb5e10d7d44ef6165e309d8e42155	workflow: ov-1158 give landing waits and infrastructure retries honest lifetimes
+engine	053a5f4802f9199759c60b471df790c5a12fdf75	workflow: ov-1158 preserve stage patience and verify real tree removal
+engine	82b57264def01634b766aa7f93f13713b068ab55	docs: ov-1158 record passing acceptance checks
+engine	a66f6f69aa080247f1761191ca405cd230884a1b	fix: ov-1158 retry cherry-pick infrastructure failures
+engine	9f870b24e196950d0d00ee89642be4b9b7ac77f7	workflow: ov-1158 retry landing gate preparation failures
+engine	3dd798a44121094426704ae1135e07fbd15eb4c3	ov-1164: require gate quiescence before retrying
+engine	b3ec462f6daaef73f780277d2699b9cd08954646	ov-1164: check gate ownership before preparing a repeated run
+engine	1ab3a01549ca585712aeba71742e3c894b34135f	ov-1164: record regression evidence and validation results
+engine	adefdc89ee14213d446f8b3021d4e9a6b61d066c	ov-1164: isolate tty-sensitive recovery tests and verify full suites
+engine	8e6206f11bcb5e21b53cd2b07795236e2e05973f	workflow: ov-1164 refuse gate recovery without process identity
+engine	9a016d410a66b3eec287291c63b36ef0815ecc4d	cli: keep ov-1159 workflow reads responsive under load
+engine	653cbaf1ddbbce34557185e012c43146a6b4df93	cli: preserve full dispatch snapshots for ov-1159
+engine	9dfa7fe8a6efcf167c74da676a7d972bbf948ee7	daemon: move ov-1159 RPC status scans and legacy reads off the inbox
+engine	9a490142ce5956e3497e19139791d107f0426f91	engine: release finished runs build output (ov-1203)
+engine	2b895a30319f1b72e5bf5e12ac6519a8226d1df3	engine: retry transient build cleanup contention (ov-1203)
+engine	c6536d6bc6179eb4ed185da4cb44678366b03aaa	engine: schedule pending build cleanup retries (ov-1203)
+engine	7681702e54916b8d1ef6a90e8a16f594345479d3	ov-1213: reconcile pool fixtures and continuous scheduling clocks
+engine	03f4b62d9ed4a100fc1c3bf4dfd15ad774c0f033	ov-1213: align combined gate and provision test fixtures
+engine	b46f4f598531edbcaa83d79dc0ae3e17968dc937	ov-1213: reconcile scheduling and hook deadline regressions
+engine	20445c9aa037fe588d2c69e953450c9827df4b2d	ov-1213: keep provision regressions within their effect pool
+engine	770966f40a86dc8d8154036218b1007d4fca7157	ov-1213: document stack conflicts and targeted validation
+engine	8f70f286cc197e49705c8a5f5593a41a03a30300	ov-1213: record passing Rust and platform regressions
+engine	d1adddf19ab46cebeb90392ea99b909c64de2d17	ov-1213: clarify conflicts from already-landed ancestry
+engine	2f3f3ff93729ea7a10dcd12763011cdd09df38d3	ov-1213: complete stack acceptance and record passing iOS tests
+engine	6f43faca7c87d9b9efea38c52179738f8b943c03	ov-1213: stabilize the combined CI clock regression fixture
+engine	c9659148eaffdad876ef6a46f4015a1f328c5643	engine: rebase ov-1213 stack onto current main
+engine	eb14611cb596830490fed85b269ea8007360b3ec	ov-1231: reducer command to close a failed run as landed
+engine	6a270a1e252d338503c74761287bc89c74a4a4f2	ov-1231: workflow landed verb, checked against the remote
+engine	a19d0bd68866b9b8fa297655863f0feb8c23c729	ov-1231: the landed commit reaches the plan; document the verb
+engine	03d72d4fe701018834e44cbd12b0bfd257c7b988	ov-1231: read the remote before the final authority recheck on landed
+engine	84c4dcf9436e6b899d0b698e7bfa64e5bc9768f5	ov-1231: PR description listing every phase the landed verb is called in
+engine	5c0ff3841b6bb6652aadb77757b03ca7accdd63f	workflow: carry ticket text in engine briefs (ov-1217)
+engine	5c2284d90064d8e9f7f637560b93320c22f63845	ov-1217: report no new commit for dirty build attempts
+engine	a9e975744f6614ba4ed74c2f303f33dcd2f889dc	ov-1217: admit full ticket briefs through native hooks
+engine	f0b8eaced6fe0d254b94e5a1ceb9859508322dfd	ov-1235: report a Cursor build's last message from its transcript, or say it is unavailable
+engine	83cf0335f7fca3842aea8d78a959aa7294849f29	workflow: make builders yield CPU and disk (ov-1170)
+engine	098c51c067deb91f8966bfa171bcbc61e432c377	workflow: preserve user output during builder cleanup (ov-1170)
+engine	44bed66172e93915f5cd1e0a6de09fb7dcfd6968	workflow: protect build consumers and recover target links (ov-1170)
+engine	f3c1d3f5733baa97b06b580a6ccdc4ee985bd2b8	Engine: drop the shared builder target, keep nice, disk check and per-run cleanup (ov-1214)
+engine	efe92f8ca23b62b7f868849fb7553d212a1f7b6c	Engine: pause builders while a landing gate runs (ov-1214)
+engine	dac734697eb45d1c028d944b974b20d365fd8105	Engine: record builder pauses atomically before stopping them (ov-1214)
+engine	d2ac6a4ac61c202765c0cbde5bf61a561c644ea1	ov-1236: keep a manually paused builder paused when a landing gate ends
+engine	e97967bc62bb125c52b8b383ddccf5aeffe3a4ad	ov-1179: grant workspace orchestrators audited workflow publication
+engine	d9e8e3c081a6aaa0a99caf7709fe3517df6c58b7	ov-1179: keep publication notices informational and document rollback
+engine	9c78577e5e12b32b718ed97634ebc4b36df6e5db	ov-1179: announce approved draft publications and test admin fences
+engine	340f8fefb4e133cef446f0f01ce25e64ca7c1d92	ov-1179: document external authorization gap and require owner resolution
+engine	8f6ba53fdeeecedccfa20051d36b0af542735109	ov-1201: keep commands, environment and hooks out of orchestrator publications
+engine	6ff9ec4a0d81d065a527a1f3eb3ffd81eaa75d82	ov-1201: keep the owner's approvals in front of what a publication runs
+engine	bf9250ed068c42437fc15f6dcef3c927ed63431c	ov-1201: count each of the owner's decisions on its own
+engine	cfb8ef8e8f43566e16ec6e2a1f80004f617dfffe	ov-1206: judge publications by the hooks each step can launch
+engine	e799524dbf2acae1603212573acb2f4bb5124878	ov-1206: build test Codex hooks from the engine's steering hooks
+engine	b1fb57ef28d5069330cc346ca167df03f6af5c34	ov-1233: supply security reviews in publication fixture
+engine	879e04b1f6efedb8d9314e6228c5fd6f3de92f4b	daemon: deliver engine agent messages and acceptance notices (ov-1171)
+engine	0cfd486a6a8da5676b9acdf7a1d16cead2bb2e22	daemon: register every grouped engine ticket (ov-1171)
+engine	456e18c299915ef71fc9fd213d1f03f31649aec3	daemon: deliver working Claude engine messages through hooks (ov-1171)
+engine	154043b1435d4aeb200b728edd94ca1cfbc90235	daemon: reproduce missing native Claude context hook (ov-1178)
+engine	507822720d69237735029b98fbb7ed879c57fe6f	daemon: require native Claude context hooks (ov-1178)
+engine	53f6b3a431599227d28fa8b40225d2c463cb825f	daemon: prove native Claude context delivery (ov-1178)
+engine	4a7f5df6b0ebd20bbf4581cffba9bdac210cef87	ov-1238: record train conflicts and reconcile combined fixtures
+engine	44431158832663dd1284759dc7772afaa33e660d	ov-1238: initialize publication reasons in combined engine fixtures
+engine	daaf5e689215e42449df7c642ae5063464c28d06	ov-1238: reconcile yielding identity and native settlement fields
+engine	cc7da4d3eb859a9e9fd8995eb0e419c23c14e480	ov-1238: reconcile cleanup ownership, yielding and message delivery
+engine	f8bff571fddb859a2bb62e8af3bbb31069318fad	ov-1238: retain split patience regression with pipelined CI
+engine	e2492bcb25be62c41e1846cfd70364f88eabd266	ov-1238: retain watched-agent messaging beside native steering
+engine	2727a313ad0fd28cc061148c7fa99e425281f426	ov-1238: record passing engine train acceptance
+resolve	e86fd06d269afb7b722b5b6fe168bf18f9b94898	ov-1220: say what holds a Start, and give uncertain provisions a way out
+resolve	0182e5ad19bd0d044525ac7e0b650d6d9438d8ba	ov-1220: resolve never waits in the loop; a Resource refusal names its holder

@@ -1,0 +1,39 @@
+RUN scripts/gate-evidence-test.py
+................
+----------------------------------------------------------------------
+Ran 16 tests in 58.943s
+
+OK
+RUN scripts/engine-gate-test.py
+....{"cold_seconds": 1.544310083, "hit_seconds": 1.110071709, "observed_wall_saved_seconds": 0.434238374, "operational_fixture": "clean-real-shell-pair", "pair_job_hit_rate": 0.5, "repeat_job_hit_rate": 1.0}
+.....
+----------------------------------------------------------------------
+Ran 9 tests in 44.701s
+
+OK
+RUN scripts/nightly-dispatch-test.py
+schedule: iOS -> shell, agent, phone, phone2, phone3, phone4, phone5, phone6, pad, captures, captures2, captures3 -> Mac perf; peak macOS runners: 1
+all: iOS -> shell, agent, phone, phone2, phone3, phone4, phone5, phone6, pad, captures, captures2, captures3 -> Mac perf; peak macOS runners: 1
+shell: iOS -> shell; peak macOS runners: 1
+agent: iOS -> agent; peak macOS runners: 1
+phone: iOS -> phone; peak macOS runners: 1
+phone2: iOS -> phone2; peak macOS runners: 1
+phone3: iOS -> phone3; peak macOS runners: 1
+phone4: iOS -> phone4; peak macOS runners: 1
+phone5: iOS -> phone5; peak macOS runners: 1
+phone6: iOS -> phone6; peak macOS runners: 1
+pad: iOS -> pad; peak macOS runners: 1
+captures: iOS -> captures; peak macOS runners: 1
+captures2: iOS -> captures2; peak macOS runners: 1
+captures3: iOS -> captures3; peak macOS runners: 1
+RUN scripts/ci-concurrency-test.py
+Mac capacity: landing 4 + shared background 1 = 5; total-job upper bound 20/20 (incl. one Nightly yield gate)
+All triggers/path matches conservatively overlap; reusable calls expanded inside their caller budget
+Workflow peaks (total, macOS): {'ov1186-cache.yml': (1, 1), 'release.yml': (2, 1), 'doc-comments.yml': (1, 0), 'canary-baseline.yml': (1, 0), 'site.yml': (2, 0), 'nightly.yml': (5, 1), 'canary.yml': (4, 1), 'tunnel-e2e.yml': (1, 1), 'web.yml': (1, 0), 'promote.yml': (4, 1), 'site-analytics.yml': (1, 0), 'derp-hosts.yml': (1, 0), 'openai-prices.yml': (1, 0), 'ci.yml': (14, 4), 'relay.yml': (1, 0), 'claude-prices.yml': (1, 0)}
+..
+----------------------------------------------------------------------
+Ran 2 tests in 1.093s
+
+OK
+RUN scripts/ios-ui-shards.py
+ios-ui-shards self-test: ok

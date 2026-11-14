@@ -1,0 +1,7 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s
+────────────
+ Nextest run ID 7dc7aeb2-6d2b-4ca4-bc46-c3e1a686f71f with nextest profile: default
+    Starting 1 test across 93 binaries (4346 tests skipped)
+        PASS [   0.016s] (1/1) farcooler-client ffi::phone_path_tests::every_route_has_an_arm
+────────────
+     Summary [   0.021s] 1 test run: 1 passed, 4346 skipped

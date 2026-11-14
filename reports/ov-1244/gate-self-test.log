@@ -1,0 +1,18 @@
+..........
+----------------------------------------------------------------------
+Ran 10 tests in 14.829s
+
+OK
+.............
+----------------------------------------------------------------------
+Ran 13 tests in 6.516s
+
+OK
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+plant proof: affected selected gate FAIL; unaffected selected PASS; CI full workspace FAIL
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.825s
+
+OK
+lane-gate self-test: ok
