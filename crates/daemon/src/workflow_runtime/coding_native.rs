@@ -645,6 +645,10 @@ fn cursor_last_message(path: &Path) -> Option<String> {
 }
 
 #[cfg(test)]
+#[path = "coding_native_delivery_tests.rs"]
+mod delivery_tests;
+
+#[cfg(test)]
 pub(super) mod tests {
     use super::*;
     use super::super::{coding_tests::{configured, admitted}, tests::{enqueue, finish}};
