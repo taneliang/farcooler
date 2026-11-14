@@ -36,7 +36,7 @@ class EvidenceTest(unittest.TestCase):
         (self.repo / ".github/actions/ios-ui-build/action.yml").write_text("runs:\n  steps:\n")
         (self.repo / ".github/workflows").mkdir()
         jobs = []
-        for job in [j for j in evidence.load_lane().JOBS if j != "doc-comments"] + ["ios-ui-plan"]:
+        for job in [j for j in evidence.load_lane().JOBS if j != "doc-comments"] + ["ios-ui-plan", "android-build", "android-ui"]:
             jobs.append(f"  {job}:\n    steps:\n      - run: printf '{job} output\\n'\n")
         jobs[0] = "  wire:\n    steps:\n      - run: mkdir -p .fixture; printf 'wire\\n' >> .fixture/wire-count\n      - run: printf 'raw wire output\\n'\n"
         (self.repo / ".github/workflows/ci.yml").write_text("jobs:\n" + "".join(jobs))

@@ -96,7 +96,7 @@ APP_JOBS = {"rust", "swift-tests", "swift", "ios", "android", "tunnel"}
 # ci.yml jobs this script covers under another name, or on purpose does not.
 CI_JOB_ALIASES = {
     "wire": "wire", "tunnel": "tunnel", "rust": "rust", "swift": "swift", "swift-tests": "swift-tests",
-    "ios": "ios", "ios-ui-plan": "ios", "android": "android", "relay": "relay", "site": "site", "web": "web",
+    "ios": "ios", "ios-ui-plan": "ios", "android": "android", "android-build": "android", "android-ui": "android", "relay": "relay", "site": "site", "web": "web",
 }
 CI_JOBS_NOT_RUN = {
     "changes": "decides which jobs CI runs; this script does that from the diff",
@@ -287,8 +287,12 @@ def steps_for(job, workflows, ctx):
             Step(job, "this lane's commits", f"./scripts/doc-comment-check.py --base {base} --head HEAD\n"),
         ]
     ids = ["ios-ui-plan", "ios"] if job == "ios" else [job]
+    if job == "android":
+        ids = ["android-build", "android-ui:first", "android-ui:rest", "android"]
     steps = []
-    for ci_id in ids:
+    for ci_spec in ids:
+        ci_id, _, shard = ci_spec.partition(":")
+        step_ctx = {**ctx, "matrix.shard": shard} if shard else ctx
         block = job_block(text, ci_id)
         if block is None:
             raise KeyError(f"ci.yml has no job {ci_id}")
@@ -314,8 +318,8 @@ def steps_for(job, workflows, ctx):
             elif job == "ios" and not IOS_KEEP.search(run):
                 skip = "decides what CI runs, or builds the iOS archive; see scripts/ios-ui-tests.sh"
             if not skip:  # a skipped step is never run, so its expressions need no value
-                env = {k: expand(v, ctx) for k, v in env.items()}
-                run = expand(run, ctx)
+                env = {k: expand(v, step_ctx) for k, v in env.items()}
+                run = expand(run, step_ctx)
             steps.append(Step(job, name, run, wd, env, skip))
     if job == "web":
         web_asset_skips(steps)
@@ -647,7 +651,10 @@ def make_ctx(repo, tmp, base):
     sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     jdk = java_home(21)
     return {"runner.temp": str(tmp), "github.sha": sha, "matrix.os": "local", "base": base,
-            "steps.jdk21.outputs.path": jdk, "runner.os": "macOS", "runner.arch": "ARM64"}
+            "steps.jdk21.outputs.path": jdk, "runner.os": "macOS", "runner.arch": "ARM64",
+            # The local gate runs the Android checks itself; model CI's join as successful.
+            "needs.changes.result": "success", "needs.changes.outputs.android": "true",
+            "needs.android-build.result": "success", "needs.android-ui.result": "success"}
 
 
 def md(cell):
@@ -932,6 +939,9 @@ def _self_test():
     expect("the tunnel steps run in crates/tailcat/go", {s.cwd for s in plans["tunnel"]}, {"crates/tailcat/go"})
     expect("the Android gradle steps run in apps/android", all(s.cwd == "apps/android" for s in plans["android"] if "gradlew" in s.run), True)
     expect("a ${{ }} is filled in", any("${{" in s.run for s in plans["web"]), False)
+    expect("changes job result expands locally", expand("${{ needs.changes.result }}", ctx), "success")
+    expect("Android join receives the changes result", any(s.env.get("CHANGES_RESULT") == "success" for s in plans["android"]), True)
+    expect("both Android UI shards are planned", all(any(f"-Pfarcooler.captureShard={shard}" in s.run for s in plans["android"]) for shard in ("first", "rest")), True)
     expect("Android's JDK 21 reaches the capture step", any(s.env.get("CAPTURE_JDK") == ctx["steps.jdk21.outputs.path"] for s in plans["android"]), True)
     expect("the web job leaves the Linux downloads to CI", any(s.skip and "gh-download.sh" in s.run for s in plans["web"]), True)
 
