@@ -43,7 +43,8 @@ mod tests {
 
     #[test]
     fn bundled_view_is_the_shared_view() {
-        let fixture: Value = serde_json::from_str(include_str!("testdata/recovery-view.json")).unwrap();
+        let fixture: Value =
+            serde_json::from_str(include_str!("testdata/recovery-view.json")).unwrap();
         assert_eq!(view(2, true), fixture);
     }
 }

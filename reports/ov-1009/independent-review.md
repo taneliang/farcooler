@@ -47,3 +47,29 @@ Older clients that omit `expected` retain unconditional writes. The new clients
 compare the exact previous ciphertext and retry conflicts; older clients must
 refresh to receive that protection. No migration or new authenticated route is
 introduced.
+
+## R-112 send-back review (2026-11-15)
+
+Rebased onto origin/main and moved recovery presentation into
+`crates/client/src/recovery_view.rs`. Saved Copies gets count and passkey
+labels through the WASM bridge. Sign Out uses a bundled snapshot of that
+shared model, checked for exact parity by a Rust test, so failed or stalled
+WASM loading cannot prevent emergency sign-out cleanup. The baseline was
+not changed and no platform-copy exemptions were added.
+
+A separate agent reviewed the complete feature diff and the ratchet fix. It
+identified an initial dependency of sign-out cleanup on WASM loading; that
+was removed before the final review. The reviewer then found no remaining
+security or regression blockers, checking account-scoped CAS, authenticated
+merge, local pin preservation, safe text sinks, and nonredirecting copy calls.
+Saved Copies also has a regression test for a closeable module-load failure.
+
+Fresh validation after rebase:
+
+- Shared-core lint passes; `--baseline-not-grown origin/main` passes.
+- Foreground full web suite: 302 tests pass.
+- Foreground full relay suite: 839 tests pass.
+- Both web TypeScript configurations and workflow tests pass.
+- `cargo check --manifest-path crates/web/Cargo.toml --locked` passes.
+- `TMPDIR=/private/tmp cargo test -p farcooler-client recovery_view --lib`:
+  both count/identity and bundled-view parity tests pass.
