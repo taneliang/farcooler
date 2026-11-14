@@ -81,7 +81,7 @@ class CoverageTests(unittest.TestCase):
             if mutation == 'missing':
                 bad[0]['rust-suites']['binary']['testcases']['a']['filter-match']['status'] = 'mismatch'
             elif mutation == 'duplicate':
-                bad[1] = deepcopy(bad[0])
+                bad[1]['rust-suites']['binary']['testcases']['a']['filter-match']['status'] = 'matches'
             elif mutation == 'extra':
                 bad[0]['rust-suites']['binary']['testcases']['ignored']['filter-match']['status'] = 'matches'
             elif mutation == 'ignored':
