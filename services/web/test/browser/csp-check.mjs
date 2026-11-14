@@ -882,7 +882,7 @@ async function workspaceWalk(page) {
 }
 
 /// The plan column (ov-875), on Billing's plan: its initiative with progress
-/// and Next, its builder with the ticket under it (once), the key in monospace,
+/// and Next, its builder (with its ticket count) and the ticket once, in its pipeline stage, the key in monospace,
 /// a Needs You row quoted into the orchestrator's box without sending, a ticket
 /// opening its card, and an agent opening its terminal.
 async function planColumnWalk(page) {
@@ -891,9 +891,13 @@ async function planColumnWalk(page) {
   if (init.length !== 1 || !init[0].includes('Invoices') || !init[0].includes('1 of 2') || !init[0].includes('Next: PDF export')) failures.push(`the initiative reads ${JSON.stringify(init)}`)
   if ((await page.getAttribute('#plan .plan-init', 'title')) !== null && (await page.getAttribute('#plan .plan-init', 'title')) === '') failures.push('the initiative has an empty title')
   const agent = (await text('#plan .plan-agent'))[0] ?? ''
-  if (!agent.includes('Builder') || !agent.includes('Writing the PDF') || !agent.includes('5 min') || !agent.includes('bil-7')) failures.push(`the builder reads ${JSON.stringify(agent)}`)
+  if (!agent.includes('Builder') || !agent.includes('Writing the PDF') || !agent.includes('5 min') || !agent.includes('1 pipeline ticket assigned') || agent.includes('bil-7')) failures.push(`the builder reads ${JSON.stringify(agent)}`)
   const tickets = await page.locator('#plan .plan-ticket').count()
   if (tickets !== 1) failures.push(`bil-7 is listed ${tickets} times`)
+  // ov-895: the roster names the agent and counts its tickets; the ticket
+  // itself is listed once, in its own pipeline stage.
+  const staged = await text('#plan .plan-stage[data-stage="building"] .plan-ticket')
+  if (staged.length !== 1 || !staged[0].includes('bil-7')) failures.push(`the Building stage lists ${JSON.stringify(staged)}`)
   const font = await page.locator('#plan .plan-key').first().evaluate(el => getComputedStyle(el).fontFamily)
   if (!/mono|Menlo/i.test(font)) failures.push(`the ticket's key is set in ${font}`)
   if (await page.locator('#plan hr, #plan [class*="stop" i], #plan [class*="assign" i]').count()) failures.push('the plan has a rule, Stop or Assign')
