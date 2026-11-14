@@ -590,13 +590,12 @@ impl Exec {
                     Err(error) => return Err(error),
                 };
                 let build = matches!(kind, StageKind::Build);
+                if build && !self.build_has_space(&tree)? {
+                    return self.refuse_unstarted(binding, builder_resources::LOW_DISK.into());
+                }
                 let managed = build || std::fs::read_link(tree.join("target")).is_ok_and(|p| p == self.builder_target(&tree));
                 let _lease = if managed {
-                    let lease = self.prepare_builder_target(&tree).await?;
-                    if build && !self.build_has_space(&tree)? {
-                        return self.refuse_unstarted(binding, builder_resources::LOW_DISK.into());
-                    }
-                    Some(lease)
+                    Some(self.prepare_builder_target(&tree, &binding.effect).await?)
                 } else { None };
                 if let Some(check) = self.review_check(binding) {
                     // No cleanup while the reviewer reads: both see the same candidate. Both futures are

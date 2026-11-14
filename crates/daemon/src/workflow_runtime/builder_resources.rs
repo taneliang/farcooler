@@ -1,7 +1,7 @@
 //! Builders yield to landing through inherited niceness and a runner-owned Cargo cache (ov-1170).
 //! Worktree buckets live in one bounded cache, without mixing workspace artifacts from different checkouts.
 //! Cargo serializes writers inside a bucket. Leases and retained run state keep LRU eviction away from live agents across daemon recovery.
-//! Scripts that explicitly build in the worktree still have their ignored target/ removed when the run rests.
+//! Only recorded engine-owned output is reclaimed; adopted worktrees can contain a person’s build output.
 use super::*;
 use rustix::fs::{flock, FlockOperation};
 
@@ -65,7 +65,16 @@ fn trim(root: &Path, cap: u64, protected: &BTreeSet<PathBuf>) -> std::io::Result
     Ok(())
 }
 
+/// A build owns its managed bucket and, if it created one, this exact compatibility link.
+/// Recording the inode keeps recovery from unlinking a replacement made by the user.
+#[derive(Serialize, Deserialize)]
+struct TargetOwner { link: Option<(u64, u64)> }
+
 impl Exec {
+    fn target_receipt(&self, effect: &Effect, suffix: &str) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.target-{suffix}.json", digest(effect)))
+    }
+
     pub(super) fn builder_target(&self, tree: &Path) -> PathBuf {
         // A checkout's Cargo fingerprints must never stand in for another checkout's: this repository has
         // measured stale workspace artifacts with a single undifferentiated CARGO_TARGET_DIR (ov-837).
@@ -101,7 +110,7 @@ impl Exec {
             .map_err(|_| Error::Refused("builder cache cleanup interrupted"))??;
         Ok(())
     }
-    pub(super) async fn prepare_builder_target(&self, tree: &Path) -> Result<File> {
+    pub(super) async fn prepare_builder_target(&self, tree: &Path, effect: &Effect) -> Result<File> {
         self.trim_builder_targets().await?;
         let target = self.builder_target(tree);
         let root = target.parent().ok_or(Error::Refused("missing builder cache"))?;
@@ -120,16 +129,25 @@ impl Exec {
         // A lease's modification time is its last use, rather than Cargo's arbitrary directory mtime.
         use std::io::Write;
         (&file).write_all(&now().to_le_bytes())?;
-        self.link_builder_target(tree, &target).await?;
+        let receipt = self.target_receipt(effect, "owner");
+        if matches!(effect.kind, EffectKind::Execute(StageKind::Build)) && !receipt.try_exists()? {
+            let link = self.link_builder_target(tree, &target).await?;
+            durable(&receipt, &serde_json::to_vec(&TargetOwner { link })?)?;
+        }
         Ok(file)
     }
     /// Existing build scripts link libraries and execute binaries through the checkout's target/ path. Keep
     /// that path working while Cargo writes into the managed bucket. Never replace tracked or nonignored files.
-    async fn link_builder_target(&self, tree: &Path, cached: &Path) -> Result<()> {
+    async fn link_builder_target(&self, tree: &Path, cached: &Path) -> Result<Option<(u64, u64)>> {
         let target = tree.join("target");
-        if std::fs::read_link(&target).is_ok_and(|p| p == cached) { return Ok(()); }
-        if !crate::git::git(tree, &["check-ignore", "--quiet", "--", "target/"]).await.is_ok_and(|o| o.ok) { return Ok(()); }
-        if !crate::git::git(tree, &["ls-files", "-z", "--", "target"]).await.is_ok_and(|o| o.ok && o.stdout.is_empty()) { return Ok(()); }
+        // Ignored does not mean owned. Keep pre-existing directories, files and even dangling links.
+        match target.symlink_metadata() {
+            Ok(_) => return Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+            Err(error) => return Err(error.into()),
+        }
+        if !crate::git::git(tree, &["check-ignore", "--quiet", "--", "target/"]).await.is_ok_and(|o| o.ok) { return Ok(None); }
+        if !crate::git::git(tree, &["ls-files", "-z", "--", "target"]).await.is_ok_and(|o| o.ok && o.stdout.is_empty()) { return Ok(None); }
         // A directory-only ignore rule (target/) doesn't ignore a symlink. Extend that already-ignored build
         // path in Git's private excludes, leaving committed source and its .gitignore unchanged.
         let exclude = crate::git::git(tree, &["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"]).await
@@ -144,62 +162,64 @@ impl Exec {
             file.write_all(b"\n# Engine-managed build output (ov-1170)\n/target\n")?;
             file.sync_all()?;
         }
-        if let Ok(metadata) = target.symlink_metadata() {
-            if metadata.file_type().is_symlink() { std::fs::remove_file(&target)?; }
-            else if metadata.is_dir() { self.discard_builder_target(&target).await?; }
-            else { return Err(Error::Refused("build output is not a directory")); }
-        }
-        std::os::unix::fs::symlink(cached, target)?;
-        Ok(())
+        // symlink fails with AlreadyExists if somebody created target while Git was being checked.
+        std::os::unix::fs::symlink(cached, &target)?;
+        let metadata = target.symlink_metadata()?;
+        File::open(tree)?.sync_all()?;
+        Ok(Some((metadata.dev(), metadata.ino())))
     }
-    /// Keep source worktrees and branches, but release their ignored local build products as soon as the run
-    /// reaches join, failure or cancellation. Done/Joined also cover transitions missed during a daemon outage.
+    /// Completed cleanup is durable and scoped to each build effect. Archived tickets may be swept again,
+    /// but must never claim a user's later output. Older runs without ownership receipts are preserved.
     pub(super) async fn prune_builder_targets(&self, workspaces: &[String]) -> Result<()> {
-        for workspace in workspaces {
-            let Some(state) = self.state(workspace)? else { continue };
-            let mut trees = BTreeSet::new();
-            let mut live = BTreeSet::new();
+        // A named tree can appear on more than one board. Protect all live trees before reclaiming any.
+        let mut live = BTreeSet::new();
+        let mut finished = Vec::new();
+        for workspace in self.store.workflow_workspaces()? {
+            let Some(state) = self.state(&workspace)? else { continue };
             for (id, item) in &state.items {
                 if item.group_of.is_some() { continue; }
-                let tree = item.tree.as_ref().map(|t| PathBuf::from(&t.path)).unwrap_or_else(|| self.item_tree(workspace, id));
-                if matches!(item.phase, Phase::WaitingJoin | Phase::Joined | Phase::Failed | Phase::Cancelled | Phase::Done) {
-                    trees.insert(tree);
-                } else { live.insert(tree); }
-            }
-            // Finished tickets can be archived by the next command before a sweep sees them. Their retained
-            // effects still name an adopted tree, which must be cleaned without deleting its source checkout.
-            if state.archive.values().any(|a| a.group.is_none()) {
-                let effects = self.store.workflow_outbox(workspace)?;
-                for (id, archived) in &state.archive {
-                    if archived.group.is_some() { continue; }
-                    let tree = effects.iter().filter(|e| e.effect.item == *id).max_by_key(|e| e.effect.created_ms)
-                        .and_then(|e| e.effect.tree.as_ref()).map(|t| PathBuf::from(&t.path))
-                        .unwrap_or_else(|| self.item_tree(workspace, id));
-                    trees.insert(tree);
+                let tree = item.tree.as_ref().map(|t| PathBuf::from(&t.path)).unwrap_or_else(|| self.item_tree(&workspace, id));
+                if !matches!(item.phase, Phase::WaitingJoin | Phase::Joined | Phase::Failed | Phase::Cancelled | Phase::Done) {
+                    live.insert(tree);
                 }
             }
-            for tree in trees.difference(&live) {
-                let target = tree.join("target");
-                // Only this run's cache bucket is released; other live runs have their own Cargo fingerprints.
-                let cached = self.builder_target(tree);
-                if cached.is_dir() {
-                    let root = cached.parent().ok_or(Error::Refused("missing builder cache"))?;
-                    let name = cached.file_name().and_then(|n| n.to_str()).ok_or(Error::Refused("missing builder cache key"))?;
-                    let lock = lease(root, name)?;
-                    if flock(&lock, FlockOperation::NonBlockingLockExclusive).is_ok() { self.discard_builder_target(&cached).await?; }
+            if !workspaces.contains(&workspace) { continue; }
+            for stored in self.store.workflow_outbox(&workspace)? {
+                let effect = stored.effect;
+                if !matches!(effect.kind, EffectKind::Execute(StageKind::Build)) { continue; }
+                let ended = state.items.get(&effect.item).is_some_and(|i| i.group_of.is_none()
+                    && matches!(i.phase, Phase::WaitingJoin | Phase::Joined | Phase::Failed | Phase::Cancelled | Phase::Done))
+                    || state.archive.get(&effect.item).is_some_and(|a| a.group.is_none());
+                if ended {
+                    let tree = effect.tree.as_ref().map(|t| PathBuf::from(&t.path)).unwrap_or_else(|| self.item_tree(&workspace, &effect.item));
+                    finished.push((tree, effect));
                 }
-                if std::fs::read_link(&target).is_ok_and(|p| p == cached) {
-                    std::fs::remove_file(&target)?;
-                    continue;
-                }
-                if target.symlink_metadata().is_err() { continue; }
-                // Named/adopted worktrees can contain people's files. Only git-ignored build output is ours.
-                if !crate::git::git(tree, &["check-ignore", "--quiet", "target/"]).await.is_ok_and(|o| o.ok) { continue; }
-                let tracked = crate::git::git(tree, &["ls-files", "-z", "--", "target"]).await;
-                if !tracked.is_ok_and(|o| o.ok && o.stdout.is_empty()) { continue; }
-                if target.symlink_metadata()?.file_type().is_symlink() { std::fs::remove_file(target)?; }
-                else if target.is_dir() { self.discard_builder_target(&target).await?; }
             }
+        }
+        for (tree, effect) in finished {
+            if live.contains(&tree) { continue; }
+            let receipt = self.target_receipt(&effect, "owner");
+            let cleaned = self.target_receipt(&effect, "cleaned");
+            if cleaned.try_exists()? || !receipt.try_exists()? { continue; }
+            let owner: TargetOwner = serde_json::from_slice(&self.bytes(&receipt)?)?;
+            let cached = self.builder_target(&tree);
+            let root = cached.parent().ok_or(Error::Refused("missing builder cache"))?;
+            let name = cached.file_name().and_then(|n| n.to_str()).ok_or(Error::Refused("missing builder cache key"))?;
+            let lock = lease(root, name)?;
+            if flock(&lock, FlockOperation::NonBlockingLockExclusive).is_err() { continue; }
+            if cached.symlink_metadata().is_ok_and(|m| m.is_dir()) { self.discard_builder_target(&cached).await?; }
+            let target = tree.join("target");
+            if let Some(identity) = owner.link {
+                if target.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink() && (m.dev(), m.ino()) == identity)
+                    && std::fs::read_link(&target).is_ok_and(|p| p == cached) {
+                    // A person may have explicitly tracked the link since launch; source is never reclaimed.
+                    if crate::git::git(&tree, &["ls-files", "-z", "--", "target"]).await.is_ok_and(|o| o.ok && o.stdout.is_empty()) {
+                        std::fs::remove_file(&target)?;
+                        File::open(&tree)?.sync_all()?;
+                    }
+                }
+            }
+            durable(&cleaned, b"{}")?;
         }
         Ok(())
     }
@@ -214,6 +234,8 @@ impl Exec {
                 .map_err(|_| Error::Refused("builder output cleanup interrupted"))??;
             return Ok(());
         }
+        File::open(target.parent().ok_or(Error::Refused("missing target parent"))?)?.sync_all()?;
+        File::open(&self.root)?.sync_all()?;
         tokio::task::spawn_blocking(move || {
             if let Err(error) = std::fs::remove_dir_all(&trash) { tracing::warn!(%error, "could not delete builder output"); }
         });

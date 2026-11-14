@@ -122,14 +122,14 @@ async fn cancelled_run_releases_target_only_after_its_writer_ends() {
     until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Cancelled)).await;
     assert!(!tree.join("target").exists());
     assert!(tree.join("result.txt").exists());
-    // A crash can fall between the durable cancellation and cleanup; another command can then archive it.
+    // Once cleanup finished, a person can build again, even after this ticket is archived.
     std::fs::create_dir(tree.join("target")).unwrap();
     std::fs::write(tree.join("target/left-by-crash"), "output").unwrap();
     let definition = runtime.configured_definition().unwrap();
     enqueue(&mut runtime, "w", "another", definition);
     assert!(runtime.state("w").unwrap().unwrap().archive.contains_key("one"));
     runtime.prune_builder_targets(&["w".into()]).await.unwrap();
-    assert!(!tree.join("target").exists(), "archiving cannot strand output after a crash");
+    assert!(tree.join("target/left-by-crash").exists(), "archiving must not reclaim later user output");
 }
 
 #[test]
@@ -220,8 +220,6 @@ async fn managed_cargo_output_remains_available_through_target_for_existing_scri
     enqueue(&mut runtime, "w", "one", definition);
     runtime.pump(2).await.unwrap();
     let tree = runtime.item_tree("w", "one");
-    std::fs::create_dir_all(tree.join("target/debug")).unwrap();
-    std::fs::write(tree.join("target/debug/stale"), "legacy output").unwrap();
     runtime.pump(3).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();
     assert!(state.items["one"].candidate.is_some(), "a build script must see Cargo's fresh managed output");
@@ -252,4 +250,117 @@ async fn a_step_entering_an_approval_wait_trims_its_idle_cache_and_the_next_gate
     runtime.pump(101).await.unwrap();
     assert!(tree.join("target").is_dir(), "the next gate recreates an evicted bucket before it runs");
     assert_ne!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
+}
+
+/// Use a real adopted checkout, rather than an engine-private tree, for ownership regressions.
+async fn adopted() -> (tempfile::TempDir, Runtime, PathBuf, String) {
+    let (dir, mut runtime) = configured(false, "prose").await;
+    let host = Uuid::now_v7();
+    let repo = runtime.repository();
+    let root = runtime.store.create_repository_root(host, repo.to_str().unwrap(), 0).unwrap();
+    let repository = runtime.store.create_repository(host, root.id, "adopted", repo.join(".git").to_str().unwrap(), "").unwrap();
+    let workspace = runtime.store.create_workspace(repository.id, "Adopted", "ad").unwrap().id.to_string();
+    runtime.host = Some(WorktreeHost { dir: dir.path().join("trees"), install_id: "test".into(), locks: Default::default() });
+    ignore_target(&runtime);
+    let tree = dir.path().join("adopted");
+    adapters::git(&runtime.repository(), &["worktree", "add", "-b", "adopted", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
+    let receipt = runtime.apply(Request { id: "track".into(), workspace: workspace.clone(), expected_revision: 0, sequence: 1,
+        command: Command::Enqueue { item: "one".into(), definition: Definition::ticket(), policy_pin: "p".into(),
+            resource: Exec::item_resource(&workspace, "one"), dependencies: BTreeSet::new(), initial_candidate: Some("one".into()) } },
+        "controller", Grant::Controller, 1).unwrap();
+    assert!(receipt.result.is_ok(), "{receipt:?}");
+    runtime.store.create_worktree(repository.id, "adopted", tree.to_str().unwrap(), false).unwrap();
+    let named = RunTree { name: "adopted".into(), branch: "adopted".into(), path: tree.to_str().unwrap().into(),
+        base: runtime.base.clone(), adopted: true };
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    let receipt = runtime.apply(Request { id: "start".into(), workspace: workspace.clone(), expected_revision: state.revision, sequence: 2,
+        command: Command::Start { item: "one".into(), definition: runtime.configured_definition().unwrap(),
+        policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "one"), dependencies: BTreeSet::new(),
+        initial_candidate: None, models: Default::default(), tree: Some(Box::new(named)), with: vec![] } }, "controller", Grant::Controller, 1).unwrap();
+    assert!(receipt.result.is_ok(), "{receipt:?}");
+    (dir, runtime, tree, workspace)
+}
+
+#[tokio::test]
+async fn adopted_preexisting_output_is_preserved_through_build_and_cleanup() {
+    for symlink in [false, true] {
+        let (dir, mut runtime, tree, workspace) = adopted().await;
+        let output = if symlink { dir.path().join("personal-output") } else { tree.join("target") };
+        std::fs::create_dir(&output).unwrap();
+        std::fs::write(output.join("keep"), "personal output").unwrap();
+        if symlink { std::os::unix::fs::symlink(&output, tree.join("target")).unwrap(); }
+        runtime.pump(2).await.unwrap();
+        runtime.pump(3).await.unwrap();
+        assert_eq!(std::fs::read_to_string(tree.join("target/keep")).unwrap(), "personal output");
+        assert_eq!(finish(&mut runtime, &workspace).await.items["one"].phase, Phase::Failed);
+        assert_eq!(std::fs::read_to_string(tree.join("target/keep")).unwrap(), "personal output");
+        assert!(!runtime.builder_target(&tree).exists());
+    }
+}
+
+#[tokio::test]
+async fn low_disk_refusal_never_touches_adopted_output_or_prepares_a_bucket() {
+    let (_dir, mut runtime, tree, workspace) = adopted().await;
+    std::fs::create_dir(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/keep"), "personal output").unwrap();
+    runtime.build_free_bytes = Some(MIN_FREE - 1);
+    assert_eq!(finish(&mut runtime, &workspace).await.items["one"].failure.as_deref(), Some(LOW_DISK));
+    assert_eq!(std::fs::read_to_string(tree.join("target/keep")).unwrap(), "personal output");
+    assert!(!runtime.builder_target(&tree).exists());
+}
+
+#[tokio::test]
+async fn adopted_user_rebuild_after_cleanup_survives_archive_and_restart() {
+    let (_dir, mut runtime, tree, workspace) = adopted().await;
+    assert_eq!(finish(&mut runtime, &workspace).await.items["one"].phase, Phase::Failed);
+    assert!(tree.join("target").symlink_metadata().is_err());
+    // Recreate both local output and the managed bucket to prove cleanup is durably complete.
+    std::fs::create_dir(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/user"), "new output").unwrap();
+    let cached = runtime.builder_target(&tree);
+    std::fs::create_dir(&cached).unwrap();
+    std::fs::write(cached.join("user"), "new cached output").unwrap();
+    runtime.prune_builder_targets(&[workspace.clone()]).await.unwrap();
+    assert!(tree.join("target/user").exists());
+    assert!(runtime.internal(&workspace, Command::Cancel { item: "one".into(), reason: None }, Grant::Controller, 50).unwrap().result.is_ok());
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, &workspace, "another", definition);
+    assert!(runtime.state(&workspace).unwrap().unwrap().archive.contains_key("one"));
+    let root = runtime.root.clone();
+    drop(runtime);
+    let runtime = Runtime::open(&root).unwrap();
+    for _ in 0..2 { runtime.prune_builder_targets(&[workspace.clone()]).await.unwrap(); }
+    assert!(tree.join("target/user").exists());
+    assert!(cached.join("user").exists());
+}
+
+#[tokio::test]
+async fn cleanup_recovery_preserves_a_replacement_target() {
+    let (_dir, mut runtime, tree, workspace) = adopted().await;
+    runtime.pump(2).await.unwrap();
+    let effect = runtime.store.workflow_outbox(&workspace).unwrap().into_iter()
+        .find(|s| s.active && matches!(s.effect.kind, EffectKind::Execute(StageKind::Build))).unwrap().effect;
+    drop(runtime.prepare_builder_target(&tree, &effect).await.unwrap());
+    // Replace the engine link before terminal cleanup. Ownership must identify the original link.
+    std::fs::remove_file(tree.join("target")).unwrap();
+    std::fs::create_dir(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/user"), "new output").unwrap();
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    finish(&mut runtime, &workspace).await;
+    assert!(tree.join("target/user").exists());
+    assert!(!runtime.builder_target(&tree).exists());
+}
+
+#[tokio::test]
+async fn cleanup_preserves_an_engine_link_that_was_explicitly_tracked() {
+    let (_dir, mut runtime, tree, workspace) = adopted().await;
+    runtime.pump(2).await.unwrap();
+    let effect = runtime.store.workflow_outbox(&workspace).unwrap().into_iter()
+        .find(|s| s.active && matches!(s.effect.kind, EffectKind::Execute(StageKind::Build))).unwrap().effect;
+    drop(runtime.prepare_builder_target(&tree, &effect).await.unwrap());
+    adapters::git(&tree, &["add", "-f", "--", "target"]).await.unwrap();
+    finish(&mut runtime, &workspace).await;
+    assert!(tree.join("target").symlink_metadata().unwrap().file_type().is_symlink());
 }
