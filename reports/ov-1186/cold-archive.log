@@ -1,0 +1,15 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde v1.0.229
+   Compiling syn v3.0.3
+   Compiling serde_json v1.0.151
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling serde_derive v1.0.229
+   Compiling farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1186-shared-cache-spike/crates/agent-core)
+    Finished `test` profile [unoptimized] target(s) in 8.44s
+   Archiving 1 binary and 2 standard libraries to /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1186-shared-cache-spike/target/ov-1186/agent-core.tar.zst
+    Archived 5 files to /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1186-shared-cache-spike/target/ov-1186/agent-core.tar.zst in 0.03s

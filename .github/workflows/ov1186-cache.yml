@@ -1,0 +1,51 @@
+# Research only: no pull_request trigger, required check, or main CI changes.
+name: ov-1186 local archive reuse
+on:
+  push:
+    branches: [ov-1186-shared-cache-spike]
+    paths:
+      - reports/ov-1186/seed.json
+      - reports/ov-1186/prototype.py
+      - .github/workflows/ov1186-cache.yml
+permissions:
+  contents: read
+jobs:
+  reuse:
+    if: github.repository == 'taneliang/farcooler' && github.ref == 'refs/heads/ov-1186-shared-cache-spike'
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Archive counterexamples
+        run: python3 reports/ov-1186/prototype_test.py
+      - name: Run locally compiled tests without compiling in CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 reports/ov-1186/prototype.py consume
+      - name: Independent cold compile and tests for comparison
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('prototype', 'reports/ov-1186/prototype.py')
+          p = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(p)
+          env = {**os.environ, 'CARGO_INCREMENTAL': '0', 'CARGO_PROFILE_DEV_DEBUG': '0',
+                 'CARGO_BUILD_JOBS': '3', 'MACOSX_DEPLOYMENT_TARGET': '15.0'}
+          result = p.timed('ci-cold-tests', ['cargo', 'nextest', 'run', '--locked', '-p', p.PACKAGE,
+                          '--profile', 'ci', '--target-dir', str(p.OUT / 'ci-cold')], env)
+          (p.OUT / 'cold.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ov-1186-timings
+          path: |
+            target/ov-1186/*.json
+            target/ov-1186/*.log
+          retention-days: 14
