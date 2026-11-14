@@ -145,6 +145,7 @@ jobs:
       # Which paths let a push skip the app jobs (ov-507): the allowlist against
       # the code paths it must never swallow, and the green-base rule against a
       # scratch repository.
+      - run: ./scripts/landing-timing.py --self-test
       - run: ./scripts/ci-changes.py --self-test
       - run: python3 ./scripts/ci-concurrency-test.py
       - run: python3 scripts/rust-shadow-test.py
