@@ -26,8 +26,9 @@ on:
   pull_request:
 
 concurrency:
-  group: doc-comments-${{ github.ref }}
+  group: background-macos
   cancel-in-progress: false
+  queue: max
 
 jobs:
   doc-comments:

@@ -22,7 +22,8 @@
 # tool on the owner's Mac and a runner cannot reach it.
 #
 # Reserve four macOS slots for landing CI (ov-1190). Each Apple job takes
-# background-macos, shared with Canary, Release and tunnel E2E. queue: max
+# background-macos, shared with shipping, deployments and maintenance.
+# Linux jobs use it too, reserving total-job headroom. queue: max
 # preserves pending shards instead of replacing them. Other workflows can
 # take the slot between shards; no whole-night lock delays shipping.
 name: Nightly
@@ -236,6 +237,11 @@ jobs:
   # also reads the per-push smoke job's times from ci.yml's runs and warns when
   # it passes 12 minutes.
   budget:
+    # Waiting for the shared budget consumes no runner (ov-1190).
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     name: iOS UI shard budget
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -267,6 +273,11 @@ jobs:
   # nightly issue through `report`, whose "ended without a test verdict" list
   # names it.
   claude-rewake:
+    # Waiting for the shared budget consumes no runner (ov-1190).
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     name: Claude rewake fields
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -374,6 +385,11 @@ jobs:
   # timeout is the build (about 12 minutes cold, 3 with a warm cache) plus
   # that, with room.
   daemon-production-timing:
+    # Waiting for the shared budget consumes no runner (ov-1190).
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     name: Daemon production timing
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -404,6 +420,11 @@ jobs:
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.
   report:
+    # Waiting for the shared budget consumes no runner (ov-1190).
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     name: Report
     needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf, daemon-production-timing, rust-macos, rust-shadow]
     if: ${{ always() }}

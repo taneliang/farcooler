@@ -2,6 +2,8 @@
 """Check the repository's four landing / one background Mac reservation (ov-1190).
 
 Uses the same small workflow reader as the wire lint; no third-party modules.
+All repository triggers are conservatively allowed to overlap one landing;
+path filters and deployment variables never reduce the reservation.
 Enumerates dependency antichains, including matrix widths, rather than assuming
 all named jobs overlap. This is a capacity proof, not a hosted queue benchmark.
 """
@@ -38,15 +40,35 @@ def peak(jobs, weights):
                        for a, b in itertools.combinations(subset, 2))), default=0)
 
 
-def widths(keys):
+def widths(keys, texts):
     """Runnable total/Mac matrix width for the checked-in workflow shapes."""
     if "uses" in keys:
-        if keys["uses"] != "./.github/workflows/linux-binaries.yml":
+        name = keys["uses"].removeprefix("./.github/workflows/")
+        if keys["uses"] != "./.github/workflows/" + name or name not in texts:
             raise ValueError("unmodelled reusable workflow: " + keys["uses"])
-        return 2, 0  # checked against the reusable's matrix below
-    strategy = keys.get("strategy", "")
+        jobs = proto.workflow_jobs(texts[name])
+        expanded = {job: widths(value, texts) for job, value in jobs.items()}
+        return tuple(peak(jobs, {job: value[i] for job, value in expanded.items()})
+                     for i in (0, 1))
+    strategy = keys.get("strategy", "").strip()
+    if strategy == "fail-fast: false\nmatrix:\nchannel: ${{ fromJSON(needs.plan.outputs.channels) }}":
+        # Site's plan emits two channels on push, one on dispatch/call. Refuse
+        # changes to that producer until this upper bound is reviewed.
+        if "channels='[\"canary\",\"production\"]'" not in texts["site.yml"]:
+            raise ValueError("update the Site dynamic matrix capacity model")
+        if keys.get("runs-on") != "ubuntu-latest":
+            raise ValueError("update the Site runner capacity model")
+        return 2, 0
+    if "include:" in strategy:
+        if (keys.get("runs-on") != "ubuntu-latest"
+                or not re.fullmatch(r"matrix:\ninclude:(?:\n- arch: [^\n]+\ntarget: [^\n]+\nmusl_sha256: [^\n]+)+", strategy)):
+            raise ValueError("unmodelled include matrix: " + strategy)
+        return len(re.findall(r"^- arch:", strategy, re.M)), 0
     axes = re.findall(r"^(?:os|shard): \[([^\]]+)\]$", strategy, re.M)
-    if "matrix:" in strategy and len(axes) != 1:
+    known_strategy = all(re.fullmatch(
+        r"(?:fail-fast: (?:false|true)|max-parallel: [1-9]\d*|matrix:|(?:os|shard): \[[^\]]+\])", line)
+        for line in strategy.splitlines())
+    if not known_strategy or ("matrix:" in strategy and len(axes) != 1):
         raise ValueError("unmodelled matrix: " + strategy)
     labels = axes[0].split(",") if axes else [keys.get("runs-on", "")]
     if "max-parallel:" in strategy:
@@ -61,56 +83,72 @@ def widths(keys):
 
 
 def check(texts):
-    problems, counts = [], {}
+    problems, counts, entries = [], {}, []
     nightly_group = proto.top_level(texts["nightly.yml"]).get("concurrency", "").strip()
     if nightly_group != "group: nightly\ncancel-in-progress: false\nqueue: max":
-        problems.append("Nightly must queue whole runs separately from its per-job Mac lock")
-    # Keep the reusable expansion honest if its architectures/runner change.
-    linux = proto.workflow_jobs(texts["linux-binaries.yml"])
-    if (set(linux) != {"build"} or linux["build"].get("runs-on") != "ubuntu-latest"
-            or len(re.findall(r"^- arch:", linux["build"].get("strategy", ""), re.M)) != 2):
-        problems.append("update the Linux reusable capacity model")
+        problems.append("Nightly must queue whole runs separately from its per-job lock")
     for name, text in texts.items():
-        if name == "linux-binaries.yml":
+        top = proto.top_level(text)
+        trigger_block = re.search(r"^on:\n((?:[ \t].*\n|\n|#.*\n)*)", text, re.M)
+        triggers = set(re.findall(r"^  ([a-z_]+):", trigger_block[1], re.M)) if trigger_block else set()
+        if not triggers or triggers - {"push", "pull_request", "workflow_run", "schedule", "workflow_dispatch", "workflow_call"}:
+            problems.append(f"{name}: unmodelled trigger")
+        # A call-only workflow consumes runners inside its caller's lock, not
+        # as an independent run. widths() expands its actual jobs recursively.
+        if triggers == {"workflow_call"}:
             continue
         jobs = proto.workflow_jobs(text)
-        total, mac = {}, {}
-        workflow_lock = proto.top_level(text).get("concurrency", "").strip() == GROUP
+        expanded = {job: widths(keys, texts) for job, keys in jobs.items()}
+        total = {job: value[0] for job, value in expanded.items()}
+        mac = {job: value[1] for job, value in expanded.items()}
+        workflow_lock = top.get("concurrency", "").strip() == GROUP
+        counts[name] = peak(jobs, total), peak(jobs, mac)
+        if workflow_lock:
+            entries.append((name, *counts[name]))
+            if counts[name][1] > 1:
+                problems.append(f"{name} can use more than one background Mac")
         for job, keys in jobs.items():
-            total[job], mac[job] = widths(keys)
             lock = keys.get("concurrency", "").strip() == GROUP
+            called = keys.get("uses", "").removeprefix("./.github/workflows/")
+            called_lock = proto.top_level(texts.get(called, "")).get("concurrency", "").strip() == GROUP
+            child_groups = (keys.get("concurrency", "").splitlines()
+                            + proto.top_level(texts.get(called, "")).get("concurrency", "").splitlines())
+            if workflow_lock and "group: background-macos" in child_groups:
+                problems.append(f"{name}/{job} would wait for its own workflow's lock")
             if name == "ci.yml":
-                if lock or workflow_lock:
+                if lock or workflow_lock or called_lock:
                     problems.append("landing CI must not wait on background-macos")
-            elif mac[job] and not (workflow_lock or lock):
-                problems.append(f"{name}/{job} escapes background-macos")
-        mac_peak = peak(jobs, mac)
-        if name != "ci.yml" and mac_peak > 1:
-            problems.append(f"{name} can use {mac_peak} Macs; only one background slot is available")
-        counts[name] = peak(jobs, total), mac_peak
-    if counts["ci.yml"][1] > 4:
-        problems.append("CI exceeds its four reserved Macs")
-    # Nightly runs Linux checks while a Canary/Release/tunnel workflow owns the
-    # background group. Their Macs cannot overlap, but count their Linux work
-    # conservatively as if it all could. Only one whole shipping workflow runs.
-    landing = counts["ci.yml"][0]
-    nightly_linux = sum(widths(k)[0] for k in proto.workflow_jobs(texts["nightly.yml"]).values() if widths(k)[1] == 0)
-    shipping = max(counts[n][0] for n in ("canary.yml", "release.yml", "tunnel-e2e.yml"))
-    if landing + nightly_linux + shipping > 20:
-        problems.append("landing + Nightly Linux + shipping exceeds 20 total jobs")
-    for name in ("canary.yml", "release.yml", "tunnel-e2e.yml"):
-        if proto.top_level(texts[name]).get("concurrency", "").strip() != GROUP:
-            problems.append(f"{name} must hold background-macos for the whole workflow")
-    return problems, counts, landing + nightly_linux + shipping
+            elif name == "canary-baseline.yml":
+                # The recorder must never lose a shipped baseline to queue
+                # overflow/replacement. Its separate single job is reserved.
+                if workflow_lock or lock or called_lock or mac[job]:
+                    problems.append("Canary baseline must remain outside the background queue on Linux")
+            elif not workflow_lock:
+                if lock:
+                    entries.append((f"{name}/{job}", total[job], mac[job]))
+                elif not called_lock:
+                    problems.append(f"{name}/{job} escapes background-macos")
+        if name == "nightly.yml" and counts[name][1] > 1:
+            problems.append("Nightly's Apple phases must remain sequential")
+    landing = counts["ci.yml"]
+    background = max((entry[1] for entry in entries), default=0)
+    background_mac = max((entry[2] for entry in entries), default=0)
+    recorder = counts["canary-baseline.yml"][0]
+    total = landing[0] + background + recorder
+    if landing[1] + background_mac > 5:
+        problems.append("landing plus shared background exceeds five Macs")
+    if total > 20:
+        problems.append("landing + all overlapping background workflows + recorder exceeds 20 total jobs")
+    # Keep the recorder's independent reservation explicitly bounded.
+    if recorder != 1:
+        problems.append("update the Canary baseline reservation")
+    return problems, counts, total
 
 
 def main():
     paths = ROOT / ".github/workflows"
-    texts = {n: (paths / n).read_text() for n in ("ci.yml", "nightly.yml", "canary.yml", "release.yml", "tunnel-e2e.yml", "linux-binaries.yml")}
+    texts = {path.name: path.read_text() for path in paths.glob("*.y*ml")}
     problems, counts, total = check(texts)
-    for path in paths.glob("*.yml"):
-        if path.name not in texts and re.search(r"^    runs-on:.*(?:macos|xcode)", path.read_text(), re.M):
-            problems.append(f"{path.name}: add this Apple workflow to the reservation model")
     if "--self-test" in sys.argv:
         cases = [
             ("Canary overlaps Nightly", "canary.yml", "  group: background-macos", "  group: canary"),
@@ -122,11 +160,38 @@ def main():
             ("Tunnel escapes", "tunnel-e2e.yml", "  group: background-macos", "  group: tunnel"),
             ("a second Nightly Mac", "nightly.yml", "    runs-on: ubuntu-latest", "    runs-on: xcode-27"),
         ]
+        cases += [
+            ("Doc comments outside the budget", "doc-comments.yml", "group: background-macos", "group: doc-comments"),
+            ("Site outside the budget", "site.yml", "group: background-macos", "group: site"),
+            ("Web outside the budget", "web.yml", "group: background-macos", "group: web"),
+            ("Relay outside the budget", "relay.yml", "group: background-macos", "group: relay"),
+            ("Nightly Linux outside the budget", "nightly.yml", "  budget:\n    # Waiting for the shared budget consumes no runner (ov-1190).\n    concurrency:\n      group: background-macos\n      cancel-in-progress: false\n      queue: max\n", "  budget:\n"),
+            ("maintenance outside the budget", "openai-prices.yml", "group: background-macos", "group: prices"),
+            ("Promote outside the budget", "promote.yml", "group: background-macos", "group: promote"),
+            ("total-job overflow", "ci.yml", "jobs:\n", "jobs:\n  overflow:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        shard: [1, 2, 3, 4]\n"),
+        ]
         for label, name, old, new in cases:
             changed = dict(texts)
             changed[name] = changed[name].replace(old, new)
             if changed[name] == texts[name] or not check(changed)[0]:
                 problems.append("self-test did not reject " + label)
+        nested = dict(texts)
+        nested["canary.yml"] = nested["canary.yml"].replace("group: canary-ios", "group: background-macos")
+        if not any("own workflow's lock" in p for p in check(nested)[0]):
+            problems.append("parent/child lock deadlock escaped the model")
+        # The review's simultaneous landing/Nightly/Canary/doc/site/web/relay
+        # case. Removing their shared queue recreates the rejected policy.
+        simultaneous = dict(texts)
+        for name in ("site.yml", "web.yml", "relay.yml", "doc-comments.yml"):
+            simultaneous[name] = simultaneous[name].replace("group: background-macos", "group: private")
+        simultaneous_problems, simultaneous_counts, _ = check(simultaneous)
+        if (not all(any(name in problem for problem in simultaneous_problems)
+                    for name in ("site.yml", "web.yml", "relay.yml", "doc-comments.yml"))
+                or total != 17 or simultaneous_counts["site.yml"] != (2, 0)):
+            problems.append("simultaneous deployment/landing reservation regression")
+        new_workflow = dict(texts, **{"new.yml": "on:\n  push:\njobs:\n  job:\n    runs-on: ubuntu-latest\n"})
+        if not check(new_workflow)[0]:
+            problems.append("a newly discovered workflow escaped the budget")
         # Exercise graph width independently of current hardcoded job counts.
         graph = {"a": {}, "b": {}, "c": {"needs": "[a, b]"}}
         if peak(graph, {"a": 2, "b": 1, "c": 4}) != 4:
@@ -135,6 +200,7 @@ def main():
         print("\n".join(problems), file=sys.stderr)
         return 1
     print(f"Mac capacity: landing {counts['ci.yml'][1]} + shared background 1 = 5; total-job upper bound {total}/20")
+    print("All triggers/path matches conservatively overlap; reusable calls expanded inside their caller budget")
     print("Workflow peaks (total, macOS): " + str(counts))
     return 0
 

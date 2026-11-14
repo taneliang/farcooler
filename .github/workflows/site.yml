@@ -49,6 +49,12 @@ on:
         required: false
         type: string
 
+# Share the background budget with Nightly and shipping (ov-1190).
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   plan:
     name: Plan

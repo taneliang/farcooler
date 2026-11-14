@@ -14,6 +14,12 @@ name: Site analytics
 on:
   workflow_dispatch:
 
+# Share the background budget with Nightly and shipping (ov-1190).
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   site-tag:
     name: Find or create the Web Analytics site

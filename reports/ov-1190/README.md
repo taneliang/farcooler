@@ -78,14 +78,18 @@ with main CI waiting up to 70.3 minutes. The first revision limited Nightly
 to one Mac, but that still let Canary take two more while a landing needed
 four. The review correctly rejected that reservation.
 
-All repository background Apple work now shares the constant
-`background-macos` concurrency group: Nightly takes it per Apple job;
-Canary, Release and Tunnel end to end take it per workflow. Canary and
-Release order their two Apple jobs so each workflow uses at most one Mac.
-CI does not join this group. Across different refs, scheduled and manual
-runs, background work therefore occupies at most one of the five Macs,
-leaving four for a landing's CI. This also covers overlapping Canary runs,
-Release through Promote, and manual tunnel checks.
+All repository background work now shares the constant `background-macos`
+concurrency group, including Linux work. Nightly takes it per job; Canary,
+Release, Tunnel end to end, Doc comments, Site, Web, Relay, both pricing checks,
+DERP hosts and Site analytics take it per workflow. Promote takes it in its
+`tag` and `baseline` jobs; its three reusable calls acquire it inside Release,
+Relay and Site. Promote never holds a parent lock while a called workflow
+waits for that same lock. CI does not join the group.
+
+Canary and Release order their Apple jobs so each uses at most one Mac.
+Across refs, scheduled and manual runs, background work therefore occupies
+at most one Mac, leaving four for a landing's CI. The group also caps total
+background jobs, including deployments triggered by that landing.
 
 [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
 (checked **2026-11-15**) permits a shared group across workflow and job
@@ -108,42 +112,65 @@ Mac build. No lint, shard, ship step, timeout or artifact is removed.
 | Maximum runnable jobs | Before ticket | First revision | Fixed revision |
 | --- | ---: | ---: | ---: |
 | One landing CI, all / macOS | 11 / 4 | 12 / 4 | 12 / 4 |
-| One Nightly, all / macOS | 16 / 13 logical | 4 / 1 | 4 / 1 |
+| One Nightly, all / macOS | 16 / 13 logical | 4 / 1 | 1 / 1 |
 | Canary alone, all / macOS | 4 / 2 | 4 / 2 | 4 / 1 |
 | Landing + Nightly + Canary, macOS | over five | up to seven | five |
 
-`scripts/ci-macos-capacity.py` computes weighted dependency antichains from
-these workflows, including matrix widths and the two-job Linux reusable.
-It checks every background Mac is protected, each shipping workflow's Mac
-width is one, and CI's Mac width is at most four. It also computes a
-conservative **20/20 total-job upper bound**: landing 12 + all four Nightly
-Linux jobs + the widest shipping workflow's four jobs. This overcounts
-Nightly Linux jobs that depend on one another, but stays within the Free
-limit. Canary, Release and tunnel cannot overlap each other because their
-whole workflows share the group.
+`scripts/ci-macos-capacity.py` discovers **every** workflow and computes
+weighted dependency antichains, recursively expanding local reusable calls.
+It checks every independent background job or workflow is protected and
+rejects a parent/child lock that would deadlock. It models Site's dynamic
+matrix as two channels on a push (one on dispatch/call), and Linux binaries
+as its actual two architecture jobs. Unknown triggers or unsupported matrix
+shapes fail the check instead of silently disappearing from the budget.
 
-This validates the review's overlapping Canary/Nightly/landing scenario in
-either arrival order: whichever background entry owns the group, all others
-wait without a runner; landing CI still has four Mac slots. Mutation tests
-reject a private Canary group, overlapping Canary/Release Apple jobs, a
-Nightly group that cancels or replaces pending work, an unprotected tunnel
-workflow, and an additional parallel Nightly Mac job. The check runs in CI's
-iOS planning job, which runs even when paths skip the app builds.
+The second review found that the previous **20/20** calculation omitted
+Doc comments, Site, Web and Relay on the same landing. It also left Linux
+Nightly jobs outside the queue. Those workloads now enter the same shared
+group. With the simultaneous path-changing main push, Nightly, Canary and
+deployments all eligible, the conservative bound is:
 
-Tradeoffs: shipping may wait for the current Nightly shard (up to its
-45-minute timeout), and holds the shared slot during Linux/setup/quiet work
-as well. Canary's Apple portion now has a 90-minute serial timeout envelope;
-Release's is 150 minutes. Existing per-job supersession remains, but whole
-Canary workflows now queue instead of overlapping. This spends no extra
-runner-minutes on the queue and sacrifices background latency to preserve
-landing capacity. Nightly's own Apple envelope remains 595 minutes before
-queue waits; actual wall time must be measured after landing.
+| Concurrent reservation | Jobs | macOS |
+| --- | ---: | ---: |
+| One landing CI | 12 | 4 |
+| One shared background entry (widest is Canary) | 4 | 1 |
+| Independent Canary wire-baseline recorder | 1 | 0 |
+| Total | **17 / 20** | **5 / 5** |
 
-The reservation applies to one landing CI plus this repository's background
-workloads. Other CI refs or other repositories in the account can still use
-the account's runner limits; GitHub does not promise immediate hosted capacity.
-Queues over GitHub's documented 100-entry maximum can still cancel excess
-entries. No higher account limit or paid runner is assumed.
+The Canary recorder intentionally retains its existing no-concurrency rule,
+so recording shipped wire compatibility cannot be dropped by a queue. The
+reservation includes one such completion run and leaves three spare Linux
+slots. All other repository scheduled, push, PR, dispatch and reusable work
+shares the background entry: path filters and disabled deploy variables are
+conservatively assumed to match. A Site workflow's two deployment channels,
+for example, run inside that entry instead of adding two jobs beside Canary.
+This includes Promote's direct jobs and its nested Release/Relay/Site calls.
+
+Mutation tests reject escaping Doc comments, Site, Web, Relay, Nightly Linux,
+maintenance or Promote jobs; the simultaneous deployment mutation must report
+all four originally omitted workflows. A newly discovered unprotected push
+workflow and a CI matrix that pushes total usage over 20 also fail. Earlier
+mutations still reject private Canary groups, overlapping shipping Macs,
+replacement/cancellation of Nightly work and unprotected tunnel work. The
+check runs in CI's iOS planning job even when paths skip app builds.
+
+Tradeoffs: all deployments, doc-comment checks and maintenance now wait behind
+the current background entry, including across environments for Relay. The
+queue retains those runs rather than replacing pending ones. Nightly still
+releases the slot between jobs; a shard can hold it for its 45-minute timeout.
+Canary holds it through its quiet wait (up to 70 minutes), Linux builds and
+serial Apple builds (90-minute Apple timeout envelope); Release's Apple
+envelope is 150 minutes. Nightly's own Apple envelope remains 595 minutes
+before queue waits, with its Linux checks now serialized too. These changes
+add queue delay, not compute minutes; post-landing runs must measure wall time.
+No lint, shard, deployment, timeout or artifact is removed.
+
+The reservation applies to one landing CI, the repository's queued background
+work and one Canary completion recorder. Concurrent CI refs, multiple old
+recorder runs or other repositories can still consume the account's limits;
+GitHub does not promise immediate hosted capacity. Queues over GitHub's
+100-entry maximum can still cancel excess entries. No higher account limit
+or paid runner is assumed.
 
 ## Validation
 
@@ -154,17 +181,15 @@ entries. No higher account limit or paid runner is assumed.
   overlapping capture/perf phases and success-only phase conditions. The
   original Nightly fails the new reservation checks.
 - Nightly report, shard-budget, CI job-time and CI changes self-tests passed.
-- Fix round: the capacity and wire-gate self-tests cover the shared background
-  queue and explicit Mac shipping gates; relevant workflow/script checks rerun.
-- Installed actionlint 1.7.12 predates `queue: max`. It passed on all five
-  modified workflows with shellcheck disabled and only the documented queue
-  key plus the existing `xcode-27` label diagnostic filtered. Unfiltered lint
-  reports eight queue-key diagnostics; GitHub's current syntax docs support
-  each of those keys.
-- File-size budget and `git diff --check` passed.
-- actionlint passed with shellcheck disabled and only its outdated
-  `xcode-27` label diagnostic ignored. Unfiltered actionlint also reports
-  existing SC2086 apt-option expansions in unchanged Rust setup steps.
+- Fix round 2: capacity self-tests passed for all discovered workflows,
+  expanded reusable calls, the simultaneous deployment mutation, unknown new
+  workflows and total-job overflow. Wire lint: 107 passed, zero failed.
+- Nightly report, shard coverage, shard budget, job-time and change-planning
+  self-tests passed; the file-size budget and `git diff --check` passed.
+- Installed actionlint 1.7.12 predates `queue: max`. All workflows passed with
+  shellcheck disabled and only its unsupported queue key and existing
+  `xcode-27` label diagnostic ignored. GitHub's current syntax documentation
+  supports the queue key; limits and queue semantics rechecked 2026-11-15.
 
 Hosted after timing and a comparable three-day queue-p90 comparison remain
 follow-up measurements after landing; local timings cannot substitute for

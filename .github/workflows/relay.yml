@@ -79,14 +79,13 @@ on:
 # working out, from a live fault, that they need to run `wrangler deploy` by
 # hand.
 #
-# Keyed by environment, because the four channels are genuinely separate
-# workers with separate databases and nothing to serialise between them. A
-# `workflow_dispatch` putting a fix on the stable relay must not queue behind a
-# canary push it has nothing to do with — that button exists for the moments
-# when waiting is the problem.
+# Share the repository background budget across channels (ov-1190). Manual
+# fixes now wait for the current background entry too, preserving total-job
+# headroom for landing CI. No running deployment is cancelled.
 concurrency:
-  group: relay-${{ inputs.environment || 'canary' }}
+  group: background-macos
   cancel-in-progress: false
+  queue: max
 
 jobs:
   deploy:

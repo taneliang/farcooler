@@ -23,6 +23,12 @@ permissions:
   contents: read
   issues: write
 
+# Share the background budget with Nightly and shipping (ov-1190).
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   derp-hosts:
     name: DERP hosts match the map

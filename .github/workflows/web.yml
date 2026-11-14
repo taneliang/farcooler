@@ -43,6 +43,12 @@ on:
         type: choice
         options: [canary]
 
+# Share the background budget with Nightly and shipping (ov-1190).
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   deploy:
     name: Deploy ${{ inputs.environment || 'canary' }}

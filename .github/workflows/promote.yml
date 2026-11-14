@@ -40,6 +40,11 @@ permissions:
 
 jobs:
   tag:
+    # Waiting for the shared budget consumes no runner (ov-1190).
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     name: Tag
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -165,6 +170,11 @@ jobs:
     secrets: inherit
 
   baseline:
+    # Waiting for the shared budget consumes no runner (ov-1190).
+    concurrency:
+      group: background-macos
+      cancel-in-progress: false
+      queue: max
     name: Record the wire baseline
     needs: [tag, build]
     runs-on: ubuntu-latest
