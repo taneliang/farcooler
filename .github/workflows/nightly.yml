@@ -142,6 +142,7 @@ jobs:
         if: always()
         with:
           name: rust-shadow-linux
+          overwrite: true
           path: ${{ runner.temp }}/rust-shadow/
 
   # The iOS app and its UI test bundle, built once for every job below, as ci.yml's
