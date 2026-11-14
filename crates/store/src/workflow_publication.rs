@@ -637,7 +637,7 @@ mod ov1179_rollback_tests {
         let file = |name: &str| Some(LaunchFile { path: format!("/runner/{name}.json").into(), digest: name.into() });
         let native = |preset: &str, codex_hooks: Option<LaunchFile>| CodingHarness::Native { preset: preset.into(),
             settings: file("claude-settings"), project_hooks: None, plugin_dir: None, prompt: "build".into(), process: command(), codex_hooks };
-        let adapter = |harness: CodingHarness| AdapterConfiguration::Coding(CodingConfig { repository: "/repo".into(), base: "main".into(),
+        let adapter = |harness: CodingHarness| AdapterConfiguration::Coding(CodingConfig { security_reviews: vec![], repository: "/repo".into(), base: "main".into(),
             landing_ref: "refs/heads/main".into(), landing: None, pull_request: None, harness, checks: vec![command()], reviewer: None,
             ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: command() } });
         // The finding's configuration: Claude launches, and a Codex hooks file running a deploy sits unused beside it.
