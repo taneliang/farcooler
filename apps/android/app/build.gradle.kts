@@ -319,6 +319,7 @@ android {
                     test.jvmArgs("-Djava.library.path=$it")
                 }
                 if (capturing) {
+                    test.maxParallelForks = 2
                     test.filter.includeTestsMatching("com.farcooler.capture.*")
                     (project.findProperty("farcooler.captureJdk") as String?)?.let {
                         test.executable = "$it/bin/java"
