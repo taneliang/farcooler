@@ -1,0 +1,42 @@
+ov-1155 fix round 1: iOS PhonePlanColumnUITests + ios-ui-shards.py smoke
+Exit code: 0
+Products: target/ios-derived/Build/Products/FarCooler_iphonesimulator27.1-arm64.xctestrun
+Device: iPhone 17 (47C77A22-0EDF-4349-B2A1-F678935955AB)
+Full log: target/ov-1155-validation/ios-fix-round1.log
+
+Test Case '-[FarCoolerUITests.FirstRunUITests testOnboardingTeachesWhatARunnerIsFor]' passed (8.323 seconds).
+Test Suite 'FirstRunUITests' passed at 2026-11-14 12:33:41.086.
+Test Case '-[FarCoolerUITests.NativeAnswersUITests testAQuestionIsAnsweredWithAnOption]' passed (12.673 seconds).
+Test Suite 'NativeAnswersUITests' passed at 2026-11-14 12:33:53.764.
+Test Case '-[FarCoolerUITests.NativeComposerTests testAPhotoAloneCanBeSent]' passed (9.753 seconds).
+Test Case '-[FarCoolerUITests.NativeComposerTests testASlashCommandIsSent]' passed (12.021 seconds).
+Test Suite 'NativeComposerTests' passed at 2026-11-14 12:34:15.540.
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testAnAgentOpensItsTicketWhenItHasNoPane]' passed (25.001 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testAnAgentWithAPaneOpensItsChat]' passed (22.261 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testANeedsYouRowDraftsIntoTheOrchestrator]' passed (13.977 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testARunnerWithNoPlanKeepsItsOldScreen]' passed (10.227 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testATicketOpensItsTask]' passed (26.944 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testCaptures]' skipped (0.080 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testItHoldsAtTheLargestAccessibilityTypeSize]' passed (233.537 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testLandingQueueWithLongTitles]' passed (18.887 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testTheMoreLineOpensItsListAndARowOpensItsTask]' passed (23.378 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testThePlanReadsInOrder]' passed (56.508 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testTicketsStayOutsideTheRosterAndKeysAreMonospaced]' passed (171.348 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testUnassignedTicketsOpenTheirStageList]' passed (46.782 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testWaitingFooterOpensItsTickets]' passed (49.652 seconds).
+Test Suite 'PhonePlanColumnUITests' passed at 2026-11-14 12:45:54.134.
+Test Case '-[FarCoolerUITests.PlanUITests testARunnerWithoutBoardPlanShowsNothingNew]' passed (10.816 seconds).
+Test Suite 'PlanUITests' passed at 2026-11-14 12:46:04.955.
+Test Case '-[FarCoolerUITests.RunnerReachTests testARunnerSavedBeforeReachExistedStillLoads]' passed (6.720 seconds).
+Test Suite 'RunnerReachTests' passed at 2026-11-14 12:46:11.676.
+Test Case '-[FarCoolerUITests.TaskScreenTests testAnsweringADecisionRemovesItFromNeedsYou]' passed (9.446 seconds).
+Test Suite 'TaskScreenTests' passed at 2026-11-14 12:46:21.123.
+Test Case '-[FarCoolerUITests.WorkspaceScreenTests testNoSegmentsAWorkspaceIsItsConversationOrItsPlan]' passed (24.022 seconds).
+Test Suite 'WorkspaceScreenTests' passed at 2026-11-14 12:46:45.147.
+Test Suite 'FarCoolerUITests.xctest' passed at 2026-11-14 12:46:45.147.
+	 Executed 21 tests, with 1 test skipped and 0 failures (0 unexpected) in 792.356 (792.390) seconds
+Test Suite 'Selected tests' passed at 2026-11-14 12:46:45.147.
+	 Executed 21 tests, with 1 test skipped and 0 failures (0 unexpected) in 792.356 (792.393) seconds
+** TEST EXECUTE SUCCEEDED **
+  21 collected, 1 skipped, 20 actually ran
+OK: 20 test(s) executed.

@@ -76,9 +76,9 @@ All remaining source commits applied cleanly. Clean merges retain the preview's
 execution observations and recovery commands, the external-close path, queue
 presentation, CLI/session enrichment, and CI rerun support.
 
-## Validation
+## Initial validation
 
-Results below are fresh checks on the integrated branch. Builds use only
+Results below were checks on the initial integrated branch, before fix round 1. Builds use only
 this worktree's `target/`; no build artifacts are redirected to `/tmp`.
 
 Completed lightweight checks (November 14):
@@ -145,25 +145,69 @@ attempt found no generated `project.pbxproj`; running
 The resulting `.xctestrun` is ready for a Plan/smoke run against these freshly
 built app and test products.
 
-## Acceptance and remaining blockers
+## Initial acceptance status (before fix round 1)
 
-1. Both reviewed stacks are on `wave-a-preview`, in order. Conflict resolutions
-   preserve cancellation recovery, external close, fold-conflict recovery,
-   split diagnostics, roster layouts and landing groups. The clean Rust,
-   shared Swift, Mac and web results above cover those interactions.
-2. **Not fully met.** Shared-core lint exits 1 on the same four unchanged
-   preview-base violations. The iOS app and UI tests compile successfully,
-   but the Plan/smoke UI run did not execute: its machine-wide gate was queued
-   for more than an hour on November 14, behind another worktree's gate.
-   That gate spent a substantial part of the wait in the Rust shadow harness's
-   load guard, then advanced to its workspace tests while retaining the lock.
-   Only this ticket's still-waiting wrapper was cancelled (exit 143), after
-   checking that it had no test child. No other process or simulator was stopped.
-   No iOS UI success is claimed. Changing unrelated feature copy is outside
-   the conflict-resolution-only scope. The shared simulator gate was kept in place.
-3. Every textual and semantic conflict and its resolution is listed above.
+The first build integrated both stacks and documented all conflicts, but did
+not complete acceptance 2: shared-core lint failed on four preview violations,
+and the iOS UI command was cancelled while queued. The review returned the
+build for those two items. The completed resolution and fresh results follow.
 
-When the shared gate is available, the remaining UI command is:
+## Fix round 1: acceptance 2
+
+The review finding on the ticket requires an executed, passing iOS Plan/smoke
+run and a zero exit code from shared-core lint. The reviewed stacks and their
+conflict resolutions above are retained.
+
+### Shared-core lint resolution
+
+Reproduced all four reported ratchet failures. Each new string describes
+platform-owned enrollment or browser recovery state:
+
+- iOS and Android `ConnectionTeammate`: the device authentication prompt for
+  confirming browser enrollment, not a projection of runner workflow data.
+- Web `app.ts`: the browser's passkey recovery-copy deletion and sign-out UI.
+- Web `saved-copies.ts`: management of account-owned browser recovery ciphertext
+  and passkey credential IDs at the relay, independent of a connected runner.
+
+Used the lint's documented `platform copy: <reason>` annotation on those lines
+and recorded just these four files in the baseline's `exempt` map. No ratchet,
+Rust-copy, wire-word, or twin allowance was increased. The existing strings,
+control flow, wire types and rendered screens are unchanged. This resolves the
+preview integration's lint failures within the requested fix; it adds no feature.
+The lint's baseline-growth gate explicitly permits reviewed platform exemptions.
+
+Fresh checks in this round:
+
+| Gate | Exit | Result |
+| --- | --- | --- |
+| `scripts/shared-core-lint.py` | 0 | All four failures resolved |
+| Shared-core baseline not grown vs `wave-a-preview` | 0 | Feature-copy ratchet unchanged |
+| Shared-core lint self-test | 0 | Violation detection still passes |
+| Copy, file-size, visual-token, swallow lints | 0 | Passed |
+| Doc-comment check against `wave-a-preview` | 0 | Passed |
+| Web recovery and Plan unit tests | 0 | 49 tests across 5 files passed |
+| Web client TypeScript | 0 | Passed |
+| Mac selected Plan suites | 0 | 37 tests across 5 suites passed |
+| Affected Rust selection | 0 | All 1,059 selected tests passed |
+| iOS PhonePlanColumn plus smoke UI tests | 0 | 20 actually ran and passed; 1 optional capture skipped |
+
+The web selection was `saved-copies.test.ts`, `sign-out.test.ts`,
+`vault.test.ts`, `plan.test.ts`, and `plan-column.test.ts`. Mac used the same
+five Plan suites as the initial validation. Initial sandboxed web test execution
+could not start its Workers runtime; the permitted rerun above completed.
+Raw logs for this round are in `target/ov-1155-validation/*-fix-round1.log`.
+
+The fresh Rust run used the same six packages and filter as the initial final
+run above, through `scripts/heavy --light`, with two compiler jobs and the
+native hook/session environment removed. It passed all 1,059 selected tests in
+123.478 seconds after compilation (4,625 cases outside the selection).
+
+### Executed iOS Plan and smoke tests
+
+The shared gate became available; the queued command ran to completion against
+this worktree's `target/ios-derived` app and UI test bundle. The existing gate,
+device lease, boot budget, test timeouts and nonzero-executed-test check were
+retained. No other worktree's process or simulator was stopped.
 
 ```sh
 export PATH="/opt/homebrew/opt/python@3.14/libexec/bin:/opt/homebrew/bin:$PATH"
@@ -172,5 +216,25 @@ XCTESTRUN="$PWD/target/ios-derived/Build/Products/FarCooler_iphonesimulator27.1-
   $(./scripts/ios-ui-shards.py smoke)
 ```
 
-The script retains its device lease, boot-budget and nonzero-executed-test
-checks. Raw build/test logs are retained locally in `target/ov-1155-validation/`.
+Exit code **0**. The leased device was iPhone 17,
+`47C77A22-0EDF-4349-B2A1-F678935955AB`. On November 14 the run completed at
+12:46:45 local time in 792.393 seconds: 21 collected, 1 skipped, **20 actually
+ran**, zero failures. `PhonePlanColumnUITests` passed its 12 executable cases,
+including the long-title landing queue and largest accessibility type size;
+its `testCaptures` case requires explicit `FC_CAPTURES=1` and was skipped as
+designed. All eight smoke cases executed and passed. The wrapper printed
+`OK: 20 test(s) executed.` after `TEST EXECUTE SUCCEEDED`.
+
+See `ios-plan-smoke.txt` for the retained per-case verdicts. The full log is
+`target/ov-1155-validation/ios-fix-round1.log`.
+
+### Final acceptance
+
+1. **Met:** both reviewed stacks remain integrated on top of `wave-a-preview`,
+   preserving the conflict resolutions documented above.
+2. **Met:** affected Rust (1,059), Mac Plan (37), web (49), TypeScript, shared-core
+   and copy lint pass by exit code. The initial shared Swift Plan check (178)
+   remains valid; this round changes only comments and the lint exemption map.
+   The iOS Plan and smoke UI selection executed and passed with exit code 0.
+3. **Met:** every integration conflict and its resolution is listed above,
+   together with the semantic fixture fixes and this round's lint resolution.

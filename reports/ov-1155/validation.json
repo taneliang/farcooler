@@ -1,12 +1,14 @@
 {
   "ticket": "ov-1155",
   "preview": "b954ea25f",
-  "implementation_commit": "22f3ba77987018a6fd0239d84f847f73805db6d8",
+  "implementation_commit": "bbc2873",
   "checks": {
     "rust_affected": {
       "exit_code": 0,
       "passed": 1059,
-      "not_selected": 4625
+      "not_selected": 4625,
+      "duration_seconds": 123.478,
+      "fix_round": 1
     },
     "agentkit_plan": {
       "exit_code": 0,
@@ -14,7 +16,8 @@
     },
     "mac_plan": {
       "exit_code": 0,
-      "passed": 37
+      "passed": 37,
+      "fix_round": 1
     },
     "web_plan_unit": {
       "exit_code": 0,
@@ -38,10 +41,28 @@
       "exit_code": 0
     },
     "ios_plan_smoke": {
-      "exit_code": null,
-      "executed": 0,
-      "queue_cancel_exit": 143,
-      "reason": "Shared machine-wide gate remained occupied for over an hour"
+      "exit_code": 0,
+      "collected": 21,
+      "executed": 20,
+      "passed": 20,
+      "skipped": 1,
+      "failures": 0,
+      "skip_reason": "PhonePlanColumnUITests/testCaptures is opt-in (FC_CAPTURES=1)",
+      "phone_plan_column": {
+        "collected": 13,
+        "executed": 12,
+        "passed": 12,
+        "skipped": 1
+      },
+      "smoke": {
+        "executed": 8,
+        "passed": 8
+      },
+      "duration_seconds": 792.393,
+      "simulator": "iPhone 17",
+      "simulator_id": "47C77A22-0EDF-4349-B2A1-F678935955AB",
+      "finished_at": "2026-11-14T12:46:45+08:00",
+      "fix_round": 1
     },
     "copy_lint": {
       "exit_code": 0
@@ -62,14 +83,29 @@
       "exit_code": 0
     },
     "shared_core_lint": {
-      "exit_code": 1,
+      "exit_code": 0,
       "new_violations_relative_to_preview": 0,
-      "unchanged_preview_failures": 4
+      "resolution": "Documented platform-copy annotations and reviewed exemption counts; no feature-copy ratchet growth",
+      "fix_round": 1
+    },
+    "web_recovery_and_plan_unit": {
+      "exit_code": 0,
+      "passed": 49,
+      "files": 5,
+      "fix_round": 1
+    },
+    "shared_core_baseline_not_grown": {
+      "exit_code": 0,
+      "base": "wave-a-preview"
+    },
+    "shared_core_self_test": {
+      "exit_code": 0
     }
   },
   "acceptance": {
     "both_stacks_integrated": true,
-    "all_gates_pass": false,
+    "all_gates_pass": true,
     "conflict_report_complete": true
-  }
+  },
+  "fix_round": 1
 }
