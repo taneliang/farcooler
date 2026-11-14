@@ -1,0 +1,469 @@
+{
+  "databaseId": 43598509967,
+  "headSha": "e35b1272732c1f12dd22c877725f0403574200dc",
+  "jobs": [
+    {
+      "completedAt": "2026-11-14T13:31:40Z",
+      "conclusion": "success",
+      "databaseId": 132459032015,
+      "name": "Swift (AgentKit + Mac tests)",
+      "startedAt": "2026-11-14T13:15:28Z",
+      "status": "completed",
+      "steps": [
+        {
+          "completedAt": "2026-11-14T13:15:32Z",
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "startedAt": "2026-11-14T13:15:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:15:38Z",
+          "conclusion": "success",
+          "name": "Check the runner has Xcode 27",
+          "number": 2,
+          "startedAt": "2026-11-14T13:15:32Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:15:51Z",
+          "conclusion": "success",
+          "name": "Run actions/checkout@v4",
+          "number": 3,
+          "startedAt": "2026-11-14T13:15:38Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:02Z",
+          "conclusion": "success",
+          "name": "Run dtolnay/rust-toolchain@stable",
+          "number": 4,
+          "startedAt": "2026-11-14T13:15:51Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:17Z",
+          "conclusion": "success",
+          "name": "Run Swatinem/rust-cache@v2",
+          "number": 5,
+          "startedAt": "2026-11-14T13:16:02Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:21Z",
+          "conclusion": "success",
+          "name": "Cache SwiftPM downloads",
+          "number": 6,
+          "startedAt": "2026-11-14T13:16:17Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:43Z",
+          "conclusion": "success",
+          "name": "Run actions/cache@v4",
+          "number": 7,
+          "startedAt": "2026-11-14T13:16:21Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:44Z",
+          "conclusion": "success",
+          "name": "Restore unchanged Swift input timestamps and force fresh links",
+          "number": 8,
+          "startedAt": "2026-11-14T13:16:43Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:52Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/macos-test-wrapper-test.sh",
+          "number": 9,
+          "startedAt": "2026-11-14T13:16:44Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:57Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/wait-for-unlock-test.sh",
+          "number": 10,
+          "startedAt": "2026-11-14T13:16:52Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:17:31Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/swift-test-guard-test.sh",
+          "number": 11,
+          "startedAt": "2026-11-14T13:16:57Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:17:39Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/macos-test-partitions.py --self-test",
+          "number": 12,
+          "startedAt": "2026-11-14T13:17:31Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:17:48Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/test-leak-check.py --self-test",
+          "number": 13,
+          "startedAt": "2026-11-14T13:17:39Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:17:49Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/mac-capture-stop-test.sh",
+          "number": 14,
+          "startedAt": "2026-11-14T13:17:48Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:17:51Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/capture-duplicates-test.sh",
+          "number": 15,
+          "startedAt": "2026-11-14T13:17:49Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:21:40Z",
+          "conclusion": "success",
+          "name": "Build the shared native test targets",
+          "number": 16,
+          "startedAt": "2026-11-14T13:17:51Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:22:54Z",
+          "conclusion": "success",
+          "name": "Test AgentKit",
+          "number": 17,
+          "startedAt": "2026-11-14T13:21:40Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:22:56Z",
+          "conclusion": "success",
+          "name": "Cache the pinned tmux build",
+          "number": 18,
+          "startedAt": "2026-11-14T13:22:54Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:23:07Z",
+          "conclusion": "success",
+          "name": "Install tmux",
+          "number": 19,
+          "startedAt": "2026-11-14T13:22:56Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:04Z",
+          "conclusion": "success",
+          "name": "Test the Mac app",
+          "number": 20,
+          "startedAt": "2026-11-14T13:23:07Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:04Z",
+          "conclusion": "success",
+          "name": "Record Swift input timestamps for the compilation cache",
+          "number": 21,
+          "startedAt": "2026-11-14T13:31:04Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:06Z",
+          "conclusion": "success",
+          "name": "Keep Mac test inventory and timing evidence",
+          "number": 22,
+          "startedAt": "2026-11-14T13:31:04Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:06Z",
+          "conclusion": "success",
+          "name": "Post Cache the pinned tmux build",
+          "number": 40,
+          "startedAt": "2026-11-14T13:31:06Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:33Z",
+          "conclusion": "success",
+          "name": "Post Run actions/cache@v4",
+          "number": 41,
+          "startedAt": "2026-11-14T13:31:06Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:34Z",
+          "conclusion": "success",
+          "name": "Post Cache SwiftPM downloads",
+          "number": 42,
+          "startedAt": "2026-11-14T13:31:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:34Z",
+          "conclusion": "success",
+          "name": "Post Run Swatinem/rust-cache@v2",
+          "number": 43,
+          "startedAt": "2026-11-14T13:31:34Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:35Z",
+          "conclusion": "success",
+          "name": "Post Run actions/checkout@v4",
+          "number": 44,
+          "startedAt": "2026-11-14T13:31:34Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:38Z",
+          "conclusion": "success",
+          "name": "Complete job",
+          "number": 45,
+          "startedAt": "2026-11-14T13:31:35Z",
+          "status": "completed"
+        }
+      ],
+      "url": "https://github.com/taneliang/farcooler/actions/runs/43598509967/job/132459032015"
+    },
+    {
+      "completedAt": "2026-11-14T13:31:16Z",
+      "conclusion": "success",
+      "databaseId": 132459032029,
+      "name": "Swift (app build + bundle checks)",
+      "startedAt": "2026-11-14T13:15:29Z",
+      "status": "completed",
+      "steps": [
+        {
+          "completedAt": "2026-11-14T13:15:32Z",
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "startedAt": "2026-11-14T13:15:29Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:15:38Z",
+          "conclusion": "success",
+          "name": "Check the runner has Xcode 27",
+          "number": 2,
+          "startedAt": "2026-11-14T13:15:32Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:15:52Z",
+          "conclusion": "success",
+          "name": "Run actions/checkout@v4",
+          "number": 3,
+          "startedAt": "2026-11-14T13:15:38Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:05Z",
+          "conclusion": "success",
+          "name": "Run dtolnay/rust-toolchain@stable",
+          "number": 4,
+          "startedAt": "2026-11-14T13:15:52Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:28Z",
+          "conclusion": "success",
+          "name": "Run Swatinem/rust-cache@v2",
+          "number": 5,
+          "startedAt": "2026-11-14T13:16:05Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:33Z",
+          "conclusion": "success",
+          "name": "Cache SwiftPM downloads",
+          "number": 6,
+          "startedAt": "2026-11-14T13:16:28Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:48Z",
+          "conclusion": "success",
+          "name": "Run actions/cache@v4",
+          "number": 7,
+          "startedAt": "2026-11-14T13:16:33Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:16:51Z",
+          "conclusion": "success",
+          "name": "Restore unchanged Swift input timestamps and force fresh links",
+          "number": 8,
+          "startedAt": "2026-11-14T13:16:48Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:17:36Z",
+          "conclusion": "success",
+          "name": "Run actions/setup-go@v5",
+          "number": 9,
+          "startedAt": "2026-11-14T13:16:51Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:17:37Z",
+          "conclusion": "success",
+          "name": "Resolve this channel's app name",
+          "number": 10,
+          "startedAt": "2026-11-14T13:17:36Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:18:02Z",
+          "conclusion": "success",
+          "name": "Check native bundle linkage isolation",
+          "number": 11,
+          "startedAt": "2026-11-14T13:17:37Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:21Z",
+          "conclusion": "success",
+          "name": "Build Far Cooler.app",
+          "number": 12,
+          "startedAt": "2026-11-14T13:18:02Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:23Z",
+          "conclusion": "success",
+          "name": "Check the bundled daemon has the tunnel linked",
+          "number": 13,
+          "startedAt": "2026-11-14T13:30:21Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:23Z",
+          "conclusion": "success",
+          "name": "Check the bundled CLI has the tunnel linked",
+          "number": 14,
+          "startedAt": "2026-11-14T13:30:23Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:23Z",
+          "conclusion": "success",
+          "name": "Check the bundle is stamped with this commit's version",
+          "number": 15,
+          "startedAt": "2026-11-14T13:30:23Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:23Z",
+          "conclusion": "success",
+          "name": "Check the CLI and daemon agree",
+          "number": 16,
+          "startedAt": "2026-11-14T13:30:23Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:36Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/icon-test.sh",
+          "number": 17,
+          "startedAt": "2026-11-14T13:30:23Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:40Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/sparkle-key-test.sh",
+          "number": 18,
+          "startedAt": "2026-11-14T13:30:36Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:49Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/gh-download-test.sh",
+          "number": 19,
+          "startedAt": "2026-11-14T13:30:40Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:50Z",
+          "conclusion": "success",
+          "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+          "number": 20,
+          "startedAt": "2026-11-14T13:30:49Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:50Z",
+          "conclusion": "success",
+          "name": "Record Swift input timestamps for the compilation cache",
+          "number": 21,
+          "startedAt": "2026-11-14T13:30:50Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:30:51Z",
+          "conclusion": "success",
+          "name": "Post Run actions/setup-go@v5",
+          "number": 38,
+          "startedAt": "2026-11-14T13:30:50Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:08Z",
+          "conclusion": "success",
+          "name": "Post Run actions/cache@v4",
+          "number": 39,
+          "startedAt": "2026-11-14T13:30:51Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:08Z",
+          "conclusion": "success",
+          "name": "Post Cache SwiftPM downloads",
+          "number": 40,
+          "startedAt": "2026-11-14T13:31:08Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:08Z",
+          "conclusion": "success",
+          "name": "Post Run Swatinem/rust-cache@v2",
+          "number": 41,
+          "startedAt": "2026-11-14T13:31:08Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:09Z",
+          "conclusion": "success",
+          "name": "Post Run actions/checkout@v4",
+          "number": 42,
+          "startedAt": "2026-11-14T13:31:08Z",
+          "status": "completed"
+        },
+        {
+          "completedAt": "2026-11-14T13:31:12Z",
+          "conclusion": "success",
+          "name": "Complete job",
+          "number": 43,
+          "startedAt": "2026-11-14T13:31:09Z",
+          "status": "completed"
+        }
+      ],
+      "url": "https://github.com/taneliang/farcooler/actions/runs/43598509967/job/132459032029"
+    }
+  ],
+  "url": "https://github.com/taneliang/farcooler/actions/runs/43598509967"
+}
