@@ -17,6 +17,7 @@ struct Live {
     tickets: Vec<String>,
     row: pb::Agent,
     send: mpsc::Sender<Order>,
+    accepting_messages: bool,
 }
 static LIVE: LazyLock<Mutex<HashMap<Uuid, Live>>> = LazyLock::new(Default::default);
 
@@ -32,7 +33,7 @@ pub(crate) fn publish(workspace: &str, item: &str, id: Uuid, harness: &str, mode
         role: if review { pb::AgentRole::Reviewer } else { pb::AgentRole::Builder } as i32,
         harness: harness.into(), model: model.unwrap_or_default(), title: format!("Engine: {item}"),
         started_at: now_ms(), working: true, ..Default::default() };
-    LIVE.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Live { workspace:workspace.into(),item:item.into(),tickets,row,send });
+    LIVE.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Live { workspace:workspace.into(),item:item.into(),tickets,row,send,accepting_messages:true });
     Listed(id)
 }
 pub(crate) fn workspace(id: Uuid) -> Option<Uuid> {
@@ -41,6 +42,19 @@ pub(crate) fn workspace(id: Uuid) -> Option<Uuid> {
 pub(crate) fn row(id: Uuid) -> Option<pb::Agent> { LIVE.lock().ok()?.get(&id).map(|a| a.row.clone()) }
 pub(crate) fn find(workspace: Uuid, item: &str) -> Option<Uuid> {
     LIVE.lock().ok()?.iter().find(|(_, a)| a.workspace == workspace.to_string() && (a.item == item || a.tickets.iter().any(|t| t == item))).map(|(id, _)| *id)
+}
+/// Serialize queue insertion with the host's last queue check. Keep the live row for watching and
+/// controls during quiescence, but never accept a message once that check handed the step off.
+pub(crate) fn inbox<T>(id: Uuid, action: impl FnOnce(&mut bool) -> Result<T>) -> Result<T> {
+    let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
+    let agent = live.get_mut(&id).ok_or(DomainError::Conflict { what:"nobody" })?;
+    action(&mut agent.accepting_messages)
+}
+pub(crate) fn queue_message<T>(id: Uuid, append: impl FnOnce() -> Result<T>) -> Result<T> {
+    inbox(id, |open| {
+        if !*open { return Err(DomainError::Conflict { what:"nobody" }); }
+        append()
+    })
 }
 pub(crate) async fn control(id: Uuid, op: Control) -> Result<()> {
     let sender = LIVE.lock().ok().and_then(|live| live.get(&id).map(|a| a.send.clone())).ok_or(DomainError::NotFound)?;

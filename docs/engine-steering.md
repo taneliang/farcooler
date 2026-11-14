@@ -2,9 +2,20 @@
 
 `farcooler message <key> "<direction>"` reaches the native Codex or Claude agent
 working the ticket's current build, review, or agent gate. It queues the message
-on the ticket. At the agent's next Stop hook, the host passes the direction back
-as a continuation in the same session, before settling the step. Messages are
-bound to that step's terminal identity; they never move to a replacement step.
+on the ticket. Claude receives it at its next `PreToolUse` hook: that tool is
+refused with the direction as its reason, so the agent can change course before
+running it. This does not interrupt a tool already executing. Codex's pinned
+configuration has no mid-turn hook, so it receives direction at its next Stop
+hook as a continuation in the same session, before the step settles. Claude also
+uses this continuation when it reaches Stop without another tool call.
+
+Message admission and the final Stop queue check share a lock. Direction accepted
+before that check extends the session; messages after the final check are
+rejected even while the agent row remains visible during capture and quiescence.
+If the step times out, stops, or otherwise exits with direction still queued,
+the ticket records the undelivered message and asks the sender to send it again
+to the current agent. Messages stay bound to that step's terminal identity;
+they never move silently to a replacement step.
 Shared builds and group gates are reachable through each ticket they work.
 
 Engine agents appear in `farcooler agent list` and the plan's agent rows with

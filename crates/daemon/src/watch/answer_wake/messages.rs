@@ -114,6 +114,7 @@ pub(super) fn release_for_tests(note: Uuid) {
 
 /// Whom a message is for, once resolved: a pane, or the orchestrator.
 struct Recipient {
+    native: bool,
     terminal: Option<Uuid>,
     /// As a person reads it: "the orchestrator", "the lane mac-ux".
     said: String,
@@ -212,7 +213,7 @@ impl Watcher {
                     self.card_named(&board, p.task.trim())?.ok_or(DomainError::Conflict { what: "no_task" })?
                 }
             };
-            (task, Recipient { terminal: None, said: "the orchestrator".into() })
+            (task, Recipient { native:false, terminal: None, said: "the orchestrator".into() })
         } else if let Some(handle) = to_rep {
             if matches!(actor, Actor::Agent { .. }) {
                 return Err(DomainError::Conflict { what: "hub" });
@@ -260,7 +261,10 @@ impl Watcher {
             }
             (actor, _) => actor,
         };
-        let note = store.send_manual_message(task.id, actor, &text, recipient.terminal, extra)?;
+        let append = || store.send_manual_message(task.id, actor, &text, recipient.terminal, extra);
+        let note = if recipient.native {
+            crate::engine_steering::queue_message(recipient.terminal.expect("native recipient"), append)?
+        } else { append()? };
         self.announce_task_changed(&task, None, actor);
         self.message_queued();
         Ok(result::Value::MessageSent(pb::MessageSent {
@@ -332,7 +336,7 @@ impl Watcher {
         let member = store.member(handle).map_err(|_| DomainError::InvalidArgument { what: "to" })?;
         let rep = store.rep_for(board.id, handle)?.ok_or(DomainError::Conflict { what: "no_rep" })?;
         let task = self.rep_card(board, handle, key)?;
-        Ok((task, Recipient { terminal: Some(rep.terminal), said: format!("{}'s rep", member.name) }))
+        Ok((task, Recipient { native:false, terminal: Some(rep.terminal), said: format!("{}'s rep", member.name) }))
     }
 
     /// `to` as a ticket's key: the pane working it, or for a ticket no pane
@@ -344,7 +348,7 @@ impl Watcher {
         let card = self.card_named(board, to)?.ok_or(DomainError::InvalidArgument { what: "to" })?;
         if let Some(id) = crate::engine_steering::find(board.id, &card.key) {
             let said = format!("{}'s engine agent", card.key);
-            return Ok((card, Recipient { terminal: Some(id), said }));
+            return Ok((card, Recipient { native:true, terminal: Some(id), said }));
         }
         if let Some(pane) = store.pane_of_ticket(card.id)? {
             let row = store.get_terminal(pane).map_err(|_| nobody.clone())?;
@@ -353,11 +357,11 @@ impl Watcher {
                 return Err(DomainError::Conflict { what: "self" });
             }
             let said = format!("the {} on {}", role_of_pane(store, pane), card.key);
-            return Ok((card, Recipient { terminal: Some(pane), said }));
+            return Ok((card, Recipient { native:false, terminal: Some(pane), said }));
         }
         let agent = self.recipient(&card).await.filter(|t| t.role != TerminalRole::Orchestrator).ok_or(nobody)?;
         let said = format!("{}'s agent", card.key);
-        Ok((card, Recipient { terminal: Some(agent.id), said }))
+        Ok((card, Recipient { native:false, terminal: Some(agent.id), said }))
     }
 
     /// Whom a queued message goes to now: its pane, or the workspace's live

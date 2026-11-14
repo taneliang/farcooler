@@ -130,7 +130,7 @@ pub(crate) fn sent_line(sent: &pb::MessageSent, json: bool) -> String {
         return serde_json::json!({ "task": sent.task_key, "to": sent.recipient }).to_string();
     }
     if sent.recipient.ends_with("'s engine agent") {
-        return format!("queued for {}, on {}. it receives this when its current turn ends, before the step settles", sent.recipient, sent.task_key);
+        return format!("queued for {}, on {}. it receives this before its next tool where supported, or when its current turn ends. undelivered direction is recorded on the ticket", sent.recipient, sent.task_key);
     }
     format!("queued for {}, on {}. it's typed in when it's ready", sent.recipient, sent.task_key)
 }

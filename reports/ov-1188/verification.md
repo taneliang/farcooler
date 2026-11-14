@@ -59,3 +59,53 @@ stopped after that environment contamination was identified.
 - Affected-package doctests: passed.
 - File-size budget, protocol capability checks, swallowed-call lint, copy lint,
   visual-token lint, doc-comment check, and whitespace checks: passed.
+
+## Fix round 1: active direction and final handoff
+
+Read the newest ticket finding with the installed Canary CLI. The root causes
+were the Stop-only delivery path and an admission window between the last Stop
+queue read and native capture/quiescence.
+
+Two new regressions failed before the fix:
+
+- `native_direction_reaches_claude_before_its_next_tool_runs`: direction did not
+  arrive before the next tool without a Stop.
+- `native_final_stop_rejects_messages_before_capture_and_settlement_for_both_harnesses`:
+  `message.send` still accepted direction after the final Stop queue check.
+
+Claude now receives direction as a denial of its next `PreToolUse`, before that
+tool can run. It does not interrupt an already executing tool. The pinned Codex
+configuration registers SessionStart, UserPromptSubmit, and Stop; it has no
+mid-turn hook. Codex therefore retains the Stop continuation path, and the CLI
+and steering documentation state the delivery boundary instead of suggesting
+instant interruption. The real-PTY fixture checks active direction and Stop
+continuation for both harnesses, before writing and committing the candidate.
+
+Queue insertion and the last Stop queue check now share the native inbox lock.
+Messages admitted first extend the same session. The last empty Stop check
+closes admission before capture/quiescence, while the row stays listed. A stale
+resolved recipient is rejected too. Unfinished builds that wait for another
+turn keep their inbox open. A lifetime guard closes the inbox on every exit and
+records any outstanding direction as undelivered, with its text and a resend
+instruction, on the original ticket. A process crash leaves the existing durable
+queue for the ordinary wake pump's recovery; nothing retargets a replacement.
+
+The first focused fixed run passed all four tests, including the real-PTY
+continuation fixture. The additional exit-recovery regression covers both
+harnesses and checks that a failure note is recorded and stale admissions fail.
+
+Test commands remove inherited FARCOOLER_* native launch variables (except the
+WorkOS client ID) and set TMPDIR=/tmp. The default sandbox prevented the macOS
+linker from creating temporary files; tests run with authorized local process
+and private tmux access. No cargo fmt was run.
+
+Final round 1 checks:
+
+- Complete daemon unit suite under `scripts/tmux-leak-check.py`: **3,076 passed**,
+  13 skipped; no leaked test servers. This includes all three new regressions.
+- Focused native message and real-PTY continuation checks: 4 passed.
+- Affected CLI message and hook checks: 25 passed, no leaked test servers.
+- `cargo clippy -p farcooler-daemon -p farcooler-cli --all-targets -- -D warnings`:
+  passed.
+- File-size budget, swallowed-call lint, copy lint, protocol capability check,
+  doc-comment check, and `git diff --check`: passed.

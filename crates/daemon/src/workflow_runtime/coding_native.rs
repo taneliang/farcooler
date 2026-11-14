@@ -309,9 +309,13 @@ impl Exec {
                 if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(self.native_prompt(binding)?.as_str()) { prompted = true; }
             }
             let events = assembler.accept(line.agent, &line.event, &line.payload);
-            let continued = prompted && events.iter().any(|event| matches!(event,
-                AgentEvent::TurnEnded { reason: EndReason::EndTurn }))
-                && self.native_followup(binding, &line, stream.get_mut()).await?;
+            let ended = prompted && events.iter().any(|event| matches!(event,
+                AgentEvent::TurnEnded { reason: EndReason::EndTurn }));
+            // Decide whether the build is waiting before the queue's last check, under the same
+            // admission lock as message.send. An unfinished build keeps accepting direction.
+            let waiting = ended && building && self.unfinished_build(binding, &tree).await.ok().flatten().is_some();
+            let continued = prompted && (ended || line.event == "PreToolUse")
+                && self.native_followup(binding, &line, stream.get_mut(), ended && !waiting).await?;
             if !continued { let _ = stream.get_mut().write_all(b"{}\n").await; }
             hooks.push(line);
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
@@ -322,8 +326,7 @@ impl Exec {
                         // A build that ends its turn with nothing committed may be waiting on something it backgrounded:
                         // it stays, and its next turn's end is read the same way (ov-1090). A tree that can't be read
                         // ends the turn as before.
-                        if building && reason == EndReason::EndTurn
-                            && self.unfinished_build(binding, &tree).await.ok().flatten().is_some() {
+                        if waiting && reason == EndReason::EndTurn {
                             tracing::info!(effect = %binding.effect.id, "the build ended its turn without committing; waiting for its next turn");
                             unfinished = Some(clock.now());
                             continue;
@@ -371,6 +374,7 @@ impl Exec {
         let review = !matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
         let _steerable = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id,
             self.native_agent(binding)?.as_str(), self.run_model(binding), review, self.steering_tickets(binding)?, send);
+        let _inbox = super::native_messages::Inbox { store:&self.store, id };
         let clock = super::native_control::ActiveClock::new();
         let turn = self.native_turn(&listener, binding, &heard_from, &clock);
         let mut stop_reply = None;
@@ -518,21 +522,29 @@ if 'EXPECT_CODEX_HOOKS' in os.environ and pathlib.Path('.codex/hooks.json').read
 def hook(event, sid=session, cwd=os.getcwd(), **extra):
     with socket.socket(socket.AF_UNIX) as s:
         s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
-        takes = ['followup'] if mode == 'steering' and event == 'Stop' and sid == session and cwd == os.getcwd() and 'agent_id' not in extra else []
+        takes = ['followup'] if mode in ('steering', 'active-steering') and event == 'Stop' and sid == session and cwd == os.getcwd() and 'agent_id' not in extra else []
+        if mode == 'active-steering' and event == 'PreToolUse' and agent == 'claude': takes = ['updated_input']
         s.sendall((json.dumps(dict(agent=agent, event=event, takes=takes, payload=dict(session_id=sid,cwd=cwd,workspace_roots=[cwd],**extra)))+'\n').encode())
         if takes:
             return json.loads(s.makefile().readline())
 hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=os.environ['TEST_LAUNCHED_PROMPT'])
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
-if mode == 'steering':
+if mode in ('steering', 'active-steering'):
     ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
     for _ in range(500):
         if ready.exists(): break
         time.sleep(0.01)
-    response = hook('Stop')
-    assert 'Use the new API' in response['followup_message'], response
-    pathlib.Path(os.environ['STARTED']).with_name('continued').write_text(response['followup_message'])
+    if mode == 'active-steering' and agent == 'claude':
+        response = hook('PreToolUse', tool_name='Write', tool_input={'file_path':'result.txt'})
+        assert response['decision']['behavior'] == 'deny', response
+        direction = response['decision']['message']
+    else:
+        # Codex has no mid-turn hook in its pinned configuration: direction gates the final Stop.
+        response = hook('Stop')
+        direction = response['followup_message']
+    assert 'Use the new API' in direction, response
+    pathlib.Path(os.environ['STARTED']).with_name('continued').write_text(direction)
 if mode == 'barrier':
     d = pathlib.Path(os.environ['STARTED']).parent / 'barrier'
     d.mkdir(exist_ok=True)
@@ -662,8 +674,8 @@ else:
     #[tokio::test]
     async fn workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement() {
         use farcooler_store::models::Actor;
-        for agent in ["claude", "codex"] {
-            let (dir, mut runtime, _fake) = native_agent("steering", agent).await;
+        for (agent, mode) in [("claude", "steering"), ("codex", "steering"), ("claude", "active-steering"), ("codex", "active-steering")] {
+            let (dir, mut runtime, _fake) = native_agent(mode, agent).await;
             let host = Uuid::now_v7();
             let repository = runtime.repository();
             let root = runtime.store.create_repository_root(host, dir.path().to_str().unwrap(), 0).unwrap();
