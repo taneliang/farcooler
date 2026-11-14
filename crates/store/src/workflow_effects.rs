@@ -17,11 +17,13 @@ pub struct EffectClaim {
 }
 
 pub(crate) fn reserve(tx: &Transaction<'_>, state: &State) -> rusqlite::Result<()> {
-    let mut stmt = tx.prepare("SELECT resource FROM workflow_resources WHERE workspace = ?1")?;
-    let resources = stmt.query_map([&state.workspace], |r| r.get::<_, String>(0))?
+    let mut stmt = tx.prepare("SELECT resource, item FROM workflow_resources WHERE workspace = ?1")?;
+    let resources = stmt.query_map([&state.workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for resource in resources {
-        if !state.items.values().any(|i| owns_resource(i) && i.resource == resource) {
+    for (resource, owner) in resources {
+        // A pushed group moves to its private CI resource while the next group takes the target.
+        // Release the old owner's row first, even when somebody else now needs that resource.
+        if !state.items.get(&owner).is_some_and(|i| owns_resource(i) && i.resource == resource) {
             tx.execute("DELETE FROM workflow_resources WHERE resource = ?1", [&resource])?;
         }
     }

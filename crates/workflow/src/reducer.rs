@@ -599,6 +599,11 @@ fn run_id(item: &Item, id: &str, input: &Input) -> String {
         item.stage, item.iteration, item.attempt, input.epoch, item.fence))
 }
 fn enter(item: &mut Item, id: &str, input: &Input, effects: &mut Vec<Effect>) -> Result<(), Refusal> {
+    // Once pushed, only this group's CI and follow-up steps remain. Keep their admission fence
+    // on a private resource so the next group can fold and gate on the published head (ov-1209).
+    if item.group_of.is_some() && item.pushed.is_some() {
+        item.resource = digest(&("workflow-item/v1", &input.workspace, id));
+    }
     item.run = run_id(item, id, input);
     item.pending = None;
     if matches!(item.definition.stages[item.stage].progression, Progression::AwaitApproval { .. }) {

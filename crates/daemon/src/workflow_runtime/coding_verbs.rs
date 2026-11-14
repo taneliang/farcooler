@@ -180,9 +180,9 @@ impl Exec {
     }
 
     /// Wait for the landing target's head, and for CI to finish on it if the step says `green`. A
-    /// pending base keeps waiting; a red one is taken as it is, so a fix for red main can land: the
-    /// group's gates judge the folded commit, and CI after the push decides (ov-1076). The head
-    /// becomes the group's candidate: the base everything else builds on.
+    /// pending base keeps waiting unless a previous landing group owns its CI: then fold and gate
+    /// speculatively, retaining that group as a dependency of the push (ov-1209). A red base is taken
+    /// as it is so a fix for red main can land (ov-1076). The head becomes the group's candidate.
     async fn await_base(&self, binding: &Binding, cancel: tokio::sync::watch::Receiver<bool>) -> Result<Outcome> {
         let (every, patience) = wait_times(&binding.effect.operation).ok_or(Error::Refused("unsound wait times"))?;
         let green = binding.effect.operation.arguments.get(1).map(String::as_str) == Some("green");
@@ -192,9 +192,10 @@ impl Exec {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
             if let Some(head) = self.fetch_base(binding, poll, &cancel).await? {
                 last = head.clone();
-                let ci = if green { Some(self.ci_poll(binding, &head, poll, &cancel).await?.0) } else { None };
+                let predecessor = self.pending_landing(&head, &binding.effect.resource)?;
+                let ci = if green && predecessor.is_none() { Some(self.ci_poll(binding, &head, poll, &cancel).await?.0) } else { None };
                 if matches!(ci, None | Some(CiStatus::Passed | CiStatus::Failed)) {
-                    let mut detail = serde_json::json!({ "polls": poll + 1 });
+                    let mut detail = serde_json::json!({ "polls": poll + 1, "predecessor": predecessor });
                     if ci == Some(CiStatus::Failed) { detail["red"] = true.into(); }
                     self.write_fact(binding, "passed", &head, detail)?;
                     return self.reconcile_verb(binding, &StageKind::AwaitBase).await;
@@ -214,6 +215,68 @@ impl Exec {
             if pause(every, &cancel).await { return Ok(Outcome::Interrupted); }
         }
         unreachable!("the poll count is unbounded")
+    }
+    /// Only a push still being judged by its own group can lend its head to the next gate.
+    /// Read all boards: the landing resource is shared across workspaces too.
+    fn pending_landing(&self, head: &str, resource: &str) -> Result<Option<(String, String)>> {
+        for workspace in self.store.workflow_workspaces()? {
+            if let Some(state) = self.store.workflow_state(&workspace)? {
+                if let Some((id, _)) = state.items.iter().find(|(_, i)| i.group_of.as_ref().is_some_and(|g|
+                    i.members.iter().any(|m| state.items.get(&m.item)
+                        .and_then(|t| t.definition.groups.get(&g.name)).is_some_and(|d| d.exclusive == resource)))
+                    && i.pushed.as_deref() == Some(head)
+                    && !matches!(i.phase, Phase::Done | Phase::Failed | Phase::Cancelled)) {
+                    return Ok(Some((workspace, id.clone())));
+                }
+            }
+        }
+        Ok(None)
+    }
+    /// Read the base step's retained dependency even if CI ended during the fold or gate.
+    /// Looking only at live groups at push time would miss a failure in between.
+    fn base_predecessor(&self, binding: &Binding, base: &str) -> Result<Option<(String, String)>> {
+        for stored in self.store.workflow_outbox(&binding.workspace)?.into_iter().rev() {
+            if stored.effect.item != binding.effect.item || stored.effect.fence >= binding.effect.fence
+                || stored.effect.kind != EffectKind::Execute(StageKind::AwaitBase) { continue; }
+            let path = self.root.join("receipts").join(format!("{}.verb.json", digest(&stored.effect)));
+            let fact: VerbFact = serde_json::from_slice(&self.bytes(&path)?)?;
+            if fact.binding.effect != stored.effect || fact.candidate != base || fact.label != "passed" {
+                return Err(Error::Refused("fold has no matching base settlement"));
+            }
+            return fact.detail.get("predecessor").filter(|v| !v.is_null())
+                .map(|v| serde_json::from_value(v.clone()).map_err(Error::from)).transpose();
+        }
+        Ok(None) // Older admitted folds did not retain this dependency.
+    }
+    /// A speculative gate cannot publish until the group that lent it its base succeeds. Its
+    /// own pinned CI step decides, including every additional workflow and any permitted rerun.
+    async fn wait_landing(&self, binding: &Binding, predecessor: &(String, String), base: &str,
+        cancel: &tokio::sync::watch::Receiver<bool>) -> Result<bool>
+    {
+        let state = self.store.workflow_state(&binding.workspace)?.ok_or(Error::Refused("missing board"))?;
+        let item = state.items.get(&binding.effect.item).ok_or(Error::Refused("missing group"))?;
+        let (every, patience) = item.definition.stages.iter().find(|s| s.kind == StageKind::AwaitBase)
+            .and_then(|s| wait_times(&s.operation)).ok_or(Error::Refused("missing base wait"))?;
+        let deadline = binding.effect.created_ms.saturating_add(i64::try_from(patience).unwrap_or(i64::MAX));
+        loop {
+            if *cancel.borrow() { return Err(Error::Refused("push wait interrupted")); }
+            let state = self.store.workflow_state(&predecessor.0)?.ok_or(Error::Refused("missing predecessor board"))?;
+            let phase = if let Some(item) = state.items.get(&predecessor.1) {
+                if item.pushed.as_deref() != Some(base) { return Err(Error::Refused("predecessor changed")); }
+                &item.phase
+            } else {
+                &state.archive.get(&predecessor.1).filter(|a| a.group.as_ref()
+                    .is_some_and(|g| g.pushed.as_deref() == Some(base)))
+                    .ok_or(Error::Refused("missing predecessor"))?.phase
+            };
+            match phase {
+                Phase::Done => return Ok(true),
+                Phase::Failed | Phase::Cancelled => return Ok(false),
+                _ => {}
+            }
+            if self.clock_ms() >= deadline { return Err(Error::Refused("previous landing wait timed out")); }
+            if pause(every, cancel).await { return Err(Error::Refused("push wait interrupted")); }
+        }
     }
     fn poll_log(&self, binding: &Binding, poll: u32) -> PathBuf {
         self.root.join("receipts").join(format!("{}.poll-{poll}.fetch.output", digest(&binding.effect)))
@@ -416,9 +479,10 @@ impl Exec {
             if url.is_some() { self.stage_candidate(binding, &candidate).await?; }
             let builds = self.builds_on(&base, &candidate).await?;
             let before = self.target_head(&identity, &read_log("before")).await?;
-            Ok((candidate, base, builds, before))
+            let predecessor = self.base_predecessor(binding, &base)?;
+            Ok((candidate, base, builds, before, predecessor))
         }.await;
-        let (candidate, base, builds, before) = match checked {
+        let (candidate, base, builds, before, predecessor) = match checked {
             Ok(checked) => checked,
             Err(error) => {
                 tracing::warn!(effect = %binding.effect.id, %error, "push refused before anything was sent; it will be tried again");
@@ -444,6 +508,20 @@ impl Exec {
             // Another lander got there after the gate; nothing was sent.
             self.write_fact(binding, "base_moved", &candidate, serde_json::json!({ "base": base, "target": before, "sent": false }))?;
             return self.reconcile_verb(binding, &StageKind::Push).await;
+        }
+        if let Some(predecessor) = predecessor {
+            match self.wait_landing(binding, &predecessor, &base, &cancel).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.write_fact(binding, "base_moved", &candidate,
+                        serde_json::json!({ "base": base, "sent": false, "why": "Previous landing CI failed" }))?;
+                    return self.reconcile_verb(binding, &StageKind::Push).await;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "previous landing has not passed; nothing was sent");
+                    return Ok(Outcome::SafeFailure);
+                }
+            }
         }
         let log = self.remote_log(binding);
         let (argv, environment, exit) = if let Some(url) = url {

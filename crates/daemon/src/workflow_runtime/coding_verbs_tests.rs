@@ -857,3 +857,71 @@ async fn a_ci_wait_that_names_its_own_workflow_again_or_nothing_sound_is_refused
     }
     assert_eq!(super::coding_verbs::combined(&[]), farcooler_store::board_ci::CiStatus::Unknown);
 }
+
+/// ov-1209: a controlled first CI stays pending until the second gate has run. The remote must
+/// stay at the first push in that interval. A red first CI makes the second group base again.
+#[tokio::test]
+async fn next_group_gates_during_ci_and_rebases_after_red() {
+    for red in [true, false] {
+        let (dir, mut runtime) = lander("pass").await;
+        let script = dir.path().join("adapter.py");
+        let text = std::fs::read_to_string(&script).unwrap();
+        let controlled = r#"elif stage == 'ci':
+    control = pathlib.Path(__file__).parent
+    first = control / 'first-ci'
+    if candidate != os.environ['RED']:
+        if not first.exists(): first.write_text(candidate)
+        if candidate == first.read_text():
+            mode = 'ci-pending' if not (control / 'release-ci').exists() else ('ci-fail' if (control / 'red-ci').exists() else 'pass')
+"#;
+        std::fs::write(&script, text.replace("elif stage == 'ci':\n", controlled)).unwrap();
+        if red { std::fs::write(dir.path().join("red-ci"), "red").unwrap(); }
+        let definition = batched_push(&runtime, "green", 30_000);
+        at_join(&mut runtime, "one", &definition).await;
+        at_join(&mut runtime, "two", &definition).await;
+        command(&runtime, Command::Queue { item: "one".into() });
+        command(&runtime, Command::Queue { item: "two".into() });
+        let state = runtime.state("w").unwrap().unwrap();
+        let second = state.items["two"].grouped_in.clone().unwrap();
+        let store = runtime.store.clone();
+        let release = dir.path().join("release-ci");
+        let first_ci = dir.path().join("first-ci");
+        let remote = runtime.coding.as_ref().unwrap().landing.as_ref().unwrap().repository.clone();
+        let second_id = second.clone();
+        let observer = tokio::spawn(async move {
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            loop {
+                let state = store.workflow_state("w").unwrap().unwrap();
+                let second = &state.items[&second_id];
+                if second.definition.stages.get(second.stage).is_some_and(|s| s.kind == StageKind::Push) {
+                    // Leave the push runnable long enough to expose a missing CI barrier.
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    let first = std::fs::read_to_string(&first_ci).unwrap();
+                    assert_eq!(adapters::git(&remote, &["rev-parse", "refs/heads/main"]).await.unwrap(), first,
+                        "the second gate finished while the first CI was pending, without a second push");
+                    std::fs::write(&release, "go").unwrap();
+                    return true;
+                }
+                if std::time::Instant::now() >= deadline {
+                    std::fs::write(&release, "go").unwrap();
+                    return false;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+        runtime.continuous = true;
+        runtime.pump(2).await.unwrap();
+        let overlapped = observer.await.unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(phase_of(&state, "two"), Some(Phase::Done));
+        let bases = runtime.store.workflow_outbox("w").unwrap().iter().filter(|s|
+            s.effect.item == second && s.effect.kind == EffectKind::Execute(StageKind::AwaitBase)).count();
+        assert_eq!(bases, if red { 2 } else { 1 }, "red previous CI returns the waiting group to base");
+        assert!(overlapped, "the next group must finish its gate before the previous CI is released");
+        let mut replay = State::empty("w".into(), state.epoch);
+        for event in runtime.store.workflow_events("w").unwrap() {
+            replay = farcooler_workflow::step(&replay, &event).unwrap().state;
+        }
+        assert_eq!(replay, state, "the resource handoff and red-CI retry replay exactly");
+    }
+}
