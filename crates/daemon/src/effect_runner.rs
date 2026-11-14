@@ -115,7 +115,7 @@ pub(crate) async fn owned_yielding(tree: &Path, argv: &[String], environment: &s
     log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>,
     builder: Option<&crate::yielding::Yielding>) -> Result<Option<i32>, ProcessFailure>
 {
-let program = argv.first().ok_or_else(|| ProcessFailure::retry_safe(std::io::Error::other("empty argv")))?;
+    let program = argv.first().ok_or_else(|| ProcessFailure::retry_safe(std::io::Error::other("empty argv")))?;
     let mut command = Command::new(program);
     command.args(&argv[1..]).env_clear().envs(environment);
     supervise(command, tree, log, limit, Some(cancel), owner, builder).await

@@ -607,14 +607,12 @@ impl Exec {
                         self.run_coding(binding, command, cancel.clone()),
                         self.run_coding(&check, self.coding_command(&check)?, cancel));
                     review?; gate?;
-                } else {
-                    if let Err(error) = self.run_coding(binding, command, cancel).await {
+                } else if let Err(error) = self.run_coding(binding, command, cancel).await {
                     // run_coding exposes I/O as retryable only before launch or after quiescence.
                     if matches!(kind, StageKind::Run) && matches!(&error, Error::Io(_)) {
                         return Ok(Outcome::SafeFailure);
                     }
                     return Err(error);
-                }
                 }
             }
             StageKind::Land => {

@@ -16,7 +16,7 @@ async fn a_failed_run_closes_as_landed_only_with_a_commit_on_the_target() {
     let definition = published.definition().unwrap();
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published)));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    ok(&runtime.wire_command("w", "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
+    ok(&runtime.wire_command("w", "owner", Action::Publish { reason: None, notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "todo".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
     // Not Failed yet: the remote is not read, and the reducer is left to refuse.
@@ -58,7 +58,7 @@ async fn a_landed_whose_caller_loses_authority_during_the_remote_read_closes_not
     let definition = published.definition().unwrap();
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published)));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    ok(&runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
+    ok(&runtime.wire_command(&w, "owner", Action::Publish { reason: None, notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
     assert_eq!(runtime.track_tickets(&[(w.clone(), "ov-7".into(), "todo".into())]).unwrap(), 1);
     let state = runtime.state(&w).unwrap().unwrap(); let item = &state.items["ov-7"];
     ok(&runtime.wire_command(&w, "orchestrator", Action::Start { mutation: m("start", state.revision, 2), item: "ov-7".into(),
