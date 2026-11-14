@@ -1,0 +1,9 @@
+Run 43588280875
+Swift (AgentKit + Mac tests)	Test AgentKit	2026-11-14T11:09:50.1025300Z swift-test-guard: 2113 tests ran (floor 2110).
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-11-14T11:13:23.8601960Z swift-test-guard: 2005 tests ran (floor 2005).
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-11-14T11:14:25.3953010Z swift-test-guard: 30 tests ran (floor 30).
+
+Run 43589173606
+2026-11-14T11:22:29.2728930Z swift-test-guard: 2113 tests ran (floor 2110).
+2026-11-14T11:25:48.7641290Z swift-test-guard: 2005 tests ran (floor 2005).
+2026-11-14T11:27:03.5714380Z swift-test-guard: 30 tests ran (floor 30).
