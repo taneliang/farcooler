@@ -139,12 +139,18 @@ impl Runtime {
             Some(tree) => (PathBuf::from(&tree.path), (!tree.adopted).then(|| tree.branch.clone())),
             None => (exec.tree(&binding), Some(format!("wf-{}", &digest(&(workspace, &provision.effect.item))[4..]))),
         };
-        // Under the repository's lock, as Provision makes a named tree, so nothing is made while it looks.
+        // Under the repository's lock, as Provision makes a named tree, so nothing is made while it looks. Taken only
+        // if free: this runs inside the runtime's loop, which is what polls a Provision holding the lock, so waiting
+        // for it here would wait for good and stop every command and effect with it.
         let lock = match (&exec.host, Uuid::parse_str(workspace).ok().and_then(|w| self.store.get_workspace(w).ok())) {
             (Some(host), Some(board)) => Some(host.lock(board.repository_id)),
             _ => None,
         };
-        let _held = match &lock { Some(lock) => Some(lock.lock().await), None => None };
+        let _held = match &lock {
+            Some(lock) => Some(lock.try_lock().map_err(|_| refused(format!("{item_id} can't be resolved while the runner is making \
+                another run's worktree in this repository. Resolve it again in a moment.")))?),
+            None => None,
+        };
         if let Some(there) = named_tree::what_is_there(&exec.repository(), &path, made.as_deref()).await {
             return Err(refused(format!("{item_id} can't be resolved yet: {there}. Take that away by hand if the run made it, then resolve again.")));
         }

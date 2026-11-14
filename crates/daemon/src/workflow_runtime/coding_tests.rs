@@ -823,6 +823,60 @@ async fn workflow_coding_resolve_settles_an_uncertain_provision_that_made_nothin
     }
 }
 
+/// ov-1220 review: resolve runs inside the runtime's loop, which is also what polls a Provision holding the
+/// repository's lock. Waiting there for that lock would wait for good: no command answered, no effect finished, not
+/// even git's timeout. With one ticket's Provision stuck in git, a resolve for another, uncertain one in the same
+/// repository is refused at once, the loop keeps answering, the Provision ends, and the resolve then goes through.
+#[tokio::test]
+async fn workflow_coding_resolve_never_waits_on_a_provision_in_the_loop() {
+    let (dir, mut runtime, workspace) = rerun_fixture().await;
+    let base = runtime.base.clone();
+    rerun_start(&runtime, &workspace, rerun_tree(dir.path(), "stuck", &base));
+    let state = runtime.state(&workspace).unwrap().unwrap();
+    let stored = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap();
+    let claim = runtime.store.workflow_claim_effect(&workspace, &stored.effect.id, "old-daemon", state.revision, state.epoch, 2, 10).unwrap().unwrap();
+    assert!(runtime.store.workflow_admit_effect(&claim, 2).unwrap());
+    runtime.observe(&workspace, &stored.effect, Outcome::Uncertain, false, 3).unwrap();
+    rerun_command(&runtime, &workspace, Command::Enqueue { item: "other".into(), definition: Definition::ticket(),
+        policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "other"), dependencies: BTreeSet::new(),
+        initial_candidate: Some("other".into()) });
+    rerun_command(&runtime, &workspace, Command::Start { item: "other".into(), definition: runtime.configured_definition().unwrap(),
+        policy_pin: "p".into(), resource: Exec::item_resource(&workspace, "other"), dependencies: BTreeSet::new(),
+        initial_candidate: None, models: Default::default(), tree: Some(Box::new(rerun_tree(dir.path(), "slow", &base))), with: vec![] });
+    let hung = hung_worktree_add(dir.path());
+    crate::git::TIMEOUT.with(|t| t.set(Some(Duration::from_secs(3))));
+    crate::git::PROGRAM.with(|p| *p.borrow_mut() = Some(hung));
+    let send = runtime.send.clone();
+    let (ws, locks) = (workspace.clone(), runtime.host.as_ref().unwrap().locks.clone());
+    let asker = tokio::spawn(async move {
+        // Ask only once the Provision holds the repository's lock.
+        let held = || locks.lock().unwrap().values().any(|l| l.try_lock().is_err());
+        while !held() { tokio::time::sleep(Duration::from_millis(20)).await; }
+        let asked = std::time::Instant::now();
+        let (reply, answer) = oneshot::channel();
+        send.send(Inbox::Resolve(ws.clone(), "ticket".into(), reply)).await.ok().unwrap();
+        let resolved = answer.await.unwrap();
+        let (reply, state) = oneshot::channel();
+        send.send(Inbox::State(ws, reply)).await.ok().unwrap();
+        let state = state.await.unwrap().unwrap().unwrap();
+        (resolved, asked.elapsed(), state)
+    });
+    let swept = tokio::time::timeout(Duration::from_secs(20), runtime.pump(4)).await;
+    crate::git::PROGRAM.with(|p| *p.borrow_mut() = None);
+    crate::git::TIMEOUT.with(|t| t.set(None));
+    swept.expect("the loop kept polling the Provision, so it ended").unwrap();
+    let (resolved, waited, seen) = tokio::time::timeout(Duration::from_secs(5), asker).await.expect("the loop answered").unwrap();
+    assert!(matches!(&resolved, Err(Error::Domain(why)) if why.to_string().contains("making another run's worktree")), "{resolved:?}");
+    assert!(waited < Duration::from_secs(3), "refused at once, not after the Provision's git: {waited:?}");
+    assert_eq!(seen.items["ticket"].phase, Phase::Uncertain, "the refused resolve settled nothing");
+    let other = runtime.state(&workspace).unwrap().unwrap().items["other"].clone();
+    assert_ne!(other.phase, Phase::Running, "the Provision ended: {other:?}");
+    runtime.resolve_provision(&runtime.controller(), &workspace, "ticket").await.unwrap();
+    runtime.pump(5).await.unwrap();
+    let item = runtime.state(&workspace).unwrap().unwrap().items["ticket"].clone();
+    assert_eq!(item.phase, Phase::Failed, "with the lock free it resolves: {item:?}");
+}
+
 async fn mismatched_provision() -> (tempfile::TempDir, Runtime, String, Binding) {
     let (dir, runtime, workspace) = rerun_fixture().await;
     let old = runtime.base.clone();

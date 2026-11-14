@@ -112,6 +112,9 @@ enum Inbox {
     /// Move a tracker-only ticket to a column: (workspace, item, column), as `MoveBy` says.
     MoveTicket(String, String, String, MoveBy, oneshot::Sender<Result<bool>>),
     Reconcile,
+    /// `resolve_provision` as the wire's Resolve runs it, inside the loop, without an RPC admission (ov-1220).
+    #[cfg(test)]
+    Resolve(String, String, oneshot::Sender<Result<()>>),
 }
 /// Who moves a ticket, for its card's history, and whether they still may when the engine takes the move: asked
 /// in the inbox, with no await before the write (R-111, L8). A move the daemon makes for itself always may.
@@ -819,6 +822,10 @@ impl Runtime {
                 let _ = reply.send(result);
             }
             Inbox::State(workspace, reply) => { let _ = reply.send(self.execution_state(&workspace)); }
+            #[cfg(test)]
+            Inbox::Resolve(workspace, item, reply) => {
+                let _ = reply.send(self.resolve_provision(&self.controller(), &workspace, &item).await);
+            }
             Inbox::Wire(admission, action, reply) => {
                 let result = async {
                     admission.recheck().and_then(|()| admission.permits(&action))

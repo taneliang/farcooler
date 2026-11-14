@@ -1,7 +1,7 @@
 //! Atomic engine/legacy task ownership. Standalone items have an explicit NULL
 //! task mapping; a board item resolves only on its own workspace by key or UUID.
 use crate::workflow::Result;
-use farcooler_workflow::{Input, Command};
+use farcooler_workflow::{Input, Command, owns_resource};
 use rusqlite::{Transaction, OptionalExtension, params};
 
 fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8>>> {
@@ -40,6 +40,39 @@ pub(crate) fn start_held(tx: &Transaction<'_>, input: &Input) -> Result<Option<S
     }
     if held.is_empty() { return Ok(None); }
     Ok(Some(format!("A run would hold these for good, so it waits until they're settled: {}. Then start it again.", held.join("; "))))
+}
+/// A Start refused as `Resource`, said as a sentence: each resource the run would take (the lead's and its
+/// followers') that something holds, and what: the engine cutover's quarantine with its reason, or another item's
+/// run, in this workspace or another (ov-1220). `None` when nothing is found to name, so the bare refusal stands.
+pub(crate) fn resource_held(tx: &Transaction<'_>, input: &Input, state: &farcooler_workflow::State) -> Result<Option<String>> {
+    let Command::Start { item, resource, with, .. } = &input.command else { return Ok(None) };
+    let run: Vec<&String> = std::iter::once(item).chain(with).collect();
+    let taken = std::iter::once((item, resource.as_str()))
+        .chain(with.iter().filter_map(|f| state.items.get(f).map(|i| (f, i.resource.as_str()))));
+    let mut held = Vec::new();
+    for (ticket, resource) in taken {
+        let reason: Option<String> = tx.query_row("SELECT reason FROM engine_cutover_quarantine WHERE resource=?1", [resource], |r| r.get(0)).optional()?;
+        if let Some(reason) = reason {
+            held.push(format!("{ticket}'s resource {resource} is quarantined since the engine's cutover ({reason})"));
+            continue;
+        }
+        let elsewhere: Option<(String, String)> = tx.query_row("SELECT workspace, item FROM workflow_resources WHERE resource=?1",
+            [resource], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        if let Some((workspace, holder)) = elsewhere.filter(|(w, i)| w != &input.workspace || !run.contains(&i)) {
+            let named: Option<String> = uuid::Uuid::parse_str(&workspace).ok().map(|w| tx.query_row("SELECT name FROM workspaces WHERE id=?1",
+                [w.as_bytes().as_slice()], |r| r.get(0)).optional()).transpose()?.flatten();
+            let place = if workspace == input.workspace { "this workspace".to_string() }
+                else { format!("the workspace {}", named.unwrap_or_else(|| workspace.clone())) };
+            held.push(format!("{ticket}'s resource {resource} is held by {holder}'s run in {place}; see it with `farcooler workflow get {workspace}`"));
+            continue;
+        }
+        if let Some((holder, _)) = state.items.iter().find(|(id, i)| !run.contains(id) && owns_resource(i) && i.resource == resource) {
+            held.push(format!("{ticket}'s resource {resource} is held by {holder}'s run in this workspace; see it with `farcooler workflow get {}`",
+                input.workspace));
+        }
+    }
+    if held.is_empty() { return Ok(None); }
+    Ok(Some(format!("Something else holds what the run needs: {}. Start it again once that's done.", held.join("; "))))
 }
 pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
     if matches!(input.command, Command::Start { .. }) { return Ok(start_held(tx, input)?.is_none()); }

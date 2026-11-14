@@ -474,3 +474,40 @@ fn workflow_join_checks_the_published_landing_resource_in_other_workspaces() {
     for event in store.workflow_events("workspace").unwrap() { replay = step(&replay, &event).unwrap().state; }
     assert_eq!(state, replay);
 }
+
+/// ov-1220: a Start refused for its resource says which resource and what holds it: another item's run in this
+/// workspace or another, or the engine cutover's quarantine with its reason. ov-1187 read only `Resource`.
+#[test]
+fn a_start_refused_for_its_resource_names_it_and_what_holds_it() {
+    let path = temp();
+    let store = Store::open(&path).unwrap();
+    assert_eq!(store.workflow_apply(&enqueue("workspace", "shared")).unwrap().result, Ok(1), "a coding run holds `shared`");
+    let ticket = Definition::ticket();
+    let ticket_pin = store.workflow_ticket_bundle(&ticket).unwrap();
+    let apply = |workspace: &str, id: &str, command: Command| {
+        let revision = store.workflow_state(workspace).unwrap().map_or(0, |s| s.revision);
+        let mut input = enqueue(workspace, "unused");
+        input.id = id.into(); input.expected_revision = revision; input.source_sequence = revision + 1; input.command = command;
+        store.workflow_apply(&input).unwrap().result
+    };
+    let rest = |workspace: &str| assert!(apply(workspace, "rest", Command::Enqueue { item: "ticket".into(), definition: ticket.clone(),
+        policy_pin: ticket_pin.clone(), resource: format!("own-{workspace}"), dependencies: BTreeSet::new(),
+        initial_candidate: Some(ticket.pin()) }).is_ok());
+    let tracker = Definition::tracker("owner");
+    let start = |workspace: &str, id: &str, resource: &str| apply(workspace, id, Command::Start { item: "ticket".into(),
+        policy_pin: tracker.pin(), resource: resource.into(), dependencies: Default::default(), initial_candidate: Some(tracker.pin()),
+        definition: tracker.clone(), models: Default::default(), tree: None, with: vec![] });
+    rest("workspace");
+    rest("other");
+    let Err(Refusal::Held(why)) = start("workspace", "start-1", "shared") else { panic!("the same workspace's holder is named") };
+    assert!(why.contains("ticket's resource shared is held by item's run in this workspace"), "{why}");
+    assert!(why.contains("`farcooler workflow get workspace`"), "{why}");
+    let Err(Refusal::Held(why)) = start("other", "start-2", "shared") else { panic!("another workspace's holder is named") };
+    assert!(why.contains("ticket's resource shared is held by item's run in the workspace workspace"), "{why}");
+    store.conn().execute("INSERT INTO engine_cutover_quarantine VALUES('fenced','held for the test')", []).unwrap();
+    let Err(Refusal::Held(why)) = start("other", "start-3", "fenced") else { panic!("a quarantine is named") };
+    assert!(why.contains("ticket's resource fenced is quarantined since the engine's cutover (held for the test)"), "{why}");
+    assert!(start("other", "start-4", "free").is_ok(), "a free resource starts");
+    drop(store);
+    std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+}

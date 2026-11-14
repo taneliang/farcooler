@@ -569,7 +569,9 @@ fn a_start_is_held_back_by_a_followers_quarantine() {
     let start = |id: &str| b.apply(id, Command::Start { item: b.ticket.key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
         dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None,
         with: vec![follower.key.clone()] }).result;
-    assert_eq!(start("start-1"), Err(farcooler_workflow::Refusal::Resource), "the follower's quarantine holds the run back");
+    let Err(farcooler_workflow::Refusal::Held(why)) = start("start-1") else { panic!("the follower's quarantine holds the run back") };
+    assert!(why.contains(&format!("{}'s resource own-follower is quarantined since the engine's cutover (held for the test)", follower.key)),
+        "and says so (ov-1220): {why}");
     s.conn().execute("DELETE FROM engine_cutover_quarantine WHERE resource='own-follower'", []).unwrap();
     assert!(start("start-2").is_ok(), "lifted, it starts");
 }

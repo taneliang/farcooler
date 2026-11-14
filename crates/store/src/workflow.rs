@@ -352,6 +352,10 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             }
         }
         let mut applied = None;
+        // A Start refused for a resource says which, and what holds it (ov-1220).
+        if matches!(result, Err(Refusal::Resource)) {
+            if let Some(why) = crate::workflow_ownership::resource_held(tx, input, &state)? { result = Err(Refusal::Held(why)); }
+        }
         let receipt = match result {
             Err(reason) => Receipt { change:None, id: input.id.clone(), result: Err(reason), effects: vec![], actor: None },
             Ok(transition) => {
