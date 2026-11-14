@@ -352,6 +352,10 @@ impl Watcher {
             let said = format!("{}'s engine agent", card.key);
             return Ok((card, Recipient { native:true, terminal: Some(id), said }));
         }
+        if let Some((_, pane)) = crate::watch_view::lookup(&board.id.to_string(), &card.key) {
+            let said = format!("{}'s engine agent", card.key);
+            return Ok((card, Recipient { native:false, terminal: Some(pane.terminal_id), said }));
+        }
         if let Some(pane) = store.pane_of_ticket(card.id)? {
             let row = store.get_terminal(pane).map_err(|_| nobody.clone())?;
             // A pane since made the orchestrator is the sender itself.
