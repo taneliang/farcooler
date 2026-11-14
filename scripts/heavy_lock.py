@@ -164,7 +164,26 @@ def trim_target(target, say=print):
         shutil.rmtree(inc, ignore_errors=True)
     if target_kb(target) > limit:
         say(f"  {target} is over {limit / 1024 / 1024:g} GB; clearing it (the next build starts cold)")
-        shutil.rmtree(target, ignore_errors=True)
+        marker = target / ".metadata_never_index"
+        if not target.is_symlink() and marker.is_file() and not marker.is_symlink():
+            # Keep the directory and its Spotlight exclusion in place throughout
+            # cleanup, so the next Cargo process never builds an unmarked target.
+            try:
+                children = list(target.iterdir())
+            except OSError:
+                children = []  # Like rmtree(ignore_errors=True), leave inaccessible output alone.
+            for child in children:
+                if child == marker:
+                    continue
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    try:
+                        child.unlink()
+                    except OSError:
+                        pass
+        else:
+            shutil.rmtree(target, ignore_errors=True)
 
 
 def prepare_lane_build(top, say=print):
@@ -685,6 +704,15 @@ def _self_test():
             (tgt / "debug" / "deps" / "big").write_bytes(b"x" * 2_000_000)
             via_heavy(lane_wt, "cargo", "build", more={TARGET_MAX_ENV: "0.001"})
             expect("still over, scripts/heavy clears the whole target/ before it builds", tgt.exists(), False)
+            # An engine-provisioned marker must survive the cold build, including
+            # the interval between cleanup and the first Cargo output.
+            tgt.mkdir()
+            (tgt / ".metadata_never_index").touch()
+            (tgt / "old-output").write_bytes(b"x" * 2_000_000)
+            (bindir / "cargo").write_text('#!/bin/sh\ntest -f target/.metadata_never_index || exit 1\nmkdir -p target/debug\ntouch target/debug/new-output\necho marked\n')
+            expect("a trimmed marked target stays excluded before and during the build", via_heavy(lane_wt, "cargo", "build", more={TARGET_MAX_ENV: "0"}), "marked")
+            expect("the cold build keeps the marker and replaces old output", ((tgt / ".metadata_never_index").is_file(), (tgt / "old-output").exists(), (tgt / "debug/new-output").exists()), (True, False, True))
+            shutil.rmtree(tgt)
             tgt.mkdir(exist_ok=True)
             (tgt / "keep").write_bytes(b"x")
             via_heavy(lane_wt, "cargo", "build", more={TARGET_MAX_ENV: "0.001"})
