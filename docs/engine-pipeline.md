@@ -140,6 +140,7 @@ pub enum Location {
     Queued { station: String },                         // in that station's queue
     Working { station: String, work: Work },            // holds a place; an effect may be out
     Stopping { station: String, work: Work, then: Box<Location> }, // still holds the place and the tree (3.4)
+    Settling { station: String, work: Work, then: Box<Location> }, // a landing effect: decide only on its settled outcome (3.5)
     Awaiting { station: String, decider: String, run: String }, // an approval or a person's/orchestrator's review
     InLot { lot: String },                              // the lot's location is where it is
     Riding { lead: String },                            // a follower (ov-970)
@@ -297,6 +298,7 @@ again and decides again.
 | Hold a ticket | `Hold { ticket, reason }` | Queued: leaves the queue. Working: it goes to `Stopping` with `then: Held` (3.4); its place and tree are freed only by the stop's receipt. In a lot: as `Pull`. It keeps its tree and candidate | Visit ends `held`, reason |
 | Release a ticket | `Release { ticket, to: Option<station> }` | Back into the queue of the station it was held at, or `to` | Visit, reason |
 | Pull from a queue or a forming lot | `Pull { ticket, reason }` | Leaves the lot; holds at the landing queue | Ticket visit and lot visit |
+| Any of `Hold`, `Pull`, `Send`, `Skip`, `Stop`, `Cancel` at a landing effect (push, land, a pull request's merge) | as in this table | Accepted and recorded as requested, but the token does not move until the landing effect's outcome is settled. Landed: the request is overruled and the token goes on to CI. Unknown: held for a person to settle. Proved not landed: the request applies (3.5) | Visit notes the request and how the landing settled it |
 | Pull from a running gate | `Pull { ticket, reason }` | The ticket leaves the lot and holds at once (the gate runs on the lot's tree, not the ticket's). The lot goes to `Stopping` with `then: Queued { land.fold }`; it keeps its id, its place, its tree and the landing target until the gate's stop receipt, and only then folds again without the ticket (3.4) | Both visits; the stop's receipt |
 | Send back, any number of times | `Send { ticket, to, reason }` | Moves it to any station before where it is, after any landing it has made (see 3.3); its brief is `reason`; it queues there by priority. If it is working, it goes through `Stopping` first (3.4) | Visit with `by`, reason, and `overrode` when a policy count was past its limit |
 | Run the step again | `Send { ticket, to: <its own station> }` | Today's `Retry`, without `MAX_RETRIES` | As above |
@@ -323,7 +325,7 @@ of them go:
 | A routed back edge past its limit → the run fails | `reducer.rs:757-758` | Hold `PolicyLimit`, not `Failed` |
 | `SendBack` while a step runs → `Phase` | `reducer.rs:403-406` | Accepted: `Send` puts the ticket in `Stopping` and its new station waits for the stop's receipt (3.4) |
 | `SendBack` that can't start the build at once → `SendBackRefused` | `reducer.rs:528-539` | It queues at build; the queue says why it waits |
-| `Leave` from a group that has left → `Phase` | `reducer.rs:573` | `Pull` from any lot that has not pushed |
+| `Leave` from a group that has left → `Phase` | `reducer.rs:573` | `Pull` from any lot that has not pushed; at the push station it waits for the push to settle (3.5) |
 | `Cancel` of a follower → `Phase` | `reducer.rs:266` | `Cancel` on a follower ends its ride and closes it alone |
 | `Start`/`Enqueue` while the resource is held → `Resource` | `reducer.rs:39-43`, `379-383` | It queues for the place |
 | A fence at `u64::MAX` → `SendBackRefused` | `reducer.rs:420-422` | Stays an `Invalid` refusal; it is not a policy |
@@ -349,7 +351,10 @@ These are what keeps the engine safe, and stay rules, not policy:
    whose pull request merged) is not sent back to build; it is reopened under
    the same key, which builds on the new base (today's `Reopen`,
    `reducer.rs:56-80`). A lot that pushed can't be cancelled or pulled from
-   (`reducer.rs:274-279`).
+   (`reducer.rs:274-279`). "Pushed" is decided by the landing effect's
+   settled outcome, not by `Lot::pushed` alone: a push can land on the target
+   before its `Observe` commits. While a landing effect may be out, an
+   intervention waits for that outcome before it may go backward (3.5).
 2. A push only sends a candidate a gate passed on the same base (today's
    route check, `definition.rs:341-358`), unless decision A says otherwise.
 3. Every effect's answer is bound to its run and fence (`reducer.rs:126-142`).
@@ -357,6 +362,12 @@ These are what keeps the engine safe, and stay rules, not policy:
    effect that used it has a stopped or settled receipt. A fence only refuses
    a late answer; it does not prove the process stopped touching the tree.
    Section 3.4 is how this rule is kept.
+5. A stop receipt proves quiescence, not non-acceptance. For a landing effect
+   (`definition::lands`, `definition.rs:488`: `Land`, `Push`, `AwaitPr`) the
+   reducer applies a backward or closing destination only once the effect's
+   outcome is known not to have landed. Section 3.5 is how this rule is kept;
+   the generic `Stopped` to `then` step of 3.4 never applies to a landing
+   effect.
 
 ### 3.4 Stopping safely before anything replaces it
 
@@ -396,7 +407,8 @@ transition, in the one event that records the command:
    choosing what to start. Nothing launches on its tree, its lot or the
    landing target, and a `Release`, `Resolve` or `Skip` that would is refused
    `Stopping`.
-5. **Out of `Stopping`.** Only `Observe` of the stop effect with
+5. **Out of `Stopping`.** For every effect that does not land (3.5 covers
+   the ones that do), only `Observe` of the stop effect with
    `Outcome::Stopped { operation, receipt }` whose operation equals
    `work.stopping` and whose receipt is valid (the check of
    `reducer.rs:184-192`) moves the token to `then`, in the same event that
@@ -419,6 +431,97 @@ reconciles the original from its receipts and journal, which is idempotent.
 A stop that was admitted before the crash is reconciled the same way. Either
 way the destination is reached only by the stop's receipt, or held. Nothing
 in this path relies on the fence alone.
+
+### 3.5 Interventions that race a landing
+
+A push, a direct land or a pull request's merge can be accepted on the target
+before the engine hears about it: the push succeeds, then the daemon dies
+before its `Observe` commits, so `Lot::pushed` is still empty. A stop does not
+fix this. `stop_coding` reconciles a known successful original and answers
+`Stopped` (`coding_execute.rs:416-435`): the receipt proves the push process
+ended, not that the push did not land. If 3.4's generic rule moved the lot to
+`then` on that receipt, a `Cancel` would close tickets whose commits are on
+main, and a `Send` would rebuild them. Today `Cancel` is refused for a group
+at the push stage, before `pushed` is set (`reducer.rs:274-278`). The
+pipeline keeps that protection by settling first and deciding afterwards.
+
+**Which work this covers.** A token whose station's step lands
+(`definition::lands`, `definition.rs:488`) and whose effect is `admitted` or
+`uncertain` in the outbox, or, for a pull request's merge, any token waiting
+at the merge station (the merge is a person's act on GitHub and can happen
+at any time). A push whose outbox row is still `pending` cannot have landed:
+the command's own transaction suppresses it (`store/src/workflow.rs:346-351`)
+so it can never be claimed, and 3.4 applies as usual.
+
+**The rule.**
+
+1. **Record, don't move.** `Hold`, `Pull`, `Send`, `Skip`, `Stop` and
+   `Cancel` are accepted. The token goes to
+   `Settling { station, work, then }`, a `Stopping` whose stop must report the
+   original's outcome. The command's `then` is kept as requested, nothing
+   more. Membership is untouched: a `Pull` does not take the ticket out of
+   the lot yet. The fence is bumped as in 3.4. The binding, the place, the
+   landing target's exclusive resource and the lot's tree stay owned.
+2. **The settling answer carries the original's outcome.** The stop answers
+   `Outcome::Settled { operation, original, receipt }`, where `original` is
+   the outcome `reconcile_coding` found: the value `stop_coding` already
+   computes and today only digests into the receipt. For a merge wait it is
+   the pull request's state, read once. `Stopped` with no `original` is
+   refused `Evidence` for a landing effect, so the generic step of 3.4 cannot
+   be taken by mistake.
+3. **Landed (known success).** `original` is the push's (or merge's) pass
+   with the target commit. In the same event, the reducer records the landing
+   first, exactly as the original's own `Observe` would have:
+   `Lot::pushed` (or the ticket's merged candidate) is set, every ticket keeps
+   its membership, and the lot follows its `passed` route to CI and the
+   post-landing steps. `then` is dropped. The visit records the request as
+   overruled with refusal `Landed` and the target commit, so the
+   orchestrator sees why. Any later wish to change those tickets is a
+   `Reopen` under the same key (3.3 rule 1).
+4. **Unknown.** `original` is `Uncertain`, or the stop itself answers
+   `Uncertain` or is refused with "acceptance remains unknown"
+   (`coding_execute.rs:431`). The token goes to
+   `Held { Uncertain }` at the push station, with the binding, membership,
+   place, tree and the landing target still owned and `then` kept in the
+   hold. Only a person's `Settle` releases it: `Settle { landed: true }`
+   continues as in step 3; `Settle { landed: false }` continues as in step 5.
+   No policy, `Release` or `Resolve` by the orchestrator gets past it.
+5. **Proved not landed.** `original` is a rejection the target gave (the
+   push was refused as non-fast-forward, the base moved, the pull request
+   was closed unmerged), or `Settle { landed: false }`. Only now does
+   `then` apply: the `Pull` takes the ticket out and the lot refolds, the
+   `Send` queues the ticket behind, the `Cancel` closes, in the same event
+   that frees the place and the resources.
+
+**Walk-through: a push that landed, its `Observe` lost.** Lot L7 holds
+tickets T1-T3 at `land.push`, its push effect E `admitted`.
+
+1. The push reaches the target: main is now at L7's candidate `c7`. The
+   daemon is killed before `Observe(E, passed c7)` commits. Restart: E is
+   `uncertain`, `Lot::pushed` is empty.
+2. The orchestrator, seeing L7 sit at push, sends `Pull { T2 }`. Today this
+   would be refused; here it is accepted. L7 goes to `Settling` with
+   `then: Queued { land.fold }` minus T2. T2 is still in L7.
+3. The orchestrator also sends `Cancel { T3 }` and `Send { T1, build }`.
+   Each is recorded on L7's visit as a further request; none moves anything.
+4. The daemon crashes again. The command events and the stop's outbox row
+   committed together (3.4), so on restart recovery reconciles E first
+   (`workflow_runtime.rs:590-619`), then claims the stop. `stop_coding`
+   reconciles E from its journal and the target: known success with `c7`.
+   The stop answers `Settled { original: Passed(c7) }`.
+5. The reducer sets `Lot::pushed = c7`, keeps T1-T3 in L7, and routes L7 to
+   `land.ci`. The three requests are recorded as overruled `Landed`. No
+   ticket is rebuilt, refolded or closed. When CI on `c7` is green, T1-T3
+   close as landed. If the orchestrator still wants T2 changed, it is
+   `Reopen { T2 }`, which builds on the new base.
+
+Had the target refused the push (main had moved), step 4 would answer
+`Settled { original: Rejected(non-fast-forward) }`: T2 leaves, L7 refolds
+without it, T3 closes, T1 queues at build. Had the journal and the target
+both been unreadable, step 4 would answer `Uncertain`, and L7 would hold for
+a person's `Settle` with all three requests waiting in the hold.
+
+The rehearsal (5.3) runs this walk-through as its own case.
 
 ## 4. What must stay true
 
@@ -652,14 +755,40 @@ live store:
      `Observe` of any of them is refused.
   3. `Genesis` emitted no effect. The host pool counts 5 of 5 busy (A1-A4
      plus the other workspace's one), so nothing can start.
-- **After.** `Prioritize { P6, 10 }`, `Prioritize { P7, 10 }`, then
-  `Observe` A2 passed. Assert exactly one new build effect, for P6, with a
-  new id and fence `old + 1`, and that the queue is P7, P1-P5, P8. Then the
-  other workspace's build ends: P7 starts, and nothing else.
+- **After: the station cap binds.** `Prioritize { P6, 10 }`,
+  `Prioritize { P7, 10 }`, then `Observe` A2 passed. Assert exactly one new
+  build effect, for P6, with a new id and fence `old + 1`; build `working` is
+  A1, A3, A4, P6 (4 of 4); the queue is P7, P1-P5, P8; the host pool is 5 of
+  5. Then the other workspace's build ends, leaving the host pool at 4 of 5.
+  Assert that no effect is emitted and P7 is still first in the queue: the
+  pool has room but the station does not, and 2.6 needs both. Then
+  `Observe` A1 passed: assert exactly one new build effect, for P7, and
+  nothing else (`working` A3, A4, P6, P7; queue P1-P5, P8).
+  A second run of the same steps replaces the `Observe` A1 with a logged
+  `SetCapacity { build, 5 }`: P7 starts on that event and the station
+  change is in the log.
+- **After: the pool cap binds.** A separate case from the same cutover
+  state, with this workspace's build capacity set to 6 by a logged
+  `SetCapacity` before any completion. The host pool is still 5 of 5, so
+  assert that the `SetCapacity` event emits nothing although the station
+  has two free places. `Observe` A2 passed: the pool drops to 4 of 5 and
+  only the head of the queue (P6 after the same `Prioritize` commands)
+  starts, so `working` is 4 of 6 and the pool 5 of 5 again. Then the other
+  workspace's build ends: P7 starts, the pool is 5 of 5, and P1 still
+  waits with one station place free.
 - **Crash.** Kill the process inside the cutover transaction: the store is
   exactly the old store, still under the old incarnation. Kill it after
   commit, before any claim: on restart, A1-A4 are reconciled first and no
   P effect exists to run.
+- **A push that landed, its `Observe` lost.** The walk-through of 3.5, run
+  as written: a lot at `land.push` with an admitted push that reached a
+  fixture target, a kill before its `Observe`, then `Pull`, `Cancel` and
+  `Send` on its tickets, then a kill again. Assert after restart that
+  `Lot::pushed` is the target commit, all tickets are still members, the lot
+  is at `land.ci`, no fold, build or close effect exists, and the three
+  requests are recorded as overruled `Landed`. Run it twice more with the
+  fixture target refusing the push (the requests apply) and unreadable (the
+  lot holds `Uncertain` for `Settle`).
 - **Replay.** The replay-from-empty check of 5.2 holds at each point above.
 
 ## 6. The Nov 14-15 failures, walked through
@@ -861,12 +990,13 @@ and `max_reworks` become policy defaults with no hard cap behind them;
 | `Missing` | Kept | |
 | `Blocked` | Removed | Never produced today |
 | `Resource` | Removed | Work waits in a queue instead (3.2) |
-| `Phase` | Narrowed to `Landed` | Only the landing rules refuse by position (3.3) |
+| `Phase` | Narrowed to `Landed` | Only the landing rules refuse by position (3.3). Today's `Cancel` refusal at the push stage (`reducer.rs:274-278`) becomes `Settling`: the command is accepted but applies only once the push is proved not to have landed, and is recorded as overruled `Landed` when it did (3.5) |
 | `Evidence` | Kept | Binds answers to candidates |
 | `Limit` | Removed as a ticket refusal; kept only for `MAX_ITEMS` | Limits are policy |
 | `SendBackRefused(String)` | Removed | `Send` is never refused by a count |
 | New: `PersonOnly` | Publish, settle, and per decision A | |
 | New: `Stopping` | A command that would start work on a tree or lot whose last effect has no stop receipt yet | Safety, not a count (3.3 rule 4, 3.4) |
+| `Evidence`, newly for a landing stop | A plain `Stopped` for a landing effect's stop, which must answer `Settled` with the original's outcome | Quiescence is not non-acceptance (3.3 rule 5, 3.5) |
 
 ## 8. Decisions for the owner
 
