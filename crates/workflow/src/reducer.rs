@@ -96,7 +96,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
                 | Command::Queue { item } | Command::Leave { item }
                 | Command::Move { item, .. } | Command::Start { item, .. }
-                | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. } => item,
+                | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. } | Command::Land { item, .. } => item,
                 Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
             };
             let mut item = next.items.remove(id).ok_or(Refusal::Missing)?;
@@ -531,6 +531,19 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.stage = to; item.attempt = 1; item.candidate = None; item.pending = None;
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     item.phase = Phase::Blocked; item.run = String::new();
+                }
+                Command::Land { commit, .. } => {
+                    controller(input)?;
+                    // Only a run that failed and holds nothing: not a group, not a follower, not a ticket at rest.
+                    if item.phase != Phase::Failed || item.pending.is_some() || item.group_of.is_some()
+                        || item.follows.is_some() || item.definition.is_ticket() { return Err(Refusal::Phase); }
+                    if commit.len() != 40 || !commit.bytes().all(|b| b.is_ascii_hexdigit()) { return Err(Refusal::Invalid); }
+                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                    // Done is what a landed run is, and the commit is the candidate a landed run keeps.
+                    item.candidate = Some(commit.to_ascii_lowercase());
+                    item.stage = item.definition.stages.len();
+                    item.phase = Phase::Done;
+                    item.failure = None; item.brief = None; item.stopping = None;
                 }
                 Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
             }

@@ -266,6 +266,10 @@ pub enum Command {
     Resolve { item: String, effect: String, run: String, fence: u64, outcome: Outcome },
     /// The orchestrator sends a run back to its last build step, with a reason the agent is told (ov-968).
     SendBack { item: String, reason: String },
+    /// The orchestrator closes a Failed run whose work is already on the target branch: the ticket lands with
+    /// `commit` (ov-1231). The reducer cannot read a remote, so the runtime proves `commit` is an ancestor of the
+    /// target on the remote before it submits this, and the reducer holds only to the shape of the claim.
+    Land { item: String, commit: String },
     /// The orchestrator reopens a closed ticket: it comes back under its own name as a ticket at rest, on
     /// `definition`, the tracker-only template at the column it reopens in (ov-968).
     Reopen { item: String, definition: Definition, policy_pin: String, resource: String },

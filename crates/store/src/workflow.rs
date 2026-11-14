@@ -300,7 +300,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
         let target=match &input.command {
             Command::Enqueue {resource,..} | Command::Start {resource,..} | Command::Reopen {resource,..} => Some(resource.as_str()),
             Command::Approve {item,..}|Command::Review {item,..}|Command::Observe {item,..}|Command::Cancel {item,..}|Command::Retry {item}|Command::Queue {item}|Command::Leave {item}|Command::Move {item,..}|Command::Resolve {item,..}
-                |Command::Decide {item,..}|Command::SendBack {item,..}|Command::Close {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
+                |Command::Decide {item,..}|Command::SendBack {item,..}|Command::Close {item,..}|Command::Land {item,..} => state.items.get(item).map(|i|i.resource.as_str()),
             Command::Advance | Command::RefreshGroups { .. } => None,
         };
         // A Start takes its followers with it (ov-970), so their quarantine holds it back as the lead's does.
