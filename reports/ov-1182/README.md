@@ -46,8 +46,19 @@ not counted toward acceptance for the final job layout.
 Rust CI sets CARGO_PROFILE_DEV_DEBUG=0 and CARGO_PROFILE_TEST_DEBUG=0 to reduce
 binary/link/archive costs. These settings change debug symbols, leaving Cargo's
 optimization settings and debug assertions unchanged. Artifact binaries retain
-panic messages and test names but do not carry full debug symbols. No source,
-test filters, retry policy, required verdict or test timeout changed.
+panic messages and test names but do not carry full debug symbols. The symbol settings leave source,
+test selection, retry policy, required verdicts and test timeouts unchanged.
 
 The inherited ov-1181 repository-wide actionlint annotations are included so
 plain `actionlint` passes, including the custom xcode-27 runner label.
+
+The initial Linux checks passed in 916 s (15m16s), and the original debug-symbol
+archive job passed in 921 s (15m21s). The monolithic Mac job exceeded 20 minutes
+before completion. That superseded experiment was cancelled to free hosted
+runners; cancelled shards/Mac have no passing verdict and are not acceptance
+evidence. Its metadata is initial-jobs.json.
+
+Initial archive payload: 6,313,939,230 bytes; compression took 100.47 s and
+upload took about 70 s. Two shards uploaded partial inventories during
+cancellation; no guard completion or full execution verdict is counted. Disabling debug
+symbols specifically addresses this observed archive cost.

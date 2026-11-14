@@ -1,0 +1,8 @@
+Rust (macos-latest)	Run Swatinem/rust-cache@v2	2026-11-14T07:59:37.7103780Z Cache restored successfully
+Rust (macos-latest)	Cache the pinned tmux build	2026-11-14T07:59:40.7613740Z Cache restored successfully
+Rust (macos-latest)	Cache the pinned tmux build	2026-11-14T07:59:40.7814910Z Cache restored from key: tmux-rust-macOS-ARM64-a8c4363c9e4c3d98fd9ee7d06ce6840701b0b904ac57d42ca9995f14b4efd8c8
+Rust test archive	Build the runtime binaries and test archive	2026-11-14T08:10:44.1341536Z ^[[32;1m   Archiving^[[0m ^[[1m143^[[0m binaries (including ^[[1m3^[[0m non-test binaries), ^[[1m1^[[0m build script output directory, ^[[1m3^[[0m linked paths, ^[[1m3^[[0m extra paths, and ^[[1m1^[[0m standard library to ^[[1mtarget/rust-tests.tar.zst^[[0m
+Rust test archive	Build the runtime binaries and test archive	2026-11-14T08:12:24.6038670Z ^[[32;1m    Archived^[[0m ^[[1m551^[[0m files to ^[[1mtarget/rust-tests.tar.zst^[[0m in 1m 40.47s
+Rust test archive	Run actions/upload-artifact@v4	2026-11-14T08:13:34.7952386Z Artifact rust-tests has been successfully uploaded! Final size is 6313939230 bytes. Artifact ID is 14106175931
+Rust tests (2/4)	UNKNOWN STEP	2026-11-14T08:19:41.4230718Z Artifact rust-inventory-2 has been successfully uploaded! Final size is 293515 bytes. Artifact ID is 14106416295
+Rust tests (1/4)	UNKNOWN STEP	2026-11-14T08:19:40.9699194Z Artifact rust-inventory-1 has been successfully uploaded! Final size is 293515 bytes. Artifact ID is 14105478532
