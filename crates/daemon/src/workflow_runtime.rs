@@ -419,7 +419,10 @@ impl Runtime {
     fn refresh_groups(&self, workspace: &str, now_ms: i64) -> Result<()> {
         if let Some(published) = self.store.workflow_configuration(workspace)? {
             let grouping = Grouping { definition: published.definition, policy_pin: published.pin };
-            if self.state(workspace)?.is_some_and(|s| s.grouping.as_ref() != Some(&grouping)) {
+            // Ungrouped workflows need no grouping event. Once a grouping exists, an empty
+            // publication must still replace it so old landing rules cannot survive removal.
+            if self.state(workspace)?.is_some_and(|s| s.grouping.as_ref() != Some(&grouping)
+                && (s.grouping.is_some() || !grouping.definition.groups.is_empty())) {
                 self.internal(workspace, Command::RefreshGroups { definition: grouping.definition,
                     policy_pin: grouping.policy_pin }, Grant::Controller, now_ms)?;
             }

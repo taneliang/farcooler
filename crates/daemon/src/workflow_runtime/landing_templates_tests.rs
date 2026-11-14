@@ -535,3 +535,22 @@ async fn staggered_ready_tickets_join_one_waiter_while_an_active_landing_keeps_i
     for event in runtime.events("w").unwrap() { replay = step(&replay, &event).unwrap().state; }
     assert_eq!(state, replay);
 }
+
+#[tokio::test]
+async fn an_ungrouped_publication_does_not_create_a_grouping_revision() {
+    use farcooler_protocol::workflow_commands::{Action, Mutation};
+    let (_dir, runtime) = lander("pass").await;
+    let definition = Definition::tracker("owner");
+    let pin = definition.pin();
+    let mutation = |id: &str| Mutation { id: id.into(), revision: 0, epoch: 1, sequence: 1 };
+    let reply = runtime.wire_command("w", "owner", Action::Publish { mutation: mutation("p"),
+        expected_pin: None, definition, adapter: None, notifications: None }).unwrap();
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    let reply = runtime.wire_command("w", "owner", Action::Enqueue { mutation: mutation("e"),
+        item: "tracker".into(), pin }).unwrap();
+    assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
+    let before = runtime.state("w").unwrap().unwrap();
+    assert!(before.grouping.is_none());
+    runtime.refresh_groups("w", 10).unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap(), before);
+}
