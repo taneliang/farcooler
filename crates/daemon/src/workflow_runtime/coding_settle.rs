@@ -34,8 +34,10 @@ impl Runtime {
         }
         let identity = exec.landing()?;
         let log = exec.root.join("receipts").join(format!("{}.landed.fetch.output", digest(&(workspace, item_id, run, sha))));
-        Ok(if exec.on_target(identity, &sha.to_ascii_lowercase(), &log).await? { None }
-            else { Some("The commit is not on the target branch on the remote.".to_string()) })
+        let on_target = exec.on_target(identity, &sha.to_ascii_lowercase(), &log).await?;
+        #[cfg(test)]
+        if let Some(change) = AFTER_LANDED_READ.lock().unwrap().remove(workspace) { change(); }
+        Ok(if on_target { None } else { Some("The commit is not on the target branch on the remote.".to_string()) })
     }
     /// A person's word on an uncertain push, believed only after the remote is read: `landed` needs the
     /// pushed commit on the target and `not landed` needs it absent. The word is written as the push's own
@@ -74,3 +76,9 @@ impl Runtime {
         Ok(())
     }
 }
+
+/// Test hook: what runs, once, the moment the remote read for a workspace's `landed` finishes, standing in for the
+/// caller losing authority while that read was pending.
+#[cfg(test)]
+pub(super) static AFTER_LANDED_READ: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Box<dyn FnOnce() + Send>>>> =
+    std::sync::LazyLock::new(Default::default);

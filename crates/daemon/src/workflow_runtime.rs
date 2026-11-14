@@ -818,6 +818,11 @@ impl Runtime {
                     self.validate_wire_publication(&admission.workspace(), &admission.principal(), &action).await?;
                     let tree = self.prepare_start(&admission.workspace(), &admission.principal(), &action).await?;
                     let close_verified = self.verify_close(&admission.workspace(), &admission.principal(), &action).await?;
+                    // The remote is read before anything is written: a commit it does not hold lands nothing.
+                    // It is the last await, so the recheck below sees any authority lost while it was pending.
+                    let landed_refusal = if let farcooler_protocol::workflow_commands::Action::Landed { item, run, pin, sha, .. } = &*action {
+                        self.landed_check(&admission.workspace(), item, run, pin, sha).await?
+                    } else { None };
                     // No await separates final retained authority recheck from receipt/transaction.
                     admission.recheck().and_then(|()| admission.permits(&action))
                         .map_err(|_| Error::Refused("workflow caller authority changed"))?;
@@ -825,12 +830,8 @@ impl Runtime {
                     let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
-                    } else if let farcooler_protocol::workflow_commands::Action::Landed { item, run, pin, sha, .. } = &*action {
-                        // The remote is read before anything is written: a commit it does not hold lands nothing.
-                        match self.landed_check(&admission.workspace(), item, run, pin, sha).await? {
-                            Some(why) => serde_json::json!({ "schema": 1, "receipt": { "result": { "Err": why } } }),
-                            None => self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, tree)?,
-                        }
+                    } else if let Some(why) = landed_refusal {
+                        serde_json::json!({ "schema": 1, "receipt": { "result": { "Err": why } } })
                     } else {
                         self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, wire_commands::Prepared { tree, close_verified })?
                     };
