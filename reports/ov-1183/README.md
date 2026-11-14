@@ -60,7 +60,14 @@ including both real tunnel checks, passed. The release Swift and native
 caches were saved successfully. Tests completed all 2,113 AgentKit and 2,035
 Mac definitions. Warm release-shaped branch measurements follow.
 
-Two qualifying release-shaped branch measurements are still pending. The prior two debug
+The first qualifying warm release run,
+[43596969322](https://github.com/taneliang/farcooler/actions/runs/43596969322)
+(f83d9adca), passed app **687 s (11m27s)** and tests **644 s (10m44s)**.
+Release FFI preparation took 98 s and the unified native build 382 s. Every
+bundle check passed, and completion guards confirmed 2,113 AgentKit plus all
+2,035 Mac definitions (2,005 + 30). Job durations include setup and post steps
+and exclude queue time, matching the baseline. The report-only repeat is
+pending; production code and optimization settings remain identical. The prior two debug
 runs are retained below for history and no longer count toward acceptance.
 
 
