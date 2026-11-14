@@ -42,7 +42,8 @@ of those same changes over their reviewed adaptations.
 - Process-guard prerequisite regression: 10 tests passed.
 - Shared Swift conversation-cache prerequisite regression: 1 test passed.
 - First complete Rust selection: 2,000 passed, 5 failed out of 2,005. Four failures identified combined fixture assumptions: preserved gate exit 1, provisions use the work pool, one-shot pumps drain bounded provision waves, and a hook retry deadline is measured from its observed expiry (including dispatch elapsed time). These are reconciled in ov-1213 test-only commits. The idle-cleanup case hit its initial five-second timeout while host load exceeded 100; the unchanged case then passed twice serially. All five previously failing regressions passed together in a serial nextest run (5/5).
-- Workflow (188), CLI (695), store (658), and affected client Plan/presentation (69) cases all passed in the complete Rust selection. Final daemon verification and iOS PhonePlanColumn execution are pending.
+- Workflow (188), CLI (695), store (658), and affected client Plan/presentation (69) cases all passed in the complete Rust selection. Final daemon selection: 447 passed, zero failures, including all 395 workflow-runtime cases plus affected file-watch and summary tests. iOS PhonePlanColumn execution is pending behind the machine-wide heavy-job queue.
+- The three ov-1159 status-offload regressions passed separately (3/3).
 - Remote main was fetched again after integration and still resolved to `73974f898`; it remains an ancestor of this branch. No changes to `docs/jobs-to-be-done.md` or
 `docs/superpowers/`.
 
@@ -77,5 +78,5 @@ swift test --package-path apps/shared/AgentKit --filter Plan
 apps/macos/build-vt.sh
 caffeinate -d swift test --package-path apps/macos \
   --filter 'PlanColumnViewTests|PlanSectionViewTests|PlanViewTests|PlanStaleTests|PlanReconnectingTests'
-./scripts/ios-ui-tests.sh FarCoolerUITests/PhonePlanColumnUITests
+./scripts/heavy -- /bin/bash -c './scripts/build-ios-frameworks.sh && ./scripts/ios-ui-tests.sh FarCoolerUITests/PhonePlanColumnUITests'
 ```
