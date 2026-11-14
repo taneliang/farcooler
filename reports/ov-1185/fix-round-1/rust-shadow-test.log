@@ -1,0 +1,29 @@
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 2.549s
+
+OK
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: accepted; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.02005441699293442; warm wall savings: -0.01s.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.010782166005810723; warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: accepted; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.010839624999789521; warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.

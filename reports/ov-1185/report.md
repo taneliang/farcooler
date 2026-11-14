@@ -1,3 +1,10 @@
+# ov-1185 — current evidence
+
+See [fix round 1 evidence and remaining acceptance gap](fix-round-1/report.md).
+The historical scheduling replay below is superseded as acceptance evidence.
+
+---
+
 # ov-1185 — local landing gate
 
 The local wrapper now enables `lane-gate.py --landing --keep-target`. Plain

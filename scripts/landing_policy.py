@@ -12,6 +12,17 @@ import subprocess
 import time
 
 
+def readonly_git(env):
+    """Suppress optional index writes while retaining dirty reads and real writes."""
+    env.setdefault("GIT_OPTIONAL_LOCKS", "0")
+    # Git diff's automatic refresh can still write with optional locks off.
+    # Append command-scoped config without replacing caller-provided entries.
+    count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    env[f"GIT_CONFIG_KEY_{count}"] = "diff.autoRefreshIndex"
+    env[f"GIT_CONFIG_VALUE_{count}"] = "false"
+    env["GIT_CONFIG_COUNT"] = str(count + 1)
+
+
 def budget_worker(env, workers):
     """Share the host between families instead of each builder taking every CPU.
 
@@ -22,7 +33,7 @@ def budget_worker(env, workers):
     # refresh their stat cache. Protocol watches the index for its build stamp;
     # that optional refresh otherwise invalidates its entire reverse closure.
     # Reads still inspect the worktree and real git writes still take locks.
-    env.setdefault("GIT_OPTIONAL_LOCKS", "0")
+    readonly_git(env)
     share = max(1, (os.cpu_count() or 1) // workers)
     # Cargo serializes writers to a shared profile. A per-family fraction
     # leaves that single active compiler underfed while other families test.

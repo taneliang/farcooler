@@ -95,6 +95,24 @@ class LandingTests(unittest.TestCase):
             git("add", "input")
             git("commit", "-qm", "real write")
             self.assertEqual(git("show", "HEAD:input"), b"changed")
+            # Exercise the actual planning entry point's first Git read,
+            # before a worker exists. Plain mode keeps its original behavior.
+            def first_git(*args):
+                self.assertEqual(subprocess.check_output(
+                    ["git", "status", "--porcelain"], cwd=repo), b"")
+                self.assertEqual(subprocess.check_output(
+                    ["git", "diff", "--binary", "HEAD"], cwd=repo), b"")
+                raise RuntimeError("stop after first planning read")
+            for landing in (True, False):
+                stat = source.stat()
+                os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns - 2_000_000_000))
+                before = index.stat().st_mtime_ns
+                with patch.dict(os.environ), patch.object(lane, "make_ctx", side_effect=first_git), \
+                        patch.object(lane.tempfile, "mkdtemp", return_value=str(repo / ".git/run")):
+                    os.environ.pop("GIT_OPTIONAL_LOCKS", None)
+                    with self.assertRaisesRegex(RuntimeError, "first planning read"):
+                        lane.gate(argparse.Namespace(worktree=str(ROOT), base="HEAD", landing=landing))
+                self.assertEqual(index.stat().st_mtime_ns == before, landing)
 
     def test_plain_runner_can_be_loaded_without_optional_landing_policy(self):
         # Evidence consumers copy the canonical plain runner and heavy lock,

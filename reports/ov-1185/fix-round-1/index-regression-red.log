@@ -1,0 +1,21 @@
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+F
+======================================================================
+FAIL: test_source_identity_includes_dirty_and_untracked_inputs (regression.BenchmarkTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "scripts/landing-benchmark-test.py", line 91, in test_source_identity_includes_dirty_and_untracked_inputs
+    self.assertEqual(index.stat().st_mtime_ns, before)
+AssertionError: 1794669375870030606 != 1794669375778908129
+
+----------------------------------------------------------------------
+Ran 1 test in 0.212s
+
+FAILED (failures=1)
+Expected red: Git diff without autoRefreshIndex=false refreshes the watched index

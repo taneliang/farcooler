@@ -37,7 +37,9 @@ def steps(text):
 
 def identity(repo):
     def git(*args):
-        return subprocess.check_output(["git", *args], cwd=repo)
+        # Observation must not invalidate the warm build it measures.
+        return subprocess.check_output(["git", "-c", "diff.autoRefreshIndex=false", *args], cwd=repo,
+                                       env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     # Include untracked source too: HEAD alone doesn't identify an agent's build.
     digest = hashlib.sha256(git("diff", "--binary", "HEAD"))
     for name in sorted(git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0")):

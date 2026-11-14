@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify real wrapper timing and reject incomplete/failed performance evidence."""
 import importlib.util
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -82,6 +83,12 @@ class BenchmarkTests(unittest.TestCase):
             git("add", "code")
             git("commit", "-qm", "initial")
             initial = benchmark.identity(root)
+            index = root / ".git/index"
+            before = index.stat().st_mtime_ns
+            stat = (root / "code").stat()
+            os.utime(root / "code", ns=(stat.st_atime_ns, stat.st_mtime_ns - 2_000_000_000))
+            self.assertEqual(initial, benchmark.identity(root))
+            self.assertEqual(index.stat().st_mtime_ns, before)
             (root / "code").write_text("after")
             dirty = benchmark.identity(root)
             self.assertEqual(initial["head"], dirty["head"])

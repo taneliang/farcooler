@@ -716,6 +716,11 @@ def main(argv):
 
 
 def gate(args):
+    if getattr(args, "landing", False):
+        # Planning also reads Git before any worker starts. Do not let those
+        # reads refresh the protocol build stamp's watched index (ov-1185).
+        import landing_policy
+        landing_policy.readonly_git(os.environ)
     repo = pathlib.Path(args.worktree).resolve()
     workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
                  "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
