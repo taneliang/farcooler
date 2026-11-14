@@ -314,7 +314,7 @@ pub fn holds_only_ours(text: &str, socket: &Path) -> bool {
 }
 
 mod native_host;
-pub(crate) use native_host::native_completion_targets;
+pub(crate) use native_host::{native_completion_targets, native_codex_hooks};
 
 /// The path this binary was launched as, resolved the same way the shim's
 /// own command line is (`service::cli_binary`), so a hooks file and a pane

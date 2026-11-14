@@ -334,7 +334,7 @@ async fn read_verdict(reader: &mut BufReader<UnixStream>) -> Option<HookVerdict>
 
 /// The decision, in the shape the agent expects to read on stdout.
 ///
-/// Claude's shape, measured against 2.1.263. Codex and cursor are handed the
+/// Claude's PermissionRequest shape, measured against 2.1.263. Codex and cursor are handed the
 /// same envelope until each is measured; a shape an agent does not understand
 /// is ignored by it, which is the same as deferring.
 fn claude_shaped_output(decision: &Decision) -> Option<String> {
@@ -359,7 +359,7 @@ fn claude_shaped_output(decision: &Decision) -> Option<String> {
     .ok()
 }
 
-/// A decision on claude's `PreToolUse` (the fence), in that hook's own shape:
+/// A decision on Claude's or Codex's `PreToolUse`, in the measured shared shape:
 /// `permissionDecision`, with a deny's message as `permissionDecisionReason`,
 /// which claude hands the model. How a subagent asked to stop is told to
 /// (`agent stop`, ov-872). The `PermissionRequest` shape names another event,
@@ -433,26 +433,28 @@ mod tests {
     /// `permissionDecision` there, and hands the reason to the model.
     #[tokio::test]
     async fn a_refused_tool_call_prints_in_pre_tool_uses_shape() {
-        let dir = tempfile::tempdir().expect("a directory");
-        let socket = dir.path().join("h.sock");
-        let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
-        tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.expect("accept");
-            let mut reader = tokio::io::BufReader::new(&mut stream);
-            let mut line = String::new();
-            tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
-            let verdict = Reply::verdict(Some(Decision::Deny { message: "Stop now".to_string() }));
-            let bytes = encode_line(&verdict).expect("encode");
-            tokio::io::AsyncWriteExt::write_all(&mut stream, bytes.as_bytes()).await.expect("write");
-        });
-        let payload = b"{\"session_id\":\"abc\",\"agent_id\":\"a1\",\"tool_name\":\"Bash\"}".to_vec();
-        let out = run_with_input(Agent::Claude, "PreToolUse".to_string(), socket, true, payload, SHAPE_NOT_SPEED).await;
-        let parsed: serde_json::Value = serde_json::from_str(&out).expect("hook printed json");
-        let inner = &parsed["hookSpecificOutput"];
-        assert_eq!(inner["hookEventName"], "PreToolUse", "{out}");
-        assert_eq!(inner["permissionDecision"], "deny", "{out}");
-        assert_eq!(inner["permissionDecisionReason"], "Stop now", "{out}");
-        assert!(inner.get("decision").is_none(), "not PermissionRequest's shape: {out}");
+        for agent in [Agent::Claude, Agent::Codex] {
+            let dir = tempfile::tempdir().expect("a directory");
+            let socket = dir.path().join("h.sock");
+            let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+            tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.expect("accept");
+                let mut reader = tokio::io::BufReader::new(&mut stream);
+                let mut line = String::new();
+                tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+                let verdict = Reply::verdict(Some(Decision::Deny { message: "Stop now".to_string() }));
+                let bytes = encode_line(&verdict).expect("encode");
+                tokio::io::AsyncWriteExt::write_all(&mut stream, bytes.as_bytes()).await.expect("write");
+            });
+            let payload = b"{\"session_id\":\"abc\",\"agent_id\":\"a1\",\"tool_name\":\"Bash\"}".to_vec();
+            let out = run_with_input(agent, "PreToolUse".to_string(), socket, true, payload, SHAPE_NOT_SPEED).await;
+            let parsed: serde_json::Value = serde_json::from_str(&out).expect("hook printed json");
+            let inner = &parsed["hookSpecificOutput"];
+            assert_eq!(inner["hookEventName"], "PreToolUse", "{out}");
+            assert_eq!(inner["permissionDecision"], "deny", "{out}");
+            assert_eq!(inner["permissionDecisionReason"], "Stop now", "{out}");
+            assert!(inner.get("decision").is_none(), "not PermissionRequest's shape: {out}");
+        }
     }
 
     /// An allow on the fence prints nothing: `permissionDecision: "allow"`

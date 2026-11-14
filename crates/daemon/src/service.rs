@@ -176,6 +176,8 @@ pub struct LaunchExtras {
     pub shared: Option<crate::shared_logins::Kept>,
     /// A member's pane's `CODEX_HOME`, an empty one of theirs (`shared_logins`).
     pub codex_home: Option<String>,
+    /// Engine-pinned hooks supplied as a per-launch config override, independent of project discovery.
+    pub codex_hooks: Option<String>,
 }
 
 /// An agent's first message, and how it reaches the agent's argv.
@@ -208,6 +210,7 @@ impl LaunchExtras {
         claude_dir: None,
         shared: None,
         codex_home: None,
+        codex_hooks: None,
     };
 
     #[cfg(test)]
@@ -434,10 +437,11 @@ pub fn preset_command_with_hooks(
         // load, where an unknown key is ignored).
         "codex" => {
             let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Codex, extras);
+            let hooks = extras.codex_hooks.as_ref().map(|hooks| format!(" --config {}", shell_quote(hooks))).unwrap_or_default();
             format!(
                 "{shell} -ilc {}",
                 shell_quote(&format!(
-                    "{}{flag} {CODEX_NO_UPDATE_CHECK}{}{orchestrator}{prompt}",
+                    "{}{flag} {CODEX_NO_UPDATE_CHECK}{hooks}{}{orchestrator}{prompt}",
                     agent_program("codex"), crate::shared_logins::codex_flags(extras)
                 ))
             )
@@ -3417,7 +3421,7 @@ impl Service {
         if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
             crate::codex_trust::trust_for_worktree(&self.root, Path::new(worktree)).await;
         }
-        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None, codex_home: None }
+        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None, codex_home: None, codex_hooks: None }
     }
 
     /// Whether `worktree` is one this install made for a new task: a real
@@ -10345,7 +10349,7 @@ mod launch_hook_install_tests {
         assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument", "terminal_mode_command"]);
         // And the extras every launch path starts from carry none.
         assert!(
-            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None, codex_home: None }")
+            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None, codex_home: None, codex_hooks: None }")
         );
     }
 }

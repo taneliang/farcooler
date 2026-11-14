@@ -2,17 +2,25 @@
 
 `farcooler message <key> "<direction>"` reaches the native Codex or Claude agent
 working the ticket's current build, review, or agent gate. It queues the message
-on the ticket. Claude receives it at its next `PreToolUse` hook: that tool is
-refused with the direction as its reason, so the agent can change course before
-running it. This does not interrupt a tool already executing. Codex's pinned
-configuration has no mid-turn hook, so it receives direction at its next Stop
-hook as a continuation in the same session, before the step settles. Claude also
-uses this continuation when it reaches Stop without another tool call.
+on the ticket. Codex and Claude receive it at their next supported `PreToolUse`
+hook: that tool is refused with the direction as its reason, so the agent can
+change course before running it. This does not interrupt a tool already
+executing. Both also receive a continuation in the same session at Stop if they
+reach it without another supported tool call, before the step settles.
 
-Native Claude settings must include the installed all-tools gating `PreToolUse`
-registration targeting this runtime's private host. Lifecycle-only settings,
+Native Claude settings and Codex hooks must include the installed all-tools
+gating `PreToolUse` registration targeting this runtime's private host.
+Lifecycle-only settings,
 disabled hooks, and altered tool gates are refused when the configuration opens
 and before a native step launches. Other user hooks may coexist with that entry.
+Existing Codex workflow pins must be updated to the engine hook file containing
+this registration. The engine also passes the pinned Codex hooks through a
+per-launch `--config` override, so delivery does not depend on discovery of the
+worktree's project layer. Codex must trust the updated hooks as it does other hooks.
+Tool-boundary delivery was verified with Codex CLI 0.167.2. Codex does not fire
+this hook for hosted tools or for `write_stdin` on an existing shell command.
+`codex queue` starts a later turn and is not the engine steering route.
+See [Codex hook coverage](https://learn.chatgpt.com/docs/hooks#tool-coverage).
 
 Message admission and the final Stop queue check share a lock. Direction accepted
 before that check extends the session; messages after the final check are

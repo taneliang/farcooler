@@ -517,7 +517,7 @@ async fn workflow_coding_codex_runs_on_the_runners_hooks_file_with_none_in_the_r
     let tree = runtime.tree(&binding);
     let pinned = |path: &Path, text: &str| { std::fs::create_dir_all(path.parent().unwrap()).unwrap(); std::fs::write(path, text).unwrap();
         LaunchFile { path: path.canonicalize().unwrap(), digest: digest(&text.as_bytes().to_vec()) } };
-    let text = crate::hook_install::merge_codex("", &runtime.root.join("h.sock"));
+    let text = serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&runtime.root.join("h.sock"))).unwrap();
     let hooks = pinned(&dir.path().join("engine-codex-hooks.json"), &text);
     let mut config = runtime.coding.clone().unwrap();
     let native = |project_hooks: Option<LaunchFile>, codex_hooks: Option<LaunchFile>| CodingHarness::Native { preset: "codex".into(),
@@ -537,6 +537,11 @@ async fn workflow_coding_codex_runs_on_the_runners_hooks_file_with_none_in_the_r
     assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), text);
     let command = runtime.coding_command(&binding).unwrap();
     assert!(command.argv[2].contains("codex") && !command.argv[2].contains("--settings"), "{}", command.argv[2]);
+    let hook_override = runtime.codex_hook_override(&binding).unwrap().unwrap();
+    let parsed: toml::Value = toml::from_str(&hook_override).unwrap();
+    let pinned_value: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(serde_json::to_value(&parsed["hooks"]).unwrap(), pinned_value["hooks"]);
+    assert!(command.argv[2].contains("--config") && command.argv[2].contains("hooks="), "the native launch supplies pinned hooks without relying on project discovery");
     assert!(runtime.tree_changes(&binding, &tree).await.unwrap().is_empty(), "the copy isn't the candidate's change");
     std::fs::write(tree.join(".codex/hooks.json"), "{}").unwrap();
     assert!(runtime.coding_command(&binding).is_err(), "a changed copy doesn't launch");
@@ -548,7 +553,7 @@ async fn workflow_coding_codex_runs_on_the_runners_hooks_file_with_none_in_the_r
     let refused = |harness| { let mut c = config.clone(); c.harness = harness; c.validate().unwrap_err() };
     assert!(matches!(refused(native(None, Some(committed.clone()))), Error::Refused("codex hooks inside the repository")));
     assert!(matches!(refused(native(Some(committed), Some(hooks.clone()))), Error::Refused("two codex hooks files")));
-    let elsewhere = pinned(&dir.path().join("elsewhere.json"), &crate::hook_install::merge_codex("", Path::new("/tmp/other.sock")));
+    let elsewhere = pinned(&dir.path().join("elsewhere.json"), &serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(Path::new("/tmp/other.sock"))).unwrap());
     let mut foreign = config.clone(); foreign.harness = native(None, Some(elsewhere));
     assert!(runtime.validate_native_configuration(&foreign).is_err(), "hooks that report elsewhere");
 
@@ -623,7 +628,7 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     let mut config = runtime.coding.clone().unwrap();
     config.harness = CodingHarness::Native { preset: "claude".into(), plugin_dir: None, prompt: "p".into(), process: live_process(&live),
         settings: Some(pinned(dir.path().join("native-settings.json"), serde_json::to_string(&crate::hook_install::claude_settings(&host)).unwrap())),
-        project_hooks: None, codex_hooks: Some(pinned(dir.path().join("workflow-codex-hooks.json"), crate::hook_install::merge_codex("", &host))) };
+        project_hooks: None, codex_hooks: Some(pinned(dir.path().join("workflow-codex-hooks.json"), serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&host)).unwrap())) };
     runtime.coding = Some(config.clone());
     let mut definition = runtime.configured_definition().unwrap();
     definition.models = models.into_iter().filter(|(step, _)| step == "build").collect(); // The scratch definition has no gate-0.
@@ -657,7 +662,7 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     assert_eq!(binding.effect.model.as_deref(), Some("codex:gpt-6.1-sol"));
     let tree = runtime.tree(&binding);
     runtime.install_codex_hooks(&binding, &tree).await.unwrap();
-    assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), crate::hook_install::merge_codex("", &host));
+    assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&host)).unwrap());
     let launch = runtime.coding_command(&binding).unwrap().argv[2].clone();
     assert!(launch.contains("codex") && launch.contains("--model gpt-6.1-sol"), "{launch}");
 }
@@ -677,7 +682,7 @@ struct Ov1087Bundle { definition: farcooler_protocol::workflow_commands::Definit
 /// `farcooler` Claude's are. This test's own binary stands in for it, so its path is swapped for that one.
 fn live_codex_hooks(claude: &Path) -> String {
     let binary = |text: &str| { let at = text.find(" hook --agent ").unwrap(); let start = text[..at].rfind("\"command\": \"").unwrap() + 12; text[start..at].to_string() };
-    let ours = crate::hook_install::merge_codex("", &claude.parent().unwrap().join("workflow/h.sock"));
+    let ours = serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&claude.parent().unwrap().join("workflow/h.sock"))).unwrap();
     let theirs = serde_json::to_string_pretty(&serde_json::from_slice::<serde_json::Value>(&std::fs::read(claude).unwrap()).unwrap()).unwrap();
     ours.replace(&binary(&ours), &binary(&theirs))
 }

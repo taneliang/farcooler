@@ -10,11 +10,11 @@ pub(crate) fn native_completion_targets(text: &str, agent: &str, socket: &Path) 
         "cursor" => &[("sessionStart", false), ("beforeSubmitPrompt", false), ("stop", true)],
         _ => return false,
     };
-    if agent == "claude" {
+    if matches!(agent, "claude" | "codex") {
         // Lifecycle-only settings cannot steer active work. Require the exact all-tools, waiting
         // registration we install: a narrowed matcher, async hook, missing --gating or changed
         // endpoint can silently defer direction until after a tool has changed the candidate.
-        let expected = super::claude_settings(socket);
+        let expected = if agent == "claude" { super::claude_settings(socket) } else { native_codex_hooks(socket) };
         if value["disableAllHooks"] == true || !value["hooks"]["PreToolUse"].as_array().is_some_and(|entries|
             entries.iter().any(|entry| entry == &expected["hooks"]["PreToolUse"][0])) {
             return false;
@@ -25,4 +25,53 @@ pub(crate) fn native_completion_targets(text: &str, agent: &str, socket: &Path) 
         value["hooks"][event].as_array().is_some_and(|entries| entries.iter().any(|entry|
             entry_runs(entry, &ours, agent != "cursor")))
     })
+}
+
+/// Engine-only Codex hooks. Ordinary panes retain their existing lifecycle registrations.
+/// Codex 0.167.2 reads PreToolUse denial in the same shape as Claude (live probe, ov-1205).
+pub(crate) fn native_codex_hooks(socket: &Path) -> serde_json::Value {
+    let mut value = parse_hooks_file(&super::merge_codex("", socket)).expect("generated Codex hooks");
+    value["hooks"]["PreToolUse"] = serde_json::json!([{
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": hook_command("codex", "PreToolUse", socket, true),
+            "timeout": super::CLAUDE_GATE_TIMEOUT_S }]
+    }]);
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_codex_requires_the_installed_all_tools_waiting_hook() {
+        let socket = Path::new("/tmp/engine/h.sock");
+        let original = native_codex_hooks(socket);
+        let accepts = |v: &serde_json::Value| native_completion_targets(&v.to_string(), "codex", socket);
+        assert!(accepts(&original));
+        assert!(!native_completion_targets(&super::super::merge_codex("", socket), "codex", socket),
+            "ordinary lifecycle-only panes are not an engine steering configuration");
+        for fault in ["missing", "not-gating", "foreign-socket", "narrow-matcher", "async", "disabled", "short-timeout"] {
+            let mut value = original.clone();
+            match fault {
+                "missing" => { value["hooks"].as_object_mut().unwrap().remove("PreToolUse"); }
+                "not-gating" | "foreign-socket" => {
+                    let command = value["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+                    value["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = if fault == "not-gating" {
+                        command.replace(" --gating", "")
+                    } else { command.replace("/tmp/engine/h.sock", "/tmp/other.sock") }.into();
+                }
+                "narrow-matcher" => value["hooks"]["PreToolUse"][0]["matcher"] = "Bash".into(),
+                "async" => value["hooks"]["PreToolUse"][0]["hooks"][0]["async"] = true.into(),
+                "disabled" => value["disableAllHooks"] = true.into(),
+                _ => value["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 0.into(),
+            }
+            assert!(!accepts(&value), "accepted inactive Codex steering: {fault}");
+        }
+        let mut coexist = original;
+        coexist["hooks"]["PreToolUse"].as_array_mut().unwrap().push(serde_json::json!({
+            "matcher": "Bash", "hooks": [{"type": "command", "command": "owners-own-hook"}]
+        }));
+        assert!(accepts(&coexist), "other pinned hooks may coexist");
+    }
 }

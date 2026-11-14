@@ -189,6 +189,7 @@ impl Exec {
                         LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
                     }
                     let extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
+                        codex_hooks: self.codex_hook_override(binding)?,
                         plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(self.native_prompt(binding)?)),
                         ..Default::default() };
                     let launch = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);

@@ -1,5 +1,5 @@
-//! Claude's next tool hook delivers direction before the tool runs. Stop remains the continuation
-//! boundary for Codex and for Claude between tools; its final queue check also closes admission.
+//! Codex and Claude tool hooks deliver direction before the tool runs. Stop remains the
+//! continuation boundary between tools; its final queue check also closes admission.
 use super::*;
 use farcooler_agent_hooks::wire::{HookLine, TAKES_FOLLOWUP};
 
@@ -36,16 +36,16 @@ impl Exec {
         Ok(keys.into_iter().collect())
     }
     pub(super) async fn native_followup(&self, binding: &Binding, line: &HookLine,
-        stream: &mut tokio::net::UnixStream, closing: bool) -> Result<bool> {
+        stream: &mut tokio::net::UnixStream, closing: bool) -> Result<Option<Vec<u8>>> {
         use farcooler_store::models::Actor;
-        let tool = line.agent == farcooler_agent_hooks::Agent::Claude && line.event == "PreToolUse"
+        let tool = matches!(line.agent, farcooler_agent_hooks::Agent::Claude | farcooler_agent_hooks::Agent::Codex) && line.event == "PreToolUse"
             && line.takes_updated_input();
         let stop = line.event == "Stop" && line.takes.iter().any(|t| t == TAKES_FOLLOWUP);
-        if !(tool || stop) || line.payload.get("agent_id").is_some() { return Ok(false); }
+        if !(tool || stop) || line.payload.get("agent_id").is_some() { return Ok(None); }
         let id = super::coding_native::terminal(binding);
         let workspace = Uuid::parse_str(&binding.workspace).ok();
         if !workspace.and_then(|w| self.store.get_workspace(w).ok()).is_some_and(|w| w.wake_on_answer) {
-            return Ok(false);
+            return Ok(None);
         }
         let claimed = crate::engine_steering::inbox(id, |open| {
             let mut claimed = Vec::new();
@@ -58,13 +58,13 @@ impl Exec {
             if closing && stop && claimed.is_empty() { *open = false; }
             Ok(claimed)
         }).map_err(Error::Domain)?;
-        if claimed.is_empty() { return Ok(false); }
+        if claimed.is_empty() { return Ok(None); }
         let text = claimed.iter().map(|(w, key)| {
             let from = match w.actor { Actor::Manager => "the orchestrator", Actor::User => "the owner", _ => "a collaborator" };
             format!("[from {from} on {key}] {}", w.body)
         }).collect::<Vec<_>>().join("\n");
         use tokio::io::AsyncWriteExt;
-        // Deny this tool, handing the direction to Claude before it can make the old change.
+        // Deny this tool, handing the direction to the agent before it can make the old change.
         // A plain allow would bypass a permission check, and a Stop continuation would arrive late.
         let response = if tool { serde_json::json!({"decision":{"behavior":"deny", "message":text}}) }
             else { serde_json::json!({"followup_message":text}) };
@@ -75,7 +75,7 @@ impl Exec {
             self.store.finish_wake(&wake, record).map_err(Error::Domain)?;
         }
         sent?;
-        Ok(true)
+        Ok(Some(reply))
     }
 }
 
@@ -107,14 +107,14 @@ mod tests {
             let foreign = svc.store.send_manual_message(task.id, Actor::Manager, "Another step", Some(Uuid::now_v7()), serde_json::json!({})).unwrap();
             let (mut writer, reader) = tokio::net::UnixStream::pair().unwrap();
             let mut line = HookLine { agent, event:"Stop".into(), payload:serde_json::json!({}), takes:vec![], launch:None };
-            assert!(!runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), "an old hook cannot read a response");
+            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_none(), "an old hook cannot read a response");
             line.takes.push(TAKES_FOLLOWUP.into());
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap());
+            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some());
             let mut text = String::new();
             tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
             let response:serde_json::Value = serde_json::from_str(&text).unwrap();
             assert_eq!(response["followup_message"], format!("[from the orchestrator on {}] Use the new API", task.key));
-            assert!(!runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), "never sent twice");
+            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_none(), "never sent twice");
             let pending = svc.store.pending_message_wakes().unwrap();
             assert!(!pending.iter().any(|w| w.note == note.id));
             let other = pending.iter().find(|w| w.note == foreign.id).unwrap();
@@ -122,31 +122,37 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn native_direction_reaches_claude_before_its_next_tool_runs() {
-        let (_dir, mut runtime) = super::super::coding_tests::configured(false, "pass").await;
-        let definition = runtime.configured_definition().unwrap();
-        super::super::tests::enqueue(&mut runtime, "w", "one", definition);
-        runtime.pump(2).await.unwrap();
-        let mut binding = super::super::coding_tests::admitted(&runtime).await;
-        let (_board_dir, svc, repo) = crate::test_support::fixture().await;
-        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
-        let task = svc.store.create_task(workspace, "Steer active work", Actor::User).unwrap();
-        binding.workspace = workspace.to_string(); runtime.store = svc.store.clone();
-        let id = super::super::coding_native::terminal(&binding);
-        let (send, _orders) = mpsc::channel(8);
-        let _listed = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id, "claude", None,
-            false, vec![task.key.clone()], send);
-        svc.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
-        let (mut writer, reader) = tokio::net::UnixStream::pair().unwrap();
-        let line = HookLine { agent:Agent::Claude, event:"PreToolUse".into(), payload:serde_json::json!({}),
-            takes:vec![farcooler_agent_hooks::wire::TAKES_UPDATED_INPUT.into()], launch:None };
-        assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap(), "direction must arrive before the tool call, without a Stop");
-        let mut text = String::new();
-        tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
-        let response:serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(response["decision"]["behavior"], "deny");
-        assert!(response["decision"]["message"].as_str().unwrap().contains("Use the new API"));
-        assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+    async fn native_direction_reaches_both_harnesses_before_their_next_tool_runs() {
+        for agent in [Agent::Claude, Agent::Codex] {
+            let (_dir, mut runtime) = super::super::coding_tests::configured(false, "pass").await;
+            let definition = runtime.configured_definition().unwrap();
+            super::super::tests::enqueue(&mut runtime, "w", "one", definition);
+            runtime.pump(2).await.unwrap();
+            let mut binding = super::super::coding_tests::admitted(&runtime).await;
+            let (_board_dir, svc, repo) = crate::test_support::fixture().await;
+            let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+            let task = svc.store.create_task(workspace, "Steer active work", Actor::User).unwrap();
+            binding.workspace = workspace.to_string(); runtime.store = svc.store.clone();
+            let id = super::super::coding_native::terminal(&binding);
+            let (send, _orders) = mpsc::channel(8);
+            let _listed = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id, agent.as_str(), None,
+                false, vec![task.key.clone()], send);
+            svc.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
+            let (mut writer, reader) = tokio::net::UnixStream::pair().unwrap();
+            let line = HookLine { agent, event:"PreToolUse".into(), payload:serde_json::json!({}),
+                takes:vec![farcooler_agent_hooks::wire::TAKES_UPDATED_INPUT.into()], launch:None };
+            let mut foreign = line.clone(); foreign.payload["agent_id"] = "subagent".into();
+            assert!(runtime.native_followup(&binding, &foreign, &mut writer, true).await.unwrap().is_none());
+            let mut old = line.clone(); old.takes.clear();
+            assert!(runtime.native_followup(&binding, &old, &mut writer, true).await.unwrap().is_none());
+            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some(), "direction must arrive before the tool call, without a Stop");
+            let mut text = String::new();
+            tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
+            let response:serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(response["decision"]["behavior"], "deny");
+            assert!(response["decision"]["message"].as_str().unwrap().contains("Use the new API"));
+            assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+        }
     }
 
     #[tokio::test]
@@ -176,12 +182,12 @@ mod tests {
                 takes:vec![TAKES_FOLLOWUP.into()], launch:None };
             // A message admitted before the final check must extend this exact session.
             watcher.message_send(request(), crate::people::Person::Owner).await.unwrap();
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap());
+            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some());
             let mut text = String::new();
             tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
             assert!(text.contains("Direction at handoff"));
             // Hold the live row past the last Stop, as capture/quiescence do in production.
-            assert!(!runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap());
+            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_none());
             assert!(watcher.message_send(request(), crate::people::Person::Owner).await.is_err(),
                 "{agent:?}: a final Stop must close admission before settlement starts");
             assert!(svc.store.pending_message_wakes().unwrap().is_empty());

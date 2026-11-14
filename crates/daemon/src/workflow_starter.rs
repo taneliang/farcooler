@@ -126,7 +126,7 @@ fn engine_hook_settings(svc: &Service) -> Option<PathBuf> {
 /// no repository has to commit one (ov-1088). Written as `engine_hook_settings` is, and left as it is after.
 fn engine_codex_hooks(svc: &Service) -> Option<LaunchFile> {
     let engine = svc.root_dir().join("workflow").canonicalize().ok()?;
-    let text = crate::hook_install::merge_codex("", &engine.join("h.sock"));
+    let text = serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&engine.join("h.sock"))).ok()?;
     let path = svc.root_dir().join("workflow-codex-hooks.json");
     if std::fs::read_to_string(&path).ok().as_deref() != Some(text.as_str()) { crate::skill_install::write_atomically(&path, &text).ok()?; }
     Some(LaunchFile { digest: farcooler_workflow::digest(&std::fs::read(&path).ok()?), path: path.canonicalize().ok()? })

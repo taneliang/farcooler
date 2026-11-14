@@ -18,6 +18,8 @@ mod coding_execute;
 mod coding_native;
 mod native_control;
 mod native_messages;
+#[cfg(test)]
+mod native_steering_live_tests;
 mod coding_landing;
 mod coding_verbs;
 mod coding_ci_rerun;

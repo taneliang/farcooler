@@ -144,6 +144,16 @@ impl Exec {
         crate::skill_install::write_atomically(&dest, &text)?;
         Ok(())
     }
+    /// Codex may skip a project hook layer in a fresh linked worktree. Supply the pinned hooks
+    /// through its per-invocation config too, without changing the owner's Codex home (ov-1205).
+    pub(super) fn codex_hook_override(&self, binding: &Binding) -> Result<Option<String>> {
+        if self.native_agent(binding)? != Agent::Codex { return Ok(None); }
+        // Reconstruct only the engine-owned registrations that native_hooks validates. Recovery
+        // reconstructs argv even after launch files disappear, so it must never read those files.
+        let value = crate::hook_install::native_codex_hooks(&self.root.join("h.sock"));
+        let hooks = toml::Value::try_from(&value["hooks"]).map_err(|_| Error::Refused("native Codex hooks cannot be passed as config"))?;
+        Ok(Some(format!("hooks={hooks}")))
+    }
     /// Pin the already-installed endpoint as well as its bytes. No hook writes.
     pub(super) fn validate_native_host(&self) -> Result<()> {
         if let Some(config) = &self.coding { self.validate_native_configuration(config)?; }
@@ -187,7 +197,7 @@ impl Exec {
         let text = String::from_utf8(self.bytes(&file.path)?).map_err(|_| Error::Refused("invalid hook text"))?;
         let socket = self.root.join("h.sock");
         if !crate::hook_install::native_completion_targets(&text, agent.as_str(), &socket) {
-            return Err(Error::Refused("native hooks must already target this private host"));
+            return Err(Error::Refused("native hooks must target this private host and include required active steering hooks"));
         }
         Ok(())
     }
@@ -260,6 +270,7 @@ impl Exec {
         let mut session = (agent == Agent::Claude).then(|| terminal(binding).to_string());
         let mut prompted = false;
         let mut hooks = Vec::new();
+        let mut continued_stop: Option<(serde_json::Value, Vec<u8>)> = None;
         // A reviewer's recorded verdict ends its turn once it has gone quiet, if its Stop never arrives (ov-1082).
         let mut look = tokio::time::interval(Duration::from_millis(250));
         let mut heard = clock.now();
@@ -308,14 +319,26 @@ impl Exec {
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
                 if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(self.native_prompt(binding)?.as_str()) { prompted = true; }
             }
+            // Codex loads hooks from every active config source. A project copy and the engine
+            // override may therefore report the same Stop concurrently. Replay its continuation;
+            // a duplicate empty queue check must not settle the step before that continuation runs.
+            let keyed_stop = agent == Agent::Codex && line.event == "Stop" && line.payload["turn_id"].is_string();
+            if keyed_stop && let Some((payload, reply)) = &continued_stop && payload == &line.payload {
+                stream.get_mut().write_all(reply).await?;
+                stream.get_mut().write_all(b"\n").await?;
+                continue;
+            }
             let events = assembler.accept(line.agent, &line.event, &line.payload);
             let ended = prompted && events.iter().any(|event| matches!(event,
                 AgentEvent::TurnEnded { reason: EndReason::EndTurn }));
             // Decide whether the build is waiting before the queue's last check, under the same
             // admission lock as message.send. An unfinished build keeps accepting direction.
             let waiting = ended && building && self.unfinished_build(binding, &tree).await.ok().flatten().is_some();
-            let continued = prompted && (ended || line.event == "PreToolUse")
-                && self.native_followup(binding, &line, stream.get_mut(), ended && !waiting).await?;
+            let followup = if prompted && (ended || line.event == "PreToolUse") {
+                self.native_followup(binding, &line, stream.get_mut(), ended && !waiting).await?
+            } else { None };
+            let continued = followup.is_some();
+            if keyed_stop && let Some(reply) = followup { continued_stop = Some((line.payload.clone(), reply)); }
             if !continued { let _ = stream.get_mut().write_all(b"{}\n").await; }
             hooks.push(line);
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
@@ -482,7 +505,7 @@ pub(super) mod tests {
     /// `agent` is `claude`, `codex` or `cursor`, each with its hooks pinned as before ov-1088 (Codex's and Cursor's
     /// committed in the repository), or `codex-engine`: Codex with the runner's own hooks file, outside the repository,
     /// which the engine copies into the worktree (ov-1088). That agent checks it finds the copy before it starts.
-    async fn native_agent(mode: &str, agent: &str) -> (tempfile::TempDir, Runtime, Fake) {
+    pub(crate) async fn native_agent(mode: &str, agent: &str) -> (tempfile::TempDir, Runtime, Fake) {
         assert!(farcooler_core::programs::find("tmux").is_some(), "native ownership proof requires real tmux");
         let (dir, mut runtime) = configured(false, "pass").await;
         let socket = runtime.root.join("h.sock");
@@ -494,7 +517,7 @@ pub(super) mod tests {
         std::fs::create_dir_all(hooks.parent().unwrap()).unwrap();
         let text = match agent {
             "claude" => serde_json::to_string(&crate::hook_install::claude_settings(&socket)).unwrap(),
-            "codex" => crate::hook_install::merge_codex("{}", &socket),
+            "codex" => serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&socket)).unwrap(),
             _ => crate::hook_install::merge_cursor("{}", &socket),
         };
         std::fs::write(&hooks, text).unwrap();
@@ -521,10 +544,10 @@ if 'EXPECT_CODEX_HOOKS' in os.environ and pathlib.Path('.codex/hooks.json').read
 # line and hangs up at once, without reading the daemon's answer (ov-1075).
 def hook(event, sid=session, cwd=os.getcwd(), **extra):
     with socket.socket(socket.AF_UNIX) as s:
-        if mode == 'active-steering' and event == 'PreToolUse' and agent == 'claude':
+        if mode == 'active-steering' and event == 'PreToolUse' and agent in ('claude', 'codex'):
             # Run the command from the accepted pinned settings, including --gating, through the
-            # actual CLI. Assert Claude's output shape, not the daemon's internal wire response.
-            settings = json.loads(pathlib.Path(os.environ['TEST_CLAUDE_SETTINGS']).read_text())
+            # actual CLI. Assert the harness's output shape, not the daemon's internal wire response.
+            settings = json.loads(pathlib.Path(os.environ['TEST_AGENT_SETTINGS']).read_text())
             command = settings['hooks']['PreToolUse'][0]['hooks'][0]['command']
             payload = dict(session_id=sid, cwd=cwd, **extra)
             reply = subprocess.run(command, shell=True, input=json.dumps(payload), text=True, capture_output=True, check=True)
@@ -542,14 +565,17 @@ if mode in ('steering', 'active-steering'):
     for _ in range(500):
         if ready.exists(): break
         time.sleep(0.01)
-    if mode == 'active-steering' and agent == 'claude':
+    if mode == 'active-steering' and agent in ('claude', 'codex'):
         response = hook('PreToolUse', tool_name='Write', tool_input={'file_path':'result.txt'})
         assert response['hookEventName'] == 'PreToolUse', response
         assert response['permissionDecision'] == 'deny', response
         direction = response['permissionDecisionReason']
     else:
-        # Codex has no mid-turn hook in its pinned configuration: direction gates the final Stop.
-        response = hook('Stop')
+        # Between tool calls, direction gates the final Stop.
+        response = hook('Stop', turn_id='probe-turn', last_assistant_message='first reply')
+        if agent == 'codex':
+            duplicate = hook('Stop', turn_id='probe-turn', last_assistant_message='first reply')
+            assert duplicate == response, (duplicate, response)
         direction = response['followup_message']
     assert 'Use the new API' in direction, response
     pathlib.Path(os.environ['STARTED']).with_name('continued').write_text(direction)
@@ -582,14 +608,14 @@ else:
 "#).unwrap();
         let CodingHarness::Command(mut process) = runtime.coding.as_ref().unwrap().harness.clone() else { unreachable!() };
         process.argv.clear(); process.timeout_ms = if mode == "foreign-only" { 300 } else { 5000 };
-        if mode == "active-steering" && agent == "claude" {
+        if mode == "active-steering" && matches!(agent, "claude" | "codex") {
             let exe = std::env::current_exe().unwrap();
             let profile = farcooler_core::scratch::cargo_profile(&exe).unwrap();
             assert!(profile.join("farcooler").is_file(), "build the hook CLI with cargo build -p farcooler-cli before this test");
             let bin = dir.path().join("hook-bin"); std::fs::create_dir(&bin).unwrap();
             std::os::unix::fs::symlink(profile.join("farcooler"), bin.join(farcooler_protocol::CHANNEL.cli_binary_name())).unwrap();
             process.environment.insert("PATH".into(), format!("{}:{}:/usr/bin:/bin", bin.display(), profile.display()));
-            process.environment.insert("TEST_CLAUDE_SETTINGS".into(), hooks.to_string_lossy().into_owned());
+            process.environment.insert("TEST_AGENT_SETTINGS".into(), hooks.to_string_lossy().into_owned());
         }
         if engine { process.environment.insert("EXPECT_CODEX_HOOKS".into(), hooks.to_string_lossy().into_owned()); }
         TEST_ARGV.with(|p| *p.borrow_mut() = Some(vec!["/usr/bin/python3".into(), script.to_string_lossy().into_owned(), mode.into(), agent.into()]));
@@ -836,7 +862,8 @@ mod recovery_tests {
     #[tokio::test]
     async fn workflow_service_native_stop_ignores_launch_drift_with_original_owner() {
         use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
-        for drift in ["changed-settings", "missing-settings", "missing-executable"] {
+        for (agent, drift) in ["claude", "codex"].into_iter().flat_map(|agent|
+            ["changed-settings", "missing-settings", "missing-executable"].map(|drift| (agent, drift))) {
             let (dir, mut runtime) = configured(false, "pass").await;
             let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
             let repo_root = svc.store.create_repository_root(svc.host_id,dir.path().to_str().unwrap(),0).unwrap();
@@ -845,7 +872,9 @@ mod recovery_tests {
             let workspace = svc.store.ensure_main_workspace(repo.id).unwrap().id.to_string();
             runtime.store = svc.store.clone();
             let settings = dir.path().join("settings.json");
-            std::fs::write(&settings,serde_json::to_vec(&crate::hook_install::claude_settings(&runtime.root.join("h.sock"))).unwrap()).unwrap();
+            let socket = runtime.root.join("h.sock");
+            let hooks = if agent == "claude" { crate::hook_install::claude_settings(&socket) } else { crate::hook_install::native_codex_hooks(&socket) };
+            std::fs::write(&settings,serde_json::to_vec(&hooks).unwrap()).unwrap();
             let executable = dir.path().join("executable");
             std::fs::copy("/bin/sh",&executable).unwrap();
             std::fs::set_permissions(&executable,std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -853,9 +882,10 @@ mod recovery_tests {
             config.checks[0].argv[0] = executable.to_string_lossy().into_owned();
             let CodingHarness::Command(mut process) = config.harness.clone() else { unreachable!() };
             process.argv.clear();
-            config.harness = CodingHarness::Native { preset:"claude".into(),
-                settings:Some(LaunchFile { path:settings.canonicalize().unwrap(),digest:digest(&std::fs::read(&settings).unwrap()) }),
-                project_hooks:None, codex_hooks:None,plugin_dir:None,prompt:"unused".into(),process };
+            let hooks = LaunchFile { path:settings.canonicalize().unwrap(),digest:digest(&std::fs::read(&settings).unwrap()) };
+            config.harness = CodingHarness::Native { preset:agent.into(),
+                settings:(agent == "claude").then(|| hooks.clone()),
+                project_hooks:None, codex_hooks:(agent == "codex").then_some(hooks),plugin_dir:None,prompt:"unused".into(),process };
             let config = config.clone(); let definition = config.definition().unwrap();
             let adapter = Some(AdapterConfiguration::Coding(config.clone()));
             let pin = farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
