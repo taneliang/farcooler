@@ -1,0 +1,15 @@
+  Extracting 1 binary to /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/nextest-archive-xk63uY
+   Extracted 5 files to /private/var/folders/3c/65jtgkjx3pb3pq08qs0t9jjr0000gp/T/nextest-archive-xk63uY in 0.01s
+────────────
+ Nextest run ID 8280d77d-1367-4009-a0b5-8e007194c2c1 with nextest profile: ci
+    Starting 8 tests across 1 binary
+        PASS [   0.007s] (1/8) farcooler-agent-core permission::tests::the_options_are_allow_and_deny_by_those_ids
+        PASS [   0.007s] (2/8) farcooler-agent-core permission::tests::a_bash_ask_is_named_for_its_command
+        PASS [   0.009s] (3/8) farcooler-agent-core event::tests::a_failed_end_keeps_reason_a_string_and_puts_the_failure_beside_it
+        PASS [   0.009s] (4/8) farcooler-agent-core usage::tests::dollars_become_exact_millionths
+        PASS [   0.009s] (5/8) farcooler-agent-core event::tests::each_backends_failure_word_lands_on_one_kind
+        PASS [   0.010s] (6/8) farcooler-agent-core event::tests::a_gap_is_a_first_class_event_not_an_absence
+        PASS [   0.010s] (7/8) farcooler-agent-core event::tests::a_sequenced_event_carries_its_own_position
+        PASS [   0.010s] (8/8) farcooler-agent-core event::tests::a_clean_end_is_the_same_bytes_it_always_was
+────────────
+     Summary [   0.011s] 8 tests run: 8 passed, 0 skipped
