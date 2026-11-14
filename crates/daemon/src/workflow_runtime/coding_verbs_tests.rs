@@ -1149,6 +1149,51 @@ async fn interrupted_ci_later_green_finishes_on_the_pushed_sha() {
 }
 
 #[tokio::test]
+async fn enospc_during_cherry_pick_retries_the_fold_without_split_or_rework() {
+    use std::os::unix::fs::PermissionsExt;
+    struct RestoreGit;
+    impl Drop for RestoreGit {
+        fn drop(&mut self) { crate::git::PROGRAM.with(|p| *p.borrow_mut() = None); }
+    }
+    for staged in [false, true] {
+        let (dir, mut runtime) = lander("pass").await;
+        let definition = batched_push(&runtime, "any", 5000);
+        for item in ["ahead", "one", "two"] { at_join(&mut runtime, item, &definition).await; }
+        // Fail exactly one fold pick, either before it writes anything or after it
+        // stages the patch but before it can commit. Other Git calls remain real.
+        let wrapper = dir.path().join("git-enospc.py");
+        let marker = dir.path().join("enospc");
+        std::fs::write(&wrapper, format!(r#"#!/usr/bin/python3
+import os, pathlib, subprocess, sys
+args = sys.argv[1:]
+marker = pathlib.Path({marker:?})
+if 'cherry-pick' in args and '-x' in args and not marker.exists():
+    marker.write_text('injected')
+    if {staged}:
+        subprocess.check_call(['/usr/bin/git', *args[:-1], '--no-commit', args[-1]])
+    print('fatal: cannot write index: No space left on device', file=sys.stderr)
+    sys.exit(128)
+os.execv('/usr/bin/git', ['/usr/bin/git', *args])
+"#, marker = marker.to_str().unwrap(), staged = if staged { "True" } else { "False" })).unwrap();
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _restore = RestoreGit;
+        crate::git::PROGRAM.with(|p| *p.borrow_mut() = Some(wrapper.into_os_string()));
+        for item in ["ahead", "one", "two"] { command(&runtime, Command::Queue { item: item.into() }); }
+        let state = until(&mut runtime, |s| matches!(phase_of(s, "two"), Some(Phase::Done | Phase::Failed))).await;
+        assert!(marker.exists(), "the cherry-pick fault was exercised");
+        for item in ["ahead", "one", "two"] {
+            assert_eq!(phase_of(&state, item), Some(Phase::Done), "staged={staged}, {item}");
+        }
+        assert_eq!(outbox(&runtime, StageKind::Fold), 3, "two original groups and one fold retry, no Split");
+        assert_eq!(outbox(&runtime, StageKind::Build), 3, "no member was sent to rework");
+        let facts: Vec<_> = std::fs::read_dir(runtime.root.join("receipts")).unwrap()
+            .map(|e| e.unwrap().path()).filter(|p| p.to_string_lossy().ends_with(".verb.json"))
+            .map(|p| serde_json::from_slice::<serde_json::Value>(&std::fs::read(p).unwrap()).unwrap()).collect();
+        assert!(facts.iter().all(|f| f["label"] != "conflict"), "infrastructure writes no conflict fact");
+    }
+}
+
+#[tokio::test]
 async fn a_fold_tree_deleted_mid_gate_retries_the_gate_without_split() {
     let (dir, mut runtime) = lander("pass").await;
     let script = dir.path().join("adapter.py");

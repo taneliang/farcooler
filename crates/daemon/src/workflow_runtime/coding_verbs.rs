@@ -528,12 +528,14 @@ impl Exec {
             };
             let mut args = pick(&["cherry-pick", "-x"]); args.push(commit);
             if self.try_git(binding, tree, &args).await?.0 { continue; }
-            let unmerged = self.try_git(binding, tree, &["diff", "--name-only", "--diff-filter=U"]).await?.1;
+            let unmerged = self.git_recorded(binding, tree, &["diff", "--name-only", "--diff-filter=U"]).await?;
             let clean = self.try_git(binding, tree, &["diff", "--cached", "--quiet"]).await?.0
                 && self.try_git(binding, tree, &["diff", "--quiet"]).await?.0;
             if unmerged.trim().is_empty() && clean && self.try_git(binding, tree, &pick(&["cherry-pick", "--skip"])).await?.0 {
                 continue;
             }
+            // Only confirmed unmerged paths diagnose a member; infrastructure failures retry the fold.
+            if unmerged.trim().is_empty() { return Err(Error::Refused("fold cherry-pick failed without conflicts")); }
             self.git_recorded(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
             return Ok(Some(serde_json::json!({ "member": member.item, "commit": commit,
                 "files": unmerged.lines().collect::<Vec<_>>() })));

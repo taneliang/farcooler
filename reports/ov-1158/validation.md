@@ -43,3 +43,30 @@ git diff --check
 ```
 
 All builds use this worktree's own `target/`. Clearing the inherited workflow variables is necessary here: otherwise hook fixture subprocesses select the running task's private hook socket instead of their test sockets.
+
+## Fix round 1: cherry-pick infrastructure failures
+
+The review found that a failed cherry-pick with no unmerged files still wrote a
+`conflict` fact when it could not be skipped. That routed infrastructure failures
+through the definition's split or member rework path.
+
+The fold now requires a successful unmerged-path query and nonempty unmerged
+paths before recording a conflict. A failed pick with no conflict paths returns
+`SafeFailure` and uses the existing bounded fold retry.
+
+The regression injects ENOSPC at the Git process boundary, once before a pick
+writes anything and once after it stages changes but before committing. Before
+the fix, the test failed with the first ticket back at `WaitingJoin`. With the
+fix, both cases pass: three tickets finish, two original groups take three fold
+attempts total, no extra build runs, and no conflict fact is recorded.
+
+Round 1 verification: workspace clippy with warnings denied, file-size budget,
+and whitespace checks pass. The full affected test command passed the ENOSPC,
+genuine merge-conflict, deleted fold-tree, and interrupted-CI regressions. The
+daemon library suite reported 3,082 passed, 13 ignored, and one failure in
+`workflow_native_review_vanished_server_keeps_output_and_recorded_verdict`:
+the killed terminal was still `Uncertain` rather than `Failed`. That native
+terminal recovery test passed when rerun separately (1 passed, 0 failed).
+All other targets in the five-crate command passed, including doctests. The
+process/tmux leak wrapper reported no leaks. The full command exited 101 because
+of the single native terminal test failure above; it was not a clean full run.
