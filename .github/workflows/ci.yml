@@ -785,9 +785,12 @@ jobs:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
       - name: Check the runner has Xcode 27
+        id: toolchain
         run: |
           xcodebuild -version
           xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+          key="$( { xcodebuild -version; swift --version; xcrun --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)"
+          echo "cache-key=$key" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           # The build number is `git rev-list --count HEAD`, and the default
@@ -811,6 +814,22 @@ jobs:
             apps/macos/.build/checkouts
             apps/macos/.build/repositories
           key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
+
+      # Cache compilation, not just downloads (ov-1183). Each source's hash
+      # gates timestamp restoration; final links always use this tree's Rust.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            apps/macos/.build
+            apps/shared/AgentKit/.build
+            target/swift-build-cache.json
+          key: swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+      - name: Restore unchanged Swift input timestamps and force fresh links
+        run: |
+          python3 scripts/swift-build-cache.py self-test
+          python3 scripts/swift-build-cache.py restore
 
       # Go, for the tunnel archive `build-app.sh` links into `farcoolerd`.
       # This job runs the whole bundle assembly, which is the point of it —
@@ -846,8 +865,11 @@ jobs:
       # The full bundle, not `swift build`. `build-app.sh` is the thing that has
       # gone wrong before — it once copied a stale Rust binary instead of
       # building one — so the assembly step is what CI should exercise.
+      # CI validates compilation and assembly with Swift's debug build. The
+      # shipping workflows still call build-app.sh without arguments (release,
+      # including Swift whole-module optimization and Rust ThinLTO).
       - name: Build Far Cooler.app
-        run: apps/macos/build-app.sh
+        run: apps/macos/build-app.sh debug
 
       # The bundled daemon, actually run. `build-app.sh` links the tunnel
       # archive into `farcoolerd`, and until it did, every Mac release carried
@@ -925,6 +947,8 @@ jobs:
       # prompt unless the final app signature carries the camera entitlement.
       # Check every signing path, not only the local bundle assembled above.
       - run: ./scripts/macos-entitlements-test.sh "apps/macos/build/$APP_NAME.app"
+      - name: Record Swift input timestamps for the compilation cache
+        run: python3 scripts/swift-build-cache.py save
 
   # The AgentKit and Mac tests, beside `swift` (see the note above it). The Mac
   # tests need only the Rust cores, which `apps/macos/test.sh` builds for itself,
@@ -949,9 +973,12 @@ jobs:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
       - name: Check the runner has Xcode 27
+        id: toolchain
         run: |
           xcodebuild -version
           xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+          key="$( { xcodebuild -version; swift --version; xcrun --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)"
+          echo "cache-key=$key" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           # Whole history, as `swift` has it. Nothing in this job asks
@@ -973,6 +1000,22 @@ jobs:
             apps/macos/.build/checkouts
             apps/macos/.build/repositories
           key: swiftpm-${{ runner.os }}-${{ hashFiles('apps/macos/Package.resolved') }}
+
+      # Cache compilation, not just downloads (ov-1183). Each source's hash
+      # gates timestamp restoration; final links always use this tree's Rust.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            apps/macos/.build
+            apps/shared/AgentKit/.build
+            target/swift-build-cache.json
+          key: swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            swift-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.cache-key }}-${{ github.job }}-${{ hashFiles('apps/macos/Package.swift', 'apps/macos/Package.resolved', 'apps/shared/AgentKit/Package.swift') }}-
+      - name: Restore unchanged Swift input timestamps and force fresh links
+        run: |
+          python3 scripts/swift-build-cache.py self-test
+          python3 scripts/swift-build-cache.py restore
 
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
@@ -1046,6 +1089,16 @@ jobs:
         env:
           FARCOOLER_MAC_TEST_PROCESSES: "2"
         run: ./apps/macos/test.sh
+      - name: Record Swift input timestamps for the compilation cache
+        run: python3 scripts/swift-build-cache.py save
+      - name: Keep Mac test inventory and timing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-test-partitions-${{ github.run_attempt }}
+          path: target/macos-test-partitions-*
+          if-no-files-found: ignore
+          retention-days: 14
 
   ios:
     name: iOS

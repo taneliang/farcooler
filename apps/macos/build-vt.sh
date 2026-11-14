@@ -57,4 +57,6 @@ done
 # crates/client/include where it lives, so there is no copy of that one to go
 # stale — see Sources/CFarCoolerClient/module.modulemap.
 echo "==> Staging the header"
-cp "$ROOT/crates/vt/include/farcooler_vt.h" Sources/CFarCoolerVT/farcooler_vt.h
+# Preserve the input's timestamp so an unchanged staged header does not
+# invalidate cached Swift compilation on every build (ov-1183).
+cp -p "$ROOT/crates/vt/include/farcooler_vt.h" Sources/CFarCoolerVT/farcooler_vt.h

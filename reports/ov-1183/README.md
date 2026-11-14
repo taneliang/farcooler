@@ -22,9 +22,18 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
 
 ## Candidate
 
+- CI's bundle job uses the existing debug Swift configuration; shipping
+  workflows still call build-app.sh with its default release configuration.
+- Cache Swift compilation separately by complete Xcode/Swift/SDK identity,
+  architecture, job and package manifests, with a per-commit key and fallback.
+  Restore an input timestamp only when its SHA-256 matches; delete executable
+  products before the build so current Rust libraries always relink. Keep the
+  staged C header's source timestamp (`cp -p`); its bytes are unchanged.
 - Disable cross-crate ThinLTO only in the two CI Swift jobs. All sources,
   release optimizations, linked tunnel features and bundle checks still run.
   Canary/Release workflows, Cargo profiles and build-app.sh are unchanged.
+  build-vt.sh's only shipping change is preserving the copied header's metadata;
+  the same source header is still copied to the same destination.
 - Run the previously measured ov-1119 two-process partition on the same runner,
   after building all test bundles once. Discover every test, preserve complete
   suites, validate the CeremonyTests checked-in floor and the exact partition
@@ -41,6 +50,14 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
   build ordering, build failure propagation and filter refusal.
 - Partition integration self-test passed; a deliberately omitted test fails.
 - lane-gate self-test passed, including every full test command remaining wired.
+- Updated wrapper checks fail against the original sequential-only runner.
+- Completion guard, temp/defaults leak guard, change selection, file-size and
+  doc-comment checks passed. actionlint has no diagnostics beyond the baseline's
+  unknown xcode-27 label and SC2086 warnings in unrelated existing install steps.
+- Cache self-test passed for unchanged/changed sources and both SwiftPM layouts.
+  A real SwiftPM fixture under this worktree's target/ reused unchanged object
+  mtimes, relinked a changed native archive (answer 1 to 2), and rebuilt changed
+  Swift content even with its timestamp preserved (answer 2 to 3).
 
 ## Branch measurements
 

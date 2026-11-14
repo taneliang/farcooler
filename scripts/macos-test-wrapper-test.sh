@@ -37,6 +37,7 @@ exit 0
 STUB
 cat >"$scratch/bin/swift" <<'STUB'
 #!/bin/bash
+[ "${SWIFT_BUILD_FAIL:-}" = 1 ] && [ "$*" = 'build --build-tests' ] && exit 1
 case "${TMPDIR:-}" in /tmp/fcl-*/) tmp="(private tmp)" ;; *) tmp="" ;; esac
 echo "swift $* ${TMUX_TMPDIR:+(private tmux)} $tmp" >>"$LOG"
 echo "Test run with 2 tests in 1 suite passed after 1 second."
@@ -87,3 +88,10 @@ if FARCOOLER_MAC_TEST_PROCESSES=2 "$scratch/apps/macos/test.sh" --filter Ceremon
   fail "parallel mode silently ignored a filter"
 fi
 echo "ok: parallel mode builds once, runs the guarded complete inventory, and refuses filters"
+
+: >"$LOG"
+if FARCOOLER_MAC_TEST_PROCESSES=2 SWIFT_BUILD_FAIL=1 "$scratch/apps/macos/test.sh" >/dev/null 2>&1; then
+  fail "a failed test-bundle build still exited 0"
+fi
+if grep -q '^partitions' "$LOG"; then fail "partitions ran after test bundles failed to build"; fi
+echo "ok: parallel mode stops when its test bundles do not build"
