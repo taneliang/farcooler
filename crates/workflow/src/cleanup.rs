@@ -27,7 +27,13 @@ pub struct CleanupEffect {
     pub uncertain: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CleanupResult { pub bytes_freed: u64, pub skipped: Vec<String> }
+pub struct CleanupResult {
+    pub bytes_freed: u64,
+    pub skipped: Vec<String>,
+    /// A transient blocker prevented release; a later sweep may try again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retry: bool,
+}
 /// Select at the same accepted transition that releases build ownership, including crashes and ends.
 /// The intent survives an item leaving live state; a later sweep never has to guess its old policy.
 pub fn effects(before: &State, after: &State) -> Vec<CleanupEffect> {

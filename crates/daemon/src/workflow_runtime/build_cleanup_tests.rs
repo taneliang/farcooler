@@ -211,6 +211,15 @@ async fn build_cleanup_delayed_intent_cannot_delete_a_later_builds_output() {
     assert!(runtime.store.workflow_admit_effect(&claim, 3).unwrap());
     let evidence = Evidence { candidate: runtime.base.clone(), manifest: "manifest".into(), receipt: "receipt".into(), policy_pin: effect.policy_pin.clone() };
     assert!(runtime.observe("w", &effect, Outcome::Passed(evidence), false, 3).unwrap());
+    let handle = File::open(tree.join("target/deep/output")).unwrap();
+    runtime.exec.release_builds(&["w".into()]).await.unwrap();
+    assert!(runtime.store.workflow_cleanups("w").unwrap()[0].result.as_ref().unwrap().retry);
+    drop(handle);
+    runtime.active_trees.lock().unwrap().insert(tree.clone());
+    runtime.exec.release_builds(&["w".into()]).await.unwrap();
+    assert!(runtime.store.workflow_cleanups("w").unwrap()[0].result.as_ref().unwrap().retry);
+    assert!(tree.join("target/deep/output").exists());
+    runtime.active_trees.lock().unwrap().clear();
     controller_command(&runtime, "w", Command::SendBack { item: "one".into(), reason: "try again".into() });
     runtime.exec.release_builds(&["w".into()]).await.unwrap();
     assert!(tree.join("target/deep/output").exists());
@@ -322,9 +331,10 @@ async fn build_cleanup_second_run_cannot_claim_between_ownership_check_and_delet
 
 
 #[tokio::test]
-async fn build_cleanup_busy_claim_fence_records_skip() {
+async fn build_cleanup_busy_claim_fence_retries_ended_run() {
     let (_dir, runtime, tree, repository, effect) = named_cleanup().await;
     let lock = runtime.exec.host.as_ref().unwrap().lock(repository);
+    controller_command(&runtime, &effect.workspace, Command::Cancel { item: effect.item.clone(), reason: None });
     let held = lock.lock().await;
     runtime.exec.release_builds(std::slice::from_ref(&effect.workspace)).await.unwrap();
     assert!(tree.join("target/output").exists());
@@ -332,7 +342,9 @@ async fn build_cleanup_busy_claim_fence_records_skip() {
     assert!(result.skipped.iter().any(|s| s.contains("fence is busy")), "{result:?}");
     drop(held);
     runtime.exec.release_builds(std::slice::from_ref(&effect.workspace)).await.unwrap();
-    assert!(tree.join("target/output").exists(), "a settled skip must not retry later");
+    assert!(!tree.join("target").exists(), "ended runs must retry after the fence clears");
+    let records = runtime.store.workflow_cleanups(&effect.workspace).unwrap();
+    assert_eq!(records.iter().filter_map(|r| r.result.as_ref()).map(|r| r.bytes_freed).sum::<u64>(), 10);
 }
 
 #[tokio::test]
@@ -349,7 +361,7 @@ async fn build_cleanup_crash_after_deletion_does_not_replay_against_rebuilt_outp
     let crash = runtime.exec.release_builds_checked(&["w".into()], || Err(Error::Refused("simulated crash"))).await;
     assert!(crash.is_err());
     assert!(!tree.join("target").exists());
-    assert!(!runtime.store.workflow_cleanup_begin(&effect).unwrap(), "only one executor may begin");
+    assert!(!runtime.store.workflow_cleanup_begin(&effect, None).unwrap(), "only one executor may begin");
     let root = runtime.root.clone();
     drop(runtime);
     // A later owner repopulates the same path before recovery sees the old effect.
@@ -424,14 +436,31 @@ async fn build_cleanup_cancelled_group_retains_open_output_and_unlisted_files() 
     use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(None).await;
     let handle = File::open(tree.join("target/output")).unwrap();
+    std::fs::create_dir_all(tree.join("apps/android/app/build")).unwrap();
+    std::fs::write(tree.join("apps/android/app/build/binary"), b"gradle").unwrap();
     std::fs::write(tree.join("personal-notes"), b"keep").unwrap();
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
     runtime.pump(100).await.unwrap();
     assert_eq!(std::fs::read(tree.join("target/output")).unwrap(), b"group output");
     assert_eq!(std::fs::read(tree.join("personal-notes")).unwrap(), b"keep");
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
-    assert!(record.result.unwrap().skipped.iter().any(|s| s.contains("open files")));
+    let result = record.result.unwrap();
+    assert!(result.retry);
+    assert_eq!(result.bytes_freed, 6, "other folders are freed during contention");
+    assert!(result.skipped.iter().any(|s| s.contains("open files")));
     drop(handle);
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    assert!(!tree.join("target").exists(), "ended groups retry after recovery and file closure");
+    assert_eq!(std::fs::read(tree.join("personal-notes")).unwrap(), b"keep");
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
+    assert_eq!(record.result.as_ref().unwrap().bytes_freed, 18);
+    assert!(!record.result.as_ref().unwrap().retry);
+    runtime.pump(100).await.unwrap();
+    let again = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
+    assert_eq!(again.result, record.result, "settled bytes are counted once");
 }
 
 

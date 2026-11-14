@@ -46,11 +46,13 @@ impl Store {
             Ok(CleanupRecord { effect: serde_json::from_str(&effect)?, result: result.map(|s| serde_json::from_str(&s)).transpose()? })
         }).collect()
     }
-    /// Persist before any filesystem mutation. An interrupted attempt is never replayed against a
-    /// path a later build may have repopulated. Its byte count is unknown, so report a reason, not bytes.
-    pub fn workflow_cleanup_begin(&self, effect: &CleanupEffect) -> Result<bool> {
-        Ok(self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result IS NULL",
-            params![effect.workspace, effect.id, serde_json::to_string(&interrupted())?])? == 1)
+    /// Claim the observed pending or retryable result before filesystem mutation.
+    /// The compare-and-swap prevents concurrent or stale sweeps from repeating an attempt.
+    /// An interrupted attempt stays terminal: deletion may have started, so its byte count is unknown.
+    pub fn workflow_cleanup_begin(&self, effect: &CleanupEffect, previous: Option<&CleanupResult>) -> Result<bool> {
+        if previous.is_some_and(|r| !r.retry) { return Ok(false); }
+        Ok(self.conn().execute("UPDATE engine_build_cleanup SET result=?3 WHERE workspace=?1 AND id=?2 AND result IS ?4",
+            params![effect.workspace, effect.id, serde_json::to_string(&interrupted())?, previous.map(serde_json::to_string).transpose()?])? == 1)
     }
     /// Only the caller which successfully began this attempt may settle it. A later release has a new id.
     pub fn workflow_cleanup_result(&self, effect: &CleanupEffect, result: &CleanupResult) -> Result<()> {
@@ -61,5 +63,5 @@ impl Store {
 }
 
 fn interrupted() -> CleanupResult {
-    CleanupResult { bytes_freed: 0, skipped: vec!["cleanup attempt interrupted; bytes freed unknown; deletion will not be replayed".into()] }
+    CleanupResult { retry: false, bytes_freed: 0, skipped: vec!["cleanup attempt interrupted; bytes freed unknown; deletion will not be replayed".into()] }
 }
