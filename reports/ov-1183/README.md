@@ -34,7 +34,7 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
   watched index; otherwise the protocol build script's own git status dirties
   that input and causes a second native build. Keep the staged C header's source
   timestamp (`cp -p`); its bytes are unchanged.
-- Use Rust opt-level 1 without cross-crate ThinLTO in the CI bundle job.
+- Use Rust opt-level 0 without cross-crate ThinLTO in the CI bundle job.
   Build the test job's two FFI libraries and real CLI/daemon/filter together
   with `build-test-native.sh`: one dev graph and no symbols, retaining debug
   assertions, overflow checks and test-only hooks. FFI/support code is opt-level
@@ -143,7 +143,15 @@ unchanged. The guard self-test now uses a checked caffeinate stand-in, avoiding
 47 s of real display wake/hold calls while preserving the guard's assertions
 and checking the wake/hold wiring itself.
 
-Final cached repeat measurements pending. A temporary push trigger for this branch
+The revised CI-only optimization candidate (57d2e55ae),
+[43588280875](https://github.com/taneliang/farcooler/actions/runs/43588280875),
+passed both jobs under 15 minutes: app **454 s (7m34s)** and tests
+**594 s (9m54s)**. The app build step took 331 s (including populating the
+new opt-level-0 native dependency cache); native test preparation took 130 s,
+AgentKit 48 s and the guard self-test 29 s. Complete job/step evidence is in
+`run-43588280875.json`. This is the first qualifying branch run.
+
+The second branch measurement is pending. A temporary push trigger for this branch
 collects ordinary CI job measurements without opening a PR or adding runner
 jobs. Remove that trigger once two successful under-15-minute runs have been
 recorded.
