@@ -224,7 +224,16 @@ def self_test():
             assert (rc != 0) == omit, (base / "run.log").read_text()
             if omit:
                 assert "below the floor" in (out / "1.log").read_text()
-    print("ok: real shard guards accept the exact union and reject an omitted test")
+        floor.write_text("4\n")
+        with mock.patch(__name__ + ".FLOOR", floor), \
+                mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "\n".join(real))):
+            try:
+                experiment(argparse.Namespace(out=base / "below-floor", suite=None, processes=2))
+            except ValueError as error:
+                assert "below the floor" in str(error)
+            else:
+                raise AssertionError("a truncated discovered inventory was accepted")
+    print("ok: exact shard counts and the checked-in inventory floor reject missing tests")
 
 
 def main():
