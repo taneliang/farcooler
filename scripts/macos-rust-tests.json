@@ -1,0 +1,69 @@
+{
+  "packages": {
+    "farcooler-cli": "The CLI the Mac app invokes: launchd links, app updates, shell/PTY and subprocess behavior.",
+    "farcooler-client": "Native SSH, pipe/SIGPIPE, FFI and Keychain paths used by the Mac client.",
+    "farcooler-tmux": "Real tmux and Darwin PTY/socket behavior.",
+    "farcooler-transport": "Unix socket peer credentials, pipe and subprocess behavior.",
+    "farcooler-ceremony": "Native reachability and socket error mappings."
+  },
+  "modules": {
+    "farcooler-store": {
+      "engine_cutover": "Darwin proc_listpidspath, flock ownership and recovery."
+    },
+    "farcooler-daemon": {
+      "fs_watch": "FSEvents registration, delivery, shutdown and process incarnation.",
+      "log_watch": "FSEvents registration, delivery, shutdown and process incarnation.",
+      "transcript_tail": "FSEvents registration, delivery, shutdown and process incarnation.",
+      "session_watch": "FSEvents registration, delivery, shutdown and process incarnation.",
+      "session_projectors": "FSEvents registration, delivery, shutdown and process incarnation.",
+      "claude_registry": "FSEvents registration, delivery, shutdown and process incarnation.",
+      "code_identity": "Darwin process/signature and terminal identity APIs.",
+      "proc_table": "Darwin process/signature and terminal identity APIs.",
+      "proc_cwd": "Darwin process/signature and terminal identity APIs.",
+      "foreground": "Darwin process/signature and terminal identity APIs.",
+      "caller_seat": "Darwin process/signature and terminal identity APIs.",
+      "daemon_log": "Mac paths, notifications and platform-facing responses.",
+      "paths": "Mac paths, notifications and platform-facing responses.",
+      "push": "Mac paths, notifications and platform-facing responses.",
+      "rpc_agent_answer": "Mac paths, notifications and platform-facing responses.",
+      "git_sandbox": "Darwin sandbox and Keychain-aware git subprocess environment.",
+      "git_launch": "Darwin sandbox and Keychain-aware git subprocess environment.",
+      "service": "Native agent PTYs, launch/shell behavior, private paths and lifecycle.",
+      "workflow_runtime": "Native agent PTYs, launch/shell behavior, private paths and lifecycle."
+    },
+    "farcooler-core": {
+      "shell": "Darwin directory-service-backed passwd lookup used for the login shell.",
+      "programs": "Login shell discovery and process-group termination under launchd PATH.",
+      "local_time": "Darwin libc time_t/tm and localtime_r ABI.",
+      "scratch": "Native temporary-directory creation, permissions and cleanup."
+    }
+  },
+  "binaries": {
+    "farcooler-daemon": {
+      "a_forgotten_projector_lets_its_watch_go": "FSEvents through the running daemon.",
+      "agent_rows_over_every_transport": "FSEvents through the running daemon.",
+      "projector_setting": "FSEvents through the running daemon.",
+      "a_change_set_tells_the_truth_about_a_worktree": "FSEvents through the running daemon.",
+      "a_real_sshd_admits_a_passkey": "Real sshd/pipe/process behavior on Darwin.",
+      "a_real_sshd_forces_the_scope": "Real sshd/pipe/process behavior on Darwin.",
+      "a_real_sshd_master_outlives_a_revoke": "Real sshd/pipe/process behavior on Darwin.",
+      "passkey_keys_follow_the_sshd": "Real sshd/pipe/process behavior on Darwin.",
+      "a_forced_command_still_streams": "Real sshd/pipe/process behavior on Darwin.",
+      "stdio_transport": "Real sshd/pipe/process behavior on Darwin.",
+      "a_stdio_relay_ends_when_the_daemon_hangs_up": "Real sshd/pipe/process behavior on Darwin.",
+      "a_resized_pane_says_so": "Real PTYs/tmux, resize, foreground process and terminal behavior.",
+      "rpc_over_socket": "Real PTYs/tmux, resize, foreground process and terminal behavior.",
+      "agent_panes_over_the_socket": "Real PTYs/tmux, resize, foreground process and terminal behavior.",
+      "agent_stop_over_the_socket": "Real PTYs/tmux, resize, foreground process and terminal behavior.",
+      "a_running_agent_reaches_every_client": "Real PTYs/tmux, resize, foreground process and terminal behavior.",
+      "git_runs_nothing_a_repository_plants": "Darwin sandbox enforcement in real git processes.",
+      "lfs_content_under_the_git_sandbox": "Darwin sandbox enforcement in real git processes.",
+      "one_daemon_per_home": "Daemon startup, paths and log redirection.",
+      "the_daemon_keeps_its_log": "Daemon startup, paths and log redirection.",
+      "the_daemon_log_holds_stderr": "Daemon startup, paths and log redirection.",
+      "a_cutover_survives_every_crash": "Kernel ownership and crash/restart recovery on Darwin.",
+      "the_owners_orchestrator_runs_a_cutover": "Kernel ownership and crash/restart recovery on Darwin.",
+      "a_real_tunnel_carries_the_scope": "Mac-only linked tunnel; ignored/default-feature gating remains in force; tunnel-e2e.yml runs it."
+    }
+  }
+}

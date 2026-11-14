@@ -88,3 +88,19 @@ test-group = 'file-events'
 [[profile.default.overrides]]
 filter = 'package(farcooler-daemon) and binary(a_resized_pane_says_so)'
 threads-required = 'num-test-threads'
+
+# Runtime binaries used by daemon/CLI integration tests on archive consumers.
+[[profile.ci.archive.include]]
+path = "debug/farcooler"
+relative-to = "target"
+on-missing = "error"
+
+[[profile.ci.archive.include]]
+path = "debug/farcoolerd"
+relative-to = "target"
+on-missing = "error"
+
+[[profile.ci.archive.include]]
+path = "debug/farcooler-lfs-filter"
+relative-to = "target"
+on-missing = "error"

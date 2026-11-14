@@ -295,7 +295,7 @@ def lint_rust(root):
 
 
 WIRING = (
-    (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- .*cargo (test|nextest run( --profile \S+)?) --workspace"), "the Rust workspace test"),
+    (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- .*cargo (test|nextest run( --profile \S+)?) (?:--workspace|--no-fail-fast --archive-file)"), "the Rust workspace test"),
     (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit"), "the AgentKit test"),
     ("apps/macos/test.sh", re.compile(r"test-leak-check\.py -- .*swift test"), "the Mac tests"),
     # The nightly perf runs are `swift test` too (ov-724), each its own run.
