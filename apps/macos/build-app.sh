@@ -193,17 +193,23 @@ echo "==> Building the daemon with the tunnel linked (release)"
 # adds about 47 MB to the CLI; that is the price of a Mac that can dial.
 echo "==> Building the CLI with the tunnel linked (release)"
 (cd "$ROOT" && cargo rustc --release -p farcooler-cli --bin farcooler \
-  --features tailcat -- -L "$ROOT/dist/tailcat/$TAILCAT_TARGET" -l static=tailcat \
+  --features tailcat,farcooler-daemon/tailcat -- -L "$ROOT/dist/tailcat/$TAILCAT_TARGET" -l static=tailcat \
   -l framework=Security) || {
   echo "    the Rust build failed; refusing to bundle a stale binary"
   exit 1
 }
 
+# Keep the daemon library's feature identity across the CLI and LFS builds.
+# Its tailcat feature only enables farcooler-tailcat/linked; the CLI already
+# enables that dependency feature. No daemon production source uses cfg(tailcat).
+# Without the matching package feature, Cargo optimizes the same daemon library
+# again under a different hash (ov-1183). The filter uses no daemon/tunnel code.
+#
 # The Git LFS filter the daemon's own gits run (`crates/daemon/src/git_lfs.rs`).
 # The daemon looks for it beside itself; without it, a worktree of an LFS
 # repository holds pointer files. Plain `cargo build`: it links nothing of Go's.
 echo "==> Building the daemon's LFS filter (release)"
-(cd "$ROOT" && cargo build --release -p farcooler-daemon --bin farcooler-lfs-filter) || {
+(cd "$ROOT" && cargo build --release -p farcooler-daemon --bin farcooler-lfs-filter --features tailcat) || {
   echo "    the Rust build failed; refusing to bundle a stale binary"
   exit 1
 }

@@ -22,7 +22,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ov-1183-ci-swift-15]
     # The canary workflow's own baseline commit touches only this file. Without
     # this, its run supersedes and cancels the CI of the commit it records.
     paths-ignore: ['proto/baseline/canary.proto']
@@ -777,11 +777,6 @@ jobs:
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
     timeout-minutes: 35
-    # CI checks compilation and bundle assembly without LLVM optimization
-    # passes (ov-1183). Canary/Release keep opt-level=3 and ThinLTO.
-    env:
-      CARGO_PROFILE_RELEASE_LTO: "false"
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: "0"
     steps:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
@@ -869,11 +864,10 @@ jobs:
       # The full bundle, not `swift build`. `build-app.sh` is the thing that has
       # gone wrong before — it once copied a stale Rust binary instead of
       # building one — so the assembly step is what CI should exercise.
-      # CI validates compilation and assembly with Swift's debug build. The
-      # shipping workflows still call build-app.sh without arguments (release,
-      # including Swift whole-module optimization and Rust ThinLTO).
+      # Keep the shipping configuration: Swift release optimization and Rust
+      # opt-level 3 + ThinLTO, including the release-only conditional code.
       - name: Build Far Cooler.app
-        run: apps/macos/build-app.sh debug
+        run: apps/macos/build-app.sh
 
       # The bundled daemon, actually run. `build-app.sh` links the tunnel
       # archive into `farcoolerd`, and until it did, every Mac release carried
