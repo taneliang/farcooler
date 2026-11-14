@@ -74,7 +74,7 @@ impl Runtime {
             .map_err(|_| Error::Refused("workflow service already owned"))?;
         let (send,inbox) = mpsc::channel(32);
         Ok(Self { exec:Exec { activities: Default::default(), places: Default::default(), root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,seeding:Default::default(),active_trees:Default::default(),
-            #[cfg(test)] user_home:None },
+            #[cfg(test)] user_home:None, #[cfg(test)] build_free_bytes:Some(u64::MAX), #[cfg(test)] build_cache_cap:builder_resources::CACHE_CAP },
             notice_wake:None,configuration_locks:Default::default(),shutdown:None,
             instance:Uuid::now_v7(),
             last_occupancy:None,trees_recovered:false,cancel_refused:Default::default(),scheduling:Default::default(),inbox,send,next_lease:None,next_cleanup:None,continuous:false,

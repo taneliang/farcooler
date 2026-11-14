@@ -35,6 +35,7 @@ mod coding_pr;
 mod review_agent;
 mod fold_trees;
 mod spotlight;
+mod builder_resources;
 mod places;
 pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES};
 use places::{Placed, Places, Pool};
@@ -185,6 +186,10 @@ pub struct Exec {
     /// A test's stand-in for the runner user's home, where git and ssh read their own configuration (ov-1026).
     #[cfg(test)]
     pub(super) user_home: Option<PathBuf>,
+    #[cfg(test)]
+    pub(super) build_free_bytes: Option<u64>,
+    #[cfg(test)]
+    pub(super) build_cache_cap: u64,
 }
 impl Exec {
     fn places(&self) -> std::sync::MutexGuard<'_, Places> {
@@ -353,7 +358,7 @@ impl Runtime {
         let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { activities: Default::default(), places: Default::default(), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
-                seeding: Default::default(), active_trees: Default::default(), #[cfg(test)] user_home: None },
+                seeding: Default::default(), active_trees: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX), #[cfg(test)] build_cache_cap: builder_resources::CACHE_CAP },
             notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
@@ -616,6 +621,12 @@ impl Runtime {
                     count += 1;
                     // Not at the end of the sweep, which a long gate elsewhere may hold for hours.
                     self.exec.prune_trees(&workspaces, false).await;
+                    // Trim after Observe, when a step that just ended may have entered an idle approval/review
+                    // wait. Before Observe it still looks live and its own retained state protects its output.
+                    if self.root.join("builder-targets").is_dir() && matches!(effect.kind, EffectKind::Execute(StageKind::Build | StageKind::Check | StageKind::Run
+                        | StageKind::Review(_) | StageKind::Ci)) {
+                        if let Err(error) = self.exec.trim_builder_targets().await { tracing::warn!(%error, "could not trim builder cache"); }
+                    }
                     scan = scan || self.continuous;
                     if stopping { scan = false; }
                 }

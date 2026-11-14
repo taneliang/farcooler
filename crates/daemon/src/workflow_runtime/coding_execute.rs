@@ -14,6 +14,9 @@ struct ProcessFact {
     log_digest: String,
     #[serde(default)]
     log_path: Option<PathBuf>,
+    /// Old receipts predate the builder resource policy and must still reconcile after an upgrade.
+    #[serde(default)]
+    managed_build: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -23,7 +26,7 @@ struct GitSettlement { binding: Binding }
 /// HEAD before this attempt started: an adopted branch can already be ahead of the run's base.
 #[derive(Serialize, Deserialize)]
 struct BuildStart { binding: Binding, head: String }
-/// A Provision that failed before it made anything: its binding, and the sentence for the ticket.
+/// A Provision or Build that failed before it started: its binding, and the sentence for the ticket.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Unstarted { binding: Binding, why: String }
@@ -111,7 +114,8 @@ impl Exec {
         let effects = self.store.workflow_outbox(workspace)?;
         let Some(stored) = effects.iter().find(|s| &s.effect.id == pending) else { return Ok(false) };
         if stored.resource_generation.is_none() || stored.dispatch_state == "suppressed" { return Ok(true); }
-        Ok(self.effect_fact_path(&stored.effect).try_exists()?)
+        Ok(self.effect_fact_path(&stored.effect).try_exists()?
+            || self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&stored.effect))).try_exists()?)
     }
     pub(super) fn owner_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.owner.json", digest(&binding.effect)))
@@ -131,11 +135,11 @@ impl Exec {
     pub(super) fn process_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.output", digest(&binding.effect)))
     }
-    /// A Provision that failed before it made anything, and why (ov-1058 review 3).
+    /// A Provision or Build that failed before it started, and why (ov-1058 review 3).
     fn unstarted_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
-    fn refuse_provision(&self, binding: &Binding, why: String) -> Result<Outcome> {
+    fn refuse_unstarted(&self, binding: &Binding, why: String) -> Result<Outcome> {
         durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why: why.clone() })?)?;
         Ok(Outcome::SafeFailureBecause(why))
     }
@@ -143,7 +147,7 @@ impl Exec {
     fn settled_process(&self, binding: &Binding) -> Result<(ProcessFact, Vec<u8>)> {
         let raw = self.bytes(&self.fact_path(binding))?;
         let fact: ProcessFact = serde_json::from_slice(&raw)?;
-        let command = self.bound_command(binding, false)?;
+        let command = self.bound_command(binding, false, fact.managed_build)?;
         if fact.binding != *binding || fact.argv != command.argv || fact.environment != command.environment
             || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
             return Err(Error::Refused("configured process receipt mismatch"));
@@ -168,11 +172,11 @@ impl Exec {
         Ok(bytes)
     }
     pub(super) fn coding_command(&self, binding: &Binding) -> Result<CodingCommand> {
-        self.bound_command(binding, true)
+        self.bound_command(binding, true, true)
     }
     // Reconstruct immutable expected argv/environment without reading mutable
     // launch files. Only fresh execution validates those files.
-    fn bound_command(&self, binding: &Binding, launch: bool) -> Result<CodingCommand> {
+    fn bound_command(&self, binding: &Binding, launch: bool, managed_build: bool) -> Result<CodingCommand> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
         let operation = &binding.effect.operation;
         let EffectKind::Execute(kind) = &binding.effect.kind else { return Err(Error::Refused("not an execution")); };
@@ -247,6 +251,12 @@ impl Exec {
             _ => return Err(Error::Refused("not a process operation")),
         };
         self.pin_context(&mut command, binding, &binding.effect.candidate.clone().unwrap_or_default(), &self.provider_path(binding));
+        if managed_build && matches!(kind, StageKind::Build) {
+            // Inherited by the agent's compilers and test runners, including native PTY launches. Always nice:
+            // a gate that starts after this builder also gets priority, without privileged renice or PID discovery.
+            command.argv.splice(0..0, ["/usr/bin/nice".into(), "-n".into(), "10".into()]);
+            command.environment.insert("CARGO_TARGET_DIR".into(), self.builder_target(&self.tree(binding)).to_string_lossy().into_owned());
+        }
         Ok(command)
     }
     /// What a native agent is launched with: a build's published prompt, or the review brief for an agent's gate.
@@ -413,7 +423,7 @@ impl Exec {
         if let Some(ledger) = &ledger { named_tree::end_gate(ledger)?; }
         let exit = exit?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
-            environment: command.environment, exit, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
+            environment: command.environment, managed_build: true, exit, log_path: Some(log.clone()), log_digest: digest(&self.bytes(&log)?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
     }
     fn check_binding(&self, workspace: &str, binding: &Binding) -> Result<()> {
@@ -460,7 +470,8 @@ impl Exec {
                 return Err(Error::Refused("the parallel gate's process could not be ended"));
             }
         }
-        if self.is_native_agent(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
+        if self.is_native_agent(&original_binding) && !self.fact_path(&original_binding).try_exists()?
+            && !self.unstarted_path(&original_binding).try_exists()? {
             self.settle_interrupted_native(&original_binding, None).await?;
         }
         // Reconcile the original facts even if Cancel fenced its Observe or a
@@ -487,9 +498,9 @@ impl Exec {
     /// End a native agent whose turn was never settled, and write the process fact its settlement implies.
     async fn settle_interrupted_native(&self, binding: &Binding, completed: Option<bool>) -> Result<()> {
         let completed = self.cancel_interrupted_native(binding, completed).await?;
-        let command = self.bound_command(binding, false)?;
+        let command = self.bound_command(binding, false, true)?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
-            environment: command.environment, exit: completed.map(|passed| if passed { 0 } else { 1 }),
+            environment: command.environment, managed_build: true, exit: completed.map(|passed| if passed { 0 } else { 1 }),
             log_path: Some(self.process_log(binding)),
             log_digest: digest(&self.bytes(&self.process_log(binding))?) };
         durable(&self.fact_path(binding), &serde_json::to_vec(&fact)?)
@@ -508,14 +519,14 @@ impl Exec {
                 // A download that fails has made nothing: the step fails with the sentence, kept so a restart reads it.
                 let log = self.root.join("receipts").join(format!("{}.provision.fetch.output", digest(&binding.effect)));
                 if let Err(why) = self.ensure_start_objects(&binding.base, &log).await {
-                    return self.refuse_provision(binding, why);
+                    return self.refuse_unstarted(binding, why);
                 }
                 match &binding.effect.tree {
                 Some(named) => match self.provision_named(workspace, binding, named).await {
                     // A refusal said as a sentence comes before anything is made (an adopted tree with changes, or
                     // a pane still in it): the step fails with it, kept so a restart reads it (ov-1074).
                     Err(Error::Domain(refused)) => {
-                        return self.refuse_provision(binding, refused.to_string());
+                        return self.refuse_unstarted(binding, refused.to_string());
                     }
                     other => other?,
                 },
@@ -578,6 +589,15 @@ impl Exec {
                     }
                     Err(error) => return Err(error),
                 };
+                let build = matches!(kind, StageKind::Build);
+                let managed = build || std::fs::read_link(tree.join("target")).is_ok_and(|p| p == self.builder_target(&tree));
+                let _lease = if managed {
+                    let lease = self.prepare_builder_target(&tree).await?;
+                    if build && !self.build_has_space(&tree)? {
+                        return self.refuse_unstarted(binding, builder_resources::LOW_DISK.into());
+                    }
+                    Some(lease)
+                } else { None };
                 if let Some(check) = self.review_check(binding) {
                     // No cleanup while the reviewer reads: both see the same candidate. Both futures are
                     // drained even on failure, so neither writer survives the stage's result.
@@ -640,7 +660,7 @@ impl Exec {
             Err(error) => return Err(error),
         };
         let fact: ProcessFact = serde_json::from_slice(&raw)?;
-        let command = self.bound_command(binding, false)?;
+        let command = self.bound_command(binding, false, fact.managed_build)?;
         if fact.binding != *binding || fact.argv != command.argv || fact.environment != command.environment
             || fact.log_digest != digest(&self.bytes(&self.process_log(binding))?) {
             return Err(Error::Refused("configured process receipt mismatch"));
@@ -765,9 +785,9 @@ impl Exec {
         if super::coding_verbs::is_verb(kind) { return self.reconcile_verb(binding, kind).await; }
         if matches!(kind, StageKind::Run) { return self.reconcile_run(binding).await; }
         let mut facts = Vec::new();
-        if matches!(kind, StageKind::Provision) && !self.git_settlement(binding).try_exists()? && self.unstarted_path(binding).try_exists()? {
+        if matches!(kind, StageKind::Provision | StageKind::Build) && self.unstarted_path(binding).try_exists()? {
             let unstarted: Unstarted = serde_json::from_slice(&self.bytes(&self.unstarted_path(binding))?)?;
-            if unstarted.binding != *binding { return Err(Error::Refused("foreign Provision refusal")); }
+            if unstarted.binding != *binding { return Err(Error::Refused("foreign unstarted refusal")); }
             return Ok(Outcome::SafeFailureBecause(unstarted.why));
         }
         if matches!(kind, StageKind::Provision) && !self.git_settlement(binding).try_exists()? {
@@ -775,7 +795,7 @@ impl Exec {
                 // Older daemons refused this before touching the tree, but left no Unstarted receipt (ov-1122).
                 // Recover the exact refusal without running Provision, even when its Stop is already Uncertain.
                 if let Err(Error::Domain(refused)) = named_tree::check_base(binding, tree) {
-                    return self.refuse_provision(binding, refused.to_string());
+                    return self.refuse_unstarted(binding, refused.to_string());
                 }
             }
         }

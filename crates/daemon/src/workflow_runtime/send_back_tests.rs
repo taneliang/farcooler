@@ -57,8 +57,9 @@ async fn workflow_send_back_builds_again_in_the_same_tree_and_the_agent_is_told_
     let brief = Exec::briefed("implement the selected task", &binding.effect, binding.iteration);
     assert!(brief.contains("sent back to you") && brief.contains(reason), "{brief}");
     // The launch quotes the brief (twice, inside a login shell), so look for words the quoting leaves alone.
-    assert!(command.argv[2].contains("This ticket was sent back to you.") && command.argv[2].contains("result.txt must say what changed")
-        && command.argv[2].contains("修复它."), "the launch carries the brief: {}", command.argv[2]);
+    let launch = command.argv.last().unwrap();
+    assert!(launch.contains("This ticket was sent back to you.") && launch.contains("result.txt must say what changed")
+        && launch.contains("修复它."), "the launch carries the brief: {launch}");
     assert_eq!(runtime.coding_command(&binding).unwrap(), command);
     let item = &runtime.state("w").unwrap().unwrap().items["ov-7"];
     assert_eq!((item.sent_back.len(), item.sent_back[0].from.as_str(), item.sent_back[0].to.as_str()), (1, "check-0", "build"));

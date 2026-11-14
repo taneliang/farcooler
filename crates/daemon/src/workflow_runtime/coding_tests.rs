@@ -306,10 +306,11 @@ async fn workflow_coding_native_launch_pins_existing_hooks_without_installing_or
     runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
     let binding = admitted(&runtime).await;
     let command = runtime.coding_command(&binding).unwrap();
-    assert_eq!(&command.argv[..2], ["/bin/sh", "-c"]);
-    assert!(command.argv[2].contains("--settings"));
-    assert!(command.argv[2].contains("--model opus"));
-    assert!(command.argv[2].contains("implement the selected task"));
+    assert_eq!(&command.argv[..5], ["/usr/bin/nice", "-n", "10", "/bin/sh", "-c"]);
+    let launch = command.argv.last().unwrap();
+    assert!(launch.contains("--settings"));
+    assert!(launch.contains("--model opus"));
+    assert!(launch.contains("implement the selected task"));
     std::fs::write(&settings, b"changed hook settings").unwrap();
     assert!(config.definition().is_err());
     assert!(!runtime.root.join("repo").exists());
@@ -410,8 +411,9 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
     // built from the same item, so the harness is swapped after Start.)
     runtime.coding = Some(config);
     let command = runtime.coding_command(&binding).unwrap();
-    assert!(command.argv[2].contains("ticket ov-7"), "the prompt names the ticket: {}", command.argv[2]);
-    assert!(command.argv[2].contains("implement the selected task"), "and keeps the published prompt");
+    let launch = command.argv.last().unwrap();
+    assert!(launch.contains("ticket ov-7"), "the prompt names the ticket: {launch}");
+    assert!(launch.contains("implement the selected task"), "and keeps the published prompt");
     assert_eq!(command.environment["FARCOOLER_WORKFLOW_ITEM"], "ov-7");
     assert_eq!(command.environment["FARCOOLER_WORKSPACE"], "w");
     // A recovery rebuilds the same command.
@@ -477,8 +479,8 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
         project_hooks: Some(hooks), codex_hooks: None, plugin_dir: None, prompt: "implement the selected task".into(),
         process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
     runtime.coding = Some(native);
-    let codex = runtime.coding_command(&builds["ov-7"]).unwrap().argv[2].clone();
-    let claude = runtime.coding_command(&builds["ov-8"]).unwrap().argv[2].clone();
+    let codex = runtime.coding_command(&builds["ov-7"]).unwrap().argv.last().unwrap().clone();
+    let claude = runtime.coding_command(&builds["ov-8"]).unwrap().argv.last().unwrap().clone();
     assert!(codex.contains("codex") && codex.contains("--model gpt-5.5") && !codex.contains("sonnet"), "{codex}");
     assert!(claude.contains("claude") && claude.contains("--model opus") && !claude.contains("sonnet"), "{claude}");
     assert_eq!(runtime.native_agent(&builds["ov-7"]).unwrap(), farcooler_agent_hooks::Agent::Codex, "its turn is read from Codex's hooks");
@@ -540,12 +542,12 @@ async fn workflow_coding_codex_runs_on_the_runners_hooks_file_with_none_in_the_r
     runtime.install_codex_hooks(&binding, &tree).await.unwrap();
     assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), text);
     let command = runtime.coding_command(&binding).unwrap();
-    assert!(command.argv[2].contains("codex") && !command.argv[2].contains("--settings"), "{}", command.argv[2]);
+    assert!(command.argv.last().unwrap().contains("codex") && !command.argv.last().unwrap().contains("--settings"), "{}", command.argv.last().unwrap());
     let hook_override = runtime.codex_hook_override(&binding).unwrap().unwrap();
     let parsed: toml::Value = toml::from_str(&hook_override).unwrap();
     let pinned_value: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(serde_json::to_value(&parsed["hooks"]).unwrap(), pinned_value["hooks"]);
-    assert!(command.argv[2].contains("--config") && command.argv[2].contains("hooks="), "the native launch supplies pinned hooks without relying on project discovery");
+    assert!(command.argv.last().unwrap().contains("--config") && command.argv.last().unwrap().contains("hooks="), "the native launch supplies pinned hooks without relying on project discovery");
     assert!(runtime.tree_changes(&binding, &tree).await.unwrap().is_empty(), "the copy isn't the candidate's change");
     std::fs::write(tree.join(".codex/hooks.json"), "{}").unwrap();
     assert!(runtime.coding_command(&binding).is_err(), "a changed copy doesn't launch");
@@ -667,7 +669,7 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     let tree = runtime.tree(&binding);
     runtime.install_codex_hooks(&binding, &tree).await.unwrap();
     assert_eq!(std::fs::read_to_string(tree.join(".codex/hooks.json")).unwrap(), serde_json::to_string_pretty(&crate::hook_install::native_codex_hooks(&host)).unwrap());
-    let launch = runtime.coding_command(&binding).unwrap().argv[2].clone();
+    let launch = runtime.coding_command(&binding).unwrap().argv.last().unwrap().clone();
     assert!(launch.contains("codex") && launch.contains("--model gpt-6.1-sol"), "{launch}");
 }
 /// The bundle at `FARCOOLER_OV1087_BUNDLE`, read as `workspace set-workflow --file` reads it, with its JSON.
