@@ -777,10 +777,11 @@ jobs:
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
     timeout-minutes: 35
-    # Bundle/test validation keeps optimizations, but pays no cross-crate LTO
-    # link on every source edit (ov-1183). Canary and Release retain ThinLTO.
+    # CI checks optimized code and bundle assembly without shipping's costly
+    # opt-level=3 and ThinLTO passes (ov-1183). Canary/Release keep both.
     env:
       CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "1"
     steps:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
@@ -965,10 +966,13 @@ jobs:
     # 42662865971, cancelled at 35 two seconds after all 1970 Mac tests passed;
     # ov-1052). 45 leaves at least 25% over the slower of the two.
     timeout-minutes: 45
-    # Bundle/test validation keeps optimizations, but pays no cross-crate LTO
-    # link on every source edit (ov-1183). Canary and Release retain ThinLTO.
+    # CI checks optimized code and bundle assembly without shipping's costly
+    # opt-level=3 and ThinLTO passes (ov-1183). Canary/Release keep both.
     env:
       CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "1"
+      # No native debugger runs here; keep test assertions, omit Rust symbols.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       # The label promises Xcode 27. This makes the log say which one, and
       # stops the job if the image ever hands it a different major.
