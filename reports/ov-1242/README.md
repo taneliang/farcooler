@@ -74,3 +74,8 @@ which broke `gate-evidence-test.py`'s output assertion in this tool session. The
 - `./scripts/ci-job-time-check.py --self-test`: pass
 - `./scripts/actionlint.sh`: ok. The repo pins and patches actionlint for `concurrency.queue`;
   Homebrew's stock `actionlint` rejects that key on main too.
+
+## Fix round 1
+
+- The ticket carried no reviewer notes; main had moved by one commit (ov-1243, a docs-only bot-commit note), so the train was rebased onto it with `git rebase --no-autostash origin/main`. It applied cleanly: 94 commits, 0 merges, `origin/main` is an ancestor.
+- Re-ran on the rebased tree, all green: `ios-ui-shards.py --check`, `lane-gate.py --self-test`, `--dry-run`, gate-evidence, engine-gate, nightly-dispatch, ci-concurrency, `ci-job-time-check.py --self-test`, actionlint, and the partial gate (`--skip rust,swift-tests,swift,android,web`).
