@@ -57,6 +57,13 @@ The second ov-1139 commit applied cleanly.
   fixture selection and queue fixture rendering; the queue-only fixture clears
   the roster as well as the pipeline so it exercises the intended empty case.
 
+### Semantic conflict found by the Rust test build
+
+- `crates/client/src/session/workflow/tests/socket.rs`: the imported real-group
+  socket fixture used `GroupDef { limit: 8 }`, while the preview's definition
+  now uses `Option<u32>`. Changed it to `Some(8)` to retain the original bounded
+  group. The first test build failed with E0308 at this exact initializer.
+
 All remaining source commits applied cleanly. Clean merges retain the preview's
 execution observations and recovery commands, the external-close path, queue
 presentation, CLI/session enrichment, and CI rerun support.
@@ -65,3 +72,25 @@ presentation, CLI/session enrichment, and CI rerun support.
 
 Results will be recorded here after the affected gates finish. Builds use only
 this worktree's `target/`; no build artifacts are redirected to `/tmp`.
+
+Completed lightweight checks (November 14):
+
+| Gate | Exit | Result |
+| --- | --- | --- |
+| Web Plan unit tests, three affected files | 0 | 22 passed |
+| Web client TypeScript | 0 | No type errors |
+| Production web Plan renderer | 0 | Pipeline at 360/1440 px; queue at 320 px |
+| `scripts/copy-lint.py` | 0 | Passed |
+| `scripts/file-size-budget.py` | 0 | Passed |
+| `scripts/visual-tokens-lint.py` | 0 | Passed |
+| `scripts/swallow-lint.py` | 0 | Passed |
+| Doc-comment check against wave-a-preview | 0 | Passed |
+| `git diff --check` | 0 | Passed |
+| `scripts/shared-core-lint.py` | 1 | Four failures already present on wave-a-preview |
+
+The in-memory baseline comparison uses the same lint measurement and exclusions
+on the tracked preview files. Its four failures exactly match this branch's;
+there are zero new violations relative to the preview. See
+`shared-core-baseline-comparison.txt`. All four offending files are unchanged
+by this integration. Changing that unrelated copy or increasing the lint baseline
+would exceed this ticket's conflict-resolution-only scope.

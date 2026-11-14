@@ -77,7 +77,7 @@ async fn landing_group_reaches_the_plan_over_the_socket() {
             if index == 0 { stage.progression = Progression::AwaitApproval { principal: "owner".into() }; }
             stage
         }).collect();
-    definition.groups.insert("landing".into(), GroupDef { limit: 8, exclusive: "landing-main".into(), steps });
+    definition.groups.insert("landing".into(), GroupDef { limit: Some(8), exclusive: "landing-main".into(), steps });
     definition.validate().unwrap();
     let group_definition = definition.group_definition("landing").unwrap();
     group_definition.validate_group().unwrap();
