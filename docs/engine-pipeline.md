@@ -139,6 +139,7 @@ pub enum Location {
     Resting { column: String },                         // tracked, no run (today's ticket template)
     Queued { station: String },                         // in that station's queue
     Working { station: String, work: Work },            // holds a place; an effect may be out
+    Stopping { station: String, work: Work, then: Box<Location> }, // still holds the place and the tree (3.4)
     Awaiting { station: String, decider: String, run: String }, // an approval or a person's/orchestrator's review
     InLot { lot: String },                              // the lot's location is where it is
     Riding { lead: String },                            // a follower (ov-970)
@@ -293,15 +294,15 @@ again and decides again.
 |---|---|---|---|
 | Put a ticket first, or anywhere | `Reorder { station, ticket, position }` | Moves it within that station's queue | The station's queue change in the log; the ticket's visit notes it |
 | Change what goes first everywhere | `Prioritize { ticket, priority }` | Re-places it in its current queue; applies at every later station | Visit note |
-| Hold a ticket | `Hold { ticket, reason }` | Queued: leaves the queue. Working: its effect is stopped (fenced), its place freed. In a lot: as `Pull`. It keeps its tree and candidate | Visit ends `held`, reason |
+| Hold a ticket | `Hold { ticket, reason }` | Queued: leaves the queue. Working: it goes to `Stopping` with `then: Held` (3.4); its place and tree are freed only by the stop's receipt. In a lot: as `Pull`. It keeps its tree and candidate | Visit ends `held`, reason |
 | Release a ticket | `Release { ticket, to: Option<station> }` | Back into the queue of the station it was held at, or `to` | Visit, reason |
 | Pull from a queue or a forming lot | `Pull { ticket, reason }` | Leaves the lot; holds at the landing queue | Ticket visit and lot visit |
-| Pull from a running gate | `Pull { ticket, reason }` | The lot's running effect is stopped and fenced; the lot returns to fold without the ticket, keeping its id; the ticket holds | Both visits; the stopped run's receipt |
-| Send back, any number of times | `Send { ticket, to, reason }` | Moves it to any station before where it is, after any landing it has made (see 3.3); its brief is `reason`; it queues there by priority | Visit with `by`, reason, and `overrode` when a policy count was past its limit |
+| Pull from a running gate | `Pull { ticket, reason }` | The ticket leaves the lot and holds at once (the gate runs on the lot's tree, not the ticket's). The lot goes to `Stopping` with `then: Queued { land.fold }`; it keeps its id, its place, its tree and the landing target until the gate's stop receipt, and only then folds again without the ticket (3.4) | Both visits; the stop's receipt |
+| Send back, any number of times | `Send { ticket, to, reason }` | Moves it to any station before where it is, after any landing it has made (see 3.3); its brief is `reason`; it queues there by priority. If it is working, it goes through `Stopping` first (3.4) | Visit with `by`, reason, and `overrode` when a policy count was past its limit |
 | Run the step again | `Send { ticket, to: <its own station> }` | Today's `Retry`, without `MAX_RETRIES` | As above |
-| Skip a step | `Skip { ticket, station, reason }` | The ticket leaves the station as `skipped` and goes on along its `passed` route | Visit ends `skipped`, reason; see decision A for the gate in front of a push |
-| Stop the running step | `Stop { ticket or lot, reason }` | Emits the stop for the effect, fences it, and holds the token at the station, nothing else lost | Visit ends `stopped` |
-| Cancel a ticket | `Cancel { ticket, reason }` | Closes it (stopping its work first). Its key stays taken; `Reopen` brings it back under the same key | Archive entry with reason |
+| Skip a step | `Skip { ticket, station, reason }` | The ticket leaves the station as `skipped` and goes on along its `passed` route, through `Stopping` if it is working (3.4) | Visit ends `skipped`, reason; see decision A for the gate in front of a push |
+| Stop the running step | `Stop { ticket or lot, reason }` | `Stopping` with `then: Held` at the same station (3.4), nothing else lost | Visit ends `stopped` |
+| Cancel a ticket | `Cancel { ticket, reason }` | `Stopping` with `then: Closed` if it is working, so it closes only on the stop's receipt, as today. Its key stays taken; `Reopen` brings it back under the same key | Archive entry with reason |
 | Change capacity | `SetCapacity { station or pool, capacity, reason }` | Takes effect at the next start; nothing running is stopped | Station change in the log |
 | Pause a station | `HoldStation { station, reason }` / `ResumeStation` | Starts nothing new; what runs finishes; its queue keeps its order | Station change |
 | Drain a station | `Drain { station, reason }` | Finishes what it holds; arrivals queue in front of it but are not started; ends when empty | Station change |
@@ -320,7 +321,7 @@ of them go:
 | `SendBack` past a step's back-edge limit → `SendBackRefused` | `reducer.rs:416-419` | Same |
 | A review's rework past `max_reworks` or `limit` → `Limit` | `reducer.rs:114-115`, `700-705` | Same |
 | A routed back edge past its limit → the run fails | `reducer.rs:757-758` | Hold `PolicyLimit`, not `Failed` |
-| `SendBack` while a step runs → `Phase` | `reducer.rs:403-406` | `Send` stops and fences the running effect first |
+| `SendBack` while a step runs → `Phase` | `reducer.rs:403-406` | Accepted: `Send` puts the ticket in `Stopping` and its new station waits for the stop's receipt (3.4) |
 | `SendBack` that can't start the build at once → `SendBackRefused` | `reducer.rs:528-539` | It queues at build; the queue says why it waits |
 | `Leave` from a group that has left → `Phase` | `reducer.rs:573` | `Pull` from any lot that has not pushed |
 | `Cancel` of a follower → `Phase` | `reducer.rs:266` | `Cancel` on a follower ends its ride and closes it alone |
@@ -333,6 +334,10 @@ What can still refuse, and why each is not a ticket limit:
 - `Stale`, `Duplicate`: the ticket moved, or the input was seen.
 - `Invalid`, `Missing`, `Evidence`, `Definition`: malformed input.
 - `Landed`: the hard landing rules in 3.3.
+- `Stopping`: a `Release`, `Resolve` or `Skip` that would start work on a
+  tree or lot whose last effect has not proved it stopped (3.3 rule 4, 3.4).
+  This is a safety rule about the tree, not a count; the command is accepted
+  as soon as the stop's receipt is in.
 - `PersonOnly`: publishing, settling a lost push, and (decision A) skipping
   the gate in front of a push.
 
@@ -348,16 +353,82 @@ These are what keeps the engine safe, and stay rules, not policy:
 2. A push only sends a candidate a gate passed on the same base (today's
    route check, `definition.rs:341-358`), unless decision A says otherwise.
 3. Every effect's answer is bound to its run and fence (`reducer.rs:126-142`).
+4. No new work starts on a tree, a lot or the landing target until the last
+   effect that used it has a stopped or settled receipt. A fence only refuses
+   a late answer; it does not prove the process stopped touching the tree.
+   Section 3.4 is how this rule is kept.
+
+### 3.4 Stopping safely before anything replaces it
+
+Every intervention that takes a working ticket or lot off its station (`Hold`,
+`Pull` from a running lot, `Send`, `Skip`, `Stop`, `Cancel`) makes the same
+transition, in the one event that records the command:
+
+1. **Into `Stopping`.** The token's location becomes
+   `Stopping { station, work, then }`. `work` is the running `Work` unchanged
+   except that `work.stopping` names the original effect and `work.run`
+   becomes a `stop:` run, as `Cancel` does today (`reducer.rs:280-286`).
+   `then` is where the command sends it: `Held`, `Queued { station }` for a
+   `Send` or a `Pull`'s refold, the `passed` route for a `Skip`, or `Closed`.
+   The fence is bumped, so a late answer from the original is refused.
+2. **What it keeps.** The original effect's binding (its id, run, resource
+   generation and base) and everything it owns stay held:
+   - the token still counts in its station's `working` set and in its pool,
+     so no replacement starts in its place over capacity;
+   - the tree or landing resource stays owned. Today that is
+     `owns_resource` (`reducer.rs:558-561`), true for `Cancelling`, which
+     keeps the `workflow_resources` row (`workflow_effects.rs:19-40`); the
+     pipeline's `owns_resource` is true for `Stopping` for the same reason;
+   - the original outbox row stays as it is: an admitted original turns
+     `uncertain` when it goes inactive (`store/src/workflow.rs:346-351`), and
+     recovery reconciles it as today.
+3. **The stop.** It emits `EffectKind::Stop { operation }` and nothing else.
+   The runtime keeps both of today's protections unchanged: a stop is not
+   claimed while the effect it stops is still running in this runtime
+   (`workflow_runtime.rs:620-624`), and `stop_coding`
+   (`coding_execute.rs:389-425`) only answers `Stopped` with a quiescence
+   receipt: a settled provision, a reconciled original, or a settled process
+   for a process stage. An unknown push or landing acceptance is refused, and
+   the stop answers `Uncertain`.
+4. **The destination waits.** A `then: Queued { station }` puts the token in
+   that station's queue at its place by priority, marked `stopping`, so the
+   board shows where it will go and in what order. The station skips it when
+   choosing what to start. Nothing launches on its tree, its lot or the
+   landing target, and a `Release`, `Resolve` or `Skip` that would is refused
+   `Stopping`.
+5. **Out of `Stopping`.** Only `Observe` of the stop effect with
+   `Outcome::Stopped { operation, receipt }` whose operation equals
+   `work.stopping` and whose receipt is valid (the check of
+   `reducer.rs:184-192`) moves the token to `then`, in the same event that
+   frees its place and its resources. The station may then start the next
+   ticket, which may be this one.
+6. **An ambiguous stop holds.** If the stop answers `Uncertain` (or its own
+   admission is lost), the token goes to `Held { Uncertain }` with the
+   binding, the place and the resources still held, and `then` kept in the
+   hold. Only `Resolve` with a stopped or settled receipt for the original
+   (and `Settle` by a person for a lost push, as today) releases it; then
+   `then` applies. No policy and no `Release` can skip this.
+
+**A crash at any point.** The command, the move to `Stopping` and the stop
+effect commit in one transaction, with the outbox rows
+(`store/src/workflow.rs:296-344`). A crash before it leaves the token working
+as it was. A crash after it leaves `Stopping` in the state and the stop in the
+outbox; on restart, recovery reconciles admitted and uncertain effects first
+(`workflow_runtime.rs:590-619`), then claims the stop, and `stop_coding`
+reconciles the original from its receipts and journal, which is idempotent.
+A stop that was admitted before the crash is reconciled the same way. Either
+way the destination is reached only by the stop's receipt, or held. Nothing
+in this path relies on the fence alone.
 
 ## 4. What must stay true
 
 | Guarantee | Today | In the pipeline |
 |---|---|---|
 | **Pure reducer** | `step(&State, &Input) -> Result<Transition, Refusal>` (`reducer.rs:4`); no clocks or I/O (`lib.rs:1-2`) | `step(&Pipeline, &Input) -> Result<Transition, Refusal>`, same rules. Capacity and order decisions move into it, so it decides more, still purely |
-| **Event log and replay** | Each accepted input appended to `workflow_events`, immutable by trigger (`store/src/workflow.rs:176-180`, `198-201`); state replays from it | Same table, same immutability. The cutover's first event per workspace is a `Genesis` input carrying the migrated pipeline's digest (section 5), so replay from that point is exact and the old log stays readable as history |
+| **Event log and replay** | Each accepted input appended to `workflow_events`, immutable by trigger (`store/src/workflow.rs:176-180`, `198-201`); state replays from it | Same table, same immutability. The cutover writes one immutable schema-3 snapshot per workspace and a `Genesis` event bound to it (5.2). Replay starts from that snapshot and folds every later event through the new `step`; it needs neither the old reducer nor `workflow_states`. The old log stays as read-only history |
 | **Idempotence and order** | `seen`, `source_sequences`, `expected_revision`, `epoch` (`reducer.rs:12-16`) | Unchanged |
-| **Fencing of effects** | Item `fence` and `run` in each effect; `Grant::Operation { effect, run, fence }` (`state.rs:175-179`); outbox claim and admit with resource generations (`workflow_runtime.rs:633-680`) | Fence per ticket and per lot. Every move of a token (send, pull, hold, stop, skip, cancel) bumps its fence, so a late answer from the station it left is refused `Stale`. Outbox, claim, admit and resource generations unchanged |
-| **Crash recovery** | Admitted or uncertain effects reconciled from receipts and the journal before anything new starts (`workflow_runtime.rs:590-620`, `coding_execute.rs:601`); `Uncertain` waits for a `Resolve` | Unchanged. An uncertain effect holds its token (`HoldKind::Uncertain`), never released by a policy |
+| **Fencing of effects** | Item `fence` and `run` in each effect; `Grant::Operation { effect, run, fence }` (`state.rs:175-179`); outbox claim and admit with resource generations (`workflow_runtime.rs:633-680`) | Fence per ticket and per lot. Every move of a token (send, pull, hold, stop, skip, cancel) bumps its fence, so a late answer from the station it left is refused `Stale`. The fence is not the proof of stopping: a working token moves through `Stopping`, which keeps its binding, place and resources until a stop receipt (3.4). Outbox, claim, admit and resource generations unchanged |
+| **Crash recovery** | Admitted or uncertain effects reconciled from receipts and the journal before anything new starts (`workflow_runtime.rs:590-620`, `coding_execute.rs:601`); `Uncertain` waits for a `Resolve` | Unchanged, including across a crash between an intervention and its stop (3.4). An uncertain effect holds its token (`HoldKind::Uncertain`), never released by a policy |
 | **Publishing needs a person** | `person_only` (`admission.rs:30`); the orchestrator only proposes (`workflow_commands.rs:51`) | Unchanged. Changing a station's policy or layout is a publish. `SetCapacity`, `Reorder`, holds and drains are operations on the running pipeline, not its process, and stay the orchestrator's |
 | **Who decides a gate** | Approval and review deciders (`definition.rs:134-147`) | Unchanged, per station |
 
@@ -385,27 +456,40 @@ the old reducer. Each step below lands on its own and leaves main working.
    policies, moves) and the four template layouts. Tested alone, including
    every walkthrough in section 6 as a reducer test. Nothing in the daemon
    uses it.
-2. **`migrate(&State, &[Input]) -> Pipeline`, pure, with a refusal list.**
-   Uses the old log for what the old state doesn't hold (the revision each
-   blocked item became ready, which orders its queue). Tested against
-   fixtures for every phase, and against copies of the live store through the
-   existing cutover rehearsal (`crates/store/src/engine_cutover/rehearsal.rs`):
-   every live item must map, and the projection (where each ticket is, its
-   candidate, tree, followers, and every pending effect's id, run and fence)
-   must be equal before and after.
+2. **`migrate`, pure, with a refusal list.**
+   `migrate(&State, &[Input], &[Dispatch], &Occupancy) -> Result<Pipeline, Vec<Quarantine>>`.
+   It reads the old state, the old log for what the state doesn't hold (the
+   revision each blocked item became ready, which orders its queue), each
+   pending effect's dispatch status from the outbox, and what every other
+   workspace holds of each host-wide pool (5.1). `Dispatch` is a plain
+   value in the workflow crate, filled by the store from
+   `workflow_outbox.dispatch_state` (`store/src/workflow.rs:187-188`), so
+   `migrate` stays pure. This step also adds the snapshot table of 5.2,
+   unused. Tested against fixtures for every phase and every dispatch
+   status, and against copies of the live store through the existing
+   cutover rehearsal (`crates/store/src/engine_cutover/rehearsal.rs`) with
+   the cases of 5.3: every live item must map, and the projection (where
+   each ticket is, its candidate, tree, followers, and each admitted
+   effect's id, run and fence) must be equal before and after.
 3. **The cutover.** In one landing:
    - the runtime calls the pipeline's `step`; the places module goes, as the
      reducer now decides what starts (`places.rs`, `launch_ready`'s pool
-     check at `workflow_runtime.rs:625-632`);
+     check at `workflow_runtime.rs:625-632`). Section 5.1 is why that is safe
+     for work already in flight;
    - wire actions: the new commands from 3.1, each naming a ticket and its
      expected station; `run` and `pin` leave the wire;
-   - at startup, before any effect is claimed, the store migrates every
-     workspace in one immediate transaction under a new cutover incarnation
-     (`engine_allowed`, `engine_cutover.rs:119`), writes each `Genesis`
-     event, and stores schema 3 state. Anything that can't be mapped is held
-     `Quarantined` with the reason, never dropped (the pattern of
-     `engine_cutover.rs:248-306`);
-   - the old reducer, `Item`, `Phase` and the group machinery are deleted;
+   - at startup, after the old runtime is quiesced (`engine_quiesce`,
+     `engine_cutover.rs:403-417`) and before any effect is claimed, the store
+     migrates every workspace in one immediate transaction under a new
+     cutover incarnation (`engine_allowed`, `engine_cutover.rs:119`): it
+     writes each workspace's snapshot and `Genesis` event (5.2), updates the
+     outbox rows of work that never started (5.1), and stores schema 3 state.
+     Anything that can't be mapped is held `Quarantined` with the reason,
+     never dropped (the pattern of `engine_cutover.rs:248-306`). The same
+     transaction then replays every workspace from its snapshot (5.2) and
+     commits only if each replay equals the state it is about to store;
+   - the old reducer, `Item`, `Phase` and the group machinery are deleted.
+     Nothing after the cutover needs them: replay starts from the snapshot;
    - `workflow get` keeps the fields today's apps read, projected from the
      pipeline, so an app a release behind still draws the board.
 4. **Apps and the orchestrator skill.** The Mac, iOS and web boards draw
@@ -425,6 +509,59 @@ station ids, and a group's steps become the landing stations, prefixed
 `land.` (`land.base`, `land.fold`, `land.gate-0`, `land.push`, `land.ci`). An
 item on an older pin whose step id has no station is held `Quarantined`.
 
+**`Running` is not one thing.** The old reducer puts an item in `Running`
+with a pending effect whether or not the runtime ever started it: on Nov 14
+twelve builds were `Running` while four places existed, and the runtime only
+skipped the other eight on each scan (`workflow_runtime.rs:625-632`). So
+`migrate` splits `Running` (and a group item's running step) by the outbox
+row of its pending effect, never by phase alone:
+
+| Pending effect's `dispatch_state` | What it means | Token after | Its outbox row |
+|---|---|---|---|
+| `admitted` | It may be running or have run outside: admission is the boundary after which nothing re-executes it (`workflow_effects.rs:115-117`) | `Working` with the same `run`, `pending`, `fence`; counts in its station's `working` and its pool | Unchanged; reconciled by recovery as today (`workflow_runtime.rs:592-619`) |
+| `uncertain` | Same, with its answer lost | `Working { uncertain }`, `Held { Uncertain }`; counts in `working` and its pool | Unchanged; waits for `Resolve` |
+| `pending` | Emitted, never claimed. No external operation | `Queued` at its station, without `Work` | `suppressed`, in the cutover transaction |
+| `claimed` | A runtime held a lease but did not admit it. No external operation: the runtime admits before any adapter call (`workflow_runtime.rs:652-671`), and the old runtime's claim can't be admitted under the new incarnation (`workflow_effects.rs:120`) | `Queued` at its station, without `Work` | `suppressed` |
+| `settled`, `suppressed`, or no row | The state and the outbox disagree | `Held { Quarantined }`, with both recorded | Unchanged |
+
+How the preserved and the queued effects meet the queue:
+
+- **Admitted work keeps its identity and its place.** Its effect keeps its
+  id, run, fence and resource generation, so its receipt, journal and
+  `Observe` still bind (`store/src/workflow.rs:271-280` requires `admitted` for an
+  `Observe`). It is in `working`, never in a queue. It frees its place only
+  when its answer is observed, exactly as today.
+- **Work that never started loses its effect id, not its turn.** Its token
+  gets `fence + 1`, and the old row is `suppressed`, so no runtime can claim
+  it (`workflow_effects.rs:98-103` claims only `pending` or an expired
+  `claimed`) and no `Observe` of it is accepted. When the station reaches it,
+  the reducer emits a new effect with a new id under the new fence. One
+  ticket, one live effect: no duplicate can run.
+- **Queue order is the order today's runtime would have started them.**
+  Queued tickets are placed by priority (all 0 at cutover), then by the
+  `(revision, id)` of the suppressed effect, which is the outbox order the
+  old runtime launched in (`store/src/workflow.rs:162`). Tickets that were
+  `Blocked` take the revision they became blocked. The orchestrator can
+  reorder from the first command after the cutover.
+- **Nothing starts at `Genesis`.** The `Genesis` event emits no effects, so
+  the cutover itself never launches work. The first start happens on the
+  next input, under the capacity rules below.
+
+**Capacity across the cutover.** Each station's and pool's capacity is
+set at `Genesis` from the runtime's configured caps at that moment
+(`places.rs`, `set_effect_cap` at `workflow_runtime.rs:334`), recorded in the
+snapshot. Occupancy is computed in the same transaction for every workspace
+at once: each workspace's admitted and uncertain effects are its own
+`working`, and what the others hold of a host-wide pool is stamped into its
+`Genesis` and every later input as `busy_resources` is today
+(`state.rs:192-194`). Starts are reducer decisions under the store's
+immediate transaction, so two workspaces can't both take the last place. If
+admitted work already exceeds a cap (a cap lowered just before the cutover),
+all of it stays `Working`: the cutover never stops admitted work, and the
+station starts nothing until it is back under the cap.
+
+Other phases:
+
 | Item today | Ticket after |
 |---|---|
 | Tracker ticket (`Definition::is_ticket`), `WaitingApproval` | `Resting { column }` |
@@ -432,18 +569,98 @@ item on an older pin whose step id has no station is held `Quarantined`.
 | `Blocked` | `Queued` at its step's station, ordered by priority (0), then the revision it became blocked, read from the log |
 | `WaitingApproval` on a run | `Awaiting { decider }` at that station |
 | `WaitingReview` | `Awaiting { decider }` at the review station |
-| `Running`, `Cancelling` | `Working` with the same `run`, `pending`, `stopping`, `fence`, so the outbox effect and its receipt still match |
+| `Running` | By dispatch status, above |
+| `Cancelling` | `Stopping` (3.4) with `then: Closed`, the same `run`, `stopping` and `fence`; the original keeps its place and resources. Its stop effect keeps its id whatever its dispatch status: a stop takes no place and must still go out |
 | `Uncertain` | `Working { uncertain }`, held `Uncertain`, waiting for `Resolve` as today |
 | `Failed` | `Held { StepFailed }` with `failure` as the reason |
 | `WaitingJoin` | `Queued` at the landing queue |
 | `Joined` | `InLot` of the lot its group became |
-| Group item | `Lot` with the same id, tickets, candidate, `pushed`, at its step's landing station, same fence and pending effect |
+| Group item | `Lot` with the same id, tickets, candidate, `pushed`, at its step's landing station, same fence; its pending effect split by dispatch status as above. A lot queued for the landing pool is queued in that order |
 | `Done`, `Cancelled` in live state | Archived, as the next step would have done (`reducer.rs:455-465`) |
 
 Counters (`back_edges`, `sent_back`, `rework_history`, `retries`,
 `ci_reruns`) become visits, so policy counts continue from where they were.
-The pending effect of every token keeps its id, run and fence, so an effect
-running across the restart is reconciled as today, against the new state.
+
+### 5.2 Replay across the cutover
+
+A digest can check a state but can't rebuild one, and the old reducer is
+deleted at the cutover. So the cutover stores the migrated state itself, in
+a place nothing can change:
+
+- **The snapshot.** A new table,
+  `workflow_genesis(workspace PRIMARY KEY, revision, epoch, schema, snapshot, snapshot_hash, legacy_through, legacy_chain, migrator)`,
+  with the no-update and no-delete triggers `workflow_events` has
+  (`store/src/workflow.rs:198-201`). `snapshot` is the whole schema-3
+  `Pipeline` JSON inline (a few hundred KB at most under `MAX_ITEMS`), so
+  its retention is the event log's: kept for as long as the store is.
+  `legacy_through` is the last old revision; `legacy_chain` is a running
+  digest of every old event row `(revision, id, payload_hash)` up to it;
+  `migrator` names the code version that wrote it.
+- **The `Genesis` event.** The first new event in `workflow_events`, at
+  `legacy_through + 1`. Its payload carries `snapshot_hash`,
+  `legacy_through`, `legacy_chain` and the stamped occupancy and caps, so the
+  event and the snapshot each vouch for the other.
+- **Replay.** `Pipeline::replay(&Genesis, &[Input])` is the only replay
+  there is. It loads the `workflow_genesis` row, checks its `snapshot_hash`
+  against the bytes and against the `Genesis` event, parses and validates the
+  snapshot as schema 3, then folds every event after `Genesis` through the
+  new `step`. It reads nothing else: not `workflow_states`, not the old
+  reducer, not the outbox.
+- **The old segment.** Events at or below `legacy_through` are never
+  replayed again. They stay in the same immutable table as history, and
+  `legacy_chain` proves the snapshot was cut from exactly that log. While
+  the old reducer still exists (step 2), the rehearsal proves
+  `migrate(replay_old(old_log)) == snapshot`; after step 3 that equation
+  has been checked once, at the cutover, and the snapshot is the base.
+- **A store from before the cutover** still holds only old events and no
+  genesis row. The new daemon refuses to run on it without the cutover; it
+  never tries to read old events as new ones.
+
+**Replay-from-empty validation**, a test in step 2 and a check in step 3:
+
+1. Build a store with an old log covering every phase, a lot mid-gate, a
+   `Cancelling` ticket and the twelve-build case of 5.3.
+2. Run the cutover.
+3. Apply new inputs after it: an `Observe` of an admitted effect, a
+   `Prioritize`, a `Pull` from the running lot and its stop receipt.
+4. Open a fresh store connection, delete every `workflow_states` row, and
+   build with the `pipeline` module only (the test target does not link the
+   old reducer).
+5. `Pipeline::replay` from each genesis row plus the events after it must
+   equal, byte for byte, the state the live run stored, and its emitted
+   effects must equal the outbox rows written after `Genesis`.
+
+The same comparison runs inside the cutover transaction (step 3) and is
+available afterwards as a new `farcooler workflow verify`, which replays every
+workspace and reports any difference without changing anything.
+
+### 5.3 Cutover rehearsal: twelve builds, four places
+
+The case from 6.1, run in the rehearsal on a fixture and on a copy of the
+live store:
+
+- **Before.** One workspace, build cap 4. Twelve tickets `Running` at
+  build. Four effects `admitted` (A1-A4), eight `pending` (P1-P8) at outbox
+  revisions in that order. P6 and P7 are speed tickets. A second workspace
+  holds one admitted build on the same host pool, host ceiling 5.
+- **Cutover.** Then assert:
+  1. Build `working` is exactly A1-A4, each with its original effect id,
+     run, fence and resource generation; the outbox rows of A1-A4 are still
+     `admitted`.
+  2. The build queue is P1-P8 in outbox order. Their eight old outbox rows
+     are `suppressed`; a claim on any of them returns nothing, and an
+     `Observe` of any of them is refused.
+  3. `Genesis` emitted no effect. The host pool counts 5 of 5 busy (A1-A4
+     plus the other workspace's one), so nothing can start.
+- **After.** `Prioritize { P6, 10 }`, `Prioritize { P7, 10 }`, then
+  `Observe` A2 passed. Assert exactly one new build effect, for P6, with a
+  new id and fence `old + 1`, and that the queue is P7, P1-P5, P8. Then the
+  other workspace's build ends: P7 starts, and nothing else.
+- **Crash.** Kill the process inside the cutover transaction: the store is
+  exactly the old store, still under the old incarnation. Kill it after
+  commit, before any claim: on restart, A1-A4 are reconciled first and no
+  P effect exists to run.
+- **Replay.** The replay-from-empty check of 5.2 holds at each point above.
 
 ## 6. The Nov 14-15 failures, walked through
 
@@ -460,7 +677,14 @@ not in the reducer, and features could only be cancelled, losing their run.
 orchestrator sends `Prioritize` for each speed ticket, or `Reorder` to put one
 first, and `Hold` on the paused features: they leave the queue, keep their
 worktrees and briefs, and `Release` puts them back. `workflow get` shows the
-queue as the station will start it.
+queue as the station will start it. A paused feature that is already
+building goes through `Stopping` (3.4): its place frees, and the next speed
+ticket starts, only when its agent has proved it stopped.
+
+If this state is live at the cutover, the four admitted builds stay working
+with their effect ids and the eight that never started become the build
+queue in the order the old runtime would have started them (5.1, rehearsed
+in 5.3).
 
 ### 6.2 A ticket that uses up its limit dies and restarts under a new key
 
@@ -513,8 +737,12 @@ once it is gating, the only move is to cancel the whole group by its group
 id, and every command needs the item's current `run` and `pin`
 (`workflow_commands.rs:19-59`).
 
-**Now.** `Pull { ticket }` stops the lot's gate, fences it, and folds the lot
-again without the ticket; the lot keeps its id and the rest of its tickets.
+**Now.** `Pull { ticket }` takes the ticket out and holds it at once. The lot
+keeps its id and the rest of its tickets and goes to `Stopping`: it keeps its
+place, its tree and the landing target until the gate's stop receipt proves
+the gate process ended, then folds again without the ticket (3.4). If the
+stop can't prove that, the lot holds `Uncertain` for reconciliation instead
+of refolding over a tree a gate may still be using.
 `HoldStation { land.gate }` pauses gating (say, while main is red);
 `Drain { build }` lets builds finish before a cutover. Every command names the
 ticket and the station the orchestrator believes it is at, nothing more.
@@ -589,7 +817,7 @@ and `max_reworks` become policy defaults with no hard cap behind them;
 | `WaitingReview` | `Awaiting { decider }` | |
 | `Running` | `Working` | |
 | `Uncertain` | `Working { uncertain }` plus `Held { Uncertain }` | Visible as needs-you, still bound to its effect |
-| `Cancelling` | `Working { stopping }` with the ticket on its way to `Closed` or `Held` | A stop no longer always means cancel |
+| `Cancelling` | `Stopping { then }`, where `then` is `Closed`, `Held`, a queue, or a `Skip`'s next station | A stop no longer always means cancel; the place and tree are kept until its receipt (3.4) |
 | `Done` | `Closed { landed: true }`, then archived | |
 | `Failed` | Removed. `Held { StepFailed }` or `Held { PolicyLimit }` | Nothing dies of a limit |
 | `Cancelled` | `Closed { landed: false }`, then archived | |
@@ -638,6 +866,7 @@ and `max_reworks` become policy defaults with no hard cap behind them;
 | `Limit` | Removed as a ticket refusal; kept only for `MAX_ITEMS` | Limits are policy |
 | `SendBackRefused(String)` | Removed | `Send` is never refused by a count |
 | New: `PersonOnly` | Publish, settle, and per decision A | |
+| New: `Stopping` | A command that would start work on a tree or lot whose last effect has no stop receipt yet | Safety, not a count (3.3 rule 4, 3.4) |
 
 ## 8. Decisions for the owner
 
