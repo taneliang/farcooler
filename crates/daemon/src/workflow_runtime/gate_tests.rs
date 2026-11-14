@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 const AGENT: &str = r#"import json, os, pathlib, socket, subprocess, sys, time
 mode = sys.argv[1]
 session = os.environ['FARCOOLER_NATIVE_SESSION']
-prompt = os.environ['TEST_LAUNCHED_PROMPT']
+prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
 def hook(event, **extra):
     with socket.socket(socket.AF_UNIX) as s:
         s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])

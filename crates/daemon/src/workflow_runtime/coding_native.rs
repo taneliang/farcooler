@@ -282,6 +282,11 @@ impl Exec {
         heard_from: &std::sync::atomic::AtomicBool, clock: &super::native_control::ActiveClock) -> Result<(bool, Vec<HookLine>, Option<String>)> {
         let agent = self.native_agent(binding)?;
         let tree = self.tree(binding);
+        let prompt = self.native_prompt(binding)?;
+        // A prompt hook echoes the entire pinned brief. JSON can escape each byte as six bytes
+        // (\uXXXX); keep the ordinary 64 KiB allowance for the envelope and other payload fields.
+        // Bound the read by what we launched, rather than dropping long tickets or reading without a limit.
+        let hook_limit = 65_536u64.saturating_add((prompt.len() as u64).saturating_mul(6));
         let mut assembler = MessageAssembler::new();
         let mut session = (agent == Agent::Claude).then(|| terminal(binding).to_string());
         let mut prompted = false;
@@ -331,8 +336,8 @@ impl Exec {
             let mut raw = Vec::new();
             // Bounded by the overall turn deadline as well as this connection.
             use tokio::io::AsyncReadExt;
-            let n = tokio::time::timeout(Duration::from_secs(1), (&mut stream).take(65537).read_until(b'\n', &mut raw)).await;
-            if !matches!(n, Ok(Ok(_))) || raw.len() > 65536 || raw.last() != Some(&b'\n') { continue; }
+            let n = tokio::time::timeout(Duration::from_secs(1), (&mut stream).take(hook_limit + 1).read_until(b'\n', &mut raw)).await;
+            if !matches!(n, Ok(Ok(_))) || raw.len() as u64 > hook_limit || raw.last() != Some(&b'\n') { continue; }
             let Ok(line) = serde_json::from_slice::<HookLine>(&raw) else { continue };
             // Never grant permissions or tool-fence bypass from this host. A hook that isn't gating has hung up
             // before this answer (crates/cli/src/hook.rs, `first_contact`), so a failed write is its news, not ours:
@@ -350,7 +355,7 @@ impl Exec {
             heard_from.store(true, std::sync::atomic::Ordering::Relaxed);
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
-                if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(self.native_prompt(binding)?.as_str()) { prompted = true; }
+                if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(prompt.as_str()) { prompted = true; }
             }
             // Codex loads hooks from every active config source. A project copy and the engine
             // override may therefore report the same Stop concurrently. Replay its continuation;
@@ -648,7 +653,8 @@ def hook(event, sid=session, cwd=os.getcwd(), **extra):
         if takes:
             return json.loads(s.makefile().readline())
 hook('sessionStart' if agent == 'cursor' else 'SessionStart')
-hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=os.environ['TEST_LAUNCHED_PROMPT'])
+prompt = pathlib.Path(os.environ['TEST_LAUNCHED_PROMPT_FILE']).read_text() if 'TEST_LAUNCHED_PROMPT_FILE' in os.environ else os.environ['TEST_LAUNCHED_PROMPT']
+hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=prompt)
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
 if mode in ('steering', 'active-steering'):
     ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
@@ -826,6 +832,48 @@ else:
                 .filter(|n| n.to_string_lossy().ends_with(".sock")).collect();
             assert!(left.is_empty(), "{agent}: {left:?}");
         }
+    }
+    #[tokio::test]
+    async fn ov_1217_long_ticket_build_and_review_settle_from_native_hooks() {
+        use farcooler_store::models::{Actor, AcceptanceItem, TaskUpdate};
+        let (_dir, mut runtime, _fake) = super::super::gate_tests::three_gates("subdir").await;
+        let host = Uuid::now_v7();
+        let root = runtime.store.create_repository_root(host, "/long-brief", 0).unwrap();
+        let repo = runtime.store.create_repository(host, root.id, "brief", "/long-brief/.git", "").unwrap();
+        let workspace = runtime.store.ensure_main_workspace(repo.id).unwrap();
+        let task = runtime.store.create_task(workspace.id, "Long native ticket", Actor::User).unwrap();
+        // The prompt itself exceeds the old limit; quotes, newlines and non-ASCII text also grow on the wire.
+        let intent = format!("{}{}", "x".repeat(70_000), "\"\\\n修复".repeat(500));
+        let acceptance = "Keep every acceptance line intact.";
+        runtime.store.update_task(task.id, task.resource_version, &TaskUpdate {
+            title: task.title.clone(), intent: intent.clone(),
+            acceptance: vec![AcceptanceItem { id: Uuid::now_v7(), text: acceptance.into(), met: false }],
+            constraints: vec!["Keep native hook ownership checks.".into()], labels: vec![], worktree_id: None,
+        }).unwrap();
+        let mut definition = super::super::gate_tests::definition(&runtime);
+        definition.stages.retain(|s| !matches!(s.kind, StageKind::Review(Reviewer::Orchestrator(_) | Reviewer::Person(_))));
+        enqueue(&mut runtime, "w", &task.key, definition);
+        let state = finish(&mut runtime, "w").await;
+        assert_eq!(state.items[&task.key].phase, Phase::Done, "{state:?}");
+        let mut settled = Vec::new();
+        for entry in std::fs::read_dir(runtime.root.join("receipts")).unwrap() {
+            let path = entry.unwrap().path();
+            if !path.to_string_lossy().ends_with(".native-settled.json") { continue; }
+            let NativeSettlement::Launched { owner, hooks, completed } = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+                else { panic!("the native step never launched") };
+            assert_eq!(completed, Some(true));
+            let prompt = hooks.iter().find(|h| h.event == "UserPromptSubmit").unwrap()
+                .payload["prompt"].as_str().unwrap();
+            assert!(prompt.len() > 65_536);
+            assert!(prompt.contains(&task.title) && prompt.contains(&intent) && prompt.contains(acceptance));
+            assert!(prompt.contains("Keep native hook ownership checks."));
+            // A review's receipt can also settle it after quiet: require the actual Stop to have been read.
+            assert!(hooks.iter().any(|h| h.event == "Stop"));
+            settled.push(owner.binding.effect.kind);
+        }
+        assert_eq!(settled.len(), 2);
+        assert!(settled.contains(&EffectKind::Execute(StageKind::Build)));
+        assert!(settled.contains(&EffectKind::Execute(StageKind::Review(Reviewer::Agent))));
     }
     #[tokio::test]
     async fn ov_1217_build_without_a_commit_reports_ended_without_changes_and_last_message() {

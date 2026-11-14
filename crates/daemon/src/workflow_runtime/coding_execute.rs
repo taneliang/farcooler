@@ -222,7 +222,11 @@ impl Exec {
                     if let Some(argv) = super::coding_native::TEST_ARGV.with(|p| p.borrow().clone()) {
                         command.argv = argv;
                         // The fake agent reports what it was launched with, as a real one would, so the turn check can't drift.
-                        command.environment.insert("TEST_LAUNCHED_PROMPT".into(), self.native_prompt(binding)?);
+                        if let Some(crate::service::LaunchPrompt::File(path)) = &extras.prompt {
+                            command.environment.insert("TEST_LAUNCHED_PROMPT_FILE".into(), path.to_string_lossy().into_owned());
+                        } else {
+                            command.environment.insert("TEST_LAUNCHED_PROMPT".into(), self.native_prompt(binding)?);
+                        }
                     }
                     command.environment.entry("TERM".into()).or_insert_with(|| "xterm-256color".into());
                     command.environment.entry("COLORTERM".into()).or_insert_with(|| "truecolor".into());
