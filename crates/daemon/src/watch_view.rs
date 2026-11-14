@@ -19,6 +19,12 @@ static LIVE: LazyLock<Mutex<HashMap<Key, (Runtime, TaggedPane)>>> = LazyLock::ne
 /// Listed for as long as it lives; dropping it unlists the pane, before the server is reaped.
 pub struct Listed(Key);
 
+/// Every ticket briefed to this agent names the same run, and is unlisted with it.
+pub fn publish_effect(workspace: &str, effect: &farcooler_workflow::Effect, server: TmuxServer, pane: TaggedPane) -> Vec<Listed> {
+    std::iter::once(&effect.item).chain(&effect.with)
+        .map(|item| publish(workspace, item, server.clone(), pane.clone())).collect()
+}
+
 pub fn publish(workspace: &str, item: &str, server: TmuxServer, pane: TaggedPane) -> Listed {
     let key = (workspace.to_string(), item.to_string());
     // `marks: None`: nothing here ever records typing, because nothing here types.

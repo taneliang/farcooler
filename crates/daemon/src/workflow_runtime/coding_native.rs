@@ -434,8 +434,9 @@ impl Exec {
         // A native builder pauses while a landing gate runs; a review never does (ov-1214).
         let _builder = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
             .then(|| self.yielding.builder(crate::yielding::Target::Tty(pane.tty.clone())));
-        // Listed for watching only (ov-972); declared after `host`, so it is unlisted before the server is reaped.
-        let _watchable = crate::watch_view::publish(&binding.workspace, &binding.effect.item, tmux.clone(), pane.clone());
+        // Every ticket this run owns can watch and message it (ov-1171). Declared after `host`, so
+        // all tickets are unlisted before the server is reaped, on success, failure or cancellation.
+        let _watchable = crate::watch_view::publish_effect(&binding.workspace, &binding.effect, tmux.clone(), pane.clone());
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
         // A build stopped on a question, or never heard from, is told in Needs You (ov-1077).
         let heard_from = std::sync::atomic::AtomicBool::new(false);

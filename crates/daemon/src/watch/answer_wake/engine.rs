@@ -185,39 +185,55 @@ mod tests {
 
     #[tokio::test]
     async fn engine_message_reaches_a_scratch_agent_and_acceptance_revision_notifies_it() {
-        let (dir, svc, repo) = crate::test_support::fixture().await;
-        let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
-        let task = svc.store.create_task(ws, "engine message", Actor::Manager).unwrap();
-        let watcher = Watcher::new(svc.clone());
-        let (server, pane) = scratch(dir.path(), "claude").await;
-        assert!(svc.store.get_terminal(pane.terminal_id).is_err(), "engine PTY isn't a legacy terminal");
-        let listed = crate::watch_view::publish(&ws.to_string(), &task.key, server.0.clone(), pane.clone());
-        send(&watcher, &task, "Rebase before finishing").await;
-        delivered(&watcher, dir.path(), "[from the orchestrator] Rebase before finishing").await;
-        let update = pb::TaskUpdate {
-            task_id: task.id.as_bytes().to_vec().into(), expected_version: task.resource_version,
-            title: task.title.clone(), intent: task.intent.clone(), actor: "manager".into(),
-            acceptance: vec![pb::TaskAcceptanceItem { text: "New requirement".into(), ..Default::default() }],
-            ..Default::default()
-        };
-        let revised = crate::task_ops::update(&svc, &watcher, &update).unwrap();
-        delivered(&watcher, dir.path(), "[Far Cooler] Acceptance changed on").await;
-        assert!(svc.store.pending_message_wakes().unwrap().is_empty());
-        let before = svc.store.notes_for(task.id, None).unwrap().len();
-        let unchanged = pb::TaskUpdate { expected_version: revised.resource_version,
-            acceptance: revised.acceptance.clone(), ..update.clone() };
-        crate::task_ops::update(&svc, &watcher, &unchanged).unwrap();
-        assert_eq!(svc.store.notes_for(task.id, None).unwrap().len(), before, "no notice for unchanged acceptance");
-        assert!(crate::task_ops::update(&svc, &watcher, &update).is_err(), "stale write fails");
-        assert_eq!(svc.store.notes_for(task.id, None).unwrap().len(), before, "no notice for rejected update");
-        // A queued message cannot jump to a replacement run of this ticket.
-        drop(listed);
-        let note = svc.store.send_manual_message(task.id, Actor::Manager, "old run only", Some(pane.terminal_id), serde_json::json!({})).unwrap();
-        let replacement = farcooler_core::inventory::TaggedPane { terminal_id: Uuid::now_v7(), ..pane };
-        let _next = crate::watch_view::publish(&ws.to_string(), &task.key, server.0.clone(), replacement);
-        watcher.pump_wakes().await;
-        assert!(!svc.store.pending_message_wakes().unwrap().iter().any(|w| w.note == note.id));
-        assert!(!std::fs::read_to_string(dir.path().join("log")).unwrap().contains("old run only"));
+        for grouped in [false, true] {
+            let (dir, svc, repo) = crate::test_support::fixture().await;
+            let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+            let primary = svc.store.create_task(ws, "primary ticket", Actor::Manager).unwrap();
+            let task = svc.store.create_task(ws, "engine message", Actor::Manager).unwrap();
+            let effect: farcooler_workflow::Effect = serde_json::from_value(serde_json::json!({
+                "id": "e", "item": if grouped { &primary.key } else { &task.key }, "run": "r",
+                "epoch": 0, "fence": 1, "resource": "tree", "definition_pin": "d", "policy_pin": "p",
+                "candidate": null, "kind": { "Execute": "Build" },
+                "with": if grouped { vec![task.key.clone()] } else { vec![] },
+                "operation": { "adapter_version": "a", "arguments": [], "environment": {} }, "created_ms": 0
+            })).unwrap();
+            let watcher = Watcher::new(svc.clone());
+            let (server, pane) = scratch(dir.path(), "claude").await;
+            assert!(svc.store.get_terminal(pane.terminal_id).is_err(), "engine PTY isn't a legacy terminal");
+            let listed = crate::watch_view::publish_effect(&ws.to_string(), &effect, server.0.clone(), pane.clone());
+            for key in std::iter::once(&effect.item).chain(&effect.with) {
+                assert_eq!(crate::watch_view::lookup(&ws.to_string(), key).unwrap().1.terminal_id, pane.terminal_id);
+            }
+            send(&watcher, &task, "Rebase before finishing").await;
+            delivered(&watcher, dir.path(), "[from the orchestrator] Rebase before finishing").await;
+            let update = pb::TaskUpdate {
+                task_id: task.id.as_bytes().to_vec().into(), expected_version: task.resource_version,
+                title: task.title.clone(), intent: task.intent.clone(), actor: "manager".into(),
+                acceptance: vec![pb::TaskAcceptanceItem { text: "New requirement".into(), ..Default::default() }],
+                ..Default::default()
+            };
+            let revised = crate::task_ops::update(&svc, &watcher, &update).unwrap();
+            delivered(&watcher, dir.path(), &format!("[Far Cooler] Acceptance changed on {}.", task.key)).await;
+            assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+            let before = svc.store.notes_for(task.id, None).unwrap().len();
+            let unchanged = pb::TaskUpdate { expected_version: revised.resource_version,
+                acceptance: revised.acceptance.clone(), ..update.clone() };
+            crate::task_ops::update(&svc, &watcher, &unchanged).unwrap();
+            assert_eq!(svc.store.notes_for(task.id, None).unwrap().len(), before, "no notice for unchanged acceptance");
+            assert!(crate::task_ops::update(&svc, &watcher, &update).is_err(), "stale write fails");
+            assert_eq!(svc.store.notes_for(task.id, None).unwrap().len(), before, "no notice for rejected update");
+            // A queued message cannot jump to a replacement run of this ticket.
+            drop(listed);
+            for key in std::iter::once(&effect.item).chain(&effect.with) {
+                assert!(crate::watch_view::lookup(&ws.to_string(), key).is_none(), "{key} outlived its run");
+            }
+            let note = svc.store.send_manual_message(task.id, Actor::Manager, "old run only", Some(pane.terminal_id), serde_json::json!({})).unwrap();
+            let replacement = farcooler_core::inventory::TaggedPane { terminal_id: Uuid::now_v7(), ..pane };
+            let _next = crate::watch_view::publish(&ws.to_string(), &task.key, server.0.clone(), replacement);
+            watcher.pump_wakes().await;
+            assert!(!svc.store.pending_message_wakes().unwrap().iter().any(|w| w.note == note.id));
+            assert!(!std::fs::read_to_string(dir.path().join("log")).unwrap().contains("old run only"));
+        }
     }
 
     #[tokio::test]
