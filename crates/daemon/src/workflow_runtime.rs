@@ -27,6 +27,7 @@ mod coding_settle;
 mod coding_pr;
 mod review_agent;
 mod fold_trees;
+mod spotlight;
 mod places;
 pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES};
 use places::{Placed, Places, Pool};

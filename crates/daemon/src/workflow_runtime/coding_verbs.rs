@@ -349,6 +349,7 @@ impl Exec {
         }
         self.git_recorded(binding, &repo, &["worktree", "add", "-b", &branch, &tree_path, &base]).await?;
         self.unpark_build(binding, &tree, &repo).await?;
+        spotlight::exclude_builds(&tree).await;
         for member in members {
             if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
             let range = format!("{base}..{}", member.candidate);

@@ -478,12 +478,15 @@ impl Exec {
                             Error::Refused("configured worktree provisioning uncertain")
                         })?;
                 }
-            } },
+            }
+                spotlight::exclude_builds(&tree).await;
+            },
             StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route =>
                 return self.execute_verb(binding, kind, cancel).await,
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {
+                spotlight::exclude_builds(&tree).await;
                 if matches!(kind, StageKind::Run) && tree.try_exists()? { self.settle_run_tree(binding, &tree).await?; }
                 if !matches!(kind, StageKind::Build) { self.verify_candidate(binding, &tree).await?; }
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
