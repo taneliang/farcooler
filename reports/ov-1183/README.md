@@ -27,6 +27,21 @@ changing the native archive relinks both binaries. Plain builds without the
 bundle environment keep their original linkage. Artifacts stay under this
 worktree's `target/`. The fixture also runs in the required app CI job.
 
+The first restored-release retry, [43592678311](https://github.com/taneliang/farcooler/actions/runs/43592678311)
+(1b78f32e3), passed the full test job in **738 s (12m18s)**. Its app build
+was still running beyond 15 minutes and was superseded at **966 s (16m06s)**;
+it is a missed target, not a successful app measurement. This confirmed that
+aligning only the daemon's forwarding feature was insufficient. The release
+libraries took 258 s, the daemon invocation 520 s, and the CLI had only just
+started when the job was superseded. The revised single-graph candidate is
+measured separately below.
+
+The initial single-graph run [43593998335](https://github.com/taneliang/farcooler/actions/runs/43593998335)
+stopped in the new fixture before building the app: CI's forced Cargo colors
+broke its compiler-command counter. This reproduced locally with
+`CARGO_TERM_COLOR=always`; the fixture now passes `--color never` explicitly.
+That failed run supplies no app timing or acceptance evidence.
+
 Fresh release-shaped branch measurements are pending. The prior two debug
 runs are retained below for history and no longer count toward acceptance.
 
@@ -53,7 +68,7 @@ The test job's Mac step took 964 seconds, including 284.39 seconds of Swift
 compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
 165 seconds, including 123.59 seconds compiling and 21.914 seconds executing.
 
-## Candidate
+## Original candidate (before fix round 1)
 
 - CI's bundle job uses the existing debug Swift configuration; shipping
   workflows still call build-app.sh with its default release configuration.

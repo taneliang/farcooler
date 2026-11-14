@@ -78,7 +78,8 @@ pub fn answer() -> i32 {
 
         archive(41)
         env = dict(os.environ, FARCOOLER_BUNDLE_TAILCAT_DIR=str(archive_dir))
-        command = ["cargo", "build", "--offline", "--release", "-p", "farcooler-cli",
+        # CI forces ANSI color; compiler-command assertions need plain output.
+        command = ["cargo", "build", "--color", "never", "--offline", "--release", "-p", "farcooler-cli",
                    "-p", "farcooler-daemon", "--bins", "--features",
                    "farcooler-cli/tailcat,farcooler-daemon/tailcat", "-vv"]
         log = run(command, cwd=root, env=env)
