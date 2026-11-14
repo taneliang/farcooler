@@ -29,12 +29,17 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
 - Cache Swift compilation separately by complete Xcode/Swift/SDK identity,
   architecture, job and package manifests, with a per-commit key and fallback.
   Restore an input timestamp only when its SHA-256 matches; delete executable
-  products before the build so current Rust libraries always relink. Keep the
-  staged C header's source timestamp (`cp -p`); its bytes are unchanged.
+  products before the build so current Rust libraries always relink. Refresh
+  Git's stat cache after restoring source timestamps, before Cargo records its
+  watched index; otherwise the protocol build script's own git status dirties
+  that input and causes a second native build. Keep the staged C header's source
+  timestamp (`cp -p`); its bytes are unchanged.
 - Use Rust opt-level 1 without cross-crate ThinLTO in the CI bundle job.
   Build the test job's two FFI libraries and real CLI/daemon/filter together
-  with `build-test-native.sh`: one dev profile, opt-level 1 and no symbols,
-  retaining debug assertions, overflow checks and test-only hooks. The Mac
+  with `build-test-native.sh`: one dev graph and no symbols, retaining debug
+  assertions, overflow checks and test-only hooks. FFI/support code is opt-level
+  1; CLI/daemon retain their original dev opt-level 0, avoiding costly LLVM work
+  on binaries used for functional integration checks. The Mac
   wrapper revalidates the exact same target/feature graph. This avoids a
   release-library build followed by a separate debug-binary build. Every
   source and test remains; no additional macOS runner is requested.
@@ -69,6 +74,9 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
   A real, tiny offline Cargo workspace also verified the mixed library/binary
   target selection, debug assertions and overflow checks at dev opt-level 1.
   Independent review found no actionable correctness or coverage issue.
+- Local gate environment parsing now matches GitHub for quoted scalars and
+  comments. Regression checks pin both CI flags, the shared native preparation,
+  and pre-Cargo index refresh ordering; the full lane-gate self-test passes.
 - Completion guard, temp/defaults leak guard, change selection, file-size and
   doc-comment checks passed. actionlint has no diagnostics beyond the baseline's
   unknown xcode-27 label and SC2086 warnings in unrelated existing install steps.
@@ -110,6 +118,17 @@ at **950 s (15m50s)**. Its Swift compilation was only 19.86 s (AgentKit) and
 28.63 s (Mac), proving compilation reuse worked. Native preparation still cost
 130 s up front and about 236 s again in the Mac wrapper. This motivated the
 single dev-profile native target graph, rather than reducing tests.
+
+The first unified trial,
+[43582274241](https://github.com/taneliang/farcooler/actions/runs/43582274241)
+(b08dc4964), passed app **702 s (11m42s)** and tests **1,185 s (19m45s)**.
+Native preparation was 322 s and the supposedly no-op wrapper rebuilt for
+278 s. A tiny real Cargo reproduction identified the watched `.git/index`:
+restoring source timestamps caused git status inside the protocol build script
+to refresh the index *during* the build. Cargo then correctly rebuilt on the
+next invocation. Pre-Cargo git status makes the second invocation fresh without
+removing or weakening any fingerprint input. The fixture reproduces the old
+compile/compile/fresh sequence and verifies compile/fresh after the fix.
 
 Final cached repeat measurements pending. A temporary push trigger for this branch
 collects ordinary CI job measurements without opening a PR or adding runner

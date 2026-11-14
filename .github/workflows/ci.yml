@@ -831,6 +831,9 @@ jobs:
         run: |
           python3 scripts/swift-build-cache.py self-test
           python3 scripts/swift-build-cache.py restore
+          # The protocol build watches .git/index. Refresh restored file stats
+          # now, so its own git status cannot invalidate the just-finished build.
+          git status --porcelain --untracked-files=no > /dev/null
 
       # Go, for the tunnel archive `build-app.sh` links into `farcoolerd`.
       # This job runs the whole bundle assembly, which is the point of it —
@@ -1020,6 +1023,9 @@ jobs:
         run: |
           python3 scripts/swift-build-cache.py self-test
           python3 scripts/swift-build-cache.py restore
+          # The protocol build watches .git/index. Refresh restored file stats
+          # now, so its own git status cannot invalidate the just-finished build.
+          git status --porcelain --untracked-files=no > /dev/null
 
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh

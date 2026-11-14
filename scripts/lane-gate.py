@@ -73,6 +73,7 @@ gate removes target/ at the end; --keep-target keeps it. FARCOOLER_LEAN_BUILD=of
 import argparse
 import contextlib
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -171,6 +172,16 @@ def job_ids(text):
     return ids
 
 
+def env_scalar(value):
+    """The plain/single/double-quoted environment scalars ci.yml uses."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return json.loads(value)
+    return value
+
+
 def parse_steps(block):
     """[(name, run, working-directory, env)] for each step of a job with a `run:`.
     `uses:` steps have no commands and are not returned. Reads only the shapes
@@ -187,10 +198,12 @@ def parse_steps(block):
             in_env = True
             continue
         if in_env:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
             m = re.match(r"^      ([A-Z_0-9]+): (.*)$", line)
             if not m:
                 break
-            job_env[m.group(1)] = m.group(2).strip()
+            job_env[m.group(1)] = env_scalar(m.group(2))
     steps, cur = [], None
     in_steps = False
     for line in block:
@@ -231,8 +244,9 @@ def parse_steps(block):
             elif line.startswith("        env:"):
                 i += 1
                 while i < len(lines) and lines[i].startswith("          "):
-                    k, _, v = lines[i].strip().partition(":")
-                    env[k] = v.strip()
+                    if lines[i].strip() and not lines[i].lstrip().startswith("#"):
+                        k, _, v = lines[i].strip().partition(":")
+                        env[k] = env_scalar(v)
                     i += 1
                 continue
             i += 1
@@ -907,6 +921,15 @@ def _self_test():
                     expect(f"{j}: {s.label()} does not run {word}", word in s.run, False)
     expect("the tmux install is skipped, not dropped", any(s.skip and "ci-install-tmux" in s.run for s in plans["rust"]), True)
     expect("the unfiltered Mac test is not skipped", any(s.run.strip() == "./apps/macos/test.sh" and not s.skip for s in plans["swift-tests"]), True)
+    mac_test = next(s for s in plans["swift-tests"] if s.run.strip() == "./apps/macos/test.sh")
+    expect("Mac tests use the complete two-process inventory", mac_test.env.get("FARCOOLER_MAC_TEST_PROCESSES"), "2")
+    expect("Mac tests revalidate the unified native graph", mac_test.env.get("FARCOOLER_MAC_TEST_UNIFIED_RUST"), "1")
+    expect("AgentKit's native preparation uses that same graph", has("swift-tests", "./apps/macos/build-test-native.sh"), True)
+    for job in ("swift", "swift-tests"):
+        refresh = next(i for i, step in enumerate(plans[job]) if "swift-build-cache.py restore" in step.run)
+        native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh debug" in step.run)
+        expect(f"{job} refreshes the watched git index before Cargo", refresh < native and
+               "git status --porcelain --untracked-files=no" in plans[job][refresh].run, True)
     expect("the tunnel steps run in crates/tailcat/go", {s.cwd for s in plans["tunnel"]}, {"crates/tailcat/go"})
     expect("the Android gradle steps run in apps/android", all(s.cwd == "apps/android" for s in plans["android"] if "gradlew" in s.run), True)
     expect("a ${{ }} is filled in", any("${{" in s.run for s in plans["web"]), False)
@@ -1050,6 +1073,21 @@ def _self_test():
     expect("parse: the default and the step directory", [w for _, _, w, _ in got], ["sub", "other"])
     expect("parse: env, job and step", [e for _, _, _, e in got], [{"K": "v"}, {"K": "v", "E": "${{ runner.temp }}"}])
     expect("parse: a job stops at the next one", job_block(sample, "b"), ["    steps:", "      - run: other"])
+    quoted = parse_steps(job_block("""jobs:
+  q:
+    env:
+      LTO: "false"
+      # A comment must not terminate the environment.
+      DEBUG: '0'
+    steps:
+      - run: tests
+        env:
+          PROCESSES: "2"
+          # Nor become an environment variable.
+          WORDS: 'it''s quoted'
+""", "q"))
+    expect("parse: quoted env values and comments match GitHub", quoted[0][3],
+           {"LTO": "false", "DEBUG": "0", "PROCESSES": "2", "WORDS": "it's quoted"})
     try:
         expand("${{ secrets.X }}", ctx)
         failures.append("an unknown ${{ }} was not refused")

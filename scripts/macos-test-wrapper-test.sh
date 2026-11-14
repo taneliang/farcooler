@@ -123,7 +123,7 @@ printf '%s\n' current-header >"$scratch/crates/vt/include/farcooler_vt.h"
 touch -t 200001010000 "$scratch/crates/vt/include/farcooler_vt.h"
 cat >"$scratch/home/.cargo/bin/cargo" <<'STUB'
 #!/bin/bash
-[ "$*" = 'build --config profile.dev.opt-level=1 --lib --bins -p farcooler-vt -p farcooler-client -p farcooler-cli -p farcooler-daemon' ] || exit 91
+[ "$*" = 'build --config profile.dev.opt-level=1 --config profile.dev.package.farcooler-cli.opt-level=0 --config profile.dev.package.farcooler-daemon.opt-level=0 --lib --bins -p farcooler-vt -p farcooler-client -p farcooler-cli -p farcooler-daemon' ] || exit 91
 [ "${NATIVE_FAILS:-}" = 1 ] && exit 1
 mkdir -p target/debug
 for name in farcooler_vt farcooler_client; do echo fresh-library >"target/debug/lib$name.a"; done
