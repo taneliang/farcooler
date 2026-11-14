@@ -148,6 +148,7 @@ jobs:
       # scratch repository.
       - run: ./scripts/ci-changes.py --self-test
       - run: python3 scripts/rust-shadow-test.py
+      - run: python3 scripts/macos-rust-tests.py --self-test --check
       # Reproduce a gate launched by scripts/heavy: private test queues must
       # still lock even though the parent already holds the machine queue.
       - run: HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test
@@ -485,9 +486,9 @@ jobs:
             exit 0
           fi
           if [ "$RUNNER_OS" = "Linux" ]; then
-            APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-            sudo apt-get $APT_OPTS update
-            sudo apt-get $APT_OPTS install -y git-lfs
+            APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+            sudo apt-get "${APT_OPTS[@]}" update
+            sudo apt-get "${APT_OPTS[@]}" install -y git-lfs
           else
             brew install git-lfs
           fi
@@ -508,9 +509,9 @@ jobs:
         run: |
           if ! command -v fish >/dev/null 2>&1; then
             if [ "$RUNNER_OS" = "Linux" ]; then
-              APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-              sudo apt-get $APT_OPTS update
-              sudo apt-get $APT_OPTS install -y fish
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y fish
             else
               brew install fish
             fi
@@ -548,9 +549,9 @@ jobs:
           set -euo pipefail
           if [ ! -x /usr/sbin/sshd ]; then
             if [ "$RUNNER_OS" = "Linux" ]; then
-              APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-              sudo apt-get $APT_OPTS update
-              sudo apt-get $APT_OPTS install -y openssh-server
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y openssh-server
             else
               echo "no /usr/sbin/sshd on a macOS runner, which ships one with the OS" >&2
               exit 1
@@ -741,14 +742,24 @@ jobs:
       # layouts as JSON, which `farcooler_tmux::layout` now reads. Under
       # `cargo test` they had never run on 3.8, because an earlier binary had
       # already failed and `cargo test` stops at the first.
-      # Shadow only: the full command always runs, then a narrow warm replay.
-      # Feature/target tests above and full doctests below are untouched.
+      # Linux keeps the full workspace suite and changed-crate shadow replay.
+      # Mac builds every test target too, then runs the maintained native set.
+      # Nightly runs the full Mac suite; feature tests and doctests stay here.
       - name: Full Rust tests and shadow measurement
+        if: runner.os == 'Linux'
         env:
           CANDIDATES: ${{ runner.temp }}/rust-green.ndjson
         run: python3 scripts/rust-shadow.py --out "${{ runner.temp }}/rust-shadow" -- ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
+      - name: macOS native Rust tests
+        if: runner.os == 'macOS'
+        run: |
+          # --workspace compiles ALL test binaries before nextest filters tests.
+          # Keep this explicit so a future change to nextest cannot narrow builds.
+          cargo nextest run --profile ci --workspace --no-run
+          selection="$(python3 scripts/macos-rust-tests.py)"
+          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && runner.os == 'Linux'
         with:
           name: rust-shadow-${{ matrix.os }}
           path: ${{ runner.temp }}/rust-shadow/
