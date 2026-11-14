@@ -403,7 +403,10 @@ async fn publish(rpc: &crate::rpc::Rpc, draft: &Draft) -> std::result::Result<()
         definition: draft.definition.clone(), adapter: Some(Box::new(draft.adapter.clone())), notifications: None };
     let reply = handle.wire_command(admit().await.map_err(refused)?, action).await.map_err(refused)?;
     match reply.pointer("/receipt/result") {
-        Some(r) if r.get("Ok").is_some() => Ok(()),
+        Some(r) if r.get("Ok").is_some() => {
+            rpc.announce_workflow_publication(&reply);
+            Ok(())
+        },
         Some(r) if r.get("Err").is_some_and(|e| e.as_str() == Some("Stale")) => Err("The workflow changed while you were deciding.".into()),
         _ => Err("The engine refused it.".into()),
     }

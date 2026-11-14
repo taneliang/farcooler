@@ -40,7 +40,7 @@ async fn configured() -> (tempfile::TempDir, CodingConfig) {
     (dir, config)
 }
 
-struct Host { service: Arc<Service>, workspace: Uuid, socket: std::path::PathBuf, stop: Arc<tokio::sync::Notify>, server: tokio::task::JoinHandle<()> }
+struct Host { service: Arc<Service>, workspace: Uuid, watcher: Arc<Watcher>, socket: std::path::PathBuf, stop: Arc<tokio::sync::Notify>, server: tokio::task::JoinHandle<()> }
 impl Host {
     async fn open(root: &Path) -> Self {
         let service = Arc::new(Service::open_in(root.join("state")).await.unwrap());
@@ -50,6 +50,7 @@ impl Host {
         let workspace = service.store.ensure_main_workspace(repo.id).unwrap().id;
         service.start_workflows().unwrap();
         let watcher = Watcher::new(service.clone());
+        let server_watcher = watcher.clone();
         let socket = root.join("d.sock");
         let listener = UnixListenerServer::bind(&socket).unwrap();
         let stop = Arc::new(tokio::sync::Notify::new());
@@ -57,11 +58,11 @@ impl Host {
         let server = tokio::spawn(async move {
             tokio::select! {
                 result = listener.serve_with_pid(move |preamble, pid| Some((HandshakeConfig { daemon_version: "ov971".into() },
-                    RpcFactory::new(svc.clone(), watcher.clone(), rpc_stop.clone(), farcooler_daemon::sessions::peer_from_preamble(preamble.as_ref())?).with_socket_caller(pid)))) => result.unwrap(),
+                    RpcFactory::new(svc.clone(), server_watcher.clone(), rpc_stop.clone(), farcooler_daemon::sessions::peer_from_preamble(preamble.as_ref())?).with_socket_caller(pid)))) => result.unwrap(),
                 _ = end.notified() => (),
             }
         });
-        Self { service, workspace, socket, stop, server }
+        Self { service, workspace, watcher, socket, stop, server }
     }
     async fn connect(&self) -> Link { Client::connect(&self.socket, "ov971", "1").await.unwrap() }
     async fn close(self) {
@@ -448,6 +449,54 @@ async fn a_draft_that_changes_only_a_value_shows_it_as_changed_on_its_card() {
     // The same value proposed again is no change, so the mark is the comparison's and not a habit.
     let same = propose(&mut link, ws, with("aaaaaaaa"), "No change.").await;
     assert!(!same["draft"]["summary"].as_str().unwrap().contains("(changed)"), "{same}");
+    drop(link);
+    host.close().await;
+}
+
+/// ov-1179: a Maintainer approving a draft also tells the owner about the publication.
+#[tokio::test]
+async fn an_approved_draft_announces_its_publication_to_the_owner() {
+    use farcooler_transport::Handler as _;
+    if as_a_person("an_approved_draft_announces_its_publication_to_the_owner").await { return; }
+    let (dir, config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let mut link = host.connect().await;
+    let reply = propose(&mut link, host.workspace, bundle(&config, "ticket-push", "make check"), "Gate every push.").await;
+    let card = card_of(&reply);
+    let words = asked(&host, card).1;
+    host.service.store.bind_owner_device("maintainer-phone", None).unwrap();
+    host.service.store.set_member("alice", "Alice", &["maintainer-phone".into()]).unwrap();
+    host.service.store.set_member_role("alice", farcooler_store::member_roles::Role::Maintainer, "user").unwrap();
+    let phone = RpcFactory::new(host.service.clone(), host.watcher.clone(), Arc::new(tokio::sync::Notify::new()),
+        farcooler_transport::Peer { client_id: Some("maintainer-phone".into()), scope: pb::Scope::Control });
+    let mut events = host.watcher.subscribe();
+    let mut req = farcooler_transport::request("task.note");
+    req.payload = Some(request::Payload::TaskNoteAppend(pb::TaskNoteAppend {
+        task_id: bytes::Bytes::copy_from_slice(card.as_bytes()), kind: pb::TaskNoteKind::Answer as i32,
+        body: words, extra_json: String::new(), supersedes: None, actor: String::new(),
+    }));
+    assert!(matches!(phone.handle(req).await.outcome, Some(pb::response::Outcome::Result(_))));
+    settles(&host, card, TaskStatus::Done).await;
+    // The closed approval card is not the new publication's announcement.
+    let mut changed = None;
+    let mut needs_you = false;
+    let notice = tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        loop {
+            match events.recv().await.unwrap().payload {
+                Some(pb::event::Payload::TaskChanged(t)) if t.task_id.as_ref() != card.as_bytes() => changed = Some(t.task_id),
+                Some(pb::event::Payload::NeedsYouChanged(_)) => needs_you = true,
+                Some(pb::event::Payload::Notice(n)) if n.task_id.as_ref() != card.as_bytes() => break n,
+                _ => (),
+            }
+        }
+    }).await.expect("owner never received the publication notice");
+    assert_eq!(changed.as_deref(), Some(notice.task_id.as_ref()), "publication task was not announced");
+    assert!(needs_you, "clients were not told to refresh Needs You");
+    assert_eq!(notice.event, "new");
+    assert!(notice.member.is_empty() && notice.author.is_empty(), "owner must hear the publication");
+    let task = host.service.store.get_task(Uuid::from_slice(&notice.task_id).unwrap()).unwrap();
+    assert_eq!(task.status, TaskStatus::InReview);
+    assert!(host.service.store.notes_for(task.id, None).unwrap().iter().any(|n| n.body.contains("Gate every push.")));
     drop(link);
     host.close().await;
 }

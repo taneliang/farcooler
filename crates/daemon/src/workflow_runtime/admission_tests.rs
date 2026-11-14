@@ -436,3 +436,41 @@ async fn ov1179_revocation_at_consumption_stops_a_queued_publish() {
     }).await;
     assert!(runtime.store.workflow_configuration(&ws.to_string()).unwrap().is_none());
 }
+
+/// ov-1179: a real publication grant must not bypass the runner's admin fences.
+/// Use HostAdmin scope so a scope failure cannot mask a missing person check.
+#[tokio::test]
+async fn ov1179_publication_grant_preserves_real_admin_operation_boundaries() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let (_pane, pid) = alices_pane(&svc, repo, ws, true).await;
+    let mut runtime = Runtime::open_service(&svc.root_dir().join("publication-test"), svc.store.clone()).unwrap();
+    let owner = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::HostAdmin }, None);
+    let agent = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::HostAdmin }, Some(pid));
+    ok(&sent(&mut runtime, &owner, ws, &Action::PublicationGrant {
+        mutation: mutation("grant", 0, 1), enabled: true,
+    }).await.0);
+    ok(&sent(&mut runtime, &agent, ws, &Action::Publish {
+        reason: Some("Track the board".into()), notifications: None, adapter: None,
+        mutation: mutation("publish", 0, 1), expected_pin: None, definition: Definition::tracker("owner"),
+    }).await.0);
+    svc.store.set_member("bob", "Bob", &["phone-b".into()]).unwrap();
+    let before = svc.store.stored_access().unwrap();
+    let login_policy = svc.store.member_login_policy().unwrap();
+    for (method, payload, refused_as) in [
+        ("member.set_access", request::Payload::MemberSetAccess(pb::MemberSetAccess { handle: "bob".into(), access: "admin".into() }), "person_only"),
+        ("client.set_cap", request::Payload::ClientSetCap(pb::ClientSetCap { client_id: "phone-b".into(), cap: "viewer".into() }), "person_only"),
+        ("member.set", request::Payload::MemberSet(pb::MemberSet { handle: "carol".into(), name: "Carol".into(), ..Default::default() }), "person_only"),
+        ("member.remove", request::Payload::MemberRemove(pb::MemberRemove { handle: "bob".into() }), "person_only"),
+        ("member.set_own_login", request::Payload::MemberOwnLoginSet(pb::MemberOwnLoginSet { harness: "codex".into(), on: true }), "in_pane"),
+    ] {
+        let mut req = farcooler_transport::request(method);
+        req.payload = Some(payload);
+        let reply = agent.handle(req).await;
+        assert!(matches!(reply.outcome, Some(response::Outcome::Error(ref e)) if e.what == refused_as), "{method}: {reply:?}");
+        assert_eq!(svc.store.stored_access().unwrap(), before, "{method} changed access");
+        assert_eq!(svc.store.member_login_policy().unwrap(), login_policy, "{method} changed credential sharing");
+        assert!(svc.store.member("bob").is_ok());
+        assert!(svc.store.member("carol").is_err());
+    }
+}

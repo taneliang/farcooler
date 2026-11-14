@@ -529,3 +529,15 @@ This grant delegates only workflow publication. It adds no secret-store write,
 security flag, relay flag or production deployment action to the workflow or RPC
 vocabulary, and does not change the authorization of any other method. Settling
 a push and changing the grant remain person-only operations.
+
+The grant is a runner RPC permission, not a credential or a shell sandbox.
+The runner's access changes (`member.set_access`, `client.set_cap`), teammate
+creation and removal, and credential sharing (`member.set_own_login`) still reject requests from an agent pane, even with this
+grant and HostAdmin scope. Publication does not make the orchestrator a person.
+
+Cloudflare secret writes (`wrangler secret put`), web/relay environment flags,
+and production deployments are managed outside this RPC API, through Cloudflare
+and GitHub credentials and deployment environments. Their authorization is not
+read from the workspace publication grant. Tests of runner admin RPCs do not
+verify those external account permissions; those must be checked at the service
+that owns them.

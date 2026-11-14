@@ -97,6 +97,17 @@ pub struct Rpc {
 }
 
 impl Rpc {
+    /// Every successful publication path announces the receipt's owner-facing review card.
+    pub(crate) fn announce_workflow_publication(&self, value: &serde_json::Value) {
+        if let Some(id) = value.pointer("/receipt/change/notice_task").and_then(|v| v.as_str()).and_then(|s| Uuid::parse_str(s).ok())
+            && let Ok(task) = self.service.store.get_task(id)
+        {
+            self.watcher.announce_task_changed(&task, None, farcooler_store::models::Actor::Manager);
+            self.watcher.task_event(&task, crate::watch::task_notice::TaskEvent::Created, farcooler_store::models::Actor::Manager);
+            self.watcher.announce_needs_you();
+        }
+    }
+
     /// Private, and it has to be: the attachment guard it takes is this
     /// module's own, and `RpcFactory` is the only thing that should be building
     /// one anyway — a handler constructed anywhere else is a connection
@@ -797,13 +808,7 @@ impl Rpc {
                     handle.read_get(admission, full || !summary).await
                 } else { handle.wire_command(admission, action).await }
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
-                if let Some(id) = value.pointer("/receipt/change/notice_task").and_then(|v|v.as_str()).and_then(|s|Uuid::parse_str(s).ok())
-                    && let Ok(task) = svc.store.get_task(id)
-                {
-                    self.watcher.announce_task_changed(&task,None,farcooler_store::models::Actor::Manager);
-                    self.watcher.task_event(&task,crate::watch::task_notice::TaskEvent::Created,farcooler_store::models::Actor::Manager);
-                    self.watcher.announce_needs_you();
-                }
+                self.announce_workflow_publication(&value);
                 if summary && !full {
                     return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
                 }
