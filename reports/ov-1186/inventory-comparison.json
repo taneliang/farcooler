@@ -1,0 +1,35 @@
+{
+  "identical": true,
+  "tests": {
+    "local-tests.log": [
+      "farcooler-agent-core event::tests::a_clean_end_is_the_same_bytes_it_always_was",
+      "farcooler-agent-core event::tests::a_failed_end_keeps_reason_a_string_and_puts_the_failure_beside_it",
+      "farcooler-agent-core event::tests::a_gap_is_a_first_class_event_not_an_absence",
+      "farcooler-agent-core event::tests::a_sequenced_event_carries_its_own_position",
+      "farcooler-agent-core event::tests::each_backends_failure_word_lands_on_one_kind",
+      "farcooler-agent-core permission::tests::a_bash_ask_is_named_for_its_command",
+      "farcooler-agent-core permission::tests::the_options_are_allow_and_deny_by_those_ids",
+      "farcooler-agent-core usage::tests::dollars_become_exact_millionths"
+    ],
+    "ci-43579040900/ci-archive-tests.log": [
+      "farcooler-agent-core event::tests::a_clean_end_is_the_same_bytes_it_always_was",
+      "farcooler-agent-core event::tests::a_failed_end_keeps_reason_a_string_and_puts_the_failure_beside_it",
+      "farcooler-agent-core event::tests::a_gap_is_a_first_class_event_not_an_absence",
+      "farcooler-agent-core event::tests::a_sequenced_event_carries_its_own_position",
+      "farcooler-agent-core event::tests::each_backends_failure_word_lands_on_one_kind",
+      "farcooler-agent-core permission::tests::a_bash_ask_is_named_for_its_command",
+      "farcooler-agent-core permission::tests::the_options_are_allow_and_deny_by_those_ids",
+      "farcooler-agent-core usage::tests::dollars_become_exact_millionths"
+    ],
+    "ci-43579040900/ci-cold-tests.log": [
+      "farcooler-agent-core event::tests::a_clean_end_is_the_same_bytes_it_always_was",
+      "farcooler-agent-core event::tests::a_failed_end_keeps_reason_a_string_and_puts_the_failure_beside_it",
+      "farcooler-agent-core event::tests::a_gap_is_a_first_class_event_not_an_absence",
+      "farcooler-agent-core event::tests::a_sequenced_event_carries_its_own_position",
+      "farcooler-agent-core event::tests::each_backends_failure_word_lands_on_one_kind",
+      "farcooler-agent-core permission::tests::a_bash_ask_is_named_for_its_command",
+      "farcooler-agent-core permission::tests::the_options_are_allow_and_deny_by_those_ids",
+      "farcooler-agent-core usage::tests::dollars_become_exact_millionths"
+    ]
+  }
+}

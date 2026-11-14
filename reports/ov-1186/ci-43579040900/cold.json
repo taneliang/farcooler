@@ -1,0 +1,16 @@
+{
+  "seconds": 21.447,
+  "command": [
+    "cargo",
+    "nextest",
+    "run",
+    "--locked",
+    "-p",
+    "farcooler-agent-core",
+    "--profile",
+    "ci",
+    "--target-dir",
+    "/Users/runner/work/farcooler/farcooler/target/ov-1186/ci-cold"
+  ],
+  "log": "ci-cold-tests.log"
+}

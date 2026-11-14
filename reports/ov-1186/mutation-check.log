@@ -1,0 +1,7 @@
+CAUGHT: deleted validation guard at line 68
+CAUGHT: deleted validation guard at line 70
+CAUGHT: deleted validation guard at line 72
+CAUGHT: deleted validation guard at line 74
+CAUGHT: deleted validation guard at line 76
+CAUGHT: deleted validation guard at line 78
+All 6 guard-deletion mutations caught

@@ -44,7 +44,11 @@ class ArchiveTests(unittest.TestCase):
                 first = p.source_key()
             source.write_text("changed")
             with patch.object(p, "ROOT", root), patch.object(p, "output", side_effect=["source.rs", ""]):
-                self.assertNotEqual(first, p.source_key())
+                changed = p.source_key()
+                self.assertNotEqual(first, changed)
+            source.chmod(0o755)
+            with patch.object(p, "ROOT", root), patch.object(p, "output", side_effect=["source.rs", ""]):
+                self.assertNotEqual(changed, p.source_key())
             with patch.object(p, "ROOT", root), patch.object(p, "output", side_effect=["source.rs", "new.rs"]):
                 with self.assertRaisesRegex(ValueError, "untracked"):
                     p.source_key()

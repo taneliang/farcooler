@@ -1,0 +1,11 @@
+{
+  "url": "https://github.com/taneliang/farcooler/actions/runs/43579040900",
+  "conclusion": "success",
+  "head_sha": "134a889660efd7e03265f612576f7ff562bb4a8c",
+  "queue_seconds": 762.0,
+  "job_seconds": 36.0,
+  "push_to_verdict_seconds": 798.0,
+  "reuse_seconds": 1.266,
+  "cold_seconds": 21.447,
+  "ci_step_seconds_saved": 20.181
+}

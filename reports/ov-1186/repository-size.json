@@ -1,0 +1,9 @@
+{
+  "crates": 1368,
+  "apps/macos": 691,
+  "apps/ios": 256,
+  "apps/android": 564,
+  "apps/shared": 473,
+  "services": 274,
+  "scripts": 142
+}

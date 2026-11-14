@@ -1,0 +1,621 @@
+reuse	Set up job	﻿2026-11-14T09:20:11.5681380Z Current runner version: '2.338.2'
+reuse	Set up job	2026-11-14T09:20:11.5699080Z ##[group]Runner Image Provisioner
+reuse	Set up job	2026-11-14T09:20:11.5699650Z Hosted Compute Agent
+reuse	Set up job	2026-11-14T09:20:11.5700020Z Version: 20261103.629
+reuse	Set up job	2026-11-14T09:20:11.5700430Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+reuse	Set up job	2026-11-14T09:20:11.5700890Z Build Date: 2026-11-03T17:26:59Z
+reuse	Set up job	2026-11-14T09:20:11.5701330Z Worker ID: {c0144d00-ee4a-4a13-bdd6-3128fca6f213}
+reuse	Set up job	2026-11-14T09:20:11.5701780Z Region: westus
+reuse	Set up job	2026-11-14T09:20:11.5702110Z Cloud: MacCloud
+reuse	Set up job	2026-11-14T09:20:11.5702460Z ##[endgroup]
+reuse	Set up job	2026-11-14T09:20:11.5703400Z ##[group]Operating System
+reuse	Set up job	2026-11-14T09:20:11.5703790Z macOS
+reuse	Set up job	2026-11-14T09:20:11.5704100Z 15.8.2
+reuse	Set up job	2026-11-14T09:20:11.5704420Z 24H232
+reuse	Set up job	2026-11-14T09:20:11.5704740Z ##[endgroup]
+reuse	Set up job	2026-11-14T09:20:11.5705090Z ##[group]Runner Image
+reuse	Set up job	2026-11-14T09:20:11.5705470Z Image: macos-15-arm64
+reuse	Set up job	2026-11-14T09:20:11.5705830Z Version: 20261104.0514.1
+reuse	Set up job	2026-11-14T09:20:11.5706560Z Included Software: https://github.com/actions/runner-images/blob/macos-15-arm64/20261104.0514/images/macos/macos-15-arm64-Readme.md
+reuse	Set up job	2026-11-14T09:20:11.5707710Z Image Release: https://github.com/actions/runner-images/releases/tag/macos-15-arm64%2F20261104.0514
+reuse	Set up job	2026-11-14T09:20:11.5708380Z ##[endgroup]
+reuse	Set up job	2026-11-14T09:20:11.5709110Z ##[group]GITHUB_TOKEN Permissions
+reuse	Set up job	2026-11-14T09:20:11.5710170Z Contents: read
+reuse	Set up job	2026-11-14T09:20:11.5710540Z Metadata: read
+reuse	Set up job	2026-11-14T09:20:11.5710900Z ##[endgroup]
+reuse	Set up job	2026-11-14T09:20:11.5712290Z Secret source: Actions
+reuse	Set up job	2026-11-14T09:20:11.5712840Z Cache mode: write
+reuse	Set up job	2026-11-14T09:20:11.5713260Z Prepare workflow directory
+reuse	Set up job	2026-11-14T09:20:11.6005690Z Prepare all required actions
+reuse	Set up job	2026-11-14T09:20:11.6043770Z Getting action download info
+reuse	Set up job	2026-11-14T09:20:12.0497090Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+reuse	Set up job	2026-11-14T09:20:12.2821320Z Download action repository 'taiki-e/install-action@v2' (SHA:4a76afe23f9e08d2d9550fb56e556444e8611d21)
+reuse	Set up job	2026-11-14T09:20:12.7649250Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+reuse	Set up job	2026-11-14T09:20:13.0049020Z Complete job name: reuse
+reuse	Run actions/checkout@v4	﻿2026-11-14T09:20:13.0562520Z ##[group]Run actions/checkout@v4
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0563100Z with:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0563440Z   repository: taneliang/farcooler
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0566160Z   token: ***
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0566480Z   ssh-strict: true
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0566800Z   ssh-user: git
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0567120Z   persist-credentials: true
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0567470Z   clean: true
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0567870Z   sparse-checkout-cone-mode: true
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0568280Z   fetch-depth: 1
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0568590Z   fetch-tags: false
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0568920Z   show-progress: true
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0569240Z   lfs: false
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0569540Z   submodules: false
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0569870Z   set-safe-directory: true
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0570250Z   allow-unsafe-pr-checkout: false
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.0570740Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4552330Z Syncing repository: taneliang/farcooler
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4553950Z ##[group]Getting Git version info
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4554490Z Working directory is '/Users/runner/work/farcooler/farcooler'
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4555300Z [command]/opt/homebrew/bin/git version
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4810720Z git version 2.56.0
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4822360Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4829550Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/0bd35dc0-8c33-4c13-90a7-b8538b1b13e7/.gitconfig'
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4836720Z Temporarily overriding HOME='/Users/runner/work/_temp/0bd35dc0-8c33-4c13-90a7-b8538b1b13e7' before making global git config changes
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4837750Z Adding repository directory to the temporary git global config as a safe directory
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4840310Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/farcooler/farcooler
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4934650Z Deleting the contents of '/Users/runner/work/farcooler/farcooler'
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4937260Z ##[group]Initializing the repository
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.4940860Z [command]/opt/homebrew/bin/git init /Users/runner/work/farcooler/farcooler
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5193440Z hint: Using 'master' as the name for the initial branch. This default branch name
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5195510Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5199090Z hint: to use in all of your new repositories, which will suppress this warning,
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5200630Z hint: call:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5201070Z hint:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5201530Z hint: 	git config --global init.defaultBranch <name>
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5202060Z hint:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5202540Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5203290Z hint: 'development'. The just-created branch can be renamed via this command:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5203910Z hint:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5204330Z hint: 	git branch -m <name>
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5204740Z hint:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5205230Z hint: Disable this message with "git config set advice.defaultBranchName false"
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5206370Z Initialized empty Git repository in /Users/runner/work/farcooler/farcooler/.git/
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5217320Z [command]/opt/homebrew/bin/git remote add origin https://github.com/taneliang/farcooler
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5313330Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5315360Z ##[group]Disabling automatic garbage collection
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5317090Z [command]/opt/homebrew/bin/git config --local gc.auto 0
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5392070Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5392910Z ##[group]Setting up auth
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5400400Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.5474400Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.6357260Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.6415870Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.7258830Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.7366030Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.8144380Z [command]/opt/homebrew/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.8204210Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.8205120Z ##[group]Fetching the repository
+reuse	Run actions/checkout@v4	2026-11-14T09:20:13.8210170Z [command]/opt/homebrew/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +134a889660efd7e03265f612576f7ff562bb4a8c:refs/remotes/origin/ov-1186-shared-cache-spike
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0793240Z From https://github.com/taneliang/farcooler
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0795130Z  * [new ref]         134a889660efd7e03265f612576f7ff562bb4a8c -> origin/ov-1186-shared-cache-spike
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0798360Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0799480Z ##[group]Determining the checkout info
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0800660Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0803180Z [command]/opt/homebrew/bin/git sparse-checkout disable
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0872870Z [command]/opt/homebrew/bin/git config --local --unset-all extensions.worktreeConfig
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0932130Z ##[group]Checking out the ref
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.0934490Z [command]/opt/homebrew/bin/git checkout --progress --force -B ov-1186-shared-cache-spike refs/remotes/origin/ov-1186-shared-cache-spike
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.7661270Z Switched to a new branch 'ov-1186-shared-cache-spike'
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.7664200Z branch 'ov-1186-shared-cache-spike' set up to track 'origin/ov-1186-shared-cache-spike'.
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.7679760Z ##[endgroup]
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.7776530Z [command]/opt/homebrew/bin/git log -1 --format=%H
+reuse	Run actions/checkout@v4	2026-11-14T09:20:17.7846470Z 134a889660efd7e03265f612576f7ff562bb4a8c
+reuse	Run taiki-e/install-action@v2	﻿2026-11-14T09:20:17.8142560Z ##[group]Run taiki-e/install-action@v2
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8143330Z with:
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8143940Z   tool: cargo-nextest@0.9.148
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8144650Z   checksum: true
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8145270Z   fallback: cargo-binstall
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8145970Z ##[endgroup]
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8220050Z ##[start-action display=Run bail() {;id=__taiki-e_install-action.__run]
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8267260Z ##[group]Run bail() {
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8267900Z ^[[36;1mbail() {^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8268510Z ^[[36;1m  printf '::error::install-action: %s\n' "$*"^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8269180Z ^[[36;1m  exit 1^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8269710Z ^[[36;1m}^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8270450Z ^[[36;1m# If /bin/sh is dash, environment variable containing % is not imported, but is fine^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8271360Z ^[[36;1m# because it also means that it will not be exposed to subprocess.^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8272180Z ^[[36;1mif /usr/bin/env | grep -Eq '^BASH_FUNC_'; then^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8273170Z ^[[36;1m  bail 'bash function injection via BASH_FUNC_ environment variable is not allowed for security reasons'^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8274100Z ^[[36;1mfi^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8274670Z ^[[36;1mif ! command -v bash >/dev/null; then^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8275380Z ^[[36;1m  if grep -Eq '^ID=alpine' /etc/os-release; then^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8276190Z ^[[36;1m    printf '::group::Install packages required for install-action (bash)\n'^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8276990Z ^[[36;1m    # NB: sync with apk_install in main.sh^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8277670Z ^[[36;1m    if command -v sudo >/dev/null; then^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8278340Z ^[[36;1m      sudo apk --no-cache add bash^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8279020Z ^[[36;1m    elif command -v doas >/dev/null; then^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8279700Z ^[[36;1m      doas apk --no-cache add bash^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8280310Z ^[[36;1m    else^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8280880Z ^[[36;1m      apk --no-cache add bash^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8281490Z ^[[36;1m    fi^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8282220Z ^[[36;1m    printf '::endgroup::\n'^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8282870Z ^[[36;1m  else^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8283470Z ^[[36;1m    bail 'this action requires bash'^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8284130Z ^[[36;1m  fi^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8284660Z ^[[36;1mfi^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8285300Z ^[[36;1mbash --noprofile --norc "${GITHUB_ACTION_PATH:?}/main.sh"^[[0m
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8289790Z shell: /usr/bin/env -u ENV -u BASH_ENV -u CDPATH -u SHELLOPTS -u BASHOPTS /bin/sh -eu {0}
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8290610Z env:
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8291160Z   INPUT_TOOL: cargo-nextest@0.9.148
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8291760Z   INPUT_CHECKSUM: true
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8292380Z   INPUT_FALLBACK: cargo-binstall
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8295240Z   DEFAULT_GITHUB_TOKEN: ***
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8295860Z   ACTION_USER_AGENT: taiki-e/install-action (v2)
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8296520Z   RUNNER_OS: macOS
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8297060Z   RUNNER_ARCH: ARM64
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8297630Z ##[endgroup]
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8784520Z info: host platform: aarch64_macos
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.8791550Z info: cargo is located at /opt/homebrew/opt/rustup/bin/cargo
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.9074240Z info: installing cargo-nextest@0.9.148
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.9326100Z info: adding '/Users/runner/.install-action/bin' to PATH
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:17.9375970Z info: downloading https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.148/cargo-nextest-0.9.148-universal-apple-darwin.tar.gz
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.5675820Z info: verifying sha256 checksum for cargo-nextest-0.9.148-universal-apple-darwin.tar.gz
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7041570Z info: cargo-nextest installed at /Users/runner/.install-action/bin/cargo-nextest
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7045720Z + cargo-nextest nextest --version
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7123470Z cargo-nextest 0.9.148 (cd1d6d546 2026-10-07)
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7126480Z release: 0.9.148
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7127540Z commit-hash: cd1d6d5467322dbc0d39a80cb671d000ac302798
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7127980Z commit-date: 2026-10-07
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7128420Z host: aarch64-apple-darwin
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7130060Z 
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7147140Z ##[end-action id=__taiki-e_install-action.__run;outcome=success;conclusion=success;duration_ms=892]
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7155780Z ##[start-action display=Run Set-StrictMode -Version Latest;id=__taiki-e_install-action.__run_2]
+reuse	Run taiki-e/install-action@v2	2026-11-14T09:20:18.7162020Z ##[end-action id=__taiki-e_install-action.__run_2;outcome=skipped;conclusion=skipped;duration_ms=0]
+reuse	Archive counterexamples	﻿2026-11-14T09:20:18.7213420Z ##[group]Run python3 reports/ov-1186/prototype_test.py
+reuse	Archive counterexamples	2026-11-14T09:20:18.7213930Z ^[[36;1mpython3 reports/ov-1186/prototype_test.py^[[0m
+reuse	Archive counterexamples	2026-11-14T09:20:18.7263550Z shell: /bin/bash -e {0}
+reuse	Archive counterexamples	2026-11-14T09:20:18.7263890Z ##[endgroup]
+reuse	Archive counterexamples	2026-11-14T09:20:19.2097150Z ..
+reuse	Archive counterexamples	2026-11-14T09:20:19.2097930Z ----------------------------------------------------------------------
+reuse	Archive counterexamples	2026-11-14T09:20:19.2098370Z Ran 2 tests in 0.004s
+reuse	Archive counterexamples	2026-11-14T09:20:19.2098630Z 
+reuse	Archive counterexamples	2026-11-14T09:20:19.2098770Z OK
+reuse	Run locally compiled tests without compiling in CI	﻿2026-11-14T09:20:19.2275460Z ##[group]Run python3 reports/ov-1186/prototype.py consume
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:19.2275890Z ^[[36;1mpython3 reports/ov-1186/prototype.py consume^[[0m
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:19.2324380Z shell: /bin/bash -e {0}
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:19.2324670Z env:
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:19.2327000Z   GH_TOKEN: ***
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:19.2327190Z ##[endgroup]
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5745860Z   Extracting 1 binary to /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/nextest-archive-zPtE76
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5748640Z    Extracted 5 files to /private/var/folders/2s/vty41l455yv698g4xkgfv7z00000gn/T/nextest-archive-zPtE76 in 0.03s
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5749740Z ────────────
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5750100Z  Nextest run ID 354d9312-6a6c-4c2c-b33a-3477519d4423 with nextest profile: ci
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5750530Z     Starting 8 tests across 1 binary
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5756490Z         PASS [   0.009s] (1/8) farcooler-agent-core event::tests::a_gap_is_a_first_class_event_not_an_absence
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5757290Z         PASS [   0.010s] (2/8) farcooler-agent-core event::tests::a_clean_end_is_the_same_bytes_it_always_was
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5758250Z         PASS [   0.010s] (3/8) farcooler-agent-core event::tests::a_failed_end_keeps_reason_a_string_and_puts_the_failure_beside_it
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5758970Z         PASS [   0.008s] (4/8) farcooler-agent-core event::tests::a_sequenced_event_carries_its_own_position
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5759570Z         PASS [   0.008s] (5/8) farcooler-agent-core event::tests::each_backends_failure_word_lands_on_one_kind
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5760880Z         PASS [   0.008s] (6/8) farcooler-agent-core permission::tests::a_bash_ask_is_named_for_its_command
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5762850Z         PASS [   0.007s] (7/8) farcooler-agent-core usage::tests::dollars_become_exact_millionths
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5763720Z         PASS [   0.007s] (8/8) farcooler-agent-core permission::tests::the_options_are_allow_and_deny_by_those_ids
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5764430Z ────────────
+reuse	Run locally compiled tests without compiling in CI	2026-11-14T09:20:20.5764800Z      Summary [   0.026s] 8 tests run: 8 passed, 0 skipped
+reuse	Independent cold compile and tests for comparison	﻿2026-11-14T09:20:20.5851760Z ##[group]Run python3 - <<'PY'
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5852080Z ^[[36;1mpython3 - <<'PY'^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5852730Z ^[[36;1mimport importlib.util^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5853000Z ^[[36;1mimport json^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5853170Z ^[[36;1mimport os^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5853500Z ^[[36;1mfrom pathlib import Path^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5853930Z ^[[36;1mspec = importlib.util.spec_from_file_location('prototype', 'reports/ov-1186/prototype.py')^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5854380Z ^[[36;1mp = importlib.util.module_from_spec(spec)^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5854680Z ^[[36;1mspec.loader.exec_module(p)^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5855090Z ^[[36;1menv = {**os.environ, 'CARGO_INCREMENTAL': '0', 'CARGO_PROFILE_DEV_DEBUG': '0',^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5855560Z ^[[36;1m       'CARGO_BUILD_JOBS': '3', 'MACOSX_DEPLOYMENT_TARGET': '15.0'}^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5856090Z ^[[36;1mresult = p.timed('ci-cold-tests', ['cargo', 'nextest', 'run', '--locked', '-p', p.PACKAGE,^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5860440Z ^[[36;1m                '--profile', 'ci', '--target-dir', str(p.OUT / 'ci-cold')], env)^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5861000Z ^[[36;1m(p.OUT / 'cold.json').write_text(json.dumps(result, indent=2) + '\n')^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5861300Z ^[[36;1mPY^[[0m
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5900110Z shell: /bin/bash -e {0}
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:20.5900360Z ##[endgroup]
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1199050Z     Updating crates.io index
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1200380Z  Downloading crates ...
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1201070Z   Downloaded block-buffer v0.10.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1201520Z   Downloaded adler2 v2.0.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1202510Z   Downloaded ahash v0.8.12
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1202900Z   Downloaded aead v0.6.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1203570Z   Downloaded aes v0.9.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1204040Z   Downloaded russh-cryptovec v0.62.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1286800Z   Downloaded aes-gcm v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1287160Z   Downloaded subtle v2.6.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1288790Z   Downloaded rustc_version v0.4.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1289060Z   Downloaded stable_deref_trait v1.2.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1290580Z   Downloaded tower-layer v0.3.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1291320Z   Downloaded typeshare v1.0.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1291930Z   Downloaded block-padding v0.4.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1294120Z   Downloaded cbc v0.2.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1294430Z   Downloaded quinn-udp v0.5.15
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1294730Z   Downloaded rand_core v0.10.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1294970Z   Downloaded sync_wrapper v1.0.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1295250Z   Downloaded toml_datetime v0.6.11
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1295760Z   Downloaded toml_write v0.1.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1296990Z   Downloaded chacha20poly1305 v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1297440Z   Downloaded scrypt v0.12.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1297670Z   Downloaded serdect v0.4.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1298240Z   Downloaded thiserror v1.0.69
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1298670Z   Downloaded rfc6979 v0.6.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1299060Z   Downloaded rustls-webpki v0.103.13
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1299450Z   Downloaded salsa20 v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1299720Z   Downloaded sha2 v0.10.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1300050Z   Downloaded socket2 v0.6.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1300610Z   Downloaded tracing-subscriber v0.3.23
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1300990Z   Downloaded aho-corasick v1.1.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1301670Z   Downloaded block-buffer v0.12.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1304920Z   Downloaded cesu8 v1.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1305250Z   Downloaded chacha20 v0.10.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1305690Z   Downloaded cmov v0.5.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1306110Z   Downloaded cpubits v0.1.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1309430Z   Downloaded cpufeatures v0.3.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1310550Z   Downloaded crypto-common v0.2.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1311430Z   Downloaded getrandom v0.2.17
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1312010Z   Downloaded regex v1.13.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1313020Z   Downloaded reqwest v0.12.28
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1313290Z   Downloaded rsa v0.10.0-rc.18
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1313760Z   Downloaded rusqlite v0.32.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1314390Z   Downloaded russh v0.62.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1315190Z   Downloaded rustc-hash v2.1.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1315500Z   Downloaded rustix-openpty v0.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1318360Z   Downloaded serde_json v1.0.151
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1318950Z   Downloaded sha3 v0.12.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1319330Z   Downloaded utf8parse v0.2.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1319680Z   Downloaded zeroize_derive v1.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1321260Z   Downloaded zerovec-derive v0.11.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1321720Z   Downloaded anstyle v1.0.14
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1323310Z   Downloaded bytes v1.12.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1324060Z   Downloaded cfg_aliases v0.2.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1324920Z   Downloaded clap_builder v4.6.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1327220Z   Downloaded clap_lex v1.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1328160Z   Downloaded colorchoice v1.0.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1328830Z   Downloaded core-foundation-sys v0.8.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1329150Z   Downloaded cpufeatures v0.2.17
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1329470Z   Downloaded crypto-common v0.1.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1330610Z   Downloaded data-encoding v2.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1330840Z   Downloaded delegate v0.13.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1331200Z   Downloaded der v0.8.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1331460Z   Downloaded digest v0.11.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1331920Z   Downloaded displaydoc v0.2.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1332420Z   Downloaded equivalent v1.0.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1332820Z   Downloaded fallible-streaming-iterator v0.1.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1333190Z   Downloaded fastrand v2.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1333490Z   Downloaded find-msvc-tools v0.1.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1333730Z   Downloaded fsevent-sys v4.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1334130Z   Downloaded futures-executor v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1334500Z   Downloaded quinn v0.11.11
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1334800Z   Downloaded rand_pcg v0.10.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1335210Z   Downloaded rustls-pki-types v1.15.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1335510Z   Downloaded rustversion v1.0.23
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1335900Z   Downloaded same-file v1.0.6
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1337040Z   Downloaded sha2 v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1337560Z   Downloaded synstructure v0.13.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1337910Z   Downloaded tinystr v0.8.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1338280Z   Downloaded tinyvec_macros v0.1.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1338620Z   Downloaded tokio-rustls v0.26.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1338840Z   Downloaded try-lock v0.2.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1339130Z   Downloaded typeshare-annotation v1.0.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1339450Z   Downloaded untrusted v0.7.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1339760Z   Downloaded litemap v0.8.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1340070Z   Downloaded anstyle-query v1.1.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1340380Z   Downloaded argon2 v0.6.0-rc.8
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1340690Z   Downloaded atomic-waker v1.1.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1340970Z   Downloaded autocfg v1.5.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1341260Z   Downloaded base16ct v1.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1341600Z   Downloaded base64 v0.22.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1341940Z   Downloaded bcrypt-pbkdf v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1342260Z   Downloaded bitflags v2.13.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1342650Z   Downloaded blake2 v0.11.0-rc.6
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1342950Z   Downloaded blowfish v0.10.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1343220Z   Downloaded byteorder v1.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1344100Z   Downloaded cfg-if v1.0.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1344390Z   Downloaded cipher v0.5.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1344560Z   Downloaded clap v4.6.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1344810Z   Downloaded clap_derive v4.6.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1345100Z   Downloaded cmake v0.1.58
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1345450Z   Downloaded ctr v0.10.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1345650Z   Downloaded ctutils v0.4.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1345830Z   Downloaded cursor-icon v1.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1346080Z   Downloaded des v0.9.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1346330Z   Downloaded digest v0.10.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1346580Z   Downloaded directories v5.0.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1346830Z   Downloaded dunce v1.0.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1347070Z   Downloaded ecdsa v0.17.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1347300Z   Downloaded ed25519 v3.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1347560Z   Downloaded elliptic-curve v0.14.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1347890Z   Downloaded fallible-iterator v0.3.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1348270Z   Downloaded ff v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1348550Z   Downloaded flate2 v1.1.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1349170Z   Downloaded fs_extra v1.3.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1349400Z   Downloaded futures v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1349710Z   Downloaded futures-channel v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1349990Z   Downloaded futures-core v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1350340Z   Downloaded futures-macro v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1350590Z   Downloaded futures-sink v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1350890Z   Downloaded russh-util v0.52.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1351140Z   Downloaded ryu v1.0.23
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1351410Z   Downloaded scopeguard v1.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1351720Z   Downloaded serde v1.0.229
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1351950Z   Downloaded serde_urlencoded v0.7.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1352250Z   Downloaded sha1 v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1352490Z   Downloaded shlex v2.0.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1352660Z   Downloaded slab v0.4.12
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1352820Z   Downloaded spki v0.8.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1353230Z   Downloaded sponge-cursor v0.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1353430Z   Downloaded ssh-encoding v0.3.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1353740Z   Downloaded strsim v0.11.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1353970Z   Downloaded thiserror v2.0.19
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1354220Z   Downloaded thiserror-impl v1.0.69
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1354550Z   Downloaded tokio-macros v2.7.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1354800Z   Downloaded toml v0.8.23
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1355070Z   Downloaded tower-service v0.3.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1355280Z   Downloaded tracing-attributes v0.1.31
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1355560Z   Downloaded password-hash v0.6.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1355830Z   Downloaded pkg-config v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1356130Z   Downloaded prost-derive v0.13.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1356380Z   Downloaded lru-slab v0.1.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1356670Z   Downloaded matchers v0.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1356930Z   Downloaded anstream v1.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1357160Z   Downloaded anstyle-parse v1.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1357500Z   Downloaded anyhow v1.0.104
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1357740Z   Downloaded arrayvec v0.7.8
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1358040Z   Downloaded base64ct v1.8.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1358280Z   Downloaded cc v1.4.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1358560Z   Downloaded chrono v0.4.45
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1358800Z   Downloaded combine v4.6.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1358980Z   Downloaded crc32fast v1.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1359240Z   Downloaded crypto-primes v0.7.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1359500Z   Downloaded dirs-sys v0.4.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1359680Z   Downloaded either v1.17.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1359860Z   Downloaded enum_dispatch v0.3.13
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1360170Z   Downloaded errno v0.3.14
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1360350Z   Downloaded fixedbitset v0.5.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1360610Z   Downloaded form_urlencoded v1.2.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1360950Z   Downloaded futures-io v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1361200Z   Downloaded futures-task v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1361510Z   Downloaded futures-util v0.3.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1361760Z   Downloaded generic-array v0.14.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1362030Z   Downloaded generic-array v1.4.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1362280Z   Downloaded quote v1.0.47
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1362600Z   Downloaded regex-syntax v0.8.11
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1362880Z   Downloaded sec1 v0.8.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1363160Z   Downloaded serde_derive v1.0.229
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1363470Z   Downloaded serde_spanned v0.6.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1363720Z   Downloaded sharded-slab v0.1.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1364080Z   Downloaded signal-hook v0.4.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1364380Z   Downloaded signal-hook-registry v1.4.8
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1364740Z   Downloaded signature v3.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1364980Z   Downloaded simd-adler32 v0.3.10
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1365280Z   Downloaded smallvec v1.15.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1365530Z   Downloaded ssh-cipher v0.3.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1365850Z   Downloaded thiserror-impl v2.0.19
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1366160Z   Downloaded thread_local v1.1.10
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1366530Z   Downloaded tracing-log v0.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1366780Z   Downloaded pin-project-lite v0.2.17
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1366990Z   Downloaded primefield v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1367360Z   Downloaded version_check v0.9.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1367870Z   Downloaded zerofrom v0.1.8
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1368060Z   Downloaded zerofrom-derive v0.1.7
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1368250Z   Downloaded zeroize v1.9.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1368550Z   Downloaded lock_api v0.4.14
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1368800Z   Downloaded percent-encoding v2.3.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1369130Z   Downloaded polyval v0.7.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1369440Z   Downloaded potential_utf v0.1.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1369750Z   Downloaded primeorder v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1369930Z   Downloaded prost v0.13.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1370120Z   Downloaded protoc-bin-vendored v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1370390Z   Downloaded const-oid v0.10.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1370620Z   Downloaded crypto-bigint v0.7.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1370840Z   Downloaded ed25519-dalek v3.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1371080Z   Downloaded semver v1.0.28
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1371560Z   Downloaded tempfile v3.27.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1371870Z   Downloaded tinyvec v1.12.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1372130Z   Downloaded tracing-core v0.1.36
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1372510Z   Downloaded p384 v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1372740Z   Downloaded uuid v1.24.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1372920Z   Downloaded icu_normalizer v2.1.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1373110Z   Downloaded icu_normalizer_data v2.1.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1373320Z   Downloaded icu_properties v2.1.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1373560Z   Downloaded log v0.4.33
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1373830Z   Downloaded phc v0.6.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1374000Z   Downloaded pkcs1 v0.8.0-rc.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1374270Z   Downloaded pkcs5 v0.8.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1374450Z   Downloaded pkcs8 v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1374620Z   Downloaded polling v3.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1374910Z   Downloaded poly1305 v0.9.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1375150Z   Downloaded proc-macro2 v1.0.107
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1375440Z   Downloaded prost-build v0.13.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1375710Z   Downloaded prost-types v0.13.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1375900Z   Downloaded unicode-ident v1.0.24
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1376160Z   Downloaded nu-ansi-term v0.50.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1376400Z   Downloaded num-integer v0.1.46
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1376630Z   Downloaded parking_lot v0.12.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1376820Z   Downloaded pem-rfc7468 v1.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1377110Z   Downloaded universal-hash v0.6.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1377400Z   Downloaded untrusted v0.9.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1377620Z   Downloaded utf16_iter v1.0.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1377900Z   Downloaded rand v0.10.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1378070Z   Downloaded serde_core v1.0.229
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1378260Z   Downloaded toml_edit v0.22.27
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1378430Z   Downloaded tower v0.5.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1378600Z   Downloaded typenum v1.20.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1378780Z   Downloaded zerotrie v0.2.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1378960Z   Downloaded prettyplease v0.2.37
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1379150Z   Downloaded notify v8.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1379330Z   Downloaded notify-types v2.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1379510Z   Downloaded num-traits v0.2.19
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1379690Z   Downloaded once_cell v1.21.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1379880Z   Downloaded option-ext v0.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1380060Z   Downloaded p256 v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1380220Z   Downloaded p521 v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1380390Z   Downloaded parking_lot_core v0.9.12
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1380590Z   Downloaded pbkdf2 v0.13.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1380920Z   Downloaded zmij v1.0.23
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1381160Z   Downloaded heck v0.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1381480Z   Downloaded hex-literal v1.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1381800Z   Downloaded aws-lc-rs v1.17.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1382050Z   Downloaded curve25519-dalek v5.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1382400Z   Downloaded ssh-key v0.7.0-rc.11
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1382670Z   Downloaded tower-http v0.6.11
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1382980Z   Downloaded zerovec v0.11.6
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1383220Z   Downloaded num-bigint v0.4.8
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1383540Z   Downloaded url v2.5.8
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1383760Z   Downloaded utf8_iter v1.0.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1384080Z   Downloaded walkdir v2.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1384530Z   Downloaded want v0.3.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1391730Z   Downloaded wnaf v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1391960Z   Downloaded write16 v1.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1392140Z   Downloaded yoke-derive v0.8.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1392370Z   Downloaded hashlink v0.9.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1392590Z   Downloaded home v0.5.11
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1392770Z   Downloaded http-body-util v0.1.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1392970Z   Downloaded iana-time-zone v0.1.65
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1393170Z   Downloaded idna_adapter v1.2.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1393360Z   Downloaded inout v0.2.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1393530Z   Downloaded jni-sys v0.3.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1393720Z   Downloaded quinn-proto v0.11.16
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1393910Z   Downloaded icu_properties_data v2.1.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1394130Z   Downloaded writeable v0.6.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1394300Z   Downloaded yoke v0.8.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1394680Z   Downloaded getrandom v0.4.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1394860Z   Downloaded ghash v0.6.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1395040Z   Downloaded http-body v1.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1395220Z   Downloaded httparse v1.10.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1395410Z   Downloaded hyper-rustls v0.27.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1395610Z   Downloaded is_terminal_polyfill v1.70.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1395820Z   Downloaded itoa v1.0.18
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1395980Z   Downloaded jni-sys v0.4.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1396150Z   Downloaded vte v0.15.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1396310Z   Downloaded group v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1396490Z   Downloaded hashbrown v0.17.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1396670Z   Downloaded hex v0.4.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1396830Z   Downloaded ipnet v2.12.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1396990Z   Downloaded rustls v0.23.43
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1397170Z   Downloaded vcpkg v0.2.15
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1397340Z   Downloaded x25519-dalek v3.0.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1397510Z   Downloaded hmac v0.13.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1397690Z   Downloaded hybrid-array v0.4.13
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1397880Z   Downloaded icu_collections v2.1.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1398080Z   Downloaded icu_provider v2.1.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1398270Z   Downloaded jni v0.21.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1398440Z   Downloaded jni-sys-macros v0.4.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1398620Z   Downloaded md5 v0.8.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1398790Z   Downloaded alacritty_terminal v0.26.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1398980Z   Downloaded syn v3.0.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1399150Z   Downloaded keccak v0.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1399310Z   Downloaded kem v0.3.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1399470Z   Downloaded lazy_static v1.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1399650Z   Downloaded hpke v0.15.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1399830Z   Downloaded icu_locale_core v2.1.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1400020Z   Downloaded jobserver v0.1.35
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1400210Z   Downloaded module-lattice v0.2.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1400400Z   Downloaded multimap v0.10.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1400580Z   Downloaded syn v2.0.119
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1400750Z   Downloaded hashbrown v0.14.5
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1400920Z   Downloaded hkdf v0.13.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1401090Z   Downloaded http v1.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1401250Z   Downloaded indexmap v2.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1401460Z   Downloaded internal-russh-num-bigint v0.5.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1401700Z   Downloaded hyper-util v0.1.20
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1401880Z   Downloaded ml-kem v0.3.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1402050Z   Downloaded winnow v0.7.15
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1402220Z   Downloaded itertools v0.14.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1402400Z   Downloaded miniz_oxide v0.8.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1402590Z   Downloaded regex-automata v0.4.16
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1402790Z   Downloaded webpki-roots v1.0.9
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1402970Z   Downloaded hyper v1.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1403140Z   Downloaded idna v1.1.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1403300Z   Downloaded mio v1.2.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1403460Z   Downloaded nix v0.31.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1403620Z   Downloaded memchr v2.8.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1403790Z   Downloaded rustix v1.1.4
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1403960Z   Downloaded sha3 v0.11.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1404130Z   Downloaded unicode-width v0.2.2
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1404320Z   Downloaded zerocopy v0.8.55
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1404680Z   Downloaded tracing v0.1.44
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1404860Z   Downloaded petgraph v0.7.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1405030Z   Downloaded tokio v1.53.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1405200Z   Downloaded libc v0.2.189
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1405360Z   Downloaded ring v0.17.14
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1405570Z   Downloaded protoc-bin-vendored-macos-aarch_64 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1405870Z   Downloaded protoc-bin-vendored-macos-x86_64 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1406140Z   Downloaded protoc-bin-vendored-win32 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1406390Z   Downloaded protoc-bin-vendored-linux-x86_64 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1406670Z   Downloaded protoc-bin-vendored-linux-aarch_64 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1406960Z   Downloaded protoc-bin-vendored-linux-ppcle_64 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1407250Z   Downloaded protoc-bin-vendored-linux-x86_32 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1407650Z   Downloaded protoc-bin-vendored-linux-s390_64 v3.2.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1407900Z   Downloaded libsqlite3-sys v0.30.1
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1408100Z   Downloaded aws-lc-sys v0.43.0
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1408290Z    Compiling proc-macro2 v1.0.107
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1408480Z    Compiling quote v1.0.47
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1408660Z    Compiling unicode-ident v1.0.24
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1408850Z    Compiling serde_core v1.0.229
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1409030Z    Compiling zmij v1.0.23
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1409200Z    Compiling serde_json v1.0.151
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1409380Z    Compiling serde v1.0.229
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1409550Z    Compiling syn v3.0.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1409700Z    Compiling itoa v1.0.18
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1409860Z    Compiling memchr v2.8.3
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1410040Z    Compiling serde_derive v1.0.229
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1410400Z    Compiling farcooler-agent-core v0.1.0 (/Users/runner/work/farcooler/farcooler/crates/agent-core)
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1410900Z     Finished `test` profile [unoptimized] target(s) in 16.26s
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1412150Z ────────────
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1412410Z  Nextest run ID a2aa72b2-f745-4975-b19d-d1cc19031da2 with nextest profile: ci
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1412730Z     Starting 8 tests across 1 binary
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1413420Z         PASS [   0.007s] (1/8) farcooler-agent-core event::tests::a_gap_is_a_first_class_event_not_an_absence
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1413960Z         PASS [   0.008s] (2/8) farcooler-agent-core event::tests::a_clean_end_is_the_same_bytes_it_always_was
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1414570Z         PASS [   0.008s] (3/8) farcooler-agent-core event::tests::a_failed_end_keeps_reason_a_string_and_puts_the_failure_beside_it
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1415150Z         PASS [   0.007s] (4/8) farcooler-agent-core event::tests::a_sequenced_event_carries_its_own_position
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1415670Z         PASS [   0.007s] (5/8) farcooler-agent-core permission::tests::a_bash_ask_is_named_for_its_command
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1416180Z         PASS [   0.007s] (6/8) farcooler-agent-core event::tests::each_backends_failure_word_lands_on_one_kind
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1416680Z         PASS [   0.007s] (7/8) farcooler-agent-core usage::tests::dollars_become_exact_millionths
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1417280Z         PASS [   0.007s] (8/8) farcooler-agent-core permission::tests::the_options_are_allow_and_deny_by_those_ids
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1417680Z ────────────
+reuse	Independent cold compile and tests for comparison	2026-11-14T09:20:42.1417860Z      Summary [   0.022s] 8 tests run: 8 passed, 0 skipped
+reuse	Run actions/upload-artifact@v4	﻿2026-11-14T09:20:42.1511120Z ##[group]Run actions/upload-artifact@v4
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1511400Z with:
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1511540Z   name: ov-1186-timings
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1511730Z   path: target/ov-1186/*.json
+reuse	Run actions/upload-artifact@v4	target/ov-1186/*.log
+reuse	Run actions/upload-artifact@v4	
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1512000Z   retention-days: 14
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1512180Z   if-no-files-found: warn
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1512340Z   compression-level: 6
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1512500Z   overwrite: false
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1512650Z   include-hidden-files: false
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.1512840Z ##[endgroup]
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.5112390Z (node:1958) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.5113460Z (Use `node --trace-deprecation ...` to show where the warning was created)
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.5156310Z With the provided path, there will be 4 files uploaded
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.5159120Z Artifact name is valid!
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:42.5159410Z Root directory input is valid!
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.0072870Z Beginning upload of artifact content to blob storage
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.0212470Z (node:1958) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.2895870Z Uploaded bytes 5018
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.3658440Z Finished uploading artifact content to blob storage!
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.3660370Z SHA256 digest of uploaded artifact zip is dd84c60887e09f16fd6a659ceb4a26cee7a06bdd45ee1b8bf658682d986a76fb
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.3669930Z Finalizing artifact upload
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.9099030Z Artifact ov-1186-timings.zip successfully finalized. Artifact ID 14108600289
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.9102130Z Artifact ov-1186-timings has been successfully uploaded! Final size is 5018 bytes. Artifact ID is 14108600289
+reuse	Run actions/upload-artifact@v4	2026-11-14T09:20:43.9124370Z Artifact download URL: https://github.com/taneliang/farcooler/actions/runs/43579040900/artifacts/14108600289
+reuse	Post Run actions/checkout@v4	﻿2026-11-14T09:20:43.9393720Z Post job cleanup.
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0362060Z [command]/opt/homebrew/bin/git version
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0442730Z git version 2.56.0
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0460720Z Copying '/Users/runner/.gitconfig' to '/Users/runner/work/_temp/ccea3790-055d-4edf-a03b-5987ca7bbb35/.gitconfig'
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0468530Z Temporarily overriding HOME='/Users/runner/work/_temp/ccea3790-055d-4edf-a03b-5987ca7bbb35' before making global git config changes
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0469260Z Adding repository directory to the temporary git global config as a safe directory
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0471510Z [command]/opt/homebrew/bin/git config --global --add safe.directory /Users/runner/work/farcooler/farcooler
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0539960Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp core\.sshCommand
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.0608280Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.1395530Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.1455500Z http.https://github.com/.extraheader
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.1493000Z [command]/opt/homebrew/bin/git config --local --unset-all http.https://github.com/.extraheader
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.1522930Z [command]/opt/homebrew/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.2217520Z [command]/opt/homebrew/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+reuse	Post Run actions/checkout@v4	2026-11-14T09:20:44.2267670Z [command]/opt/homebrew/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+reuse	Complete job	﻿2026-11-14T09:20:44.2966880Z Cleaning up orphan processes
+reuse	Complete job	2026-11-14T09:20:44.5576090Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

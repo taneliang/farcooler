@@ -1,0 +1,23 @@
+{
+  "download_verify_seconds": 0.99,
+  "source_key": "57e372d8a42d8fc5efe9b22859822e99ebd29a7d0ff4c9a93f353e7cd42d48cf",
+  "archive_sha256": "739c73142aba68f82aafb6ca58768c5931405c559e3093b766c9453546a9f8bd",
+  "runner_os": "macOS-15.8.2-arm64-arm-64bit-Mach-O",
+  "compilation_skipped": true,
+  "tests": {
+    "seconds": 0.208,
+    "command": [
+      "cargo",
+      "nextest",
+      "run",
+      "--profile",
+      "ci",
+      "--archive-file",
+      "/Users/runner/work/farcooler/farcooler/target/ov-1186/download.tar.zst",
+      "--workspace-remap",
+      "/Users/runner/work/farcooler/farcooler"
+    ],
+    "log": "ci-archive-tests.log"
+  },
+  "total_seconds": 1.266
+}
