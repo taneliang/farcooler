@@ -174,6 +174,12 @@ class LandingTests(unittest.TestCase):
                 self.assertTrue(all(r["seconds"] >= 0 for r in timings))
 
     def test_real_affected_failure_and_unaffected_ci_failure(self):
+        self.real_failure_proof(use_nextest=shutil.which("cargo-nextest") is not None)
+
+    def test_real_failure_proof_without_optional_nextest(self):
+        self.real_failure_proof(use_nextest=False)
+
+    def real_failure_proof(self, use_nextest):
         with tempfile.TemporaryDirectory(prefix="landing-selection-") as t:
             repo = Path(t).resolve()
             (repo / "Cargo.toml").write_text('[workspace]\nresolver="2"\nmembers=["leaf","consumer","unrelated"]\n')
@@ -218,6 +224,15 @@ class LandingTests(unittest.TestCase):
                 step.run = step.run.replace("run --offline", "run")
                 plans = {"rust": [step]}
                 policy.apply(plans, {**proposal, "full": full})
+                if not use_nextest:
+                    # The wire job has Cargo but does not install nextest.
+                    # Still exercise real filtered/workspace failures there;
+                    # Rust-equipped local gates also exercise the exact
+                    # production nextest command above.
+                    step.run = "cargo test --no-fail-fast"
+                    step.run += (" --workspace" if full else
+                                 "".join(" -p " + p for p in proposal["packages"]))
+                    step.run += "\n"
                 tmp = repo / ".git/run"
                 tmp.mkdir(exist_ok=True)
                 env = dict(os.environ, CARGO_NET_OFFLINE="true")
