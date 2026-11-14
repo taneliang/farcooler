@@ -20,10 +20,14 @@ pub(crate) enum Target {
     Tty(String),
 }
 
+/// A builder, and whether the orchestrator has paused it by hand (ov-1205). A builder is stopped while a gate
+/// runs, by hand, or both, and is continued only when neither remains.
+struct Builder { target: Target, manual: bool }
+
 #[derive(Default)]
 struct State {
     gates: BTreeMap<u64, ()>,
-    builders: BTreeMap<u64, Target>,
+    builders: BTreeMap<u64, Builder>,
     next: u64,
     paused: bool,
     ticking: bool,
@@ -45,7 +49,14 @@ impl Drop for GateGuard {
 impl Drop for BuilderGuard {
     fn drop(&mut self) {
         // Continued before it is forgotten, so nothing is left stopped that no one will resume.
-        self.0.change(|s| { if let Some(target) = s.builders.remove(&self.1) { signal(&target, libc::SIGCONT); } });
+        self.0.change(|s| { if let Some(target) = s.builders.remove(&self.1) { signal(&target.target, libc::SIGCONT); } });
+    }
+}
+impl BuilderGuard {
+    /// The orchestrator paused (`true`) or resumed (`false`) this builder by hand. A hand pause survives the end of
+    /// a gate, and a hand resume leaves the builder stopped while a gate still holds it.
+    pub(crate) fn manual(&self, on: bool) {
+        self.0.change(|s| { if let Some(b) = s.builders.get_mut(&self.1) { b.manual = on; if !on && s.gates.is_empty() { signal(&b.target, libc::SIGCONT); } } });
     }
 }
 
@@ -91,7 +102,7 @@ impl Yielding {
     /// A builder started. It stops at once if a gate is running.
     pub(crate) fn builder(&self, target: Target) -> BuilderGuard {
         let mut id = 0;
-        self.change(|s| { s.next += 1; id = s.next; s.builders.insert(id, target); });
+        self.change(|s| { s.next += 1; id = s.next; s.builders.insert(id, Builder { target, manual: false }); });
         BuilderGuard(self.clone(), id)
     }
     /// Whether builders are paused now.
@@ -103,7 +114,7 @@ impl Yielding {
         edit(&mut state);
         if state.gates.is_empty() {
             if state.paused {
-                for target in state.builders.values() { signal(target, libc::SIGCONT); }
+                for b in state.builders.values().filter(|b| !b.manual) { signal(&b.target, libc::SIGCONT); }
                 if let Some(record) = &self.0.record { let _ = std::fs::remove_file(record); }
             }
             state.paused = false;
@@ -114,19 +125,19 @@ impl Yielding {
         // no record that a restarted daemon could resume it from.
         if let Err(e) = self.write(&state) {
             tracing::warn!(error = %e, "could not record the builders to pause; they keep running during this gate");
-            for target in state.builders.values() { signal(target, libc::SIGCONT); }
+            for b in state.builders.values().filter(|b| !b.manual) { signal(&b.target, libc::SIGCONT); }
             state.paused = false;
             return;
         }
         // Also covers a builder that is new, and children a native agent forked before it stopped.
-        for target in state.builders.values() { signal(target, libc::SIGSTOP); }
+        for b in state.builders.values() { signal(&b.target, libc::SIGSTOP); }
         state.paused = true;
         if !state.ticking { state.ticking = true; self.tick(); }
     }
     /// Replace the record in one step: a reader sees the whole old set or the whole new set, never a part.
     fn write(&self, state: &State) -> std::io::Result<()> {
         let Some(record) = &self.0.record else { return Ok(()) };
-        let targets: Vec<&Target> = state.builders.values().collect();
+        let targets: Vec<&Target> = state.builders.values().map(|b| &b.target).collect();
         let bytes = serde_json::to_vec(&targets).map_err(std::io::Error::other)?;
         let temp = record.with_extension("json.tmp");
         {
@@ -148,7 +159,7 @@ impl Yielding {
                 let Some(inner) = weak.upgrade() else { return };
                 let mut state = inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if state.gates.is_empty() || !state.paused { state.ticking = false; return; }
-                for target in state.builders.values() { signal(target, libc::SIGSTOP); }
+                for b in state.builders.values() { signal(&b.target, libc::SIGSTOP); }
             }
         });
     }

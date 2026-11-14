@@ -76,7 +76,7 @@ impl ActiveClock {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result<T>>, tmux: &TmuxServer,
     pane: &str, tty: &str, supervisor: i32, id: Uuid, clock: &ActiveClock, timeout: Duration, mut orders: mpsc::Receiver<Order>,
-    mut cancel: tokio::sync::watch::Receiver<bool>, frozen: &mut Option<Frozen>, stop_reply: &mut Option<oneshot::Sender<farcooler_core::Result<()>>>) -> Result<Option<T>> {
+    mut cancel: tokio::sync::watch::Receiver<bool>, frozen: &mut Option<Frozen>, yielded: Option<&crate::yielding::BuilderGuard>, stop_reply: &mut Option<oneshot::Sender<farcooler_core::Result<()>>>) -> Result<Option<T>> {
     tokio::pin!(turn);
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
@@ -92,21 +92,30 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                     Control::Pause if frozen.is_none() => {
                         // Validate the tagged pane again; never signal a tty from a stale capability.
                         match tmux.pane_life(pane, id).await {
-                            Ok(farcooler_tmux::PaneLife::Live) => match freeze(tty, supervisor).await {
+                            Ok(farcooler_tmux::PaneLife::Live) => {
+                                // Recorded first, so a gate that ends meanwhile cannot continue what is about to stop.
+                                if let Some(y) = yielded { y.manual(true); }
+                                match freeze(tty, supervisor).await {
                                 Ok(stopped) => {
                                     remaining = remaining.saturating_sub(active_since.elapsed());
                                     *frozen = Some(stopped); clock.pause(); engine_steering::paused(id, true); Ok(())
                                 },
                                 Err(error) => {
                                     tracing::warn!(%error, "native pause refused");
+                                    if let Some(y) = yielded { y.manual(false); }
                                     Err(farcooler_core::DomainError::OperationFailed)
                                 },
+                                }
                             },
                             _ => Err(farcooler_core::DomainError::NotFound),
                         }
                     },
                     Control::Resume if frozen.is_some() => {
-                        drop(frozen.take());
+                        // A builder a landing gate also holds stays stopped until the gate ends.
+                        match (frozen.take(), yielded) {
+                            (Some(stopped), Some(y)) => { stopped.quiescent(); y.manual(false); }
+                            (stopped, _) => drop(stopped),
+                        }
                         clock.resume();
                         active_since = tokio::time::Instant::now();
                         deadline.as_mut().reset(active_since + remaining);
@@ -144,7 +153,7 @@ mod tests {
         let mut stop_reply = None;
         let mut frozen = None;
         let turn = controlled(std::future::pending::<Result<()>>(), &tmux, &pane.pane_id, &pane.tty, pane.stamp.pid as i32, id,
-            &clock, Duration::from_millis(250), orders, cancel, &mut frozen, &mut stop_reply);
+            &clock, Duration::from_millis(250), orders, cancel, &mut frozen, None, &mut stop_reply);
         let steer = async {
             let order = |op| { let (reply, answer) = oneshot::channel(); let send = send.clone(); async move {
                 send.send((op, reply)).await.unwrap(); answer.await.unwrap().unwrap();

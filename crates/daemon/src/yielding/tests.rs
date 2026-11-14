@@ -174,3 +174,52 @@ async fn an_unreadable_record_is_kept_not_deleted() {
     let _y = Yielding::at(dir.path());
     assert!(dir.path().join("yielding.json").exists());
 }
+
+fn settle() { std::thread::sleep(Duration::from_millis(200)); }
+/// Stopped by hand, as a native pause does, then recorded.
+fn pause_by_hand(guard: &BuilderGuard, child: &std::process::Child) {
+    guard.manual(true);
+    unsafe { libc::killpg(child.id() as i32, libc::SIGSTOP); }
+}
+
+#[tokio::test]
+async fn a_manually_paused_builder_stays_paused_when_a_gate_ends() {
+    let y = Yielding::default();
+    let child = builder();
+    let guard = y.builder(group(&child));
+    let gate = y.gate();
+    pause_by_hand(&guard, &child);
+    drop(gate);
+    settle();
+    assert!(stopped(&child), "the orchestrator still holds it: {:?}", states(&child));
+    guard.manual(false);
+    settle();
+    assert!(running(&child), "no gate and no hand pause: it runs: {:?}", states(&child));
+    end(child);
+}
+
+#[tokio::test]
+async fn a_builder_paused_by_gate_and_hand_resumes_only_after_both_are_lifted_in_either_order() {
+    let y = Yielding::default();
+    let child = builder();
+    let guard = y.builder(group(&child));
+    // The gate ends first.
+    let gate = y.gate();
+    pause_by_hand(&guard, &child);
+    drop(gate);
+    settle();
+    assert!(stopped(&child), "the hand still holds it: {:?}", states(&child));
+    guard.manual(false);
+    settle();
+    assert!(running(&child), "both lifted: {:?}", states(&child));
+    // The hand resume comes first.
+    let gate = y.gate();
+    pause_by_hand(&guard, &child);
+    guard.manual(false);
+    settle();
+    assert!(stopped(&child), "the gate still holds it: {:?}", states(&child));
+    drop(gate);
+    settle();
+    assert!(running(&child), "both lifted: {:?}", states(&child));
+    end(child);
+}

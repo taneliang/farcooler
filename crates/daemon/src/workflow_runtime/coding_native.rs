@@ -451,7 +451,7 @@ impl Exec {
         let mut stop_reply = None;
         let mut frozen = None;
         let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &owner.tty, pane.stamp.pid as i32, id,
-            &clock, Duration::from_millis(command.timeout_ms), orders, cancel, &mut frozen, &mut stop_reply);
+            &clock, Duration::from_millis(command.timeout_ms), orders, cancel, &mut frozen, _builder.as_ref(), &mut stop_reply);
         let _ = super::execution::ACTIVITY.try_with(|a| a.session.store(true, std::sync::atomic::Ordering::SeqCst));
         let result = tokio::select! {
             never = stuck => match never {},
