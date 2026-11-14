@@ -90,9 +90,10 @@ def report(directory):
                    for m in e.get('members', []) if isinstance(m, dict)}
         group['members'] = sorted({m[0] for m in members if m[0]})
         group['gate_steps'] = sorted(group.get('gate_steps', []), key=lambda x: -x['seconds'])[:5]
+        matched_items = set()
         for item, candidate in sorted(members, key=lambda x: str(x)):
             ticket = tickets.get(item)
-            if not ticket or not candidate:
+            if not ticket or not candidate or item in matched_items:
                 continue
             lower = previous_landing.get(item, float('-inf'))
             history = [(e, start, end) for e, start, end in ticket['_effects']
@@ -103,6 +104,7 @@ def report(directory):
                        and e.get('candidate') == candidate]
             if not reviews:
                 continue
+            matched_items.add(item)
             ticket.setdefault('groups', []).append(group['item'])
             builds = [(start, end) for e, start, end in history
                       if e['kind'].get('Execute') == 'Build']
@@ -112,11 +114,11 @@ def report(directory):
             completed = [end for _, _, end in reviews if end <= group_start]
             if completed:
                 wait = group_start - max(completed)
-                ticket['stages']['wait_join'] = wait
+                ticket['stages']['wait_join'] = ticket['stages'].get('wait_join', 0) + wait
                 group['stages']['wait_join'] = group['stages'].get('wait_join', 0) + wait
             for stage in ('fold', 'gate', 'push', 'ci'):
                 if stage in group['stages']:
-                    ticket['stages'][stage] = group['stages'][stage]
+                    ticket['stages'][stage] = ticket['stages'].get(stage, 0) + group['stages'][stage]
         for item in group['members']:
             previous_landing[item] = group_start
     for row in list(groups.values()) + list(tickets.values()):
@@ -194,6 +196,27 @@ def self_test():
         assert later['groups'][0]['stages'] == before
         assert later['tickets'][0]['stages']['wait_join'] == 30
         assert later['tickets'][0]['stages']['review'] == 40
+        # A retry contributes each shared group stage and join wait once per ticket.
+        retry = dest / 'retry'
+        retry.mkdir()
+        synthetic = retry
+        member = {'item': 'ticket-1', 'candidate': 'abc'}
+        receipt('review-1', 'ticket-1', {'Review': 'Agent'}, 10, 20, 'abc')
+        receipt('fold-1', 'group-1', 'Fold', 30, 40, members=[member, member])
+        for i, kind in enumerate(('Run', 'Push', 'AwaitCi')):
+            receipt(f'group-1-{kind}', 'group-1', kind, 41 + i * 10, 46 + i * 10, members=[member])
+        receipt('review-2', 'ticket-1', {'Review': 'Agent'}, 100, 110, 'abc')
+        receipt('fold-2', 'group-2', 'Fold', 130, 150, members=[member, member])
+        for i, kind in enumerate(('Run', 'Push', 'AwaitCi')):
+            receipt(f'group-2-{kind}', 'group-2', kind, 151 + i * 20, 161 + i * 20, members=[member])
+        result = report(retry)
+        ticket = result['tickets'][0]
+        assert ticket['groups'] == ['group-1', 'group-2']
+        assert ticket['stages']['wait_join'] == 30
+        assert ticket['stages']['fold'] == 30
+        assert all(ticket['stages'][stage] == 15 for stage in ('gate', 'push', 'ci'))
+        assert [g['stages']['fold'] for g in result['groups']] == [10, 20]
+        assert result['percentiles']['fold'] == {'n': 2, 'p50': 10, 'p95': 20}
     print('landing-timing self-test: ok')
 
 
