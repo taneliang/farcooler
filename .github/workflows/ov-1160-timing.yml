@@ -38,7 +38,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Green bases for Rust shadow (ov-1116)
-        if: runner.os == 'Linux'
+        if: matrix.coverage == 'full'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -373,7 +373,9 @@ jobs:
         run: python3 scripts/rust-shadow.py --out "${{ runner.temp }}/rust-shadow" -- ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
       - name: macOS full Rust tests (before)
         if: matrix.coverage == 'full'
-        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
+        env:
+          CANDIDATES: ${{ runner.temp }}/rust-green.ndjson
+        run: python3 scripts/rust-shadow.py --out "${{ runner.temp }}/rust-shadow" -- ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
       - name: macOS native Rust tests
         if: runner.os == 'macOS' && matrix.coverage == 'selected'
         run: |
