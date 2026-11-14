@@ -1,0 +1,591 @@
+name: ov-1182 Rust timing
+on:
+  push:
+    branches: [ov-1182-ci-rust-15]
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ${{ matrix.os }}
+    # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
+    # macOS 60: its runners have run 2-3x slower, the crash-matrix binary alone takes about 6 min, and 35 min cut main off about 4900 of 6665 tests in (ov-992).
+    # Ubuntu 45 (ov-1056): the last five green main runs took 24.8-31.1 min (gh run view, Nov 9). The leak-checked nextest step went 11.1 to 14.0 min and clippy 3.2 to 4.2 across them. 45 is 45% over the slowest.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 45 }}
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both, because the daemon runs on both and the differences are real:
+        # tmux behaves differently, launchd and systemd are different code paths,
+        # and the Linux build is the one that has to work without OpenSSL
+        # headers — which is why reqwest uses rustls.
+        # Ubuntu by version, not `ubuntu-latest`: the tmux it ships is the one
+        # `scripts/ci-install-tmux.sh` expects, and a new image should be a
+        # change somebody makes, not one GitHub makes for every lane at once.
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          # aarch64 Linux, added alongside the host target rather than in
+          # place of it — see the `farcooler-tailcat` check below for why.
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      # cargo-nextest runs the tests below (ov-540). `cargo test` ran this
+      # workspace's ~90 test binaries one after another, so a binary whose
+      # tests mostly sleep left the runner idle; nextest keeps one pool full
+      # across all of them. Both the action and the tool are pinned: the action
+      # by tag, the tool by `tool: name@version`, which it downloads as a
+      # prebuilt binary (no compile). Settings, and the groups of tests that
+      # must not run beside each other, are in `.config/nextest.toml`.
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+
+      # tmux is not a test double here. The tmux crate drives the real binary,
+      # because a fake tmux would agree with whatever this code believed.
+      # Bounded, and it has to be. This step hung for an hour on two
+      # consecutive runs — `apt-get update` against a mirror that accepts the
+      # connection and then stops answering, which has no timeout of its own
+      # and no output, so the job reads as "still working" until someone looks
+      # at the step list. A run that fails in five minutes can be re-run; one
+      # that hangs holds a runner until the six-hour ceiling.
+      #
+      # And a KNOWN tmux, one per runner (ov-554): see the header of
+      # `scripts/ci-install-tmux.sh` for which, why, and how to move one. The
+      # Swift job's Mac tests use the same script and the same build.
+      - name: Cache the pinned tmux build
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
+      - name: Install tmux
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
+
+      # git-lfs, for the two daemon tests that use it
+      # (`crates/daemon/tests/lfs_content_under_the_git_sandbox.rs`): one makes
+      # the repository the daemon's own LFS filter reads, and one shows that a
+      # planted `lfs.extension` does run under git-lfs, which is the control
+      # for the test that it runs nothing under the daemon. The daemon itself
+      # never runs git-lfs. With `CI` set, a missing git-lfs fails them rather
+      # than skipping. Both runner images usually have it; bounded like tmux.
+      - name: Install git-lfs
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v git-lfs >/dev/null 2>&1; then
+            git-lfs version
+            exit 0
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+            sudo apt-get "${APT_OPTS[@]}" update
+            sudo apt-get "${APT_OPTS[@]}" install -y git-lfs
+          else
+            brew install git-lfs
+          fi
+          git-lfs version
+
+      # fish, because it is a login shell people have and the one whose quoting
+      # differs: inside single quotes it reads `\\` and `\'`, which sh does not.
+      # A pane's command is parsed by the login shell, so the daemon's launch
+      # tests run every quoting case through fish as well as sh, bash and zsh
+      # — and with `CI` set, a missing fish FAILS them rather than skipping
+      # its half (`launch_prompt_tests::shells`). Bounded like tmux above.
+      # Ubuntu's fish is 3.7 and Homebrew's is 4.x; the launch needs 3.4 or
+      # later for `"$(…)"`.
+      - name: Install fish
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if ! command -v fish >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y fish
+            else
+              brew install fish
+            fi
+          fi
+          fish --version
+
+      # `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` stands up a real
+      # loopback sshd, and `cargo nextest run --workspace` below runs it. It is the
+      # closest thing this repository has to a security guard: sshd, not the
+      # daemon, is what makes a `read` device unable to ask for `host_admin`,
+      # and only a real sshd can be asked whether that is true.
+      #
+      # It was `#[ignore]`d for four months behind a reason that named a
+      # scheduled lane that did not exist. Nothing ran it. The attribute is gone; this step is the one
+      # thing the runner has to supply that is not universal.
+      #
+      # NOT root, and that was the open question — whether a non-root sshd
+      # starts on a GitHub runner. It was tried before this line was written, on
+      # macOS 26.6 (OpenSSH 10.3p1) and Ubuntu 26.04 (OpenSSH 10.2p1):
+      # `restrict`, `command=` and `environment=` all behave, and OpenSSH skips
+      # privilege separation outright when `getuid()` is not 0, which is the
+      # only part that would have wanted a privileged runner.
+      #
+      # `command -v` first for the same reason the tmux step does it: the
+      # Ubuntu image ships `openssh-server` already and the macOS one ships
+      # sshd with the OS, so this is normally free. The test asserts on
+      # `/usr/sbin/sshd` by absolute path — it will not take one off PATH,
+      # because a runner is entitled to know which sshd it authenticated
+      # against — so that is the path this checks.
+      - name: Make sure there is an sshd to test the fence against
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y openssh-server
+            else
+              echo "no /usr/sbin/sshd on a macOS runner, which ships one with the OS" >&2
+              exit 1
+            fi
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
+
+      # No `cargo fmt --check`, deliberately, and it is worth saying why rather
+      # than leaving it looking forgotten. This workspace predates any
+      # formatter, and default rustfmt wants to reformat sixty files — mostly by
+      # expanding onto four lines things that were written on one. Adopting it
+      # is a reasonable call to make later; making it as a side effect of adding
+      # CI is not. Clippy, which finds real defects rather than disagreeing
+      # about widths, runs at -D warnings.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The line above is `--workspace` at DEFAULT features, and that word is
+      # the whole gap these seven lines close: every `tailcat` feature in this
+      # workspace is off by default, so the code behind them had never been
+      # linted by anything. Not "less often" — never, since the features were
+      # added.
+      #
+      # It was not hypothetical. `cargo clippy -p farcooler-daemon --features
+      # tailcat-helper --all-targets` failed with two `await_holding_lock`
+      # errors in `tests/a_pairing_gives_the_runner_a_tunnel.rs` — a
+      # `std::sync::MutexGuard` held across four `.await`s, which is a deadlock
+      # the moment tokio resumes that task on another thread — and `cargo
+      # clippy -p farcooler-cli --features tailcat --all-targets` failed with a
+      # `dead_code`. Both files are ones CI already BUILDS: the four
+      # `cargo nextest run --features tailcat-helper` lines below run that daemon
+      # test, and `apps/macos/build-app.sh` ships the CLI at `--features
+      # tailcat`. Only the lint was blind.
+      #
+      # `-p` per crate rather than one `--workspace --features …`: clippy lints
+      # only the packages it is asked for, so `-p farcooler-daemon --features
+      # tailcat` says nothing about `farcooler-cli` even though it builds it.
+      # `--all-targets` because all three findings were in test targets, which
+      # is where a feature's `cfg(not(…))` arms live.
+      #
+      # None of these link, so none of them need a Go toolchain — verified with
+      # `go` off PATH, the same standard `cargo check -p farcooler-daemon
+      # --features tailcat` below is held to.
+      #
+      # Six of the seven lint source no other line here reaches: a
+      # `cfg(feature = ...)` or `cfg(not(feature = ...))` item that the default
+      # build never compiles. `farcooler-jni` is the exception and is kept
+      # anyway — it has no feature-gated source of its own TODAY, so today it
+      # only re-lints what `--workspace` already did, but `--features tailcat`
+      # is what `scripts/build-android-libs.sh` and
+      # `scripts/build-ios-frameworks.sh` both ship that crate with, and the
+      # first `cfg` anybody writes there would otherwise land unlinted the same
+      # way these findings did. Each of the seven was watched to go red on a
+      # mutation behind its own feature while `--workspace` above stayed green.
+      - run: cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings
+      - run: cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings
+
+      # The `linked` backend on the target it actually ships on. The clippy
+      # line above now type-checks it too, but only for THIS job's host arch;
+      # the second invocation here is the one that cannot be dropped, and the
+      # first is kept as the plain-`check` baseline the paragraph below is
+      # about. `--workspace` reaches neither: it builds every crate at DEFAULT
+      # features, and so does `cargo nextest run --workspace` below. `linked` is off
+      # by default on purpose (see that crate's `Cargo.toml`) so a checkout
+      # with no Go toolchain still builds — but that meant the only backend
+      # that will ever run in production, every FFI declaration and every
+      # errno mapping in it, was for a long time checked by nothing here at
+      # all.
+      # `cargo check` doesn't link, so it needs no Go archive; it still
+      # catches a type mismatch in the `extern "C"` block, which is exactly
+      # what shipped once before this step existed — `c_char` is `u8` on ARM
+      # Linux and a hardcoded `i8` compiled cleanly on this job's own host
+      # while failing on `aarch64-unknown-linux-musl`, this crate's own
+      # release target and the same architecture Android ships on. The
+      # second invocation below is the one that catches that: the host arm
+      # of this matrix is darwin or x86_64 Linux, neither of which disagrees
+      # with `i8`.
+      - run: cargo check -p farcooler-tailcat --features linked
+      - run: cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl
+
+      # The same gap, for the backend Linux actually ships. `helper` is off by
+      # default too, so `--workspace` never builds it — and unlike `linked`
+      # this one can be TESTED rather than only type-checked, because it links
+      # no Go and needs no toolchain at all: it spawns a program, and a test
+      # can hand it a shell script.
+      #
+      # The daemon test is the one that matters and it is named for what it
+      # asserts: a runner that admits nobody must start no helper PROCESS, not
+      # merely return a refusal. Tailcat reads an empty allowlist as "admit
+      # everyone", so that guard is the one this design is most likely to lose,
+      # and this is the only place in CI where losing it goes red.
+      - run: cargo nextest run --profile ci -p farcooler-tailcat --features helper
+      - run: cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel
+      # Revocation's guards live or die by this line. A default `cargo test`
+      # links no tunnel, so `serve` refuses every call for any input and "was
+      # the tunnel rebuilt" is unobservable -- every assertion in that file
+      # would pass vacuously. Under the helper backend the tunnel is a process
+      # a fake helper records commands for, which is the only shape in which
+      # revoking the LAST tunneled device can be seen to stop a running server.
+      - run: cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked
+      # The pairing's two halves, and they pull opposite ways: a runner with no
+      # tunnel must GET one, and a runner that has one must keep serving it
+      # rather than have it replaced under every other device. Neither is
+      # observable in a default build — `serve` refuses every call for any
+      # input there, so "was the running server replaced" has the same answer
+      # whatever the code does. Under the helper backend the tunnel is a
+      # process, and a fake helper records the commands it was given tagged
+      # with its own pid, so two servers are two numbers in a file.
+      - run: cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel
+      # The released devices' sweep (ov-783): K devices revoked in one tunnel
+      # rebuild, and a daemon's first tunnel built only after its start sweep.
+      # Both are counts of what a fake helper heard, so a default build, which
+      # links no tunnel, can't see either.
+      - run: cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once
+      # `FARCOOLER_DERP_MAP` end to end, and it is here for the same reason as
+      # the three lines above: a default build's `serve` refuses every call, so
+      # nothing is spawned and nothing is told anything, and "did the runner's
+      # DERP map reach the thing that serves" would be a vacuous assertion.
+      #
+      # What it buys that `rendezvous`'s own unit tests cannot: those prove the
+      # decision is wired to `set_derp_map_url`, and nothing in this workspace
+      # can prove `main` CALLS it — that line is inside `#[tokio::main] async fn
+      # main()`, which no test links. This file spawns the real `farcoolerd`
+      # with the variable set and reads back what the tunnel helper was told, so
+      # deleting the call from `main` turns it red.
+      - run: cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel
+
+      # The end-to-end tunnel test, type-checked here and RUN nightly.
+      #
+      # `crates/daemon/tests/a_real_tunnel_carries_the_scope.rs` carries a byte
+      # end to end through a real tunnel: a DERP relay on loopback, a real
+      # tailcat server and client, a real sshd, and the scope out of a real
+      # `authorized_keys`. It needs a Go archive linked into the test binary, a
+      # built `derper`, `TS_DEBUG_USE_DERP_HTTP=1` and an Apple silicon host, so
+      # `scripts/tunnel-e2e.sh` runs it, and `tunnel-e2e.yml` runs that script
+      # nightly on macOS. Not here: it is minutes of cold builds and a dial that
+      # waits on timeouts, which would make pushes to main flaky.
+      #
+      # So this line buys one thing: the file cannot rot between nightlies.
+      # `--workspace` above builds default features, which `cfg`s that file away
+      # entirely, so a shipped API it calls could be renamed and nothing here
+      # would notice. `cargo check` links nothing, so it needs no archive and no
+      # Go toolchain, and it goes red on exactly that drift: renaming
+      # `allowlist::tunnel_plan` under it gives `error[E0425]: cannot find
+      # function` and exit 101.
+      #
+      # It does NOT prove a tunnel comes up. Only the nightly run does.
+      - run: cargo check -p farcooler-daemon --features tailcat --all-targets
+
+      # A `changes` pane runs THIS CHANNEL'S CLI by name — `changes_host_command`
+      # asks `shim_binary`, which looks beside the daemon's own executable and
+      # otherwise falls back to the bare name for PATH to resolve. Under `cargo
+      # test` the "daemon executable" is the test binary in `target/debug/deps`,
+      # where no CLI has ever been placed. A harness that sets the test stub
+      # switch also looks in `target/debug` (ov-547, `cli_binary`); one that
+      # doesn't has only the PATH fallback.
+      #
+      # A developer machine has one installed, which is why
+      # `a_pane_split_with_the_changes_preset_is_a_changes_pane` passes there and
+      # nowhere else. A runner has none, the pane's command cannot start, and
+      # `remain-on-exit` leaves a dead rectangle the test correctly calls Exited.
+      #
+      # Named for the channel because that is what `shim_binary` asks for, and a
+      # clean untagged checkout is `local`. The other names are linked too, so
+      # this does not quietly stop working the day CI builds a different one.
+      - name: Put this channel's CLI where the daemon tests look for it
+        run: |
+          set -euo pipefail
+          cargo build --workspace --bins
+          for name in farcooler-local farcooler-preview farcooler-canary; do
+            ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
+          done
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+
+      # Wrapped so a test that leaves its tmux server running fails the job
+      # (ov-207): one such server once ran for 15.5 hours at 92% CPU. And so a
+      # test that leaves a file in TMPDIR does (ov-541): 685,000 of them
+      # piled up on the owner's Mac.
+      - run: ./scripts/tmux-leak-check.py --self-test
+      - run: ./scripts/tmux-stale-sockets.py --self-test
+      - run: ./scripts/test-leak-check.py --self-test
+      # nextest again (ov-559). The two live_tmux layout tests that sent this
+      # back to `cargo test` failed on tmux 3.8, not on nextest: 3.8 writes
+      # layouts as JSON, which `farcooler_tmux::layout` now reads. Under
+      # `cargo test` they had never run on 3.8, because an earlier binary had
+      # already failed and `cargo test` stops at the first.
+      # Linux default-feature tests run from one archive in rust-tests below.
+      # nextest does not run doctests, so this is the only thing that would.
+      # There are none today (checked: every `Doc-tests` target reports zero),
+      # and the step costs a few seconds of empty rustdoc runs; it is here so
+      # the first doctest anybody writes is run rather than silently skipped.
+      - run: cargo test --workspace --doc
+
+  # Compile the default workspace once, independently of lint/feature checks.
+  rust-build:
+    name: Rust test archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rust-test-archive
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Build the runtime binaries and test archive
+        run: |
+          cargo build --locked --workspace --bins
+          cargo nextest archive --locked --profile ci --workspace --archive-file target/rust-tests.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-tests
+          path: target/rust-tests.tar.zst
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
+
+  rust-tests:
+    name: Rust tests (${{ matrix.shard }}/4)
+    needs: rust-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      FARCOOLER_TEST_SHELL: /bin/sh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-tests
+          path: target
+      - name: Cache the pinned tmux build
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
+      - name: Install tmux
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
+
+      - name: Install git-lfs
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v git-lfs >/dev/null 2>&1; then
+            git-lfs version
+            exit 0
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+            sudo apt-get "${APT_OPTS[@]}" update
+            sudo apt-get "${APT_OPTS[@]}" install -y git-lfs
+          else
+            brew install git-lfs
+          fi
+          git-lfs version
+
+      - name: Install fish
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if ! command -v fish >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y fish
+            else
+              brew install fish
+            fi
+          fi
+          fish --version
+
+      - name: Make sure there is an sshd to test the fence against
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y openssh-server
+            else
+              echo "no /usr/sbin/sshd on a macOS runner, which ships one with the OS" >&2
+              exit 1
+            fi
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
+
+      - name: Extract archive and prove partition coverage
+        run: |
+          python3 scripts/rust-shards.py --archive target/rust-tests.tar.zst --out target/shard-inventories
+          for name in farcooler-local farcooler-preview farcooler-canary; do
+            ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
+          done
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+      - name: Full Rust workspace shard
+        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --no-fail-fast --archive-file target/rust-tests.tar.zst --extract-to . --extract-overwrite --workspace-remap "$PWD" --partition hash:${{ matrix.shard }}/4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-inventory-${{ matrix.shard }}
+          path: target/shard-inventories
+
+  # Native suite and feature/lint checks overlap on independent Mac runners.
+  rust-macos-tests:
+    name: Rust native tests (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    # Symbols only: optimization and debug assertions keep Cargo defaults.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-latest
+      - uses: taiki-e/install-action@v2.87.28
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Cache the pinned tmux build
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
+      - name: Install tmux
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
+
+      - name: Install git-lfs
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if command -v git-lfs >/dev/null 2>&1; then
+            git-lfs version
+            exit 0
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+            sudo apt-get "${APT_OPTS[@]}" update
+            sudo apt-get "${APT_OPTS[@]}" install -y git-lfs
+          else
+            brew install git-lfs
+          fi
+          git-lfs version
+
+      - name: Install fish
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          if ! command -v fish >/dev/null 2>&1; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y fish
+            else
+              brew install fish
+            fi
+          fi
+          fish --version
+
+      - name: Make sure there is an sshd to test the fence against
+        timeout-minutes: 5
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/sbin/sshd ]; then
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              APT_OPTS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+              sudo apt-get "${APT_OPTS[@]}" update
+              sudo apt-get "${APT_OPTS[@]}" install -y openssh-server
+            else
+              echo "no /usr/sbin/sshd on a macOS runner, which ships one with the OS" >&2
+              exit 1
+            fi
+          fi
+          /usr/sbin/sshd -V 2>&1 | head -1
+
+      - name: Put this channel's CLI where the daemon tests look for it
+        run: |
+          set -euo pipefail
+          cargo build --workspace --bins
+          for name in farcooler-local farcooler-preview farcooler-canary; do
+            ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"
+          done
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+
+      - name: Python for macOS coverage guard
+        if: runner.os == 'macOS'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: macOS native Rust tests
+        if: runner.os == 'macOS'
+        run: |
+          # --workspace compiles ALL test binaries before nextest filters tests.
+          # Keep this explicit so a future change to nextest cannot narrow builds.
+          cargo nextest run --profile ci --workspace --no-run
+          selection="$(python3 scripts/macos-rust-tests.py)"
+          ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast -E "$selection"
+

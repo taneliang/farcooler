@@ -62,3 +62,29 @@ Initial archive payload: 6,313,939,230 bytes; compression took 100.47 s and
 upload took about 70 s. Two shards uploaded partial inventories during
 cancellation; no guard completion or full execution verdict is counted. Disabling debug
 symbols specifically addresses this observed archive cost.
+
+## Second-run intermittent test failure
+
+Run 43575477705's first shard-2 attempt ran all 1,740 assigned tests; 1,739
+passed and `watch::answer_wake::tests::compose_held_tests::a_whole_read_between_tears_restarts_the_cap`
+failed at compose_held_tests.rs:405 (`the cap ran across a whole read`).
+That unchanged test passed in run 43574660997 in 3.117 s; the failing invocation
+took 4.167 s. Its fixture uses 1.2 s torn / 0.3 s healthy / 1.2 s torn while
+the background teller resets only after an actual non-torn retry. The likely
+failure mechanism is missing the short healthy observation window under load;
+this is a hypothesis from the fixture and production retry code, not a proven
+product fix. No Rust code or test assertion, timeout, filter or retry policy
+was changed in response. The complete first-attempt job log is retained.
+The whole failed shard will be rerun unchanged, including its coverage guard
+and both leak wrappers; any passing rerun will be reported as a separate attempt.
+
+## Clippy placement refinement
+
+The first symbol-free run's slow Mac runner took 379 s on workspace Clippy
+alone (the next run took 126 s on the same command). Every workspace/feature
+Clippy invocation now runs once on Linux, where all eight already ran. Mac
+retains all feature tests, target checks, doctests and the native full-test build
+and selection. This follows the ticket's cheapest-platform instruction without
+removing any test or Clippy feature variant from per-push CI. The earlier
+symbol-only workflow is symbols-hosted-timing.yml; final acceptance uses the
+Linux-Clippy workflow in hosted-timing.yml.
