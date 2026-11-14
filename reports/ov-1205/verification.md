@@ -106,3 +106,48 @@ Codex home rather than running in the supplied login directory.
   **4,321 passed, 18 skipped**, 513.904 seconds. The final argv-recovery
   adjustment was additionally verified by the 38-test native run and refreshed
   clippy; it reconstructs the same engine arguments without mutable-file reads.
+
+
+## Fix round 1: explicit native direction with answer wake disabled
+
+Read the newest ticket finding and the inherited branch commits before editing.
+The run-start base remains `2cc183694e6924141097c2893c36cc07f3f76452` and is
+already an ancestor of this branch.
+
+The expanded `native_direction_reaches_both_harnesses_before_their_next_tool_runs`
+regression now sends through the real `message.send` handler, then exercises the
+native `PreToolUse` handler, for Claude and Codex with `wake_on_answer` both on
+and off. Failing-first checks exposed two independent gates on this checkout:
+
+- Before any production changes, the disabled-preference case failed admission
+  with `Conflict { what: "typing_off" }` in the store.
+- After introducing native-only admission, the same case queued successfully
+  but failed the assertion that direction must arrive before the next tool.
+  This confirmed the reviewer's early-return finding in `native_followup`.
+
+Explicit native messages now queue through a separate store entry point while
+holding the exact live agent's existing admission lock. It uses the same atomic
+note/queue transaction and workflow-incarnation fence, and refuses runner
+notices. Ordinary pane messages and automatic notices retain their wake
+preference. Native tool and Stop hooks consume admitted direction independently
+of that preference. The regression also checks single consumption; the final
+Stop regression checks continuation and closure of late-message admission with
+the preference both on and off for each harness.
+
+The initial sandboxed test attempt could not initialize its scratch Git fixture;
+rerunning with the required Git/socket access reproduced the actual failures
+above. No owner Codex settings were changed and no `cargo fmt` ran. The original
+scratch live-Codex evidence above remains applicable to the unchanged hook
+transport; this round exercises the admission and delivery preference through
+the real handlers without launching another paid Codex session.
+
+Round 1 validation:
+
+- Focused daemon message and native-handler regressions: **27 passed**.
+- `cargo build -p farcooler-cli`: passed before the broader tests.
+- `cargo nextest run -p farcooler-daemon -p farcooler-cli -p farcooler-store --no-fail-fast`:
+  **4,976 passed, 21 skipped**, 539.479 seconds.
+- File-size budget, doc comments, swallowed-call lint, copy lint, and whitespace:
+  passed.
+- `cargo clippy -p farcooler-daemon -p farcooler-cli -p farcooler-store --all-targets -- -D warnings`:
+  passed.

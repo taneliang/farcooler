@@ -47,7 +47,9 @@
 //! `LONGEST_TEXT` characters; at most `MOST_WAITING` wait for one recipient,
 //! and one sender sends one recipient at most `MOST_PER_HOUR` an hour, so two
 //! agents can't flood each other into a loop. The workspace's wake-on-answer
-//! switch covers messages: it is what lets the runner type into a pane.
+//! switch covers pane messages: it is what lets the runner type into a pane.
+//! Explicit messages to live native engine agents use their hooks independently
+//! of that preference, under the agent's admission lock.
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, AgentActivity, Request, request, result};
@@ -261,10 +263,10 @@ impl Watcher {
             }
             (actor, _) => actor,
         };
-        let append = || store.send_manual_message(task.id, actor, &text, recipient.terminal, extra);
         let note = if recipient.native {
-            crate::engine_steering::queue_message(recipient.terminal.expect("native recipient"), append)?
-        } else { append()? };
+            let id = recipient.terminal.expect("native recipient");
+            crate::engine_steering::queue_message(id, || store.send_native_message(task.id, actor, &text, id, extra))?
+        } else { store.send_manual_message(task.id, actor, &text, recipient.terminal, extra)? };
         self.announce_task_changed(&task, None, actor);
         self.message_queued();
         Ok(result::Value::MessageSent(pb::MessageSent {

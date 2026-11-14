@@ -44,9 +44,8 @@ impl Exec {
         if !(tool || stop) || line.payload.get("agent_id").is_some() { return Ok(None); }
         let id = super::coding_native::terminal(binding);
         let workspace = Uuid::parse_str(&binding.workspace).ok();
-        if !workspace.and_then(|w| self.store.get_workspace(w).ok()).is_some_and(|w| w.wake_on_answer) {
-            return Ok(None);
-        }
+        // Explicit messages were admitted for this exact live agent. The answer-wake
+        // preference governs pane typing, not direction returned through a native hook.
         let claimed = crate::engine_steering::inbox(id, |open| {
             let mut claimed = Vec::new();
             for wake in self.store.pending_message_wakes()? {
@@ -123,21 +122,33 @@ mod tests {
     }
     #[tokio::test]
     async fn native_direction_reaches_both_harnesses_before_their_next_tool_runs() {
-        for agent in [Agent::Claude, Agent::Codex] {
+        for (agent, wake_on_answer) in [Agent::Claude, Agent::Codex].into_iter()
+            .flat_map(|agent| [true, false].map(|wake| (agent, wake))) {
             let (_dir, mut runtime) = super::super::coding_tests::configured(false, "pass").await;
             let definition = runtime.configured_definition().unwrap();
             super::super::tests::enqueue(&mut runtime, "w", "one", definition);
             runtime.pump(2).await.unwrap();
             let mut binding = super::super::coding_tests::admitted(&runtime).await;
             let (_board_dir, svc, repo) = crate::test_support::fixture().await;
-            let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+            let board = svc.store.ensure_main_workspace(repo).unwrap();
+            let board = svc.store.set_workspace_wake_on_answer(board.id, board.resource_version, wake_on_answer).unwrap();
+            let workspace = board.id;
             let task = svc.store.create_task(workspace, "Steer active work", Actor::User).unwrap();
             binding.workspace = workspace.to_string(); runtime.store = svc.store.clone();
             let id = super::super::coding_native::terminal(&binding);
             let (send, _orders) = mpsc::channel(8);
             let _listed = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id, agent.as_str(), None,
                 false, vec![task.key.clone()], send);
-            svc.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
+            let watcher = crate::watch::Watcher::new(svc.clone());
+            let reply = watcher.message_send(farcooler_protocol::v1::Request { method:"message.send".into(),
+                payload:Some(farcooler_protocol::v1::request::Payload::MessageSend(farcooler_protocol::v1::MessageSend {
+                    workspace_id:crate::wire::id_bytes(workspace), to:task.key.clone(), actor:"user".into(),
+                    text:"Use the new API".into(), ..Default::default() })), ..Default::default() },
+                crate::people::Person::Owner).await.unwrap();
+            assert!(matches!(reply, farcooler_protocol::v1::result::Value::MessageSent(_)));
+            let pending = svc.store.pending_message_wakes().unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0].to, Some(id));
             let (mut writer, reader) = tokio::net::UnixStream::pair().unwrap();
             let line = HookLine { agent, event:"PreToolUse".into(), payload:serde_json::json!({}),
                 takes:vec![farcooler_agent_hooks::wire::TAKES_UPDATED_INPUT.into()], launch:None };
@@ -145,26 +156,31 @@ mod tests {
             assert!(runtime.native_followup(&binding, &foreign, &mut writer, true).await.unwrap().is_none());
             let mut old = line.clone(); old.takes.clear();
             assert!(runtime.native_followup(&binding, &old, &mut writer, true).await.unwrap().is_none());
-            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some(), "direction must arrive before the tool call, without a Stop");
+            assert!(runtime.native_followup(&binding, &line, &mut writer, true).await.unwrap().is_some(), "{agent:?}, wake_on_answer={wake_on_answer}: direction must arrive before the tool call, without a Stop");
             let mut text = String::new();
             tokio::io::BufReader::new(reader).read_line(&mut text).await.unwrap();
             let response:serde_json::Value = serde_json::from_str(&text).unwrap();
             assert_eq!(response["decision"]["behavior"], "deny");
             assert!(response["decision"]["message"].as_str().unwrap().contains("Use the new API"));
             assert!(svc.store.pending_message_wakes().unwrap().is_empty());
+            assert!(runtime.native_followup(&binding, &line, &mut writer, false).await.unwrap().is_none(),
+                "direction is consumed once");
         }
     }
 
     #[tokio::test]
     async fn native_final_stop_rejects_messages_before_capture_and_settlement_for_both_harnesses() {
-        for agent in [Agent::Claude, Agent::Codex] {
+        for (agent, wake_on_answer) in [Agent::Claude, Agent::Codex].into_iter()
+            .flat_map(|agent| [true, false].map(|wake| (agent, wake))) {
             let (_dir, mut runtime) = super::super::coding_tests::configured(false, "pass").await;
             let definition = runtime.configured_definition().unwrap();
             super::super::tests::enqueue(&mut runtime, "w", "one", definition);
             runtime.pump(2).await.unwrap();
             let mut binding = super::super::coding_tests::admitted(&runtime).await;
             let (_board_dir, svc, repo) = crate::test_support::fixture().await;
-            let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+            let board = svc.store.ensure_main_workspace(repo).unwrap();
+            let board = svc.store.set_workspace_wake_on_answer(board.id, board.resource_version, wake_on_answer).unwrap();
+            let workspace = board.id;
             let task = svc.store.create_task(workspace, "Final handoff", Actor::User).unwrap();
             binding.workspace = workspace.to_string(); binding.effect.item = task.key.clone();
             runtime.store = svc.store.clone();

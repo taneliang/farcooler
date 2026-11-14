@@ -6,7 +6,10 @@ on the ticket. Codex and Claude receive it at their next supported `PreToolUse`
 hook: that tool is refused with the direction as its reason, so the agent can
 change course before running it. This does not interrupt a tool already
 executing. Both also receive a continuation in the same session at Stop if they
-reach it without another supported tool call, before the step settles.
+reach it without another supported tool call, before the step settles. Explicit
+messages to a running native engine agent work even when the workspace has
+`wake_on_answer` disabled. That preference still controls automatic answer wakes
+and message delivery into ordinary panes.
 
 Native Claude settings and Codex hooks must include the installed all-tools
 gating `PreToolUse` registration targeting this runtime's private host.

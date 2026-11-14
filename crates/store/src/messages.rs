@@ -12,8 +12,8 @@
 //! for the workspace's orchestrator, found when it is told, so a restarted
 //! orchestrator still gets it.
 //!
-//! Only a board that wakes on answers queues: the switch is what lets the
-//! runner type into a pane at all.
+//! Pane messages require a board that wakes on answers. Explicit direction to a
+//! live native engine agent is delivered by its hooks and does not type into a pane.
 
 use rusqlite::params;
 use uuid::Uuid;
@@ -59,6 +59,20 @@ impl Store {
         to: Option<Uuid>,
         extra: serde_json::Value,
     ) -> Result<TaskNote> {
+        self.queue_message(task, actor, body, to, extra, true)
+    }
+
+    /// Explicit direction to a live native engine agent bypasses the pane-typing preference.
+    /// The caller must hold that exact agent's admission lock so settlement cannot race this write.
+    pub fn send_native_message(&self, task: Uuid, actor: Actor, body: &str, to: Uuid, extra: serde_json::Value) -> Result<TaskNote> {
+        if actor == Actor::Runner { return Err(DomainError::InvalidArgument { what: "manual_actor" }); }
+        self.queue_message(task, actor, body, Some(to), extra, false)
+    }
+
+    /// Both routes retain the same transaction and engine-incarnation fence. Only hook delivery
+    /// can opt out of the preference granting permission to type into ordinary panes.
+    fn queue_message(&self, task: Uuid, actor: Actor, body: &str, to: Option<Uuid>,
+        extra: serde_json::Value, require_wake: bool) -> Result<TaskNote> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let wakes: Option<bool> = {
@@ -73,8 +87,8 @@ impl Store {
         };
         match wakes {
             None => return Err(DomainError::NotFound),
-            Some(false) => return Err(DomainError::Conflict { what: "typing_off" }),
-            Some(true) => {}
+            Some(false) if require_wake => return Err(DomainError::Conflict { what: "typing_off" }),
+            Some(_) => {}
         }
         let kind = if actor == Actor::Runner { NoteKind::Progress } else { NoteKind::Comment };
         let note = insert_note(&tx, task, kind, actor, body, &extra, None)?;
