@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -309,6 +310,24 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(row["exit"], 0)
         self.assertIsNotNone(row["error"])
         self.assertTrue(row["log_sha256"])
+
+    def test_socket_stdin_does_not_load_user_bashrc(self):
+        # Bash treats socket stdin as a remote shell and otherwise reads ~/.bashrc.
+        home = self.root / "home"
+        home.mkdir()
+        (home / ".bashrc").write_text("printf 'unexpected user rc\\n' >&2\nexit 42\n")
+        tmp = self.root / "socket-step"
+        tmp.mkdir()
+        step = {"run": "printf 'raw error\\n'; exit 23", "cwd": None, "env": {}}
+        popen = evidence.subprocess.Popen
+        reader, writer = socket.socketpair()
+        with reader, writer:
+            with patch.object(evidence.subprocess, "Popen",
+                              side_effect=lambda *a, **kw: popen(*a, stdin=reader, **kw)):
+                row = evidence.execute_step(step, 0, {"PATH": "/usr/bin:/bin", "HOME": str(home)},
+                                            self.repo, tmp, self.root / "socket.log")
+        self.assertEqual(row["exit"], 23)
+        self.assertEqual((self.root / "socket.log").read_text(), "raw error\n")
 
     def test_android_public_sdk_ndk_metadata_preflight(self):
         sdk = self.root / "sdk"

@@ -221,7 +221,7 @@ def prerequisites(lane, repo, chosen, plans, environments, declaration):
                 paths.extend(public_file(sdk / kind / version / suffix) for suffix in suffixes)
             result[job]["ci_sdk"] = paths
             selected = subprocess.check_output(
-                ["bash", "-e", "-c", '. scripts/android-ndk.sh\nandroid_toolchain\n'
+                ["bash", "--noprofile", "--norc", "-e", "-c", '. scripts/android-ndk.sh\nandroid_toolchain\n'
                  'ndk_cc aarch64-linux-android\nprintf "%s\\n" "$TOOLCHAIN/bin/clang" "$TOOLCHAIN/bin/llvm-ar"'],
                 cwd=repo, env=env, text=True).splitlines()
             require(len(selected) == 3, "cannot resolve actual selected NDK tools")
@@ -405,12 +405,13 @@ def execute_step(step, index, env, repo, tmp, log):
     gh_path.write_text("")
     execution_env = {k: expand_temp(v, tmp) for k, v in receipt["env"].items()}
     execution_env.update(GITHUB_ENV=str(gh_env), GITHUB_PATH=str(gh_path))
+    # Socket stdin can make even noninteractive Bash read ~/.bashrc; disable rc files.
     # Numeric subprocess status is the only success producer. Output is never parsed for green.
     with open(log, "xb") as out:
         os.chmod(log, 0o600)
         process = None
         try:
-            process = subprocess.Popen(["bash", "-e", "-c", expand_temp(step["run"], tmp)],
+            process = subprocess.Popen(["bash", "--noprofile", "--norc", "-e", "-c", expand_temp(step["run"], tmp)],
                                        cwd=repo / (step["cwd"] or "."), env=execution_env,
                                        stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
             receipt["exit"] = process.wait()
