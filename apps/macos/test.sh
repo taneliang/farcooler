@@ -27,9 +27,19 @@ cd "$(dirname "$0")"
 
 log="$(mktemp -t farcooler-test-vt)"
 trap 'rm -f "$log"' EXIT
-./build-vt.sh >"$log" 2>&1 || { cat "$log" >&2; echo "test.sh: the Rust cores did not build" >&2; exit 1; }
-export PATH="$HOME/.cargo/bin:$PATH"
-(cd ../.. && cargo build --bins) >"$log" 2>&1 || { cat "$log" >&2; echo "test.sh: the CLI and daemon did not build" >&2; exit 1; }
+case "${FARCOOLER_MAC_TEST_UNIFIED_RUST:-0}" in
+  0)
+    ./build-vt.sh >"$log" 2>&1 || { cat "$log" >&2; echo "test.sh: the Rust cores did not build" >&2; exit 1; }
+    export PATH="$HOME/.cargo/bin:$PATH"
+    (cd ../.. && cargo build --bins) >"$log" 2>&1 || { cat "$log" >&2; echo "test.sh: the CLI and daemon did not build" >&2; exit 1; }
+    ;;
+  1)
+    ./build-test-native.sh >"$log" 2>&1 || { cat "$log" >&2; echo "test.sh: the native test targets did not build" >&2; exit 1; }
+    # Keep Cargo's no-op/rebuild timing visible in CI.
+    tail -n 1 "$log"
+    ;;
+  *) echo "FARCOOLER_MAC_TEST_UNIFIED_RUST must be 0 or 1" >&2; exit 2 ;;
+esac
 
 # Under the tmux leak check (ov-207): the real-CLI tests start scratch
 # daemons, each with a tmux server that `daemon stop` leaves running, and a

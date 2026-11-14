@@ -31,9 +31,13 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
   Restore an input timestamp only when its SHA-256 matches; delete executable
   products before the build so current Rust libraries always relink. Keep the
   staged C header's source timestamp (`cp -p`); its bytes are unchanged.
-- Use Rust opt-level 1 without cross-crate ThinLTO in the two CI Swift jobs,
-  and omit Rust debug symbols in the test job. All sources, optimized-code
-  compilation, linked tunnel features, assertions and bundle checks still run.
+- Use Rust opt-level 1 without cross-crate ThinLTO in the CI bundle job.
+  Build the test job's two FFI libraries and real CLI/daemon/filter together
+  with `build-test-native.sh`: one dev profile, opt-level 1 and no symbols,
+  retaining debug assertions, overflow checks and test-only hooks. The Mac
+  wrapper revalidates the exact same target/feature graph. This avoids a
+  release-library build followed by a separate debug-binary build. Every
+  source and test remains; no additional macOS runner is requested.
   Canary/Release workflows, Cargo profiles and build-app.sh are unchanged.
   build-vt.sh's only shipping change is preserving the copied header's metadata;
   the same source header is still copied to the same destination.
@@ -59,6 +63,12 @@ compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
 - Partition integration self-test passed; a deliberately omitted test fails.
 - lane-gate self-test passed, including every full test command remaining wired.
 - Updated wrapper checks fail against the original sequential-only runner.
+- Unified native helper checks passed: complete library/binary target union,
+  replacement of stale libraries, identical staged header bytes/timestamp,
+  and build failure propagation. Default local wrapper behavior is preserved.
+  A real, tiny offline Cargo workspace also verified the mixed library/binary
+  target selection, debug assertions and overflow checks at dev opt-level 1.
+  Independent review found no actionable correctness or coverage issue.
 - Completion guard, temp/defaults leak guard, change selection, file-size and
   doc-comment checks passed. actionlint has no diagnostics beyond the baseline's
   unknown xcode-27 label and SC2086 warnings in unrelated existing install steps.
@@ -84,16 +94,24 @@ CeremonyTests region plus its other four bundles. Both shards met their exact
 inventory counts and five-minute load criterion. This comparison motivates the
 partition but does not substitute for two successful final job measurements.
 
-The final implementation's cold cache-population run,
+The cache-population candidate before native profile unification,
 [43576738289](https://github.com/taneliang/farcooler/actions/runs/43576738289)
 (4c109287f), passed both Swift jobs: bundle **919 s (15m19s)**, tests
 **1,622 s (27m02s)**. This is not an under-15-minute acceptance run. The app
 step took 814 s; native libraries for the tests 257 s, AgentKit 294 s and
 Mac build/tests 855 s. Both compilation and native dependency caches were
-populated successfully. Initial main/SDK/manifest cache misses retain this
-cold-build cost; the target is verified on ordinary cached branch pushes below.
+populated successfully. This records the cold-build cost of that candidate; it is not a cold-cache
+15-minute guarantee. The final target is verified on cached branch pushes.
 
-Cached repeat measurements pending. A temporary push trigger for this branch
+The first cached candidate,
+[43579418253](https://github.com/taneliang/farcooler/actions/runs/43579418253)
+(fbbc96efd), passed the app job in **574 s (9m34s)** but missed the test target
+at **950 s (15m50s)**. Its Swift compilation was only 19.86 s (AgentKit) and
+28.63 s (Mac), proving compilation reuse worked. Native preparation still cost
+130 s up front and about 236 s again in the Mac wrapper. This motivated the
+single dev-profile native target graph, rather than reducing tests.
+
+Final cached repeat measurements pending. A temporary push trigger for this branch
 collects ordinary CI job measurements without opening a PR or adding runner
 jobs. Remove that trigger once two successful under-15-minute runs have been
 recorded.

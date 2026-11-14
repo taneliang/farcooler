@@ -13,6 +13,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 real="$PWD/apps/macos/test.sh"
+native_real="$PWD/apps/macos/build-test-native.sh"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
@@ -43,6 +44,14 @@ echo "swift $* ${TMUX_TMPDIR:+(private tmux)} $tmp" >>"$LOG"
 echo "Test run with 2 tests in 1 suite passed after 1 second."
 STUB
 chmod +x "$scratch/apps/macos/build-vt.sh" "$scratch/bin/swift" "$scratch/home/.cargo/bin/cargo" "$scratch/apps/macos/test.sh"
+
+cat >"$scratch/apps/macos/build-test-native.sh" <<'STUB'
+#!/bin/bash
+echo "build-test-native" >>"$LOG"
+[ "${NATIVE_FAILS:-}" = 1 ] && exit 1
+exit 0
+STUB
+chmod +x "$scratch/apps/macos/build-test-native.sh"
 
 cat >"$scratch/scripts/heavy" <<'STUB'
 #!/bin/bash
@@ -95,3 +104,44 @@ if FARCOOLER_MAC_TEST_PROCESSES=2 SWIFT_BUILD_FAIL=1 "$scratch/apps/macos/test.s
 fi
 if grep -q '^partitions' "$LOG"; then fail "partitions ran after test bundles failed to build"; fi
 echo "ok: parallel mode stops when its test bundles do not build"
+
+: >"$LOG"
+FARCOOLER_MAC_TEST_UNIFIED_RUST=1 "$scratch/apps/macos/test.sh" --filter CeremonyTests >/dev/null
+[ "$(cat "$LOG")" = $'build-test-native\nswift test --filter CeremonyTests (private tmux) (private tmp)' ] \
+  || fail "unified mode did not build all native targets before the guarded tests"
+: >"$LOG"
+if FARCOOLER_MAC_TEST_UNIFIED_RUST=1 NATIVE_FAILS=1 "$scratch/apps/macos/test.sh" >/dev/null 2>&1; then
+  fail "unified native failure still exited 0"
+fi
+[ "$(cat "$LOG")" = build-test-native ] || fail "tests ran after unified native build failed"
+echo "ok: unified native mode revalidates its targets and propagates failures"
+
+# Exercise the real native helper after the wrapper's stand-in cases.
+cp "$native_real" "$scratch/apps/macos/build-test-native.sh"
+mkdir -p "$scratch/crates/vt/include" "$scratch/apps/macos/Sources/CFarCoolerVT" "$scratch/target/release"
+printf '%s\n' current-header >"$scratch/crates/vt/include/farcooler_vt.h"
+touch -t 200001010000 "$scratch/crates/vt/include/farcooler_vt.h"
+cat >"$scratch/home/.cargo/bin/cargo" <<'STUB'
+#!/bin/bash
+[ "$*" = 'build --config profile.dev.opt-level=1 --lib --bins -p farcooler-vt -p farcooler-client -p farcooler-cli -p farcooler-daemon' ] || exit 91
+[ "${NATIVE_FAILS:-}" = 1 ] && exit 1
+mkdir -p target/debug
+for name in farcooler_vt farcooler_client; do echo fresh-library >"target/debug/lib$name.a"; done
+for name in farcooler farcoolerd farcooler-lfs-filter; do echo fresh-binary >"target/debug/$name"; done
+STUB
+printf '%s\n' stale-library >"$scratch/target/release/libfarcooler_client.a"
+"$scratch/apps/macos/build-test-native.sh"
+for name in farcooler_vt farcooler_client; do
+  [ "$(cat "$scratch/target/release/lib$name.a")" = fresh-library ] || fail "native helper staged a stale library"
+done
+for name in farcooler farcoolerd farcooler-lfs-filter; do
+  [ "$(cat "$scratch/target/debug/$name")" = fresh-binary ] || fail "native helper dropped a real-CLI target"
+done
+cmp "$scratch/crates/vt/include/farcooler_vt.h" "$scratch/apps/macos/Sources/CFarCoolerVT/farcooler_vt.h" || fail "staged header differs"
+python3 - "$scratch" <<'CHECK'
+import pathlib, sys
+root = pathlib.Path(sys.argv[1])
+assert (root / "crates/vt/include/farcooler_vt.h").stat().st_mtime_ns == (root / "apps/macos/Sources/CFarCoolerVT/farcooler_vt.h").stat().st_mtime_ns
+CHECK
+if NATIVE_FAILS=1 "$scratch/apps/macos/build-test-native.sh"; then fail "native helper swallowed Cargo failure"; fi
+echo "ok: one dev target graph builds every native product and stages fresh libraries/header with build failures propagated"
