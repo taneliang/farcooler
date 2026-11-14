@@ -747,6 +747,82 @@ async fn workflow_coding_second_run_of_ticket_provisions_its_own_base() {
     assert_eq!(adapters::git(&dir.path().join("second"), &["rev-parse", "HEAD"]).await.unwrap(), base);
 }
 
+/// A git that hangs on `worktree add` and is every other git, as one busy enough to hit its timeout there is.
+fn hung_worktree_add(dir: &Path) -> std::ffi::OsString {
+    let git = crate::git::absolute_git().unwrap();
+    let script = dir.join("hung-worktree-add");
+    std::fs::write(&script, format!("#!/bin/sh\nprev=\nfor a in \"$@\"; do\n  if [ \"$prev\" = worktree ] && [ \"$a\" = add ]; then exec sleep 30; fi\n  \
+        prev=$a\ndone\nexec '{}' \"$@\"\n", git.to_string_lossy())).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    script.into_os_string()
+}
+/// ov-1220: on a busy runner git timed out making a run's named tree and was killed (ov-1228, ov-1232, ov-1234).
+/// Nothing had been made, yet the step went Uncertain and stayed there. A look after the failure, under the
+/// repository's lock, finds nothing at the path, no worktree and no branch, so the step fails with a sentence and runs
+/// again; once git answers, a retry makes the tree.
+#[tokio::test]
+async fn workflow_coding_a_named_tree_git_never_made_fails_the_step_with_a_sentence() {
+    let (dir, mut runtime, workspace) = rerun_fixture().await;
+    let base = runtime.base.clone();
+    rerun_start(&runtime, &workspace, rerun_tree(dir.path(), "slow", &base));
+    let hung = hung_worktree_add(dir.path());
+    crate::git::TIMEOUT.with(|t| t.set(Some(std::time::Duration::from_secs(2))));
+    crate::git::PROGRAM.with(|p| *p.borrow_mut() = Some(hung));
+    // Two attempts, each killed at the timeout.
+    for time in 2..4 { runtime.pump(time).await.unwrap(); }
+    crate::git::PROGRAM.with(|p| *p.borrow_mut() = None);
+    crate::git::TIMEOUT.with(|t| t.set(None));
+    let item = runtime.state(&workspace).unwrap().unwrap().items["ticket"].clone();
+    assert_eq!((item.phase.clone(), item.stage), (Phase::Failed, 0), "{item:?}");
+    assert!(item.failure.as_deref().is_some_and(|f| f.contains("nothing was made")), "{:?}", item.failure);
+    assert!(!dir.path().join("slow").exists());
+    rerun_command(&runtime, &workspace, Command::Retry { item: "ticket".into() });
+    runtime.pump(5).await.unwrap();
+    assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].stage, 1, "a retry makes the tree");
+    assert_eq!(adapters::git(&dir.path().join("slow"), &["rev-parse", "HEAD"]).await.unwrap(), base);
+}
+
+/// ov-1220: provisions left Uncertain before the runner looked for itself, with no receipt (ov-1228, ov-1232,
+/// ov-1234), and the cancel of one (ov-1221), had no way out. `resolve` looks first: anything of the tree there is
+/// named and nothing is settled; with nothing there the step fails, a retry makes the tree, and a cancel ends.
+#[tokio::test]
+async fn workflow_coding_resolve_settles_an_uncertain_provision_that_made_nothing() {
+    for cancelled in [false, true] {
+        let (dir, mut runtime, workspace) = rerun_fixture().await;
+        let base = runtime.base.clone();
+        rerun_start(&runtime, &workspace, rerun_tree(dir.path(), "stuck", &base));
+        let state = runtime.state(&workspace).unwrap().unwrap();
+        let stored = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap();
+        let claim = runtime.store.workflow_claim_effect(&workspace, &stored.effect.id, "old-daemon", state.revision, state.epoch, 2, 10).unwrap().unwrap();
+        assert!(runtime.store.workflow_admit_effect(&claim, 2).unwrap());
+        runtime.observe(&workspace, &stored.effect, Outcome::Uncertain, false, 3).unwrap();
+        if cancelled {
+            rerun_command(&runtime, &workspace, Command::Cancel { item: "ticket".into(), reason: None });
+            runtime.pump(4).await.unwrap();
+        }
+        runtime.pump(5).await.unwrap();
+        assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].phase, Phase::Uncertain, "stuck, as on the board");
+        std::fs::create_dir_all(dir.path().join("stuck")).unwrap();
+        let held = runtime.resolve_provision(&runtime.controller(), &workspace, "ticket").await;
+        assert!(matches!(&held, Err(Error::Domain(why)) if why.to_string().contains("there is a directory at")), "{held:?}");
+        runtime.pump(6).await.unwrap();
+        assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].phase, Phase::Uncertain, "a refused word settles nothing");
+        std::fs::remove_dir(dir.path().join("stuck")).unwrap();
+        runtime.resolve_provision(&runtime.controller(), &workspace, "ticket").await.unwrap();
+        runtime.pump(7).await.unwrap();
+        let item = runtime.state(&workspace).unwrap().unwrap().items["ticket"].clone();
+        if cancelled {
+            assert_eq!(item.phase, Phase::Cancelled, "{item:?}");
+            continue;
+        }
+        assert_eq!(item.phase, Phase::Failed, "{item:?}");
+        assert!(item.failure.as_deref().is_some_and(|f| f.contains("the orchestrator resolved it")), "{:?}", item.failure);
+        rerun_command(&runtime, &workspace, Command::Retry { item: "ticket".into() });
+        runtime.pump(8).await.unwrap();
+        assert_eq!(runtime.state(&workspace).unwrap().unwrap().items["ticket"].stage, 1, "a retry makes the tree");
+    }
+}
+
 async fn mismatched_provision() -> (tempfile::TempDir, Runtime, String, Binding) {
     let (dir, runtime, workspace) = rerun_fixture().await;
     let old = runtime.base.clone();

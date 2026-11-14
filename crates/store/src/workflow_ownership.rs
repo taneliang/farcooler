@@ -14,18 +14,35 @@ fn task(tx: &Transaction<'_>, input: &Input, item: &str) -> Result<Option<Vec<u8
     if rows.next()?.is_some() { return Err(crate::workflow::WorkflowError::AmbiguousTask); }
     Ok(found)
 }
-pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
-    // Start fences a ticket's subagent records and blocks (a run owns them), so it waits for the orchestrator to
-    // settle them: otherwise a stopped subagent could never end and a block could never clear (ov-965).
-    // The tickets that follow the run are fenced with it, so the same holds for each of them (ov-970).
-    if let Command::Start { item, with, .. } = &input.command {
-        for ticket in std::iter::once(item).chain(with) {
-            let Some(task) = task(tx,input,ticket)? else { continue };
-            if tx.query_row("SELECT EXISTS(SELECT 1 FROM ticket_work WHERE task_id=?1 AND ended_at IS NULL)
-                OR EXISTS(SELECT 1 FROM task_blocks WHERE task_id=?1)", [task], |r| r.get::<_,bool>(0))? { return Ok(false); }
+/// Why a Start must wait, as a sentence naming what holds it and the command that settles each (ov-1220).
+/// Start fences a ticket's subagent records and blocks (a run owns them), so it waits for the orchestrator to
+/// settle them: otherwise a stopped subagent could never end and a block could never clear (ov-965).
+/// The tickets that follow the run are fenced with it, so the same holds for each of them (ov-970).
+/// A block stays until it is cleared, even once the ticket it waits on is done.
+pub(crate) fn start_held(tx: &Transaction<'_>, input: &Input) -> Result<Option<String>> {
+    let Command::Start { item, with, .. } = &input.command else { return Ok(None) };
+    let mut held = Vec::new();
+    for ticket in std::iter::once(item).chain(with) {
+        let Some(task) = task(tx,input,ticket)? else { continue };
+        let key: String = tx.query_row("SELECT key FROM tasks WHERE id=?1", [&task], |r| r.get(0))?;
+        let mut blocks = tx.prepare("SELECT t.key FROM task_blocks b JOIN tasks t ON t.id=b.blocked_by WHERE b.task_id=?1 ORDER BY b.rowid")?;
+        for on in blocks.query_map([&task], |r| r.get::<_,String>(0))? {
+            let on = on?;
+            held.push(format!("{key} waits on {on}; clear that with `farcooler task block {key} --on {on} --clear`"));
         }
-        return Ok(true);
+        // The agent's own id where it has one (what `agent end` was told), else the runner's.
+        let mut work = tx.prepare("SELECT coalesce(a.subagent_id, lower(hex(a.id))), w.role FROM ticket_work w JOIN agents a ON a.id=w.agent_id
+            WHERE w.task_id=?1 AND w.ended_at IS NULL ORDER BY w.started_at")?;
+        for row in work.query_map([&task], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?)))? {
+            let (agent, role) = row?;
+            held.push(format!("a subagent ({role}) still works {key}; end it with `farcooler agent end {agent} --verdict stopped`"));
+        }
     }
+    if held.is_empty() { return Ok(None); }
+    Ok(Some(format!("A run would hold these for good, so it waits until they're settled: {}. Then start it again.", held.join("; "))))
+}
+pub(crate) fn available(tx: &Transaction<'_>, input: &Input) -> Result<bool> {
+    if matches!(input.command, Command::Start { .. }) { return Ok(start_held(tx, input)?.is_none()); }
     let Command::Enqueue { item, definition, .. } = &input.command else { return Ok(true) };
     let Some(task) = task(tx,input,item)? else { return Ok(true) };
     // A migrated card must be retained-intent. Its history stays inert (a landed line, an old

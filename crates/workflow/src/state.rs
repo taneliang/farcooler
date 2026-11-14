@@ -9,6 +9,8 @@ pub enum Refusal {
     Phase, Evidence, Limit,
     /// A send-back cannot be accepted; the sentence identifies the exhausted budget.
     SendBackRefused(String),
+    /// A `Resource` refusal said as a sentence: what holds the item, and the command that settles it (ov-1220).
+    Held(String),
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

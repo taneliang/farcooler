@@ -77,6 +77,10 @@ pub enum WorkflowCmd {
         #[arg(long,required_unless_present="sha")] continues_under:Option<String>,#[command(flatten)] identity:Identity },
     /// Run a failed item's step again, within its published retry allowance.
     Retry { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    /// Settle a run whose worktree step is Uncertain because its git never finished, or a cancel waiting on one. The
+    /// runner looks first: with nothing of the tree there (no directory, no worktree git lists, no branch it would
+    /// have made), the step fails and can be retried; anything there is named, to take away by hand first.
+    Resolve { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Queue a ticket waiting at its join step into the open group for that step.
     Queue { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Take a queued ticket out of a group that has not left yet.
@@ -182,6 +186,7 @@ impl WorkflowCmd {
             Self::Reopen { workspace,item,column,identity } => (workspace,Action::Reopen { mutation:identity.mutation(),item,column }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
             Self::Pause { .. } | Self::Resume { .. } => return Err("steering is a live step command".into()),
+            Self::Resolve { workspace,item,run,pin,identity } => (workspace,Action::Resolve { mutation:identity.mutation(),item,run,pin }),
             Self::Watch { .. } => return Err("watch is a stream, not a command".into()),
             Self::Verdict { .. } => return Err("a verdict is written where the review step reads it, not sent".into()),
         })
@@ -466,6 +471,17 @@ mod tests {
         assert!(matches!(action,Action::Settle{landed:true,..}));
         let request=super::request(workspace,&action).unwrap();
         assert_eq!(request.method,"workflow.settle");
+        assert_eq!(request.required_capabilities,[capability::WORKFLOW_COMMANDS]);
+    }
+    #[test]
+    fn workflow_resolve_travels_as_its_own_method() {
+        let args=["farcooler","workflow","resolve","00000000-0000-0000-0000-000000000000","ov-1","--run","run","--pin","pin",
+            "--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(args).unwrap().command else {panic!()};
+        let (workspace,action)=cmd.action().unwrap();
+        assert!(matches!(&action,Action::Resolve{item,..} if item=="ov-1"));
+        let request=super::request(workspace,&action).unwrap();
+        assert_eq!(request.method,"workflow.resolve");
         assert_eq!(request.required_capabilities,[capability::WORKFLOW_COMMANDS]);
     }
     #[test]

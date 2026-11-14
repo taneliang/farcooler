@@ -840,6 +840,8 @@ impl Runtime {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
                     } else if let Some(why) = landed_refusal {
                         serde_json::json!({ "schema": 1, "receipt": { "result": { "Err": why } } })
+                    } else if let farcooler_protocol::workflow_commands::Action::Resolve { mutation, item, run, pin } = &*action {
+                        self.resolve_wire(&admission.workspace(), item, run, pin, mutation.epoch).await?
                     } else {
                         self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, wire_commands::Prepared { tree, close_verified })?
                     };

@@ -453,6 +453,35 @@ fn start_waits_for_a_tickets_subagents_and_blocks_to_settle() {
     }
 }
 
+/// ov-1220: a Start held back by a block or an open subagent says which, and the command that settles it. ov-1187
+/// was refused as a bare `Resource` five times, with an owner ask on it taking the blame, while what held it was a
+/// block on a ticket still in review. The ask itself holds nothing: answered and moved on, the ticket starts.
+#[test]
+fn a_start_held_back_says_what_holds_it() {
+    for phase in PHASES {
+        let b = board(phase);
+        let (s, t, user) = (&b.store, b.ticket.id, Actor::User);
+        let key = b.ticket.key.clone();
+        let other = s.get_task(b.other).unwrap().key;
+        let tracker = Definition::tracker("owner");
+        let start = |b: &Board, id: &str| b.apply(id, Command::Start { item: key.clone(), policy_pin: tracker.pin(), resource: "own-ticket".into(),
+            dependencies: Default::default(), initial_candidate: Some(tracker.pin()), definition: tracker.clone(), models: Default::default(), tree: None, with: vec![] }).result;
+        s.set_block(t, b.other, Some("waits on the spike")).unwrap();
+        let Err(farcooler_workflow::Refusal::Held(why)) = start(&b, "start-1") else { panic!("{phase:?}: a block is named") };
+        assert!(why.contains(&format!("{key} waits on {other}")), "{phase:?}: {why}");
+        assert!(why.contains(&format!("`farcooler task block {key} --on {other} --clear`")), "{phase:?}: {why}");
+        s.unblock(t, b.other).unwrap();
+        s.record_worker(t, &worker("a1"), user).unwrap();
+        let Err(farcooler_workflow::Refusal::Held(why)) = start(&b, "start-2") else { panic!("{phase:?}: a subagent is named") };
+        assert!(why.contains("`farcooler agent end a1 --verdict stopped`"), "{phase:?}: {why}");
+        s.end_worker(t, "claude", Some("a1"), EndReason::Finished, user).unwrap();
+        // An owner ask, answered with a ruling and moved on (ov-1187's own history), holds nothing.
+        s.add_note(t, crate::models::NoteKind::Question, Actor::Manager, "Which way?", serde_json::json!({"options": ["this", "that"]})).unwrap();
+        s.add_note(t, crate::models::NoteKind::Decision, Actor::Manager, "Ruling: this way.", serde_json::json!({})).unwrap();
+        assert!(start(&b, "start-3").is_ok(), "{phase:?}: settled, the ticket starts");
+    }
+}
+
 /// ov-970: a Start that takes other tickets as followers waits for their subagents as it does for its own, and a
 /// follower is the run's from then on: no longer at rest, so its records are fenced like the lead's.
 #[test]

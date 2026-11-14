@@ -133,8 +133,8 @@ fn refusal_words(refusal: &str, keys: &[&str]) -> String {
         "Stale" => "the board moved while it was starting",
         "Phase" if several => "one of them isn't waiting to be started any more",
         "Phase" => "it isn't waiting to be started any more",
-        // The store refuses a Start this way while the card has open subagent records or blocks, which a run would
-        // fence and so never settle (ov-965). The orchestrator settles those, so say how.
+        // A runner from before ov-1220 refuses a Start this way while the card has open subagent records or blocks,
+        // which a run would fence and so never settle (ov-965); a newer one names them (`Held`). Say how to settle.
         "Resource" if several => return format!("something else holds what they need, or a subagent still works one of them or one \
             has a block. End their subagents with `farcooler agent end <agent> --verdict stopped`, clear their blocks with {}, \
             and dispatch again", listed(&keys.iter().map(|k| format!("`farcooler task block {k} --on <key> --clear`")).collect::<Vec<_>>())),
@@ -266,9 +266,13 @@ pub(super) async fn through_engine<L: DispatchLink>(
         let Some(result::Value::WorkflowReply(reply)) = reply.value else { return Err(unreadable()) };
         let value: Value = serde_json::from_str(&reply.json).map_err(|_| unreadable())?;
         let Some(refusal) = value.pointer("/receipt/result/Err") else { break };
+        let keys: Vec<&str> = tickets.iter().map(|t| t.key.as_str()).collect();
+        // A runner that names what holds the tickets says it in a sentence of its own (ov-1220).
+        if let Some(held) = refusal.get("Held").and_then(Value::as_str) {
+            return Err(format!("The engine didn't start {}. {held}", listed(&keys)).into());
+        }
         let said = refusal.as_str().map_or_else(|| refusal.to_string(), String::from);
         if said == "Stale" && !retried { retried = true; continue; }
-        let keys: Vec<&str> = tickets.iter().map(|t| t.key.as_str()).collect();
         return Err(format!("The engine didn't start {}: {}.", listed(&keys), refusal_words(&said, &keys)).into());
     }
     let started: Vec<String> = tickets.iter().map(|t| t.key.clone()).collect();

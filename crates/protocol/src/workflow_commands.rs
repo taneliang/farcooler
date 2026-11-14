@@ -32,6 +32,9 @@ pub enum Action {
     Close { mutation: Mutation, item: String, run: String, pin: String, resolution: farcooler_workflow::CloseResolution },
     /// Run a failed item's step again. A controller's command, like cancel.
     Retry { mutation: Mutation, item: String, run: String, pin: String },
+    /// Settle a step left Uncertain whose outcome can be read from the runner itself: a Provision git never finished,
+    /// believed only once the runner finds nothing of the tree (ov-1220). The step then fails, and can run again.
+    Resolve { mutation: Mutation, item: String, run: String, pin: String },
     /// Queue a ticket waiting at its join step into the open group. The orchestrator decides.
     Queue { mutation: Mutation, item: String, run: String, pin: String },
     /// Pull a queued ticket out of a group that has not left yet.
@@ -90,6 +93,7 @@ impl Action {
             Self::ResolveCancellation { .. } => "workflow.resolve_cancellation",
             Self::Close { .. } => "workflow.close",
             Self::Retry { .. } => "workflow.retry",
+            Self::Resolve { .. } => "workflow.resolve",
             Self::Queue { .. } => "workflow.queue",
             Self::Leave { .. } => "workflow.leave",
             Self::Settle { .. } => "workflow.settle",

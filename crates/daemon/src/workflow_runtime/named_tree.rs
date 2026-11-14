@@ -296,8 +296,15 @@ impl Exec {
         if tree.adopted { return self.provision_adopted(board, repository, &host.install_id, tree).await; }
         let path = Path::new(&tree.path);
         if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
-        let created = crate::git::create_worktree_with(&self.repository(), &tree.branch, &tree.base, path, true).await
-            .map_err(|_| Error::Refused("named worktree provisioning uncertain"))?;
+        let created = match crate::git::create_worktree_with(&self.repository(), &tree.branch, &tree.base, path, true).await {
+            Ok(created) => created,
+            // Both are checked before git changes anything.
+            Err(DomainError::BranchExists) => return Err(said(&format!("The branch {} already exists, so the run can't make it. \
+                Delete it or name another branch, then start the run again.", tree.branch))),
+            Err(DomainError::WorktreeExists) => return Err(said("Something is already at the worktree's path, so the run can't make \
+                its tree there. Move it away or name another worktree, then start the run again.")),
+            Err(error) => return Err(unmade(&self.repository(), path, Some(&tree.branch), error, "named worktree provisioning uncertain").await),
+        };
         crate::git::mark_owner(path, &host.install_id).await;
         if created.forked { crate::git::mark_forked(path, &host.install_id).await; }
         // The tree is made, so a failure to record or claim it takes it back out (it is clean and at its base),
@@ -316,6 +323,45 @@ impl Exec {
 
 /// A refusal said as a sentence, for one that comes before anything is changed (ov-1074).
 fn said(sentence: &str) -> Error { Error::Domain(DomainError::refused(sentence.into())) }
+
+/// Why making a run's tree failed, as the step takes it (ov-1220). Most often git hit its timeout on a busy runner and
+/// was killed, at any point, so this looks at what is there, still under the repository's lock: no directory at the
+/// path, no worktree git lists there, and no branch `made` (the one a fresh tree makes) means nothing was made. Then
+/// the step fails with a sentence, kept so a restart reads it, and can run again. Anything there, or a look that
+/// fails too, leaves the outcome unknown (`uncertain`) for a person to settle.
+pub(super) async fn unmade(repository: &Path, path: &Path, made: Option<&str>, error: DomainError, uncertain: &'static str) -> Error {
+    tracing::warn!(path = %path.display(), ?error, "making a run's worktree failed; looking at what is there");
+    if let Some(there) = what_is_there(repository, path, made).await {
+        tracing::warn!(path = %path.display(), %there, "the run's worktree is left uncertain");
+        return Error::Refused(uncertain);
+    }
+    said("Git didn't finish making the run's worktree, and nothing was made, most often because the runner was too busy \
+        to answer in time. Retry the run.")
+}
+
+/// What a Provision that never finished left of its tree, said for a person; `None` when there is nothing: no
+/// directory at `path`, no worktree git lists there, and no branch `made` (the one a fresh tree makes). A look that
+/// fails is never taken for nothing.
+pub(super) async fn what_is_there(repository: &Path, path: &Path, made: Option<&str>) -> Option<String> {
+    let shown = path.display();
+    match path.try_exists() {
+        Ok(false) => {}
+        Ok(true) => return Some(format!("there is a directory at {shown}")),
+        Err(_) => return Some(format!("{shown} can't be read")),
+    }
+    match crate::git::list_worktrees(repository).await {
+        Ok(trees) if trees.iter().any(|t| same_path(Path::new(&t.path), path)) =>
+            return Some(format!("git still lists a worktree at {shown}; `git worktree prune` clears one whose directory is gone")),
+        Ok(_) => {}
+        Err(_) => return Some("git couldn't list the repository's worktrees".into()),
+    }
+    let branch = made?;
+    match crate::git::branch_exists(repository, branch).await {
+        Ok(false) => None,
+        Ok(true) => Some(format!("the branch {branch} exists")),
+        Err(_) => Some(format!("git couldn't say whether the branch {branch} exists")),
+    }
+}
 
 pub(super) fn check_base(binding: &Binding, tree: &RunTree) -> Result<()> {
     if binding.base != tree.base { return Err(said("The worktree's base differs from the run's pinned base. Nothing was made; cancel and reopen the ticket to start a new run.")); }
@@ -355,8 +401,10 @@ impl Exec {
             }
         } else {
             if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
-            crate::git::create_worktree_from_branch(&self.repository(), &tree.branch, path).await
-                .map_err(|_| Error::Refused("adopted worktree provisioning uncertain"))?;
+            // The branch was there before and is never made here, so only the tree is looked for.
+            if let Err(error) = crate::git::create_worktree_from_branch(&self.repository(), &tree.branch, path).await {
+                return Err(unmade(&self.repository(), path, None, error, "adopted worktree provisioning uncertain").await);
+            }
             crate::git::mark_owner(path, install_id).await;
         }
         let row = match row {

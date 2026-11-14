@@ -1039,6 +1039,7 @@ pub mod method {
         WorkflowCancel = "workflow.cancel" => WORKFLOW_COMMANDS,
         WorkflowResolveCancellation = "workflow.resolve_cancellation" => WORKFLOW_COMMANDS,
         WorkflowRetry = "workflow.retry" => WORKFLOW_COMMANDS,
+        WorkflowResolve = "workflow.resolve" => WORKFLOW_COMMANDS,
         WorkflowQueue = "workflow.queue" => WORKFLOW_COMMANDS,
         WorkflowLeave = "workflow.leave" => WORKFLOW_COMMANDS,
         WorkflowSettle = "workflow.settle" => WORKFLOW_COMMANDS,

@@ -82,3 +82,75 @@ impl Runtime {
 #[cfg(test)]
 pub(super) static AFTER_LANDED_READ: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Box<dyn FnOnce() + Send>>>> =
     std::sync::LazyLock::new(Default::default);
+
+/// The runner's own look settling a Provision left Uncertain (ov-1220).
+impl Runtime {
+    /// The wire's Resolve, answered as Settle's is: no engine state is written here, so a resolve that went through
+    /// and is sent again is refused because the step is no longer uncertain.
+    pub(super) async fn resolve_wire(&self, workspace: &str, item: &str, run: &str, pin: &str, epoch: u64) -> Result<serde_json::Value> {
+        let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;
+        let answer = if state.epoch != epoch || !state.items.get(item).is_some_and(|i| i.run == run && i.pin == pin) {
+            Err("Stale".to_string())
+        } else {
+            self.resolve_provision(&self.controller(), workspace, item).await.map_err(|error| match error {
+                Error::Domain(refused) => refused.to_string(),
+                other => other.to_string(),
+            })
+        };
+        Ok(serde_json::json!({ "schema": 1, "receipt": { "result": match answer {
+            Ok(()) => serde_json::json!({ "Ok": null }), Err(why) => serde_json::json!({ "Err": why }) } } }))
+    }
+    /// Settle a Provision whose git never finished and left no receipt (a git killed at its timeout on a busy runner,
+    /// before ov-1220 looked for itself), or the Stop of a cancelled run waiting on one. Believed only once the runner
+    /// looks and finds nothing of the tree: no directory at its path, no worktree git lists there, and none of the
+    /// branch it would have made. Then the Provision is recorded as having made nothing, and the next sweep fails the
+    /// step with that (it can run again), or ends the cancelled run. Anything there is named for a person to clear first.
+    pub async fn resolve_provision(&self, controller: &Controller, workspace: &str, item_id: &str) -> Result<()> {
+        self.authorize(controller.instance)?;
+        let refused = |sentence: String| Error::Domain(farcooler_core::DomainError::refused(sentence));
+        let state = self.state(workspace)?.ok_or(Error::Refused("missing workspace"))?;
+        let item = state.items.get(item_id).ok_or(Error::Refused("no such item"))?;
+        if item.phase != Phase::Uncertain {
+            return Err(refused(format!("{item_id} isn't uncertain, so there is nothing to resolve.")));
+        }
+        let pending = item.pending.as_ref().ok_or(Error::Refused("nothing is pending"))?;
+        let outbox = self.store.workflow_outbox(workspace)?;
+        let stored = outbox.iter().find(|s| &s.effect.id == pending).ok_or(Error::Refused("missing pending effect"))?;
+        let provision = match &stored.effect.kind {
+            EffectKind::Stop { operation } => outbox.iter().find(|s| &s.effect.id == operation).ok_or(Error::Refused("missing stopped effect"))?,
+            _ => stored,
+        };
+        if provision.effect.kind != EffectKind::Execute(StageKind::Provision) {
+            return Err(refused(format!("Only a step that makes a run's worktree can be resolved this way; {item_id}'s uncertain step doesn't.")));
+        }
+        let mut exec = self.exec.clone();
+        if self.service_mode {
+            let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
+            exec.coding = bundle.adapter.map(|farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config)| config);
+            exec.base = exec.coding.as_ref().map_or_else(|| "0".repeat(40), |c| c.base.clone());
+        }
+        let base = exec.item_base(workspace, &provision.effect)?;
+        let binding = Binding::new(workspace, &provision.effect,
+            provision.resource_generation.ok_or(Error::Refused("the provision was never admitted"))?, item.iteration, &base);
+        if exec.git_settlement(&binding).try_exists()? {
+            return Err(refused(format!("{item_id}'s worktree step finished and left its receipt, which settles it; nothing to resolve.")));
+        }
+        let (path, made) = match &provision.effect.tree {
+            Some(tree) => (PathBuf::from(&tree.path), (!tree.adopted).then(|| tree.branch.clone())),
+            None => (exec.tree(&binding), Some(format!("wf-{}", &digest(&(workspace, &provision.effect.item))[4..]))),
+        };
+        // Under the repository's lock, as Provision makes a named tree, so nothing is made while it looks.
+        let lock = match (&exec.host, Uuid::parse_str(workspace).ok().and_then(|w| self.store.get_workspace(w).ok())) {
+            (Some(host), Some(board)) => Some(host.lock(board.repository_id)),
+            _ => None,
+        };
+        let _held = match &lock { Some(lock) => Some(lock.lock().await), None => None };
+        if let Some(there) = named_tree::what_is_there(&exec.repository(), &path, made.as_deref()).await {
+            return Err(refused(format!("{item_id} can't be resolved yet: {there}. Take that away by hand if the run made it, then resolve again.")));
+        }
+        exec.refuse_unstarted(&binding, "Git never finished making the run's worktree, and nothing was made; the orchestrator \
+            resolved it. Retry the run.".into())?;
+        if let Some(wake) = &self.notice_wake { wake.notify_one(); }
+        Ok(())
+    }
+}

@@ -314,8 +314,9 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
             Err(Refusal::Unauthorized)
         } else { step(&state, &admitted) };
         if result.as_ref().is_ok_and(|transition|transition.effects.iter().any(|effect|blocked.contains(&effect.resource))) { result=Err(Refusal::Resource); }
-        if result.is_ok() && !crate::workflow_ownership::available(tx, input)? {
-            result = Err(Refusal::Resource);
+        if result.is_ok() {
+            if let Some(why) = crate::workflow_ownership::start_held(tx, input)? { result = Err(Refusal::Held(why)); }
+            else if !crate::workflow_ownership::available(tx, input)? { result = Err(Refusal::Resource); }
         }
         if result.is_ok() {
             if let farcooler_workflow::Command::Observe { effect, .. }

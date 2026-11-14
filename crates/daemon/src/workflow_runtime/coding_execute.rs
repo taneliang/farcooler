@@ -140,7 +140,7 @@ impl Exec {
     fn unstarted_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
-    fn refuse_unstarted(&self, binding: &Binding, why: String) -> Result<Outcome> {
+    pub(super) fn refuse_unstarted(&self, binding: &Binding, why: String) -> Result<Outcome> {
         durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why: why.clone() })?)?;
         Ok(Outcome::SafeFailureBecause(why))
     }
@@ -539,12 +539,14 @@ impl Exec {
                 },
                 None => {
                     let branch = format!("wf-{}", &digest(&(workspace, &binding.effect.item))[4..]);
-                    crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await
-                        .map_err(|error| {
-                            // The refusal below is a fixed sentence; git's own reason is in the `worktree add failed` warning just above this one.
-                            tracing::warn!(item = %binding.effect.item, %error, "worktree provisioning left the step uncertain");
-                            Error::Refused("configured worktree provisioning uncertain")
-                        })?;
+                    if let Err(error) = crate::git::create_worktree_with(&self.repository(), &branch, &binding.base, &tree, true).await {
+                        // Nothing made fails the step with a sentence (ov-1220); git's own reason is in the warning just above.
+                        tracing::warn!(item = %binding.effect.item, %error, "worktree provisioning failed");
+                        return match named_tree::unmade(&self.repository(), &tree, Some(&branch), error, "configured worktree provisioning uncertain").await {
+                            Error::Domain(refused) => self.refuse_unstarted(binding, refused.to_string()),
+                            uncertain => Err(uncertain),
+                        };
+                    }
                 }
             }
                 spotlight::exclude_builds(&tree).await;

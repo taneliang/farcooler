@@ -136,7 +136,7 @@ impl Runtime {
         let mutation = match &action {
             Action::PublicationGrant { mutation, .. } | Action::Rollback { mutation, .. } | Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
-            | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
+            | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. } | Action::Resolve { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
             | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } | Action::Landed { mutation, .. } => mutation,
             Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
@@ -269,6 +269,7 @@ impl Runtime {
                     }
                 }
                 Action::Settle { .. } => unreachable!("settling reads the remote, so it is answered before this"),
+                Action::Resolve { .. } => unreachable!("resolving looks at the runner first, so it is answered before this"),
                 Action::Track { item, column, .. } => {
                     let Some(definition) = Definition::ticket_at(column.as_deref().unwrap_or("backlog")) else {
                         return Ok(serde_json::json!({"schema":1,"receipt":self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Invalid))?}));

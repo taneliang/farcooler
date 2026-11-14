@@ -214,6 +214,8 @@ fn the_engine_lands_and_the_orchestrator_cleans_up() {
             "Rebase onto main", "page set trains", "plan ticket set", "landing-template <workspace>"] {
             assert!(!land.contains(gone), "{h:?} still shows {gone:?}: {land}");
         }
+        // A worktree step left Uncertain has a way out the orchestrator can take (ov-1220).
+        assert!(skill(h).contains("or a cancel stuck behind one: `workflow resolve …`. The runner"), "{h:?}");
     }
 }
 

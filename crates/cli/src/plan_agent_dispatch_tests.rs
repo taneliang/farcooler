@@ -37,7 +37,7 @@ struct Runner {
     /// What the engine holds, as `workflow get` answers it: `None` is a runner with no engine.
     engine: Option<serde_json::Value>,
     /// The engine's answer to a start: `None` accepts it.
-    refuse_start: Option<&'static str>,
+    refuse_start: Option<serde_json::Value>,
     /// `workflow get` fails, as for a seat the engine turns away.
     engine_unanswered: bool,
     /// `workflow.start` fails with this code, as the runner refuses a taken branch or name (ov-967).
@@ -85,7 +85,7 @@ impl DispatchLink for Runner {
             }),
             ("workflow.start", _) => result::Value::WorkflowReply(pb::WorkflowReply {
                 schema: 1,
-                json: match self.refuse_start {
+                json: match &self.refuse_start {
                     Some(why) => json!({"schema":1,"receipt":{"result":{"Err":why}}}),
                     None => json!({"schema":1,"receipt":{"result":{"Ok":null}}}),
                 }
@@ -314,7 +314,7 @@ async fn a_builder_on_tracked_tickets_goes_through_one_start() {
     assert!(said.contains("farcooler workflow send-back ") && said.contains(" ov-9 ") && said.contains("farcooler workflow cancel "), "{said}");
     // A refusal that one of several tickets caused is said of all of them, so the orchestrator looks at each.
     let mut link = with_engine(&held);
-    link.refuse_start = Some("Resource");
+    link.refuse_start = Some(json!("Resource"));
     let said = say(&mut link, "--role builder --ticket ov-2 --ticket ov-3").await.unwrap_err().to_string();
     assert!(said.starts_with("The engine didn't start ov-2 and ov-3: "), "{said}");
     assert!(said.contains("`farcooler task block ov-2 --on <key> --clear`") && said.contains("`farcooler task block ov-3 --on <key> --clear`"), "{said}");
@@ -355,7 +355,7 @@ async fn nothing_starts_that_the_engine_cannot_take() {
     let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
     assert!(said.starts_with("This board has no published workflow"), "{said}");
     let mut link = with_engine(&mixed);
-    link.refuse_start = Some("Resource");
+    link.refuse_start = Some(json!("Resource"));
     let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
     assert!(said.starts_with("The engine didn't start ov-2: something else holds what it needs, or a subagent still works it or it has a block."), "{said}");
     // What to do about the second (ov-965): the commands that settle each.
@@ -363,6 +363,13 @@ async fn nothing_starts_that_the_engine_cannot_take() {
     for m in ["terminal.create", "worktree.create"] {
         assert!(!link.methods().contains(&m), "{:?}", link.methods());
     }
+    // A runner that knows what holds it says so, and that sentence is what's shown (ov-1220).
+    let mut link = with_engine(&mixed);
+    link.refuse_start = Some(json!({"Held": "A run would hold these for good, so it waits until they're settled: ov-2 waits on ov-1; \
+        clear that with `farcooler task block ov-2 --on ov-1 --clear`. Then start it again."}));
+    let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
+    assert_eq!(said, "The engine didn't start ov-2. A run would hold these for good, so it waits until they're settled: ov-2 waits on ov-1; \
+        clear that with `farcooler task block ov-2 --on ov-1 --clear`. Then start it again.");
 }
 
 /// A flag a start can't honor is named and refused, not dropped with an exit of 0 (ov-962 B3). Nothing starts.
@@ -396,7 +403,7 @@ async fn a_closed_ticket_in_the_archive_is_not_dispatched_to_a_pane() {
 #[tokio::test]
 async fn a_start_the_board_moved_under_is_sent_again_once() {
     let mut link = with_engine(&[("ov-2", "ticket/v1", "WaitingApproval")]);
-    link.refuse_start = Some("Stale");
+    link.refuse_start = Some(json!("Stale"));
     let said = say(&mut link, "--role builder --ticket ov-2").await.unwrap_err().to_string();
     assert_eq!(starts(&link).len(), 2, "one retry");
     assert!(said.starts_with("The engine didn't start ov-2: the board moved while it was starting."), "{said}");

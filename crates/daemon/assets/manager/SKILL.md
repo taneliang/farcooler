@@ -125,10 +125,10 @@ stale, report it and wait for the next check-in. Inspect other refusals before r
    have a subagent do it, then pass it (`workflow review … --passed --evidence
    <file>`, the file holding its `last_evidence` exactly as get gives it) or
    send it back. A person gate waits for that person in the app: never decide it.
-4. **Send back.** `workflow send-back … --reason "<what to change>"` restarts its
-   build step in the same worktree, and the agent is told your reason. A failed
-   step: `workflow retry` (three at most) or send it back; `workflow cancel` ends
-   the run.
+4. **Send back.** `workflow send-back … --reason "<what to change>"` restarts its build step in the same worktree, and the
+   agent is told your reason. A failed step: `workflow retry` (three at most) or send it back; `workflow cancel` ends the run.
+   A worktree step left `Uncertain` (its git never finished), or a cancel stuck behind one: `workflow resolve …`. The runner
+   looks first and names anything of the tree still there; with nothing there the step fails and you retry.
 5. **Land.** After the last gate the ticket reads `WaitingJoin`: queue it with
    `workflow queue …` (nothing queues it for you). The
    engine does the rest: section 4.
