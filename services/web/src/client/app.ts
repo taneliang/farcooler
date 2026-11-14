@@ -1078,11 +1078,11 @@ function signOutForgets(session: () => Session | null): void {
     dropSecret,
     waiting: () => status('Signing out…'),
     failed: (retry, anyway) => status(
-      'Your saved copy may still be at Far Cooler',
-      'Far Cooler couldn’t confirm that your passkey’s shared recovery copy was deleted. It may still restore your runners in browsers using this passkey. Retry, or sign out and clear it later from Saved Copies.',
-      { label: 'Retry Delete', run: retry },
+      'Your saved copy may still be at Far Cooler', // platform copy: browser passkey recovery deletion status
+      'Far Cooler couldn’t confirm that your passkey’s shared recovery copy was deleted. It may still restore your runners in browsers using this passkey. Retry, or sign out and clear it later from Saved Copies.', // platform copy: browser passkey recovery deletion guidance
+      { label: 'Retry Delete', run: retry }, // platform copy: browser passkey recovery deletion action
       anyway,
-      'Sign Out Anyway',
+      'Sign Out Anyway', // platform copy: browser session sign-out action
     ),
   })
 }

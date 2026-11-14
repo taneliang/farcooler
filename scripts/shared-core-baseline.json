@@ -787,7 +787,11 @@
   "services/web/src/client/workflow.ts": 5
  },
  "exempt": {
+  "apps/android/app/src/main/java/com/farcooler/net/ConnectionTeammate.kt": 1,
+  "apps/ios/FarCooler/ConnectionTeammate.swift": 1,
   "apps/ios/FarCooler/TeammateAddHarness.swift": 1,
-  "services/web/src/client/copy.ts": 3
+  "services/web/src/client/app.ts": 4,
+  "services/web/src/client/copy.ts": 3,
+  "services/web/src/client/saved-copies.ts": 9
  }
 }
