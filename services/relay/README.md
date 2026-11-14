@@ -268,8 +268,8 @@ the page derives from the passkey's PRF output, which the relay never sees.
 
 The relay can't read or forge a copy, but it can't tell who saved one either:
 a session without the passkey could overwrite a copy with junk. The page
-checks after each passkey touch that the relay's copy is the one it last sent,
-and sends it again if not. The relay could also withhold a copy, which costs the
+checks after each passkey touch that the relay's copy opens with its key,
+and repairs it only if it is missing or unreadable. The relay could also withhold a copy, which costs the
 person a new enrollment, or hand back an older one, which lists the runners as
 they were then.
 
@@ -397,3 +397,12 @@ needs no dependency and is worse — no timeout control worth the name, no
 connection reuse across a night of notifications, and an error surface that is a
 string. That argument is the reason not to reach for a subprocess the next time
 something here wants to make a request.
+
+
+Web recovery saves from ov-1009 clients include `expected`: the ciphertext read
+before merging, or `null` for a missing copy. The write compares it atomically
+and returns 409 `changed` on a race; clients re-read and retry. Omitting the
+field keeps the previous unconditional-save behavior for older clients. The
+body limit permits two copies (new and expected); each copy keeps its 12 KB
+limit. Saved Copies in the web header lets the account owner delete any row
+through the existing account-scoped delete route.

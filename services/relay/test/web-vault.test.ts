@@ -95,6 +95,18 @@ describe('a browser’s sealed copy', () => {
     expect((await list('alice')).body).toEqual({ vaults: [{ credential: CRED, uv: false, sealed: sealedOf(1) }] })
   })
 
+  it('compares the previous ciphertext atomically, including creation and deletion races', async () => {
+    const body = { credential: CRED, uv: false, sealed: sealedOf(1), expected: null }
+    expect((await save('alice', body)).status).toBe(200)
+    expect((await save('alice', { ...body, sealed: sealedOf(2) })).body).toEqual({ error: 'changed' })
+    expect((await save('alice', { ...body, sealed: sealedOf(2), expected: sealedOf(1) })).status).toBe(200)
+    expect((await save('alice', { ...body, sealed: sealedOf(3), expected: sealedOf(1) })).body).toEqual({ error: 'changed' })
+    await remove('alice', { credential: CRED })
+    expect((await save('alice', { ...body, expected: sealedOf(2) })).body).toEqual({ error: 'changed' })
+    expect((await list('alice')).body.vaults).toEqual([])
+    expect((await save('alice', { ...body, expected: 1 })).status).toBe(400)
+  })
+
   it('needs a session', async () => {
     expect((await save(null)).status).toBe(401)
     expect((await list(null)).status).toBe(401)

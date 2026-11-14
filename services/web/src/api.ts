@@ -66,7 +66,7 @@ export async function api(request: Request, url: URL, env: Configured & WebEnv):
   let answer: Answer = me
   if (route !== 'directory/me') {
     const text = await request.text()
-    if (text.length > MAX_BODY) return json({ error: 'too large' }, 413, cookies())
+    if (text.length > (route === 'web/vault/save' ? 32 * 1024 : MAX_BODY)) return json({ error: 'too large' }, 413, cookies())
     let body: unknown
     try {
       body = text ? JSON.parse(text) : {}

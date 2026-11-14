@@ -13,6 +13,7 @@
   <span class="title">Far Cooler</span>
   <button class="count" id="bar-count" type="button" hidden></button>
   <span class="who" id="who"></span>
+  <button class="quiet" id="show-saved-copies" type="button">Saved Copies</button>
   <form method="post" action="/sign-out"><button class="quiet" type="submit">Sign Out</button></form>
 </header>
 <div class="update" id="update" hidden>
@@ -107,6 +108,7 @@
     </div>
   </section>
 </main>
+<dialog class="saved-copies" id="saved-copies" aria-label="Saved Copies"></dialog>
 <dialog class="plan-sheet" id="workflow-runs" aria-label="Workflow Runs"></dialog>
 <dialog class="plan-sheet" id="plan-list" aria-labelledby="plan-list-title">
   <header class="plan-sheet-bar">

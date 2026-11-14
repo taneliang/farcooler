@@ -46,28 +46,15 @@ import { drawCode } from './qr'
 import { type Budget, MAX_LIVE_PANES, PaneSet } from './panes'
 import { comparisonButtons, type Opened, registerDevice, waitForReply } from './sealed'
 import { type LinkView, Reconnector } from './reconnect'
+import { installSignOut } from './sign-out'
+import { relayCopy, relayRaw } from './relay-client'
+import { SavedCopies } from './saved-copies'
 import { StartWatch } from './start'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
-import { b64url, deriveKeys, needsSaving, prfUse, relayHoldsOurs, restore, saveCopy, type Saved, type Vault } from './vault'
+import { b64url, deriveKeys, needsSaving, prfUse, restore, syncCopy, type Saved, type Vault } from './vault'
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T
-
-/// A call to the relay, through this Worker (services/web/src/api.ts). The
-/// `x-fc` header and the same-origin `Origin` are its CSRF check.
-async function relayRaw(route: string, body: unknown = {}): Promise<{ status: number; body: any }> {
-  const response = await fetch(`/api/relay/${route}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-fc': '1' },
-    body: JSON.stringify(body),
-    credentials: 'same-origin',
-  })
-  if (response.status === 401) {
-    location.assign('/')
-    return { status: 401, body: null }
-  }
-  return { status: response.status, body: await response.json().catch(() => null) }
-}
 
 async function relay(route: string, body: unknown = {}): Promise<any> {
   const answer = await relayRaw(route, body)
@@ -124,6 +111,8 @@ interface Session {
   /// PRF output (vault.ts), and whether that output came verified. In memory
   /// only: the passkey gives it again.
   vault?: { key: CryptoKey; uv: boolean }
+  copyWork?: Promise<void>
+  signingOut?: boolean
 }
 
 // MARK: The sealed copy
@@ -167,24 +156,25 @@ async function notePrf(session: Session, answer: Signed): Promise<void> {
 /// PRF has no copy: its storage is asked to persist instead, so the browser
 /// is less likely to clear it.
 ///
-/// `recheck`, after a passkey touch, also asks the relay whether it still
-/// holds the copy this browser last sent, and saves it again when it doesn't:
-/// a full account refused it, another browser's Sign Out deleted it, or a
-/// browser restored from it overwrote it (vault.ts `relayHoldsOurs`).
-async function keepCopy(session: Session, recheck = false): Promise<void> {
+/// After a touch, repair a missing or unreadable copy. On local changes,
+/// merge the relay's authenticated runners before saving (ov-1009).
+function keepCopy(session: Session, recheck = false): Promise<void> {
+  if (session.signingOut) return Promise.resolve()
+  const work = (session.copyWork ?? Promise.resolve()).catch(() => {}).then(() => {
+    if (!session.signingOut) return keepCopyNow(session, recheck)
+  })
+  session.copyWork = work
+  return work
+}
+
+async function keepCopyNow(session: Session, recheck: boolean): Promise<void> {
   const { device } = session
   if (!session.vault) {
     if (device.runners?.length) void navigator.storage?.persist?.().catch(() => {})
     return
   }
-  let save = await needsSaving(device)
-  if (!save && recheck) {
-    const answer = await relayRaw('web/vault').catch(() => null)
-    const vaults = answer?.status === 200 && Array.isArray(answer.body?.vaults) ? (answer.body.vaults as Vault[]) : null
-    save = !!vaults && !(await relayHoldsOurs(vaults, device))
-  }
-  if (!save) return
-  const saved = await saveCopy(relayRaw, session.vault.key, device, session.vault.uv)
+  if (!recheck && !(await needsSaving(device))) return
+  const saved = await syncCopy(relayCopy, session.vault.key, device, session.vault.uv)
   if (saved === 'saved') await saveDevice(device)
   copyNote(saved)
 }
@@ -1076,30 +1066,24 @@ async function addAgain(session: Session): Promise<void> {
 
 // MARK: Boot
 
-/// How long Sign Out waits for this site's storage to forget the device
-/// before it signs out anyway: the Worker's `Clear-Site-Data` clears it too.
-const FORGET_WAIT_MS = 2_000
-
-/// Sign Out takes this browser's key and runners with it, before the form
-/// posts. The Worker's answer also clears the origin's storage
-/// (`Clear-Site-Data`), which covers a sign-out this page didn't run, and one
-/// whose storage never answered. The relay's sealed copy for this browser's
-/// passkey goes too, in the same wait: signing out is "this browser is done",
-/// and a copy left behind would restore its runners for anyone who later
-/// signs in here with a synced passkey (ov-779 review M2). Copies other
-/// browsers keep stay.
+/// Sign Out stops queued copies, forgets local runners, and reports an
+/// unconfirmed shared-copy delete before leaving the page.
 function signOutForgets(session: () => Session | null): void {
   const form = document.querySelector<HTMLFormElement>('form[action="/sign-out"]')
   if (!form) return
-  form.addEventListener('submit', event => {
-    event.preventDefault()
-    dropSecret()
-    const passkey = session()?.device.passkey
-    const forgetting = Promise.all([
-      forgetDevice().catch(() => {}),
-      passkey ? relayRaw('web/vault/delete', { credential: b64url(passkey.id) }).catch(() => {}) : null,
-    ])
-    void Promise.race([forgetting, new Promise(resolve => setTimeout(resolve, FORGET_WAIT_MS))]).finally(() => form.submit())
+  installSignOut(form, {
+    session,
+    call: relayCopy,
+    forget: forgetDevice,
+    dropSecret,
+    waiting: () => status('Signing out…'),
+    failed: (retry, anyway) => status(
+      'Your saved copy may still be at Far Cooler',
+      'Far Cooler couldn’t confirm that your passkey’s shared recovery copy was deleted. It may still restore your runners in browsers using this passkey. Retry, or sign out and clear it later from Saved Copies.',
+      { label: 'Retry Delete', run: retry },
+      anyway,
+      'Sign Out Anyway',
+    ),
   })
 }
 
@@ -1129,6 +1113,11 @@ async function boot(): Promise<void> {
     if (document.visibilityState === 'visible') recheckLink()
   })
   window.addEventListener('online', recheckLink)
+  const copies = new SavedCopies($('saved-copies') as HTMLDialogElement, relayCopy, () => {
+    const passkey = signedIn?.device.passkey
+    return passkey ? b64url(passkey.id) : undefined
+  })
+  $('show-saved-copies').addEventListener('click', () => void copies.open())
   signOutForgets(() => signedIn)
   $('copy-note-close').addEventListener('click', () => ($('copy-note').hidden = true))
 

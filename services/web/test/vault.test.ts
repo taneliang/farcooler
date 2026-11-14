@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Device, Granted } from '../src/client/device'
-import { b64url, type Copy, copyOf, deriveKeys, fromB64url, needsSaving, openCopy, type Prf, prfOf, PRF_SALT, prfUse, relayHoldsOurs, restore, type RestoreDeps, saveCopy, sealCopy, type Vault } from '../src/client/vault'
+import { b64url, type Copy, copyOf, deriveKeys, fromB64url, needsSaving, openCopy, type Prf, prfOf, PRF_SALT, prfUse, relayHoldsOurs, restore, type RestoreDeps, saveCopy, sealCopy, syncCopy, type Vault } from '../src/client/vault'
 
 const ACCOUNT = 'user_OWNER'
 const RUNNERS: Granted[] = [{ id: 'r1', label: 'studio', user: 'owner', host_key: 'ssh-ed25519 AAAAhost', token: 'tok', why: '' }]
@@ -121,13 +121,13 @@ describe('the sealed copy', () => {
     let sent = ''
     await saveCopy(async (_route, body: any) => ((sent = body.sealed), { status: 200, body: { ok: true } }), vaultKey, device, false)
     const ours = { credential: b64url(CRED), uv: false, sealed: sent }
-    expect(await relayHoldsOurs([ours], device)).toBe(true)
+    expect(await relayHoldsOurs([ours], device, vaultKey)).toBe(true)
     // Overwritten by a session without the passkey, or gone: not ours.
-    expect(await relayHoldsOurs([{ ...ours, sealed: sent.slice(0, -2) + 'AA' }], device)).toBe(false)
-    expect(await relayHoldsOurs([], device)).toBe(false)
-    expect(await relayHoldsOurs([{ ...ours, credential: 'b3RoZXI' }], device)).toBe(false)
-    // A device that never sent one holds nothing there.
-    expect(await relayHoldsOurs([ours], enrolled({ vaultSealed: undefined }))).toBe(false)
+    expect(await relayHoldsOurs([{ ...ours, sealed: sent.slice(0, -2) + 'AA' }], device, vaultKey)).toBe(false)
+    expect(await relayHoldsOurs([], device, vaultKey)).toBe(false)
+    expect(await relayHoldsOurs([{ ...ours, credential: 'b3RoZXI' }], device, vaultKey)).toBe(false)
+    // A second browser can open it without having sent it.
+    expect(await relayHoldsOurs([ours], enrolled({ vaultSealed: undefined }), vaultKey)).toBe(true)
   })
 })
 
@@ -214,7 +214,7 @@ describe('restoring after the site’s storage was cleared', () => {
     expect(done.device.offer).toBeUndefined()
     // The copy it came from is the one the relay holds: nothing to save again.
     expect(await needsSaving(done.device)).toBe(false)
-    expect(await relayHoldsOurs(vaults, done.device)).toBe(true)
+    expect(await relayHoldsOurs(vaults, done.device, done.vaultKey)).toBe(true)
   })
 
   it('gets back a node key enrolled before ov-779 from the copy, since the passkey can’t derive it', async () => {
@@ -257,5 +257,108 @@ describe('restoring after the site’s storage was cleared', () => {
     const bad = { ...copyOf(enrolled()), runners: 'nope' } as unknown as Copy
     const vaults = [{ credential: b64url(CRED), uv: false, sealed: await sealCopy(vaultKey, ACCOUNT, CRED, bad) }]
     expect(await restore(passkey({}).deps, ACCOUNT, HANDLE, vaults)).toEqual({ ok: false, word: 'unopened' })
+  })
+})
+
+
+describe('browsers sharing one synced passkey (ov-1009)', () => {
+  it('keeps every runner across alternating touches, local additions and a racing save', async () => {
+    const { vaultKey } = await deriveKeys(prfBytes(7))
+    const first = enrolled()
+    const second = enrolled({ runners: [{ ...RUNNERS[0], id: 'r2', label: 'den' }] })
+    let held: Vault | undefined
+    let writes = 0
+    let race: (() => Promise<void>) | undefined
+    const call = async (route: string, body: any): Promise<{ status: number; body: any }> => {
+      if (route === 'web/vault') return { status: 200, body: { vaults: held ? [{ ...held }] : [] } }
+      if (race) { const other = race; race = undefined; await other() }
+      if (body.expected !== (held?.sealed ?? null)) return { status: 409, body: { error: 'changed' } }
+      held = { credential: body.credential, uv: body.uv, sealed: body.sealed }
+      writes++
+      return { status: 200, body: { ok: true } }
+    }
+    expect(await syncCopy(call, vaultKey, first, false)).toBe('saved')
+    expect(await syncCopy(call, vaultKey, second, false)).toBe('saved')
+    const both = held!.sealed
+    for (const device of [first, second, first, second]) expect(await syncCopy(call, vaultKey, device, false)).toBe('saved')
+    expect(held!.sealed).toBe(both)
+    expect(writes).toBe(2)
+    expect((await openCopy(vaultKey, ACCOUNT, CRED, held!.sealed))?.runners.map(r => r.id).sort()).toEqual(['r1', 'r2'])
+    first.runners = [...first.runners!, { ...RUNNERS[0], id: 'r3' }]
+    second.runners = [...second.runners!, { ...RUNNERS[0], id: 'r4' }]
+    race = async () => { expect(await syncCopy(call, vaultKey, second, false)).toBe('saved') }
+    expect(await syncCopy(call, vaultKey, first, false)).toBe('saved')
+    expect((await openCopy(vaultKey, ACCOUNT, CRED, held!.sealed))?.runners.map(r => r.id).sort()).toEqual(['r1', 'r2', 'r3', 'r4'])
+    // Each browser learns the shared additions before a later repair.
+    await syncCopy(call, vaultKey, second, false)
+    await syncCopy(call, vaultKey, first, false)
+    expect(first.runners?.map(r => r.id).sort()).toEqual(['r1', 'r2', 'r3', 'r4'])
+    // Junk is repaired on a touch, even though the local device is unchanged.
+    held!.sealed = 'junk'
+    expect(await syncCopy(call, vaultKey, first, false)).toBe('saved')
+    expect((await openCopy(vaultKey, ACCOUNT, CRED, held!.sealed))?.runners.map(r => r.id).sort()).toEqual(['r1', 'r2', 'r3', 'r4'])
+    held = undefined
+    expect(await syncCopy(call, vaultKey, first, false)).toBe('saved')
+    expect(held).toBeDefined()
+  })
+
+  it('preserves a newer grant when a stale browser adds another runner, without replacing its local host pin', async () => {
+    const { vaultKey } = await deriveKeys(prfBytes(7))
+    let held: Vault | undefined
+    const call = async (route: string, body: any) => {
+      if (route === 'web/vault') return { status: 200, body: { vaults: held ? [held] : [] } }
+      held = { credential: body.credential, uv: body.uv, sealed: body.sealed }
+      return { status: 200, body: {} }
+    }
+    const a = enrolled({ runners: structuredClone(RUNNERS) })
+    const b = enrolled({ runners: structuredClone(RUNNERS) })
+    await syncCopy(call, vaultKey, a, false)
+    await syncCopy(call, vaultKey, b, false)
+    b.runners![0] = { ...b.runners![0], host_key: 'new-pin', token: 'new-token' }
+    await syncCopy(call, vaultKey, b, false)
+    a.runners!.push({ ...RUNNERS[0], id: 'r2' })
+    expect(await syncCopy(call, vaultKey, a, false)).toBe('saved')
+    const opened = await openCopy(vaultKey, ACCOUNT, CRED, held!.sealed)
+    expect(opened?.runners.find(r => r.id === 'r1')).toMatchObject({ host_key: 'new-pin', token: 'new-token' })
+    expect(opened?.runners.map(r => r.id)).toEqual(['r1', 'r2'])
+    expect(a.runners![0].host_key).toBe(RUNNERS[0].host_key)
+  })
+
+  it('keeps an enrollment that arrives during a save dirty until its queued save completes', async () => {
+    const { vaultKey } = await deriveKeys(prfBytes(7))
+    const device = enrolled({ runners: structuredClone(RUNNERS) })
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    let started!: () => void
+    const writing = new Promise<void>(resolve => { started = resolve })
+    let held: Vault | undefined
+    let writes = 0
+    const call = async (route: string, body: any) => {
+      if (route === 'web/vault') return { status: 200, body: { vaults: held ? [held] : [] } }
+      if (++writes === 1) { started(); await pending }
+      held = { credential: body.credential, uv: body.uv, sealed: body.sealed }
+      return { status: 200, body: {} }
+    }
+    const saving = syncCopy(call, vaultKey, device, false)
+    await writing
+    device.runners!.push({ ...RUNNERS[0], id: 'r2' })
+    release()
+    await saving
+    expect(await needsSaving(device)).toBe(true)
+    await syncCopy(call, vaultKey, device, false)
+    expect((await openCopy(vaultKey, ACCOUNT, CRED, held!.sealed))?.runners.map(r => r.id)).toEqual(['r1', 'r2'])
+    expect(await needsSaving(device)).toBe(false)
+  })
+
+  it('never overwrites after a failed read or a bounded series of conflicts', async () => {
+    const { vaultKey } = await deriveKeys(prfBytes(7))
+    let writes = 0
+    expect(await syncCopy(async () => { throw new Error('offline') }, vaultKey, enrolled(), false)).toBe('unreachable')
+    expect(await syncCopy(async route => {
+      if (route === 'web/vault') return { status: 200, body: { vaults: [] } }
+      writes++
+      return { status: 409, body: { error: 'changed' } }
+    }, vaultKey, enrolled(), false)).toBe('unreachable')
+    expect(writes).toBe(3)
   })
 })

@@ -28,8 +28,8 @@
 ///
 /// The relay can't tell who sealed a copy, so a session without the passkey
 /// can still overwrite one with junk. The page checks, after each touch that
-/// gives it the key, that the relay's copy is the one it last sent, and sends
-/// it again when it isn't (app.ts `keepCopy`).
+/// gives it the key, that the relay's copy opens with that key, and repairs
+/// it only when missing or unreadable (app.ts `keepCopy`).
 
 import { readLimited } from './heartbeat-body'
 import { json, type Env } from './index'
@@ -84,7 +84,7 @@ async function saveVault(request: Request, env: Env): Promise<Response> {
   if (account instanceof Response) return account
 
   // The body's JSON wraps the copy and the credential id.
-  const text = await readLimited(request, VAULT_MAX + CREDENTIAL_MAX + 256)
+  const text = await readLimited(request, 2 * VAULT_MAX + CREDENTIAL_MAX + 256)
   if (text === null) return json({ error: 'too large' }, 413)
   let body: unknown
   try {
@@ -92,25 +92,35 @@ async function saveVault(request: Request, env: Env): Promise<Response> {
   } catch {
     return json({ error: 'body' }, 400)
   }
-  const { credential, uv, sealed } = (body ?? {}) as Record<string, unknown>
+  const { credential, uv, sealed, expected } = (body ?? {}) as Record<string, unknown>
   if (typeof credential !== 'string' || !BASE64URL.test(credential) || credential.length > CREDENTIAL_MAX) return json({ error: 'credential' }, 400)
   if (typeof uv !== 'boolean') return json({ error: 'uv' }, 400)
   if (typeof sealed !== 'string') return json({ error: 'sealed' }, 400)
   if (sealed.length > VAULT_MAX) return json({ error: 'too large' }, 413)
   if (!BASE64URL.test(sealed) || !looksSealed(sealed)) return json({ error: 'sealed' }, 400)
 
+  // New clients compare the ciphertext they read before merging runners.
+  // Absent `expected` remains compatible with clients predating ov-1009.
+  if (expected !== undefined && expected !== null && (typeof expected !== 'string' || expected.length > VAULT_MAX || !BASE64URL.test(expected))) return json({ error: 'expected' }, 400)
+
   // A passkey already kept is always saved again; a new one only while the
   // account keeps fewer than VAULTS_MAX.
   const written = await env.DB.prepare(
     `INSERT INTO web_vaults (account_id, credential, uv, sealed, updated_at)
      SELECT ?1, ?2, ?3, ?4, ?5
-     WHERE EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2)
-        OR (SELECT COUNT(*) FROM web_vaults WHERE account_id = ?1) < ?6
-     ON CONFLICT (account_id, credential) DO UPDATE SET uv = ?3, sealed = ?4, updated_at = ?5`,
+     WHERE (EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2)
+        OR (SELECT COUNT(*) FROM web_vaults WHERE account_id = ?1) < ?6)
+       AND (?7 = 0 OR (?8 IS NULL AND NOT EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2))
+         OR EXISTS (SELECT 1 FROM web_vaults WHERE account_id = ?1 AND credential = ?2 AND sealed = ?8))
+     ON CONFLICT (account_id, credential) DO UPDATE SET uv = ?3, sealed = ?4, updated_at = ?5
+       WHERE ?7 = 0 OR web_vaults.sealed = ?8`,
   )
-    .bind(account, credential, uv ? 1 : 0, sealed, Date.now(), VAULTS_MAX)
+    .bind(account, credential, uv ? 1 : 0, sealed, Date.now(), VAULTS_MAX, expected === undefined ? 0 : 1, expected ?? null)
     .run()
-  if (!written.meta.changes) return json({ error: 'full' }, 409)
+  if (!written.meta.changes) {
+    const row = await env.DB.prepare('SELECT sealed FROM web_vaults WHERE account_id = ? AND credential = ?').bind(account, credential).first<{ sealed: string }>()
+    return json({ error: expected !== undefined && (row?.sealed ?? null) !== expected ? 'changed' : 'full' }, 409)
+  }
   return json({ ok: true })
 }
 

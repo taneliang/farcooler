@@ -167,33 +167,106 @@ export type Saved = 'saved' | 'full' | 'too_large' | 'unreachable' | 'refused'
 /// On 'saved', `device.vaulted` says what was kept and `device.vaultSealed`
 /// which sealed string, and the caller saves the device. Anything else leaves
 /// both alone, so the next chance tries again.
-export async function saveCopy(call: (route: string, body: unknown) => Promise<{ status: number; body: any }>, key: CryptoKey, device: Device, uv: boolean): Promise<Saved> {
+export async function saveCopy(call: VaultCall, key: CryptoKey, device: Device, uv: boolean, copy = copyOf(device), expected?: string | null): Promise<Saved | 'changed'> {
   const passkey = device.passkey
   if (!passkey) return 'refused'
   const kept = await digest(device)
-  const sealed = await sealCopy(key, device.account, passkey.id, copyOf(device))
-  const answer = await call('web/vault/save', { credential: b64url(passkey.id), uv, sealed }).catch(() => null)
+  const sealed = await sealCopy(key, device.account, passkey.id, copy)
+  const answer = await call('web/vault/save', { credential: b64url(passkey.id), uv, sealed, expected }).catch(() => null)
   if (answer?.status !== 200) {
     if (!answer || answer.status === 429 || answer.status >= 500) return 'unreachable'
+    if (answer.status === 409 && answer.body?.error === 'changed') return 'changed'
     if (answer.status === 409 && answer.body?.error === 'full') return 'full'
     if (answer.status === 413) return 'too_large'
     return 'refused'
   }
   device.vaulted = kept
+  device.vaultRunnerHashes = await runnerHashes(device.runners ?? [])
   device.vaultSealed = await sealedHash(sealed)
   return 'saved'
 }
 
-/// Whether `vaults` holds, for this device's passkey, the very copy this
-/// browser last sent. Not when it is gone (a full account refused it, Sign
-/// Out elsewhere deleted it) or another session overwrote it: then the next
-/// touch saves it again. Compared by the sealed string, since a copy sealed
-/// twice from the same device differs in its nonce.
-export async function relayHoldsOurs(vaults: Vault[], device: Device): Promise<boolean> {
-  if (!device.passkey || !device.vaultSealed) return false
+/// A touch repairs only a missing or unreadable copy. Another browser with
+/// this synced passkey may have added runners since our last save.
+export async function relayHoldsOurs(vaults: Vault[], device: Device, key: CryptoKey): Promise<boolean> {
+  if (!device.passkey) return false
   const ours = vaults.find(v => v.credential === b64url(device.passkey!.id))
-  return !!ours && (await sealedHash(ours.sealed)) === device.vaultSealed
+  return !!ours && !!(await openCopy(key, device.account, device.passkey.id, ours.sealed))
 }
+
+/// Read before writing, merge only authenticated runners, and retry a raced
+/// write. Edited local entries replace shared grants; stale entries do not.
+/// A touch with unchanged local data never replaces a readable copy.
+export async function syncCopy(call: VaultCall, key: CryptoKey, device: Device, uv: boolean): Promise<Saved> {
+  if (!device.passkey) return 'refused'
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // Enrollment may change the live device while the relay is answering.
+    // Only this snapshot may be marked saved when that write completes.
+    const snapshot: Device = structuredClone(device)
+    const read = await call('web/vault', {}).catch(() => null)
+    if (read?.status !== 200 || !Array.isArray(read.body?.vaults)) return 'unreachable'
+    const ours = (read.body.vaults as Vault[]).find(v => v.credential === b64url(snapshot.passkey!.id))
+    const copy = ours && await openCopy(key, snapshot.account, snapshot.passkey!.id, ours.sealed)
+    const changed = await needsSaving(snapshot)
+    // Copies with another public or legacy node key cannot describe this
+    // device. Never combine grants made to different node identities.
+    if (copy && (copy.spki !== copyOf(snapshot).spki || JSON.stringify(copy.node) !== JSON.stringify(copyOf(snapshot).node))) return 'refused'
+    const merged = copyOf(snapshot)
+    const hashes = await runnerHashes(merged.runners)
+    if (copy) {
+      const local = new Map(merged.runners.map(r => [r.id, r]))
+      merged.runners = []
+      for (const remote of copy.runners) {
+        const here = local.get(remote.id)
+        if (!here) merged.runners.push(remote)
+        else {
+          const differs = (await runnerHashes([remote]))[remote.id] !== hashes[here.id]
+          // Without a baseline, differing grants cannot be ordered safely.
+          // Refuse the save rather than roll back another browser's host pin.
+          if (changed && differs && !snapshot.vaultRunnerHashes?.[here.id]) return 'refused'
+          const locallyChanged = snapshot.vaultRunnerHashes?.[here.id] !== hashes[here.id]
+          merged.runners.push(locallyChanged ? here : remote)
+          local.delete(remote.id)
+        }
+      }
+      merged.runners.push(...local.values())
+      merged.registered ||= copy.registered
+    }
+    const remember = async () => {
+      // Learn missing runners, but never replace an existing local host pin
+      // or token merely because another browser changed the shared copy.
+      const original = snapshot.runners ?? []
+      const imported = merged.runners.filter(r => !original.some(local => local.id === r.id))
+      snapshot.runners = [...original, ...imported]
+      snapshot.registered = merged.registered
+      const here = device.runners ?? []
+      device.runners = [...here, ...imported.filter(r => !here.some(local => local.id === r.id))]
+      device.registered ||= merged.registered
+      device.vaulted = await digest(snapshot)
+      device.vaultRunnerHashes = await runnerHashes(snapshot.runners)
+      device.vaultSealed = snapshot.vaultSealed
+    }
+    if (copy && !changed) {
+      await remember()
+      return 'saved'
+    }
+    const saved = await saveCopy(call, key, snapshot, uv, merged, ours?.sealed ?? null)
+    if (saved === 'saved') await remember()
+    if (saved !== 'changed') return saved
+  }
+  return 'unreachable'
+}
+
+async function runnerHashes(runners: Granted[]): Promise<Record<string, string>> {
+  const hashes: Record<string, string> = Object.create(null)
+  for (const r of runners) {
+    const canonical = JSON.stringify([r.id, r.label, r.user, r.host_key, r.token, r.why, r.cause ?? null])
+    hashes[r.id] = await sealedHash(canonical)
+  }
+  return hashes
+}
+
+export type VaultCall = (route: string, body: unknown) => Promise<{ status: number; body: any }>
 
 async function sealedHash(sealed: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sealed))))
@@ -274,6 +347,7 @@ export async function restore(deps: RestoreDeps, account: string, handle: Uint8A
     runners: copy.runners,
   }
   device.vaulted = await digest(device)
+  device.vaultRunnerHashes = await runnerHashes(device.runners ?? [])
   device.vaultSealed = await sealedHash(vault.sealed)
   return { ok: true, device, vaultKey }
 }

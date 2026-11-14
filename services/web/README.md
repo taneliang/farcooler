@@ -17,3 +17,18 @@ connects to runners homed there fail with a false "didn't answer".
 
 A daily workflow (`.github/workflows/derp-hosts.yml`) runs that check and opens
 an issue when the map and `DERP_HOSTS` differ.
+
+## Saved recovery copies
+
+The header's **Saved Copies** lists the signed-in account's passkey credential
+ids, marks this browser's passkey, and lets the owner clear any copy, including
+unreadable junk. Clearing removes recovery for every browser sharing that
+passkey; it does not revoke the passkey or remove local runners. An active
+browser can save again after its next touch.
+
+A passkey touch leaves a readable shared copy alone. Local changes merge the
+copy's authenticated runners with local runners (only changed local entries
+replace a shared grant), and compare the previous ciphertext at the relay before writing.
+Conflicts re-read and merge again, up to three attempts. Failed reads never
+trigger an overwrite. A failed or timed-out Sign Out deletion offers Retry
+Delete or Sign Out Anyway and explains that recovery may remain.

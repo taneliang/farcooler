@@ -114,6 +114,14 @@ describe('/api/relay', () => {
       expect(calls.filter(c => c.path === '/v1/web/vault')).toEqual([{ path: '/v1/web/vault', method: 'POST', authorization: `Bearer ${ACCESS}`, body: copy }])
     })
 
+    it('forwards a full-sized conditional save, while keeping the body bounded', async () => {
+      const calls = relay(OWNER, { '/v1/web/vault': () => Response.json({ ok: true }) })
+      const copy = { credential: 'Y3JlZA', uv: true, sealed: 'A'.repeat(12_288), expected: 'B'.repeat(12_288) }
+      expect((await send('web/vault/save', copy)).status).toBe(200)
+      expect(calls.find(c => c.path === '/v1/web/vault')?.body).toEqual(copy)
+      expect((await send('web/vault/save', { ...copy, expected: 'B'.repeat(32 * 1024) })).status).toBe(413)
+    })
+
     it('deletes a copy as a POST to the relay’s delete route, body and all', async () => {
       const calls = relay(OWNER, { '/v1/web/vault/delete': () => Response.json({ ok: true }) })
       expect((await send('web/vault/delete', { credential: 'Y3JlZA' })).status).toBe(200)
