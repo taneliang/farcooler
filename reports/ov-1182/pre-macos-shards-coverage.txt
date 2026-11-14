@@ -1,0 +1,4 @@
+Pre-Mac-sharding trial 1: 6977 runnable tests, each in exactly one shard
+[1713, 1740, 1741, 1783]
+PASS: deleting one real hosted test assignment makes the coverage guard fail
+Pre-Mac-sharding trial 2: 6977 runnable tests, each in exactly one shard

@@ -98,3 +98,18 @@ measurement files, not test verdicts or per-attempt GitHub logs. See the
 [upload action's overwrite contract](https://github.com/actions/upload-artifact).
 Final measurement runs include this setting; earlier in-flight trials were
 superseded before counting acceptance.
+
+## Native Mac archive and shards
+
+The next trial completed Linux and Mac feature checks but its combined native
+build/run exceeded 20 minutes. Native compilation was 8m19s after a 2m34s
+runtime-bin build; test execution started at 09:09:12 UTC and was still running
+when the 20-minute job limit cancelled it at 09:17:33. This reproduces the
+remaining bottleneck instead of treating the earlier 9m08s sample as a bound.
+Phase logs and both trial job records are retained under pre-macos-shards-*.
+
+Final CI builds every Mac test target once into an archive, then runs the same
+maintained native selection in two independent Mac partitions. The generic
+inventory guard now checks both Linux's four full-workspace partitions and
+Mac's two filtered-native partitions. No native case or compilation target
+is removed. Mac's archive cache shares the previous native-build namespace.
