@@ -21,6 +21,9 @@ pub enum Action {
     Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String> },
     Cancel { mutation: Mutation, item: String, run: String, pin: String },
+    /// The owner confirms an uncertain cancellation is quiescent after checking processes and external effects.
+    /// The reason records what was lost and what was checked; this never asserts success.
+    ResolveCancellation { mutation: Mutation, item: String, run: String, pin: String, reason: String },
     /// Run a failed item's step again. A controller's command, like cancel.
     Retry { mutation: Mutation, item: String, run: String, pin: String },
     /// Queue a ticket waiting at its join step into the open group. The orchestrator decides.
@@ -75,6 +78,7 @@ impl Action {
             Self::Approve { .. } => "workflow.approve",
             Self::Review { .. } => "workflow.review",
             Self::Cancel { .. } => "workflow.cancel",
+            Self::ResolveCancellation { .. } => "workflow.resolve_cancellation",
             Self::Retry { .. } => "workflow.retry",
             Self::Queue { .. } => "workflow.queue",
             Self::Leave { .. } => "workflow.leave",

@@ -19,10 +19,11 @@ struct NativeOwner {
 }
 /// Launched keeps the receipt shape previous engines wrote. A never-launched review records its binding
 /// directly rather than inventing a pane owner, and can only supply an interrupted exit, never a verdict.
+/// The optional failure preserves startup refusal reasons without changing older launched receipts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 enum NativeSettlement {
-    Launched { owner: NativeOwner, hooks: Vec<HookLine>, completed: Option<bool> },
+    Launched { owner: NativeOwner, hooks: Vec<HookLine>, completed: Option<bool>, #[serde(default, skip_serializing_if = "Option::is_none")] failure: Option<String> },
     NeverLaunched { binding: Binding },
 }
 impl NativeSettlement {
@@ -51,6 +52,21 @@ const VERDICT_QUIET: Duration = Duration::from_secs(1);
 const UNFINISHED_QUIET: Duration = Duration::from_secs(30 * 60);
 #[cfg(test)]
 const UNFINISHED_QUIET: Duration = Duration::from_secs(2);
+
+/// A startup refusal ends the turn even if the harness leaves its interactive prompt alive. This is
+/// negative evidence only; screen text can never supply a successful result.
+fn startup_refusal(agent: Agent, output: &str) -> Option<String> {
+    if agent != Agent::Codex { return None; }
+    // tmux wraps the error at the pane width. Only the harness's error line starts the match.
+    let line = output.lines().position(|line| line.trim_start().starts_with("■ The '"))?;
+    let tail = output.lines().skip(line).collect::<Vec<_>>().join("\n");
+    let tail = tail.trim_start().strip_prefix("■ The '")?;
+    let words = tail.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (model, rest) = words.split_once("' model is not supported when using Codex with a ChatGPT account")?;
+    if model.is_empty() || model.len() > 100 || !model.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        || !rest.is_empty() && !rest.starts_with(['.', '\n', ' ']) { return None; }
+    Some(format!("The '{model}' model is not supported when using Codex with a ChatGPT account. Choose another model."))
+}
 
 // Each effect has its own retained server, never the installed daemon's socket.
 // A cancelled future tears down its server but cannot publish quiescence/success.
@@ -263,12 +279,13 @@ impl Exec {
                     && binding.effect.candidate.as_ref() == Some(&r.candidate))
     }
     async fn native_turn(&self, listener: &tokio::net::UnixListener, binding: &Binding,
-        heard_from: &std::sync::atomic::AtomicBool, clock: &super::native_control::ActiveClock) -> Result<(bool, Vec<HookLine>)> {
+        heard_from: &std::sync::atomic::AtomicBool, clock: &super::native_control::ActiveClock) -> Result<(bool, Vec<HookLine>, Option<String>)> {
         let agent = self.native_agent(binding)?;
         let tree = self.tree(binding);
         let mut assembler = MessageAssembler::new();
         let mut session = (agent == Agent::Claude).then(|| terminal(binding).to_string());
         let mut prompted = false;
+        let mut startup_check = tokio::time::Instant::now();
         let mut hooks = Vec::new();
         let mut continued_stop: Option<(serde_json::Value, Vec<u8>)> = None;
         // A reviewer's recorded verdict ends its turn once it has gone quiet, if its Stop never arrives (ov-1082).
@@ -281,14 +298,30 @@ impl Exec {
             let stream = tokio::select! {
                 accepted = listener.accept() => accepted?.0,
                 _ = look.tick() => {
+                    let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
+                    let alive = server(&self.root, binding).pane_life(&owner.pane, owner.terminal).await
+                        .is_ok_and(|life| life == farcooler_tmux::PaneLife::Live);
+                    if !alive {
+                        let _ = super::execution::ACTIVITY.try_with(|a| {
+                            a.session.store(false, std::sync::atomic::Ordering::SeqCst);
+                            a.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+                        });
+                        return Err(Error::Refused("the native session was lost without a receipt"));
+                    }
+                    if agent == Agent::Codex && startup_check.elapsed() >= Duration::from_secs(1) {
+                        startup_check = tokio::time::Instant::now();
+                        let output = server(&self.root, binding).capture_pane(&owner.pane, 40).await
+                            .map_err(|_| Error::Refused("native startup output unavailable"))?;
+                        if let Some(reason) = startup_refusal(agent, &output) { return Ok((false, hooks, Some(reason))); }
+                    }
                     if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(clock.now()); }
                     if verdict.is_some_and(|at: Duration| clock.now().saturating_sub(at.max(heard)) >= VERDICT_QUIET) {
                         tracing::warn!(effect = %binding.effect.id, "the reviewer recorded its verdict and went quiet without its turn's end being heard; the verdict ends it");
-                        return Ok((true, hooks));
+                        return Ok((true, hooks, None));
                     }
                     if unfinished.is_some_and(|at| clock.now().saturating_sub(at.max(heard)) >= UNFINISHED_QUIET) {
                         tracing::warn!(effect = %binding.effect.id, "the build ended its turn without committing and was quiet after; its turn is over");
-                        return Ok((true, hooks));
+                        return Ok((true, hooks, None));
                     }
                     continue;
                 }
@@ -354,7 +387,7 @@ impl Exec {
                             unfinished = Some(clock.now());
                             continue;
                         }
-                        return Ok((reason == EndReason::EndTurn, hooks));
+                        return Ok((reason == EndReason::EndTurn, hooks, None));
                     }
                 }
             }
@@ -404,6 +437,7 @@ impl Exec {
         let mut frozen = None;
         let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &owner.tty, pane.stamp.pid as i32, id,
             &clock, Duration::from_millis(command.timeout_ms), orders, cancel, &mut frozen, &mut stop_reply);
+        let _ = super::execution::ACTIVITY.try_with(|a| a.session.store(true, std::sync::atomic::Ordering::SeqCst));
         let result = tokio::select! {
             never = stuck => match never {},
             result = controlled => match result {
@@ -411,16 +445,21 @@ impl Exec {
                 Err(error) => { tracing::warn!(effect = %binding.effect.id, %error, "the native turn could not be read"); None }
             },
         };
+        let _ = super::execution::ACTIVITY.try_with(|a| {
+            a.settle();
+            a.session.store(false, std::sync::atomic::Ordering::SeqCst);
+        });
         // Capture actual PTY output before closing it; never parse it as success.
         let output = tmux.capture_scrollback(&window.pane_id).await.map_err(|_| Error::Refused("native PTY output unavailable"))?;
         std::fs::write(self.process_log(binding), output)?;
         self.quiesce_native(&owner).await?;
         if let Some(stopped) = frozen.take() { stopped.quiescent(); }
-        let (mut completed, hooks) = result.map_or((None, Vec::new()), |(passed, hooks)| (Some(passed), hooks));
+        let (mut completed, hooks, mut failure) = result.map_or((None, Vec::new(), None),
+            |(passed, hooks, failure)| (Some(passed), hooks, failure));
         // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
         // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
-        if self.recorded_verdict(binding) { completed = Some(true); }
-        durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks, completed })?)?;
+        if self.recorded_verdict(binding) { completed = Some(true); failure = None; }
+        durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks, completed, failure })?)?;
         drop(listener);
         std::fs::remove_file(socket)?;
         if let Some(reply) = stop_reply { let _ = reply.send(Ok(())); }
@@ -471,7 +510,7 @@ impl Exec {
                 std::fs::write(self.process_log(binding), output)?;
                 self.quiesce_native(&owner).await?;
             }
-            durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed })?)?;
+            durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed, failure: None })?)?;
             completed
         };
         // The socket is this build's alone, so a leftover one is stale by construction.
@@ -479,12 +518,16 @@ impl Exec {
         if socket.try_exists()? { std::fs::remove_file(socket)?; }
         Ok(completed)
     }
-    pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<()> {
+    pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<Option<String>> {
         let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&self.native_path(binding, "settled"))?)?;
         if settlement.completion(binding)?.map(|p| if p { 0 } else { 1 }) != exit {
             return Err(Error::Refused("foreign native settlement"));
         }
-        Ok(())
+        let failure = match settlement { NativeSettlement::Launched { failure, .. } => failure, NativeSettlement::NeverLaunched { .. } => None };
+        if failure.is_some() && exit != Some(1) {
+            return Err(Error::Refused("native startup failure has no failed settlement"));
+        }
+        Ok(failure)
     }
     /// Only native reviews can recover a missing owner as never launched (ov-1130). A present but unreadable or
     /// malformed owner is still uncertain; absence alone is not enough until the private server is checked.
@@ -579,6 +622,9 @@ if mode in ('steering', 'active-steering'):
         direction = response['followup_message']
     assert 'Use the new API' in direction, response
     pathlib.Path(os.environ['STARTED']).with_name('continued').write_text(direction)
+if mode == 'model-refused':
+    print("■ The 'gpt-6.1-luna' model is not supported when using Codex with a ChatGPT account", flush=True)
+    time.sleep(30)
 if mode == 'barrier':
     d = pathlib.Path(os.environ['STARTED']).parent / 'barrier'
     d.mkdir(exist_ok=True)
@@ -630,6 +676,82 @@ else:
         drop(runtime);
         (dir, Runtime::open(&root).unwrap(), Fake)
     }
+    #[test]
+    fn workflow_native_startup_refusal_requires_the_codex_error_line() {
+        let line = "■ The 'gpt-6.1-luna' model is not supported when using Codex with a ChatGPT account";
+        assert!(startup_refusal(Agent::Codex, &line.replace("using Codex", "using\nCodex")).is_some());
+        assert!(startup_refusal(Agent::Claude, line).is_none());
+        assert!(startup_refusal(Agent::Codex, &format!("quoted: {line}")).is_none());
+        assert!(startup_refusal(Agent::Codex, "Ready. All checks passed.").is_none());
+    }
+
+    #[tokio::test]
+    async fn workflow_native_startup_model_refusal_fails_promptly_with_reason() {
+        let (_dir, mut runtime, _fake) = native_agent("model-refused", "codex").await;
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(4), finish(&mut runtime, "w")).await
+            .expect("a startup refusal must release its slot before the turn deadline");
+        let item = &runtime.state("w").unwrap().unwrap().items["one"];
+        assert_eq!(item.phase, Phase::Failed);
+        assert!(item.failure.as_ref().unwrap().contains("not supported when using Codex"));
+    }
+
+    #[tokio::test]
+    async fn workflow_execution_native_turn_stays_present_during_verification() {
+        let (_dir, mut runtime, _fake) = native("pass").await;
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap();
+        let mut running = Vec::new();
+        let mut futures = Vec::new();
+        runtime.launch_ready(&["w".into()], 3, &mut running, &mut futures, &mut 0).await.unwrap();
+        let binding = &running[0].binding;
+        let command = runtime.coding_command(binding).unwrap();
+        let activity = runtime.activities.lock().unwrap().get(&("w".into(), binding.effect.id.clone())).unwrap().clone();
+        // Run just the native turn, pausing the adapter before its ProcessFact and candidate checks.
+        super::super::execution::ACTIVITY.scope(activity, async {
+            assert_eq!(runtime.run_native(binding, &command, running[0].cancel.subscribe()).await.unwrap(), Some(0));
+            assert_eq!(runtime.execution_state("w").unwrap().unwrap().items["one"].phase, Phase::Running);
+        }).await;
+        drop(futures);
+    }
+
+    #[tokio::test]
+    async fn workflow_native_session_lost_without_receipt_leaves_running_in_one_scan() {
+        let (dir, mut runtime, _fake) = native("cancel").await;
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap(); // Provision; the next effect launches the agent.
+        let mut running = Vec::new();
+        let mut futures = Vec::new();
+        runtime.launch_ready(&["w".into()], 3, &mut running, &mut futures, &mut 0).await.unwrap();
+        let started = dir.path().join("started");
+        tokio::select! {
+            _ = super::super::next_finished(&mut futures) => panic!("agent ended before it started"),
+            _ = async {
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while !started.exists() { tokio::time::sleep(Duration::from_millis(10)).await; }
+                }).await.unwrap();
+            } => {}
+        }
+        assert_eq!(runtime.execution_state("w").unwrap().unwrap().items["one"].phase, Phase::Running);
+        let pid: i32 = std::fs::read_to_string(started).unwrap().parse().unwrap();
+        unsafe { libc::kill(pid, libc::SIGKILL); }
+        let (index, _) = tokio::time::timeout(Duration::from_secs(2), super::super::next_finished(&mut futures))
+            .await.expect("a dead session must not wait for the five-second turn deadline");
+        let lost = runtime.execution_state("w").unwrap().unwrap();
+        assert_eq!(lost.items["one"].phase, Phase::Uncertain);
+        assert!(lost.items["one"].execution.as_ref().unwrap().text.contains("lost without a receipt"));
+        let job = running.remove(index); futures.remove(index);
+        runtime.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
+        runtime.observe("w", &job.effect, Outcome::Uncertain, false, 4).unwrap();
+        let item = &runtime.execution_state("w").unwrap().unwrap().items["one"];
+        assert_eq!(item.phase, Phase::Uncertain);
+        assert!(item.execution.is_none(), "settled uncertainty must not invent a new session-loss observation");
+    }
+
     #[tokio::test]
     async fn workflow_coding_native_real_pty_normalized_hooks_and_quiescence() {
         for agent in ["claude", "codex", "cursor", "codex-engine"] {

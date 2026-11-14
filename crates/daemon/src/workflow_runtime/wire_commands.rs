@@ -54,7 +54,7 @@ impl Runtime {
             let notices:Vec<_>=deliveries.iter().map(|d|farcooler_store::workflow::WorkflowNotice {
                 id:d.notice.id.clone(),revision:d.notice.revision,body:format!("{}:{:?}",d.notice.item,d.notice.point)
             }).collect();
-            let state = self.state(workspace)?;
+            let state = self.execution_state(workspace)?;
             // Why a run's named tree stopped it, for the run it stopped (ov-979).
             let mut stops = serde_json::Map::new();
             for (item, live) in state.iter().flat_map(|s| &s.items) {
@@ -73,7 +73,7 @@ impl Runtime {
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
-            | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
+            | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
             | Action::SendBack { mutation, .. } | Action::Reopen { mutation, .. } => mutation,
             Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
@@ -142,6 +142,39 @@ impl Runtime {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
                     } else {
                         let input = input(Command::Cancel { item:item.clone() , reason: None },Grant::Controller);
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
+                    }
+                }
+                Action::ResolveCancellation { item, run, pin, reason, .. } => {
+                    // The owner's recorded reconciliation closes an already fenced cancellation. It never
+                    // supplies a candidate or a successful external result, and an active owner blocks it.
+                    let live = state.items.get(item).filter(|i| &i.run == run && &i.pin == pin);
+                    let effects = self.store.workflow_outbox(workspace)?;
+                    let busy = self.activities.lock().map_err(|_| Error::Refused("execution observations unavailable"))?
+                        .keys().any(|(board, effect)| board == workspace
+                            && effects.iter().any(|e| &e.effect.id == effect && &e.effect.item == item));
+                    let busy = busy || effects.iter().any(|e| e.effect.item == *item && e.active
+                        && e.dispatch_state == "claimed" && e.lease_until.is_some_and(|t| t > self.clock_ms()));
+                    let refusal = match live {
+                        _ if principal != "owner" => Some(Refusal::Unauthorized),
+                        None => Some(Refusal::Stale),
+                        Some(_) if !farcooler_workflow::valid_rework_reason(reason) => Some(Refusal::Invalid),
+                        Some(i) if i.phase != Phase::Uncertain || i.stopping.is_none() || i.pending.is_none()
+                            || !i.run.starts_with("cancel:") || !i.members.is_empty()
+                            || !matches!(i.definition.stages[i.stage].kind, StageKind::Provision | StageKind::Build
+                                | StageKind::Check | StageKind::Run | StageKind::Review(_)) => Some(Refusal::Phase),
+                        Some(_) if busy => Some(Refusal::Phase),
+                        _ => None,
+                    };
+                    if let Some(refusal) = refusal {
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(refusal))?
+                    } else {
+                        let live = live.unwrap();
+                        let input = input(Command::Resolve { item:item.clone(),effect:live.pending.clone().unwrap(),
+                            run:run.clone(),fence:live.fence,outcome:Outcome::Stopped {
+                                operation:live.stopping.clone().unwrap(),
+                                receipt:digest(&("owner-confirmed-cancellation/v1", principal, reason, &payload)),
+                            } },Grant::Controller);
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }
@@ -240,6 +273,65 @@ mod tests {
     use farcooler_protocol::workflow_commands::Mutation;
     fn m(id:&str,revision:u64,sequence:u64) -> Mutation { Mutation { id:id.into(),revision,epoch:1,sequence } }
     fn ok(value:&serde_json::Value) { assert!(value.pointer("/receipt/result/Ok").is_some(),"{value}"); }
+    #[tokio::test]
+    async fn workflow_owner_can_resolve_a_lost_provision_cancellation_then_reopen() {
+        lost_cancellation(false).await;
+    }
+    #[tokio::test]
+    async fn workflow_owner_can_resolve_a_lost_review_cancellation_then_reopen() {
+        lost_cancellation(true).await;
+    }
+    async fn lost_cancellation(review: bool) {
+        let (_dir, mut runtime) = super::super::coding_tests::configured(review, "pass").await;
+        let definition = runtime.configured_definition().unwrap();
+        super::super::tests::enqueue(&mut runtime, "w", "one", definition);
+        // The admitted Provision or review lost its settlement before a restart could read it.
+        if review { for at in 2..6 { runtime.pump(at).await.unwrap(); } }
+        let original = super::super::coding_tests::admitted(&runtime).await;
+        runtime.pump(200).await.unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(state.items["one"].phase, Phase::Uncertain);
+        let resolve = |state: &State, id: &str, reason: &str| Action::ResolveCancellation {
+            mutation:m(id,state.revision,state.revision + 100),item:"one".into(),run:state.items["one"].run.clone(),
+            pin:state.items["one"].pin.clone(),reason:reason.into(),
+        };
+        let why = "The step's settlement was lost. I checked the worktree and all owned processes have ended.";
+        assert!(runtime.wire_command("w","owner",resolve(&state,"before-cancel",why)).unwrap()
+            .pointer("/receipt/result/Err").is_some());
+        ok(&runtime.wire_command("w","owner",Action::Cancel { mutation:m("cancel",state.revision,state.revision + 100),
+            item:"one".into(),run:state.items["one"].run.clone(),pin:state.items["one"].pin.clone() }).unwrap());
+        runtime.pump(201).await.unwrap();
+        // Reconciliation is done by the service in production; reopen it with the same durable state.
+        let (root, store) = (runtime.root.clone(), runtime.store.clone());
+        drop(runtime);
+        let runtime = Runtime::open_service(&root, store).unwrap();
+        let state = runtime.state("w").unwrap().unwrap();
+        assert_eq!(state.items["one"].phase, Phase::Uncertain);
+        assert!(runtime.execution_state("w").unwrap().unwrap().items["one"].execution.as_ref().unwrap()
+            .text.contains("cancellation receipt could not be verified"));
+        let action = resolve(&state,"resolve",why);
+        assert!(super::super::admission::person_only(&action));
+        assert!(runtime.wire_command("w","orchestrator",resolve(&state,"agent",why)).unwrap()
+            .pointer("/receipt/result/Err").is_some());
+        let key = ("w".into(), original.effect.id.clone());
+        runtime.activities.lock().unwrap().insert(key.clone(), Default::default());
+        assert!(runtime.wire_command("w","owner",resolve(&state,"busy",why)).unwrap()
+            .pointer("/receipt/result/Err").is_some());
+        runtime.activities.lock().unwrap().remove(&key);
+        assert!(runtime.wire_command("w","owner",resolve(&state,"blank"," ")).unwrap()
+            .pointer("/receipt/result/Err").is_some());
+        let mut stale = resolve(&state,"stale",why);
+        if let Action::ResolveCancellation { run, .. } = &mut stale { *run = "old".into(); }
+        assert!(runtime.wire_command("w","owner",stale).unwrap().pointer("/receipt/result/Err").is_some());
+        let receipt = runtime.wire_command("w","owner",action.clone()).unwrap(); ok(&receipt);
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
+        assert_eq!(runtime.wire_command("w","owner",action).unwrap(),receipt);
+        let state = runtime.state("w").unwrap().unwrap();
+        ok(&runtime.wire_command("w","owner",Action::Reopen { mutation:m("reopen",state.revision,state.revision + 100),
+            item:"one".into(),column:None }).unwrap());
+        assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::WaitingApproval);
+    }
+
     #[tokio::test]
     async fn workflow_wire_pins_policy_and_replays_after_restart_without_reexecution() {
         let dir = tempfile::tempdir().unwrap(); let root = dir.path().join("fixture");

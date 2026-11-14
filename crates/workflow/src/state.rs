@@ -12,13 +12,18 @@ pub enum Refusal {
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Phase { Blocked, WaitingApproval, WaitingReview, Running, Uncertain, Cancelling, Done, Failed, Cancelled,
+// Retained reducer records use Running for scheduled intent for replay compatibility.
+// Public reads replace it with execution_view's observed phase; it is never liveness evidence.
+pub enum Phase { Blocked, WaitingApproval, WaitingReview, Running, WaitingSlot, Starting, Uncertain, Cancelling, Done, Failed, Cancelled,
     /// At a `Join` step, not yet queued into a group. Holds no resource.
     WaitingJoin,
     /// Queued into a group (`grouped_in`). Holds no resource.
     Joined }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Item {
+    /// Read-time execution facts. Never persisted or used for reducer authority (ov-1107).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<crate::ExecutionView>,
     pub definition: Definition,
     pub pin: String,
     pub policy_pin: String,

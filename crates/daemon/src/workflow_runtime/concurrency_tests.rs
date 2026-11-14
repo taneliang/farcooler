@@ -57,6 +57,55 @@ async fn workflow_effect_cap_holds_builds_back() {
     assert!(state.items.values().any(|i| i.stage < 2), "a cap of one must serialize the builds: {state:?}");
 }
 
+/// Tonight's shape: four occupied slots and three additional runs, observed through workflow.get.
+/// Poll real adapter futures: merely admitting them must still say Starting.
+#[tokio::test]
+async fn workflow_execution_phases_follow_claims_and_slots() {
+    use std::future::Future;
+    let (_dir, mut runtime) = configured(false, "pass").await;
+    runtime.set_effect_cap(4);
+    let definition = runtime.configured_definition().unwrap();
+    for n in 0..7 { enqueue_item(&mut runtime, "w", &format!("item-{n}"), definition.clone()); }
+    let read = |runtime: &Runtime| runtime.wire_command("w", "owner",
+        farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    assert!(read(&runtime)["state"]["items"].as_object().unwrap().values().all(|i| i["phase"] == "WaitingSlot"));
+    let mut running = Vec::new();
+    let mut futures = Vec::new();
+    let mut count = 0;
+    runtime.launch_ready(&["w".into()], 2, &mut running, &mut futures, &mut count).await.unwrap();
+    let first = read(&runtime);
+    let items = first["state"]["items"].as_object().unwrap();
+    assert_eq!(items.values().filter(|i| i["phase"] == "Starting").count(), 4);
+    let queued: Vec<_> = items.values().filter(|i| i["phase"] == "WaitingSlot").collect();
+    assert_eq!(queued.len(), 3);
+    for (n, item) in queued.iter().enumerate() {
+        assert_eq!(item["execution"]["position"], n + 1);
+        assert_eq!(item["execution"]["holders"].as_array().unwrap().len(), 4);
+    }
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    assert!(Box::pin(next_finished(&mut futures)).as_mut().poll(&mut context).is_pending());
+    assert_eq!(read(&runtime)["state"]["items"].as_object().unwrap().values().filter(|i| i["phase"] == "Running").count(), 4);
+    // Each freed slot takes the next queued run, in the reported order.
+    for n in 4..7 {
+        let (index, outcome) = next_finished(&mut futures).await;
+        let job = running.remove(index);
+        futures.remove(index);
+        runtime.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
+        runtime.observe("w", &job.effect, outcome.unwrap(), false, 3).unwrap();
+        runtime.launch_ready(&["w".into()], 3, &mut running, &mut futures, &mut count).await.unwrap();
+        assert_eq!(read(&runtime)["state"]["items"][format!("item-{n}")]["phase"], "Starting");
+        // Start the newly admitted session while retaining all unfinished futures.
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(futures.last_mut().unwrap().as_mut().unwrap().as_mut().poll(&mut context).is_pending());
+        assert_eq!(read(&runtime)["state"]["items"][format!("item-{n}")]["phase"], "Running");
+    }
+    // Drain every admitted adapter; the test must not leave processes behind.
+    while !running.is_empty() {
+        let (index, _) = next_finished(&mut futures).await;
+        running.remove(index); futures.remove(index);
+    }
+}
+
 #[tokio::test]
 async fn workflow_work_enqueued_during_a_sweep_starts_without_waiting() {
     let (_dir, mut runtime) = barrier(false).await;

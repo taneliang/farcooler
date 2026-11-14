@@ -1,5 +1,6 @@
 //! Workflow runtime for private fixtures and the sole ordinary Service owner.
 //! The local capability boundary is intended for authenticated embedding, not wire grants.
+pub(crate) mod execution;
 use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -199,6 +200,7 @@ impl std::ops::Deref for Runtime { type Target = Exec; fn deref(&self) -> &Exec 
 impl std::ops::DerefMut for Runtime { fn deref_mut(&mut self) -> &mut Exec { &mut self.exec } }
 
 pub struct Runtime {
+    activities: execution::Activities,
     exec: Exec,
     pub(crate) notice_wake: Option<std::sync::Arc<tokio::sync::Notify>>,
     configuration_locks: std::collections::BTreeMap<PathBuf, File>,
@@ -326,7 +328,7 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { inbox, send, next_lease: None, places: Default::default(), continuous: false,
+        let runtime = Self { activities: Default::default(), inbox, send, next_lease: None, places: Default::default(), continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), #[cfg(test)] user_home: None },
@@ -433,6 +435,7 @@ impl Runtime {
             while !running.is_empty() {
                 let (index, outcome) = next_finished(&mut futures).await;
                 let job = running.remove(index);
+                self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
                 futures.remove(index);
                 #[cfg(test)] { self.drained += 1; }
                 if let Ok(outcome) = outcome {
@@ -535,6 +538,7 @@ impl Runtime {
                 }
                 Event::Finished(index, result) => {
                     let job = running.remove(index);
+                    self.activities.lock().unwrap().remove(&(job.workspace.clone(), job.effect.id.clone()));
                     futures.remove(index);
                     self.note_holding(running);
                     let (workspace, effect, binding) = (job.workspace, job.effect, job.binding);
@@ -623,7 +627,7 @@ impl Runtime {
                     if self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", now_ms)? { *count += 1; }
                     continue;
                 }
-                if !matches!(item.phase, Phase::Running | Phase::Cancelling) { continue; }
+                if !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { continue; }
                 // A stop waits for the effect it stops to end; they must not touch one pane at once.
                 if let EffectKind::Stop { operation } = &effect.kind {
                     if running.iter().any(|j| &j.effect.id == operation && &j.workspace == workspace) { continue; }
@@ -675,6 +679,8 @@ impl Runtime {
                     }
                 };
                 if !self.store.workflow_admit_effect(&claim, now_ms)? { continue; }
+                let activity = std::sync::Arc::new(execution::Activity::default());
+                self.activities.lock().unwrap().insert((workspace.clone(), effect.id.clone()), activity.clone());
                 let binding = Binding::new(workspace, &effect, claim.resource_generation, item.iteration, &base);
                 // Any I/O failure beyond admission is ambiguous, not a retry permission.
                 let (cancel, cancelled) = tokio::sync::watch::channel(false);
@@ -683,10 +689,15 @@ impl Runtime {
                 let mut exec = self.exec.clone();
                 exec.launched = Some((now_ms, std::time::Instant::now()));
                 let (run_workspace, run_binding) = (workspace.clone(), binding.clone());
-                futures.push(Some(Box::pin(async move {
+                futures.push(Some(Box::pin(execution::ACTIVITY.scope(activity.clone(), async move {
+                    // Internal adapters own an async session; native agents and configured commands
+                    // publish presence only after the real PTY or child exists.
+                    let process = exec.coding.is_some() && matches!(run_binding.effect.kind,
+                        EffectKind::Execute(StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(Reviewer::Agent)));
+                    if !process { activity.session.store(true, std::sync::atomic::Ordering::SeqCst); }
                     if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
-                })));
+                }))));
                 running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool });
             }
         }
@@ -739,7 +750,7 @@ impl Runtime {
                 // A dropped caller never rolls back an accepted durable command.
                 let _ = reply.send(result);
             }
-            Inbox::State(workspace, reply) => { let _ = reply.send(self.state(&workspace)); }
+            Inbox::State(workspace, reply) => { let _ = reply.send(self.execution_state(&workspace)); }
             Inbox::Wire(admission, action, reply) => {
                 let result = async {
                     admission.recheck().and_then(|()| admission.permits(&action))

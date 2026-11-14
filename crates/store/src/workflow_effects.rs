@@ -92,7 +92,7 @@ impl Store {
         let Some(item) = state.items.values().find(|i| i.pending.as_deref() == Some(effect)) else {
             return Ok(None);
         };
-        if !matches!(item.phase, Phase::Running | Phase::Cancelling) { return Ok(None); }
+        if !matches!(item.phase, Phase::Running | Phase::WaitingSlot | Phase::Cancelling) { return Ok(None); }
         let generation: u64 = tx.query_row(
             "SELECT generation FROM workflow_resources WHERE resource = ?1 AND workspace = ?2 AND run = ?3 AND fence = ?4",
             params![item.resource, workspace, item.run, item.fence], |r| r.get(0),

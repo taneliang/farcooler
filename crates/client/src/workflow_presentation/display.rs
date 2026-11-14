@@ -3,6 +3,7 @@ use super::*;
 
 pub(super) fn phase_label(phase: &Phase, style: Style) -> String {
     style.label(match phase {
+        Phase::WaitingSlot => "Waiting for a slot", Phase::Starting => "Starting",
         Phase::Blocked => "Waiting", Phase::WaitingApproval => "Awaiting approval",
         Phase::WaitingReview => "Awaiting review", Phase::Running => "Running",
         Phase::Uncertain => "Outcome uncertain", Phase::Cancelling => "Cancelling",

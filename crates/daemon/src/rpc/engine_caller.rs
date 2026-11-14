@@ -10,13 +10,13 @@ impl Rpc {
     ///   their orchestrator pane (ov-999), and a Maintainer on any workspace,
     ///   to act on its runs (`people::acts_on_runs`, ov-1000).
     ///
-    /// Setting a workflow outright and settling a push stay the owner's. This
+    /// Setting a workflow outright, settling a push and resolving a lost cancellation stay the owner's. This
     /// only narrows: `admit` then proves who the caller is, and
     /// `Admission::permits` asks the same again when the command is used.
     pub(super) fn engine_caller(&self, workspace: Uuid, method: &str) -> Result<()> {
         use crate::people::Person;
         let person = self.caller()?;
-        let owners = matches!(method, "workspace.set_workflow" | "workflow.settle");
+        let owners = matches!(method, "workspace.set_workflow" | "workflow.settle" | "workflow.resolve_cancellation");
         match &person {
             Person::Owner => Ok(()),
             Person::Member(_) if method == "workflow.get" => Ok(()),

@@ -542,6 +542,8 @@ public enum WirePhase: String, Codable, Equatable, Sendable {
 	case waitingApproval = "WaitingApproval"
 	case waitingReview = "WaitingReview"
 	case running = "Running"
+	case waitingSlot = "WaitingSlot"
+	case starting = "Starting"
 	case uncertain = "Uncertain"
 	case cancelling = "Cancelling"
 	case done = "Done"

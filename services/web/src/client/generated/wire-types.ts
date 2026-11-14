@@ -363,6 +363,8 @@ export enum Phase {
 	WaitingApproval = "WaitingApproval",
 	WaitingReview = "WaitingReview",
 	Running = "Running",
+	WaitingSlot = "WaitingSlot",
+	Starting = "Starting",
 	Uncertain = "Uncertain",
 	Cancelling = "Cancelling",
 	Done = "Done",

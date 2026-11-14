@@ -327,7 +327,7 @@ fn actions() -> Vec<ActionKind> {
 fn phase_slot(p: &Phase) -> usize {
     match p { Phase::Blocked => 0, Phase::WaitingApproval => 1, Phase::WaitingReview => 2, Phase::Running => 3,
         Phase::Uncertain => 4, Phase::Cancelling => 5, Phase::Done => 6, Phase::Failed => 7, Phase::Cancelled => 8,
-        Phase::WaitingJoin => 9, Phase::Joined => 10 }
+        Phase::WaitingJoin => 9, Phase::Joined => 10, Phase::WaitingSlot => 11, Phase::Starting => 12 }
 }
 fn kind_slot(k: &StageKind) -> usize {
     match k { StageKind::Provision => 0, StageKind::Build => 1, StageKind::Check => 2, StageKind::Review(_) => 3,
@@ -432,10 +432,35 @@ fn a_request_without_a_style_is_refused() {
     let mut request = serde_json::to_value(Request { schema: SCHEMA, snapshot: state, capabilities: auth(),
         style: Style::Material, selection: None }).unwrap();
     let ok: Response = serde_json::from_str(&json(&request.to_string())).unwrap();
-    assert_eq!(ok.card.unwrap().runs[0].phase_label, "Running");
+    assert_eq!(ok.card.unwrap().runs[0].phase_label, "Waiting for a slot");
     request.as_object_mut().unwrap().remove("style");
     let refused: Response = serde_json::from_str(&json(&request.to_string())).unwrap();
     assert_eq!(refused.error, Some(Error::Invalid));
+}
+
+#[test]
+fn execution_facts_drive_every_shared_run_slot() {
+    use farcooler_workflow::{Dispatch, Refusal, execution_view};
+    let mut state = fixtures().remove(0).1;
+    for (dispatch, phase, label) in [
+        (Dispatch::Pending, Phase::WaitingSlot, "Waiting for a Slot"),
+        (Dispatch::Claimed { alive: false, lost: None }, Phase::Starting, "Starting"),
+        (Dispatch::Claimed { alive: true, lost: None }, Phase::Running, "Running"),
+        (Dispatch::Claimed { alive: false, lost: Some("The session was lost without a receipt.") }, Phase::Uncertain, "Outcome Uncertain"),
+    ] {
+        let execution = execution_view(dispatch, Some(2), vec!["board/other".into()]);
+        let item = state.items.get_mut("item").unwrap();
+        item.phase = execution.phase.clone();
+        item.execution = Some(execution.clone());
+        let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
+        assert_eq!(card.phase, phase);
+        assert_eq!(card.phase_label, label);
+        assert_eq!(card.page.reason, execution.text);
+        assert_eq!(card.reasons[0].text, execution.text);
+        assert_eq!(step(&state, &Input { schema: 1, id: "read-is-not-authority".into(), workspace: state.workspace.clone(),
+            expected_revision: state.revision, epoch: state.epoch, source: "controller".into(), source_sequence: 1,
+            now_ms: 1, grant: Grant::Controller, command: Command::Advance, busy_resources: Default::default() }), Err(Refusal::Invalid));
+    }
 }
 
 /// ov-1060: a run's page leads with the ticket, the outcome and the reason, and shows no hash, stage id or counter by default.
@@ -492,7 +517,7 @@ fn a_runs_page_holds_the_gate_every_reason_and_plain_words() {
     assert_eq!(waiting.reason, "Waiting for owner's approval to start Prepare workspace.");
     assert!(!approval.more.iter().any(|m| m.contains("configured approval")), "{:?}", approval.more);
     // A running run names its stage; an uncertain one names the stage and what to do.
-    assert_eq!(page("automatic").reason, "Running: Prepare workspace.");
+    assert_eq!(page("automatic").reason, "Waiting for a slot. The runner has not reported a live claim.");
     assert_eq!(page("uncertain").reason, "Run checks may or may not have finished. Check it before it continues.");
     // Rework and stale evidence stay on the page, with the reworks left in words.
     let rework = page("rework");
@@ -589,4 +614,19 @@ fn status_words_are_sentence_case_on_every_platform() {
 #[test]
 fn short_leaves_a_name_alone() {
     assert_eq!(page::short("new-candidate"), "new-candidate");
+}
+
+#[test]
+fn stored_uncertainty_keeps_its_own_explanation() {
+    let mut state = fixtures().into_iter().find(|(name, _)| *name == "uncertain").unwrap().1;
+    for pending in [true, false] {
+        let reason = "The push may have been accepted; check the remote before continuing.";
+        let item = state.items.get_mut("item").unwrap();
+        if !pending { item.pending = None; }
+        item.failure = Some(reason.into());
+        assert!(item.execution.is_none());
+        let card = project(&state, &auth(), STYLE).unwrap().runs.remove(0);
+        assert_eq!(card.phase, Phase::Uncertain);
+        assert_eq!(card.page.reason, reason);
+    }
 }

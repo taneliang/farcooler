@@ -91,7 +91,7 @@ pub(crate) fn place(item: &Item) -> (TaskStatus, Stage) {
         Phase::WaitingApproval | Phase::Uncertain | Phase::Failed => (TaskStatus::NeedsDecision, Stage::NeedsYou),
         Phase::WaitingReview if matches!(kind(item), Some(StageKind::Review(Reviewer::Person(_)))) => (TaskStatus::NeedsDecision, Stage::NeedsYou),
         Phase::WaitingReview => (TaskStatus::InReview, Stage::Reviewing),
-        Phase::Running | Phase::Cancelling => match kind(item) {
+        Phase::Running | Phase::WaitingSlot | Phase::Starting | Phase::Cancelling => match kind(item) {
             Some(StageKind::Review(_)) => (TaskStatus::InReview, Stage::Reviewing),
             Some(StageKind::Land | StageKind::Ci) => (TaskStatus::InReview, Stage::Landing),
             _ => (TaskStatus::InProgress, Stage::Building),

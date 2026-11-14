@@ -42,15 +42,21 @@ pub(crate) async fn exited(pid: u32) -> std::io::Result<()> {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
-fn has_exited(pid: u32) -> std::io::Result<bool> {
+pub(crate) fn has_exited(pid: u32) -> std::io::Result<bool> {
+    exit_info(pid).map(|info| unsafe { info.si_pid() } == pid as i32)
+}
+/// A normal exit is still the supervisor's retained result, not a lost process.
+pub(crate) fn present(pid: u32) -> bool {
+    exit_info(pid).is_ok_and(|info| unsafe { info.si_pid() } == 0 || info.si_code == libc::CLD_EXITED)
+}
+fn exit_info(pid: u32) -> std::io::Result<libc::siginfo_t> {
     let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
     if unsafe { libc::waitid(libc::P_PID, pid, &mut info,
         libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) } != 0 {
         let error = std::io::Error::last_os_error();
         if error.kind() != std::io::ErrorKind::Interrupted { return Err(error); }
-        return Ok(false);
     }
-    Ok(unsafe { info.si_pid() } == pid as i32)
+    Ok(info)
 }
 
 pub(crate) async fn fixture(tree: &Path, script: &str, log: &Path, limit: Duration,
@@ -137,6 +143,7 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
     command.process_group(0);
     let mut child = command.spawn()?;
     let pid = child.id().expect("newly spawned child has a pid");
+    let presence = crate::workflow_runtime::execution::process(pid);
     let mut group = Group(Some(pid));
     if let Some(owner) = owner { Owner::write(owner, pid)?; }
     let result = tokio::select! {
@@ -149,6 +156,8 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
             } else { std::future::pending::<()>().await; }
         } => None,
     };
+    // The supervisor has an answer; the adapter remains present while it settles that answer.
+    if !matches!(result, Some(Ok(Err(_)))) { presence.settle(); }
     // Signal before releasing the leader identity. Disarm even on signal error:
     // no retry may target a recycled PGID after the child has been reaped.
     #[cfg(test)]

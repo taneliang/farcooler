@@ -41,7 +41,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                     || next.items.values().any(|i| owns_resource(i) && i.resource == *resource)) {
                 return Err(Refusal::Resource);
             }
-            let mut record = Item { definition: definition.clone(), pin: definition.pin(),
+            let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
@@ -68,7 +68,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
             next.items.remove(item);
             next.archive.remove(item);
             if next.items.len() >= MAX_ITEMS { return Err(Refusal::Limit); }
-            let mut record = Item { definition: definition.clone(), pin: definition.pin(),
+            let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
                 candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, failure: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
@@ -308,7 +308,7 @@ pub fn step(state: &State, input: &Input) -> Result<Transition, Refusal> {
                             let gid = group_id(state, name);
                             let definition = item.definition.group_definition(name).ok_or(Refusal::Definition)?;
                             let resource = item.definition.groups[name].exclusive.clone();
-                            next.items.insert(gid.clone(), Item { pin: definition.pin(), definition,
+                            next.items.insert(gid.clone(), Item { execution: None, pin: definition.pin(), definition,
                                 policy_pin: item.policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
@@ -800,7 +800,7 @@ fn valid_state(state: &State) -> bool {
             && matches!(a.phase, Phase::Done | Phase::Failed | Phase::Cancelled)
             && a.candidate.as_deref().is_none_or(valid_id))
         && state.items.iter().all(|(id, item)| {
-            valid_id(id) && item.pin == item.definition.pin()
+            item.execution.is_none() && valid_id(id) && item.pin == item.definition.pin()
                 && if item.group_of.is_some() { item.definition.validate_group() } else { item.definition.validate() }.is_ok()
                 && valid_membership(state, id, item)
                 && (item.pushed.is_none() || (item.group_of.is_some() && item.pushed.as_deref().is_some_and(valid_id)))

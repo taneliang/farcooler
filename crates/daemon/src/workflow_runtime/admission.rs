@@ -26,8 +26,8 @@ pub(crate) struct Admission {
 }
 
 /// The actions an orchestrator may never take on a person's behalf: publishing a definition, and saying
-/// whether a lost push landed.
-pub(super) fn person_only(action: &Action) -> bool { matches!(action, Action::Publish { .. } | Action::Settle { .. }) }
+/// whether a lost push landed or an uncertain cancellation is quiescent.
+pub(super) fn person_only(action: &Action) -> bool { matches!(action, Action::Publish { .. } | Action::Settle { .. } | Action::ResolveCancellation { .. }) }
 
 impl Admission {
     /// The workspace of a command about the whole host, such as a cutover. No
@@ -152,8 +152,8 @@ impl Admission {
                 // A gate decides who decides it: the reducer takes the decision only from the name it waits on,
                 // which `deciders` holds only for whoever it names (ov-1002).
                 Action::Approve { .. } | Action::Review { .. } => Ok(()),
-                // Settling a push stays the owner's.
-                Action::Settle { .. } => Err(DomainError::NotYours { what: "not_yours" }),
+                // Settling a push or attesting to a lost cancellation stays the owner's.
+                Action::Settle { .. } | Action::ResolveCancellation { .. } => Err(DomainError::NotYours { what: "not_yours" }),
                 // Only through a draft a Maintainer approved (`workflow_drafts`): `workspace.set_workflow` is
                 // the owner's at dispatch (R-107).
                 Action::Publish { .. } if crate::people::maintains(store, &self.person)? => Ok(()),

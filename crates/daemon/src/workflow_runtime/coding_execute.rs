@@ -671,6 +671,11 @@ impl Exec {
                 }
             }
             let (fact, raw) = self.settled_process(binding)?;
+            if self.is_native_agent(binding) {
+                if let Some(reason) = self.verify_native_settlement(binding, fact.exit)? {
+                    return Ok(Outcome::SafeFailureBecause(reason));
+                }
+            }
             // Even a dirty interrupted build can settle cancellation once this
             // exact owned group has been reaped; it supplies no candidate success.
             if fact.exit != Some(0) { return Ok(Outcome::SafeFailure); }

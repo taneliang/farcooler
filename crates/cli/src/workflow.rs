@@ -61,6 +61,11 @@ pub enum WorkflowCmd {
         #[arg(long)] evidence:std::path::PathBuf,#[arg(long)] reason:String,#[command(flatten)] identity:Identity },
     /// Request cancellation of the inspected run.
     Cancel { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
+    /// Close an Uncertain cancellation after you have checked that its processes have ended and its external
+    /// effects are accounted for. Owner in person only. --reason records what was lost and what you checked.
+    /// Then reopen the ticket to run it again. A push must be settled with `settle` instead.
+    ResolveCancellation { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+        #[arg(long)] reason:String,#[command(flatten)] identity:Identity },
     /// Run a failed item's step again. At most three retries per item.
     Retry { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,#[command(flatten)] identity:Identity },
     /// Queue a ticket waiting at its join step into the open group for that step.
@@ -126,6 +131,12 @@ impl WorkflowCmd {
                 }
                 let bytes=read_file(&evidence)?;
                 (workspace,Action::Review { mutation:identity.mutation(),item,run,pin,evidence:serde_json::from_slice(&bytes)?,passed:false,reason:Some(reason) })
+            }
+            Self::ResolveCancellation { workspace,item,run,pin,reason,identity } => {
+                if !farcooler_protocol::workflow_commands::valid_rework_reason(&reason) {
+                    return Err("The reason must record what was lost and what you checked, in at most 4096 bytes.".into());
+                }
+                (workspace,Action::ResolveCancellation { mutation:identity.mutation(),item,run,pin,reason })
             }
             Self::Cancel { workspace,item,run,pin,identity } => (workspace,Action::Cancel { mutation:identity.mutation(),item,run,pin }),
             Self::Queue { workspace,item,run,pin,identity } => (workspace,Action::Queue { mutation:identity.mutation(),item,run,pin }),
@@ -324,6 +335,20 @@ mod tests {
         assert!(body.json.ends_with(r#""worktree":{"name":"phones","branch":"e-liang/phones","adopt":true}}"#),"{}",body.json);
         assert!(parsed(&["--adopt"]).is_err());
     }
+    #[test]
+    fn workflow_resolve_cancellation_requires_a_checked_reason() {
+        let args=["farcooler","workflow","resolve-cancellation","00000000-0000-0000-0000-000000000000","ov-7",
+            "--run","cancel:run","--pin","pin","--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        let action=|reason:&str| {
+            let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(args.iter().copied().chain(["--reason",reason])).unwrap().command else {panic!()};
+            cmd.action()
+        };
+        let (workspace,sent)=action("The review receipt was lost. Its processes have ended.").unwrap();
+        assert_eq!(super::request(workspace,&sent).unwrap().method,"workflow.resolve_cancellation");
+        for bad in [" ","bell\u{7}"] { assert!(action(bad).is_err()); }
+        assert!(crate::Cli::try_parse_from(args).is_err());
+    }
+
     /// ov-968: send a run back with a reason the agent is told, and reopen a closed ticket, each its own method.
     #[test]
     fn workflow_send_back_and_reopen_travel_as_their_own_methods() {

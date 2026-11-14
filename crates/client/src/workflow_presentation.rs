@@ -177,7 +177,13 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
     }
     let snapshot_guard = digest(&("workflow-presentation/v2", state, auth));
     let mut runs = Vec::new();
-    for (id, item) in &state.items {
+    for (id, original) in &state.items {
+        // Old runners send scheduling intent as Running. Without execution facts, fail closed.
+        let mut observed = original.clone();
+        if matches!(original.phase, Phase::Running | Phase::WaitingSlot | Phase::Starting) {
+            observed.phase = original.execution.as_ref().map_or(Phase::WaitingSlot, |e| e.phase.clone());
+        }
+        let item = &observed;
         let guard = digest(&(&snapshot_guard, id));
         if item.definition.validate().is_err() || item.pin != item.definition.pin()
             || item.iteration > item.definition.max_reworks
@@ -204,6 +210,7 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             Phase::WaitingApproval => Reason::ApprovalRequired,
             Phase::WaitingReview => Reason::ReviewRequired,
             Phase::Running => Reason::Automatic,
+            Phase::WaitingSlot | Phase::Starting => Reason::DependenciesOrResource,
             Phase::Uncertain => Reason::EffectUncertain,
             Phase::Cancelling => Reason::Cancelling,
             Phase::Done => Reason::Completed,
@@ -214,8 +221,19 @@ pub fn project(state: &State, auth: &Capabilities, style: Style) -> Result<Prese
             item.candidate.as_ref() == Some(&e.candidate) && item.policy_pin == e.policy_pin);
         if item.iteration > 0 { kinds_of_reason.push(Reason::Reworking); }
         if item.last_evidence.is_some() && !evidence_valid { kinds_of_reason.push(Reason::EvidenceInvalidated); }
-        let reasons: Vec<ReasonCard> = kinds_of_reason.into_iter().map(|r| display::reason_card(r, style))
+        let mut reasons: Vec<ReasonCard> = kinds_of_reason.into_iter().map(|r| display::reason_card(r, style))
             .map(|card| display::with_cancel_reason(card, item.cancel_reason.as_deref())).collect();
+        if let Some(execution) = &item.execution {
+            if let Some(reason) = reasons.first_mut() {
+                reason.label = display::phase_label(&execution.phase, style);
+                reason.text = execution.text.clone();
+            }
+        } else if item.phase == Phase::WaitingSlot {
+            if let Some(reason) = reasons.first_mut() {
+                reason.label = display::phase_label(&item.phase, style);
+                reason.text = "Waiting for a slot. The runner has not reported a live claim.".into();
+            }
+        }
         let mut kinds = Vec::new();
         // Inspection returns the retained evidence identity even when it no longer authorizes action.
         if item.last_evidence.is_some() { kinds.push(ActionKind::InspectLatestEvidence); }

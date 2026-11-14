@@ -445,6 +445,10 @@ enum class Phase(val string: String) {
 	WaitingReview("WaitingReview"),
 	@SerialName("Running")
 	Running("Running"),
+	@SerialName("WaitingSlot")
+	WaitingSlot("WaitingSlot"),
+	@SerialName("Starting")
+	Starting("Starting"),
 	@SerialName("Uncertain")
 	Uncertain("Uncertain"),
 	@SerialName("Cancelling")

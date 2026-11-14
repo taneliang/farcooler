@@ -180,13 +180,13 @@
               ],
               "detailsLabel": "Details",
               "more": [],
-              "outcome": "Running",
-              "reason": "Running: Prepare workspace.",
+              "outcome": "Waiting for a slot",
+              "reason": "Waiting for a slot. The runner has not reported a live claim.",
               "retryLabel": "Try Again",
               "steps": [
                 {
                   "label": "Prepare workspace",
-                  "state": "Running"
+                  "state": "Waiting for a slot"
                 },
                 {
                   "label": "Build",
@@ -212,14 +212,14 @@
               "ticket": "item"
             },
             "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
-            "phase": "Running",
-            "phaseLabel": "Running",
+            "phase": "WaitingSlot",
+            "phaseLabel": "Waiting for a Slot",
             "policyPin": "policy",
             "reasons": [
               {
-                "kind": "Automatic",
-                "label": "Running",
-                "text": "The engine is executing this stage."
+                "kind": "DependenciesOrResource",
+                "label": "Waiting for a Slot",
+                "text": "Waiting for a slot. The runner has not reported a live claim."
               }
             ],
             "reworksRemaining": 2,
@@ -840,8 +840,8 @@
                 "The latest evidence no longer matches the current candidate or policy.",
                 "1 rework left."
               ],
-              "outcome": "Running",
-              "reason": "Running: Build.",
+              "outcome": "Waiting for a slot",
+              "reason": "Waiting for a slot. The runner has not reported a live claim.",
               "retryLabel": "Try Again",
               "steps": [
                 {
@@ -850,7 +850,7 @@
                 },
                 {
                   "label": "Build",
-                  "state": "Running"
+                  "state": "Waiting for a slot"
                 },
                 {
                   "label": "Run checks",
@@ -872,14 +872,14 @@
               "ticket": "item"
             },
             "pendingEffect": "wf1:26d7d6a45040ce13c2bced8faf524941966b949ec7c1eb800dce245fbaafbc94",
-            "phase": "Running",
-            "phaseLabel": "Running",
+            "phase": "WaitingSlot",
+            "phaseLabel": "Waiting for a Slot",
             "policyPin": "policy",
             "reasons": [
               {
-                "kind": "Automatic",
-                "label": "Running",
-                "text": "The engine is executing this stage."
+                "kind": "DependenciesOrResource",
+                "label": "Waiting for a Slot",
+                "text": "Waiting for a slot. The runner has not reported a live claim."
               },
               {
                 "kind": "Reworking",
@@ -1489,8 +1489,8 @@
                 "The latest evidence no longer matches the current candidate or policy.",
                 "1 rework left."
               ],
-              "outcome": "Running",
-              "reason": "Running: Run checks.",
+              "outcome": "Waiting for a slot",
+              "reason": "Waiting for a slot. The runner has not reported a live claim.",
               "retryLabel": "Try Again",
               "steps": [
                 {
@@ -1503,7 +1503,7 @@
                 },
                 {
                   "label": "Run checks",
-                  "state": "Running"
+                  "state": "Waiting for a slot"
                 },
                 {
                   "label": "Review",
@@ -1521,14 +1521,14 @@
               "ticket": "item"
             },
             "pendingEffect": "wf1:03f9d84cada3cbd030aed5fdeb9bc3a50e8aacd7129d116d7fb654fb7bcab65d",
-            "phase": "Running",
-            "phaseLabel": "Running",
+            "phase": "WaitingSlot",
+            "phaseLabel": "Waiting for a Slot",
             "policyPin": "policy",
             "reasons": [
               {
-                "kind": "Automatic",
-                "label": "Running",
-                "text": "The engine is executing this stage."
+                "kind": "DependenciesOrResource",
+                "label": "Waiting for a Slot",
+                "text": "Waiting for a slot. The runner has not reported a live claim."
               },
               {
                 "kind": "Reworking",
