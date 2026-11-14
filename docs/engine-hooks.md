@@ -541,3 +541,23 @@ and GitHub credentials and deployment environments. Their authorization is not
 read from the workspace publication grant. Tests of runner admin RPCs do not
 verify those external account permissions; those must be checked at the service
 that owns them.
+
+For ov-1179, the external owner-only requirement in acceptance item 4 remains
+unverified. Neither rejecting unknown protocol fields nor refusing runner admin
+RPCs proves that an orchestrator cannot use credentials available to its shell.
+The relevant implementation paths are:
+
+| Operation | Actual path | Missing evidence |
+| --- | --- | --- |
+| Secret-store writes | Relay secrets are provisioned with `wrangler secret put`, as listed in `services/relay/wrangler.toml`. | Cloudflare must refuse the orchestrator's identity while permitting the owner's on an isolated secret. |
+| Security flags | The ticket names no concrete flag or API. | The owner must identify the protected settings and the service that authorizes writes before a refusal can be tested. |
+| Relay flags | `.github/workflows/relay.yml` reads the GitHub variable `RELAY_DEPLOY`; Worker settings come from `services/relay/wrangler.toml`. | GitHub variable writes and Cloudflare settings writes must refuse the orchestrator's identity while permitting the owner's. |
+| Production deployments | `.github/workflows/relay.yml` deploys stable via `wrangler deploy`; `.github/workflows/promote.yml` uses the GitHub `promote` environment. | The configured GitHub environment rules and Cloudflare token permissions must enforce owner-only deployment, including the direct relay dispatch path. |
+
+These workflows use GitHub and Cloudflare credentials, not the runner's caller
+seat or publication grant. Repository source does not establish the live account
+permissions or configured environment protections. No external refusal test has
+been run, and the grant must not be described as enforcing these restrictions.
+Completing item 4 requires either isolated external authorization tests with the
+grant enabled or an owner decision to narrow the acceptance item and track those
+tests separately. Until that decision or evidence exists, item 4 stays open.

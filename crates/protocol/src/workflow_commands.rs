@@ -188,7 +188,9 @@ mod publication_grant_tests {
 mod publication_grant_boundaries {
     use super::*;
     #[test]
-    fn ov1179_publication_grant_cannot_delegate_sensitive_actions() {
+    fn ov1179_publication_grant_rejects_unknown_fields_and_actions() {
+        // Schema closure only: these names are not operations in this API. This
+        // does not test Cloudflare or GitHub authorization (ov-1179 criterion 4).
         let grant = serde_json::json!({"action":"PublicationGrant","mutation":{"id":"g","revision":0,"epoch":1,"sequence":1},"enabled":true});
         assert!(parse(&grant.to_string()).is_ok());
         for field in ["secret_store", "security_flags", "relay_flags", "production_deploy"] {

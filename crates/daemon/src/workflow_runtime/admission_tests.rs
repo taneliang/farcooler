@@ -439,8 +439,9 @@ async fn ov1179_revocation_at_consumption_stops_a_queued_publish() {
 
 /// ov-1179: a real publication grant must not bypass the runner's admin fences.
 /// Use HostAdmin scope so a scope failure cannot mask a missing person check.
+/// These are runner administration checks, not tests of external deployment or secret permissions.
 #[tokio::test]
-async fn ov1179_publication_grant_preserves_real_admin_operation_boundaries() {
+async fn ov1179_publication_grant_preserves_runner_admin_operation_boundaries() {
     let (_dir, svc, repo) = crate::test_support::fixture().await;
     let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
     let (_pane, pid) = alices_pane(&svc, repo, ws, true).await;
