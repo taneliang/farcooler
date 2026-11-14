@@ -32,23 +32,13 @@ a few steps that need the Linux toolchain the web job downloads; every skip is
 listed in the output with its reason. A new job in ci.yml that this script does
 not know fails the self-test.
 
-Which jobs a change reaches. CI itself decides only "website and docs" versus
-"app" (scripts/ci-changes.py, whose allowlist is imported here, not copied),
-and then runs every app job. A lane cannot afford that for every change, so
-this narrows by path, always towards running more:
-
-  - Always: `wire` (the lints and script self-tests) and `doc-comments`.
-  - Code shared by every app (crates/, proto/, Cargo.*, test/, toolchain files):
-    rust, swift, swift-tests and android; ios when scripts/ios-ui-plan.py says
-    the iOS app is built from the path; tunnel for crates/tailcat; web for
-    crates/web.
-  - apps/macos and apps/shared: swift and swift-tests. apps/ios: ios.
-    apps/android: android. services/relay, services/site, services/web and
-    services/common: their own jobs.
-  - A file under scripts/: every job whose commands name that script.
-  - .github/workflows/ci.yml: every job.
-  - Any other path outside the site-only allowlist (one this table does not
-    know): every app job, the same safe side ci-changes.py takes.
+Which jobs a change reaches (ov-1189). ci-changes.py's families are the minimum
+coverage: their union over the combined diff selects the platform suites.
+Wire and doc-comments always run; docs and reports need no builds. Cross-cutting
+inputs (Cargo.lock, the protocol crate, workflows, unknown paths) run everything.
+The ov-1116 reverse crate closure is printed for Rust changes. It remains an
+impact diagnostic: CI still runs the full Rust suite, so this gate retains it,
+including doctests and feature checks, rather than enabling shadow skips here.
 
 The ios job runs the steps of .github/actions/ios-ui-build that compile: the
 Rust xcframeworks, the generated project, and `xcodebuild build-for-testing` of
@@ -89,6 +79,7 @@ import sys
 import tempfile
 import time
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import heavy_lock as hl  # noqa: E402  the machine-wide lock, shared with scripts/heavy
 from heavy_lock import LOCK_POLL, machine_lock  # noqa: E402
@@ -348,32 +339,41 @@ def steps_for(job, workflows, ctx):
 # ---------------------------------------------------------------- which jobs
 
 
-def changed_files(repo, base):
-    """Repo-relative paths changed since the merge base with `base`: commits,
-    uncommitted edits to tracked files, and untracked files that are not ignored."""
+def changed_inputs(repo, base):
+    """The combined branch, index, worktree and untracked diff; retain deletions
+    and both sides of renames so moving code into docs cannot hide its impact."""
     def git(*args):
         return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
     mb = git("merge-base", base, "HEAD")
     if mb.returncode != 0:
         raise SystemExit(f"lane-gate: no merge base between {base} and HEAD: {mb.stderr.strip()}")
-    diff = git("diff", "--no-renames", "--name-only", mb.stdout.strip())
-    untracked = git("ls-files", "--others", "--exclude-standard")
+    diff = git("diff", "--no-renames", "--name-status", "-z", mb.stdout.strip())
+    untracked = git("ls-files", "--others", "--exclude-standard", "-z")
     for out in (diff, untracked):
         if out.returncode != 0:
             raise SystemExit(f"lane-gate: git failed: {out.stderr.strip()}")
-    return sorted({f for f in diff.stdout.splitlines() + untracked.stdout.splitlines() if f})
+    raw = diff.stdout.split("\0")[:-1]
+    entries = set(zip(raw[::2], raw[1::2]))
+    entries.update(("A", f) for f in untracked.stdout.split("\0") if f)
+    return sorted(entries)
 
 
-# What each of ci-changes.py's families runs here. The iOS job joins by apps/ios or by
-# scripts/ios-ui-plan.py's RELEVANT, as before: an Apple-family change does not build iOS by itself.
-FAMILY_JOBS = {"rust": {"rust"}, "apple": {"swift", "swift-tests"}, "android": {"android"}, "web": {"web"}, "relay": {"relay"}}
+def changed_files(repo, base):
+    return sorted({f for _, f in changed_inputs(repo, base)})
 
 
-KNOWN_SHARED = ("crates/", "proto/", "test/", "Cargo", ".cargo/", ".config/", "rust-toolchain", "Cross.toml")
+# CI's apple condition covers all three jobs, including the iOS build even when
+# ios-ui-plan skips simulator smoke. Never narrow below that condition.
+FAMILY_JOBS = {"rust": {"rust"}, "apple": {"swift", "swift-tests", "ios"},
+               "android": {"android"}, "web": {"web"}, "relay": {"relay"}}
 
 
 def jobs_for(files, site, ios_relevant, commands, families):
-    """{job: [the paths that reach it]}. `commands` is {job: all its run text}."""
+    """{job: [paths]}. CI families are a floor, never overridden by local rules.
+
+    Keep the site/ios inputs in this public API for gate_evidence's canonical
+    planner. Unknown scripts and workflows take CI's full fallback too.
+    """
     reach = {"wire": [], "doc-comments": []}
 
     def add(jobs, f):
@@ -383,41 +383,39 @@ def jobs_for(files, site, ios_relevant, commands, families):
                 reach[j].append(f)
 
     for f in files:
-        if f.startswith("services/relay/"):
-            add({"relay"}, f)
-        elif f.startswith("services/site/"):
-            add({"site"}, f)
-        elif f.startswith(("services/web/", "services/common/")):
-            add({"web", "site"}, f)
-        elif site.match(f):
-            continue  # docs, a root .md, the site workflows: only the lints above read them
-        elif f == ".github/workflows/ci.yml":
+        flags = families([f])
+        for family, jobs in FAMILY_JOBS.items():
+            if flags[family]:
+                add(jobs, f)
+        if all(flags[k] for k in FAMILY_JOBS):
             add(set(JOBS), f)
-        elif f.startswith(".github/workflows/"):
-            continue
-        elif f.startswith(".github/actions/"):
-            add({"ios"}, f)
-        elif f.startswith("scripts/"):
-            for j, text in commands.items():
-                if f in text:
-                    add({j}, f)
-        elif f.startswith("apps/ios/"):
-            add({"ios"}, f)  # finer than the family: the iOS app is not the Mac app
-        elif f.startswith("apps/macos/"):
-            add({"swift", "swift-tests"}, f)
-        else:
-            # The families are scripts/ci-changes.py's, the ones CI's jobs wait on (ov-1021);
-            # a path it does not know reaches all of them.
-            on = {k for k, v in families([f]).items() if v and k in FAMILY_JOBS}
-            for k in on:
-                add(FAMILY_JOBS[k], f)
-            if f.startswith("crates/tailcat/"):
-                add({"tunnel"}, f)
-            elif len(on) == len(FAMILY_JOBS) and not f.startswith(KNOWN_SHARED):
-                add(APP_JOBS, f)  # nothing names this path: every app job, the safe side
-        if ios_relevant(f) and not f.startswith(("services/", ".github/workflows/")) and not site.match(f):
-            add({"ios"}, f)
+        if f.startswith(("services/site/", "services/web/", "services/common/")):
+            add({"site"}, f)
+        if f.startswith("crates/tailcat/"):
+            add({"tunnel"}, f)
     return reach
+
+
+def rust_impact(repo, inputs):
+    """Reuse ov-1116's conservative crate selector without enabling its skips.
+
+    Offline metadata resolves all features/targets, never builds or downloads.
+    Missing metadata or selector evidence keeps the full Rust suite.
+    """
+    if not inputs or any(status not in ("A", "M")
+                         or not re.fullmatch(r"crates/(?!protocol/)[^/]+/(?:src|tests|examples)/.+\.rs", path)
+                         for status, path in inputs):
+        return "full workspace (cross-cutting, deleted or unknown input)"
+    try:
+        shadow = load_module("rust_shadow", repo / "scripts/rust-shadow.py")
+        metadata = subprocess.run(["cargo", "metadata", "--offline", "--locked",
+                                   "--format-version", "1", "--all-features"],
+                                  cwd=repo, capture_output=True, text=True, check=True)
+        import json
+        packages, reasons, full = shadow.select(repo, json.loads(metadata.stdout), inputs)
+        return ("full workspace" if full else ", ".join(packages)) + "; " + "; ".join(reasons)
+    except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as exc:
+        return f"full workspace (impact unavailable: {type(exc).__name__})"
 
 
 # ---------------------------------------------------------------- running
@@ -689,7 +687,8 @@ def main(argv):
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
     ap.add_argument("--landing", action="store_true", help="local landing: parallel families, selected Rust, CI retains release bundle proof")
     ap.add_argument("--workers", type=int, default=4, choices=range(1, 5), help="maximum concurrent landing families (default 4)")
-    ap.add_argument("--base", default="origin/main", help="what the branch is measured against")
+    ap.add_argument("--base", default=os.environ.get("FARCOOLER_BASE") or "origin/main",
+                    help="combined diff base (default: engine FARCOOLER_BASE, else origin/main)")
     ap.add_argument("--worktree", default=str(ROOT), help="the checkout to gate (default: this one)")
     ap.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
     ap.add_argument("--only", default="", help="comma-separated jobs to run (default: every job the diff reaches)")
@@ -728,7 +727,8 @@ def gate(args):
     ctx = make_ctx(repo, tmp, args.base)
     changes = load_module("ci_changes", repo / "scripts" / "ci-changes.py")
     ios_plan = load_module("ios_ui_plan", repo / "scripts" / "ios-ui-plan.py")
-    files = changed_files(repo, args.base)
+    inputs = changed_inputs(repo, args.base)
+    files = sorted({f for _, f in inputs})
 
     plans = {j: steps_for(j, workflows, ctx) for j in JOBS}
     commands = {j: "\n".join(s.run for s in plans[j] if not s.skip) for j in JOBS}
@@ -760,7 +760,13 @@ def gate(args):
         why = reach[j][:3]
         more = f" and {len(reach[j]) - 3} more" if len(reach[j]) > 3 else ""
         print(f"  {j}: {', '.join(why) if why else 'always'}{more}")
+    if "rust" in chosen:
+        print(f"lane-gate: Rust impact: {rust_impact(repo, inputs)}")
+        print("lane-gate: Rust coverage: full CI suite retained (ov-1116 skips disabled)")
+    if not any(j in HEAVY for j in chosen):
+        print("lane-gate: no builds selected")
     if args.dry_run:
+        shutil.rmtree(tmp, ignore_errors=True)
         for j in chosen:
             print(f"\n[{j}]")
             for s in plans[j]:
@@ -1226,28 +1232,28 @@ def _self_test():
     always = {"wire", "doc-comments"}
     expect("docs only: the lints alone", reaches("docs/releasing.md", "README.md"), always)
     expect("a site-proof file: the lints alone", reaches("scripts/site-proof.py"), always)
-    expect("a script nothing names: the lints alone", reaches("scripts/nonexistent-lane-script.sh"), always)
+    expect("an unknown script: full fallback", reaches("scripts/nonexistent-lane-script.sh"), set(JOBS))
     expect("a script a job names reaches that job", "swift-tests" in reaches("scripts/swift-test-guard.sh"), True)
-    expect("... and not the others", "android" in reaches("scripts/swift-test-guard.sh"), False)
+    expect("scripts retain CI coverage", "android" in reaches("scripts/swift-test-guard.sh"), True)
     expect("the nextest wrapper reaches rust", "rust" in reaches("scripts/tmux-leak-check.py"), True)
     expect("relay", reaches("services/relay/src/index.ts"), always | {"relay"})
     expect("site", reaches("services/site/src/index.ts"), always | {"site"})
-    expect("common reaches web and site", reaches("services/common/session.ts"), always | {"web", "site"})
+    expect("common reaches web, site and relay", reaches("services/common/session.ts"), always | {"web", "site", "relay"})
     expect("web", reaches("services/web/src/a.ts"), always | {"web", "site"})
     expect("android", reaches("apps/android/app/src/A.kt"), always | {"android", "relay"})
-    expect("ios", reaches("apps/ios/FarCooler/App.swift"), always | {"ios"})
-    expect("macos", reaches("apps/macos/Sources/x.swift"), always | {"swift", "swift-tests"})
+    expect("ios retains the Apple family", reaches("apps/ios/FarCooler/App.swift"), always | FAMILY_JOBS["apple"])
+    expect("macos retains the Apple family", reaches("apps/macos/Sources/x.swift"), always | FAMILY_JOBS["apple"])
     expect("agentkit reaches the iOS app and the Android tests that read it", reaches("apps/shared/AgentKit/Sources/a.swift"), always | {"swift", "swift-tests", "ios", "android"})
     expect("tailcat reaches the tunnel", "tunnel" in reaches("crates/tailcat/go/a.go"), True)
-    expect("a daemon change reaches every family (ci-changes.py) but not the tunnel or iOS",
-           reaches("crates/daemon/src/git.rs"), always | {"rust", "swift", "swift-tests", "android", "web", "relay"})
+    expect("a daemon change reaches every family (ci-changes.py)",
+           reaches("crates/daemon/src/git.rs"), set(JOBS))
     expect("the JNI crate reaches Android and Rust, not the Mac", reaches("crates/android/src/lib.rs"), always | {"rust", "android"})
-    expect("the CLI crate reaches the Mac and Rust, not Android", reaches("crates/cli/src/main.rs"), always | {"rust", "swift", "swift-tests"})
+    expect("the CLI crate reaches the Mac and Rust, not Android", reaches("crates/cli/src/main.rs"), always | {"rust", "swift", "swift-tests", "ios"})
     expect("core reaches iOS", "ios" in reaches("crates/core/src/lib.rs"), True)
     expect("the lockfile reaches every app job", reaches("Cargo.lock") >= always | APP_JOBS - {"tunnel"}, True)
     expect("ci.yml reaches every job", reaches(".github/workflows/ci.yml"), set(JOBS))
-    expect("another workflow: the lints alone", reaches(".github/workflows/canary.yml"), always)
-    expect("an iOS action", reaches(".github/actions/ios-ui-shard/action.yml"), always | {"ios"})
+    expect("another workflow: full fallback", reaches(".github/workflows/canary.yml"), set(JOBS))
+    expect("an action: full fallback", reaches(".github/actions/ios-ui-shard/action.yml"), set(JOBS))
     expect("an unknown path takes the safe side", reaches("mystery/file.txt") >= always | APP_JOBS, True)
 
     # The diff: commits, uncommitted edits and untracked files all count.

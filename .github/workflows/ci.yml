@@ -153,6 +153,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python3 scripts/macos-rust-tests.py --self-test --check
+      - run: python3 scripts/landing-gate-test.py
       # Reproduce a gate launched by scripts/heavy: private test queues must
       # still lock even though the parent already holds the machine queue.
       - run: HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test

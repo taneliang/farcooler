@@ -24,6 +24,11 @@ class EngineGateTest(unittest.TestCase):
         shutil.copyfile(ROOT / "engine-gate.py", self.f.scripts / "engine-gate.py")
         self.f.git("add", ".")
         self.f.git("commit", "-qm", "engine adapter")
+        # The adapter is a shared input and now correctly selects every suite.
+        # Keep this reuse fixture docs-only by installing it in the base first.
+        self.f.base = self.f.git("rev-parse", "HEAD").strip()
+        (self.f.repo / "README.md").write_text("engine candidate docs\n")
+        self.f.git("commit", "-qam", "engine candidate")
         self.f.env.update(FARCOOLER_BASE=self.f.base,
                           FARCOOLER_CANDIDATE=self.f.git("rev-parse", "HEAD").strip(),
                           FARCOOLER_DEFINITION_PIN="definition", FARCOOLER_POLICY_PIN="policy",
@@ -148,6 +153,8 @@ class EngineGateTest(unittest.TestCase):
         self.f.git("add", ".")
         self.f.git("commit", "-qm", "instrument candidate race")
         self.f.env["FARCOOLER_CANDIDATE"] = self.f.git("rev-parse", "HEAD").strip()
+        # Instrumentation is part of the base; the concurrent edit is docs-only.
+        self.f.env["FARCOOLER_BASE"] = self.f.env["FARCOOLER_CANDIDATE"]
         p = self.invoke(code=1)
         self.assertIn("engine candidate differs from HEAD", p.stderr)
         self.assertFalse(self.f.pointer.exists())
@@ -164,6 +171,8 @@ class EngineGateTest(unittest.TestCase):
         self.f.git("add", ".")
         self.f.git("commit", "-qm", "instrument capture race")
         self.f.env["FARCOOLER_CANDIDATE"] = self.f.git("rev-parse", "HEAD").strip()
+        # Instrumentation is part of the base; the concurrent edit is docs-only.
+        self.f.env["FARCOOLER_BASE"] = self.f.env["FARCOOLER_CANDIDATE"]
         p = self.invoke(code=1)
         self.assertIn("inputs changed before capture", p.stderr)
         self.assertFalse(self.f.pointer.exists())

@@ -226,6 +226,15 @@ jobs, and it exits non-zero if any step fails. It leaves the iOS build and UI
 smoke to `./scripts/ios-ui-tests.sh`, and the web job's Linux downloads to CI;
 both are listed in its output.
 
+The landing gate uses `FARCOOLER_BASE` under the workflow engine, so selection
+covers the combined diff of every folded ticket even if `origin/main` moves.
+An explicit `--base` overrides it. CI's path families are the minimum coverage;
+shared inputs and unclassified paths select everything. Docs and reports under
+`docs/`, `reports/` and `.claude/agent/reports/` run only the cheap checks, without
+queuing a build. Rust changes print the ov-1116 reverse crate closure when
+metadata is available, while retaining CI's full Rust suites, feature checks and
+doctests: the shadow selector's skips remain disabled.
+
 `./scripts/install-git-hooks.sh` installs a `commit-msg` hook that runs the
 doc comment check on every commit. A doc comment you moved on purpose takes a
 `Doc-Comment-Check: moved` trailer in the commit message.
