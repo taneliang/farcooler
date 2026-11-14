@@ -1050,7 +1050,14 @@ async fn a_fold_conflict_isolates_all_bad_tickets_and_keeps_the_healthy_batch_to
         assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok());
     }
     let state = until(&mut runtime, |s| ["ahead", "good-one", "good-two"].iter().all(|t| phase_of(s, t) == Some(Phase::Done))
-        && ["bad-one", "bad-two", "bad-pair"].iter().all(|t| phase_of(s, t) == Some(Phase::Failed))).await;
+        && ["bad-one", "bad-two", "bad-pair"].iter().all(|t| phase_of(s, t) == Some(Phase::WaitingJoin))).await;
+    assert_eq!(outbox(&runtime, StageKind::Build), 9, "each diagnosed ticket rebuilds once");
+    assert_eq!(outbox(&runtime, StageKind::Check), 9, "rebuilt candidates run checks again");
+    for name in ["bad-one", "bad-two", "bad-pair"] {
+        assert!(state.items[name].back_edges.is_empty(), "a conflict spends no join review budget");
+        assert_eq!(state.items[name].iteration, 0);
+        assert!(state.items[name].brief.is_none(), "the rebuild consumed its rebase brief");
+    }
     assert_eq!(outbox(&runtime, StageKind::Fold), 3, "ahead, diagnosis, one healthy fold");
     assert_eq!(outbox(&runtime, StageKind::Run), 2, "one gate for each healthy landing");
     assert_eq!(outbox(&runtime, StageKind::AwaitCi), 2, "one CI watch for each healthy landing");
@@ -1090,7 +1097,9 @@ async fn tickets_that_apply_alone_but_conflict_together_return_the_conflicting_m
         assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok());
     }
     until(&mut runtime, |s| ["first", "tail"].iter().all(|t| phase_of(s, t) == Some(Phase::Done))
-        && ["second", "third"].iter().all(|t| phase_of(s, t) == Some(Phase::Failed))).await;
+        && ["second", "third"].iter().all(|t| phase_of(s, t) == Some(Phase::WaitingJoin))).await;
+    assert_eq!(outbox(&runtime, StageKind::Build), 7, "both conflicting members rebuild");
+    assert_eq!(outbox(&runtime, StageKind::Check), 7, "their checks rerun before joining");
     assert_eq!(outbox(&runtime, StageKind::Fold), 3);
     assert_eq!(outbox(&runtime, StageKind::Run), 2);
     assert_eq!(outbox(&runtime, StageKind::AwaitCi), 2);
