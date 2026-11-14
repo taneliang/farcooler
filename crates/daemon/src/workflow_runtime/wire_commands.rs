@@ -128,7 +128,7 @@ impl Runtime {
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
             | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
-            | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } => mutation,
+            | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } | Action::Landed { mutation, .. } => mutation,
             Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
@@ -309,6 +309,15 @@ impl Runtime {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Phase))?
                     } else {
                         let input = input(Command::SendBack { item:item.clone(),reason:reason.clone() },Grant::Controller);
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
+                    }
+                }
+                Action::Landed { item, run, pin, sha, .. } => {
+                    // The runtime has already read the remote and found `sha` on the target before it got here.
+                    if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
+                    } else {
+                        let input = input(Command::Land { item:item.clone(),commit:sha.clone() },Grant::Controller);
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                     }
                 }

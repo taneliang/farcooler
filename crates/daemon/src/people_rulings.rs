@@ -100,7 +100,7 @@ pub fn member_ruling(method: M) -> Ruling {
         M::WorkspaceSetWorkflow | M::WorkflowSettle | M::WorkflowResolveCancellation | M::WorkflowCutover => Owners(Why::Reshapes),
         M::WorkflowApprove | M::WorkflowReview => Decision,
         M::WorkflowEnqueue | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue
-        | M::WorkflowLeave | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowSendBack | M::WorkflowClose | M::WorkflowReopen
+        | M::WorkflowLeave | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowSendBack | M::WorkflowClose | M::WorkflowLanded | M::WorkflowReopen
         | M::WorkflowPropose | M::WorkflowDrafts | M::WorkflowPause | M::WorkflowResume => Engine,
         M::HostGet
         | M::HostHealth

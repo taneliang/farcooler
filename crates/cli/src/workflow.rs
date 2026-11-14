@@ -106,6 +106,11 @@ pub enum WorkflowCmd {
     SendBack { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
         /// Why, for the agent: what to change. At most 4096 bytes; the first 1500 are in its brief.
         #[arg(long)] reason:String,#[command(flatten)] identity:Identity },
+    /// Close a failed run as landed, when its commit is already on the target branch. The runner reads the remote
+    /// first and refuses a commit that is not on the target there. Taken only while the run is Failed.
+    Landed { workspace:Uuid,item:String,#[arg(long)] run:String,#[arg(long)] pin:String,
+        /// The commit, in full, that the run's work landed as.
+        #[arg(long)] sha:String,#[command(flatten)] identity:Identity },
     /// Reopen a closed ticket: it comes back as a ticket at rest, in --column (todo when left out), under its own name.
     Reopen { workspace:Uuid,item:String,#[arg(long)] column:Option<String>,#[command(flatten)] identity:Identity },
     /// Stream a running engine agent's terminal to stdout, read-only: its picture, then live bytes, until
@@ -164,6 +169,10 @@ impl WorkflowCmd {
                     return Err("The reason must say something, in at most 4096 bytes, with no control characters but tabs and line breaks.".into());
                 }
                 (workspace,Action::SendBack { mutation:identity.mutation(),item,run,pin,reason })
+            }
+            Self::Landed { workspace,item,run,pin,sha,identity } => {
+                if sha.len()!=40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) { return Err("--sha must be the full 40-character commit hash.".into()); }
+                (workspace,Action::Landed { mutation:identity.mutation(),item,run,pin,sha })
             }
             Self::Reopen { workspace,item,column,identity } => (workspace,Action::Reopen { mutation:identity.mutation(),item,column }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
@@ -409,6 +418,20 @@ mod tests {
         assert_eq!(super::request(workspace,&reopen).unwrap().method,"workflow.reopen");
         let (_,reopen)=action(&["reopen","00000000-0000-0000-0000-000000000000","ov-7"]).unwrap();
         assert!(matches!(reopen,Action::Reopen{column:None,..}),"the runner picks the column");
+    }
+    /// ov-1231: `workflow landed` closes a failed run with a full commit hash, as its own method.
+    #[test]
+    fn workflow_landed_travels_as_its_own_method_and_wants_a_full_hash() {
+        let ids=["--command-id","same","--revision","5","--epoch","1","--sequence","2"];
+        let action=|args:&[&str]| { let crate::Command::Workflow(cmd)=crate::Cli::try_parse_from(["farcooler","workflow"].iter().chain(args).chain(&ids)).unwrap().command else {panic!()}; cmd.action() };
+        let sha="73974f89898d716c36595eade2511ba5f8df7a8f";
+        let landed=["landed","00000000-0000-0000-0000-000000000000","ov-7","--run","run","--pin","pin","--sha"];
+        let (workspace,sent)=action(&[&landed[..],&[sha]].concat()).unwrap();
+        let request=super::request(workspace,&sent).unwrap();
+        assert_eq!(request.method,"workflow.landed");
+        let Some(request::Payload::WorkflowCommand(body))=request.payload else {panic!()};
+        assert_eq!(body.json,format!(r#"{{"action":"Landed","mutation":{{"id":"same","revision":5,"epoch":1,"sequence":2}},"item":"ov-7","run":"run","pin":"pin","sha":"{sha}"}}"#));
+        for bad in ["73974f8","not-a-hash-not-a-hash-not-a-hash-not-a-hash"] { assert!(action(&[&landed[..],&[bad]].concat()).is_err(),"{bad:?}"); }
     }
     /// ov-966: `--model <step>=<model>` picks a step's model at Start, once per step.
     #[test]

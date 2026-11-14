@@ -825,6 +825,12 @@ impl Runtime {
                     let get = matches!(*action, farcooler_protocol::workflow_commands::Action::Get);
                     let mut result = if let farcooler_protocol::workflow_commands::Action::Settle { mutation, item, run, pin, landed } = &*action {
                         self.settle_wire(&admission.workspace(), item, run, pin, *landed, mutation.epoch).await?
+                    } else if let farcooler_protocol::workflow_commands::Action::Landed { item, run, pin, sha, .. } = &*action {
+                        // The remote is read before anything is written: a commit it does not hold lands nothing.
+                        match self.landed_check(&admission.workspace(), item, run, pin, sha).await? {
+                            Some(why) => serde_json::json!({ "schema": 1, "receipt": { "result": { "Err": why } } }),
+                            None => self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, tree)?,
+                        }
                     } else {
                         self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, wire_commands::Prepared { tree, close_verified })?
                     };
@@ -979,6 +985,8 @@ mod coding_pr_tests;
 mod gate_tests;
 #[cfg(test)]
 mod send_back_tests;
+#[cfg(test)]
+mod landed_tests;
 #[cfg(test)]
 mod fold_trees_tests;
 #[cfg(test)]

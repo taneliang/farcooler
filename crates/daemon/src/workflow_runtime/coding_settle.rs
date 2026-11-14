@@ -1,6 +1,7 @@
 //! A person's word on a push whose outcome the runtime lost (ov-956).
 use super::*;
 use super::coding::sha;
+use super::coding::sha as sha_ok;
 
 impl Runtime {
     /// The wire's Settle: the reply is a receipt-shaped answer, but no engine state is written, so a
@@ -16,6 +17,25 @@ impl Runtime {
         };
         Ok(serde_json::json!({ "schema": 1, "receipt": { "result": match answer {
             Ok(()) => serde_json::json!({ "Ok": null }), Err(why) => serde_json::json!({ "Err": why }) } } }))
+    }
+    /// Whether a Failed run may close as landed with `sha` (ov-1231): `None` to go on, or the sentence that refuses.
+    /// The run must be the one named and Failed; the commit must be an ancestor of the target on the remote, read
+    /// now. A remote that cannot be read is an error, never a "no", and a run in any other phase is left to the
+    /// reducer to refuse, so no network read is spent on it.
+    pub(super) async fn landed_check(&self, workspace: &str, item_id: &str, run: &str, pin: &str, sha: &str) -> Result<Option<String>> {
+        let Some(state) = self.state(workspace)? else { return Ok(None) };
+        let Some(item) = state.items.get(item_id).filter(|i| i.run == run && i.pin == pin && i.phase == Phase::Failed) else { return Ok(None) };
+        if !sha_ok(sha) { return Ok(None); }
+        let mut exec = self.exec.clone();
+        if self.service_mode {
+            let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
+            exec.coding = bundle.adapter.map(|farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config)| config);
+            exec.base = exec.coding.as_ref().map_or_else(|| "0".repeat(40), |c| c.base.clone());
+        }
+        let identity = exec.landing()?;
+        let log = exec.root.join("receipts").join(format!("{}.landed.fetch.output", digest(&(workspace, item_id, run, sha))));
+        Ok(if exec.on_target(identity, &sha.to_ascii_lowercase(), &log).await? { None }
+            else { Some("The commit is not on the target branch on the remote.".to_string()) })
     }
     /// A person's word on an uncertain push, believed only after the remote is read: `landed` needs the
     /// pushed commit on the target and `not landed` needs it absent. The word is written as the push's own

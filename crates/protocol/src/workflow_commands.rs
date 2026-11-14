@@ -59,6 +59,9 @@ pub enum Action {
     /// Send a run back to its last build step, which starts again in the same worktree and is told `reason`
     /// (ov-968). Taken while the run waits (for a review, an approval or its landing group) or has failed.
     SendBack { mutation: Mutation, item: String, run: String, pin: String, reason: String },
+    /// Close a Failed run as landed with `sha`, a commit already on the target branch. The runner reads the remote
+    /// first and refuses a commit that is not an ancestor of the target there (ov-1231).
+    Landed { mutation: Mutation, item: String, run: String, pin: String, sha: String },
     /// Reopen a closed ticket: it comes back under the engine as a ticket at rest in `column` (`todo` when left
     /// out), under its own name, so its history stays in one place (ov-968).
     Reopen { mutation: Mutation, item: String, #[serde(default, skip_serializing_if = "Option::is_none")] column: Option<String> },
@@ -93,6 +96,7 @@ impl Action {
             Self::Drafts { .. } => "workflow.drafts",
             Self::SendBack { .. } => "workflow.send_back",
             Self::Reopen { .. } => "workflow.reopen",
+            Self::Landed { .. } => "workflow.landed",
         }
     }
 }
