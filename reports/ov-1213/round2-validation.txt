@@ -1,0 +1,41 @@
+ov-1213 fix round 2; base bfe99f5248d5a18c4743ca5c1b94f573e416d6c2
+Commands: README.md, Reproduction section.
+
+Rust nextest
+     Summary [ 192.157s] 2005 tests run: 2005 passed, 3733 skipped
+
+Shared Swift Plan
+✔ Test run with 178 tests in 33 suites passed after 0.524 seconds.
+
+Mac Plan
+✔ Test run with 37 tests in 5 suites passed after 5.714 seconds.
+
+iOS PhonePlanColumn
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testAnAgentOpensItsTicketWhenItHasNoPane]' passed (24.675 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testAnAgentWithAPaneOpensItsChat]' passed (27.422 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testANeedsYouRowDraftsIntoTheOrchestrator]' passed (17.000 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testARunnerWithNoPlanKeepsItsOldScreen]' passed (10.934 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testATicketOpensItsTask]' passed (26.777 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testCaptures]' skipped (0.055 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testItHoldsAtTheLargestAccessibilityTypeSize]' passed (242.431 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testLandingQueueWithLongTitles]' passed (20.543 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testTheMoreLineOpensItsListAndARowOpensItsTask]' passed (22.417 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testThePlanReadsInOrder]' passed (57.772 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testTicketsStayOutsideTheRosterAndKeysAreMonospaced]' passed (168.412 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testUnassignedTicketsOpenTheirStageList]' passed (47.036 seconds).
+Test Case '-[FarCoolerUITests.PhonePlanColumnUITests testWaitingFooterOpensItsTickets]' passed (52.135 seconds).
+	 Executed 13 tests, with 1 test skipped and 0 failures (0 unexpected) in 717.609 (717.623) seconds
+	 Executed 13 tests, with 1 test skipped and 0 failures (0 unexpected) in 717.609 (717.625) seconds
+	 Executed 13 tests, with 1 test skipped and 0 failures (0 unexpected) in 717.609 (717.627) seconds
+** TEST SUCCEEDED **
+  13 collected, 1 skipped, 12 actually ran
+OK: 12 test(s) executed.
+
+Static verification
+94/94 range-diff entries patch-identical; complete messages, authors and author dates preserved.
+Old-candidate-to-rebased-tip and old-main-to-current-main stable patch IDs:
+81451e6f1dc97cb79ece18b9611ffdb1943c110e
+Final fetch: bfe99f5248d5a18c4743ca5c1b94f573e416d6c2; ancestor of HEAD.
+git diff --check origin/main: passed.
+doc-comment-check.py --base origin/main --head HEAD: passed.
+file-size-budget.py: ok, 2120 files, 27 grandfathered.

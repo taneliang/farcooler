@@ -1,7 +1,9 @@
 # ov-1213: waiting engine stack on main
 
-Base: `73974f89898d716c36595eade2511ba5f8df7a8f` (short identity `73974f898`; see `git rev-parse origin/main`).
-Remote main was fetched before integration and matched the starting branch.
+Current base: `bfe99f5248d5a18c4743ca5c1b94f573e416d6c2` (short identity `bfe99f524`).
+Fix round 2 rebased all 94 stack commits onto freshly fetched `origin/main`.
+The initial integration and fix round 1 used `73974f898`; that base is historical,
+not current main. See the fix round 2 audit below for fresh validation.
 All twelve tickets are included. No ticket was forced through an unresolved conflict.
 The original branches were left untouched. Cherry-picks retain authors, author dates,
 and messages; rewritten commits cannot retain their original signatures. The source
@@ -9,20 +11,20 @@ stack tips are unsigned. No formatter or prohibited Git cleanup command was run.
 
 ## Application and conflicts
 
-| Ticket | Source branch / tip | Conflicts and resolution |
-| --- | --- | --- |
-| ov-1154 | `ov-1154-engine-stack` / `df098ece0` | Applied shared preview prerequisites, then its engine stack in original order. Truthful phases conflicted in `workflow_runtime.rs`: retained main's places and pool-bearing running effects while adding activity scopes. Failure-log reads conflicted in `wire_commands.rs`: retained places and added logs. Script decisions and automatic starts conflicted in runtime/service constructors and admission: retained main's separate agent/landing/work pools, scheduler state and scheduling calls; decision effects keep their existing no-slot behavior. Retained the empty ov-1142 checkpoint. |
-| ov-1155 | `ov-1155-apps-stack` / `6c0eea202` | Board closes and landing diagnostics overlapped engine fields and command matches in CLI, store, reducer, state and tests. Kept close, decision and refresh commands, all optional fields and both regression suites. Combined gate-output fixture diagnostics. App files otherwise applied without conflict. |
-| ov-1164 | `ov-1164-engine-waits-fix` / `1230437df` | Runtime clocks, admission wrapper and publication refresh overlapped wait lifetime changes: retained pool reporting, current workspace refresh and scheduling, added wait clocks, retaining the tokio clock for continuous admission and the elapsed real clock for one-shot wait lifetimes. Reducer retained hook counters and decision timing exclusions with stage patience. Cherry-pick infrastructure detection moved into the stack's extracted `pick_member`, retaining batch diagnosis and safe retries. Gate supervision retained bounded stream capture and incoming pre-spawn retry-safe errors. Both test sets retained. Merge `5fffa41cf` has no delta against its second parent, so its main ancestry was not replayed; its author, date and message are retained as an empty checkpoint. An initial ancestry enumeration also included main's adoption commits, producing duplicate conflicts in `workflow_service/adopt.rs` and `reports/ov-1074/report.md`; that attempt was aborted and those already-landed ancestors excluded before applying the unique wait fixes. |
-| ov-1146 | `ov-1146-gate-output-rebased` / `d378f70a9` | Already carried as the eight engine-stack commits `a5824b1a8..6cf9ca72e`; not applied twice. `git cherry` plus range-diff identifies changed patch IDs from the earlier stack's execution-tracking adaptations. New-main log-read overlap resolved under ov-1154 above. |
-| ov-1153 | `ov-1153-script-hooks-rebased` / `e70363f0d` | Already carried as six engine-stack commits `d5527c5ed..1e27b3719`; retained the stack's optional group-limit adaptations. New-main pool overlap resolved under ov-1154. |
-| ov-1147 | `ov-1147-auto-start-rebased` / `2dd82817c` | Already carried as ten engine-stack commits `37885efc7..d60e1f581`; retained runner-wide persisted admission and scheduling regressions. Kept main's effect pools alongside published ticket admission. |
-| ov-1142 | `ov-1142-waiting-groups-rebased` / `724cea500` | Already carried as seven engine-stack commits `1f512b0d1..58cb262ba`, including empty checkpoint and reviewed consolidation fixes. Main's ov-1148 join-conflict/rebase behavior retained alongside diagnosed-member handling. |
-| ov-1139 | `ov-1139-board-writes-refuse` / `50213f05d` | Already carried by the app stack as `4508639a5` and `f0ef1f35d`. Combined close fields and command matches with engine hook/refresh state; kept both send-back and close regression cases. |
-| ov-1145 | `ov-1145-queue-view-rebased` / `313b88374` | Already carried by the app stack as eight commits `2db79fb54..3f6ca190b` plus reviewed fixture adaptations. Combined diagnostics, execution and hook state; retained both queue and batching tests. Mac/iOS Plan-column changes applied without textual conflicts. |
-| ov-1152 | `ov-1152-truthful-phases-rebased` / `8439797e4` | Its complete tree delta is already in preview `3d56dac4c` (the only tree differences from that source tip belong to the preceding ov-1151 preview). Did not duplicate its code changes. Retained the five original commit messages, authors and dates, plus the main-merge checkpoint, as empty equivalence commits because the preview already carries their complete content. Combined activity tracking with places, later shared those observations with the lightweight reader. |
-| ov-1159 | `ov-1159-light-workflow-get` / `3703f2847` | Three unique implementation commits applied; investigation source already on main. `wire_commands.rs` conflicted with prepared closes, execution snapshots, failure logs and places. Kept all in the extracted reader. Shared activities and places through cloned Exec so the off-inbox read still reports live facts. |
-| ov-1203 | `ov-1203-free-build-output` / `d73dccd58` | Added cleanup fields alongside script/admission limits throughout definitions and fixtures; retained both modules. Kept reader extraction with cleanup status, process-log pruning alongside build release, and shared observation fields alongside active-tree tracking. Combined scheduling Tick and CleanupRetry events and constructors. A previous tree-removal assertion now requires the source tree to remain, while still verifying recovered conflict evidence. |
+| Ticket | Source branch / tip | Initial conflicts and resolution | Round 2 onto `bfe99f524` |
+| --- | --- | --- | --- |
+| ov-1154 | `ov-1154-engine-stack` / `df098ece0` | Applied shared preview prerequisites, then its engine stack in original order. Truthful phases conflicted in `workflow_runtime.rs`: retained main's places and pool-bearing running effects while adding activity scopes. Failure-log reads conflicted in `wire_commands.rs`: retained places and added logs. Script decisions and automatic starts conflicted in runtime/service constructors and admission: retained main's separate agent/landing/work pools, scheduler state and scheduling calls; decision effects keep their existing no-slot behavior. Retained the empty ov-1142 checkpoint. | Clean replay; no additional conflicts. |
+| ov-1155 | `ov-1155-apps-stack` / `6c0eea202` | Board closes and landing diagnostics overlapped engine fields and command matches in CLI, store, reducer, state and tests. Kept close, decision and refresh commands, all optional fields and both regression suites. Combined gate-output fixture diagnostics. App files otherwise applied without conflict. | Clean replay; no additional conflicts. |
+| ov-1164 | `ov-1164-engine-waits-fix` / `1230437df` | Runtime clocks, admission wrapper and publication refresh overlapped wait lifetime changes: retained pool reporting, current workspace refresh and scheduling, added wait clocks, retaining the tokio clock for continuous admission and the elapsed real clock for one-shot wait lifetimes. Reducer retained hook counters and decision timing exclusions with stage patience. Cherry-pick infrastructure detection moved into the stack's extracted `pick_member`, retaining batch diagnosis and safe retries. Gate supervision retained bounded stream capture and incoming pre-spawn retry-safe errors. Both test sets retained. Merge `5fffa41cf` has no delta against its second parent, so its main ancestry was not replayed; its author, date and message are retained as an empty checkpoint. An initial ancestry enumeration also included main's adoption commits, producing duplicate conflicts in `workflow_service/adopt.rs` and `reports/ov-1074/report.md`; that attempt was aborted and those already-landed ancestors excluded before applying the unique wait fixes. | Clean replay; no additional conflicts. |
+| ov-1146 | `ov-1146-gate-output-rebased` / `d378f70a9` | Already carried as the eight engine-stack commits `a5824b1a8..6cf9ca72e`; not applied twice. `git cherry` plus range-diff identifies changed patch IDs from the earlier stack's execution-tracking adaptations. New-main log-read overlap resolved under ov-1154 above. | Clean replay; no additional conflicts. |
+| ov-1153 | `ov-1153-script-hooks-rebased` / `e70363f0d` | Already carried as six engine-stack commits `d5527c5ed..1e27b3719`; retained the stack's optional group-limit adaptations. New-main pool overlap resolved under ov-1154. | Clean replay; no additional conflicts. |
+| ov-1147 | `ov-1147-auto-start-rebased` / `2dd82817c` | Already carried as ten engine-stack commits `37885efc7..d60e1f581`; retained runner-wide persisted admission and scheduling regressions. Kept main's effect pools alongside published ticket admission. | Clean replay; no additional conflicts. |
+| ov-1142 | `ov-1142-waiting-groups-rebased` / `724cea500` | Already carried as seven engine-stack commits `1f512b0d1..58cb262ba`, including empty checkpoint and reviewed consolidation fixes. Main's ov-1148 join-conflict/rebase behavior retained alongside diagnosed-member handling. | Clean replay; no additional conflicts. |
+| ov-1139 | `ov-1139-board-writes-refuse` / `50213f05d` | Already carried by the app stack as `4508639a5` and `f0ef1f35d`. Combined close fields and command matches with engine hook/refresh state; kept both send-back and close regression cases. | Clean replay; no additional conflicts. |
+| ov-1145 | `ov-1145-queue-view-rebased` / `313b88374` | Already carried by the app stack as eight commits `2db79fb54..3f6ca190b` plus reviewed fixture adaptations. Combined diagnostics, execution and hook state; retained both queue and batching tests. Mac/iOS Plan-column changes applied without textual conflicts. | Clean replay; no additional conflicts. |
+| ov-1152 | `ov-1152-truthful-phases-rebased` / `8439797e4` | Its complete tree delta is already in preview `3d56dac4c` (the only tree differences from that source tip belong to the preceding ov-1151 preview). Did not duplicate its code changes. Retained the five original commit messages, authors and dates, plus the main-merge checkpoint, as empty equivalence commits because the preview already carries their complete content. Combined activity tracking with places, later shared those observations with the lightweight reader. | Clean replay; no additional conflicts. |
+| ov-1159 | `ov-1159-light-workflow-get` / `3703f2847` | Three unique implementation commits applied; investigation source already on main. `wire_commands.rs` conflicted with prepared closes, execution snapshots, failure logs and places. Kept all in the extracted reader. Shared activities and places through cloned Exec so the off-inbox read still reports live facts. | Clean replay; no additional conflicts. |
+| ov-1203 | `ov-1203-free-build-output` / `d73dccd58` | Added cleanup fields alongside script/admission limits throughout definitions and fixtures; retained both modules. Kept reader extraction with cleanup status, process-log pruning alongside build release, and shared observation fields alongside active-tree tracking. Combined scheduling Tick and CleanupRetry events and constructors. A previous tree-removal assertion now requires the source tree to remain, while still verifying recovered conflict evidence. | Clean replay; no additional conflicts. |
 
 The ov-1150 preview becomes empty on main and was skipped; ov-1148's preview
 is patch-equivalent to main and was skipped. Other shared preview prerequisites
@@ -31,7 +33,12 @@ remaining positive patch IDs in already-consolidated tickets were compared with
 the corresponding preserved stack commits, rather than replaying older versions
 of those same changes over their reviewed adaptations.
 
-## Validation
+Commit identities in the initial-resolution column refer to the pre-round-2
+stack. [round2-range-diff.txt](round2-range-diff.txt) maps all 94 commits to their
+rebased identities; every entry is patch-identical (`=`), including the empty
+checkpoints. All original subjects, authors, author dates and messages are kept.
+
+## Initial validation (historical)
 
 - Shared Swift Plan selection: 178 tests in 33 suites passed.
 - Web Plan, API and recovery selection: 68 tests in 7 files passed.
@@ -45,10 +52,10 @@ of those same changes over their reviewed adaptations.
 - Workflow (188), CLI (695), store (658), and affected client Plan/presentation (69) cases all passed in the complete Rust selection. Final daemon selection: 447 passed, zero failures, including all 395 workflow-runtime cases plus affected file-watch and summary tests.
 - The three ov-1159 status-offload regressions passed separately (3/3).
 - iOS PhonePlanColumn: exit 0, 13 collected, 1 optional screenshot-capture skip, 12 actually executed, zero failures (699.821 seconds). This includes the long-title landing queue and largest accessibility text-size cases. All three simulator XCFrameworks were built from this worktree before Xcode built and tested the app on the leased iPhone 17 simulator (SDK 27.1). The job waited for the repository's machine-wide heavy-job lock and retained its device lease and nonzero-execution check.
-- Remote main was fetched again after all validation and still resolved to `73974f898`; it remains an ancestor of this branch. No changes to `docs/jobs-to-be-done.md` or
+- At the initial validation checkpoint, remote main still resolved to `73974f898`; it remains an ancestor of this branch, but is no longer current main. No changes to `docs/jobs-to-be-done.md` or
 `docs/superpowers/`. `git diff --check origin/main...HEAD` passed; the final worktree is clean after committing this report.
 
-All four acceptance items are met: the twelve tickets are included on current main, the requested test selections pass, the per-ticket conflict table is above, and no ticket was omitted or forced through an unresolved conflict.
+At the initial validation checkpoint, all four acceptance items were recorded as met: the twelve tickets are included on current main, the requested test selections pass, the per-ticket conflict table is above, and no ticket was omitted or forced through an unresolved conflict.
 
 ## Fix round 1 audit
 
@@ -57,7 +64,7 @@ history. The history records the return from review to in progress but contains
 no reviewer note or requested correction. The workflow evidence read was refused
 with `scope-denied: known caller required`.
 
-Fetched `origin/main` again: it remains `73974f898`, an ancestor of this branch.
+At the fix round 1 checkpoint, fetched `origin/main` resolved to `73974f898`, an ancestor of this branch. This observation is superseded by fix round 2 below.
 Rechecked `git cherry` for all twelve recorded source tips. Every remaining
 non-equivalent patch has its original subject represented on this branch except
 the already-empty ov-1150 prerequisite described above. Main's `places.rs` is
@@ -90,6 +97,50 @@ Fresh validation:
   zero failures. No app or production files changed in this round.
 - `git diff --check origin/main...HEAD` passed.
 - The doc-comment and file-size checks passed.
+
+## Fix round 2 audit
+
+The newest ticket finding identified that candidate `dcdea01d3` lacked nine
+commits from current main, including ov-1160, ov-1181 and ov-1180. Fetched
+`origin/main` and rebased the clean worktree with
+`git rebase --no-autostash --empty=keep origin/main` onto
+`bfe99f5248d5a18c4743ca5c1b94f573e416d6c2`.
+
+All 94 commits replayed without conflicts. No ticket was omitted. The per-ticket
+table above now records this round separately from the initial conflict
+resolutions. The range-diff records 94 patch-identical entries, and an independent
+metadata comparison verified all 94 complete commit messages, authors and author
+dates. The rebased stack tip before this report is `d07d4327c`.
+
+The complete delta from the old candidate to that rebased tip is exactly the nine
+new main commits: `git diff dcdea01d3 d07d4327c` and
+`git diff 73974f898 bfe99f524` have the same stable patch ID
+(disregarding shifted context line numbers and blob identities). Main's effect
+`places.rs` and the protected documentation paths have no delta against main.
+Main's ov-1148 join-conflict behavior and the stack's reviewed adaptations remain
+unchanged; all daemon workflow-runtime tests pass. No production or fixture
+changes were needed in this round.
+
+Fresh validation on the rebased branch, using the reproduction commands below:
+
+- Rust: **2,005/2,005 passed**, zero failures, in 192.157 seconds: workflow 188,
+  daemon workflow-runtime 395, CLI 695, store 658, client Plan/presentation 69.
+  The 3,733 other cases were excluded by the targeted selection.
+- Shared Swift Plan: **178 tests in 33 suites passed**.
+- Mac native libraries rebuilt successfully; Plan selection:
+  **37 tests in 5 suites passed**.
+- All three iOS simulator XCFrameworks rebuilt successfully; PhonePlanColumn:
+  **13 collected, 1 optional capture skip, 12 executed, zero failures**, exit 0,
+  in 717.609 seconds. This includes largest accessibility text, long-title
+  landing queue, navigation and roster cases on the leased iPhone 17 simulator.
+  The script's nonzero-execution guard passed.
+- Final fetch still resolved to `bfe99f524`; `git merge-base --is-ancestor
+  origin/main HEAD` passed. Whitespace, doc-comment and file-size checks passed.
+
+All four acceptance items are met on this base. No ticket was excluded, no
+additional conflict resolution was required, and no formatter or prohibited Git
+command was used. [round2-validation.txt](round2-validation.txt) retains the
+fresh test summaries; full local logs are `/tmp/ov-1213-round2-*.log`.
 
 ## Reproduction
 
