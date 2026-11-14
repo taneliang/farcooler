@@ -1,5 +1,35 @@
 # ov-1183: Swift CI under 15 minutes
 
+## Landing-gate follow-up
+
+Rebased the clean worktree onto origin/main with `--no-autostash` before
+this fix. The toolchain steps write their cache key to `GITHUB_OUTPUT`, but
+lane-gate supplied only `GITHUB_ENV` and `GITHUB_PATH`. It now creates and
+empties a separate output file for each step, using the same temporary-file
+lifecycle as the other runner files. The self-test verifies the file exists,
+accepts a cache-key write, retains that output, and starts empty on the next
+step. All three regression assertions failed before the fix; the complete
+`HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test` passes afterward.
+The host's `/usr/local/bin/python3` cannot execute, so validation prepended
+`/usr/bin:/bin:/usr/sbin:/sbin` to PATH.
+
+A foreground run through lane-gate's `steps_for` and `run_one_job` executed
+the actual first three run steps of each Swift job, without stubs:
+
+| Job | Opening step | Result |
+| --- | --- | --- |
+| swift | Xcode 27 check and toolchain cache-key output | pass |
+| swift | Swift cache self-test, timestamp restoration and index refresh | pass |
+| swift | Resolve channel app name through GITHUB_ENV | pass |
+| swift-tests | Xcode 27 check and toolchain cache-key output | pass |
+| swift-tests | Swift cache self-test, timestamp restoration and index refresh | pass |
+| swift-tests | Mac test wrapper integration checks | pass |
+
+This was an opening-step partial gate, not a new full build or timing run.
+Logs are in `/tmp/ov-1183-opening-gate-logs`. The two qualifying release CI
+runs below remain the timing evidence. Swift test cache/build comments now
+describe the shared dev-profile native graph and staged libraries.
+
 ## Fix round 1: restore required release coverage
 
 Review correctly rejected the debug bundle measurements below: they do not

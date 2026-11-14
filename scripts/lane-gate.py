@@ -504,9 +504,11 @@ def job_env(job):
 
 def run_step(step, repo, env, logdir, tmp, fail_fast=False):
     gh_env, gh_path = tmp / "github_env", tmp / "github_path"
+    gh_output = tmp / "github_output"
     gh_env.write_text("")
     gh_path.write_text("")
-    e = {**env, **step.env, "GITHUB_ENV": str(gh_env), "GITHUB_PATH": str(gh_path)}
+    gh_output.write_text("")
+    e = {**env, **step.env, "GITHUB_ENV": str(gh_env), "GITHUB_PATH": str(gh_path), "GITHUB_OUTPUT": str(gh_output)}
     cwd = repo / step.cwd if step.cwd else repo
     log = logdir / f"{step.job}-{abs(hash(step.run)) % 10**8}.log"
     started = time.time()
@@ -1262,6 +1264,14 @@ def _self_test():
         expect("a missing working directory is a FAIL row, not a FileNotFoundError", (row[0].startswith("FAIL: working directory"), row[3]), (True, False))
         row = run_step_safely(Step("x", "ok", "true\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
         expect("a step that passes still passes", (row[0], row[3]), ("pass", True))
+        output_step = Step("x", "output", 'test -f "$GITHUB_OUTPUT"\necho "cache-key=toolchain" >> "$GITHUB_OUTPUT"\n')
+        row = run_step_safely(output_step, t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a step can write GITHUB_OUTPUT", (row[0], row[3]), ("pass", True))
+        expect("GITHUB_OUTPUT retains the step's output", (t / "github_output").read_text() if (t / "github_output").exists() else None,
+               "cache-key=toolchain\n")
+        row = run_step_safely(Step("x", "fresh output", 'test -f "$GITHUB_OUTPUT" && test ! -s "$GITHUB_OUTPUT"\n'),
+                              t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("each step gets an empty GITHUB_OUTPUT file", (row[0], row[3]), ("pass", True))
         noisy = "echo 'test-leak-check: note: 2 new entries appeared in /x' >&2\n"
         expect("a leak note shows in a real run's Result", "leak note" in run_step_safely(Step("x", "n", noisy), t, {"PATH": "/usr/bin:/bin"}, logs, t)[0], True)
         expect("... and not in a self-test's", "leak note" in run_step_safely(Step("x", "n", noisy + "# --self-test\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)[0], False)

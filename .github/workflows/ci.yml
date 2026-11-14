@@ -1016,6 +1016,8 @@ jobs:
           # `version.sh` for the build number, so this is only for parity.
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+      # Cache both FFI libraries and the CLI/daemon/filter in the dev-profile
+      # feature graph build-test-native.sh and the Mac wrapper share (ov-1183).
       - uses: Swatinem/rust-cache@v2
         with:
           # Release `-p farcooler-vt -p farcooler-client` plus the Mac tests' dev
@@ -1101,10 +1103,10 @@ jobs:
       # `Package.resolved`, and a dirty tree makes `scripts/version.sh channel`
       # answer `local` — every step above that asks it must have asked already.
       #
-      # It needs the `target/release` static libraries and the debug CLI and
-      # daemon, which `apps/macos/test.sh` builds itself now that `build-app.sh`
-      # runs in the other job (ov-301): the Rust cores, `cargo build --bins` and
-      # a debug `swift build`, about five minutes before the tests start.
+      # build-test-native.sh stages the dev-profile static libraries under
+      # target/release for Swift's linker and leaves the CLI/daemon/filter in
+      # target/debug. test.sh revalidates those same targets before building
+      # and partitioning the Swift tests, reusing the prepared native artifacts.
       # RenderBenchTests asserts nothing and stays silent unless
       # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
       #
