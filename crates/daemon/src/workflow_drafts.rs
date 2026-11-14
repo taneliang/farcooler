@@ -182,6 +182,47 @@ pub fn refuse_on_card(svc: &Service, card: Uuid, kind: Option<NoteKind>, extra: 
     Ok(())
 }
 
+/// Compare every field, including fields the prose summary does not interpret. Environment values are never
+/// exposed on a card, but a change to one is still visible. Paths and values are escaped for display.
+pub(crate) fn bundle_diff(before: Option<serde_json::Value>, after: serde_json::Value) -> String {
+    fn walk(path: &str, old: Option<&serde_json::Value>, new: Option<&serde_json::Value>, secret: bool, lines: &mut Vec<String>) {
+        if old == new { return; }
+        let objects = old.and_then(|v| v.as_object()).is_some() || new.and_then(|v| v.as_object()).is_some();
+        if objects && old.is_none_or(|v| v.is_object()) && new.is_none_or(|v| v.is_object()) {
+            let mut keys = std::collections::BTreeSet::new();
+            if let Some(m) = old.and_then(|v| v.as_object()) { keys.extend(m.keys()); }
+            if let Some(m) = new.and_then(|v| v.as_object()) { keys.extend(m.keys()); }
+            if keys.is_empty() { lines.push(format!("- {}: {} → {}", workflow_summary::code(path), if old.is_some() { "{}" } else { "(absent)" }, if new.is_some() { "{}" } else { "(absent)" })); }
+            for key in keys {
+                walk(&format!("{path}/{}", key.replace('~', "~0").replace('/', "~1")), old.and_then(|v| v.get(key)), new.and_then(|v| v.get(key)), secret || key == "environment", lines);
+            }
+        } else if (old.is_none_or(|v| v.is_array()) && new.is_none_or(|v| v.is_array())) && (old.is_some_and(|v| v.is_array()) || new.is_some_and(|v| v.is_array())) {
+            let len = old.and_then(|v| v.as_array()).map_or(0, Vec::len).max(new.and_then(|v| v.as_array()).map_or(0, Vec::len));
+            if len == 0 { lines.push(format!("- {}: {} → {}", workflow_summary::code(path), if old.is_some() { "[]" } else { "(absent)" }, if new.is_some() { "[]" } else { "(absent)" })); }
+            for i in 0..len { walk(&format!("{path}/{i}"), old.and_then(|v| v.get(i)), new.and_then(|v| v.get(i)), secret, lines); }
+        } else {
+            fn redact(v: &mut serde_json::Value) {
+                match v {
+                    serde_json::Value::Object(m) => for (key, value) in m {
+                        if key == "environment" { *value = serde_json::json!("(hidden)"); } else { redact(value); }
+                    },
+                    serde_json::Value::Array(a) => for value in a { redact(value); },
+                    _ => (),
+                }
+            }
+            let show = |v: Option<&serde_json::Value>| match v {
+                None => "(absent)".to_string(),
+                Some(_) if secret => "(hidden)".to_string(),
+                Some(v) => { let mut v = v.clone(); redact(&mut v); workflow_summary::code(&v.to_string()) },
+            };
+            lines.push(format!("- {}: {} → {}", workflow_summary::code(path), show(old), show(new)));
+        }
+    }
+    let mut lines = Vec::new();
+    walk("", before.as_ref(), Some(&after), false, &mut lines);
+    if lines.is_empty() { "- No fields changed.".into() } else { lines.join("\n") }
+}
+
 /// File a proposal and ask a person. Returns the draft, already pending on its card.
 pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, reason: &str, definition: Definition, adapter: AdapterConfiguration) -> Result<Draft> {
     // A member-led orchestrator reads `workflow.get` with every environment value hidden; proposing that back would
@@ -197,7 +238,9 @@ pub fn propose(svc: &Service, watcher: &crate::watch::Watcher, workspace: Uuid, 
     crate::workflow_deciders::refuse_unknown(&svc.store, &definition).map_err(|_| DomainError::InvalidArgument { what: "decider" })?;
     let current = svc.store.workflow_configuration(&workspace.to_string()).map_err(|_| DomainError::OperationFailed)?;
     let bundle = crate::landing_templates::Bundle { definition, adapter };
-    let summary = workflow_summary::summarize(reason, &bundle, current.as_ref().map(|c| &c.definition), current.as_ref().and_then(|c| c.adapter.as_ref()));
+    let before = current.as_ref().map(|c| serde_json::json!({"definition": c.definition, "adapter": c.adapter}));
+    let after = serde_json::to_value(&bundle).map_err(|_| DomainError::OperationFailed)?;
+    let summary = format!("{}\n- Field changes (environment values hidden):\n{}", workflow_summary::summarize(reason, &bundle, current.as_ref().map(|c| &c.definition), current.as_ref().and_then(|c| c.adapter.as_ref())), bundle_diff(before, after));
     let crate::landing_templates::Bundle { definition, adapter } = bundle;
     let digest = content_digest(&definition, &adapter, &summary);
     let draft = Draft { id: Uuid::now_v7().simple().to_string()[20..].to_string(), workspace, task: None, state: State::Pending,
@@ -398,5 +441,17 @@ mod title_tests {
         let t = super::card_title("x/a\n\u{202e}Approve now `y`");
         assert!(!t.contains('\n') && !t.contains('\u{202e}') && !t.contains("`y`"), "{t}");
         assert!(t.starts_with("Workflow: approve ") && t.contains("\\n") && t.contains("\\u{202e}"), "{t}");
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    #[test]
+    fn field_diff_shows_arbitrary_changes_without_environment_values() {
+        let old = serde_json::json!({"definition":{"wait":12,"jobs":[1,2]},"adapter":{"environment":{"TOKEN":"old-secret"}}});
+        let new = serde_json::json!({"definition":{"wait":8,"jobs":[1,3],"empty":[]},"adapter":{"environment":{"TOKEN":"new-secret"}}});
+        let diff = super::bundle_diff(Some(old), new);
+        for text in ["/definition/wait", "`12` → `8`", "/definition/jobs/1", "/definition/empty", "/adapter/environment/TOKEN", "(hidden) → (hidden)"] { assert!(diff.contains(text), "{text}: {diff}"); }
+        assert!(!diff.contains("old-secret") && !diff.contains("new-secret"));
     }
 }

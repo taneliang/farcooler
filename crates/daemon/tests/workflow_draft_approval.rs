@@ -138,6 +138,7 @@ async fn a_draft_publishes_only_when_a_person_answers_approve() {
     assert!(ask.body.contains("`PATH=(hidden)`") && !ask.body.contains("/usr/bin:/bin"), "{}", ask.body);
     assert!(reply["draft"]["summary"].as_str().unwrap().contains("`PATH=(hidden)`") && !reply["draft"]["summary"].as_str().unwrap().contains("/usr/bin:/bin"), "{reply}");
     assert!(ask.body.contains("What runs as you:") && ask.body.contains("In full, exactly as it runs:"), "{}", ask.body);
+    assert!(ask.body.contains("Field changes") && ask.body.contains("/definition/source"), "{}", ask.body);
     assert!(ask.body.rfind(&words).unwrap() > ask.body.find("In full").unwrap(), "the approving words follow the change");
     assert!(!ask.body.lines().take(3).any(|l| l.contains(&words)), "a two- or three-line row never shows them");
 

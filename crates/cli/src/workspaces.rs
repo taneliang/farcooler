@@ -81,10 +81,14 @@ pub enum WorkspaceCmd {
     WorkflowDraft {
         workspace: String,
         /// batched-push, ticket-push, ticket-pr or batched-pr.
-        name: String,
+        #[arg(required_unless_present = "file", conflicts_with = "file")]
+        name: Option<String>,
+        /// A complete definition and adapter bundle, as JSON (or - for standard input).
+        #[arg(long, conflicts_with_all = ["gate", "batch", "agent_gate", "orchestrator_gate", "person_gate", "gate_env", "route", "route_default"])]
+        file: Option<String>,
         /// What the person asked for, in their words. They read it above the summary.
-        #[arg(long)]
-        reason: String,
+        #[arg(long, required_unless_present = "file")]
+        reason: Option<String>,
         /// A command gate, run with `sh -c`. Repeat for several; this is the whole list.
         #[arg(long = "gate", value_name = "COMMAND")]
         gate: Vec<String>,
@@ -645,12 +649,20 @@ async fn workspace_via(
             crate::landing_templates::deliver(&bundle, &[], &held, uuid_of(&ws.id), &output)?;
         }
 
-        WorkspaceCmd::WorkflowDraft { workspace, name, reason, gate, batch, gates, routes, repo } => {
+        WorkspaceCmd::WorkflowDraft { workspace, name, file, reason, gate, batch, gates, routes, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
-            let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
-            let bundle = crate::landing_templates::template(&name, &held, &gate, &gates, &routes, batch)?;
-            if held.suggesting() { eprintln!("This workspace has no workflow yet, so the draft uses the settings this runner suggests. The card shows every one."); }
-            let action = crate::landing_templates::propose_action(&reason, bundle);
+            let bundle = if let Some(path) = file {
+                let text = if path == "-" { std::io::read_to_string(std::io::stdin())? } else {
+                    std::fs::read_to_string(&path).map_err(|e| format!("couldn't read {path}: {e}"))?
+                };
+                serde_json::from_str(&text)?
+            } else {
+                let held = crate::landing_templates::held(&crate::workflow::get(&mut link, uuid_of(&ws.id)).await?)?;
+                let bundle = crate::landing_templates::template(name.as_deref().expect("clap requires a template or file"), &held, &gate, &gates, &routes, batch)?;
+                if held.suggesting() { eprintln!("This workspace has no workflow yet, so the draft uses the settings this runner suggests. The card shows every one."); }
+                bundle
+            };
+            let action = crate::landing_templates::propose_action(reason.as_deref().unwrap_or("Review this workflow definition."), bundle);
             let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &action).await?;
             crate::landing_templates::print_draft(&reply, json)?;
         }
@@ -1388,5 +1400,17 @@ mod tests {
             .expect_err("refused")
             .to_string();
         assert!(said.contains("--wake-on-answer") && said.contains("--landing"), "{said}");
+    }
+}
+
+#[cfg(test)]
+mod workflow_file_tests {
+    use clap::Parser;
+    #[test]
+    fn file_draft_and_template_forms_are_exclusive() {
+        assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "workflow-draft", "main", "--file", "bundle.json"]).is_ok());
+        assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "workflow-draft", "main", "ticket-push", "--reason", "checks"]).is_ok());
+        assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "workflow-draft", "main", "ticket-push", "--file", "bundle.json"]).is_err());
+        assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "workflow-draft", "main", "--file", "bundle.json", "--gate", "true"]).is_err());
     }
 }

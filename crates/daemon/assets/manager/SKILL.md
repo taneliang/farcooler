@@ -193,7 +193,7 @@ out before the group leaves. A push whose outcome was lost: look at the target y
 ```
 **Drafting the workflow.** You propose; a person publishes, never you. `workspace workflow-draft <ws> <template> --reason "<the
 owner's words>"` files one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) and asks the owner to approve
-it on the board. A gate is a command (`--gate`, the whole list each time; `--gate-env NAME=value`), an agent the engine starts
+it on the board. For a complete definition and adapter bundle, use `workspace workflow-draft <ws> --file <bundle.json> --reason "<the owner's words>"`; the card shows its field changes for the person to review. A gate is a command (`--gate`, the whole list each time; `--gate-env NAME=value`), an agent the engine starts
 (`--agent-gate`), you (`--orchestrator-gate`) or the owner (`--person-gate owner`); each holds the ticket for its verdict.
 `--route 'site/**=ask'` routes by changed paths, and `ask` holds those tickets for the owner's word. PR templates aren't live: in PR mode draft none and tell the owner the engine
 can't land this workspace yet. `import-landing` reads the charter's `## Landing` once (path rules become a `route` step, `Gate: none` a gate that passes):
