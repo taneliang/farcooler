@@ -151,7 +151,37 @@ new opt-level-0 native dependency cache); native test preparation took 130 s,
 AgentKit 48 s and the guard self-test 29 s. Complete job/step evidence is in
 `run-43588280875.json`. This is the first qualifying branch run.
 
-The second branch measurement is pending. A temporary push trigger for this branch
-collects ordinary CI job measurements without opening a PR or adding runner
-jobs. Remove that trigger once two successful under-15-minute runs have been
-recorded.
+The repeat (67162e0a3),
+[43589173606](https://github.com/taneliang/farcooler/actions/runs/43589173606),
+also passed both jobs: app **328 s (5m28s)** and tests **663 s (11m03s)**.
+The app build step took 210 s, native test preparation 167 s, AgentKit 62 s
+and the complete Mac build/test step 266 s. Complete job/step evidence is in
+`run-43589173606.json`. These are two distinct branch pushes of the same code;
+the second adds only the first run's report. Durations include setup and post
+steps and exclude queue time, matching the baseline. The temporary branch push
+trigger has now been removed.
+
+## Acceptance evidence
+
+| Job | Main baseline | Branch run 43588280875 | Branch run 43589173606 |
+| --- | ---: | ---: | ---: |
+| App build + bundle checks | 22m22s | 7m34s | 5m28s |
+| AgentKit + Mac tests | 22m37s | 9m54s | 11m03s |
+
+- Both jobs succeeded below 15 minutes in both branch runs. The surrounding
+  workflow's unrelated jobs may be superseded by later pushes; the recorded
+  Swift job verdicts include their successful post steps.
+- Main pushes retain the full AgentKit command and the unfiltered Mac command.
+  The Mac runner discovers every definition, checks the exact partition union,
+  runs every parameter case, and requires each shard's exact completion count.
+  Both qualifying runs completed 2,113 AgentKit definitions and all 2,035
+  Mac definitions (30 + 2,005), with the existing completion and leak guards.
+  Their guard summaries are retained in `test-completion.txt`.
+- Canary/Release workflows, `build-app.sh` and Cargo profiles are unchanged
+  from this branch's base. Their default release configuration still uses
+  opt-level 3 and ThinLTO. Only CI sets the cheaper profile and debug Swift
+  configuration; it retains tunnel linkage and all bundle checks. The shared
+  header copy still stages identical bytes, preserving metadata for cache reuse.
+- Local guard, wrapper, partition, cache and lane-gate self-tests passed.
+  File-size checks and diff whitespace checks passed. Actionlint reports only
+  the existing xcode-27 label and unrelated SC2086 warnings.
