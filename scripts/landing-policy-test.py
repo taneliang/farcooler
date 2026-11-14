@@ -228,6 +228,27 @@ class LandingTests(unittest.TestCase):
         self.assertIn("planted runner failure", rows[0][2])
         self.assertEqual(rows[1][2], "pass")
 
+    def test_landing_fail_fast_stops_queued_families_and_apple_jobs(self):
+        jobs = ["swift-tests", "swift", "ios", "wire"]
+        with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):
+            t = Path(t)
+            marker = t / "later"
+            plans = {j: [lane.Step(j, "later", f'echo {j} >> "{marker}"\n')] for j in jobs}
+            plans["swift-tests"].insert(0, lane.Step("swift-tests", "failure", "exit 1\n"))
+            args = argparse.Namespace(workers=1, strict_leaks=False, no_load_wait=True,
+                                      no_lock=True, landing=True, fail_fast=True)
+            rows = []
+            self.assertTrue(lane.run_jobs(jobs, plans, rows, ROOT, t, lane.make_ctx(ROOT, t, "HEAD"), t, args))
+            self.assertFalse(marker.exists())
+            self.assertEqual([r[0] for r in rows if r[2].startswith("FAIL")], ["swift-tests", "landing"])
+
+            args.fail_fast = False
+            rows = []
+            second = t / "second"
+            second.mkdir()
+            self.assertTrue(lane.run_jobs(jobs, plans, rows, ROOT, second, lane.make_ctx(ROOT, second, "HEAD"), t, args))
+            self.assertEqual(marker.read_text().splitlines(), jobs)
+
     def test_clippy_is_independent_and_failure_is_required(self):
         lint = lane.Step("rust", "clippy", "cargo clippy --workspace --all-targets -- -D warnings")
         suite = lane.Step("rust", "tests", "cargo nextest run --workspace")

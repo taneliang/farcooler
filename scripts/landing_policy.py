@@ -9,6 +9,7 @@ import json
 import os
 import shlex
 import subprocess
+import threading
 import time
 
 
@@ -147,10 +148,15 @@ def families(chosen):
 
 def run(chosen, plans, rows, repo, tmp, ctx, logdir, args, run_one_job):
     """Bounded parallel families, ordered steps, deterministic complete results."""
+    import copy
+    args = copy.copy(args)
+    args.stop_event = threading.Event() if getattr(args, "fail_fast", False) else None
     def worker(jobs):
         own_rows = []
         failed = False
         for job in jobs:
+            if args.stop_event and args.stop_event.is_set():
+                break
             job_tmp = tmp / job
             job_tmp.mkdir()
             try:
@@ -158,6 +164,8 @@ def run(chosen, plans, rows, repo, tmp, ctx, logdir, args, run_one_job):
             except Exception as exc:
                 own_rows.append((job, "family runner", f"FAIL: {type(exc).__name__}: {exc}", "", ""))
                 failed = True
+            if failed and args.stop_event:
+                args.stop_event.set()
         return failed, own_rows
 
     # Clippy does not consume the binaries/PATH exported by Rust's test setup.

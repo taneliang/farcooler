@@ -858,6 +858,9 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
     print(f"\n[{j}]", flush=True)
     for s in plans[j]:
+        stop_event = getattr(args, "stop_event", None)
+        if stop_event and stop_event.is_set():
+            break
         started = time.monotonic()
         if s.skip:
             rows.append((j, s.label(), f"skipped: {s.skip}", "", ""))
@@ -875,6 +878,8 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
             landing_policy.record_timing(logdir, j, s, result, started, time.monotonic())
         if not ok:
             failed = True
+            if stop_event:
+                stop_event.set()
             if log is None:
                 print(f"  FAILED before it ran: {output}")
             else:
