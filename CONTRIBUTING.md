@@ -169,6 +169,13 @@ A few things that save time:
   number, a slow tmux, file events), add it to a test group in
   `.config/nextest.toml`. nextest does not run doctests; CI runs
   `cargo test --workspace --doc` for those.
+- For a full plain `cargo test` run that includes the daemon, pass
+  `-- --test-threads=1`. libtest does not read nextest's isolation rules:
+  the pane-resize tests need to reacquire a freed tty number, and native
+  vanished-review recovery needs its old tty to stay empty. Concurrent PTY
+  tests can take those numbers and invalidate either fixture. Prefer nextest
+  for parallel runs; its exclusive overrides cover both cases. Avoid running
+  another PTY test suite alongside either runner.
 - Run the iOS UI suite through `scripts/ios-ui-tests.sh`, not a hand-written
   `xcodebuild test`. A run in which every test skipped still prints `TEST
   SUCCEEDED`; the script fails it.

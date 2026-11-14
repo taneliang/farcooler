@@ -539,3 +539,1019 @@ def run_step(step, repo, env, logdir, tmp, fail_fast=False):
     log = logdir / f"{step.job}-{abs(hash(step.run)) % 10**8}.log"
     started = time.time()
     with open(log, "w") as f:
+        # The supervisor owns the step's session, including when the gate dies.
+        # It also reaps children before returning a failure to fail-fast callers.
+        code = process_guard.run(["bash", "-e", "-c", step.run], cwd=cwd, env=e,
+                                 stdout=f, stderr=subprocess.STDOUT).returncode
+    secs = time.time() - started
+    output = log.read_text(errors="replace")
+    # What the step left for the ones after it, as GitHub's files do.
+    for line in gh_env.read_text().splitlines():
+        k, _, v = line.partition("=")
+        if k:
+            env[k] = v
+    for p in gh_path.read_text().splitlines():
+        if p:
+            env["PATH"] = p + os.pathsep + env["PATH"]
+    return code, secs, output, log
+
+
+NEXTEST_VERSION = re.search(r"cargo-nextest@([\d.]+)", (ROOT / ".github/workflows/ci.yml").read_text())
+NEXTEST_HINT = f"cargo install cargo-nextest --locked --version {NEXTEST_VERSION.group(1) if NEXTEST_VERSION else '<the version in ci.yml>'}"
+
+
+def blocker(step, repo, env):
+    """Why `step` cannot run on this host, or "" when it can.
+
+    A missing tool is a named FAIL row, never a crash and never a quiet pass.
+    cargo-nextest is the case that matters: `cargo test` is not a stand-in. CI's
+    `cargo nextest run --profile ci` runs one process per test, with the
+    test-groups in .config/nextest.toml that keep the tmux and file-event tests
+    from running beside each other; under `cargo test` a `static Mutex` that
+    nextest makes useless would hide the failures nextest finds, and the
+    gate would print green for a suite CI can still fail. So it says how to
+    install the pinned version and is red until then (ov-802).
+    """
+    path = env.get("PATH", "")
+    cwd = repo / step.cwd if step.cwd else repo
+    if not cwd.is_dir():
+        return f"working directory {step.cwd or cwd} does not exist (an earlier step should have made it)"
+    if re.search(r"\bcargo nextest\b", step.run) and not shutil.which("cargo-nextest", path=path):
+        return f"cargo-nextest is not installed; install it with: {NEXTEST_HINT}"
+    if re.search(r"(^|\s)\./gradlew\b", step.run):
+        home = env.get("JAVA_HOME", "")
+        if jdk_major(home) < 17:
+            return "gradle needs JDK 17 and this host has none; install it with: brew install openjdk@17"
+        if "captureJdk" in step.run and jdk_major(env.get("CAPTURE_JDK", "")) < 21:
+            return "the Android capture tests need JDK 21 and this host has none; install it with: brew install openjdk@21"
+    for tool, hint in (("go", "brew install go"), ("npm", "install Node"), ("swift", "install Xcode"), ("xcodebuild", "install Xcode"), ("cargo", "install Rust with rustup")):
+        if re.search(rf"(^|&&|\|\||[;|(])[ \t]*(?:\./)?{tool}[ \t]", step.run, re.M) and not shutil.which(tool, path=path):
+            return f"{tool} is not installed; {hint}"
+    return ""
+
+
+# Known gaps in THIS host's environment, not in the code under test (ov-822). A failed step whose output
+# matches one is tagged "[env-gap: NAME]" in its Result cell, and scripts/gate-summary-check.py lets a push
+# through when every failure carries a tag it lists. Add one only for a gap the host owner can't close, and add it to
+# GAP_NAMES in gate-summary-check.py too. The match is on output, so a step that fails for a gap AND a real reason is
+# still waved through: the log named in the summary is where to look.
+ENV_GAPS = (
+    ("git-lfs-missing", re.compile(r"git-lfs[^\n]*(isn't|is not|not) (on PATH|installed)|'lfs' is not a git command"), re.compile(r"cargo nextest|cargo test")),
+    ("wrangler-dry-run-without-dist", re.compile(r"(assets|dist)[^\n]*(does not exist|ENOENT|no such file)|ENOENT[^\n]*dist", re.I), re.compile(r"wrangler deploy --dry-run")),
+)
+
+
+def env_gap(step, output):
+    """The name of the known environment gap that explains this failed step, or ""."""
+    for name, in_output, in_step in ENV_GAPS:
+        if in_step.search(step.run) and in_output.search(output):
+            return name
+    return ""
+
+
+DISK_FULL = "the disk is full (no space left on device); free some space and run the gate again"
+NO_SPACE = re.compile(r"No space left on device|os error 28\b|ENOSPC")
+
+
+def is_shallow(repo):
+    """True when `repo`'s git dir is shallow. A worktree shares its git dir with every other
+    worktree, so a step's `git fetch --depth=1` makes them all shallow (ov-1018)."""
+    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "--is-shallow-repository"], capture_output=True, text=True)
+    return out.returncode == 0 and out.stdout.strip() == "true"
+
+
+def run_step_safely(step, repo, env, logdir, tmp, fail_fast=False):
+    """(result, seconds, counts, ok, log, output) for one step; never raises.
+
+    A tool the host lacks, a directory a failed step never made, or anything
+    else this script trips over becomes that step's FAIL row, so the summary
+    table still prints for every step that did run (ov-802)."""
+    reason = blocker(step, repo, {**env, **step.env})
+    if reason:
+        return f"FAIL: {reason}", 0.0, "", False, None, reason
+    was_shallow = is_shallow(repo)
+    try:
+        code, secs, output, log = run_step(step, repo, env, logdir, tmp, fail_fast)
+    except Exception as e:  # noqa: BLE001 -- any crash is this step's failure
+        reason = DISK_FULL if hl.disk_full(e) else f"lane-gate could not run it: {type(e).__name__}: {e}"
+        return f"FAIL: {reason}", 0.0, "", False, None, reason
+    if not was_shallow and is_shallow(repo):
+        # Never leave the shared repository shallow: it breaks every other worktree and lane.
+        return (f"FAIL: this step made the shared git repository shallow (a `git fetch --depth` or `--shallow-since`); "
+                f"repair with `git fetch --unshallow`, and fetch without a depth", secs, count_tests(output), False, log, output)
+    result = "pass" if code == 0 else f"FAIL (exit {code})"
+    gap = "" if code == 0 else env_gap(step, output)
+    if gap:
+        result += f" [env-gap: {gap}]"
+    if code != 0 and NO_SPACE.search(output):
+        result += "; the disk is full (\"No space left on device\" in its output)"
+    notes = "" if "--self-test" in step.run else leak_notes(output)  # a self-test prints notes on purpose
+    if notes:
+        result += f"; {notes}"
+    return result, secs, count_tests(output), code == 0, log, output
+
+
+LEAK_NOTE = re.compile(r"test-leak-check: note: (\d+) new (entries|plists) appeared")
+
+
+def leak_notes(output):
+    """What test-leak-check let pass because this Mac is shared, for the Result column.
+
+    It cannot say whose they are: a sibling lane's Swift tests leave the same
+    UUID-named folders. So the count is shown rather than dropped, and
+    --strict-leaks (on a quiet Mac) turns it back into a failure."""
+    found = LEAK_NOTE.findall(output)
+    if not found:
+        return ""
+    total = sum(int(n) for n, _ in found)
+    return f"leak note: {total} unattributed new temp/plist entries (siblings or this lane; see the log, or rerun with --strict-leaks)"
+
+
+def base_env(repo, tmp, ctx, strict_leaks=False):
+    env = dict(os.environ)
+    # A gate launched inside an agent pane must not route fixture hooks to
+    # that pane's real workflow socket. Tests can still set their own socket.
+    env.pop("FARCOOLER_NATIVE_HOOK_SOCKET", None)
+    # CI=true is for the tests' sake; the Mac is still shared with sibling lanes,
+    # whose UUID-named leftovers land in the same system temp folder as this
+    # lane's. test-leak-check makes those a note, shown in the Result column,
+    # unless the lane asks for strict (ov-802).
+    env.pop("FC_LEAK_STRICT", None)
+    env["FC_LEAK_SHARED"] = "1"
+    if strict_leaks:
+        env["FC_LEAK_STRICT"] = "1"
+    env["PATH"] = os.path.expanduser("~/.cargo/bin") + os.pathsep + env.get("PATH", "")
+    env.update({"RUNNER_TEMP": str(tmp), "RUNNER_OS": "macOS" if sys.platform == "darwin" else "Linux",
+                "GITHUB_SHA": ctx["github.sha"], "GITHUB_WORKSPACE": str(repo), "CI": "true"})
+    return env
+
+
+def make_ctx(repo, tmp, base):
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    jdk = java_home(21)
+    return {"runner.temp": str(tmp), "github.sha": sha, "matrix.os": "local", "base": base,
+            "steps.jdk21.outputs.path": jdk, "runner.os": "macOS", "runner.arch": "ARM64",
+            # The local gate runs the Android checks itself; model CI's join as successful.
+            "needs.changes.result": "success", "needs.changes.outputs.android": "true",
+            "needs.android-build.result": "success", "needs.android-ui.result": "success"}
+
+
+def md(cell):
+    return cell.replace("|", "\\|").replace("`", "'")
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
+    ap.add_argument("--landing", action="store_true", help="local landing: parallel families, selected Rust, CI retains release bundle proof")
+    ap.add_argument("--workers", type=int, default=4, choices=range(1, 5), help="maximum concurrent landing families (default 4)")
+    ap.add_argument("--base", default=os.environ.get("FARCOOLER_BASE") or "origin/main",
+                    help="combined diff base (default: engine FARCOOLER_BASE, else origin/main)")
+    ap.add_argument("--worktree", default=str(ROOT), help="the checkout to gate (default: this one)")
+    ap.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
+    ap.add_argument("--only", default="", help="comma-separated jobs to run (default: every job the diff reaches)")
+    ap.add_argument("--skip", default="", help="comma-separated jobs to leave out")
+    ap.add_argument("--log-dir", default="", help="where each step's full output goes (default: a new temp dir)")
+    ap.add_argument("--no-load-wait", action="store_true", help="do not wait for the load average to fall")
+    ap.add_argument("--release-between-jobs", action="store_true", help="queue again for each heavy job instead of holding the lock for the whole gate")
+    ap.add_argument("--no-lock", action="store_true", help="skip the machine-wide heavy-job lock (it is off already when CI is set)")
+    ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
+    ap.add_argument("--keep-target", action="store_true", help="keep the worktree's target/ after a fully green gate (by default a lane worktree's is removed then)")
+    ap.add_argument("--fail-fast", action="store_true", help="stop at the first failed step (for landing gates)")
+    ap.add_argument("--self-test", action="store_true")
+    args = ap.parse_args(argv)
+    if args.self_test:
+        return self_test()
+    hl.survive_dead_output()  # a waiting gate outlives the terminal or pipe that started it (ov-839)
+    try:
+        return gate(args)
+    except OSError as e:
+        if not hl.disk_full(e):
+            raise
+        print(f"lane-gate: FAIL: {DISK_FULL}\n\nlane-gate: FAILED", flush=True)
+        return 1
+
+
+def gate(args):
+    if getattr(args, "landing", False):
+        # Planning also reads Git before any worker starts. Do not let those
+        # reads refresh the protocol build stamp's watched index (ov-1185).
+        import landing_policy
+        landing_policy.readonly_git(os.environ)
+    repo = pathlib.Path(args.worktree).resolve()
+    workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
+                 "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC here is caught by main
+    ctx = make_ctx(repo, tmp, args.base)
+    changes = load_module("ci_changes", repo / "scripts" / "ci-changes.py")
+    ios_plan = load_module("ios_ui_plan", repo / "scripts" / "ios-ui-plan.py")
+    inputs = changed_inputs(repo, args.base)
+    files = sorted({f for _, f in inputs})
+
+    plans = {j: steps_for(j, workflows, ctx) for j in JOBS}
+    commands = {j: "\n".join(s.run for s in plans[j] if not s.skip) for j in JOBS}
+    reach = jobs_for(files, changes.SITE, lambda f: bool(ios_plan.RELEVANT.match(f)), commands, changes.families)
+    only = {j for j in args.only.split(",") if j}
+    skip = {j for j in args.skip.split(",") if j}
+    for j in only | skip:
+        if j not in JOBS:
+            raise SystemExit(f"lane-gate: no job {j}; jobs are {', '.join(JOBS)}")
+    chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
+
+    proposal = None
+    if args.landing:
+        import landing_policy  # optional local policy; plain runners stay self-contained
+        proposal = (landing_policy.rust_selection(repo, args.base, load_module) if "rust" in chosen
+                    else {"full": True, "packages": [], "reasons": ["Rust not reached"]})
+        landing_policy.apply(plans, proposal)
+        print("lane-gate: local landing Rust selection: " + "; ".join(proposal["reasons"]))
+        print(f"lane-gate: landing families: {landing_policy.families(chosen)}; workers: {args.workers}")
+
+    # --only (or --skip) leaves out jobs the diff reaches. Say so here, and again in the summary, which is
+    # what gets pasted into a report: a summary that reads "all steps passed" must not stand for a gate it skipped.
+    left_out = [j for j in JOBS if j in reach and j not in chosen]
+    partial = bool(left_out) and bool(only or skip)
+    if partial:
+        print(f"lane-gate: PARTIAL GATE: --only/--skip leaves out {', '.join(left_out)}, which this diff reaches")
+    print(f"lane-gate: {len(files)} changed file(s) against {args.base}; jobs: {', '.join(chosen) or 'none'}")
+    for j in chosen:
+        why = reach[j][:3]
+        more = f" and {len(reach[j]) - 3} more" if len(reach[j]) > 3 else ""
+        print(f"  {j}: {', '.join(why) if why else 'always'}{more}")
+    if "rust" in chosen:
+        print(f"lane-gate: Rust impact: {rust_impact(repo, inputs)}")
+        print("lane-gate: Rust coverage: full CI suite retained (ov-1116 skips disabled)")
+    if not any(j in HEAVY for j in chosen):
+        print("lane-gate: no builds selected")
+    if args.dry_run:
+        shutil.rmtree(tmp, ignore_errors=True)
+        for j in chosen:
+            print(f"\n[{j}]")
+            for s in plans[j]:
+                where = f" (in {s.cwd})" if s.cwd else ""
+                print(f"  {'SKIP' if s.skip else 'run '} {s.label()}{where}" + (f"  -- {s.skip}" if s.skip else ""))
+        return 0
+
+    logdir = pathlib.Path(args.log_dir) if args.log_dir else pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-logs-"))
+    logdir.mkdir(parents=True, exist_ok=True)
+    if proposal is not None:
+        import json
+        (logdir / "rust-selection.json").write_text(json.dumps(proposal, indent=2) + "\n")
+    rows, failed = [], True  # until run_jobs says otherwise: an exception is a failure
+    try:
+        failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)
+    except BaseException as e:  # an interrupt or a bug still leaves a table of what ran
+        full = hl.disk_full(e)  # a full disk is a named row and a red gate, not a traceback
+        rows.append(("lane-gate", "(the gate itself)", f"FAIL: {DISK_FULL if full else f'{type(e).__name__}: {e}'}", "", ""))
+        failed = True
+        if not full:
+            raise
+    finally:
+        try:
+            print_summary(rows, repo, args.base, logdir, failed, left_out if partial else [], summary_path(repo))
+        except OSError as e:  # the table is on screen; only the saved copy needs room
+            print(f"lane-gate: could not save the summary file: {e.strerror or e}", flush=True)
+        shutil.rmtree(tmp, ignore_errors=True)
+    if not failed and not partial and not args.keep_target and not args.landing and not args.dry_run:
+        clean_target_after_pass(repo)
+    return 1 if failed else 0
+
+
+def clean_target_after_pass(repo, say=print):
+    """A fully green gate means the lane is done: its target/ (several GB) goes, so a finished lane does not hold the disk (ov-837).
+    Only a linked worktree's, never the main checkout's, and the next build in it starts cold."""
+    target = pathlib.Path(repo) / "target"
+    if target.is_dir() and hl.lean_wanted(repo):
+        if target.is_symlink():  # the link may point at a folder somebody else owns: drop the link, never follow it
+            target.unlink()
+            say(f"lane-gate: {target} was a symlink; removed the link and left what it points to (--keep-target keeps the link)", flush=True)
+            return
+        shutil.rmtree(target, ignore_errors=True)
+        say(f"lane-gate: removed {target} (the gate passed; --keep-target keeps it)", flush=True)
+
+
+def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
+    """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
+    failed = False
+    heavy = [j for j in chosen if j in HEAVY] and hl.lock_wanted(getattr(args, "no_lock", False))
+    between = getattr(args, "release_between_jobs", False)
+    # By default one place in line covers all of this gate's heavy jobs, so gates finish one after
+    # another, oldest first; releasing between jobs made nine gates each take nine times as long (ov-836).
+    with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()):
+        if getattr(args, "landing", False):
+            import landing_policy
+            if between:
+                raise ValueError("--landing cannot release the gate lock between parallel jobs")
+            if any(j in HEAVY for j in chosen) and not args.no_load_wait:
+                wait_for_load()
+            # Wait once before admission, not once per family: our own workers
+            # raise load and must not make later families wait on this gate.
+            import copy
+            admitted = copy.copy(args)
+            admitted.no_load_wait = True
+            if "rust" in chosen:
+                hl.prepare_lane_build(repo)  # trim once, before any worker builds
+            return landing_policy.run(chosen, plans, rows, repo, tmp, ctx, logdir, admitted, run_one_job)
+        for j in chosen:
+            locked = bool(heavy) and between and j in HEAVY
+            with (machine_lock(repo, j) if locked else contextlib.nullcontext()):
+                failed = run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args) or failed
+            if failed and getattr(args, "fail_fast", False):
+                break
+    if "ios" in chosen:
+        rows.append(("ios", "iOS UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
+    return failed
+
+
+def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
+    if getattr(args, "landing", False):
+        import landing_policy
+    failed = False
+    if j in HEAVY and not args.no_load_wait:
+        wait_for_load()
+    env = base_env(repo, tmp, ctx, args.strict_leaks)
+    env.update(job_env(j))
+    if getattr(args, "landing", False):
+        landing_policy.budget_worker(env, args.workers)
+        # Apple/Android also build host Rust binaries in this target. Mixing
+        # debug-info levels replaces shared outputs and defeats the handoff.
+        env.update(hl.lean_cargo_env(repo))
+    elif j in {"rust", "rust-lints"}:
+        env.update(hl.prepare_lane_build(repo))
+    if j == "android" and ctx["steps.jdk21.outputs.path"]:
+        env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
+    print(f"\n[{j}]", flush=True)
+    for s in plans[j]:
+        stop_event = getattr(args, "stop_event", None)
+        if stop_event and stop_event.is_set():
+            break
+        started = time.monotonic()
+        if s.skip:
+            rows.append((j, s.label(), f"skipped: {s.skip}", "", ""))
+            if getattr(args, "landing", False):
+                landing_policy.record_timing(logdir, j, s, f"skipped: {s.skip}", started, started)
+            print(f"  skip {s.label()}  ({s.skip})")
+            continue
+        print(f"  run  {s.label()}", flush=True)
+        # `env` itself, not a copy: what a step writes to $GITHUB_ENV (the
+        # swift job's APP_NAME) is read back into it for the steps after
+        # (ov-812). The step's own `env:` is laid over it inside run_step.
+        result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp, getattr(args, "fail_fast", False))
+        rows.append((j, s.label(), result, f"{secs:.0f}", counts))
+        if getattr(args, "landing", False):
+            landing_policy.record_timing(logdir, j, s, result, started, time.monotonic())
+        if not ok:
+            failed = True
+            if stop_event:
+                stop_event.set()
+            if log is None:
+                print(f"  FAILED before it ran: {output}")
+            else:
+                tail = "\n".join(output.splitlines()[-15:])
+                print(f"  FAILED, log {log}\n" + "\n".join("    " + l for l in tail.splitlines()))
+            if getattr(args, "fail_fast", False):
+                break
+    return failed
+
+
+SUMMARY_NAME = "lane-gate-summary.txt"
+FAIL_GAP = re.compile(r"\[env-gap: ([a-z0-9-]+)\]")
+
+
+def summary_path(repo):
+    """Where `repo`'s last gate summary lives: inside its own git dir, so each worktree has one (ov-822)."""
+    out = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True).stdout.strip()
+    return pathlib.Path(out) / SUMMARY_NAME if out else None
+
+
+def print_summary(rows, repo, base, logdir, failed, left_out=(), write_to=None):
+    """Print the summary table and, given `write_to`, save it there with the full HEAD sha it gated.
+
+    The file opens with `key: value` lines scripts/gate-summary-check.py reads: head, verdict (ok, partial or
+    failed; partial wins over failed) and a `failed-step:` line per failed row with the env gap it matched."""
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    verdict = "partial" if left_out else "failed" if failed else "ok"
+    lines = ["## lane-gate summary" + (" (PARTIAL)" if left_out else ""), ""]
+    lines += [f"Branch HEAD {sha[:9]} against {base}; logs in {logdir}", ""]
+    lines += ["| Job | Command | Result | Secs | Tests |", "| --- | --- | --- | --- | --- |"]
+    lines += ["| " + " | ".join(md(c) for c in r) + " |" for r in rows]
+    note = f" (PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run by --only/--skip)" if left_out else ""
+    if failed:
+        last = "lane-gate: FAILED" + note
+    elif left_out:
+        last = f"lane-gate: PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run (--only/--skip); the steps that ran passed"
+    else:
+        last = "lane-gate: all steps passed"
+    print("\n".join(lines) + "\n\n" + last, flush=True)
+    if write_to:
+        head = ["lane-gate-summary v1", f"head: {sha}", f"verdict: {verdict}"]
+        for r in rows:
+            if str(r[2]).startswith("FAIL"):
+                m = FAIL_GAP.search(str(r[2]))
+                head.append(f"failed-step: {r[0]} | {md(r[1])} | gap={m.group(1) if m else 'none'}")
+        pathlib.Path(write_to).write_text("\n".join(head) + "\n\n" + "\n".join(lines) + "\n\n" + last + "\n")
+
+
+# ---------------------------------------------------------------- self-test
+
+
+def self_test():
+    from unittest.mock import patch
+
+    if subprocess.call([sys.executable, str(ROOT / "scripts/process_guard_test.py")]):
+        return 1
+
+    # An outer scripts/heavy owns the machine queue, not these scratch queues.
+    # Restore its marker afterward; production nested gates must still bypass it.
+    with patch.dict(os.environ):
+        os.environ.pop(hl.HELD_ENV, None)
+        return _self_test()
+
+
+def _self_test():
+    global run_jobs, clean_target_after_pass
+    import contextlib
+    import io
+    failures = []
+
+    def expect(what, got, want):
+        if got != want:
+            failures.append(f"{what}: got {got!r}, want {want!r}")
+
+    text = (ROOT / ".github/workflows/ci.yml").read_text()
+    changes = load_module("ci_changes", ROOT / "scripts" / "ci-changes.py")
+    ios_plan = load_module("ios_ui_plan", ROOT / "scripts" / "ios-ui-plan.py")
+    ios_rel = lambda f: bool(ios_plan.RELEVANT.match(f))
+    with tempfile.TemporaryDirectory() as t:
+        ctx = make_ctx(ROOT, pathlib.Path(t), "origin/main")
+    ctx["steps.jdk21.outputs.path"] = ctx["steps.jdk21.outputs.path"] or "/jdk21"
+    wf = {"ci": text, "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
+
+    # A job added to ci.yml must be added here, or the script quietly under-gates.
+    for job in job_ids(text):
+        known = job in CI_JOB_ALIASES or job in CI_JOBS_NOT_RUN
+        expect(f"ci.yml job {job} is known to lane-gate", known, True)
+    for job in set(CI_JOB_ALIASES) | set(CI_JOBS_NOT_RUN):
+        expect(f"lane-gate's {job} is still in ci.yml", job in job_ids(text), True)
+
+    plans = {j: steps_for(j, wf, ctx) for j in JOBS}
+    for j in JOBS:
+        expect(f"{j} has steps", len([s for s in plans[j] if not s.skip]) > 0, True)
+
+    def has(job, needle):
+        return any(needle in s.run and not s.skip for s in plans[job])
+
+    # The wrappers and the full, unfiltered suites, as CI runs them.
+    for job, needle in [
+        ("wire", "./scripts/proto-lint.py --channel canary"),
+        ("wire", "./scripts/copy-lint.py"),
+        ("wire", "./scripts/test-leak-check.py --lint"),
+        ("rust", "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest run --profile ci --workspace"),
+        ("rust", "cargo clippy --workspace --all-targets -- -D warnings"),
+        ("rust", "cargo test --workspace --doc"),
+        ("swift-tests", "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit"),
+        ("swift-tests", "./apps/macos/test.sh"),
+        ("swift", "apps/macos/build-app.sh"),
+        ("swift", "python3 scripts/macos-bundle-native-test.py"),
+        ("android", "./gradlew testInstrumentedUnitTest"),
+        ("android", "-Pfarcooler.captures"),
+        ("relay", "npm test"),
+        ("site", "npm test"),
+        ("web", "npm test"),
+        ("tunnel", "go test -count=1 ./..."),
+        ("ios", "./scripts/generator-test.sh"),
+        ("ios", "./scripts/ios-ui-shards.py --check"),
+        ("doc-comments", "--base origin/main --head HEAD"),
+    ]:
+        expect(f"{job} runs {needle}", has(job, needle), True)
+    expect("local gate runs one full Rust workspace suite", sum(
+        "cargo nextest run --profile ci --workspace" in s.run and not s.skip
+        for s in plans["rust"]), 1)
+    native = parse_steps(job_block(text, "rust-macos-tests") or [])
+    expect("CI retains its filtered Mac native tests", sum(
+        name == "macOS native Rust tests" and "--partition" in run and "-E" in run
+        for name, run, _wd, _env in native), 1)
+    expect("local gate does not replay filtered Mac CI tests", any(
+        s.name == "macOS native Rust tests" and not s.skip for s in plans["rust"]), False)
+    expect("local Rust runs the full workspace exactly once", sum(
+        "cargo nextest run --profile ci --workspace" in step.run and not step.skip
+        for step in plans["rust"]), 1)
+    expect("local Rust needs neither CI archives nor partition filters", any(
+        "--archive-file" in step.run or "--partition" in step.run
+        for step in plans["rust"] if not step.skip), False)
+    narrowed = dict(wf, ci=text.replace("--no-fail-fast --archive-file", "-E package(farcooler-cli) --no-fail-fast --archive-file", 1))
+    try:
+        steps_for("rust", narrowed, ctx)
+    except ValueError:
+        pass
+    else:
+        failures.append("a narrowed CI prefix silently narrowed the local Rust gate")
+    # Nothing that only installs on a CI runner is run, and the skip is recorded.
+    for j in JOBS:
+        for s in plans[j]:
+            if not s.skip:
+                # Spelled out here, not read from SETUP, so SETUP losing one goes red.
+                for word in ("apt-get", "brew install", "sdkmanager", "ci-install-tmux", "sshd -V"):
+                    expect(f"{j}: {s.label()} does not run {word}", word in s.run, False)
+    expect("the tmux install is skipped, not dropped", any(s.skip and "ci-install-tmux" in s.run for s in plans["rust"]), True)
+    expect("the unfiltered Mac test is not skipped", any(s.run.strip() == "./apps/macos/test.sh" and not s.skip for s in plans["swift-tests"]), True)
+    mac_test = next(s for s in plans["swift-tests"] if s.run.strip() == "./apps/macos/test.sh")
+    expect("Mac tests use the complete two-process inventory", mac_test.env.get("FARCOOLER_MAC_TEST_PROCESSES"), "2")
+    expect("Mac tests revalidate the unified native graph", mac_test.env.get("FARCOOLER_MAC_TEST_UNIFIED_RUST"), "1")
+    expect("AgentKit's native preparation uses that same graph", has("swift-tests", "./apps/macos/build-test-native.sh"), True)
+    bundle = next(s for s in plans["swift"] if "build-app.sh" in s.run)
+    expect("bundle uses the shipping Swift release configuration", bundle.run.strip(), "apps/macos/build-app.sh")
+    for key in ("CARGO_PROFILE_RELEASE_LTO", "CARGO_PROFILE_RELEASE_OPT_LEVEL", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
+        expect(f"bundle does not override shipping optimization through {key}", key in bundle.env, False)
+    for job in ("swift", "swift-tests"):
+        refresh = next(i for i, step in enumerate(plans[job]) if "swift-build-cache.py restore" in step.run)
+        native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh" in step.run)
+        expect(f"{job} refreshes the watched git index before Cargo", refresh < native and
+               "git status --porcelain --untracked-files=no" in plans[job][refresh].run, True)
+    for cgo in (0, 1):
+        for command in ("vet ./...", "test -count=1 ./..."):
+            expect(f"tunnel gates cgo={cgo} {command}",
+                   has("tunnel", f"CGO_ENABLED={cgo} go {command}"), True)
+    expect("the tunnel steps run in crates/tailcat/go", {s.cwd for s in plans["tunnel"]}, {"crates/tailcat/go"})
+    expect("the Android gradle steps run in apps/android", all(s.cwd == "apps/android" for s in plans["android"] if "gradlew" in s.run), True)
+    expect("a ${{ }} is filled in", any("${{" in s.run for s in plans["web"]), False)
+    expect("changes job result expands locally", expand("${{ needs.changes.result }}", ctx), "success")
+    expect("Android join receives the changes result", any(s.env.get("CHANGES_RESULT") == "success" for s in plans["android"]), True)
+    expect("both Android UI shards are planned", all(any(f"-Pfarcooler.captureShard={shard}" in s.run for s in plans["android"]) for shard in ("first", "rest")), True)
+    expect("Android's JDK 21 reaches the capture step", any(s.env.get("CAPTURE_JDK") == ctx["steps.jdk21.outputs.path"] for s in plans["android"]), True)
+    expect("the web job leaves the Linux downloads to CI", any(s.skip and "gh-download.sh" in s.run for s in plans["web"]), True)
+
+    # The real CI producers and consumers must stay paired by channel. A skipped
+    # producer cannot supply dist, even if a stale dist happens to exist locally.
+    web = plans["web"]
+    for channel, flag in (("stable", ""), ("canary", "--env canary")):
+        producers = [s for s in web if f'./build.sh --channel {channel}' in s.run and 'WEB_WASM_DIR=' in s.run]
+        consumers = [s for s in web if 'npx wrangler deploy --dry-run' in s.run and (('--env canary' in s.run) == bool(flag))]
+        expect(f"{channel} has one CI asset producer and dry-run", (len(producers), len(consumers)), (1, 1))
+        if producers and consumers:
+            expect(f"{channel} skipped producer skips dry-run with reason", bool(producers[0].skip and consumers[0].skip and "build" in consumers[0].skip), True)
+    # A runnable producer, including one that fails at runtime, cannot turn a
+    # missing input into a skip. Exercise the real runner's failure path too.
+    fixture = [Step("web", "build", 'WEB_WASM_DIR=x ./build.sh --channel stable --build sha\n'),
+               Step("web", "dry-run", 'npx wrangler deploy --dry-run --outdir /tmp/web-build\n')]
+    web_asset_skips(fixture)
+    expect("a runnable producer does not hide missing inputs", fixture[1].skip, None)
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        failed_build = run_step_safely(Step("web", "build", "exit 7\n"), t, {"PATH": "/usr/bin:/bin"}, t, t)
+        missing_dist = run_step_safely(Step("web", "dry-run", "test -d dist\n"), t, {"PATH": "/usr/bin:/bin"}, t, t)
+        expect("a failed producer remains a failure", failed_build[3], False)
+        expect("a missing input remains a failure", missing_dist[3], False)
+
+    # The iOS job compiles what CI's does (ov-812): the generated project's
+    # FarCooler scheme, build-for-testing, after the frameworks and the project.
+    ios_cmds = [s.run for s in plans["ios"] if not s.skip]
+    build = [i for i, r in enumerate(ios_cmds) if r.startswith("xcodebuild -project apps/ios/FarCooler.xcodeproj")]
+    expect("ios runs one xcodebuild of the project", len(build), 1)
+    if build:
+        expect("ios builds the FarCooler scheme for testing, as the action does", all(w in ios_cmds[build[0]] for w in ("-scheme FarCooler", "build-for-testing", "ARCHS=arm64", "generic/platform=iOS Simulator")), True)
+        expect("... after the frameworks and the generated project", [i for i, r in enumerate(ios_cmds) if "build-ios-frameworks.sh" in r or "generate-project.py" in r], [build[0] - 2, build[0] - 1])
+    expect("ios leaves the watchOS download and the packaging to CI", sum(1 for s in plans["ios"] if s.skip and ("downloadPlatform" in s.run or "ios-ui-products" in s.run)) >= 1, True)
+
+    # What a step writes to $GITHUB_ENV reaches the steps after it, through run_jobs
+    # as well as run_step: the swift job's APP_NAME was lost between them (ov-812).
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        chain = [Step("x", "set", 'echo "APP_NAME=Far Cooler Test" >> "$GITHUB_ENV"\n'),
+                 Step("x", "read", '[ "$APP_NAME" = "Far Cooler Test" ]\n'),
+                 Step("x", "unset", '[ -z "${APP_NAME_NEVER_SET:-}" ] && set -u && : "$APP_NAME_NEVER_SET"\n')]
+        rows = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            failed = run_jobs(["x"], {"x": chain}, rows, t, t, ctx, t, argparse.Namespace(no_load_wait=True, strict_leaks=False))
+        expect("a step reads what an earlier step put in GITHUB_ENV", [r[2] for r in rows[:2]], ["pass", "pass"])
+        expect("... and an unset variable still fails a step", rows[2][2].startswith("FAIL"), True)
+    # Landing stops at the first failure, including within a job; a lane
+    # still runs the rest and reports every failure.
+    with tempfile.TemporaryDirectory() as d:
+        d = pathlib.Path(d)
+        marker = d / "later"
+        child_marker = d / "child"
+        fixtures = {"first": [Step("first", "fail", f'(sleep 2; touch "{child_marker}") & echo planted-failure; exit 7\n'),
+                              Step("first", "later step", f'touch "{marker}"; exit 8\n')],
+                    "second": [Step("second", "later job", f'touch "{marker}"; exit 9\n')]}
+        ns = argparse.Namespace(no_load_wait=True, strict_leaks=False, fail_fast=True)
+        rows = []
+        capture = io.StringIO()
+        with contextlib.redirect_stdout(capture):
+            failed = run_jobs(["first", "second"], fixtures, rows, d, d, ctx, d, ns)
+        expect("landing fails at the planted failure", failed and len(rows) == 1, True)
+        expect("landing keeps the failure output", "planted-failure" in capture.getvalue(), True)
+        expect("landing does not start later steps or jobs", marker.exists(), False)
+        time.sleep(2.2)
+        expect("landing stops the failed step's background child", child_marker.exists(), False)
+        ns.fail_fast = False
+        fixtures["first"][0] = Step("first", "fail", "echo planted-failure; exit 7\n")
+        rows = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            failed = run_jobs(["first", "second"], fixtures, rows, d, d, ctx, d, ns)
+        expect("a lane reports all failures by default", failed and len(rows) == 3 and all(r[2].startswith("FAIL") for r in rows), True)
+        expect("a lane starts later jobs", marker.exists(), True)
+    swift_run = [s for s in plans["swift"] if not s.skip]
+    names = [i for i, s in enumerate(swift_run) if 'GITHUB_ENV' in s.run and "APP_NAME=" in s.run]
+    users = [i for i, s in enumerate(swift_run) if "$APP_NAME" in s.run]
+    expect("the swift job sets APP_NAME before any step uses it", bool(names and users and names[0] < users[0]), True)
+
+    # One heavy job at a time on the machine (ov-831); the lock itself is tested in scripts/heavy_lock.py (ov-836).
+    import threading
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        lock = t / "lane-gate.lock"
+
+        # Through run_jobs: two fake heavy jobs at once do not overlap, but a light job does not wait,
+        # and the lock is let go between a gate's jobs so the other gate's job slips in.
+        marks = t / "marks"
+        def step(name):
+            return Step("x", name, f'echo "{name} start" >> "{marks}"; sleep 0.5; echo "{name} end" >> "{marks}"\n')
+        plans2 = {"h1": [step("g1h1")], "h2": [step("g1h2")], "g2h": [step("g2h")], "light": [step("g2light")]}
+        saved_heavy, saved_ci = set(HEAVY), os.environ.pop("CI", None)
+        HEAVY.update({"h1", "h2", "g2h"})
+        saved_poll = LOCK_POLL
+        globals()["LOCK_POLL"] = 0.05
+        orig_lock = machine_lock
+        globals()["machine_lock"] = lambda wt, j, **k: orig_lock(wt, j, path=lock, poll=LOCK_POLL, say=lambda *a, **kw: None, **k)
+        try:
+            ns = argparse.Namespace(no_load_wait=True, strict_leaks=False, no_lock=False)
+            with contextlib.redirect_stdout(io.StringIO()):
+                t1 = threading.Thread(target=run_jobs, args=(["h1", "h2"], plans2, [], t, t, ctx, t, ns))
+                t1.start()
+                time.sleep(0.2)
+                t2 = threading.Thread(target=run_jobs, args=(["g2h"], plans2, [], t, t, ctx, t, ns))
+                t2.start()
+                t0 = time.time()
+                run_jobs(["light"], plans2, [], t, t, ctx, t, ns)
+                light_secs = time.time() - t0
+                t1.join(10)
+                t2.join(10)
+            expect("a light job does not wait for the lock", light_secs < 0.8, True)
+            seq = marks.read_text().split("\n")
+            spans, open_ = [], []
+            for line in filter(None, seq):
+                n, what = line.split()
+                open_.append(n) if what == "start" else open_.remove(n)
+                spans.append(len([x for x in open_ if x != "g2light"]))
+            expect("heavy jobs never overlap", max(spans), 1)
+            expect("a gate holds the lock for all its heavy jobs, so the other gate waits for the whole gate",
+                   [l.split()[0] for l in seq if l.endswith("start") and not l.startswith("g2light")], ["g1h1", "g1h2", "g2h"])
+            ns.release_between_jobs = True
+            marks.write_text("")
+            with contextlib.redirect_stdout(io.StringIO()):
+                t1 = threading.Thread(target=run_jobs, args=(["h1", "h2"], plans2, [], t, t, ctx, t, ns))
+                t1.start()
+                time.sleep(0.2)
+                t2 = threading.Thread(target=run_jobs, args=(["g2h"], plans2, [], t, t, ctx, t, ns))
+                t2.start()
+                t1.join(10)
+                t2.join(10)
+            expect("--release-between-jobs queues again for each job, so the other gate slips in",
+                   [l.split()[0] for l in marks.read_text().split("\n") if l.endswith("start")], ["g1h1", "g2h", "g1h2"])
+            ns.release_between_jobs = False
+            ns.no_lock = True
+            marks.write_text("")
+            with contextlib.redirect_stdout(io.StringIO()):
+                t1 = threading.Thread(target=run_jobs, args=(["h1"], plans2, [], t, t, ctx, t, ns))
+                t1.start()
+                time.sleep(0.2)
+                run_jobs(["g2h"], plans2, [], t, t, ctx, t, ns)
+                t1.join(10)
+            expect("--no-lock lets them overlap", marks.read_text().split()[:4], ["g1h1", "start", "g2h", "start"])
+            ns.no_lock = False
+            os.environ["CI"] = "true"
+            expect("CI turns the lock off by default", hl.lock_wanted(ns.no_lock), False)
+            os.environ.pop("CI")
+            expect("... and without CI or --no-lock it is on", hl.lock_wanted(ns.no_lock), True)
+        finally:
+            HEAVY.clear(); HEAVY.update(saved_heavy)
+            globals()["LOCK_POLL"] = saved_poll
+            globals()["machine_lock"] = orig_lock
+            if saved_ci is not None:
+                os.environ["CI"] = saved_ci
+
+    # The parser, on the shapes ci.yml uses, so a mistake cannot hide in ci.yml.
+    sample = (
+        "jobs:\n  a:\n    defaults:\n      run:\n        working-directory: sub\n    env:\n      K: v\n    steps:\n"
+        "      - uses: x/y@v1\n        with:\n          run: not-a-step\n"
+        "      - run: one\n"
+        "      - name: Two\n        working-directory: other\n        env:\n          E: ${{ runner.temp }}\n        run: |\n          two\n          three\n"
+        "  b:\n    steps:\n      - run: other\n"
+    )
+    got = parse_steps(job_block(sample, "a"))
+    expect("parse: steps with a run", [(n, r) for n, r, _, _ in got], [("", "one\n"), ("Two", "two\nthree\n")])
+    expect("parse: the default and the step directory", [w for _, _, w, _ in got], ["sub", "other"])
+    expect("parse: env, job and step", [e for _, _, _, e in got], [{"K": "v"}, {"K": "v", "E": "${{ runner.temp }}"}])
+    expect("parse: a job stops at the next one", job_block(sample, "b"), ["    steps:", "      - run: other"])
+    quoted = parse_steps(job_block("""jobs:
+  q:
+    env:
+      LTO: "false"
+      # A comment must not terminate the environment.
+      DEBUG: '0'
+    steps:
+      - run: tests
+        env:
+          PROCESSES: "2"
+          # Nor become an environment variable.
+          WORDS: 'it''s quoted'
+""", "q"))
+    expect("parse: quoted env values and comments match GitHub", quoted[0][3],
+           {"LTO": "false", "DEBUG": "0", "PROCESSES": "2", "WORDS": "it's quoted"})
+    try:
+        expand("${{ secrets.X }}", ctx)
+        failures.append("an unknown ${{ }} was not refused")
+    except KeyError:
+        pass
+
+    # Which jobs a path reaches. Every rule has a sample that only it explains.
+    commands = {j: "\n".join(s.run for s in plans[j] if not s.skip) for j in JOBS}
+
+    def reaches(*paths):
+        return set(jobs_for(list(paths), changes.SITE, ios_rel, commands, changes.families))
+
+    always = {"wire", "doc-comments"}
+    non_docs = always | {"site", "tunnel"}
+    expect("docs only: the lints alone", reaches("docs/releasing.md", "README.md"), always)
+    expect("site-proof retains non-doc CI jobs", reaches("scripts/site-proof.py"), non_docs)
+    expect("an unknown script: full fallback", reaches("scripts/nonexistent-lane-script.sh"), set(JOBS))
+    expect("a script a job names reaches that job", "swift-tests" in reaches("scripts/swift-test-guard.sh"), True)
+    expect("scripts retain CI coverage", "android" in reaches("scripts/swift-test-guard.sh"), True)
+    expect("the nextest wrapper reaches rust", "rust" in reaches("scripts/tmux-leak-check.py"), True)
+    expect("relay", reaches("services/relay/src/index.ts"), non_docs | {"relay"})
+    expect("site", reaches("services/site/src/index.ts"), non_docs | {"site"})
+    expect("common reaches web, site and relay", reaches("services/common/session.ts"), non_docs | {"web", "site", "relay"})
+    expect("web", reaches("services/web/src/a.ts"), non_docs | {"web", "site"})
+    expect("android", reaches("apps/android/app/src/A.kt"), non_docs | {"android", "relay"})
+    expect("ios retains the Apple family", reaches("apps/ios/FarCooler/App.swift"), non_docs | FAMILY_JOBS["apple"])
+    expect("macos retains the Apple family", reaches("apps/macos/Sources/x.swift"), non_docs | FAMILY_JOBS["apple"])
+    expect("agentkit reaches the iOS app and the Android tests that read it", reaches("apps/shared/AgentKit/Sources/a.swift"), non_docs | {"swift", "swift-tests", "ios", "android"})
+    expect("tailcat reaches the tunnel", "tunnel" in reaches("crates/tailcat/go/a.go"), True)
+    expect("a daemon change reaches every family (ci-changes.py)",
+           reaches("crates/daemon/src/git.rs"), set(JOBS))
+    expect("the JNI crate reaches Android and Rust, not the Mac", reaches("crates/android/src/lib.rs"), non_docs | {"rust", "android"})
+    expect("the CLI crate reaches the Mac and Rust, not Android", reaches("crates/cli/src/main.rs"), non_docs | {"rust", "swift", "swift-tests", "ios"})
+    expect("core reaches iOS", "ios" in reaches("crates/core/src/lib.rs"), True)
+    expect("the lockfile reaches every app job", reaches("Cargo.lock") >= non_docs | APP_JOBS - {"tunnel"}, True)
+    expect("ci.yml reaches every job", reaches(".github/workflows/ci.yml"), set(JOBS))
+    expect("another workflow: full fallback", reaches(".github/workflows/canary.yml"), set(JOBS))
+    expect("an action: full fallback", reaches(".github/actions/ios-ui-shard/action.yml"), set(JOBS))
+    expect("an unknown path takes the safe side", reaches("mystery/file.txt") >= non_docs | APP_JOBS, True)
+
+    # The diff: commits, uncommitted edits and untracked files all count.
+    with tempfile.TemporaryDirectory() as t:
+        repo = pathlib.Path(t)
+
+        def g(*a):
+            r = subprocess.run(["git", "-C", t, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *a], capture_output=True, text=True)
+            if r.returncode:
+                raise RuntimeError(r.stderr)
+            return r.stdout.strip()
+
+        g("init", "-q", "-b", "main")
+        (repo / "a.txt").write_text("a\n")
+        (repo / "b.txt").write_text("b\n")
+        g("add", "-A")
+        g("commit", "-qm", "base")
+        g("checkout", "-qb", "lane")
+        (repo / "c.txt").write_text("c\n")
+        g("add", "-A")
+        g("commit", "-qm", "c")
+        (repo / "a.txt").write_text("changed\n")
+        (repo / "new.txt").write_text("n\n")
+        g("mv", "b.txt", "moved.txt")
+        expect("changed_files", changed_files(repo, "main"), ["a.txt", "b.txt", "c.txt", "moved.txt", "new.txt"])
+
+    expect("a nextest summary is counted", count_tests("     Summary [  12.3s] 1234 tests run: 1230 passed, 4 skipped"), "1230 nextest")
+    expect("an XCTest total is counted", count_tests("Executed 17 tests, with 0 failures (0 unexpected) in 1.0 (1.1) seconds"), "17 xctest")
+    expect("go packages are counted, a bare 'ok' line is not", count_tests("ok  \tpkg/a\t0.3s\nok  \tpkg/b\t(cached)\nok  \tpkg/c\t1.2s\nok something\n"), "2 go pkgs")
+    expect("vitest is counted", count_tests(" Tests  42 passed (42)"), "42 vitest")
+
+    # A host missing a tool, a directory or a JDK is a named FAIL row, not a crash (ov-802).
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+
+        def fake_jdk(name, version):
+            (t / name).mkdir()
+            (t / name / "release").write_text(f'JAVA_VERSION="{version}"\n')
+            return str(t / name)
+
+        jdk11, jdk17, jdk21 = fake_jdk("j11", "11.0.12"), fake_jdk("j17", "17.0.9"), fake_jdk("j21", "21.0.1")
+        jdk8 = fake_jdk("j8", "1.8.0_292")
+        expect("jdk_major reads a release file", (jdk_major(jdk11), jdk_major(jdk8), jdk_major(str(t / "none"))), (11, 8, 0))
+        expect("JDK 17 is picked by its own version", java_home(17, [jdk11, jdk17, jdk21]), jdk17)
+        expect("only JDK 11 installed: no JDK 17 (java_home -v 17 said 11)", java_home(17, [jdk11]), "")
+        expect("a newer JDK stands in when there is no exact one", java_home(17, [jdk11, jdk21]), jdk21)
+        bindir = t / "bin"
+        bindir.mkdir()
+        empty = str(t / "empty")
+        (t / "empty").mkdir()
+        for tool in ("cargo-nextest", "cargo"):
+            (bindir / tool).write_text("#!/bin/sh\n")
+            (bindir / tool).chmod(0o755)
+        nextest = Step("rust", "n", "cargo nextest run --profile ci --workspace\n")
+        expect("nextest missing is named, with the install command",
+               "cargo-nextest is not installed" in blocker(nextest, t, {"PATH": empty}) and "cargo install cargo-nextest --locked --version" in blocker(nextest, t, {"PATH": empty}), True)
+        expect("nextest present: nothing blocks", blocker(nextest, t, {"PATH": str(bindir)}), "")
+        gradle = Step("android", "g", "./gradlew assembleDebug\n")
+        expect("gradle on JDK 11 is named", "JDK 17" in blocker(gradle, t, {"PATH": empty, "JAVA_HOME": jdk11}), True)
+        expect("gradle on JDK 17 is fine", blocker(gradle, t, {"PATH": empty, "JAVA_HOME": jdk17}), "")
+        capture = Step("android", "c", "./gradlew test \\\n  -Pfarcooler.captureJdk=$CAPTURE_JDK\n")
+        expect("the capture task on a JDK 17 is named", "JDK 21" in blocker(capture, t, {"PATH": empty, "JAVA_HOME": jdk17, "CAPTURE_JDK": jdk17}), True)
+        expect("the capture task on a JDK 21 is fine", blocker(capture, t, {"PATH": empty, "JAVA_HOME": jdk17, "CAPTURE_JDK": jdk21}), "")
+        goes = Step("tunnel", "go", "go test -count=1 ./...\n")
+        expect("go missing is named", "go is not installed" in blocker(goes, t, {"PATH": empty}), True)
+        expect("go in prose is not a command", blocker(Step("x", "y", "echo to go on\n"), t, {"PATH": empty}), "")
+
+        logs = t / "logs"
+        logs.mkdir()
+        gone = Step("android", "r", "true\n", cwd="apps/android/app/build/test-results/missing")
+        row = run_step_safely(gone, t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a missing working directory is a FAIL row, not a FileNotFoundError", (row[0].startswith("FAIL: working directory"), row[3]), (True, False))
+        row = run_step_safely(Step("x", "ok", "true\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a step that passes still passes", (row[0], row[3]), ("pass", True))
+        output_step = Step("x", "output", 'test -f "$GITHUB_OUTPUT"\necho "cache-key=toolchain" >> "$GITHUB_OUTPUT"\n')
+        row = run_step_safely(output_step, t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a step can write GITHUB_OUTPUT", (row[0], row[3]), ("pass", True))
+        expect("GITHUB_OUTPUT retains the step's output", (t / "github_output").read_text() if (t / "github_output").exists() else None,
+               "cache-key=toolchain\n")
+        row = run_step_safely(Step("x", "fresh output", 'test -f "$GITHUB_OUTPUT" && test ! -s "$GITHUB_OUTPUT"\n'),
+                              t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("each step gets an empty GITHUB_OUTPUT file", (row[0], row[3]), ("pass", True))
+        noisy = "echo 'test-leak-check: note: 2 new entries appeared in /x' >&2\n"
+        expect("a leak note shows in a real run's Result", "leak note" in run_step_safely(Step("x", "n", noisy), t, {"PATH": "/usr/bin:/bin"}, logs, t)[0], True)
+        expect("... and not in a self-test's", "leak note" in run_step_safely(Step("x", "n", noisy + "# --self-test\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)[0], False)
+        row = run_step_safely(Step("x", "bad", "exit 3\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        expect("a step that fails says its exit code", row[0], "FAIL (exit 3)")
+        # A step that makes the shared repository shallow goes red (ov-1018), in a scratch clone.
+        origin = t / "origin"
+        clone = t / "clone"
+        for args in (["init", "-q", str(origin)],
+                     ["-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "one"],
+                     ["-C", str(origin), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "two"],
+                     ["clone", "-q", f"file://{origin}", str(clone)]):
+            subprocess.run(["git", *args], check=True, capture_output=True)
+        sh_env = {"PATH": os.environ["PATH"]}
+        row = run_step_safely(Step("x", "deep", "git fetch --no-tags --depth=1 origin\n"), clone, sh_env, logs, t)
+        expect("a --depth=1 fetch step goes red, naming the cause", (row[3], "shallow" in row[0]), (False, True))
+        subprocess.run(["git", "-C", str(clone), "fetch", "-q", "--unshallow"], check=True, capture_output=True)
+        row = run_step_safely(Step("x", "full", "git fetch --no-tags origin\n"), clone, sh_env, logs, t)
+        expect("a plain fetch step stays green", row[3], True)
+        global run_step
+        real_run_step = run_step
+        run_step = lambda *a: (_ for _ in ()).throw(OSError("boom"))
+        try:
+            row = run_step_safely(Step("x", "boom", "true\n"), t, {"PATH": "/usr/bin:/bin"}, logs, t)
+        finally:
+            run_step = real_run_step
+        expect("an exception inside a step is that step's FAIL row", (row[0], row[3]), ("FAIL: lane-gate could not run it: OSError: boom", False))
+
+    expect("a leak note is carried into the Result column", "leak note: 3" in leak_notes("test-leak-check: note: 3 new entries appeared in /x"), True)
+    expect("no note, no addition", leak_notes("test-leak-check: the run left nothing"), "")
+    env = base_env(ROOT, pathlib.Path("/tmp"), ctx)
+    expect("the gate marks the Mac shared, so siblings' leftovers are a note", (env["FC_LEAK_SHARED"], env["CI"], "FC_LEAK_STRICT" in env), ("1", "true", False))
+    expect("--strict-leaks turns strict back on", base_env(ROOT, pathlib.Path("/tmp"), ctx, True).get("FC_LEAK_STRICT"), "1")
+
+    # The table prints even when running the jobs raises (the ov-800 crash printed none).
+    real_run_jobs = run_jobs
+    def boom(chosen, plans, rows, *rest):
+        rows.append(("wire", "a step that ran", "pass", "1", ""))
+        raise RuntimeError("the gate tripped")
+    run_jobs = boom
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            main(["--worktree", str(ROOT), "--base", "HEAD", "--only", "wire", "--no-load-wait"])
+        failures.append("an exception in the run was swallowed")
+    except RuntimeError:
+        pass
+    finally:
+        run_jobs = real_run_jobs
+    text_out = out.getvalue()
+    expect("the summary table prints after an exception", ("## lane-gate summary" in text_out, "a step that ran" in text_out, "FAIL: RuntimeError: the gate tripped" in text_out, "lane-gate: FAILED" in text_out), (True, True, True, True))
+
+    # A full disk is a named FAIL row and a red gate, never a traceback (ov-839).
+    import errno
+    full = OSError(errno.ENOSPC, "No space left on device")
+    def full_run(*a, **k):
+        raise full
+    real_run_step, real_mkdtemp = run_step, tempfile.mkdtemp
+    run_step = full_run
+    try:
+        res = run_step_safely(Step("rust", "n", "true\n"), ROOT, {"PATH": os.environ["PATH"]}, pathlib.Path("/tmp"), pathlib.Path("/tmp"))
+    finally:
+        run_step = real_run_step
+    expect("a step that cannot write for want of room is a named FAIL row", (res[0].startswith("FAIL: the disk is full"), res[3]), (True, False))
+    with tempfile.TemporaryDirectory() as t:
+        res = run_step_safely(Step("rust", "n", "echo 'error: No space left on device (os error 28)'; exit 101\n"), ROOT, {"PATH": os.environ["PATH"]}, pathlib.Path(t), pathlib.Path(t))
+    expect("a step that ran out of room says so beside its exit code", (res[0].startswith("FAIL (exit 101); the disk is full"), res[3]), (True, False))
+    for where in ("run_jobs", "mkdtemp"):
+        out = io.StringIO()
+        if where == "run_jobs":
+            run_jobs = full_run
+        else:
+            tempfile.mkdtemp = full_run
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = main(["--worktree", str(ROOT), "--base", "HEAD", "--only", "wire", "--no-load-wait"])
+        except OSError as e:
+            rc = f"raised {e!r}"
+        finally:
+            run_jobs, tempfile.mkdtemp = real_run_jobs, real_mkdtemp
+        expect(f"a full disk in {where} gives a named FAIL and exit 1, not a crash", (rc, "FAIL: the disk is full" in out.getvalue(), "lane-gate: FAILED" in out.getvalue()), (1, True, True))
+    asked = []
+    real_survive = hl.survive_dead_output
+    hl.survive_dead_output = lambda: asked.append(1)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(["--worktree", str(ROOT), "--base", "HEAD", "--dry-run"])
+    finally:
+        hl.survive_dead_output = real_survive
+    expect("the gate protects its own output before it queues", asked, [1])
+
+    # A fully green gate removes a lane worktree's target/ (ov-837); never the main checkout's, never after a partial or failed gate.
+    with tempfile.TemporaryDirectory() as t:
+        t = pathlib.Path(t)
+        def sh(*a, cwd):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=cwd, capture_output=True, check=True)
+        main_wt, lane_wt = t / "main", t / "lane"
+        main_wt.mkdir()
+        sh("init", "-q", cwd=main_wt)
+        sh("commit", "-q", "--allow-empty", "-m", "x", cwd=main_wt)
+        sh("worktree", "add", "-q", "--detach", str(lane_wt), cwd=main_wt)
+        for wt in (main_wt, lane_wt):
+            (wt / "target").mkdir()
+        link_wt, elsewhere = t / "linked", t / "elsewhere"
+        sh("worktree", "add", "-q", "--detach", str(link_wt), cwd=main_wt)
+        elsewhere.mkdir()
+        (elsewhere / "precious").write_text("x")
+        (link_wt / "target").symlink_to(elsewhere)
+        said = []
+        saved_env = {k: os.environ.pop(k, None) for k in (hl.LEAN_ENV, "CI")}  # the gate runs its own tests with CI=true
+        try:
+            clean_target_after_pass(main_wt, say=lambda *a, **k: None)
+            clean_target_after_pass(lane_wt, say=lambda *a, **k: None)
+            clean_target_after_pass(link_wt, say=lambda m, **k: said.append(m))
+            expect("a target/ symlink is unlinked, never followed, and the message does not claim a removal",
+                   ((link_wt / "target").exists() or (link_wt / "target").is_symlink(), (elsewhere / "precious").exists(), "symlink" in said[0] and "removed /" not in said[0]), (False, True, True))
+            expect("a green gate removes the lane worktree's target/ and leaves the main checkout's", ((lane_wt / "target").exists(), (main_wt / "target").exists()), (False, True))
+        finally:
+            os.environ.update({k: v for k, v in saved_env.items() if v is not None})
+    cleaned = []
+    real_clean, real_run_jobs2 = clean_target_after_pass, run_jobs
+    clean_target_after_pass = lambda repo, say=print: cleaned.append(1)
+    try:
+        for stub, extra, want in ((False, [], 1), (False, ["--keep-target"], 0), (True, [], 0), (False, ["--only", "wire"], 0)):
+            cleaned.clear()
+            run_jobs = lambda chosen, plans, rows, *r, _f=stub: _f
+            with contextlib.redirect_stdout(io.StringIO()):
+                main(["--worktree", str(ROOT), "--base", "HEAD", "--no-load-wait", *extra])
+            expect(f"target/ cleaning after a gate (failed={stub}, args={extra})", len(cleaned), want)
+    finally:
+        clean_target_after_pass, run_jobs = real_clean, real_run_jobs2
+
+    # A filtered gate says so in its summary heading and its last line, and an unfiltered one does not (ov-817).
+    for left, failed_, want_head, want_last in [
+        (["relay", "wire"], False, "## lane-gate summary (PARTIAL)", "lane-gate: PARTIAL, NOT A FULL GATE: relay, wire not run"),
+        ([], False, "## lane-gate summary\n", "lane-gate: all steps passed"),
+    ]:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            print_summary([("wire", "x", "pass", "1", "")], ROOT, "HEAD", "/tmp", failed_, left)
+        o = buf.getvalue()
+        expect(f"summary with {len(left)} job(s) left out", (want_head in o, want_last in o, ("PARTIAL" in o) == bool(left)), (True, True, True))
+
+    # The summary file carries the full sha it gated, the verdict, and each failed step's env gap (ov-822).
+    with tempfile.TemporaryDirectory() as t:
+        dest = pathlib.Path(t) / SUMMARY_NAME
+        rows = [("rust", "cargo nextest run", "FAIL (exit 101) [env-gap: git-lfs-missing]", "2", ""), ("web", "tsc", "FAIL (exit 2)", "1", "")]
+        with contextlib.redirect_stdout(io.StringIO()):
+            print_summary(rows, ROOT, "HEAD", "/tmp", True, [], dest)
+        saved = dest.read_text()
+        full = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+        expect("the saved summary", (f"head: {full}\n" in saved, "verdict: failed\n" in saved, "failed-step: rust | cargo nextest run | gap=git-lfs-missing\n" in saved, "failed-step: web | tsc | gap=none\n" in saved), (True,) * 4)
+        with contextlib.redirect_stdout(io.StringIO()):
+            print_summary(rows[:0], ROOT, "HEAD", "/tmp", False, ["rust"], dest)
+        expect("a partial run saves verdict partial", "verdict: partial\n" in dest.read_text(), True)
+    gap_step = Step("rust", "n", "cargo nextest run --profile ci\n")
+    expect("a git-lfs gap", env_gap(gap_step, "panicked: CI installs git-lfs, and it isn't on PATH"), "git-lfs-missing")
+    expect("the same words from another command", env_gap(Step("wire", "n", "./scripts/x.sh\n"), "git-lfs isn't on PATH"), "")
+    expect("a plain test failure", env_gap(gap_step, "assertion failed: left == right"), "")
+    expect("a wrangler gap", env_gap(Step("web", "n", "npx wrangler deploy --dry-run --outdir /tmp/w\n"), "The directory specified by assets.directory does not exist: dist"), "wrangler-dry-run-without-dist")
+
+    for failure in failures:
+        print(f"lane-gate self-test: {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    policy_test = subprocess.run([sys.executable, str(ROOT / "scripts/landing-policy-test.py")])
+    if policy_test.returncode:
+        return policy_test.returncode
+    benchmark_test = subprocess.run([sys.executable, str(ROOT / "scripts/landing-benchmark-test.py")])
+    if benchmark_test.returncode:
+        return benchmark_test.returncode
+    print("lane-gate self-test: ok")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

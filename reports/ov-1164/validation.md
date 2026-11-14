@@ -89,3 +89,66 @@ Every failing test passed in isolation, but acceptance item 3 does not have an
 unqualified clean parallel full-suite run. The native recovery flake predates
 this ticket; the resize test also depends on global tty allocation. Neither
 terminal behavior nor their tests were changed for this gate-ownership fix.
+
+## Fix round 1: isolate tests that depend on tty reuse
+
+The review correctly rejected the earlier exit-101 runs as acceptance evidence.
+The two failing fixtures depend on the host's shared PTY-number pool:
+
+- The vanished-review test kills its private tmux server, waits for the old
+  tty to have no processes, then reopens the runtime. Another PTY test can
+  reuse that number before reconciliation. `cancel_interrupted_native` then
+  correctly refuses with `native vanished pane still has processes`, leaving
+  the item Uncertain. The existing busy-tty test explicitly requires this
+  conservative behavior, including for a tty reused since the crash.
+- The resize fixture's `take` opens up to 256 PTYs to reacquire the old tty.
+  If another test takes that number first, opening more PTYs cannot recover it.
+  The assertion `was never handed out again` is a fixture isolation failure.
+
+The nextest configuration already runs the resize tests exclusively. The
+vanished-review test now also requires every scheduler slot, inheriting that
+rule in the CI profile. This isolates it from all other tests in that runner,
+not merely from the other native tests. Plain libtest does not read nextest's
+configuration, so CONTRIBUTING.md now requires `--test-threads=1` for full
+plain cargo runs containing the daemon. Neither runner should overlap another
+PTY test run on the host. Production ownership checks and gate retry behavior
+are unchanged; the gate regressions' fail-before-fix evidence above still holds.
+
+### Final verification for fix round 1
+
+The full four-crate cargo run on the final source **passed, exit 0**:
+
+```sh
+python3 scripts/tmux-leak-check.py -- cargo test \
+  -p farcooler-workflow -p farcooler-store -p farcooler-daemon \
+  -p farcooler-cli --no-fail-fast -- --test-threads=4
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+Clippy also **passed, exit 0**. Both commands used the worktree's own target,
+four build jobs, TMPDIR=/tmp, system tools first on PATH, and cleared inherited
+FARCOOLER_* variables as described above. No process/tmux leaks were reported.
+
+This complete run did not reproduce the intermittent fixture failures: the
+daemon library passed 3,086 tests (13 ignored), including the vanished-server
+review, the busy-tty refusal, both ov-1164 regressions and the ov-1158 landing
+regressions. All three resize integration tests passed in that same run.
+CLI, store and workflow unit/integration tests and all doctests passed too.
+The new nextest rule addresses the fixture's scheduling premise independently
+of whether a particular parallel libtest run happens to win the tty race.
+
+The affected scheduling check also **passed, exit 0** under the CI profile:
+
+```sh
+python3 scripts/tmux-leak-check.py -- cargo nextest run --profile ci \
+  -p farcooler-daemon \
+  -E 'binary(a_resized_pane_says_so) or test(workflow_native_review_vanished)' \
+  --status-level all
+```
+
+All 5 selected tests passed: vanished-server recovery, busy-tty refusal, and
+all three resize cases. No leaks were reported. File-size budget, doc-comment
+check, and `git diff --check` passed on the final changes.
+
+Status: **DONE**. This clean full-suite run supersedes the earlier
+DONE_WITH_CONCERNS result; acceptance item 3 now has a complete exit-0 run.
