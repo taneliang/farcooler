@@ -10,7 +10,8 @@ impl Rpc {
     ///   their orchestrator pane (ov-999), and a Maintainer on any workspace,
     ///   to act on its runs (`people::acts_on_runs`, ov-1000).
     ///
-    /// Setting a workflow outright, settling a push and resolving a lost cancellation stay the owner's. This
+    /// Publishing is also reachable by a granted workspace's lead; retained admission proves the
+    /// orchestrator seat. Settling a push and resolving a lost cancellation stay the owner's. This
     /// only narrows: `admit` then proves who the caller is, and
     /// `Admission::permits` asks the same again when the command is used.
     pub(super) fn engine_caller(&self, workspace: Uuid, method: &str) -> Result<()> {
@@ -19,6 +20,9 @@ impl Rpc {
         let owners = matches!(method, "workspace.set_workflow" | "workflow.settle" | "workflow.resolve_cancellation");
         match &person {
             Person::Owner => Ok(()),
+            Person::Member(_) if method == "workspace.set_workflow"
+                && self.service.store.orchestrator_publishes_workflow(&workspace.to_string()).map_err(|_| DomainError::OperationFailed)?
+                && crate::people::leads(&self.service.store, &person, workspace)? => Ok(()),
             Person::Member(_) if method == "workflow.get" => Ok(()),
             // The engine takes a decision only from whoever holds the name its gate waits on (ov-1002).
             Person::Member(_) if matches!(method, "workflow.approve" | "workflow.review") => Ok(()),

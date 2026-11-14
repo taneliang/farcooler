@@ -25,6 +25,9 @@ pub enum WorkflowError {
 pub type Result<T> = std::result::Result<T, WorkflowError>;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
+    /// Immutable publication or grant audit, written with the selection and receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<serde_json::Value>,
     pub id: String,
     pub result: std::result::Result<u64, Refusal>,
     pub effects: Vec<String>,
@@ -349,7 +352,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
         }
         let mut applied = None;
         let receipt = match result {
-            Err(reason) => Receipt { id: input.id.clone(), result: Err(reason), effects: vec![], actor: None },
+            Err(reason) => Receipt { change:None, id: input.id.clone(), result: Err(reason), effects: vec![], actor: None },
             Ok(transition) => {
                 crate::workflow_ownership::reserve(tx, input)?;
                 let revision = transition.state.revision;
@@ -409,7 +412,7 @@ fn apply_in_snapshot(tx: &Transaction<'_>, input: &Input, payload: &str, by: Opt
                 )?;
                 let effects = transition.effects.iter().map(|e| e.id.clone()).collect();
                 applied = Some(transition.state);
-                Receipt { id: input.id.clone(), result: Ok(revision), effects, actor: None }
+                Receipt { change:None, id: input.id.clone(), result: Ok(revision), effects, actor: None }
             }
         };
         tx.execute(

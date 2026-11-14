@@ -26,7 +26,7 @@ pub(super) async fn a_failed_run(workspace: Uuid) -> (tempfile::TempDir, Runtime
     let definition = published.definition().unwrap();
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published)));
     let start_pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter, mutation: mutation("p", 0, 1),
+    runtime.wire_command(&w, "owner", Action::Publish { reason:None, notifications: None, adapter, mutation: mutation("p", 0, 1),
         expected_pin: None, definition }).unwrap();
     assert_eq!(runtime.track_tickets(&[(w.clone(), "ov-7".into(), "todo".into())]).unwrap(), 1);
     let state = runtime.state(&w).unwrap().unwrap(); let item = &state.items["ov-7"];
@@ -173,7 +173,7 @@ async fn workflow_a_maintainer_does_not_set_a_workflow_outright() {
     let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));
     let before = snapshot(&runtime, workspace);
-    let publish = Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None,
+    let publish = Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None,
         definition: coding_definition(false) };
     let (reply, reached) = sent(&mut runtime, &rpc, workspace, &publish).await;
     assert_eq!(refused(&reply), "scope-denied");

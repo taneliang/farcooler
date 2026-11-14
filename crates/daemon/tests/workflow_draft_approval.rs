@@ -200,7 +200,7 @@ async fn a_declined_draft_and_one_the_workflow_has_moved_past_publish_nothing() 
     let live = bundle(&config, "ticket-push", "make test");
     let adapter = Some(Box::new(live.adapter.clone()));
     let state = call(&mut link, ws, Action::Get).await;
-    let receipt = call(&mut link, ws, Action::Publish { notifications: None, adapter, expected_pin: None, definition: live.definition,
+    let receipt = call(&mut link, ws, Action::Publish { reason:None, notifications: None, adapter, expected_pin: None, definition: live.definition,
         mutation: Mutation { id: "by-hand".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 1 } }).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
     let held = pin(&host);
@@ -261,7 +261,7 @@ async fn mains_draft_landing_on_a_remote_publishes_on_a_scratch_copy() {
     leaky.landing.as_mut().unwrap().repository = "https://x-access-token:secret@github.com/o/r.git".into();
     let bad = lt::template("ticket-push", &leaky, &["scripts/landing-gate".to_string()], &[], &Options::default()).unwrap();
     let state = call(&mut link, ws, Action::Get).await;
-    let action = Action::Publish { notifications: None, adapter: Some(Box::new(bad.adapter)), expected_pin: None, definition: bad.definition,
+    let action = Action::Publish { reason:None, notifications: None, adapter: Some(Box::new(bad.adapter)), expected_pin: None, definition: bad.definition,
         mutation: Mutation { id: "leaky".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 9 } };
     let mut req = farcooler_transport::request(action.method());
     req.target_resource_id = Some(bytes::Bytes::copy_from_slice(ws.as_bytes()));
@@ -435,7 +435,7 @@ async fn a_draft_that_changes_only_a_value_shows_it_as_changed_on_its_card() {
     let live = with("aaaaaaaa");
     let adapter = Some(Box::new(live.adapter.clone()));
     let state = call(&mut link, ws, Action::Get).await;
-    let receipt = call(&mut link, ws, Action::Publish { notifications: None, adapter, expected_pin: None, definition: live.definition,
+    let receipt = call(&mut link, ws, Action::Publish { reason:None, notifications: None, adapter, expected_pin: None, definition: live.definition,
         mutation: Mutation { id: "live".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 1 } }).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
 

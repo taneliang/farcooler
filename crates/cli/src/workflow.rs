@@ -18,6 +18,8 @@ impl Identity {
 }
 #[derive(Args)]
 pub struct Publication {
+    /// Why this workflow changes. Required for an orchestrator publication.
+    #[arg(long)] pub reason: Option<String>,
     #[arg(long)] pub file: std::path::PathBuf,
     #[arg(long)] pub expected_pin: Option<String>,
     #[command(flatten)] pub identity: Identity,
@@ -38,13 +40,15 @@ impl Publication {
             if serde_json::to_value(&definition)? != value { return Err("unknown definition fields".into()); }
             (definition, None, None)
         };
-        Ok(Action::Publish { notifications, adapter, mutation:self.identity.mutation(),expected_pin:self.expected_pin.clone(),definition })
+        Ok(Action::Publish { reason:self.reason.clone(), notifications, adapter, mutation:self.identity.mutation(),expected_pin:self.expected_pin.clone(),definition })
     }
 }
 #[derive(Subcommand)]
 pub enum WorkflowCmd {
     /// Read current state; --full includes definitions and notification history.
     Get { workspace: Uuid, #[arg(long)] full: bool },
+    /// Restore the previous workflow bundle, retaining a new audit entry. Owner in person only.
+    Rollback { workspace: Uuid, #[arg(long, default_value="Restore previous workflow")] reason:String },
     /// Admit against the exact configuration pin selected from get.
     Enqueue { workspace: Uuid, item: String, #[arg(long)] pin:String, #[command(flatten)] identity:Identity },
     /// Approve only the run, candidate and definition that were inspected.
@@ -128,6 +132,7 @@ pub enum WorkflowCmd {
 impl WorkflowCmd {
     pub fn action(self) -> Result<(Uuid, Action), Box<dyn std::error::Error>> {
         Ok(match self {
+            Self::Rollback { .. } => return Err("rollback is prepared from current state".into()),
             Self::Get { workspace, .. } => (workspace,Action::Get),
             Self::Enqueue { workspace,item,pin,identity } => (workspace,Action::Enqueue { mutation:identity.mutation(),item,pin }),
             Self::Approve { workspace,item,run,pin,candidate,identity } => (workspace,Action::Approve { mutation:identity.mutation(),item,run,pin,candidate }),
@@ -299,6 +304,10 @@ pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible
         return Ok(());
     }
     let full = matches!(&cmd, WorkflowCmd::Get { full:true, .. });
+    if let WorkflowCmd::Rollback { workspace, reason } = cmd {
+        let mut link = crate::connect_to(runner).await?;
+        return publication_change(&mut link,workspace,None,reason,json).await;
+    }
     let (workspace,action) = cmd.action()?;
     let mut link = crate::connect_to(runner).await?;
     if full {
@@ -519,7 +528,7 @@ mod tests {
         let dir=tempfile::tempdir().unwrap();let path=dir.path().join("workflow.json");
         let definition=farcooler_daemon::workflow_runtime::coding_definition(false);
         std::fs::write(&path,serde_json::to_vec(&definition).unwrap()).unwrap();
-        let publication=Publication { file:path.clone(),expected_pin:None,identity:Identity {command_id:"publish".into(),revision:0,epoch:1,sequence:1} };
+        let publication=Publication { reason:None, file:path.clone(),expected_pin:None,identity:Identity {command_id:"publish".into(),revision:0,epoch:1,sequence:1} };
         let action=publication.action().unwrap();let request=super::request(workspace,&action).unwrap();
         let Some(request::Payload::WorkflowCommand(body))=request.payload else {panic!("wrong payload")};
         assert_eq!(farcooler_protocol::workflow_commands::parse(&body.json).unwrap(),action);
@@ -536,7 +545,7 @@ mod bundle_tests {
     fn workflow_bundle_file_closed_schema_and_bounded_inputs() {
         let dir=tempfile::tempdir().unwrap();let path=dir.path().join("workflow.json");
         let definition=farcooler_protocol::workflow_commands::Definition::tracker("owner");
-        let publication=Publication { file:path.clone(),expected_pin:None,identity:Identity {command_id:"publish".into(),revision:0,epoch:1,sequence:1} };
+        let publication=Publication { reason:None, file:path.clone(),expected_pin:None,identity:Identity {command_id:"publish".into(),revision:0,epoch:1,sequence:1} };
         // Bad adapter tags and extra envelope fields must not be silently lost.
         for value in [serde_json::json!({"definition":definition,"adapter":{"version":"untrusted/v9","config":{} }}),
             serde_json::json!({"definition":definition,"adapter":null,"principal":"owner"})] {
@@ -588,5 +597,35 @@ mod close_tests {
             let req = request(workspace, &action).unwrap();
             assert_eq!(req.method, "workflow.close");
         }
+    }
+}
+
+/// Prepare a workspace-level change from an inspected state, with a unique retry identity.
+pub(crate) async fn publication_change(link:&mut crate::Link, workspace:Uuid, enabled:Option<bool>, reason:String, json:bool) -> crate::Fallible {
+    let current = ask(link, workspace, &Action::Get).await?;
+    let mutation = Mutation { id:Uuid::now_v7().to_string(), revision:current.pointer("/state/revision").and_then(|v|v.as_u64()).unwrap_or(0),
+        epoch:current.pointer("/state/epoch").and_then(|v|v.as_u64()).unwrap_or(1), sequence:1 };
+    let action = match enabled {
+        Some(enabled) => Action::PublicationGrant { mutation,enabled },
+        None => Action::Rollback { mutation,reason, expected_pin:current.pointer("/configuration/pin").and_then(|v|v.as_str()).ok_or("no workflow has been published")?.into() },
+    };
+    send(link,workspace,action,json).await
+}
+
+#[cfg(test)]
+mod ov1179_cli_tests {
+    use super::*;
+    use clap::Parser;
+    #[test]
+    fn ov1179_cli_grant_and_single_command_rollback() {
+        let parsed=crate::Cli::try_parse_from(["farcooler","workspace","set","Main","--orchestrator-publishes-workflow","on"]).unwrap();
+        let crate::Command::Workspace(cmd)=parsed.command else {panic!()};
+        cmd.check().unwrap();
+        assert!(matches!(cmd,crate::workspaces::WorkspaceCmd::Set {orchestrator_publishes_workflow:Some(crate::workspaces::OnOff::On),..}));
+        let parsed=crate::Cli::try_parse_from(["farcooler","workspace","set","Main","--orchestrator-publishes-workflow","off","--landing","direct"]).unwrap();
+        let crate::Command::Workspace(cmd)=parsed.command else {panic!()};
+        assert!(cmd.check().is_err(),"never silently drop a grant or combine partial settings writes");
+        let parsed=crate::Cli::try_parse_from(["farcooler","workflow","rollback","00000000-0000-0000-0000-000000000001"]).unwrap();
+        assert!(matches!(parsed.command,crate::Command::Workflow(WorkflowCmd::Rollback {..})));
     }
 }

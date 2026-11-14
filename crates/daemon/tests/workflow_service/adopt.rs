@@ -14,7 +14,7 @@ async fn workflow_service_an_adopted_tree_with_only_our_hooks_files_lands_and_on
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
     let mut sequence=1;
     let mut tickets=Vec::new();

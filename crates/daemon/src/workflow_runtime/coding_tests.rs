@@ -396,7 +396,7 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
     let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published.clone())));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    ok(&wire(&runtime, "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
+    ok(&wire(&runtime, "owner", Action::Publish { reason:None, notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
     // What the daemon's tracking does for a card: the ticket template, no run.
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let item = &state.items["ov-7"];
@@ -435,7 +435,7 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published.clone())));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    ok(&wire(&runtime, "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
+    ok(&wire(&runtime, "owner", Action::Publish { reason:None, notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into()), ("w".into(), "ov-8".into(), "backlog".into())]).unwrap(), 2);
     let start = |runtime: &Runtime, item: &str, models: &[(&str, &str)], sequence| {
         let state = runtime.state("w").unwrap().unwrap(); let held = &state.items[item];
@@ -646,13 +646,13 @@ async fn workflow_codex_bundle_publishes_and_starts_a_codex_build() {
     runtime.coding = Some(bare.clone());
     let mut bare_definition = runtime.configured_definition().unwrap();
     bare_definition.models = definition.models.clone();
-    let refusal = runtime.wire_command("w", "owner", Action::Publish { notifications: None, adapter: Some(Box::new(AdapterConfiguration::Coding(bare))),
+    let refusal = runtime.wire_command("w", "owner", Action::Publish { reason:None, notifications: None, adapter: Some(Box::new(AdapterConfiguration::Coding(bare))),
         mutation: m("publish-bare", 0, 1), expected_pin: None, definition: bare_definition });
     assert!(matches!(refusal, Err(Error::Refused("a listed model's harness isn't set up on this runtime"))), "{refusal:?}");
     runtime.coding = Some(config.clone());
     let adapter = Some(Box::new(AdapterConfiguration::Coding(config.clone())));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    ok(&runtime.wire_command("w", "owner", Action::Publish { notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
+    ok(&runtime.wire_command("w", "owner", Action::Publish { reason:None, notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }).unwrap());
     assert!(!config.repository.join(".codex").exists(), "published with no hooks file in the repository");
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into())]).unwrap(), 1);
     let state = runtime.state("w").unwrap().unwrap(); let held = &state.items["ov-7"];

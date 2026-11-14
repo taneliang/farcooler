@@ -782,6 +782,11 @@ impl Rpc {
                 if action.method() != req.method { return Err(DomainError::NotFound); }
                 let handle = self.workflow.as_ref().ok_or(DomainError::CapabilityUnsupported { needed: "workflow execution service" })?;
                 let admission = self.admit(workspace).await?;
+                // A Maintainer may publish a draft they approved through workflow_drafts. The direct
+                // command is still the owner's or, with a grant, this workspace's orchestrator's.
+                if matches!(action, Action::Publish { .. }) && !admission.is_owner() && admission.orchestrator().is_none() {
+                    return Err(DomainError::ScopeDenied { needed: "owner" });
+                }
                 admission.permits(&action)?;
                 if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)
                 // Every read bypasses the effect inbox and its per-message git/tree cleanup.
@@ -792,6 +797,13 @@ impl Rpc {
                     handle.read_get(admission, full || !summary).await
                 } else { handle.wire_command(admission, action).await }
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
+                if let Some(id) = value.pointer("/receipt/change/notice_task").and_then(|v|v.as_str()).and_then(|s|Uuid::parse_str(s).ok())
+                    && let Ok(task) = svc.store.get_task(id)
+                {
+                    self.watcher.announce_task_changed(&task,None,farcooler_store::models::Actor::Manager);
+                    self.watcher.task_event(&task,crate::watch::task_notice::TaskEvent::Created,farcooler_store::models::Actor::Manager);
+                    self.watcher.announce_needs_you();
+                }
                 if summary && !full {
                     return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
                 }

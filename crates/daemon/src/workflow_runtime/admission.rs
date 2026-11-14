@@ -25,9 +25,8 @@ pub(crate) struct Admission {
     person: Person,
 }
 
-/// The actions an orchestrator may never take on a person's behalf: publishing a definition, and saying
-/// whether a lost push landed or an uncertain cancellation is quiescent.
-pub(super) fn person_only(action: &Action) -> bool { matches!(action, Action::Publish { .. } | Action::Settle { .. } | Action::ResolveCancellation { .. }) }
+/// Actions that stay person-only even with a workspace publication grant.
+pub(super) fn person_only(action: &Action) -> bool { matches!(action, Action::PublicationGrant { .. } | Action::Rollback { .. } | Action::Settle { .. } | Action::ResolveCancellation { .. }) }
 
 impl Admission {
     /// The workspace of a command about the whole host, such as a cutover. No
@@ -100,7 +99,7 @@ impl Admission {
         }
     }
     /// Whether the person behind this caller is the owner, whatever seat they call from.
-    pub(super) fn is_owner(&self) -> bool { self.person == Person::Owner }
+    pub(crate) fn is_owner(&self) -> bool { self.person == Person::Owner }
     /// The decider names this caller holds, read from the store now (ov-1002): the owner holds `owner`, and
     /// `role:maintainer` as every Maintainer does; a member in person `member:<handle>`, and the role while they
     /// hold it; an orchestrator pane only `orchestrator`, whoever leads it.
@@ -141,6 +140,21 @@ impl Admission {
     pub(crate) fn permits(&self, action: &Action) -> Result<()> {
         // Refused here too, not only by `admits`, so nothing below fails open (R-111, L7).
         if self.person == Person::Released { return Err(DomainError::NotYours { what: "not_yours" }); }
+        if matches!(action, Action::PublicationGrant { .. } | Action::Rollback { .. }) {
+            self.require_person()?;
+            self.require_owner()?;
+        }
+        if let Action::Publish { reason, .. } = action {
+            if self.seat != Seat::Person {
+                if !self.service.store.orchestrator_publishes_workflow(&self.workspace())
+                    .map_err(|_| DomainError::OperationFailed)? {
+                    return Err(DomainError::ScopeDenied { needed: "person" });
+                }
+                if !reason.as_ref().is_some_and(|r| farcooler_protocol::workflow_commands::valid_rework_reason(r)) {
+                    return Err(DomainError::InvalidArgument { what: "reason" });
+                }
+            }
+        }
         if person_only(action) && self.seat != Seat::Person {
             return Err(DomainError::ScopeDenied { needed: "person" });
         }

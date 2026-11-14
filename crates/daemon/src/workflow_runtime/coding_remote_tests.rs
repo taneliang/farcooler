@@ -411,7 +411,7 @@ async fn a_remote_that_cant_be_read_at_start_stops_the_ticket_and_says_why() {
     let config = r.runtime.coding.clone().unwrap();
     let adapter = Some(Box::new(AdapterConfiguration::Coding(config.clone())));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    let published = r.runtime.wire_command("w", "owner", Action::Publish { notifications: None, adapter, expected_pin: None,
+    let published = r.runtime.wire_command("w", "owner", Action::Publish { reason:None, notifications: None, adapter, expected_pin: None,
         mutation: Mutation { id: "publish".into(), revision: 0, epoch: 1, sequence: 1 }, definition: definition.clone() }).unwrap();
     assert!(published.pointer("/receipt/result/Ok").is_some(), "{published}");
     let start = |id: &str| Action::Start { mutation: Mutation { id: id.into(), revision: 1, epoch: 1, sequence: 2 }, item: "ov-7".into(),
@@ -662,7 +662,7 @@ async fn a_start_that_names_a_worktree_pins_the_remotes_main_not_the_stale_one()
     r.runtime.host = Some(WorktreeHost { dir: r._dir.path().join("trees"), install_id: "i".into(), locks: Default::default() });
     let adapter = Some(Box::new(AdapterConfiguration::Coding(config.clone())));
     let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    let published = r.runtime.wire_command(&board, "owner", Action::Publish { notifications: None, adapter, expected_pin: None,
+    let published = r.runtime.wire_command(&board, "owner", Action::Publish { reason:None, notifications: None, adapter, expected_pin: None,
         mutation: Mutation { id: "publish".into(), revision: 0, epoch: 1, sequence: 1 }, definition: definition.clone() }).unwrap();
     assert!(published.pointer("/receipt/result/Ok").is_some(), "{published}");
     let start = Action::Start { mutation: Mutation { id: "named".into(), revision: 1, epoch: 1, sequence: 2 }, item: "ov-7".into(),

@@ -157,6 +157,9 @@ pub enum WorkspaceCmd {
     /// as they are.
     Set {
         workspace: String,
+        /// Let this workspace's orchestrator publish workflows. Only the owner in person can change this grant.
+        #[arg(long, value_name="on|off")]
+        orchestrator_publishes_workflow: Option<OnOff>,
         #[command(flatten)]
         settings: SettingsArgs,
         #[arg(long)]
@@ -355,8 +358,11 @@ impl WorkspaceCmd {
     pub(crate) fn check(&self) -> Result<(), String> {
         match self {
             WorkspaceCmd::Create(args) => args.checked().map(drop),
-            WorkspaceCmd::Set { settings, .. } if settings.is_empty() => {
+            WorkspaceCmd::Set { settings, orchestrator_publishes_workflow:None, .. } if settings.is_empty() => {
                 Err("name a setting to change, like --wake-on-answer off or --landing pull-requests".into())
+            }
+            WorkspaceCmd::Set { settings, orchestrator_publishes_workflow:Some(_), .. } if !settings.is_empty() => {
+                Err("change the workflow publication grant on its own".into())
             }
             _ => Ok(()),
         }
@@ -495,7 +501,11 @@ async fn workspace_via(
             })?;
         }
 
-        WorkspaceCmd::Set { workspace, settings, repo } => {
+        WorkspaceCmd::Set { workspace, settings, repo, orchestrator_publishes_workflow } => {
+            if let Some(enabled) = orchestrator_publishes_workflow {
+                let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+                return crate::workflow::publication_change(&mut link,uuid_of(&ws.id),Some(enabled == OnOff::On),String::new(),json).await;
+            }
             let has = |c: &str| link.daemon_capabilities().iter().any(|have| have == c);
             if settings.wake_on_answer.is_some() && !has(capability::WAKE_ON_ANSWER) {
                 return Err("this runner's Far Cooler can't wake an agent when you answer yet. update it first".into());

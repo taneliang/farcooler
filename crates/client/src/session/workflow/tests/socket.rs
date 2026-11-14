@@ -37,7 +37,7 @@ async fn seed(session: &Session, h: &Harness, item: &str, revision: u64, sequenc
     if sequence == 1 {
         let mut definition=coding_definition(false);
         definition.stages[0].progression=Progression::AwaitApproval {principal:"owner".into()};
-        let a=wire::Action::Publish { notifications:None,adapter:None,mutation:Mutation {id:"publish".into(),sequence:1,revision:0,epoch:1},expected_pin:None,definition};
+        let a=wire::Action::Publish { reason:None, notifications:None,adapter:None,mutation:Mutation {id:"publish".into(),sequence:1,revision:0,epoch:1},expected_pin:None,definition};
         let receipt=session.workflow_wire(h.workspace,serde_json::to_string(&a).unwrap()).await.unwrap();
     assert!(receipt.pointer("/receipt/result/Ok").is_some(),"seed {item} revision={revision} sequence={sequence}: {receipt}");
     }
@@ -330,7 +330,7 @@ async fn workflow_reasoned_socket_selection_loss_and_reconnect() {
         farcooler_workflow::StageKind::Review(farcooler_workflow::Reviewer::Person("owner".into()));
     let pin=definition.pin();
     let mutation=|id:&str|Mutation{id:id.into(),revision:0,epoch:1,sequence:1};
-    session.workflow_wire(h.workspace,serde_json::to_string(&wire::Action::Publish{notifications:None,adapter:None,mutation:mutation("b-publish"),expected_pin:None,definition}).unwrap()).await.unwrap();
+    session.workflow_wire(h.workspace,serde_json::to_string(&wire::Action::Publish{ reason:None,notifications:None,adapter:None,mutation:mutation("b-publish"),expected_pin:None,definition}).unwrap()).await.unwrap();
     session.workflow_wire(h.workspace,serde_json::to_string(&wire::Action::Enqueue{mutation:mutation("b-enqueue"),item:"B".into(),pin}).unwrap()).await.unwrap();
     let snapshot=tokio::time::timeout(std::time::Duration::from_secs(10),async {
         loop {let s=session.workflow_snapshot(h.workspace,Style::Apple).await.unwrap();

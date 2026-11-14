@@ -52,7 +52,7 @@ async fn a_board_tracks_its_cards_once_it_has_a_published_workflow() {
 
     // Publishing brings the board's open cards under the engine.
     let definition = Definition::tracker("owner");
-    let publish = Action::Publish { notifications: None, adapter: None, mutation: mutation("publish", 0, 1), expected_pin: None, definition };
+    let publish = Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("publish", 0, 1), expected_pin: None, definition };
     let receipt = workflow(&mut client, &workspace, publish).await;
     assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
     assert!(held(&mut client, &workspace, &before.key).await, "publishing tracks the cards already there");

@@ -399,7 +399,7 @@ async fn publish(rpc: &crate::rpc::Rpc, draft: &Draft) -> std::result::Result<()
     let admit = || rpc.admit(draft.workspace);
     let state = handle.wire_command(admit().await.map_err(refused)?, Action::Get).await.map_err(refused)?;
     let (revision, epoch) = (state.pointer("/state/revision").and_then(|v| v.as_u64()).unwrap_or(0), state.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1));
-    let action = Action::Publish { mutation: Mutation { id: format!("draft-{}", draft.id), revision, epoch, sequence: 1 }, expected_pin: draft.expected_pin.clone(),
+    let action = Action::Publish { reason:Some(draft.reason.clone()), mutation: Mutation { id: format!("draft-{}", draft.id), revision, epoch, sequence: 1 }, expected_pin: draft.expected_pin.clone(),
         definition: draft.definition.clone(), adapter: Some(Box::new(draft.adapter.clone())), notifications: None };
     let reply = handle.wire_command(admit().await.map_err(refused)?, action).await.map_err(refused)?;
     match reply.pointer("/receipt/result") {

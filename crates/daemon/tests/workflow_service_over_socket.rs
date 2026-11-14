@@ -152,14 +152,14 @@ async fn workflow_service_ordinary_socket_config_pins_rework_restart_and_offline
         }
         let adapter=Some(AdapterConfiguration::Coding(config.clone()));
         let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-        let publish=Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition:definition.clone(),adapter:adapter.map(Box::new)};
+        let publish=Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition:definition.clone(),adapter:adapter.map(Box::new)};
         let receipt=call(&mut link,workspace,publish.clone()).await; accepted(&receipt);
         accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"a".into(),pin:pin.clone()}).await);
         let snapshot=get(&mut link,workspace).await;
         assert_eq!(snapshot["state"]["items"]["a"]["phase"],"WaitingApproval");
         let mut other=config.clone(); other.checks[0].environment.insert("MODE".into(),"check-fail".into());
         let revision=snapshot["state"]["revision"].as_u64().unwrap();
-        accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("b",revision,2),expected_pin:Some(pin.clone()),definition:other.definition().unwrap(),adapter:Some(Box::new(AdapterConfiguration::Coding(other)))}).await);
+        accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("b",revision,2),expected_pin:Some(pin.clone()),definition:other.definition().unwrap(),adapter:Some(Box::new(AdapterConfiguration::Coding(other)))}).await);
         drop(link);host.close().await;
         let host=Host::open(dir.path()).await;let mut link=host.connect().await;
         assert_eq!(call(&mut link,workspace,publish.clone()).await,receipt);
@@ -212,7 +212,7 @@ async fn workflow_service_no_git_bootstrap_shutdown_and_recovery() {
     let dir=tempfile::Builder::new().prefix("w931").tempdir_in("/tmp").unwrap();
     let host=Host::open(dir.path()).await;let workspace=host.workspace;let mut link=host.connect().await;
     let definition=Definition::tracker("owner");let pin=definition.pin();
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:None}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:None}).await);
     accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"tracker".into(),pin:pin.clone()}).await);
     drop(link);host.close().await;
     let host=Host::open(dir.path()).await;let mut link=host.connect().await;
@@ -231,7 +231,7 @@ async fn workflow_service_shutdown_reaps_active_command_and_restart_does_not_rel
     let host=Host::open(dir.path()).await;let workspace=host.workspace;let mut link=host.connect().await;
     let definition=config.definition().unwrap();let adapter=Some(AdapterConfiguration::Coding(config));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"active".into(),pin}).await);
     let started=dir.path().join("started");
     tokio::time::timeout(std::time::Duration::from_secs(10),async {
@@ -291,7 +291,7 @@ async fn workflow_service_process_bootstrap_restart_coding_offline_and_joined_sh
     definition.stages[0].progression=Progression::AwaitApproval {principal:"owner".into()};
     let adapter=Some(AdapterConfiguration::Coding(config));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let enqueue=Action::Enqueue {mutation:mutation("e",0,1),item:"process-item".into(),pin};
     let receipt=call(&mut link,workspace,enqueue.clone()).await;accepted(&receipt);
     end_process(&mut child,&mut link).await;
@@ -330,7 +330,7 @@ async fn workflow_service_fast_ship_without_checks_or_review() {
     let host=Host::open(dir.path()).await;let mut link=host.connect().await;
     let definition=config.definition().unwrap();let adapter=Some(AdapterConfiguration::Coding(config));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,host.workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,host.workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     accepted(&call(&mut link,host.workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"fast".into(),pin}).await);
     for _ in 0..200 {
         let snapshot=get(&mut link,host.workspace).await;
@@ -348,7 +348,7 @@ async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfigura
     let host=Host::open(dir.path()).await;let workspace=host.workspace;let mut link=host.connect().await;
     let definition=config.definition().unwrap();let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"recover".into(),pin:pin.clone()}).await);
     let snapshot=tokio::time::timeout(std::time::Duration::from_secs(20),async {
         loop {
@@ -359,7 +359,7 @@ async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfigura
     }).await.unwrap();
     let mut other=config;other.base=snapshot["state"]["items"]["recover"]["candidate"].as_str().unwrap().into();
     other.ci.workflow="different-ci-policy".into();
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("b",snapshot["state"]["revision"].as_u64().unwrap(),2),
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("b",snapshot["state"]["revision"].as_u64().unwrap(),2),
         expected_pin:Some(pin.clone()),definition:other.definition().unwrap(),adapter:Some(Box::new(AdapterConfiguration::Coding(other)))}).await);
     let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
     let ci=effects.iter().find(|e| matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Ci))).unwrap();
@@ -418,7 +418,7 @@ async fn workflow_service_a_started_ticket_runs_in_a_named_worktree_from_main_at
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let ticket=host.service.store.create_task(workspace,"named",farcooler_store::models::Actor::User).unwrap();
     host.service.track_tickets(Some(ticket.id)).await;
     // Main moves on after publishing.
@@ -464,7 +464,7 @@ async fn workflow_service_refuses_a_bad_or_taken_named_tree_at_start() {
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let first=host.service.store.create_task(workspace,"first",farcooler_store::models::Actor::User).unwrap();
     let second=host.service.store.create_task(workspace,"second",farcooler_store::models::Actor::User).unwrap();
     host.service.track_tickets(Some(first.id)).await;
@@ -507,7 +507,7 @@ async fn workflow_service_frees_a_named_tree_when_its_run_ends() {
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let first=host.service.store.create_task(workspace,"first",farcooler_store::models::Actor::User).unwrap();
     let second=host.service.store.create_task(workspace,"second",farcooler_store::models::Actor::User).unwrap();
     host.service.track_tickets(Some(first.id)).await;
@@ -553,7 +553,7 @@ async fn workflow_service_unmakes_a_named_tree_it_could_not_record() {
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let ticket=host.service.store.create_task(workspace,"unrecorded",farcooler_store::models::Actor::User).unwrap();
     host.service.track_tickets(Some(ticket.id)).await;
     let repository=host.service.store.get_workspace(workspace).unwrap().repository_id;
@@ -596,7 +596,7 @@ async fn workflow_service_a_start_adopts_a_branch_with_work_and_a_closed_ticket_
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let ticket=host.service.store.create_task(workspace,"adopted",farcooler_store::models::Actor::User).unwrap();
     host.service.track_tickets(Some(ticket.id)).await;
     // Earlier work: a branch off main, with a commit, checked out in a worktree of its own.
@@ -656,7 +656,7 @@ async fn workflow_service_one_run_carries_three_tickets_on_one_branch() {
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let tickets:Vec<_>=["small fix one","small fix two","small fix three"].iter()
         .map(|t| host.service.store.create_task(workspace,t,farcooler_store::models::Actor::User).unwrap()).collect();
     for t in &tickets { host.service.track_tickets(Some(t.id)).await; }
@@ -702,7 +702,7 @@ async fn workflow_service_adopt_refuses_the_landing_branch_and_trees_that_are_no
     let definition=config.definition().unwrap();
     let adapter=Some(AdapterConfiguration::Coding(config.clone()));
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
-    accepted(&call(&mut link,workspace,Action::Publish { notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
+    accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     let private=host.service.store.create_task(workspace,"private run",farcooler_store::models::Actor::User).unwrap();
     let ticket=host.service.store.create_task(workspace,"adopter",farcooler_store::models::Actor::User).unwrap();
     host.service.track_tickets(Some(private.id)).await;

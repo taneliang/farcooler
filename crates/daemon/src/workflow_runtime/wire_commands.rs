@@ -21,6 +21,14 @@ pub(super) fn hide_environment(reply: &mut serde_json::Value) {
         }
     }
     if let Some(adapter) = reply.pointer_mut("/configuration/adapter") { walk(adapter); }
+    if let Some(history) = reply.get_mut("publication_history").and_then(|v|v.as_array_mut()) {
+        for entry in history {
+            if let Some(actor) = entry.get_mut("actor").and_then(|v|v.as_object_mut()) {
+                actor.remove("device");
+                actor.remove("pane");
+            }
+        }
+    }
 }
 /// What a hidden environment value reads as.
 pub(super) use crate::workflow_summary::HIDDEN;
@@ -73,6 +81,8 @@ impl Exec {
         let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
             .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
         Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
+            "publication_history":self.store.workflow_publication_history(workspace)?,
+            "orchestrator_publishes_workflow":self.store.orchestrator_publishes_workflow(workspace)?,
             "build_cleanup":self.store.workflow_cleanups(workspace)?, "back_edge_budgets":budgets, "process_logs":self.failed_process_logs(workspace)?, "places":self.places().view(workspace), "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}))
     }
 }
@@ -124,7 +134,7 @@ impl Runtime {
             return self.exec.read_get(workspace);
         }
         let mutation = match &action {
-            Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
+            Action::PublicationGrant { mutation, .. } | Action::Rollback { mutation, .. } | Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
             | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
@@ -156,7 +166,16 @@ impl Runtime {
             self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
         } else {
             match &action {
-                Action::Publish { expected_pin, definition, adapter, notifications, .. } => {
+                Action::PublicationGrant { enabled, .. } => self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::PublicationGrant { enabled:*enabled,revision:state.revision })?,
+                Action::Rollback { expected_pin, reason, .. } => {
+                    if !farcooler_protocol::workflow_commands::valid_rework_reason(reason) { return Err(Error::Refused("a rollback needs a reason")); }
+                    self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Rollback { expected_pin,reason,revision:state.revision })?
+                }
+
+                Action::Publish { expected_pin, definition, adapter, notifications, reason, .. } => {
+                    if reason.as_ref().is_some_and(|r| !farcooler_protocol::workflow_commands::valid_rework_reason(r)) {
+                        return Err(Error::Refused("invalid publication reason"));
+                    }
                     // A valid pure definition can still name an unsupported fixture adapter.
                     self.validate_publication(definition, adapter.as_deref())?;
                     self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Publish {
@@ -334,7 +353,7 @@ impl Runtime {
             }
         };
         // A board tracks its cards once it has a published workflow, so the cards already on it come under the engine now (ov-962).
-        if matches!(action, Action::Publish { .. }) && receipt.result.is_ok() {
+        if matches!(action, Action::Publish { .. } | Action::Rollback { .. }) && receipt.result.is_ok() {
             let found = self.store.untracked_tickets(None).unwrap_or_default();
             let mine: Vec<_> = found.into_iter().filter(|(w, _, _)| w.to_string() == workspace)
                 .map(|(w, k, s)| (w.to_string(), k, crate::workflow_service::column_of(s).to_string())).collect();
@@ -541,7 +560,7 @@ mod tests {
         let mut definition = coding_definition(false);
         definition.stages[0].progression = Progression::AwaitApproval { principal:"owner".into() };
         let pin = definition.pin();
-        let publication = Action::Publish { notifications:None, adapter:None, mutation:m("publish",0,1),expected_pin:None,definition };
+        let publication = Action::Publish { reason:None, notifications:None, adapter:None, mutation:m("publish",0,1),expected_pin:None,definition };
         ok(&runtime.wire_command("ws","owner",publication.clone()).unwrap());
         let enqueue = Action::Enqueue { mutation:m("enqueue",0,1),item:"a".into(),pin:pin.clone() };
         let receipt = runtime.wire_command("ws","owner",enqueue.clone()).unwrap(); ok(&receipt);
@@ -549,7 +568,7 @@ mod tests {
         let state = runtime.state("ws").unwrap().unwrap();
         assert_eq!(state.items["a"].phase,Phase::WaitingApproval);
         let new_definition = coding_definition(true);
-        ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None, adapter:None, mutation:m("publish2",state.revision,2),expected_pin:Some(pin.clone()),definition:new_definition }).unwrap());
+        ok(&runtime.wire_command("ws","owner",Action::Publish { reason:None, notifications:None, adapter:None, mutation:m("publish2",state.revision,2),expected_pin:Some(pin.clone()),definition:new_definition }).unwrap());
         assert_eq!(runtime.state("ws").unwrap().unwrap().items["a"].pin,pin);
         assert_eq!(runtime.wire_command("ws","owner",enqueue.clone()).unwrap(),receipt);
         assert!(runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("enqueue",0,1),item:"different".into(),pin:pin.clone() }).is_err());
@@ -563,7 +582,7 @@ mod tests {
     async fn workflow_wire_stale_epoch_pin_run_and_wrong_decider_refuse() {
         let dir = tempfile::tempdir().unwrap(); let mut runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();
         let definition = Definition::tracker("owner"); let pin = definition.pin();
-        ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
+        ok(&runtime.wire_command("ws","owner",Action::Publish { reason:None, notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
         ok(&runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap());
         runtime.pump(10).await.unwrap();
         let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
@@ -596,7 +615,7 @@ mod tests {
         assert_eq!(item.definition.stages[item.stage].id,"doing");
         // Starting needs the published definition's pin; a pin that is not the published one is stale.
         let definition = coding_definition(false); let start_pin = definition.pin();
-        ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None,adapter:None,mutation:m("publish",state.revision,3),expected_pin:None,definition }).unwrap());
+        ok(&runtime.wire_command("ws","owner",Action::Publish { reason:None, notifications:None,adapter:None,mutation:m("publish",state.revision,3),expected_pin:None,definition }).unwrap());
         let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
         let start = |id,pin:&str| Action::Start { mutation:m(id,state.revision,4),item:"a".into(),run:item.run.clone(),pin:item.pin.clone(),start_pin:pin.into(),models:Default::default(),worktree:None,with:vec![] };
         let stale = runtime.wire_command("ws","orchestrator",start("wrong","wf1:other")).unwrap();
@@ -610,7 +629,7 @@ mod tests {
     async fn workflow_wire_retry_needs_the_exact_run_and_a_failed_item() {
         let dir = tempfile::tempdir().unwrap(); let mut runtime = Runtime::create(&dir.path().join("fixture")).await.unwrap();
         let definition = Definition::tracker("owner"); let pin = definition.pin();
-        ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
+        ok(&runtime.wire_command("ws","owner",Action::Publish { reason:None, notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
         ok(&runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap());
         runtime.pump(10).await.unwrap();
         let state = runtime.state("ws").unwrap().unwrap(); let item = &state.items["a"];
@@ -635,7 +654,7 @@ mod tests {
             let mut definition = coding_definition(false);
             if every { for stage in &mut definition.stages { stage.progression=Progression::AwaitApproval { principal:"orchestrator".into() }; } }
             let pin=definition.pin();
-            ok(&runtime.wire_command("ws","owner",Action::Publish { notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
+            ok(&runtime.wire_command("ws","owner",Action::Publish { reason:None, notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap());
             ok(&runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap());
             let mut approvals=0;
             for time in 1..40 {
@@ -665,7 +684,7 @@ mod semantic_review_tests {
             definition.stages.iter_mut().find(|s| matches!(s.kind,StageKind::Review(_))).unwrap().kind=StageKind::Review(Reviewer::Person("owner".into()));
             let pin=definition.pin();
             let m=|id:&str,revision,sequence| Mutation { id:id.into(),revision,epoch:1,sequence };
-            runtime.wire_command("ws","owner",Action::Publish { notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap();
+            runtime.wire_command("ws","owner",Action::Publish { reason:None, notifications:None, adapter:None, mutation:m("p",0,1),expected_pin:None,definition }).unwrap();
             runtime.wire_command("ws","owner",Action::Enqueue { mutation:m("e",0,1),item:"a".into(),pin:pin.clone() }).unwrap();
             for time in 1..15 {
                 runtime.pump(time).await.unwrap();
@@ -703,7 +722,7 @@ mod reasoned_tests {
         definition.stages.iter_mut().find(|s|matches!(s.kind,StageKind::Review(_))).unwrap().kind=StageKind::Review(Reviewer::Person("owner".into()));
         let pin=definition.pin();
         let m=|id:&str,revision,sequence|Mutation{id:id.into(),revision,epoch:1,sequence};
-        runtime.wire_command("ws","owner",Action::Publish{notifications:None,adapter:None,mutation:m("p",0,1),expected_pin:None,definition}).unwrap();
+        runtime.wire_command("ws","owner",Action::Publish{ reason:None,notifications:None,adapter:None,mutation:m("p",0,1),expected_pin:None,definition}).unwrap();
         runtime.wire_command("ws","owner",Action::Enqueue{mutation:m("e",0,1),item:"a".into(),pin:pin.clone()}).unwrap();
         for t in 1..15 {runtime.pump(t).await.unwrap();if runtime.state("ws").unwrap().unwrap().items["a"].phase==Phase::WaitingReview {break;}}
         let state=runtime.state("ws").unwrap().unwrap();let item=&state.items["a"];
@@ -770,7 +789,7 @@ mod cli_payload_tests {
             definition.stages.iter_mut().find(|s|matches!(s.kind,StageKind::Review(_))).unwrap().kind=StageKind::Review(Reviewer::Person("owner".into()));
             let pin=definition.pin();
             let m=|id:&str| Mutation{id:id.into(),revision:0,epoch:1,sequence:1};
-            runtime.wire_command(ws,"owner",Action::Publish{notifications:None,adapter:None,mutation:m("p"),expected_pin:None,definition}).unwrap();
+            runtime.wire_command(ws,"owner",Action::Publish{ reason:None,notifications:None,adapter:None,mutation:m("p"),expected_pin:None,definition}).unwrap();
             runtime.wire_command(ws,"owner",Action::Enqueue{mutation:m("e"),item:"a".into(),pin}).unwrap();
             for t in 1..15 {runtime.pump(t).await.unwrap();if runtime.state(ws).unwrap().unwrap().items["a"].phase==Phase::WaitingReview {break;}}
             let state=runtime.state(ws).unwrap().unwrap();let item=&state.items["a"];

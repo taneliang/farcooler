@@ -65,7 +65,7 @@ async fn device_authority_change(change: u8, publication: bool) {
     let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     let definition = coding_definition(false);
     let pin = definition.pin();
-    let publish = Action::Publish { notifications:None, adapter:None, mutation: mutation("p", 0, 1), expected_pin: None, definition };
+    let publish = Action::Publish { reason:None, notifications:None, adapter:None, mutation: mutation("p", 0, 1), expected_pin: None, definition };
     let action = if publication { publish } else {
         runtime.wire_command(&workspace.to_string(), "owner", publish).unwrap();
         Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin }
@@ -121,7 +121,7 @@ async fn workflow_held_queue_orchestrator_proof_changes_refuse_without_writes() 
         let dir = tempfile::tempdir().unwrap();
         let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
         let definition = coding_definition(false); let pin = definition.pin();
-        runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { notifications:None, adapter:None,
+        runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { reason:None, notifications:None, adapter:None,
             mutation: mutation("p", 0, 1), expected_pin: None, definition,
         }).unwrap();
         let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));
@@ -250,7 +250,7 @@ async fn workflow_a_member_led_orchestrator_drives_its_own_workspace() {
     definition.stages.iter_mut().find(|s| matches!(s.kind, StageKind::Review(_))).unwrap().kind =
         StageKind::Review(Reviewer::Orchestrator("orchestrator".into()));
     let pin = definition.pin();
-    runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter: None,
+    runtime.wire_command(&w, "owner", Action::Publish { reason:None, notifications: None, adapter: None,
         mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap();
     let rpc = factory(&svc, &runtime, peer.clone(), Some(pid));
     let (reply, _) = sent(&mut runtime, &rpc, workspace, &Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() }).await;
@@ -274,7 +274,7 @@ async fn workflow_a_member_led_orchestrator_drives_its_own_workspace() {
     let definition = published.definition().unwrap();
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published)));
     let start_pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
-    runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter, mutation: mutation("p", 0, 1),
+    runtime.wire_command(&w, "owner", Action::Publish { reason:None, notifications: None, adapter, mutation: mutation("p", 0, 1),
         expected_pin: None, definition }).unwrap();
     assert_eq!(runtime.track_tickets(&[(w.clone(), "ov-7".into(), "todo".into())]).unwrap(), 1);
     let state = runtime.state(&w).unwrap().unwrap(); let item = &state.items["ov-7"];
@@ -303,7 +303,7 @@ async fn workflow_a_member_led_orchestrator_is_refused_on_another_workspace() {
     let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     let definition = coding_definition(false); let pin = definition.pin();
     for other in [unled, also_alices] {
-        runtime.wire_command(&other.to_string(), "owner", Action::Publish { notifications: None, adapter: None,
+        runtime.wire_command(&other.to_string(), "owner", Action::Publish { reason:None, notifications: None, adapter: None,
             mutation: mutation("p", 0, 1), expected_pin: None, definition: definition.clone() }).unwrap();
     }
     let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));
@@ -330,7 +330,7 @@ async fn workflow_dispatch_admits_a_member_only_where_they_lead() {
     let dir = tempfile::tempdir().unwrap();
     let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     let definition = coding_definition(false); let pin = definition.pin();
-    runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { notifications: None, adapter: None,
+    runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { reason:None, notifications: None, adapter: None,
         mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap();
     let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, Some(pid));
     let enqueue = Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() };
@@ -344,4 +344,95 @@ async fn workflow_dispatch_admits_a_member_only_where_they_lead() {
     let (reply, _) = sent(&mut runtime, &rpc, workspace, &enqueue).await;
     ok(&reply);
     assert!(runtime.events(&workspace.to_string()).unwrap().iter().any(|e| e.source == "wire:member:alice"), "as Alice, not the owner");
+}
+
+#[tokio::test]
+async fn ov1179_only_the_granted_workspace_orchestrator_publishes() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let (_pane, pid) = alices_pane(&svc, repo, ws, true).await;
+    let mut runtime = Runtime::open_service(&svc.root_dir().join("publication-test"), svc.store.clone()).unwrap();
+    let watcher = Watcher::new(svc.clone());
+    let mut events = watcher.subscribe();
+    let agent = RpcFactory::new(svc.clone(),watcher,Arc::new(tokio::sync::Notify::new()),Peer {client_id:None,scope:Scope::Control})
+        .with_caller_pid(Some(pid)).with_workflow_fixture(runtime.command_handle(&runtime.controller()).unwrap());
+    let owner = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+    let grant = |enabled, revision| Action::PublicationGrant { mutation: mutation(if enabled {"grant"} else {"revoke"}, revision, 1), enabled };
+    let publication = Action::Publish { reason:Some("Make the board track work".into()), notifications:None, adapter:None,
+        mutation:mutation("publish",0,1), expected_pin:None, definition:Definition::tracker("owner") };
+    let (response, _) = sent(&mut runtime, &agent, ws, &publication).await;
+    assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "off by default");
+    let (response, _) = sent(&mut runtime, &agent, ws, &grant(true, 0)).await;
+    assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "agent grants itself authority");
+    let (response, _) = sent(&mut runtime, &owner, ws, &grant(true, 0)).await;
+    ok(&response);
+    let member = super::member_tests::alices_phone(&svc);
+    svc.store.set_member_role("alice",farcooler_store::member_roles::Role::Maintainer,"user").unwrap();
+    let member = factory(&svc,&runtime,member,None);
+    let (response,_) = sent(&mut runtime,&member,ws,&grant(true,0)).await;
+    assert!(matches!(response.outcome,Some(response::Outcome::Error(_))),"a member granted publication");
+    let (response,_) = sent(&mut runtime,&member,ws,&publication).await;
+    assert!(matches!(response.outcome,Some(response::Outcome::Error(_))),"a member in person used the orchestrator grant");
+    let mut unexplained = publication.clone();
+    if let Action::Publish {reason,..} = &mut unexplained { *reason=None; }
+    let (response,_) = sent(&mut runtime,&agent,ws,&unexplained).await;
+    assert!(matches!(response.outcome,Some(response::Outcome::Error(_))),"an agent published without a reason");
+    let (response, _) = sent(&mut runtime, &agent, ws, &publication).await;
+    ok(&response);
+    let audit = receipt(&response);
+    assert_eq!(audit["receipt"]["actor"]["person"],"member:alice");
+    assert_eq!(audit["receipt"]["actor"]["orchestrator"],true);
+    assert_eq!(audit["receipt"]["change"]["reason"],"Make the board track work");
+    let notice = Uuid::parse_str(audit.pointer("/receipt/change/notice_task").unwrap().as_str().unwrap()).unwrap();
+    assert_eq!(svc.store.get_task(notice).unwrap().status, farcooler_store::models::TaskStatus::InReview);
+    let mut announced = false;
+    while let Ok(event) = events.try_recv() {
+        if let Some(pb::event::Payload::TaskChanged(changed)) = event.payload {
+            announced |= changed.task_id.as_ref() == notice.as_bytes();
+        }
+    }
+    assert!(announced,"owner's board never heard the publication notice");
+    let other = svc.store.create_workspace(repo,"Other","oth").unwrap().id;
+    let (response,_) = sent(&mut runtime,&agent,other,&publication).await;
+    assert!(matches!(response.outcome,Some(response::Outcome::Error(_))),"grant escaped its workspace");
+    let rollback = Action::Rollback {mutation:mutation("rollback",0,1),expected_pin:"pin".into(),reason:"Undo".into()};
+    let (response,_) = sent(&mut runtime,&agent,ws,&rollback).await;
+    assert!(matches!(response.outcome,Some(response::Outcome::Error(_))),"agent rolled back as the owner");
+    let first = runtime.store.workflow_configuration(&ws.to_string()).unwrap().unwrap();
+    let revision = runtime.state(&ws.to_string()).unwrap().map_or(0,|s|s.revision);
+    let second = Action::Publish {reason:Some("Let the orchestrator track the board".into()),notifications:None,adapter:None,
+        mutation:mutation("second",revision,2),expected_pin:Some(first.pin.clone()),definition:Definition::tracker("orchestrator")};
+    ok(&sent(&mut runtime,&agent,ws,&second).await.0);
+    let selected = runtime.store.workflow_configuration(&ws.to_string()).unwrap().unwrap();
+    let revision = runtime.state(&ws.to_string()).unwrap().map_or(0,|s|s.revision);
+    let undo = Action::Rollback {mutation:mutation("undo",revision,1),expected_pin:selected.pin,reason:"Restore the owner gate".into()};
+    ok(&sent(&mut runtime,&owner,ws,&undo).await.0);
+    assert_eq!(runtime.store.workflow_configuration(&ws.to_string()).unwrap(),Some(first));
+    let revision = runtime.state(&ws.to_string()).unwrap().map_or(0,|s|s.revision);
+    let (response, _) = sent(&mut runtime, &agent, ws, &grant(false, revision)).await;
+    assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "agent revokes the owner grant");
+    let (response, _) = sent(&mut runtime, &owner, ws, &grant(false, revision)).await;
+    ok(&response);
+    let (response, _) = sent(&mut runtime, &agent, ws, &publication).await;
+    assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "revocation stops replay too");
+}
+
+#[tokio::test]
+async fn ov1179_revocation_at_consumption_stops_a_queued_publish() {
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let (_, pid) = alices_pane(&svc, repo, ws, true).await;
+    let mut runtime = Runtime::open_service(&svc.root_dir().join("publication-test"), svc.store.clone()).unwrap();
+    let agent = factory(&svc, &runtime, Peer { client_id:None,scope:Scope::Control }, Some(pid));
+    let owner = factory(&svc, &runtime, Peer { client_id:None,scope:Scope::Control }, None);
+    let grant = Action::PublicationGrant {mutation:mutation("grant",0,1),enabled:true};
+    ok(&sent(&mut runtime,&owner,ws,&grant).await.0);
+    let publish = Action::Publish {reason:Some("Track the workspace".into()),notifications:None,adapter:None,
+        mutation:mutation("publish",0,1),expected_pin:None,definition:Definition::tracker("owner")};
+    let store = svc.store.clone();
+    held(&mut runtime,&agent,ws,publish,true,|| {
+        store.workflow_wire_write_by(&ws.to_string(),"revoke","revoke",None,
+            farcooler_store::workflow_publication::Write::PublicationGrant {enabled:false,revision:0}).unwrap();
+    }).await;
+    assert!(runtime.store.workflow_configuration(&ws.to_string()).unwrap().is_none());
 }

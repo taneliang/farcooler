@@ -15,7 +15,11 @@ pub struct Mutation {
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum Action {
     Get,
-    Publish { mutation: Mutation, expected_pin: Option<String>, definition: Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<Box<crate::workflow_config::AdapterConfiguration>>, #[serde(default, skip_serializing_if = "Option::is_none")] notifications: Option<crate::workflow_config::NotificationPolicy> },
+    /// Owner in person grants or revokes this workspace orchestrator's publication authority.
+    PublicationGrant { mutation: Mutation, enabled: bool },
+    /// Restore the last publication's previous immutable bundle. Owner in person only.
+    Rollback { mutation: Mutation, expected_pin: String, reason: String },
+    Publish { #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, mutation: Mutation, expected_pin: Option<String>, definition: Definition, #[serde(default, skip_serializing_if = "Option::is_none")] adapter: Option<Box<crate::workflow_config::AdapterConfiguration>>, #[serde(default, skip_serializing_if = "Option::is_none")] notifications: Option<crate::workflow_config::NotificationPolicy> },
     Enqueue { mutation: Mutation, item: String, pin: String },
     Approve { mutation: Mutation, item: String, run: String, pin: String, candidate: Option<String> },
     Review { mutation: Mutation, item: String, run: String, pin: String, evidence: farcooler_workflow::Evidence, passed: bool,
@@ -78,7 +82,7 @@ impl Action {
     pub fn method(&self) -> &'static str {
         match self {
             Self::Get => "workflow.get",
-            Self::Publish { .. } => "workspace.set_workflow",
+            Self::PublicationGrant { .. } | Self::Rollback { .. } | Self::Publish { .. } => "workspace.set_workflow",
             Self::Enqueue { .. } => "workflow.enqueue",
             Self::Approve { .. } => "workflow.approve",
             Self::Review { .. } => "workflow.review",
@@ -145,12 +149,12 @@ mod tests {
         definition.schema = 2; definition.max_reworks = 0; definition.rework_target = None;
         definition.stages[2].routes.insert("rejected".into(), farcooler_workflow::Target::Step("stage-1".into()));
         definition.stages[2].limit = 2;
-        let publish = Action::Publish { notifications:None, adapter:None, mutation:Mutation { id:"p".into(),revision:0,epoch:1,sequence:1 },expected_pin:None,definition };
+        let publish = Action::Publish { reason:None, notifications:None, adapter:None, mutation:Mutation { id:"p".into(),revision:0,epoch:1,sequence:1 },expected_pin:None,definition };
         assert_eq!(parse(&serde_json::to_string(&publish).unwrap()).unwrap(),publish);
     }
     #[test]
     fn workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields() {
-        let action = Action::Publish { notifications:None, adapter:None, mutation: Mutation { id:"publish".into(),revision:0,epoch:1,sequence:1 }, expected_pin:None,definition:Definition::tracker("owner") };
+        let action = Action::Publish { reason:None, notifications:None, adapter:None, mutation: Mutation { id:"publish".into(),revision:0,epoch:1,sequence:1 }, expected_pin:None,definition:Definition::tracker("owner") };
         let raw = serde_json::to_string(&action).unwrap();
         assert_eq!(parse(&raw).unwrap(),action);
         let mut value:serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -161,5 +165,40 @@ mod tests {
         assert!(parse(&value.to_string()).is_err());
         for raw in [r#"{"action":"Resolve"}"#,r#"{"action":"Observe"}"#,r#"{"action":"Get","principal":"owner"}"#] { assert!(parse(raw).is_err()); }
         assert!(parse(&"x".repeat(MAX_BYTES+1)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod publication_grant_tests {
+    use super::*;
+    #[test]
+    fn ov1179_publication_grant_and_rollback_are_closed_commands() {
+        for raw in [
+            r#"{"action":"PublicationGrant","mutation":{"id":"g","revision":0,"epoch":1,"sequence":1},"enabled":true}"#,
+            r#"{"action":"Rollback","mutation":{"id":"r","revision":0,"epoch":1,"sequence":1},"expected_pin":"pin","reason":"Restore the last workflow"}"#,
+        ] {
+            let action = parse(raw).expect("ov-1179 command");
+            assert_eq!(action.method(), "workspace.set_workflow");
+            assert_eq!(serde_json::to_value(action).unwrap(), serde_json::from_str::<serde_json::Value>(raw).unwrap());
+        }
+    }
+}
+
+#[cfg(test)]
+mod publication_grant_boundaries {
+    use super::*;
+    #[test]
+    fn ov1179_publication_grant_cannot_delegate_sensitive_actions() {
+        let grant = serde_json::json!({"action":"PublicationGrant","mutation":{"id":"g","revision":0,"epoch":1,"sequence":1},"enabled":true});
+        assert!(parse(&grant.to_string()).is_ok());
+        for field in ["secret_store", "security_flags", "relay_flags", "production_deploy"] {
+            let mut broadened = grant.clone();
+            broadened[field] = serde_json::json!(true);
+            assert!(parse(&broadened.to_string()).is_err(), "grant accepted {field}");
+            let mut action = grant.clone();
+            action["action"] = serde_json::json!(field);
+            assert!(parse(&action.to_string()).is_err(), "grant introduced {field} action");
+            assert!(crate::method::Method::parse(field).is_none(), "sensitive action gained a dispatch route");
+        }
     }
 }

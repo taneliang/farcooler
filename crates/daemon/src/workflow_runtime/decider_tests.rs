@@ -32,7 +32,7 @@ async fn waiting_for(runtime: &mut Runtime, workspace: Uuid, decider: &str, item
     let definition = Definition::tracker(decider); let pin = definition.pin();
     // A run starts only under a workflow whose members are here, on the runtime's own store too.
     if let Some(handle) = decider.strip_prefix("member:") { runtime.store.set_member(handle, "Them", &[]).unwrap(); }
-    accepted(&runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+    accepted(&runtime.wire_command(&w, "owner", Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition }).unwrap());
     // Publishing on a store-backed runtime may already have enqueued the card that is `item`.
     let state = runtime.state(&w).unwrap();
@@ -97,7 +97,7 @@ async fn workflow_a_review_gate_naming_a_member_takes_only_their_verdict() {
     definition.stages.iter_mut().find(|s| matches!(s.kind, StageKind::Review(_))).unwrap().kind = StageKind::Review(Reviewer::Person("member:alice".into()));
     let pin = definition.pin();
     runtime.store.set_member("alice", "Alice", &[]).unwrap();
-    accepted(&runtime.wire_command(&w, "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap());
+    accepted(&runtime.wire_command(&w, "owner", Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap());
     accepted(&runtime.wire_command(&w, "owner", Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin: pin.clone() }).unwrap());
     for time in 1..15 {
         runtime.pump(time).await.unwrap();
@@ -151,7 +151,7 @@ async fn workflow_a_publication_naming_a_stranger_is_refused() {
     svc.store.set_member("alice", "Alice", &[]).unwrap();
     let mut runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
     let rpc = factory(&svc, &runtime, local(), None);
-    let publish = |id: &str, decider: &str| Action::Publish { notifications: None, adapter: None, mutation: mutation(id, 0, 1),
+    let publish = |id: &str, decider: &str| Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation(id, 0, 1),
         expected_pin: None, definition: Definition::tracker(decider) };
     let before = snapshot(&runtime, workspace);
     let (reply, reached) = sent(&mut runtime, &rpc, workspace, &publish("stranger", "member:nobody")).await;
@@ -265,7 +265,7 @@ async fn a_workflow_naming_a_removed_member_starts_no_run_and_keeps_their_handle
     let dir = tempfile::tempdir().unwrap();
     let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     runtime.store.set_member("alice", "Alice", &[]).unwrap();
-    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition: owner_then("member:alice") }).unwrap());
     let pin = runtime.store.workflow_configuration("ws").unwrap().unwrap().pin;
     runtime.store.remove_member("alice").unwrap();
@@ -276,7 +276,7 @@ async fn a_workflow_naming_a_removed_member_starts_no_run_and_keeps_their_handle
     assert!(matches!(runtime.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" })));
     // Someone else's handle is issued as ever.
     runtime.store.set_member("bob", "Bob", &[]).unwrap();
-    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p2", revision, 3),
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p2", revision, 3),
         expected_pin: Some(pin), definition: owner_then("member:bob") }).unwrap());
     runtime.store.set_member("alice", "Another Alice", &[]).unwrap();
 }
@@ -313,7 +313,7 @@ async fn deleting_a_board_frees_the_handle_its_published_workflow_named() {
     let board = svc.store.create_workspace(repo, "Billing", "BIL").unwrap();
     svc.store.set_member("alice", "Alice", &[]).unwrap();
     let runtime = Runtime::open_service(&svc.root_dir().join("workflow"), svc.store.clone()).unwrap();
-    accepted(&runtime.wire_command(&board.id.to_string(), "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+    accepted(&runtime.wire_command(&board.id.to_string(), "owner", Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition: owner_then("member:alice") }).unwrap());
     svc.store.remove_member("alice").unwrap();
     assert!(matches!(svc.store.set_member("alice", "Another Alice", &[]), Err(DomainError::Conflict { what: "handle_waited_on" })));
@@ -329,7 +329,7 @@ async fn a_start_under_a_workflow_naming_a_removed_member_is_refused() {
     let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     runtime.store.set_member("alice", "Alice", &[]).unwrap();
     let definition = owner_then("member:alice");
-    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition }).unwrap());
     let pin = runtime.store.workflow_configuration("ws").unwrap().unwrap().pin;
     let revision = runtime.state("ws").unwrap().map_or(0, |s| s.revision);
@@ -354,7 +354,7 @@ async fn dispatch_says_why_a_workflow_naming_a_removed_member_starts_nothing() {
     let rpc = factory(&svc, &runtime, local(), None);
     let definition = owner_then("member:alice");
     let pin = definition.pin();
-    let (reply, _) = sent(&mut runtime, &rpc, workspace, &Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+    let (reply, _) = sent(&mut runtime, &rpc, workspace, &Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition }).await;
     accepted(&receipt(&reply));
     remove(&svc, "alice").await;
@@ -372,7 +372,7 @@ async fn editing_a_member_a_workflow_names_is_allowed() {
     let dir = tempfile::tempdir().unwrap();
     let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
     runtime.store.set_member("alice", "Alice", &[]).unwrap();
-    accepted(&runtime.wire_command("ws", "owner", Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1),
+    accepted(&runtime.wire_command("ws", "owner", Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1),
         expected_pin: None, definition: owner_then("member:alice") }).unwrap());
     assert_eq!(runtime.store.set_member("alice", "Alice Chen", &[]).unwrap().name, "Alice Chen");
     assert_eq!(runtime.store.member("alice").unwrap().name, "Alice Chen");

@@ -126,7 +126,7 @@ async fn workflow_a_publication_carrying_the_hidden_marker_is_refused() {
         let mut config = runtime.coding.clone().unwrap();
         let definition = config.definition().unwrap();
         config.checks[0].environment.insert("NPM_TOKEN".into(), value.into());
-        Action::Publish { notifications: None, adapter: Some(Box::new(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))),
+        Action::Publish { reason:None, notifications: None, adapter: Some(Box::new(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config))),
             mutation: mutation("p", 0, 1), expected_pin: None, definition }
     };
     let marker = |r: &Result<()>| matches!(r, Err(Error::Domain(farcooler_core::error::DomainError::InvalidArgument { what: "adapter" })));
@@ -222,7 +222,7 @@ async fn workflow_owners_methods_are_refused_a_members_device_at_the_gate() {
     svc.store.set_member_role("alice", Role::Maintainer, "user").unwrap();
     let (_run, mut runtime) = a_failed_run(workspace).await;
     let rpc = factory(&svc, &runtime, phone, None);
-    let publish = Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None,
+    let publish = Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None,
         definition: coding_definition(false) };
     for action in [publish, settle(&runtime, workspace)] {
         let before = snapshot(&runtime, workspace);
@@ -243,7 +243,7 @@ async fn admission_permits_no_member_settle_and_only_a_maintainers_publish() {
     let (_run, runtime) = a_failed_run(workspace).await;
     let admission = Admission::capture(svc.clone(), local(), svc.sessions().open(None), Some(pid), Arc::new(OnceLock::new()), workspace)
         .await.expect("Alice, in her own shell, where she leads");
-    let publish = Action::Publish { notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None,
+    let publish = Action::Publish { reason:None, notifications: None, adapter: None, mutation: mutation("p", 0, 1), expected_pin: None,
         definition: coding_definition(false) };
     let not_yours = |r: farcooler_core::Result<()>| matches!(r, Err(farcooler_core::DomainError::NotYours { .. }));
     assert!(not_yours(admission.permits(&settle(&runtime, workspace))), "a lead settles");
@@ -285,7 +285,7 @@ async fn workflow_a_member_led_orchestrators_command_held_is_refused_when_its_le
         let dir = tempfile::tempdir().unwrap();
         let mut runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
         let definition = coding_definition(false); let pin = definition.pin();
-        runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { notifications: None, adapter: None,
+        runtime.wire_command(&workspace.to_string(), "owner", Action::Publish { reason:None, notifications: None, adapter: None,
             mutation: mutation("p", 0, 1), expected_pin: None, definition }).unwrap();
         let rpc = factory(&svc, &runtime, local(), Some(pid));
         held(&mut runtime, &rpc, workspace, Action::Enqueue { mutation: mutation("e", 0, 1), item: "a".into(), pin }, true, || {
