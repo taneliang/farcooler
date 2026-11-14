@@ -814,9 +814,7 @@ impl Exec {
         if matches!(kind, StageKind::Build) {
             if let Some(mut why) = self.unfinished_build(binding, &tree).await? {
                 if self.is_native_agent(binding) {
-                    if let Some(message) = self.native_last_message(binding)? {
-                        why.push_str(&format!("\n\nThe agent's last message:\n{message}"));
-                    }
+                    if let Some(note) = self.last_message_note(binding)? { why.push_str(&format!("\n\n{note}")); }
                 }
                 return Ok(Outcome::SafeFailureBecause(why));
             }

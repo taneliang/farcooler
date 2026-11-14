@@ -560,6 +560,10 @@ impl Exec {
         let mut last = None;
         let mut assembler = MessageAssembler::new();
         if let NativeSettlement::Launched { hooks, .. } = settlement {
+            // Cursor's stop hook carries no prose; it names the transcript the prose is in (ov-1235).
+            let cursor_transcript = hooks.iter().rev().filter(|h| h.agent == Agent::Cursor)
+                .find_map(|h| facts(h.agent, &h.payload).transcript_path);
+            if let Some(path) = cursor_transcript { last = cursor_last_message(&path); }
             for hook in hooks {
                 for event in assembler.accept(hook.agent, &hook.event, &hook.payload) {
                     if let AgentEvent::Message { role: farcooler_agent_core::event::Role::Agent, text, parent: None } = event {
@@ -569,6 +573,15 @@ impl Exec {
             }
         }
         Ok(last)
+    }
+    /// What a no-commit build's report says of its last message: the message, or for an agent whose message cannot
+    /// be read, the words that it is unavailable (ov-1235).
+    pub(super) fn last_message_note(&self, binding: &Binding) -> Result<Option<String>> {
+        Ok(match self.native_last_message(binding)? {
+            Some(message) => Some(format!("The agent's last message:\n{message}")),
+            None if self.native_agent(binding)? == Agent::Cursor => Some("The agent's last message: unavailable for this agent.".to_string()),
+            None => None,
+        })
     }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<Option<String>> {
         let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&self.native_path(binding, "settled"))?)?;
@@ -588,6 +601,32 @@ impl Exec {
             && !self.native_path(binding, "owner").try_exists()?)
     }
     pub(super) fn native_session(binding: &Binding) -> String { terminal(binding).to_string() }
+}
+
+/// The last thing Cursor said in its latest turn, from the tail of its transcript. A transcript that is missing,
+/// too large to be one, or has no prose gives `None`; it never fails the step (ov-1235).
+fn cursor_last_message(path: &Path) -> Option<String> {
+    use farcooler_core::session_log::{TurnEvent, cursor::parse_line};
+    use std::io::{Read, Seek, SeekFrom};
+    const TAIL: u64 = 1 << 20;
+    let mut file = std::fs::File::open(path).ok()?;
+    if !file.metadata().ok()?.is_file() { return None; }
+    let len = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(len.saturating_sub(TAIL))).ok()?;
+    let mut raw = Vec::new();
+    file.take(TAIL).read_to_end(&mut raw).ok()?;
+    let text = String::from_utf8_lossy(&raw);
+    let mut last = None;
+    for line in text.lines().filter(|l| l.starts_with('{')) {
+        for event in parse_line(line) {
+            match event {
+                TurnEvent::Started { .. } => last = None,
+                TurnEvent::Said { text, .. } if !text.is_empty() => last = Some(text),
+                _ => {}
+            }
+        }
+    }
+    last
 }
 
 #[cfg(test)]
@@ -686,10 +725,22 @@ if mode == 'barrier':
     while len(list(d.iterdir())) < 2:
         if time.time() - t > 4: sys.exit(9)
         time.sleep(0.05)
-if mode in ('no-changes', 'dirty-no-commit'):
+if mode in ('no-changes', 'no-changes-bare', 'dirty-no-commit'):
     if mode == 'dirty-no-commit':
         pathlib.Path('result.txt').write_text('work kept without a commit')
-    hook('Stop', last_assistant_message='I could not read the ticket; the runner request hung.')
+    if agent == 'cursor':
+        # Cursor's stop hook carries no prose; it names the transcript, where the prose is (ov-1235).
+        extra = {}
+        if mode != 'no-changes-bare':
+            t = pathlib.Path(os.environ['STARTED']).parent / 'cursor-transcript.jsonl'
+            t.write_text(json.dumps(dict(role='user', message=dict(content=[dict(type='text', text='<user_query>go</user_query>')]))) + '\n'
+                + json.dumps(dict(role='assistant', message=dict(content=[dict(type='text', text='Looking at the ticket.')]))) + '\n'
+                + json.dumps(dict(role='assistant', message=dict(content=[dict(type='text', text='I could not read the ticket; the runner request hung.')]))) + '\n'
+                + json.dumps(dict(type='turn_ended', status='success')) + '\n')
+            extra = dict(transcript_path=str(t))
+        hook('stop', **extra)
+    else:
+        hook('Stop', last_assistant_message='I could not read the ticket; the runner request hung.')
     time.sleep(30)
 if mode in ('background', 'abandon'):
     # Ends its turn with its work uncommitted, as an agent that backgrounds a wait does (ov-1090). `background` is
@@ -884,6 +935,24 @@ else:
         assert_eq!(item.phase, Phase::Failed, "{state:?}");
         assert_eq!(item.failure.as_deref(), Some("The build ended without changes: it made no new commit.\n\nThe agent's last message:\nI could not read the ticket; the runner request hung."));
         assert!(item.candidate.is_none());
+    }
+    #[tokio::test]
+    async fn ov_1235_cursor_build_without_a_commit_reports_the_last_message_from_its_transcript() {
+        let (_dir, mut runtime, _fake) = native_agent("no-changes", "cursor").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        let state = finish(&mut runtime, "w").await;
+        let item = &state.items["one"];
+        assert_eq!(item.phase, Phase::Failed, "{state:?}");
+        assert_eq!(item.failure.as_deref(), Some("The build ended without changes: it made no new commit.\n\nThe agent's last message:\nI could not read the ticket; the runner request hung."));
+    }
+    #[tokio::test]
+    async fn ov_1235_cursor_build_without_a_transcript_says_its_last_message_is_unavailable() {
+        let (_dir, mut runtime, _fake) = native_agent("no-changes-bare", "cursor").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        let state = finish(&mut runtime, "w").await;
+        let item = &state.items["one"];
+        assert_eq!(item.phase, Phase::Failed, "{state:?}");
+        assert_eq!(item.failure.as_deref(), Some("The build ended without changes: it made no new commit.\n\nThe agent's last message: unavailable for this agent."));
     }
     #[tokio::test]
     async fn ov_1217_dirty_build_without_a_commit_reports_reason_files_and_last_message() {
