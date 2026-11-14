@@ -380,3 +380,20 @@ async fn a_manual_message_after_cutover_is_told_once_and_the_old_queue_stays_ine
     let rows: i64 = farcooler_store::testing::count_rows_for_tests(&b.svc.store, "message_wakes");
     assert_eq!(rows, 2, "the old row is retained beside the fresh one");
 }
+
+/// ov-1188: the native host publishes its private pane, outside the daemon inventory.
+#[tokio::test]
+async fn an_engine_agent_is_addressed_by_its_ticket() {
+    let b = board().await;
+    let id = Uuid::now_v7();
+    let server = farcooler_tmux::TmuxServer::in_dir("engine-steer", id, b.dir.path());
+    let window = server.create_terminal_window(id, id, "engine", b.dir.path().to_str().unwrap(), "sleep 60").await.unwrap();
+    let pane = server.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
+    let _listed = crate::watch_view::publish(&b.task.workspace_id.to_string(), &b.task.key, server.clone(), pane);
+    let (send, _orders) = tokio::sync::mpsc::channel(8);
+    let _steerable = crate::engine_steering::publish(&b.task.workspace_id.to_string(), &b.task.key, id,
+        "codex", None, false, vec![b.task.key.clone()], send);
+    let sent = b.send("manager", &b.task.key, "Use the owner's new direction").await;
+    farcooler_tmux::reap_server(server.socket());
+    assert!(sent.is_ok(), "the engine's live agent must be reachable: {sent:?}");
+}

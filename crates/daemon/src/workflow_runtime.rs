@@ -16,6 +16,8 @@ mod coding;
 mod service_owner;
 mod coding_execute;
 mod coding_native;
+mod native_control;
+mod native_messages;
 mod coding_landing;
 mod coding_verbs;
 mod coding_ci_rerun;

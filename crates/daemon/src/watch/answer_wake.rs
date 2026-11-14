@@ -438,6 +438,13 @@ impl Watcher {
         if messages::held_for_tests(wake.note) {
             return Pass::Waiting(Held::Busy);
         }
+        if wake.kind == WakeKind::Message
+            && let Ok(task) = self.service.store.get_task(wake.task)
+            && wake.to.is_some_and(|id| crate::engine_steering::workspace(id) == Some(task.workspace_id))
+        {
+            // The native host owns delivery and claim recovery while this exact effect is live.
+            return Pass::Waiting(Held::Busy);
+        }
         // Claimed and never finished: the daemon stopped mid-typing. It may
         // have reached the agent, so it's never typed again. One pasted and
         // stopped short of its Enter by a dialog may have the Enter pressed

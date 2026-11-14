@@ -151,6 +151,7 @@ pub(crate) mod test_support;
 pub mod transcript_tail;
 pub mod watch;
 pub mod watch_view;
+mod engine_steering;
 pub mod web_pane;
 pub mod wire;
 pub mod worker_seen;

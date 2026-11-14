@@ -366,7 +366,7 @@ pub(crate) fn required_scope(method: &str) -> Option<Scope> {
 fn scope_of(method: Method) -> Scope {
     match method {
         Method::WorkflowCutover => Scope::HostAdmin,
-        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowSendBack | Method::WorkflowReopen | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowReview | Method::WorkflowWatch => Scope::Control,
+        Method::WorkspaceSetWorkflow | Method::WorkflowEnqueue | Method::WorkflowGet | Method::WorkflowApprove | Method::WorkflowCancel | Method::WorkflowRetry | Method::WorkflowQueue | Method::WorkflowLeave | Method::WorkflowSettle | Method::WorkflowTrack | Method::WorkflowMove | Method::WorkflowStart | Method::WorkflowSendBack | Method::WorkflowReopen | Method::WorkflowPropose | Method::WorkflowDrafts | Method::WorkflowReview | Method::WorkflowWatch | Method::WorkflowPause | Method::WorkflowResume => Scope::Control,
         // Themes are what a client paints with. Read, not Control: naming a
         // color changes nothing on the runner, and a phone connected in a
         // read-only capacity should still be able to render itself properly.
@@ -791,6 +791,20 @@ impl Rpc {
             // item, never by terminal id: the engine's pane is in a tmux server the daemon's inventory
             // does not list, so `terminal.write` and the rest cannot name it. This only attaches.
             "workflow.watch" => self.workflow_watch(req).await,
+            "workflow.pause" | "workflow.resume" => {
+                let workspace = Self::target(&req)?;
+                self.engine_caller(workspace, &req.method)?;
+                crate::engine_steering::authorize(svc, &self.peer, self.caller_pid, workspace).await?;
+                let Some(request::Payload::WorkflowCommand(p)) = req.payload else { return Err(DomainError::NotFound) };
+                let item = crate::watch_view::item_of(&p).ok_or(DomainError::NotFound)?;
+                let id = crate::engine_steering::find(workspace, &item).ok_or(DomainError::NotFound)?;
+                let paused = req.method == "workflow.pause";
+                let op = if paused { crate::engine_steering::Control::Pause } else { crate::engine_steering::Control::Resume };
+                crate::engine_steering::control(id, op).await?;
+                self.watcher.announce_plan_changed(workspace, farcooler_store::models::Actor::Runner);
+                Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1,
+                    json:serde_json::json!({"item":item,"paused":paused}).to_string() }))
+            }
             "workflow.cutover" => {
                 use farcooler_protocol::workflow_cutover::{self, Cutover};
                 if self.caller()? != crate::people::Person::Owner { return Err(DomainError::ScopeDenied { needed: "owner" }); }

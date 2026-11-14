@@ -85,6 +85,8 @@ test-group = 'file-events'
 # number"). Pty numbers are one pool for the whole machine, and every tmux pane
 # in every other test process takes from it, so these three run with nothing
 # else running. They take about 0.3 s each.
+# Native vanished-server recovery also asserts that a dead tty stays empty between its wait and
+# reconciliation. Another test opening a pane on that tty makes recovery correctly refuse it.
 [[profile.default.overrides]]
-filter = 'package(farcooler-daemon) and binary(a_resized_pane_says_so)'
+filter = 'package(farcooler-daemon) and (binary(a_resized_pane_says_so) or test(workflow_native_review_vanished_server_keeps_output_and_recorded_verdict))'
 threads-required = 'num-test-threads'

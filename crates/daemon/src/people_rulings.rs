@@ -101,7 +101,7 @@ pub fn member_ruling(method: M) -> Ruling {
         M::WorkflowApprove | M::WorkflowReview => Decision,
         M::WorkflowEnqueue | M::WorkflowCancel | M::WorkflowRetry | M::WorkflowQueue
         | M::WorkflowLeave | M::WorkflowTrack | M::WorkflowMove | M::WorkflowStart | M::WorkflowSendBack | M::WorkflowReopen
-        | M::WorkflowPropose | M::WorkflowDrafts => Engine,
+        | M::WorkflowPropose | M::WorkflowDrafts | M::WorkflowPause | M::WorkflowResume => Engine,
         M::HostGet
         | M::HostHealth
         | M::DaemonVersion

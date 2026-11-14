@@ -359,6 +359,7 @@ pub(crate) async fn read_plan(
         crate::plan_stage::annotate_waits(svc, workspace, &plan, &mut wire);
         crate::pr_suggest::annotate(svc, &plan, &mut wire);
     }
+    crate::engine_steering::annotate(&svc.store, workspace, &mut wire)?;
     Ok(wire)
 }
 
@@ -558,7 +559,7 @@ pub(crate) fn pb_line(v: &LineView, admin: bool) -> pb::TicketLine {
     }
 }
 
-fn pb_status(status: TaskStatus) -> i32 {
+pub(crate) fn pb_status(status: TaskStatus) -> i32 {
     (match status {
         TaskStatus::Backlog => pb::TaskStatus::Backlog,
         TaskStatus::Todo => pb::TaskStatus::Todo,

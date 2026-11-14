@@ -58,7 +58,7 @@ struct Host(TmuxServer);
 impl Drop for Host {
     fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); }
 }
-fn terminal(binding: &Binding) -> Uuid {
+pub(super) fn terminal(binding: &Binding) -> Uuid {
     let pin = digest(&("native-terminal/v1", binding));
     Uuid::parse_str(&pin[4..36]).expect("digest UUID")
 }
@@ -66,7 +66,7 @@ fn server(root: &Path, binding: &Binding) -> TmuxServer {
     let id = terminal(binding);
     TmuxServer::in_dir(&format!("workflow-{id}"), id, root)
 }
-fn snapshot() -> Result<crate::foreground::Foreground> {
+pub(super) fn snapshot() -> Result<crate::foreground::Foreground> {
     let raw = crate::proc_table::snapshot().ok_or(Error::Refused("native process table unavailable"))?;
     // Unlike display/label reads, an empty/partial fallback is never quiescence.
     if !raw.lines().any(|line| line.split_whitespace().next() == Some(std::process::id().to_string().as_str())) {
@@ -253,7 +253,7 @@ impl Exec {
                     && binding.effect.candidate.as_ref() == Some(&r.candidate))
     }
     async fn native_turn(&self, listener: &tokio::net::UnixListener, binding: &Binding,
-        heard_from: &std::sync::atomic::AtomicBool) -> Result<(bool, Vec<HookLine>)> {
+        heard_from: &std::sync::atomic::AtomicBool, clock: &super::native_control::ActiveClock) -> Result<(bool, Vec<HookLine>)> {
         let agent = self.native_agent(binding)?;
         let tree = self.tree(binding);
         let mut assembler = MessageAssembler::new();
@@ -262,20 +262,20 @@ impl Exec {
         let mut hooks = Vec::new();
         // A reviewer's recorded verdict ends its turn once it has gone quiet, if its Stop never arrives (ov-1082).
         let mut look = tokio::time::interval(Duration::from_millis(250));
-        let mut heard = tokio::time::Instant::now();
+        let mut heard = clock.now();
         let mut verdict = None;
         let building = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
-        let mut unfinished: Option<tokio::time::Instant> = None;
+        let mut unfinished: Option<Duration> = None;
         loop {
             let stream = tokio::select! {
                 accepted = listener.accept() => accepted?.0,
                 _ = look.tick() => {
-                    if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(tokio::time::Instant::now()); }
-                    if verdict.is_some_and(|at: tokio::time::Instant| at.max(heard).elapsed() >= VERDICT_QUIET) {
+                    if verdict.is_none() && self.recorded_verdict(binding) { verdict = Some(clock.now()); }
+                    if verdict.is_some_and(|at: Duration| clock.now().saturating_sub(at.max(heard)) >= VERDICT_QUIET) {
                         tracing::warn!(effect = %binding.effect.id, "the reviewer recorded its verdict and went quiet without its turn's end being heard; the verdict ends it");
                         return Ok((true, hooks));
                     }
-                    if unfinished.is_some_and(|at| at.max(heard).elapsed() >= UNFINISHED_QUIET) {
+                    if unfinished.is_some_and(|at| clock.now().saturating_sub(at.max(heard)) >= UNFINISHED_QUIET) {
                         tracing::warn!(effect = %binding.effect.id, "the build ended its turn without committing and was quiet after; its turn is over");
                         return Ok((true, hooks));
                     }
@@ -293,7 +293,6 @@ impl Exec {
             // Never grant permissions or tool-fence bypass from this host. A hook that isn't gating has hung up
             // before this answer (crates/cli/src/hook.rs, `first_contact`), so a failed write is its news, not ours:
             // failing the turn on it ended every real build at its first hook, with none recorded (ov-1075).
-            let _ = stream.get_mut().write_all(b"{}\n").await;
             let fact = facts(line.agent, &line.payload);
             // An agent's hooks name the directory it is in now, which is wherever it last moved to: ov-1064's reviewer
             // ended its turn in `apps/android`, and a hook that had to name the worktree itself was never heard (ov-1082).
@@ -303,15 +302,20 @@ impl Exec {
                 session = Some(sid.clone());
             }
             if session.as_ref() != Some(sid) { continue; }
-            heard = tokio::time::Instant::now();
+            heard = clock.now();
             heard_from.store(true, std::sync::atomic::Ordering::Relaxed);
             if matches!(line.event.as_str(), "UserPromptSubmit" | "beforeSubmitPrompt") {
                 // What the agent was launched with is the briefed prompt, so that is what its hook reports.
                 if line.payload.get("prompt").and_then(|p| p.as_str()) == Some(self.native_prompt(binding)?.as_str()) { prompted = true; }
             }
             let events = assembler.accept(line.agent, &line.event, &line.payload);
+            let continued = prompted && events.iter().any(|event| matches!(event,
+                AgentEvent::TurnEnded { reason: EndReason::EndTurn }))
+                && self.native_followup(binding, &line, stream.get_mut()).await?;
+            if !continued { let _ = stream.get_mut().write_all(b"{}\n").await; }
             hooks.push(line);
             if hooks.len() > 4096 { return Err(Error::Refused("too many native hooks")); }
+            if continued { unfinished = None; continue; }
             if prompted {
                 for event in events {
                     if let AgentEvent::TurnEnded { reason } = event {
@@ -321,7 +325,7 @@ impl Exec {
                         if building && reason == EndReason::EndTurn
                             && self.unfinished_build(binding, &tree).await.ok().flatten().is_some() {
                             tracing::info!(effect = %binding.effect.id, "the build ended its turn without committing; waiting for its next turn");
-                            unfinished = Some(tokio::time::Instant::now());
+                            unfinished = Some(clock.now());
                             continue;
                         }
                         return Ok((reason == EndReason::EndTurn, hooks));
@@ -331,7 +335,7 @@ impl Exec {
         }
     }
     pub(super) async fn run_native(&self, binding: &Binding, command: &CodingCommand,
-        mut cancel: tokio::sync::watch::Receiver<bool>) -> Result<Option<i32>> {
+        cancel: tokio::sync::watch::Receiver<bool>) -> Result<Option<i32>> {
         self.native_hooks(binding)?;
         let socket = self.native_socket(binding);
         // No unlink-before-bind: a surviving owner is evidence, never a restart.
@@ -339,13 +343,15 @@ impl Exec {
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
         let host = Host(server(&self.root, binding));
         let tmux = &host.0;
-        let mut launch = String::from("exec env -i");
+        let mut launch = String::from("env -i");
         for (key, value) in &command.environment {
             launch.push(' '); launch.push_str(&crate::service::shell_quote(&format!("{key}={value}")));
         }
         for arg in &command.argv { launch.push(' '); launch.push_str(&crate::service::shell_quote(arg)); }
         // Retained PTY stdin, not null: read gates launch until tags and owner are durable.
-        let gated = format!("/bin/sh -c {}", crate::service::shell_quote(&format!("read -r workflow_start; {launch}")));
+        // tmux automatically continues a stopped pane leader. Keep this waiting shell as the leader,
+        // and pause only its agent child and descendants; the shell runs no work of its own.
+        let gated = format!("exec /bin/sh -c {}", crate::service::shell_quote(&format!("read -r workflow_start; {launch}; status=$?; exit \"$status\"")));
         let id = terminal(binding);
         let window = tmux.create_terminal_window(id, id, "workflow coding", &self.tree(binding).to_string_lossy(), &gated).await
             .map_err(|_| Error::Refused("native managed PTY open uncertain"))?;
@@ -361,19 +367,28 @@ impl Exec {
         let heard_from = std::sync::atomic::AtomicBool::new(false);
         let stuck = crate::engine_stuck::watch(&binding.workspace, &binding.effect.item, self.native_agent(binding)?.as_str(),
             tmux, &window.pane_id, &heard_from);
+        let (send, orders) = mpsc::channel(8);
+        let review = !matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
+        let _steerable = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id,
+            self.native_agent(binding)?.as_str(), self.run_model(binding), review, self.steering_tickets(binding)?, send);
+        let clock = super::native_control::ActiveClock::new();
+        let turn = self.native_turn(&listener, binding, &heard_from, &clock);
+        let mut stop_reply = None;
+        let mut frozen = None;
+        let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &owner.tty, pane.stamp.pid as i32, id,
+            &clock, Duration::from_millis(command.timeout_ms), orders, cancel, &mut frozen, &mut stop_reply);
         let result = tokio::select! {
             never = stuck => match never {},
-            result = tokio::time::timeout(Duration::from_millis(command.timeout_ms), self.native_turn(&listener, binding, &heard_from)) => match result {
-                Ok(Ok(turn)) => Some(turn),
-                Ok(Err(error)) => { tracing::warn!(effect = %binding.effect.id, %error, "the native build's turn could not be read"); None }
-                Err(_) => { tracing::warn!(effect = %binding.effect.id, "the native build's turn did not end in time"); None }
+            result = controlled => match result {
+                Ok(turn) => turn,
+                Err(error) => { tracing::warn!(effect = %binding.effect.id, %error, "the native turn could not be read"); None }
             },
-            _ = async { while !*cancel.borrow_and_update() { if cancel.changed().await.is_err() { break; } } } => None,
         };
         // Capture actual PTY output before closing it; never parse it as success.
         let output = tmux.capture_scrollback(&window.pane_id).await.map_err(|_| Error::Refused("native PTY output unavailable"))?;
         std::fs::write(self.process_log(binding), output)?;
         self.quiesce_native(&owner).await?;
+        if let Some(stopped) = frozen.take() { stopped.quiescent(); }
         let (mut completed, hooks) = result.map_or((None, Vec::new()), |(passed, hooks)| (Some(passed), hooks));
         // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
         // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
@@ -381,6 +396,7 @@ impl Exec {
         durable(&self.native_path(binding, "settled"), &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks, completed })?)?;
         drop(listener);
         std::fs::remove_file(socket)?;
+        if let Some(reply) = stop_reply { let _ = reply.send(Ok(())); }
         Ok(completed.map(|passed| if passed { 0 } else { 1 }))
     }
     /// Only an admitted Stop, or a reviewer's own recorded verdict (ov-1082), may terminate an interrupted native
@@ -502,10 +518,21 @@ if 'EXPECT_CODEX_HOOKS' in os.environ and pathlib.Path('.codex/hooks.json').read
 def hook(event, sid=session, cwd=os.getcwd(), **extra):
     with socket.socket(socket.AF_UNIX) as s:
         s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
-        s.sendall((json.dumps(dict(agent=agent, event=event, payload=dict(session_id=sid,cwd=cwd,workspace_roots=[cwd],**extra)))+'\n').encode())
+        takes = ['followup'] if mode == 'steering' and event == 'Stop' and sid == session and cwd == os.getcwd() and 'agent_id' not in extra else []
+        s.sendall((json.dumps(dict(agent=agent, event=event, takes=takes, payload=dict(session_id=sid,cwd=cwd,workspace_roots=[cwd],**extra)))+'\n').encode())
+        if takes:
+            return json.loads(s.makefile().readline())
 hook('sessionStart' if agent == 'cursor' else 'SessionStart')
 hook('beforeSubmitPrompt' if agent == 'cursor' else 'UserPromptSubmit', prompt=os.environ['TEST_LAUNCHED_PROMPT'])
 pathlib.Path(os.environ['STARTED']).write_text(str(os.getpid()))
+if mode == 'steering':
+    ready = pathlib.Path(os.environ['STARTED']).with_name('direction-ready')
+    for _ in range(500):
+        if ready.exists(): break
+        time.sleep(0.01)
+    response = hook('Stop')
+    assert 'Use the new API' in response['followup_message'], response
+    pathlib.Path(os.environ['STARTED']).with_name('continued').write_text(response['followup_message'])
 if mode == 'barrier':
     d = pathlib.Path(os.environ['STARTED']).parent / 'barrier'
     d.mkdir(exist_ok=True)
@@ -632,6 +659,75 @@ else:
         assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Done);
         assert_eq!(std::fs::read(dir.path().join("started")).unwrap(), before);
     }
+    #[tokio::test]
+    async fn workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement() {
+        use farcooler_store::models::Actor;
+        for agent in ["claude", "codex"] {
+            let (dir, mut runtime, _fake) = native_agent("steering", agent).await;
+            let host = Uuid::now_v7();
+            let repository = runtime.repository();
+            let root = runtime.store.create_repository_root(host, dir.path().to_str().unwrap(), 0).unwrap();
+            let repo = runtime.store.create_repository(host, root.id, "Native", repository.join(".git").to_str().unwrap(), "").unwrap();
+            let board = runtime.store.ensure_main_workspace(repo.id).unwrap();
+            let task = runtime.store.create_task(board.id, "Steer this", Actor::User).unwrap();
+            let workspace = board.id.to_string();
+            let definition = runtime.configured_definition().unwrap();
+            enqueue(&mut runtime, &workspace, &task.key, definition);
+            runtime.pump(2).await.unwrap();
+            let state = runtime.state(&workspace).unwrap().unwrap();
+            let effect = runtime.store.workflow_outbox(&workspace).unwrap().into_iter().find(|s| s.active).unwrap().effect;
+            let claim = runtime.store.workflow_claim_effect(&workspace, &effect.id, "steering", state.revision, state.epoch, 10, 100).unwrap().unwrap();
+            let base = runtime.pin_base(&workspace, &effect).await.unwrap();
+            assert!(runtime.store.workflow_admit_effect(&claim, 10).unwrap());
+            let binding = Binding::new(&workspace, &effect, claim.resource_generation, 0, &base);
+            let (_cancel, cancel) = tokio::sync::watch::channel(false);
+            let steer = async {
+                for _ in 0..500 {
+                    if dir.path().join("started").exists() { break; }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                assert!(dir.path().join("started").exists());
+                let id = crate::engine_steering::find(board.id, &task.key).expect("the running step is listed");
+                assert_eq!(id, terminal(&binding));
+                runtime.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
+                std::fs::write(dir.path().join("direction-ready"), "").unwrap();
+            };
+            let (outcome, ()) = tokio::join!(runtime.execute_coding(&workspace, &binding, cancel), steer);
+            assert!(matches!(outcome.unwrap(), Outcome::Passed(_)));
+            assert!(std::fs::read_to_string(dir.path().join("continued")).unwrap().contains("Use the new API"));
+            assert!(runtime.store.pending_message_wakes().unwrap().is_empty());
+            assert_eq!(runtime.state(&workspace).unwrap().unwrap(), state, "steering changes no workflow state");
+            assert!(crate::engine_steering::find(board.id, &task.key).is_none(), "unlisted after settlement");
+        }
+    }
+
+    #[tokio::test]
+    async fn workflow_native_stop_reaps_a_paused_agent_without_cancelling_its_run() {
+        let (dir, mut runtime, _fake) = native("cancel").await;
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap();
+        let binding = admitted(&runtime).await;
+        let state = runtime.state("w").unwrap().unwrap();
+        let (_cancel, cancel) = tokio::sync::watch::channel(false);
+        let stop = async {
+            for _ in 0..500 {
+                if dir.path().join("started").exists() { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(dir.path().join("started").exists());
+            let id = terminal(&binding);
+            crate::engine_steering::control(id, crate::engine_steering::Control::Pause).await.unwrap();
+            assert_eq!(crate::engine_steering::row(id).unwrap().doing_now, "Paused");
+            crate::engine_steering::control(id, crate::engine_steering::Control::Stop).await.unwrap();
+            let pid: i32 = std::fs::read_to_string(dir.path().join("started")).unwrap().parse().unwrap();
+            assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "Stop acknowledges only after process quiescence");
+        };
+        let (outcome, ()) = tokio::join!(runtime.execute_coding("w", &binding, cancel), stop);
+        assert_eq!(outcome.unwrap(), Outcome::SafeFailure);
+        assert_eq!(runtime.state("w").unwrap().unwrap(), state, "Stop leaves settlement to the engine");
+    }
+
     #[tokio::test]
     async fn workflow_coding_native_owned_cancel_reaps_terminal_and_descendant() {
         let (dir, mut runtime, _fake) = native("cancel").await;

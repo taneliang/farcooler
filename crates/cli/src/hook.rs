@@ -113,7 +113,11 @@ fn private_socket(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
 /// parameter only so the binary's own tests can take the machine's speed out
 /// of a test that is about something else; see `--deadline-ms` in `main.rs`.
 pub async fn run(agent: Agent, event: String, socket: PathBuf, gating: bool, deadline: Duration) {
-    let socket = private_socket(std::env::var_os(NATIVE_HOOK_SOCKET)).unwrap_or(socket);
+    let private = private_socket(std::env::var_os(NATIVE_HOOK_SOCKET));
+    // Native Stop waits for steering before the engine may settle the step. Ordinary lifecycle
+    // hooks remain fire-and-forget; no permissions are granted by this response.
+    let gating = gating || (private.is_some() && event == "Stop" && matches!(agent, Agent::Claude | Agent::Codex));
+    let socket = private.unwrap_or(socket);
     // One bound over everything, rather than one per way of getting stuck. A
     // list of blocking calls each with its own guard is only right while
     // somebody keeps adding to the list; a bound around the lot is a property,
@@ -226,6 +230,8 @@ async fn with_input(
     if gating && is_followup(agent, &event) {
         takes.push(TAKES_FOLLOWUP.to_string());
     }
+    let native_stop = gating && event == "Stop" && matches!(agent, Agent::Claude | Agent::Codex);
+    if native_stop { takes.push(TAKES_FOLLOWUP.to_string()); }
     let pre_tool = event == "PreToolUse";
     let launch = pane_launch(std::env::var_os(farcooler_core::pane_env::LAUNCH));
     let line = HookLine { agent, event, payload, takes, launch };
@@ -238,7 +244,7 @@ async fn with_input(
     // whichever route it took to get there. `converse` bounds its two parts
     // more tightly still; this is the backstop to its arithmetic.
     let hold = if gating { LONGEST_HOLD + HOLD_GRACE } else { Duration::ZERO };
-    tokio::time::timeout_at(by + hold, converse(&socket, &encoded, gating, by, pre_tool))
+    tokio::time::timeout_at(by + hold, converse(&socket, &encoded, gating, by, pre_tool, native_stop))
         .await
         .unwrap_or_default()
 }
@@ -262,7 +268,7 @@ async fn with_input(
 /// unless the daemon's first word is a hold. A hold buys one more line, read
 /// under the hold's own bound, and that line is the verdict. EOF or an error in
 /// the hold is the daemon gone, and ends the wait at once.
-async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant, pre_tool: bool) -> String {
+async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant, pre_tool: bool, native_stop: bool) -> String {
     let first = tokio::time::timeout_at(by, first_contact(socket, encoded, gating)).await;
     let Ok(Some((mut reader, verdict))) = first else {
         return String::new();
@@ -283,7 +289,9 @@ async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant, pre_t
     // Cursor's own shape: its `stop` hook queues `followup_message` as the
     // next user message.
     if let Some(message) = verdict.followup_message {
-        return serde_json::to_string(&serde_json::json!({ "followup_message": message })).unwrap_or_default();
+        let output = if native_stop { serde_json::json!({"decision":"block", "reason":message}) }
+            else { serde_json::json!({ "followup_message": message }) };
+        return serde_json::to_string(&output).unwrap_or_default();
     }
     let Some(decision) = verdict.decision else {
         return String::new();
@@ -494,6 +502,28 @@ mod tests {
             "Denied from a test",
             "our own words reach the pane verbatim"
         );
+    }
+
+    #[tokio::test]
+    async fn native_stops_deliver_steering_as_a_continuation_for_codex_and_claude() {
+        for agent in [Agent::Codex, Agent::Claude] {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("h.sock");
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let frame = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut line = String::new();
+                tokio::io::BufReader::new(&mut stream).read_line(&mut line).await.unwrap();
+                stream.write_all(b"{\"followup_message\":\"New owner direction\"}\n").await.unwrap();
+                line
+            });
+            let out = run_with_input(agent, "Stop".into(), socket, true,
+                b"{\"session_id\":\"abc\"}".to_vec(), SHAPE_NOT_SPEED).await;
+            let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(parsed, serde_json::json!({"decision":"block", "reason":"New owner direction"}));
+            let sent: HookLine = decode_line(frame.await.unwrap().trim()).unwrap();
+            assert!(sent.takes_followup());
+        }
     }
 
     /// Cursor's `stop` hook prints a followup as cursor's own

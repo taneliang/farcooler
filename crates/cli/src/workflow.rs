@@ -101,6 +101,10 @@ pub enum WorkflowCmd {
     /// Stream a running engine agent's terminal to stdout, read-only: its picture, then live bytes, until
     /// the agent's turn ends. Nothing is ever sent to the agent. Owner only.
     Watch { workspace:Uuid,item:String },
+    /// Suspend the current native agent step and its timeout, keeping the same run and session.
+    Pause { workspace:Uuid,item:String },
+    /// Continue a paused native agent step in the same session.
+    Resume { workspace:Uuid,item:String },
     /// For an agent the engine started to review a ticket: record your verdict. Only this counts; what you
     /// say in your turn doesn't. Run it before you end your turn, or the review runs again. Writes the step's
     /// receipt locally and talks to no runner.
@@ -139,6 +143,7 @@ impl WorkflowCmd {
             }
             Self::Reopen { workspace,item,column,identity } => (workspace,Action::Reopen { mutation:identity.mutation(),item,column }),
             Self::Retry { workspace,item,run,pin,identity } => (workspace,Action::Retry { mutation:identity.mutation(),item,run,pin }),
+            Self::Pause { .. } | Self::Resume { .. } => return Err("steering is a live step command".into()),
             Self::Watch { .. } => return Err("watch is a stream, not a command".into()),
             Self::Verdict { .. } => return Err("a verdict is written where the review step reads it, not sent".into()),
         })
@@ -228,6 +233,16 @@ async fn watch(runner:Option<&str>, workspace:Uuid, item:String) -> Fallible {
     }
 }
 pub async fn workflow(runner:Option<&str>,cmd:WorkflowCmd,json:bool) -> Fallible {
+    if let WorkflowCmd::Pause { workspace,item } | WorkflowCmd::Resume { workspace,item } = &cmd {
+        let method = if matches!(cmd, WorkflowCmd::Pause { .. }) { "workflow.pause" } else { "workflow.resume" };
+        let mut link = crate::connect_to(runner).await?;
+        let mut request = watch_request(*workspace, item);
+        request.method = method.into();
+        let reply = expect_value(link.call(request).await?.value)?;
+        let result::Value::WorkflowReply(reply) = reply else { return Err("unexpected steering reply".into()) };
+        println!("{}", reply.json);
+        return Ok(());
+    }
     if let WorkflowCmd::Watch { workspace,item } = cmd { return watch(runner,workspace,item).await; }
     if let WorkflowCmd::Verdict { passed } = cmd {
         farcooler_daemon::workflow_runtime::write_agent_verdict(|key| std::env::var(key).ok(), passed)

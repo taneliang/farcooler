@@ -738,6 +738,9 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
                 return Ok(());
             }
             println!("{}  {}  {}", task.key, short_bytes(&written.id), kind.as_str());
+            if kind == NoteKind::Answer {
+                println!("To deliver this direction to an engine agent, run `farcooler message {} \"Read the answer note just added to this ticket\" --workspace {}`.", task.key, uuid_of(&task.workspace_id));
+            }
         }
 
         TaskCmd::Ask { key, body, option, thread, reviewer, repo, actor } => {

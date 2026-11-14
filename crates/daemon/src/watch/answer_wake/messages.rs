@@ -342,6 +342,10 @@ impl Watcher {
         let store = &self.service.store;
         let nobody = DomainError::Conflict { what: "nobody" };
         let card = self.card_named(board, to)?.ok_or(DomainError::InvalidArgument { what: "to" })?;
+        if let Some(id) = crate::engine_steering::find(board.id, &card.key) {
+            let said = format!("{}'s engine agent", card.key);
+            return Ok((card, Recipient { terminal: Some(id), said }));
+        }
         if let Some(pane) = store.pane_of_ticket(card.id)? {
             let row = store.get_terminal(pane).map_err(|_| nobody.clone())?;
             // A pane since made the orchestrator is the sender itself.

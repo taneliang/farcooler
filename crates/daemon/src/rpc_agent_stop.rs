@@ -48,6 +48,15 @@ pub(crate) async fn dispatch(
     if reason.as_deref().is_some_and(|r| r.chars().count() > REASON_MAX || r.chars().any(char::is_control)) {
         return Err(DomainError::InvalidArgument { what: "reason" });
     }
+    if let Some(workspace) = crate::engine_steering::workspace(id) {
+        crate::engine_steering::authorize(svc, peer, caller_pid, workspace).await?;
+        let mut row = crate::engine_steering::row(id).ok_or(DomainError::NotFound)?;
+        crate::engine_steering::control(id, crate::engine_steering::Control::Stop).await?;
+        row.working = false;
+        row.stop_asked_at = Some(crate::engine_steering::now_ms());
+        watcher.announce_plan_changed(workspace, actor);
+        return Ok(result::Value::Agent(row));
+    }
     let agent = svc.store.agent(id)?;
     if agent.ended_at.is_some() {
         return Err(DomainError::InvalidArgument { what: "agent_ended" });
