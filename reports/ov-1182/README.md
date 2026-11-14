@@ -1,122 +1,136 @@
 # ov-1182: Rust CI under 15 minutes
 
-Baseline main run: [43557233452](https://github.com/taneliang/farcooler/actions/runs/43557233452).
-Linux Rust: 24m10s; macOS Rust: 39m01s. Full tests plus shadow bookkeeping:
-15m35s Linux, 26m04s macOS. Raw step timestamps are in baseline-jobs.json.
+All ten per-push Rust jobs passed in two branch runs, with maxima of **11m19s**
+and **8m53s**. These are job `startedAt` → `completedAt` wall times,
+including setup, compilation, tests, artifact transfer and cache teardown.
+Runner queue waits are excluded; this is not a claim that the whole workflow
+or its queues finish in 15 minutes. Raw timestamps remain in the job records.
 
-Implementation reuses the ov-1181 Mac selection and its maintained coverage
-guard. Full Mac tests remain in Nightly. Linux compiles default-feature tests
-once into a nextest archive and runs four hash partitions on independent
-runners. Each runner lists the full archive and every partition, rejecting any
-missing, unexpected, changed or duplicated runnable test before execution.
-Ignored tests keep their existing policy. Feature tests, clippy checks,
-target checks, doctests and both leak wrappers remain per push.
+- [Run 1: 43581462181](https://github.com/taneliang/farcooler/actions/runs/43581462181) at `5a532b87364d8e50eea79d7e837b7c453f3a1b01`.
+- [Run 2: 43582348026](https://github.com/taneliang/farcooler/actions/runs/43582348026) at `9095d68b8997828856c8a806f482d7cee1dfac4f`.
 
-The archive explicitly carries the runtime CLI, daemon and LFS filter. Consumers
-extract under their own worktree target, recreate channel CLI aliases and set
-the same test shell. Shadow measurement moves to Nightly; it is an experiment
-with inventories, host-load waits and a possible sequential selected replay,
-not a required coverage check. Hosted before/after evidence follows below.
+| Rust job | Run 1 | Run 2 |
+| --- | ---: | ---: |
+| Rust (ubuntu-24.04) | 11m19s | 6m08s |
+| Rust (macos-latest) | 5m35s | 7m16s |
+| Rust test archive | 8m11s | 3m28s |
+| Rust tests (1/4) | 4m21s | 4m31s |
+| Rust tests (2/4) | 3m38s | 3m46s |
+| Rust tests (3/4) | 4m31s | 4m08s |
+| Rust tests (4/4) | 4m01s | 3m52s |
+| Rust native test archive (macOS) | 4m19s | 8m53s |
+| Rust native tests (macOS 1/2) | 6m10s | 6m15s |
+| Rust native tests (macOS 2/2) | 5m32s | 6m03s |
 
-Local validation: actionlint for changed workflows, ci-changes self-test,
-partition mutation tests and a real 65-case nextest archive (64 runnable,
-one ignored; all four partitions executed successfully), Mac selection guard/self-tests and leak-wrapper self-tests.
+Baseline main run [43557233452](https://github.com/taneliang/farcooler/actions/runs/43557233452)
+took **24m10s** for Linux Rust and **39m01s** for Mac Rust. Its full-test/shadow
+steps took 15m35s and 26m04s respectively. This is an observed before/after
+comparison with differing cache states and runners, not a controlled causal
+estimate or a guarantee for every cold cache or future runner.
 
-A temporary branch-only push workflow copies the production Rust jobs, removing
-only the changes/path-selection dependency. It will be removed after timing.
+## What changed
 
-## Shadow measurement limits
+Linux compiles the default workspace once into a nextest archive and runs four
+hash partitions. Mac compiles **every** workspace test target once into its own
+archive and runs the existing ov-1181 native selection in two hash partitions.
+The maintained Mac selector and its source/dependency guard are reused, not
+replaced. Full default Mac execution remains in Nightly.
 
-The baseline Linux full command took 588.47 s (584.716 s in nextest execution)
-inside a 935 s step. Mac took 1040.50 s (1034.879 s execution) inside a 1564 s
-step. Neither replayed a narrowed proposal on this workflow-changing commit.
-The remaining 346.53/523.50 s include test compilation during inventory and
-planner/load/bookkeeping time; they cannot all be attributed to shadow overhead.
-Moving shadow removes optional sequential replays from per-push critical paths;
-the baseline alone does not prove minutes saved by removing its bookkeeping.
+Both platforms package the runtime CLI, daemon and LFS filter, recreate the
+channel aliases, remap the checkout and extract under their own worktree's
+`target/`. Archive consumers do not compile the suite again. All feature tests,
+target checks and doctests remain per push. All eight Clippy invocations run
+once on Linux. No assertion, ignored-test policy, test timeout or retry policy
+was relaxed. The job timeout is still a failure boundary, not the timing proof.
 
-## Initial experiment and follow-up
+CI sets `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`. This removes
+debug symbols while retaining optimization settings and debug assertions.
+The initial symbol-bearing Linux artifact was 6,313,939,230 bytes; an early
+symbol-free trial was 714,851,462 bytes. Final artifact sizes are recorded
+separately. Panic locations and test names remain visible in the retained logs.
 
-Run 43573567048 measured the first split. By roughly 12 minutes the Mac job
-was still in feature/check setup, before its default suite. The final design
-therefore runs native Mac tests independently of the unchanged platform
-lint/feature checks. The initial harness is initial-hosted-timing.yml and is
-not counted toward acceptance for the final job layout.
+Uploads use `overwrite: true` to support complete-job reruns without a same-name
+artifact conflict; GitHub's per-attempt logs/verdicts are retained. See the
+[upload action contract](https://github.com/actions/upload-artifact).
 
-Rust CI sets CARGO_PROFILE_DEV_DEBUG=0 and CARGO_PROFILE_TEST_DEBUG=0 to reduce
-binary/link/archive costs. These settings change debug symbols, leaving Cargo's
-optimization settings and debug assertions unchanged. Artifact binaries retain
-panic messages and test names but do not carry full debug symbols. The symbol settings leave source,
-test selection, retry policy, required verdicts and test timeouts unchanged.
+## Coverage proof
 
-The inherited ov-1181 repository-wide actionlint annotations are included so
-plain `actionlint` passes, including the custom xcode-27 runner label.
+Each shard lists its archive without partitioning and with every partition,
+then rejects missing, duplicated, unexpected or changed runnable cases. The Mac
+comparison applies the same native expression to its base and both partitions.
 
-The initial Linux checks passed in 916 s (15m16s), and the original debug-symbol
-archive job passed in 921 s (15m21s). The monolithic Mac job exceeded 20 minutes
-before completion. That superseded experiment was cancelled to free hosted
-runners; cancelled shards/Mac have no passing verdict and are not acceptance
-evidence. Its metadata is initial-jobs.json.
+Both final runs cover **6,977 Linux runnable tests**, split
+**1,713 / 1,740 / 1,741 / 1,783**, and **2,601 selected Mac tests**, split
+**1,270 / 1,331**. These platform counts overlap and must not be added together
+as unique tests. The existing ignored tests retain their policy (35 in Linux's
+full inventory). No new test exclusion was introduced.
 
-Initial archive payload: 6,313,939,230 bytes; compression took 100.47 s and
-upload took about 70 s. Two shards uploaded partial inventories during
-cancellation; no guard completion or full execution verdict is counted. Disabling debug
-symbols specifically addresses this observed archive cost.
+`coverage-verification.txt` and the four final inventory ZIPs preserve the
+comparisons. Unit self-tests plant missing and duplicate cases; deleting one
+assignment from a real hosted inventory also makes the guard reject it.
+A real local archive additionally exercised four unfiltered partitions and two
+filtered partitions, including an ignored case.
 
-## Second-run intermittent test failure
+The local lane gate derives one **unfiltered** workspace run from CI's shard
+command, under both leak wrappers. Its regression test rejects a narrowed
+prefix and recognizes all new Rust jobs. The iOS checker now scopes its matrix
+rule to iOS jobs and still rejects an iOS smoke matrix; Nightly's report-needs
+mutation remains effective with the new Rust jobs. `integration-validation.txt`
+records the previously missing local suite and the corrected plan.
 
-Run 43575477705's first shard-2 attempt ran all 1,740 assigned tests; 1,739
-passed and `watch::answer_wake::tests::compose_held_tests::a_whole_read_between_tears_restarts_the_cap`
-failed at compose_held_tests.rs:405 (`the cap ran across a whole read`).
-That unchanged test passed in run 43574660997 in 3.117 s; the failing invocation
-took 4.167 s. Its fixture uses 1.2 s torn / 0.3 s healthy / 1.2 s torn while
-the background teller resets only after an actual non-torn retry. The likely
-failure mechanism is missing the short healthy observation window under load;
-this is a hypothesis from the fixture and production retry code, not a proven
-product fix. No Rust code or test assertion, timeout, filter or retry policy
-was changed in response. The complete first-attempt job log is retained.
-GitHub refused a single-job rerun while the workflow was still active. The
-symbol-only layout was then superseded and cancelled for Clippy placement.
-The final branch runs rerun the entire workspace with unchanged assertions,
-including every shard guard and both leak wrappers; the failed attempt is
-retained and is not counted as a passing acceptance run.
+## Measurement and validation
 
-## Clippy placement refinement
+`hosted-timing.yml` is the exact temporary branch-push workflow used by both
+final runs. It copies production Rust jobs, removing only the path-selection
+job/dependencies and their conditions. The temporary workflow is removed from
+`.github/workflows/` after measurement.
 
-The first symbol-free run's slow Mac runner took 379 s on workspace Clippy
-alone (the next run took 126 s on the same command). Every workspace/feature
-Clippy invocation now runs once on Linux, where all eight already ran. Mac
-retains all feature tests, target checks, doctests and the native full-test build
-and selection. This follows the ticket's cheapest-platform instruction without
-removing any test or Clippy feature variant from per-push CI. The earlier
-symbol-only workflow is symbols-hosted-timing.yml; final acceptance uses the
-Linux-Clippy workflow in hosted-timing.yml.
+Run `python3 reports/ov-1182/verify-hosted.py reports/ov-1182/run1-jobs.json reports/ov-1182/run2-jobs.json`
+from this checkout with the measured commits available. It checks current
+production-job parity, the exact workflow at both measured SHAs, two distinct
+run IDs, all ten successful verdicts and every job strictly below 900 seconds.
 
-Archive and inventory uploads use `overwrite: true` so an entire job/workflow
-can be rerun without failing at a same-name artifact upload. This replaces
-measurement files, not test verdicts or per-attempt GitHub logs. See the
-[upload action's overwrite contract](https://github.com/actions/upload-artifact).
-Final measurement runs include this setting; earlier in-flight trials were
-superseded before counting acceptance.
+`local-validation.txt` records passing actionlint (all workflows), ci-changes,
+partition/mutation tests, Mac coverage guard, leak checks, shadow self-tests,
+Nightly report, iOS shard checks, local lane gate, 16 evidence tests and 9 engine
+contract tests. The inherited ov-1181 actionlint annotations and xcode-27 label
+configuration allow plain `actionlint` to pass repository-wide.
 
-## Native Mac archive and shards
+## Shadow measurement and unsuccessful trials
 
-The next trial completed Linux and Mac feature checks but its combined native
-build/run exceeded 20 minutes. Native compilation was 8m19s after a 2m34s
-runtime-bin build; test execution started at 09:09:12 UTC and was still running
-when the 20-minute job limit cancelled it at 09:17:33. This reproduces the
-remaining bottleneck instead of treating the earlier 9m08s sample as a bound.
-Phase logs and both trial job records are retained under pre-macos-shards-*.
+Shadow measurement moves to Nightly, including green-base discovery, inventory
+comparison, load waits and optional sequential selected-suite replay. Baseline
+Linux's full command took 588.47 s (584.716 s in nextest) inside its 935 s step;
+Mac took 1040.50 s (1034.879 s in nextest) inside 1564 s. Neither replayed a
+narrowed proposal on that workflow-changing commit. The remaining 346.53 /
+523.50 s include compilation during listing, so they cannot all be attributed
+to shadow bookkeeping. The move removes optional replay work from per-push CI;
+the baseline does not prove minutes saved solely by deleting bookkeeping.
 
-Final CI builds every Mac test target once into an archive, then runs the same
-maintained native selection in two independent Mac partitions. The generic
-inventory guard now checks both Linux's four full-workspace partitions and
-Mac's two filtered-native partitions. No native case or compilation target
-is removed. Mac's archive cache shares the previous native-build namespace.
+Earlier trials are retained and **excluded** from final acceptance:
 
-Mac-sharded final measurement run 1 is
-[43581462181](https://github.com/taneliang/farcooler/actions/runs/43581462181)
-at `5a532b873`. The final workflow has ten Rust jobs: two platform checks,
-two platform archives, four Linux full-workspace shards and two Mac native
-shards. The second measurement changes report text only; measured job commands,
-profiles, runners and partition counts stay identical.
+- 43573567048: initial Linux checks/archive passed in 15m16s/15m21s; the old
+  Mac layout exceeded 20 minutes. Superseded work was cancelled. Initial
+  compression alone took 100.47 s for the 6.31 GB artifact.
+- 43574660997 / 43575477705: symbol-free trials exposed slow duplicate Mac
+  Clippy work (379 s for workspace Clippy on one runner versus 126 s on another).
+  One unchanged timing-sensitive test failed once in Linux shard 2:
+  `a_whole_read_between_tears_restarts_the_cap`, at compose_held_tests.rs:405.
+  It passed in the earlier trial in 3.117 s and failed after 4.167 s. Its
+  300 ms healthy-registry window can be missed by the asynchronous retry loop;
+  that is a fixture-timing hypothesis, not a claimed product fix. The complete
+  failed-attempt log is retained. No test retry or assertion change was added.
+- 43576689824 / 43576844809: superseded before measurement completion to make
+  new artifact uploads replaceable on rerun.
+- 43577077629 / 43577253123: the combined Mac native build/run hit its 20-minute
+  job limit. One log shows 8m19s test compilation after a 2m34s binary build,
+  followed by a native execution still running at cancellation. This led to
+  the final separate archive and two native shards. Linux coverage in those
+  trials was green; partial native execution is not credited as coverage.
+
+The unsuccessful records, native phase logs and the intermittent failure are
+preserved under `initial-*`, `symbols-*`, `pre-overwrite-*`, `pre-macos-shards-*`
+and `run2-shard2-first-attempt.log.zip`. `run1-inventories.zip` is the earlier
+symbol-only trial; final proofs are `run1-{linux,macos}-inventories.zip` and
+`run2-{linux,macos}-inventories.zip`. Final complete logs and API records are
+`run1-logs.zip`, `run2-logs.zip` and `run{1,2}-jobs.json`.
