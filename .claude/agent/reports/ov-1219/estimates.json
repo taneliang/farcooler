@@ -1,0 +1,172 @@
+[
+  {
+    "sha": "6afab149ab10a5548dc6033537914945cbd93c0b",
+    "after": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-daemon-engine",
+      "farcooler-daemon-integration",
+      "farcooler-jni"
+    ],
+    "after_full": false,
+    "after_reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "before_cases": 4696,
+    "after_cases": 2087,
+    "before_build_seconds": 129.14922041551756,
+    "after_build_seconds": 72.44324698580081,
+    "before_test_seconds": 656.7549598619789,
+    "after_test_seconds": 364.35767231325383,
+    "before_minutes": 13.098403004624942,
+    "after_minutes": 7.28001532165091
+  },
+  {
+    "sha": "3c6cb253ace546f5aba16184e99c76a5a95b8761",
+    "after": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-daemon-engine",
+      "farcooler-daemon-integration",
+      "farcooler-daemon-watch",
+      "farcooler-jni"
+    ],
+    "after_full": false,
+    "after_reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "before_cases": 4696,
+    "after_cases": 2289,
+    "before_build_seconds": 129.14922041551756,
+    "after_build_seconds": 76.81281968711207,
+    "before_test_seconds": 656.7549598619789,
+    "after_test_seconds": 377.14627324353563,
+    "before_minutes": 13.098403004624942,
+    "after_minutes": 7.565984882177461
+  },
+  {
+    "sha": "4d331fabdbf5f4eef2a37dc7d7a990caadc71947",
+    "after": [
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-daemon-access",
+      "farcooler-daemon-agents",
+      "farcooler-daemon-board",
+      "farcooler-daemon-context",
+      "farcooler-daemon-contracts",
+      "farcooler-daemon-delivery",
+      "farcooler-daemon-engine",
+      "farcooler-daemon-git",
+      "farcooler-daemon-integration",
+      "farcooler-daemon-service",
+      "farcooler-daemon-watch",
+      "farcooler-fence",
+      "farcooler-jni",
+      "farcooler-protocol",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-workflow"
+    ],
+    "after_full": false,
+    "after_reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "before_cases": 6694,
+    "after_cases": 6694,
+    "before_build_seconds": 152.0736029585782,
+    "after_build_seconds": 163.07360295857825,
+    "before_test_seconds": 699.9476108513355,
+    "after_test_seconds": 699.947610851336,
+    "before_minutes": 14.200353563498561,
+    "after_minutes": 14.383686896831904
+  },
+  {
+    "sha": "2cf9644fc949311530afd22920b451260930e707",
+    "after": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-daemon-access",
+      "farcooler-daemon-agents",
+      "farcooler-daemon-board",
+      "farcooler-daemon-context",
+      "farcooler-daemon-contracts",
+      "farcooler-daemon-delivery",
+      "farcooler-daemon-engine",
+      "farcooler-daemon-git",
+      "farcooler-daemon-integration",
+      "farcooler-daemon-service",
+      "farcooler-daemon-watch",
+      "farcooler-jni",
+      "farcooler-store",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ],
+    "after_full": false,
+    "after_reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "before_cases": 6287,
+    "after_cases": 6287,
+    "before_build_seconds": 144.25440944836572,
+    "after_build_seconds": 155.25440944836578,
+    "before_test_seconds": 697.987918525253,
+    "after_test_seconds": 697.9879185252535,
+    "before_minutes": 14.037372132893646,
+    "after_minutes": 14.220705466226987
+  },
+  {
+    "sha": "73974f89898d716c36595eade2511ba5f8df7a8f",
+    "after": [
+      "farcooler-agent-core",
+      "farcooler-agent-hooks",
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-daemon-access",
+      "farcooler-daemon-agents",
+      "farcooler-daemon-board",
+      "farcooler-daemon-context",
+      "farcooler-daemon-contracts",
+      "farcooler-daemon-delivery",
+      "farcooler-daemon-engine",
+      "farcooler-daemon-git",
+      "farcooler-daemon-integration",
+      "farcooler-daemon-service",
+      "farcooler-daemon-watch",
+      "farcooler-fence",
+      "farcooler-ffi-guard",
+      "farcooler-jni",
+      "farcooler-protocol",
+      "farcooler-review",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-vt",
+      "farcooler-workflow"
+    ],
+    "after_full": true,
+    "after_reasons": [
+      "full: M docs/workspaces.md"
+    ],
+    "before_cases": 6928,
+    "after_cases": 6928,
+    "before_build_seconds": 154.1299999999986,
+    "after_build_seconds": 165.12999999999863,
+    "before_test_seconds": 700.8409999999909,
+    "after_test_seconds": 700.8409999999913,
+    "before_minutes": 14.249516666666493,
+    "after_minutes": 14.432849999999831
+  }
+]

@@ -1,0 +1,195 @@
+{
+  "farcooler-agent-core": [],
+  "farcooler-agent-hooks": [
+    "farcooler-agent-core"
+  ],
+  "farcooler-ceremony": [
+    "farcooler-protocol"
+  ],
+  "farcooler-cli": [
+    "farcooler-agent-core",
+    "farcooler-agent-hooks",
+    "farcooler-client",
+    "farcooler-core",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-daemon-engine",
+    "farcooler-daemon-service",
+    "farcooler-fence",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tailcat",
+    "farcooler-transport"
+  ],
+  "farcooler-client": [
+    "farcooler-ceremony",
+    "farcooler-core",
+    "farcooler-daemon",
+    "farcooler-fence",
+    "farcooler-ffi-guard",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tailcat",
+    "farcooler-tmux",
+    "farcooler-transport",
+    "farcooler-workflow"
+  ],
+  "farcooler-core": [
+    "farcooler-ffi-guard",
+    "farcooler-protocol"
+  ],
+  "farcooler-daemon": [
+    "farcooler-agent-core",
+    "farcooler-agent-hooks",
+    "farcooler-cli",
+    "farcooler-core",
+    "farcooler-daemon-access",
+    "farcooler-daemon-agents",
+    "farcooler-daemon-board",
+    "farcooler-daemon-delivery",
+    "farcooler-daemon-engine",
+    "farcooler-daemon-git",
+    "farcooler-daemon-service",
+    "farcooler-daemon-watch",
+    "farcooler-fence",
+    "farcooler-ffi-guard",
+    "farcooler-protocol",
+    "farcooler-review",
+    "farcooler-store",
+    "farcooler-tailcat",
+    "farcooler-tmux",
+    "farcooler-transport",
+    "farcooler-workflow"
+  ],
+  "farcooler-daemon-access": [
+    "farcooler-core",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-daemon-git",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-daemon-agents": [
+    "farcooler-core",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-daemon-git",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-daemon-board": [
+    "farcooler-core",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-daemon-git",
+    "farcooler-protocol",
+    "farcooler-review",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-daemon-context": [
+    "farcooler-core",
+    "farcooler-daemon-contracts",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-daemon-contracts": [
+    "farcooler-core",
+    "farcooler-protocol",
+    "farcooler-workflow"
+  ],
+  "farcooler-daemon-delivery": [
+    "farcooler-core",
+    "farcooler-daemon-agents",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-daemon-engine": [
+    "farcooler-core",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-daemon-git",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux",
+    "farcooler-workflow"
+  ],
+  "farcooler-daemon-git": [
+    "farcooler-core",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-daemon-integration": [
+    "farcooler-cli",
+    "farcooler-client",
+    "farcooler-daemon",
+    "farcooler-store",
+    "farcooler-vt"
+  ],
+  "farcooler-daemon-service": [
+    "farcooler-core",
+    "farcooler-daemon-access",
+    "farcooler-daemon-agents",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-daemon-git",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-daemon-watch": [
+    "farcooler-core",
+    "farcooler-daemon-agents",
+    "farcooler-daemon-board",
+    "farcooler-daemon-context",
+    "farcooler-daemon-contracts",
+    "farcooler-daemon-delivery",
+    "farcooler-protocol",
+    "farcooler-store",
+    "farcooler-tmux"
+  ],
+  "farcooler-fence": [
+    "farcooler-protocol"
+  ],
+  "farcooler-ffi-guard": [],
+  "farcooler-jni": [
+    "farcooler-client",
+    "farcooler-ffi-guard",
+    "farcooler-vt"
+  ],
+  "farcooler-protocol": [
+    "farcooler-workflow"
+  ],
+  "farcooler-review": [
+    "farcooler-ffi-guard"
+  ],
+  "farcooler-store": [
+    "farcooler-core",
+    "farcooler-protocol",
+    "farcooler-workflow"
+  ],
+  "farcooler-tailcat": [
+    "farcooler-protocol"
+  ],
+  "farcooler-tmux": [
+    "farcooler-core",
+    "farcooler-protocol"
+  ],
+  "farcooler-transport": [
+    "farcooler-core",
+    "farcooler-protocol"
+  ],
+  "farcooler-vt": [
+    "farcooler-ffi-guard"
+  ],
+  "farcooler-workflow": []
+}

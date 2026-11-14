@@ -1,0 +1,5048 @@
+[
+  {
+    "path": "crates/daemon/examples/workflow_command_server.rs",
+    "group": "shell",
+    "lines": 39,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/examples/workflow_fixture.rs",
+    "group": "shell",
+    "lines": 30,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/access_migration.rs",
+    "group": "access",
+    "lines": 506,
+    "crate_references": [
+      "enrollment",
+      "service",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/access_migration_tests.rs",
+    "group": "access",
+    "lines": 346,
+    "crate_references": [
+      "enrollment",
+      "rpc_people",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/activity_source.rs",
+    "group": "agents",
+    "lines": 115,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/agent_panes.rs",
+    "group": "service",
+    "lines": 207,
+    "crate_references": [
+      "reps",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/agent_panes_tests.rs",
+    "group": "service",
+    "lines": 146,
+    "crate_references": [
+      "service",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/agent_supervisor/epoch.rs",
+    "group": "agents",
+    "lines": 21,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/agent_supervisor/failed_turn_tests.rs",
+    "group": "agents",
+    "lines": 19,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/agent_supervisor/gap_tests.rs",
+    "group": "agents",
+    "lines": 137,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/agent_supervisor/monotonic_seq_tests.rs",
+    "group": "agents",
+    "lines": 56,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/agent_supervisor/replay_fit.rs",
+    "group": "agents",
+    "lines": 110,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/agent_supervisor/replay_fit_tests.rs",
+    "group": "agents",
+    "lines": 186,
+    "crate_references": [
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/agent_supervisor.rs",
+    "group": "agents",
+    "lines": 496,
+    "crate_references": [
+      "activity_source"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/allowlist.rs",
+    "group": "access",
+    "lines": 435,
+    "crate_references": [
+      "service",
+      "tunnel_gate"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/answered_for.rs",
+    "group": "board",
+    "lines": 104,
+    "crate_references": [
+      "needs_you",
+      "people"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/answered_for_tests.rs",
+    "group": "board",
+    "lines": 150,
+    "crate_references": [
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/approvals.rs",
+    "group": "access",
+    "lines": 345,
+    "crate_references": [
+      "people",
+      "push",
+      "service",
+      "step_up",
+      "step_up_rpc"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/approvals_tests.rs",
+    "group": "access",
+    "lines": 239,
+    "crate_references": [
+      "rpc_people",
+      "step_up",
+      "step_up_rpc"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/beneath.rs",
+    "group": "git",
+    "lines": 71,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/bin/farcooler-lfs-filter.rs",
+    "group": "shell",
+    "lines": 528,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/board_reads_ops.rs",
+    "group": "board",
+    "lines": 78,
+    "crate_references": [
+      "people",
+      "review",
+      "service",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/by_hand.rs",
+    "group": "board",
+    "lines": 75,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/caller_person.rs",
+    "group": "access",
+    "lines": 121,
+    "crate_references": [
+      "claude_logins",
+      "people",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/caller_person_tests.rs",
+    "group": "access",
+    "lines": 140,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/caller_seat.rs",
+    "group": "access",
+    "lines": 399,
+    "crate_references": [
+      "code_identity",
+      "proc_table",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/caller_seat_tests.rs",
+    "group": "access",
+    "lines": 123,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/change_set.rs",
+    "group": "git",
+    "lines": 1150,
+    "crate_references": [
+      "git",
+      "hook_install"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/charter_draft.rs",
+    "group": "board",
+    "lines": 170,
+    "crate_references": [
+      "pastes",
+      "skill_install",
+      "survey",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/charter_draft_tests.rs",
+    "group": "board",
+    "lines": 206,
+    "crate_references": [
+      "landing",
+      "skill_install",
+      "survey",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/charter_read.rs",
+    "group": "board",
+    "lines": 73,
+    "crate_references": [
+      "service",
+      "wire",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/charter_write.rs",
+    "group": "board",
+    "lines": 92,
+    "crate_references": [
+      "caller_person",
+      "charter_read",
+      "service",
+      "skill_install",
+      "wire",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/chat_migration.rs",
+    "group": "service",
+    "lines": 276,
+    "crate_references": [
+      "agent_supervisor",
+      "paths",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/chat_migration_tests.rs",
+    "group": "service",
+    "lines": 253,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/check_in_target.rs",
+    "group": "board",
+    "lines": 56,
+    "crate_references": [
+      "claude_registry",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/ci_canary.rs",
+    "group": "board",
+    "lines": 133,
+    "crate_references": [
+      "ci_watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/ci_canary_tests.rs",
+    "group": "board",
+    "lines": 154,
+    "crate_references": [
+      "ci_watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/ci_watch.rs",
+    "group": "board",
+    "lines": 455,
+    "crate_references": [
+      "ci_canary",
+      "rpc_pages",
+      "service",
+      "stack",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/ci_watch_tests.rs",
+    "group": "board",
+    "lines": 169,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/claims.rs",
+    "group": "board",
+    "lines": 874,
+    "crate_references": [
+      "foreground",
+      "hook_ingress",
+      "proc_cwd",
+      "service",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_key_exports.rs",
+    "group": "agents",
+    "lines": 230,
+    "crate_references": [
+      "claude_sign_in",
+      "people",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_key_exports_tests.rs",
+    "group": "agents",
+    "lines": 378,
+    "crate_references": [
+      "rpc",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_login_renewal.rs",
+    "group": "agents",
+    "lines": 263,
+    "crate_references": [
+      "claude_logins",
+      "people",
+      "push",
+      "review",
+      "service",
+      "shared_logins",
+      "watch",
+      "web_pane"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_login_renewal_tests.rs",
+    "group": "agents",
+    "lines": 510,
+    "crate_references": [
+      "claude_logins",
+      "claude_sign_in",
+      "push",
+      "reconcile",
+      "review",
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_login_wire.rs",
+    "group": "agents",
+    "lines": 143,
+    "crate_references": [
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_login_wire_tests.rs",
+    "group": "agents",
+    "lines": 161,
+    "crate_references": [
+      "claude_logins"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_logins.rs",
+    "group": "agents",
+    "lines": 711,
+    "crate_references": [
+      "claude_key_exports",
+      "claude_sign_in",
+      "member_removal",
+      "people",
+      "reps",
+      "service",
+      "shared_logins"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_logins_harness_tests.rs",
+    "group": "agents",
+    "lines": 141,
+    "crate_references": [
+      "claude_login_renewal"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_logins_tests.rs",
+    "group": "agents",
+    "lines": 540,
+    "crate_references": [
+      "caller_seat",
+      "people",
+      "reconcile",
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_mailbox.rs",
+    "group": "agents",
+    "lines": 219,
+    "crate_references": [
+      "hook_install",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_registry.rs",
+    "group": "agents",
+    "lines": 680,
+    "crate_references": [
+      "claude_logins",
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_registry_tests.rs",
+    "group": "agents",
+    "lines": 343,
+    "crate_references": [
+      "claude_logins"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_sign_in.rs",
+    "group": "agents",
+    "lines": 668,
+    "crate_references": [
+      "claude_logins",
+      "people",
+      "review",
+      "service",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/claude_sign_in_tests.rs",
+    "group": "agents",
+    "lines": 740,
+    "crate_references": [
+      "claude_logins",
+      "member_removal",
+      "people",
+      "reconcile",
+      "rpc",
+      "service",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/code_identity.rs",
+    "group": "access",
+    "lines": 115,
+    "crate_references": [
+      "claude_registry"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/codex_trust.rs",
+    "group": "agents",
+    "lines": 1116,
+    "crate_references": [
+      "git",
+      "git_guard",
+      "git_sandbox",
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/crash_reports.rs",
+    "group": "shell",
+    "lines": 360,
+    "crate_references": [
+      "charter_read",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/crash_reports_tests.rs",
+    "group": "shell",
+    "lines": 340,
+    "crate_references": [
+      "git",
+      "rpc",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/cutover_admin.rs",
+    "group": "access",
+    "lines": 142,
+    "crate_references": [
+      "cutover_gate",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/cutover_delegate.rs",
+    "group": "access",
+    "lines": 244,
+    "crate_references": [
+      "caller_seat",
+      "claude_registry",
+      "cutover_admin",
+      "cutover_grant",
+      "proc_table",
+      "service",
+      "sessions",
+      "step_up_rpc",
+      "workflow_runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/cutover_delegate_tests.rs",
+    "group": "access",
+    "lines": 150,
+    "crate_references": [
+      "claude_registry",
+      "cutover_admin",
+      "cutover_grant",
+      "service",
+      "step_up_rpc",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/cutover_gate.rs",
+    "group": "access",
+    "lines": 17,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/cutover_grant.rs",
+    "group": "access",
+    "lines": 209,
+    "crate_references": [
+      "caller_seat",
+      "people",
+      "service",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/cutover_grant_tests.rs",
+    "group": "access",
+    "lines": 422,
+    "crate_references": [
+      "caller_seat",
+      "cutover_admin",
+      "enrollment",
+      "rpc_people",
+      "service",
+      "step_up",
+      "step_up_rpc",
+      "task_ops",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/daemon_log.rs",
+    "group": "service",
+    "lines": 197,
+    "crate_references": [
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/daemon_log_tests.rs",
+    "group": "service",
+    "lines": 86,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/effect_runner.rs",
+    "group": "engine",
+    "lines": 266,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/engine_moves.rs",
+    "group": "engine",
+    "lines": 29,
+    "crate_references": [
+      "task_starts",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/engine_stuck.rs",
+    "group": "engine",
+    "lines": 146,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/engine_stuck_tests.rs",
+    "group": "engine",
+    "lines": 103,
+    "crate_references": [
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/enrollment/added.rs",
+    "group": "access",
+    "lines": 217,
+    "crate_references": [
+      "people",
+      "person_access",
+      "service",
+      "sessions",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/enrollment/added_tests.rs",
+    "group": "access",
+    "lines": 184,
+    "crate_references": [
+      "people",
+      "service",
+      "tunnel_gate"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/enrollment/grant.rs",
+    "group": "access",
+    "lines": 129,
+    "crate_references": [
+      "people"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/enrollment/grant_tests.rs",
+    "group": "access",
+    "lines": 201,
+    "crate_references": [
+      "enrollment",
+      "people",
+      "release_sweep",
+      "rpc",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/enrollment/in_flight_tests.rs",
+    "group": "access",
+    "lines": 323,
+    "crate_references": [
+      "rpc",
+      "service",
+      "sessions",
+      "tunnel_gate",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/enrollment/rekey.rs",
+    "group": "access",
+    "lines": 189,
+    "crate_references": [
+      "service",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/enrollment/rekey_tests.rs",
+    "group": "access",
+    "lines": 228,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/enrollment.rs",
+    "group": "access",
+    "lines": 1349,
+    "crate_references": [
+      "allowlist",
+      "cutover_grant",
+      "person_access",
+      "service",
+      "sessions",
+      "tunnel_gate",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/fanout.rs",
+    "group": "service",
+    "lines": 1194,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/fanout_socket_tests.rs",
+    "group": "service",
+    "lines": 145,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/file_diff.rs",
+    "group": "git",
+    "lines": 336,
+    "crate_references": [
+      "change_set",
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/first_key.rs",
+    "group": "access",
+    "lines": 227,
+    "crate_references": [
+      "people",
+      "service",
+      "step_up",
+      "step_up_rpc"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/foreground.rs",
+    "group": "service",
+    "lines": 1206,
+    "crate_references": [
+      "proc_table"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/backend.rs",
+    "group": "git",
+    "lines": 493,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/exclusion_tests.rs",
+    "group": "git",
+    "lines": 617,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/exclusions.rs",
+    "group": "git",
+    "lines": 327,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/fsevents.rs",
+    "group": "git",
+    "lines": 581,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/nested_tests.rs",
+    "group": "git",
+    "lines": 98,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/offload.rs",
+    "group": "git",
+    "lines": 173,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/offload_tests.rs",
+    "group": "git",
+    "lines": 124,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/fs_watch/settle.rs",
+    "group": "git",
+    "lines": 264,
+    "crate_references": [
+      "review"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/fs_watch.rs",
+    "group": "git",
+    "lines": 1461,
+    "crate_references": [
+      "git",
+      "review"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/gh_inert.rs",
+    "group": "shell",
+    "lines": 68,
+    "crate_references": [
+      "service",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git.rs",
+    "group": "git",
+    "lines": 1500,
+    "crate_references": [
+      "change_set",
+      "codex_trust",
+      "git_guard",
+      "git_launch",
+      "git_lfs",
+      "git_sandbox",
+      "hook_install"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git_capped.rs",
+    "group": "git",
+    "lines": 74,
+    "crate_references": [
+      "git",
+      "git_guard",
+      "git_lfs"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git_exclude/gitfile_tests.rs",
+    "group": "git",
+    "lines": 110,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/git_exclude/tests.rs",
+    "group": "git",
+    "lines": 188,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/git_exclude.rs",
+    "group": "git",
+    "lines": 279,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git_guard.rs",
+    "group": "git",
+    "lines": 404,
+    "crate_references": [
+      "git_lfs",
+      "git_sandbox"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git_launch/tests.rs",
+    "group": "git",
+    "lines": 85,
+    "crate_references": [
+      "git_sandbox"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git_launch.rs",
+    "group": "git",
+    "lines": 123,
+    "crate_references": [
+      "git",
+      "git_guard",
+      "git_lfs",
+      "git_sandbox"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git_lfs.rs",
+    "group": "git",
+    "lines": 547,
+    "crate_references": [
+      "beneath",
+      "change_set",
+      "git",
+      "git_guard",
+      "git_sandbox"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/git_lfs_pointer_tests.rs",
+    "group": "git",
+    "lines": 49,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/git_sandbox.rs",
+    "group": "git",
+    "lines": 972,
+    "crate_references": [
+      "change_set",
+      "git",
+      "git_guard",
+      "git_lfs"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_asks/delivery_tests.rs",
+    "group": "agents",
+    "lines": 42,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/hook_asks/shape.rs",
+    "group": "agents",
+    "lines": 198,
+    "crate_references": [
+      "session_projectors"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_asks.rs",
+    "group": "agents",
+    "lines": 1467,
+    "crate_references": [
+      "hook_ingress",
+      "session_projectors"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_fence_tests.rs",
+    "group": "shell",
+    "lines": 192,
+    "crate_references": [
+      "hook_asks",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress/fence.rs",
+    "group": "agents",
+    "lines": 154,
+    "crate_references": [
+      "hook_asks"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress/followup.rs",
+    "group": "agents",
+    "lines": 42,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress/refusals.rs",
+    "group": "agents",
+    "lines": 68,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress/stopping.rs",
+    "group": "agents",
+    "lines": 97,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress/writer.rs",
+    "group": "agents",
+    "lines": 15,
+    "crate_references": [
+      "writer_gate"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress.rs",
+    "group": "agents",
+    "lines": 1236,
+    "crate_references": [
+      "claims",
+      "claude_registry",
+      "hook_asks",
+      "paths",
+      "registry_binding",
+      "service",
+      "session_projectors",
+      "subagent_rows",
+      "transcript_tail",
+      "writer_gate"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress_held_tests.rs",
+    "group": "agents",
+    "lines": 108,
+    "crate_references": [
+      "session_projectors"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress_launch_tests.rs",
+    "group": "agents",
+    "lines": 81,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/hook_ingress_tests.rs",
+    "group": "agents",
+    "lines": 727,
+    "crate_references": [
+      "claims",
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_install/native_host.rs",
+    "group": "agents",
+    "lines": 18,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/hook_install.rs",
+    "group": "agents",
+    "lines": 1632,
+    "crate_references": [
+      "change_set",
+      "claude_mailbox",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/hook_install_claude_tests.rs",
+    "group": "agents",
+    "lines": 29,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/hostwalk.rs",
+    "group": "git",
+    "lines": 256,
+    "crate_references": [
+      "foreground",
+      "proc_table"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/landing.rs",
+    "group": "board",
+    "lines": 407,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/landing_read.rs",
+    "group": "board",
+    "lines": 356,
+    "crate_references": [
+      "git",
+      "landing",
+      "service",
+      "stack",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/landing_read_tests.rs",
+    "group": "board",
+    "lines": 276,
+    "crate_references": [
+      "landing",
+      "test_support",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/landing_templates.rs",
+    "group": "engine",
+    "lines": 259,
+    "crate_references": [
+      "path_routes",
+      "workflow_deciders",
+      "workflow_runtime",
+      "workflow_starter"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/landing_tests.rs",
+    "group": "board",
+    "lines": 329,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/layout.rs",
+    "group": "service",
+    "lines": 522,
+    "crate_references": [
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/lead_change.rs",
+    "group": "board",
+    "lines": 320,
+    "crate_references": [
+      "claude_logins",
+      "orchestrator",
+      "reps",
+      "service",
+      "watch",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/lead_change_tests.rs",
+    "group": "board",
+    "lines": 452,
+    "crate_references": [
+      "claude_logins",
+      "people",
+      "rpc",
+      "service",
+      "watch",
+      "wire",
+      "workspace_home",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/lfs_ops.rs",
+    "group": "service",
+    "lines": 71,
+    "crate_references": [
+      "git_lfs",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/lib.rs",
+    "group": "shell",
+    "lines": 202,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/log_join.rs",
+    "group": "agents",
+    "lines": 1391,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/log_watch/follow.rs",
+    "group": "agents",
+    "lines": 554,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/log_watch.rs",
+    "group": "agents",
+    "lines": 559,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/main.rs",
+    "group": "shell",
+    "lines": 858,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/member_removal.rs",
+    "group": "access",
+    "lines": 493,
+    "crate_references": [
+      "claude_logins",
+      "service",
+      "shared_logins"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/member_removal_tests.rs",
+    "group": "access",
+    "lines": 319,
+    "crate_references": [
+      "claude_logins",
+      "rpc",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/concern.rs",
+    "group": "board",
+    "lines": 302,
+    "crate_references": [
+      "people",
+      "task_link",
+      "wire",
+      "workflow_deciders"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/concern_tests.rs",
+    "group": "board",
+    "lines": 144,
+    "crate_references": [
+      "people"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/engine.rs",
+    "group": "board",
+    "lines": 25,
+    "crate_references": [
+      "engine_stuck"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/engine_tests.rs",
+    "group": "board",
+    "lines": 22,
+    "crate_references": [
+      "engine_stuck"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/kept.rs",
+    "group": "board",
+    "lines": 148,
+    "crate_references": [
+      "people",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/kept_rpc_tests.rs",
+    "group": "board",
+    "lines": 127,
+    "crate_references": [
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/kept_tests.rs",
+    "group": "board",
+    "lines": 175,
+    "crate_references": [
+      "needs_you"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/login.rs",
+    "group": "board",
+    "lines": 86,
+    "crate_references": [
+      "claude_login_renewal",
+      "people",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/login_tests.rs",
+    "group": "board",
+    "lines": 103,
+    "crate_references": [
+      "claude_login_renewal",
+      "needs_you"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/pr.rs",
+    "group": "board",
+    "lines": 152,
+    "crate_references": [
+      "git",
+      "pr_review",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you/pr_tests.rs",
+    "group": "board",
+    "lines": 319,
+    "crate_references": [
+      "pr_review"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/needs_you.rs",
+    "group": "board",
+    "lines": 1396,
+    "crate_references": [
+      "claude_login_renewal",
+      "engine_stuck",
+      "hook_asks",
+      "people",
+      "pr_review",
+      "push",
+      "review",
+      "service",
+      "task_link",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/notice_audience.rs",
+    "group": "board",
+    "lines": 164,
+    "crate_references": [
+      "people"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/notice_audience_pane_tests.rs",
+    "group": "board",
+    "lines": 47,
+    "crate_references": [
+      "reconcile",
+      "rpc",
+      "service",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/opening.rs",
+    "group": "service",
+    "lines": 45,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/orchestrator.rs",
+    "group": "board",
+    "lines": 302,
+    "crate_references": [
+      "skill_install",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pane_color_tests.rs",
+    "group": "shell",
+    "lines": 65,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/paste_mode.rs",
+    "group": "service",
+    "lines": 626,
+    "crate_references": [
+      "fanout",
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pastes/staged.rs",
+    "group": "service",
+    "lines": 220,
+    "crate_references": [
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pastes/staged_tests.rs",
+    "group": "service",
+    "lines": 205,
+    "crate_references": [
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pastes.rs",
+    "group": "service",
+    "lines": 806,
+    "crate_references": [
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/path_routes.rs",
+    "group": "engine",
+    "lines": 83,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/paths.rs",
+    "group": "service",
+    "lines": 305,
+    "crate_references": [
+      "daemon_log"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people.rs",
+    "group": "access",
+    "lines": 1204,
+    "crate_references": [
+      "caller_seat",
+      "proc_table",
+      "service",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_actor_tests.rs",
+    "group": "access",
+    "lines": 417,
+    "crate_references": [
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_enrolled_tests.rs",
+    "group": "access",
+    "lines": 349,
+    "crate_references": [
+      "enrollment",
+      "rpc",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_maintainer_tests.rs",
+    "group": "access",
+    "lines": 235,
+    "crate_references": [
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_plan_tests.rs",
+    "group": "access",
+    "lines": 505,
+    "crate_references": [
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_released_tests.rs",
+    "group": "access",
+    "lines": 237,
+    "crate_references": [
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_rep_plan_tests.rs",
+    "group": "access",
+    "lines": 88,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/people_roles_tests.rs",
+    "group": "access",
+    "lines": 292,
+    "crate_references": [
+      "reconcile",
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_rulings.rs",
+    "group": "board",
+    "lines": 303,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/people_rulings_tests.rs",
+    "group": "board",
+    "lines": 199,
+    "crate_references": [
+      "reconcile",
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_settings_tests.rs",
+    "group": "access",
+    "lines": 166,
+    "crate_references": [
+      "service",
+      "test_support",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_team_tests.rs",
+    "group": "access",
+    "lines": 530,
+    "crate_references": [
+      "reconcile",
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "wire",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/people_tests.rs",
+    "group": "access",
+    "lines": 789,
+    "crate_references": [
+      "needs_you",
+      "reconcile",
+      "review",
+      "rpc",
+      "service",
+      "task_ops",
+      "test_support",
+      "watch",
+      "wire",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/person_access.rs",
+    "group": "access",
+    "lines": 536,
+    "crate_references": [
+      "access_migration",
+      "caller_seat",
+      "enrollment",
+      "people",
+      "person_access_change",
+      "service",
+      "sessions",
+      "step_up",
+      "teammate_bind"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/person_access_change.rs",
+    "group": "access",
+    "lines": 125,
+    "crate_references": [
+      "people",
+      "person_access",
+      "service",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/person_access_change_tests.rs",
+    "group": "access",
+    "lines": 153,
+    "crate_references": [
+      "person_access",
+      "rpc_people",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/person_access_tests.rs",
+    "group": "access",
+    "lines": 717,
+    "crate_references": [
+      "access_migration",
+      "enrollment",
+      "reconcile",
+      "rpc",
+      "rpc_people",
+      "test_support",
+      "tunnel_gate"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/plan_glance.rs",
+    "group": "board",
+    "lines": 139,
+    "crate_references": [
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/plan_glance_tests.rs",
+    "group": "board",
+    "lines": 192,
+    "crate_references": [
+      "test_support",
+      "watch",
+      "wire",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/plan_stage.rs",
+    "group": "board",
+    "lines": 228,
+    "crate_references": [
+      "pr_stage",
+      "pr_timing",
+      "service",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/plan_stage_tests.rs",
+    "group": "board",
+    "lines": 284,
+    "crate_references": [
+      "pr_stage"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_actions.rs",
+    "group": "board",
+    "lines": 410,
+    "crate_references": [
+      "caller_seat",
+      "git",
+      "needs_you",
+      "plan_stage",
+      "pr_watch",
+      "service",
+      "stack",
+      "task_ops",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_actions_tests.rs",
+    "group": "board",
+    "lines": 78,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/pr_nudge.rs",
+    "group": "board",
+    "lines": 360,
+    "crate_references": [
+      "plan_stage",
+      "pr_timing",
+      "pr_timing_read",
+      "service",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_nudge_post_tests.rs",
+    "group": "board",
+    "lines": 72,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/pr_nudge_settings_tests.rs",
+    "group": "board",
+    "lines": 47,
+    "crate_references": [
+      "rpc",
+      "test_support",
+      "watch",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_nudge_tests.rs",
+    "group": "board",
+    "lines": 238,
+    "crate_references": [
+      "pr_timing",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_review.rs",
+    "group": "board",
+    "lines": 406,
+    "crate_references": [
+      "pr_watch",
+      "service",
+      "stack",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_review_tests.rs",
+    "group": "board",
+    "lines": 324,
+    "crate_references": [
+      "pr_watch",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_stage.rs",
+    "group": "board",
+    "lines": 203,
+    "crate_references": [
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_stage_tests.rs",
+    "group": "board",
+    "lines": 175,
+    "crate_references": [
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_suggest.rs",
+    "group": "board",
+    "lines": 184,
+    "crate_references": [
+      "git",
+      "plan_stage",
+      "pr_timing",
+      "service",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_suggest_tests.rs",
+    "group": "board",
+    "lines": 164,
+    "crate_references": [
+      "pr_timing",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_timing.rs",
+    "group": "board",
+    "lines": 220,
+    "crate_references": [
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_timing_read.rs",
+    "group": "board",
+    "lines": 175,
+    "crate_references": [
+      "pr_timing",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_timing_read_tests.rs",
+    "group": "board",
+    "lines": 49,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/pr_timing_tests.rs",
+    "group": "board",
+    "lines": 182,
+    "crate_references": [
+      "pr_timing_read",
+      "stack"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_watch.rs",
+    "group": "board",
+    "lines": 416,
+    "crate_references": [
+      "plan_stage",
+      "pr_nudge",
+      "pr_stage",
+      "pr_suggest",
+      "pr_timing_read",
+      "review",
+      "service",
+      "stack",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/pr_watch_tests.rs",
+    "group": "board",
+    "lines": 200,
+    "crate_references": [
+      "pr_stage",
+      "pr_timing_read",
+      "stack",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/proc_cwd.rs",
+    "group": "service",
+    "lines": 107,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/proc_table.rs",
+    "group": "service",
+    "lines": 466,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/push/contracts.rs",
+    "group": "service",
+    "lines": 319,
+    "crate_references": [
+      "plan_glance",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/push/inventory.rs",
+    "group": "service",
+    "lines": 186,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/push/inventory_tests.rs",
+    "group": "service",
+    "lines": 236,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/push/member.rs",
+    "group": "service",
+    "lines": 141,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/push/review_tests.rs",
+    "group": "service",
+    "lines": 43,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/push/tests.rs",
+    "group": "service",
+    "lines": 608,
+    "crate_references": [
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/push.rs",
+    "group": "service",
+    "lines": 947,
+    "crate_references": [
+      "hook_asks",
+      "hostname",
+      "paths",
+      "plan_glance",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/read_only_folders/guard.rs",
+    "group": "git",
+    "lines": 131,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/read_only_folders/tests.rs",
+    "group": "git",
+    "lines": 355,
+    "crate_references": [
+      "paths",
+      "read_only_folders",
+      "service",
+      "wire",
+      "worktree_files"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/read_only_folders.rs",
+    "group": "git",
+    "lines": 173,
+    "crate_references": [
+      "paths"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/reconcile.rs",
+    "group": "git",
+    "lines": 924,
+    "crate_references": [
+      "git",
+      "service",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/refusal.rs",
+    "group": "service",
+    "lines": 166,
+    "crate_references": [
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/registry_binding.rs",
+    "group": "access",
+    "lines": 79,
+    "crate_references": [
+      "claude_registry"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/registry_binding_tests.rs",
+    "group": "access",
+    "lines": 176,
+    "crate_references": [
+      "claude_registry",
+      "hook_ingress",
+      "service",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/release_sweep.rs",
+    "group": "board",
+    "lines": 152,
+    "crate_references": [
+      "allowlist",
+      "enrollment",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/release_sweep_tests.rs",
+    "group": "board",
+    "lines": 208,
+    "crate_references": [
+      "enrollment",
+      "rpc_people",
+      "sessions"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rendezvous.rs",
+    "group": "access",
+    "lines": 151,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/rep_connectors_tests.rs",
+    "group": "shell",
+    "lines": 220,
+    "crate_references": [
+      "reconcile",
+      "rep_gate",
+      "rpc",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rep_gate.rs",
+    "group": "board",
+    "lines": 450,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/rep_gate_tests.rs",
+    "group": "board",
+    "lines": 346,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/repo_grep.rs",
+    "group": "git",
+    "lines": 204,
+    "crate_references": [
+      "git_capped",
+      "people",
+      "rep_gate",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/repo_grep_tests.rs",
+    "group": "git",
+    "lines": 414,
+    "crate_references": [
+      "git",
+      "reconcile",
+      "rep_gate",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/report/compute.rs",
+    "group": "board",
+    "lines": 438,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/report/gather.rs",
+    "group": "board",
+    "lines": 75,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/report/mod.rs",
+    "group": "board",
+    "lines": 369,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/report/serve.rs",
+    "group": "board",
+    "lines": 34,
+    "crate_references": [
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/report/spend.rs",
+    "group": "board",
+    "lines": 198,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/report/spend_tests.rs",
+    "group": "board",
+    "lines": 221,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/report/tests.rs",
+    "group": "board",
+    "lines": 444,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/reps.rs",
+    "group": "board",
+    "lines": 585,
+    "crate_references": [
+      "git",
+      "hook_ingress",
+      "hook_install",
+      "orchestrator",
+      "service",
+      "shared_logins"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/reps_tests.rs",
+    "group": "board",
+    "lines": 495,
+    "crate_references": [
+      "claude_logins",
+      "enrollment",
+      "reconcile",
+      "rpc",
+      "session_discovery",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/resync.rs",
+    "group": "service",
+    "lines": 537,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/review.rs",
+    "group": "board",
+    "lines": 543,
+    "crate_references": [
+      "change_set"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/review_agent.rs",
+    "group": "board",
+    "lines": 74,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/review_ops.rs",
+    "group": "board",
+    "lines": 715,
+    "crate_references": [
+      "change_set",
+      "file_diff",
+      "git",
+      "people",
+      "review",
+      "service",
+      "stack",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc/engine_caller.rs",
+    "group": "rpc",
+    "lines": 29,
+    "crate_references": [
+      "people"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc/error_response.rs",
+    "group": "rpc",
+    "lines": 23,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/rpc/recovery.rs",
+    "group": "rpc",
+    "lines": 142,
+    "crate_references": [
+      "caller_seat",
+      "claude_registry",
+      "cutover_admin",
+      "cutover_delegate",
+      "refusal",
+      "sessions"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc/recovery_tests.rs",
+    "group": "rpc",
+    "lines": 343,
+    "crate_references": [
+      "caller_seat",
+      "claude_registry",
+      "cutover_admin",
+      "cutover_delegate",
+      "cutover_grant",
+      "rpc",
+      "service",
+      "step_up_rpc",
+      "task_ops",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc/runner_settings.rs",
+    "group": "rpc",
+    "lines": 82,
+    "crate_references": [
+      "push",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc/screen_revision.rs",
+    "group": "rpc",
+    "lines": 28,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/rpc/watch.rs",
+    "group": "rpc",
+    "lines": 27,
+    "crate_references": [
+      "caller_person",
+      "caller_seat",
+      "watch_view"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc.rs",
+    "group": "rpc",
+    "lines": 2398,
+    "crate_references": [
+      "caller_person",
+      "caller_seat",
+      "charter_read",
+      "charter_write",
+      "claude_login_wire",
+      "claude_logins",
+      "crash_reports",
+      "cutover_admin",
+      "cutover_delegate",
+      "enrollment",
+      "landing_read",
+      "lead_change",
+      "needs_you",
+      "notice_audience",
+      "pastes",
+      "people",
+      "person_access",
+      "pr_actions",
+      "push",
+      "repo_grep",
+      "report",
+      "resync",
+      "review",
+      "review_ops",
+      "rpc_agent_answer",
+      "rpc_agent_stop",
+      "rpc_board",
+      "rpc_pages",
+      "rpc_people",
+      "rpc_plan",
+      "rpc_rows",
+      "service",
+      "sessions",
+      "step_up",
+      "step_up_rpc",
+      "survey_ops",
+      "task_link",
+      "usage",
+      "watch",
+      "web_pane",
+      "wire",
+      "workflow_drafts",
+      "workflow_runtime",
+      "workflow_starter",
+      "workspace_ops",
+      "worktree_files"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_agent_answer.rs",
+    "group": "rpc",
+    "lines": 153,
+    "crate_references": [
+      "answered_for",
+      "caller_person",
+      "caller_seat",
+      "enrollment",
+      "hook_asks",
+      "needs_you",
+      "people",
+      "service",
+      "task_ops",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_agent_answer_seat_tests.rs",
+    "group": "rpc",
+    "lines": 326,
+    "crate_references": [
+      "caller_seat",
+      "hook_asks",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_agent_answer_tests.rs",
+    "group": "rpc",
+    "lines": 286,
+    "crate_references": [
+      "enrollment",
+      "hook_asks",
+      "needs_you",
+      "people",
+      "review",
+      "rpc",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_agent_stop.rs",
+    "group": "rpc",
+    "lines": 111,
+    "crate_references": [
+      "people",
+      "rpc_plan",
+      "service",
+      "task_ops",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_agent_stop_rep_tests.rs",
+    "group": "rpc",
+    "lines": 47,
+    "crate_references": [
+      "reconcile",
+      "rpc",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_answer_tests.rs",
+    "group": "rpc",
+    "lines": 92,
+    "crate_references": [
+      "hook_asks",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_board.rs",
+    "group": "rpc",
+    "lines": 184,
+    "crate_references": [
+      "board_reads_ops",
+      "caller_person",
+      "caller_seat",
+      "cutover_grant",
+      "service",
+      "step_up",
+      "task_ops",
+      "task_starts",
+      "ticket_moves",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_claude_sign_in.rs",
+    "group": "rpc",
+    "lines": 63,
+    "crate_references": [
+      "people",
+      "service",
+      "task_ops",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_landings.rs",
+    "group": "rpc",
+    "lines": 115,
+    "crate_references": [
+      "rpc_plan",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_pages.rs",
+    "group": "rpc",
+    "lines": 204,
+    "crate_references": [
+      "ci_watch",
+      "service",
+      "task_ops",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_people.rs",
+    "group": "rpc",
+    "lines": 419,
+    "crate_references": [
+      "access_migration",
+      "caller_person",
+      "caller_seat",
+      "enrollment",
+      "lead_change",
+      "people",
+      "person_access",
+      "person_access_change",
+      "release_sweep",
+      "rpc_claude_sign_in",
+      "service",
+      "step_up",
+      "step_up_rpc",
+      "task_ops",
+      "watch",
+      "wire",
+      "workflow_deciders"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_people_tests.rs",
+    "group": "rpc",
+    "lines": 251,
+    "crate_references": [
+      "enrollment",
+      "release_sweep",
+      "rpc",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_plan.rs",
+    "group": "rpc",
+    "lines": 668,
+    "crate_references": [
+      "by_hand",
+      "plan_stage",
+      "pr_suggest",
+      "pr_watch",
+      "review",
+      "rpc_landings",
+      "rpc_rulings",
+      "service",
+      "task_ops",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_revision_tests.rs",
+    "group": "rpc",
+    "lines": 30,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/rpc_rows.rs",
+    "group": "rpc",
+    "lines": 342,
+    "crate_references": [
+      "rpc_rows_join",
+      "service",
+      "session_projectors",
+      "subagent_rows",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_rows_join.rs",
+    "group": "rpc",
+    "lines": 44,
+    "crate_references": [
+      "claude_registry",
+      "foreground",
+      "running_agent",
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_rows_join_tests.rs",
+    "group": "rpc",
+    "lines": 28,
+    "crate_references": [
+      "claude_registry"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_rows_tests.rs",
+    "group": "rpc",
+    "lines": 181,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_rulings.rs",
+    "group": "rpc",
+    "lines": 109,
+    "crate_references": [
+      "service",
+      "task_ops",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/rpc_scope_tests.rs",
+    "group": "rpc",
+    "lines": 154,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/rpc_terminal_task_tests.rs",
+    "group": "rpc",
+    "lines": 99,
+    "crate_references": [
+      "reconcile",
+      "service",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/runner_key.rs",
+    "group": "access",
+    "lines": 255,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/runner_key_tests.rs",
+    "group": "access",
+    "lines": 227,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/running_agent.rs",
+    "group": "agents",
+    "lines": 51,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/runtime/fanout.rs",
+    "group": "service",
+    "lines": 172,
+    "crate_references": [
+      "fanout"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/runtime/typed.rs",
+    "group": "service",
+    "lines": 146,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/runtime/typed_tests.rs",
+    "group": "service",
+    "lines": 124,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/runtime.rs",
+    "group": "service",
+    "lines": 1364,
+    "crate_references": [
+      "fanout",
+      "paste_mode",
+      "pastes",
+      "paths",
+      "resync",
+      "service",
+      "stream_end"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/runtime_selection.rs",
+    "group": "service",
+    "lines": 42,
+    "crate_references": [
+      "claude_logins",
+      "cutover_gate",
+      "log_watch",
+      "people",
+      "read_only_folders"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/runtime_selection_tests.rs",
+    "group": "service",
+    "lines": 80,
+    "crate_references": [
+      "access_migration",
+      "allowlist",
+      "claude_logins",
+      "enrollment",
+      "log_watch",
+      "people"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/service/stand_in_agent_tests.rs",
+    "group": "service",
+    "lines": 33,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/service.rs",
+    "group": "service",
+    "lines": 11366,
+    "crate_references": [
+      "agent_panes",
+      "agent_supervisor",
+      "beneath",
+      "by_hand",
+      "change_set",
+      "chat_migration",
+      "claims",
+      "claude_logins",
+      "codex_trust",
+      "cutover_gate",
+      "git",
+      "git_exclude",
+      "git_guard",
+      "hook_ingress",
+      "hook_install",
+      "layout",
+      "lead_change",
+      "lfs_ops",
+      "opening",
+      "orchestrator",
+      "paste_mode",
+      "pastes",
+      "paths",
+      "people",
+      "pr_review",
+      "pr_timing",
+      "read_only_folders",
+      "reconcile",
+      "reps",
+      "review",
+      "runtime",
+      "service",
+      "session_discovery",
+      "sessions",
+      "shared_logins",
+      "skill_install",
+      "stack",
+      "test_support",
+      "tunnel_gate",
+      "watch",
+      "web_pane",
+      "wire",
+      "worker_seen",
+      "workflow_runtime",
+      "workflow_service",
+      "workspace_home",
+      "workspace_ops",
+      "writer_gate"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/service_launch_tests.rs",
+    "group": "service",
+    "lines": 108,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/service_lfs_tests.rs",
+    "group": "service",
+    "lines": 274,
+    "crate_references": [
+      "change_set",
+      "git_lfs",
+      "service",
+      "test_support",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/service_lost_tests.rs",
+    "group": "service",
+    "lines": 84,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/service_remove_worktree_tests.rs",
+    "group": "service",
+    "lines": 213,
+    "crate_references": [
+      "reconcile",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/service_submodule_tests.rs",
+    "group": "service",
+    "lines": 49,
+    "crate_references": [
+      "skill_install"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/service_terminal_names.rs",
+    "group": "service",
+    "lines": 105,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/session_discovery.rs",
+    "group": "agents",
+    "lines": 174,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/session_projectors.rs",
+    "group": "agents",
+    "lines": 988,
+    "crate_references": [
+      "claude_registry"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/session_projectors_follow_tests.rs",
+    "group": "agents",
+    "lines": 407,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/session_projectors_holds.rs",
+    "group": "agents",
+    "lines": 197,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/session_projectors_holds_tests.rs",
+    "group": "agents",
+    "lines": 201,
+    "crate_references": [
+      "hook_asks",
+      "session_projectors"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/session_projectors_tests.rs",
+    "group": "agents",
+    "lines": 256,
+    "crate_references": [
+      "hook_ingress"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/session_watch.rs",
+    "group": "agents",
+    "lines": 252,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/sessions.rs",
+    "group": "access",
+    "lines": 541,
+    "crate_references": [
+      "approvals",
+      "service",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/shared_logins.rs",
+    "group": "service",
+    "lines": 295,
+    "crate_references": [
+      "claude_logins",
+      "codex_trust",
+      "orchestrator",
+      "people",
+      "reps",
+      "review",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/shared_logins_tests.rs",
+    "group": "service",
+    "lines": 440,
+    "crate_references": [
+      "claude_logins",
+      "codex_trust",
+      "rpc",
+      "service",
+      "shared_logins",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/skill_install.rs",
+    "group": "agents",
+    "lines": 1274,
+    "crate_references": [
+      "beneath",
+      "rep_gate",
+      "reps",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/skill_install_practice_tests.rs",
+    "group": "agents",
+    "lines": 492,
+    "crate_references": [
+      "charter_draft"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/sshd_version.rs",
+    "group": "access",
+    "lines": 166,
+    "crate_references": [
+      "enrollment",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/stack.rs",
+    "group": "git",
+    "lines": 1035,
+    "crate_references": [
+      "gh_inert",
+      "git",
+      "git_guard",
+      "pr_timing",
+      "review"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/step_up.rs",
+    "group": "access",
+    "lines": 482,
+    "crate_references": [
+      "access_migration",
+      "approvals",
+      "people",
+      "service",
+      "sessions",
+      "step_up_rpc"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/step_up_rpc.rs",
+    "group": "access",
+    "lines": 202,
+    "crate_references": [
+      "approvals",
+      "caller_seat",
+      "cutover_grant",
+      "first_key",
+      "people",
+      "person_access",
+      "service",
+      "sessions",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/step_up_tests.rs",
+    "group": "access",
+    "lines": 1015,
+    "crate_references": [
+      "access_migration",
+      "enrollment",
+      "first_key",
+      "person_access",
+      "reconcile",
+      "rpc",
+      "rpc_people",
+      "sessions",
+      "step_up_rpc",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/stream_end.rs",
+    "group": "service",
+    "lines": 183,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/stream_end_tests.rs",
+    "group": "service",
+    "lines": 484,
+    "crate_references": [
+      "resync",
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/subagent_rows.rs",
+    "group": "agents",
+    "lines": 139,
+    "crate_references": [
+      "session_projectors"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/subagent_rows_tests.rs",
+    "group": "agents",
+    "lines": 87,
+    "crate_references": [
+      "session_projectors"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/survey.rs",
+    "group": "board",
+    "lines": 688,
+    "crate_references": [
+      "landing"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/survey_ops.rs",
+    "group": "board",
+    "lines": 137,
+    "crate_references": [
+      "charter_draft",
+      "charter_write",
+      "git",
+      "landing_read",
+      "service",
+      "survey",
+      "survey_read",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/survey_read.rs",
+    "group": "board",
+    "lines": 300,
+    "crate_references": [
+      "git",
+      "git_capped",
+      "landing",
+      "landing_read",
+      "service",
+      "stack",
+      "survey"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/survey_tests.rs",
+    "group": "board",
+    "lines": 661,
+    "crate_references": [
+      "charter_draft",
+      "git_capped",
+      "landing",
+      "stack",
+      "survey_read",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/task_link.rs",
+    "group": "board",
+    "lines": 181,
+    "crate_references": [
+      "service",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/task_ops.rs",
+    "group": "board",
+    "lines": 1119,
+    "crate_references": [
+      "answered_for",
+      "board_reads_ops",
+      "caller_seat",
+      "cutover_grant",
+      "people",
+      "review",
+      "service",
+      "task_starts",
+      "test_support",
+      "watch",
+      "wire",
+      "workflow_drafts"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/task_starts.rs",
+    "group": "board",
+    "lines": 251,
+    "crate_references": [
+      "service",
+      "task_ops",
+      "watch",
+      "wire",
+      "worker_seen"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/task_starts_tests.rs",
+    "group": "board",
+    "lines": 224,
+    "crate_references": [
+      "needs_you",
+      "report",
+      "task_ops",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/teammate_bind.rs",
+    "group": "access",
+    "lines": 139,
+    "crate_references": [
+      "access_migration",
+      "people",
+      "person_access"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/teammate_bind_tests.rs",
+    "group": "access",
+    "lines": 226,
+    "crate_references": [
+      "person_access",
+      "rpc",
+      "rpc_people",
+      "step_up"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/test_support.rs",
+    "group": "service",
+    "lines": 370,
+    "crate_references": [
+      "caller_seat",
+      "claude_logins",
+      "git",
+      "service",
+      "workflow_runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/ticket_moves.rs",
+    "group": "engine",
+    "lines": 309,
+    "crate_references": [
+      "caller_seat",
+      "people",
+      "service",
+      "task_ops",
+      "task_starts",
+      "test_support",
+      "workflow_runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/transcript_tail.rs",
+    "group": "agents",
+    "lines": 1063,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/tunnel_gate.rs",
+    "group": "access",
+    "lines": 162,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/usage.rs",
+    "group": "agents",
+    "lines": 227,
+    "crate_references": [
+      "service",
+      "task_link",
+      "task_ops",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/usage_tests.rs",
+    "group": "agents",
+    "lines": 122,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/agent_start.rs",
+    "group": "watch",
+    "lines": 276,
+    "crate_references": [
+      "needs_you",
+      "runtime",
+      "task_link"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/agent_start_tests.rs",
+    "group": "delivery",
+    "lines": 377,
+    "crate_references": [
+      "needs_you",
+      "rpc",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/answer_seat_tests.rs",
+    "group": "delivery",
+    "lines": 260,
+    "crate_references": [
+      "caller_seat",
+      "cutover_grant",
+      "people",
+      "step_up_rpc",
+      "task_ops",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/bring.rs",
+    "group": "delivery",
+    "lines": 342,
+    "crate_references": [
+      "runtime",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/bring_tests.rs",
+    "group": "delivery",
+    "lines": 305,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/check_in.rs",
+    "group": "delivery",
+    "lines": 248,
+    "crate_references": [
+      "claude_registry",
+      "log_join",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/codex_turn.rs",
+    "group": "delivery",
+    "lines": 341,
+    "crate_references": [
+      "claude_registry",
+      "log_join"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/codex_turn_tests.rs",
+    "group": "delivery",
+    "lines": 299,
+    "crate_references": [
+      "log_join",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose/codex.rs",
+    "group": "delivery",
+    "lines": 371,
+    "crate_references": [
+      "claude_registry",
+      "log_join",
+      "pastes",
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose/codex_tests.rs",
+    "group": "delivery",
+    "lines": 16,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose/held.rs",
+    "group": "delivery",
+    "lines": 375,
+    "crate_references": [
+      "session_projectors",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose/pending.rs",
+    "group": "delivery",
+    "lines": 784,
+    "crate_references": [
+      "runtime",
+      "session_projectors",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose.rs",
+    "group": "delivery",
+    "lines": 864,
+    "crate_references": [
+      "pastes",
+      "paths",
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_bad_read_tests.rs",
+    "group": "delivery",
+    "lines": 139,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_codex_tests.rs",
+    "group": "delivery",
+    "lines": 619,
+    "crate_references": [
+      "review",
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_empty_box_tests.rs",
+    "group": "delivery",
+    "lines": 170,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_held_tests.rs",
+    "group": "delivery",
+    "lines": 538,
+    "crate_references": [
+      "runtime",
+      "session_projectors",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_parked_tests.rs",
+    "group": "delivery",
+    "lines": 244,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_pending_tests.rs",
+    "group": "delivery",
+    "lines": 847,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_scrolled_tests.rs",
+    "group": "delivery",
+    "lines": 204,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_tests.rs",
+    "group": "delivery",
+    "lines": 442,
+    "crate_references": [
+      "paths",
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/compose_upload_tests.rs",
+    "group": "delivery",
+    "lines": 168,
+    "crate_references": [
+      "pastes",
+      "paths",
+      "rpc"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/cursor.rs",
+    "group": "delivery",
+    "lines": 64,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/cursor_tests.rs",
+    "group": "delivery",
+    "lines": 119,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/deliver.rs",
+    "group": "delivery",
+    "lines": 348,
+    "crate_references": [
+      "claude_mailbox",
+      "log_join"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/deliver_tests.rs",
+    "group": "delivery",
+    "lines": 194,
+    "crate_references": [
+      "log_join"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/draft_hold.rs",
+    "group": "delivery",
+    "lines": 281,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/draft_hold_tests.rs",
+    "group": "delivery",
+    "lines": 269,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/finish.rs",
+    "group": "delivery",
+    "lines": 310,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/finish_tests.rs",
+    "group": "delivery",
+    "lines": 413,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/follow_race_tests.rs",
+    "group": "delivery",
+    "lines": 37,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/followup.rs",
+    "group": "delivery",
+    "lines": 59,
+    "crate_references": [
+      "hook_ingress"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/followup_tests.rs",
+    "group": "delivery",
+    "lines": 252,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/hidden_turn_tests.rs",
+    "group": "delivery",
+    "lines": 100,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/input_mark_tests.rs",
+    "group": "delivery",
+    "lines": 44,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/interrupt.rs",
+    "group": "delivery",
+    "lines": 365,
+    "crate_references": [
+      "hook_asks",
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/interrupt_tests.rs",
+    "group": "delivery",
+    "lines": 391,
+    "crate_references": [
+      "pastes",
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/lane_tests.rs",
+    "group": "delivery",
+    "lines": 72,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/mailbox_tests.rs",
+    "group": "delivery",
+    "lines": 210,
+    "crate_references": [
+      "claude_mailbox",
+      "people"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/messages.rs",
+    "group": "delivery",
+    "lines": 545,
+    "crate_references": [
+      "caller_seat",
+      "people",
+      "task_link",
+      "task_ops",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/messages_tests.rs",
+    "group": "delivery",
+    "lines": 382,
+    "crate_references": [
+      "people",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/mid_turn.rs",
+    "group": "delivery",
+    "lines": 521,
+    "crate_references": [
+      "hook_asks",
+      "runtime",
+      "session_discovery",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/mid_turn_tests.rs",
+    "group": "delivery",
+    "lines": 538,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/notice_wait_tests.rs",
+    "group": "delivery",
+    "lines": 222,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/queued.rs",
+    "group": "delivery",
+    "lines": 194,
+    "crate_references": [
+      "runtime",
+      "session_projectors",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/queued_tests.rs",
+    "group": "delivery",
+    "lines": 113,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/registry_turn.rs",
+    "group": "delivery",
+    "lines": 217,
+    "crate_references": [
+      "claude_registry"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/rep_messages_tests.rs",
+    "group": "delivery",
+    "lines": 242,
+    "crate_references": [
+      "people",
+      "session_discovery",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/route.rs",
+    "group": "delivery",
+    "lines": 418,
+    "crate_references": [
+      "caller_seat",
+      "claude_mailbox",
+      "task_link",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/route_pin_tests.rs",
+    "group": "delivery",
+    "lines": 119,
+    "crate_references": [
+      "claude_mailbox"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/route_tests.rs",
+    "group": "delivery",
+    "lines": 659,
+    "crate_references": [
+      "caller_seat",
+      "claude_mailbox",
+      "needs_you",
+      "people",
+      "proc_table",
+      "rpc",
+      "task_link",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/seat_tests.rs",
+    "group": "delivery",
+    "lines": 207,
+    "crate_references": [
+      "caller_seat",
+      "proc_table",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/stand_in_show.rs",
+    "group": "delivery",
+    "lines": 101,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/tell.rs",
+    "group": "delivery",
+    "lines": 58,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/tell_tests.rs",
+    "group": "delivery",
+    "lines": 199,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/tests.rs",
+    "group": "delivery",
+    "lines": 1482,
+    "crate_references": [
+      "needs_you",
+      "reconcile",
+      "runtime",
+      "service",
+      "task_ops",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/tmux_bracketing.rs",
+    "group": "delivery",
+    "lines": 80,
+    "crate_references": [
+      "paste_mode"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/typing_tests.rs",
+    "group": "delivery",
+    "lines": 119,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/viewer_resize_tests.rs",
+    "group": "delivery",
+    "lines": 34,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/web_tests.rs",
+    "group": "delivery",
+    "lines": 35,
+    "crate_references": [
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/worker_tests.rs",
+    "group": "delivery",
+    "lines": 362,
+    "crate_references": [
+      "claude_mailbox",
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs",
+    "group": "delivery",
+    "lines": 391,
+    "crate_references": [
+      "effect_runner",
+      "workflow_notices"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/answer_wake.rs",
+    "group": "delivery",
+    "lines": 1241,
+    "crate_references": [
+      "runtime",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/board_reads.rs",
+    "group": "watch",
+    "lines": 29,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/claude_login_event_tests.rs",
+    "group": "watch",
+    "lines": 49,
+    "crate_references": [
+      "claude_logins",
+      "needs_you"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/code_share.rs",
+    "group": "watch",
+    "lines": 28,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/holds.rs",
+    "group": "watch",
+    "lines": 40,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/idle_walk_tests.rs",
+    "group": "watch",
+    "lines": 23,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/marks.rs",
+    "group": "watch",
+    "lines": 282,
+    "crate_references": [
+      "needs_you",
+      "people",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/marks_tests.rs",
+    "group": "watch",
+    "lines": 414,
+    "crate_references": [
+      "needs_you",
+      "review",
+      "review_ops",
+      "rpc",
+      "service",
+      "test_support",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/member_push.rs",
+    "group": "watch",
+    "lines": 196,
+    "crate_references": [
+      "needs_you",
+      "push",
+      "review",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/member_push_tests.rs",
+    "group": "watch",
+    "lines": 537,
+    "crate_references": [
+      "needs_you",
+      "push",
+      "service",
+      "task_ops",
+      "test_support",
+      "wire",
+      "workflow_deciders"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/needs_you_push_tests.rs",
+    "group": "watch",
+    "lines": 508,
+    "crate_references": [
+      "needs_you",
+      "push",
+      "task_ops",
+      "test_support",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/pages.rs",
+    "group": "watch",
+    "lines": 30,
+    "crate_references": [
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/plan_layer.rs",
+    "group": "watch",
+    "lines": 59,
+    "crate_references": [
+      "needs_you",
+      "plan_glance",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/pr_review_notice.rs",
+    "group": "watch",
+    "lines": 78,
+    "crate_references": [
+      "push",
+      "review_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/pr_review_notice_tests.rs",
+    "group": "watch",
+    "lines": 213,
+    "crate_references": [
+      "pr_review",
+      "push",
+      "service",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/reap.rs",
+    "group": "watch",
+    "lines": 258,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/registry_join.rs",
+    "group": "watch",
+    "lines": 765,
+    "crate_references": [
+      "claude_registry",
+      "registry_binding",
+      "session_projectors",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/review_notice_tests.rs",
+    "group": "watch",
+    "lines": 183,
+    "crate_references": [
+      "push",
+      "review",
+      "review_ops",
+      "rpc",
+      "test_support",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/running_agent_tests.rs",
+    "group": "watch",
+    "lines": 40,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/screen_cache.rs",
+    "group": "watch",
+    "lines": 133,
+    "crate_references": [
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/subagents_wire.rs",
+    "group": "watch",
+    "lines": 37,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/subagents_wire_tests.rs",
+    "group": "watch",
+    "lines": 87,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/watch/suggestion_tests.rs",
+    "group": "watch",
+    "lines": 90,
+    "crate_references": [
+      "session_projectors"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/task_notice/tests.rs",
+    "group": "delivery",
+    "lines": 652,
+    "crate_references": [
+      "rpc",
+      "service",
+      "task_ops",
+      "test_support",
+      "watch",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/task_notice.rs",
+    "group": "delivery",
+    "lines": 571,
+    "crate_references": [
+      "needs_you",
+      "push",
+      "review",
+      "review_ops",
+      "service",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/timing.rs",
+    "group": "watch",
+    "lines": 239,
+    "crate_references": [
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/tmux_spawn_tests.rs",
+    "group": "watch",
+    "lines": 258,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/workers.rs",
+    "group": "watch",
+    "lines": 226,
+    "crate_references": [
+      "usage"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch/workers_tests.rs",
+    "group": "watch",
+    "lines": 327,
+    "crate_references": [
+      "people",
+      "service",
+      "task_ops",
+      "task_starts",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch.rs",
+    "group": "watch",
+    "lines": 8699,
+    "crate_references": [
+      "change_set",
+      "claims",
+      "claude_login_renewal",
+      "claude_login_wire",
+      "claude_registry",
+      "engine_stuck",
+      "foreground",
+      "fs_watch",
+      "hostname",
+      "hostwalk",
+      "layout",
+      "log_join",
+      "log_watch",
+      "needs_you",
+      "plan_glance",
+      "push",
+      "reconcile",
+      "review",
+      "review_ops",
+      "running_agent",
+      "service",
+      "task_link",
+      "test_support",
+      "usage",
+      "wire"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch_view.rs",
+    "group": "shell",
+    "lines": 106,
+    "crate_references": [
+      "people",
+      "resync",
+      "runtime",
+      "stream_end"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/watch_view_tests.rs",
+    "group": "shell",
+    "lines": 199,
+    "crate_references": [
+      "people",
+      "resync",
+      "runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/web_pane.rs",
+    "group": "service",
+    "lines": 165,
+    "crate_references": [
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/web_pane_tests.rs",
+    "group": "service",
+    "lines": 115,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/wire.rs",
+    "group": "rpc",
+    "lines": 1105,
+    "crate_references": [
+      "agent_supervisor",
+      "layout",
+      "read_only_folders",
+      "review",
+      "service",
+      "skill_install",
+      "task_ops",
+      "workspace_home"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/worker_seen.rs",
+    "group": "board",
+    "lines": 73,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_deciders.rs",
+    "group": "engine",
+    "lines": 108,
+    "crate_references": [
+      "service",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_deciders_tests.rs",
+    "group": "engine",
+    "lines": 68,
+    "crate_references": [
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_drafts.rs",
+    "group": "engine",
+    "lines": 402,
+    "crate_references": [
+      "landing_templates",
+      "people",
+      "rpc",
+      "service",
+      "task_ops",
+      "ticket_moves",
+      "watch",
+      "workflow_deciders",
+      "workflow_runtime",
+      "workflow_summary"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_notices.rs",
+    "group": "engine",
+    "lines": 214,
+    "crate_references": [
+      "claude_registry",
+      "codex_turn",
+      "effect_runner",
+      "log_join",
+      "watch",
+      "workflow_runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/adapters.rs",
+    "group": "engine",
+    "lines": 330,
+    "crate_references": [
+      "ci_watch",
+      "effect_runner",
+      "git",
+      "hook_install"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/admission.rs",
+    "group": "engine",
+    "lines": 247,
+    "crate_references": [
+      "caller_person",
+      "caller_seat",
+      "claude_logins",
+      "claude_registry",
+      "people",
+      "person_access",
+      "service",
+      "sessions",
+      "workflow_deciders"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/admission_tests.rs",
+    "group": "engine",
+    "lines": 347,
+    "crate_references": [
+      "caller_person",
+      "caller_seat",
+      "cutover_delegate",
+      "people",
+      "rpc",
+      "service",
+      "test_support",
+      "watch"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding.rs",
+    "group": "engine",
+    "lines": 410,
+    "crate_references": [
+      "hook_install",
+      "orchestrator",
+      "path_routes",
+      "review_agent"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_ci_rerun.rs",
+    "group": "engine",
+    "lines": 57,
+    "crate_references": [
+      "ci_watch",
+      "effect_runner"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_ci_rerun_tests.rs",
+    "group": "engine",
+    "lines": 131,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_execute.rs",
+    "group": "engine",
+    "lines": 743,
+    "crate_references": [
+      "ci_watch",
+      "effect_runner",
+      "git",
+      "hook_install",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_landing.rs",
+    "group": "engine",
+    "lines": 598,
+    "crate_references": [
+      "effect_runner",
+      "git",
+      "git_guard",
+      "git_launch",
+      "landing_templates"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_native.rs",
+    "group": "engine",
+    "lines": 901,
+    "crate_references": [
+      "engine_stuck",
+      "foreground",
+      "hook_install",
+      "proc_table",
+      "service",
+      "skill_install",
+      "watch_view"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_pr.rs",
+    "group": "engine",
+    "lines": 358,
+    "crate_references": [
+      "effect_runner"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_pr_tests.rs",
+    "group": "engine",
+    "lines": 649,
+    "crate_references": [
+      "landing_templates"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_remote_tests.rs",
+    "group": "engine",
+    "lines": 673,
+    "crate_references": [
+      "git",
+      "workflow_starter"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_security_tests.rs",
+    "group": "engine",
+    "lines": 147,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_settle.rs",
+    "group": "engine",
+    "lines": 56,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_tests.rs",
+    "group": "engine",
+    "lines": 876,
+    "crate_references": [
+      "git",
+      "hook_install",
+      "workflow_runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_verbs.rs",
+    "group": "engine",
+    "lines": 554,
+    "crate_references": [
+      "ci_watch",
+      "effect_runner",
+      "git",
+      "path_routes"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/coding_verbs_tests.rs",
+    "group": "engine",
+    "lines": 859,
+    "crate_references": [
+      "effect_runner"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/concurrency_tests.rs",
+    "group": "engine",
+    "lines": 201,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/decider_tests.rs",
+    "group": "engine",
+    "lines": 379,
+    "crate_references": [
+      "rpc",
+      "service",
+      "test_support",
+      "watch",
+      "workflow_deciders",
+      "workflow_drafts"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/fold_trees.rs",
+    "group": "engine",
+    "lines": 123,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/fold_trees_tests.rs",
+    "group": "engine",
+    "lines": 102,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/gate_tests.rs",
+    "group": "engine",
+    "lines": 284,
+    "crate_references": [
+      "landing_templates",
+      "review_agent"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/landing_templates_tests.rs",
+    "group": "engine",
+    "lines": 410,
+    "crate_references": [
+      "landing_templates",
+      "path_routes"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/main_bundle_tests.rs",
+    "group": "engine",
+    "lines": 79,
+    "crate_references": [
+      "review_agent",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/member_tests.rs",
+    "group": "engine",
+    "lines": 214,
+    "crate_references": [
+      "service",
+      "test_support"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/named_tree.rs",
+    "group": "engine",
+    "lines": 530,
+    "crate_references": [
+      "change_set",
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/observe_tests.rs",
+    "group": "engine",
+    "lines": 43,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/places.rs",
+    "group": "engine",
+    "lines": 79,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/review_agent.rs",
+    "group": "engine",
+    "lines": 53,
+    "crate_references": [
+      "review_agent"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/review_tests.rs",
+    "group": "engine",
+    "lines": 333,
+    "crate_references": [
+      "caller_seat",
+      "test_support",
+      "watch_view"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/send_back_tests.rs",
+    "group": "engine",
+    "lines": 136,
+    "crate_references": [
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/service_owner.rs",
+    "group": "engine",
+    "lines": 179,
+    "crate_references": [
+      "git",
+      "workflow_deciders",
+      "workflow_drafts"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/tests.rs",
+    "group": "engine",
+    "lines": 661,
+    "crate_references": [
+      "git"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime/wire_commands.rs",
+    "group": "engine",
+    "lines": 525,
+    "crate_references": [
+      "workflow_deciders",
+      "workflow_service",
+      "workflow_summary"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_runtime.rs",
+    "group": "engine",
+    "lines": 904,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/workflow_service.rs",
+    "group": "engine",
+    "lines": 115,
+    "crate_references": [
+      "service",
+      "test_support",
+      "workflow_notices",
+      "workflow_runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_starter.rs",
+    "group": "engine",
+    "lines": 268,
+    "crate_references": [
+      "hook_install",
+      "landing_templates",
+      "service",
+      "skill_install",
+      "workflow_runtime"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workflow_summary.rs",
+    "group": "engine",
+    "lines": 662,
+    "crate_references": [
+      "landing_templates",
+      "workflow_drafts"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workspace_home.rs",
+    "group": "service",
+    "lines": 322,
+    "crate_references": [
+      "git",
+      "service",
+      "test_support",
+      "watch",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/workspace_ops.rs",
+    "group": "service",
+    "lines": 677,
+    "crate_references": [
+      "caller_person",
+      "caller_seat",
+      "landing_read",
+      "lead_change",
+      "people",
+      "pr_review",
+      "review",
+      "service",
+      "task_ops",
+      "task_starts",
+      "test_support",
+      "watch",
+      "wire",
+      "workspace_home",
+      "workspace_ops"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/worktree_files/tests.rs",
+    "group": "git",
+    "lines": 165,
+    "crate_references": [
+      "rpc"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/worktree_files.rs",
+    "group": "git",
+    "lines": 399,
+    "crate_references": [
+      "beneath",
+      "read_only_folders",
+      "service"
+    ]
+  },
+  {
+    "path": "crates/daemon/src/writer_gate.rs",
+    "group": "access",
+    "lines": 93,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/src/writer_join.rs",
+    "group": "access",
+    "lines": 66,
+    "crate_references": [
+      "service",
+      "writer_gate"
+    ]
+  },
+  {
+    "path": "crates/daemon/tests/a_bad_review_search_is_not_logged.rs",
+    "group": "integration",
+    "lines": 57,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_change_set_tells_the_truth_about_a_worktree.rs",
+    "group": "integration",
+    "lines": 808,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_configured_derp_map_reaches_the_tunnel.rs",
+    "group": "integration",
+    "lines": 280,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_cutover_survives_every_crash.rs",
+    "group": "integration",
+    "lines": 564,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_device_registers_its_own_node_key.rs",
+    "group": "integration",
+    "lines": 498,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_diff_is_parsed_or_refused_never_mangled.rs",
+    "group": "integration",
+    "lines": 473,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_forced_command_still_streams.rs",
+    "group": "integration",
+    "lines": 828,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_forgotten_projector_lets_its_watch_go.rs",
+    "group": "integration",
+    "lines": 126,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_hook_reaches_the_daemon/held_dialogs.rs",
+    "group": "integration",
+    "lines": 190,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_hook_reaches_the_daemon/launches.rs",
+    "group": "integration",
+    "lines": 164,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_hook_reaches_the_daemon.rs",
+    "group": "integration",
+    "lines": 1427,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_page_reads_live_ci.rs",
+    "group": "integration",
+    "lines": 45,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_pairing_gives_the_runner_a_tunnel.rs",
+    "group": "integration",
+    "lines": 317,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_pairing_writes_the_node_key.rs",
+    "group": "integration",
+    "lines": 278,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_phone_moves_its_line_to_a_new_key.rs",
+    "group": "integration",
+    "lines": 239,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_pull_request_nobody_reviewed_is_nudged_once.rs",
+    "group": "integration",
+    "lines": 368,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_read_fills_pr_state_without_waiting_for_github.rs",
+    "group": "integration",
+    "lines": 266,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_real_sshd_admits_a_passkey.rs",
+    "group": "integration",
+    "lines": 315,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_real_sshd_forces_the_scope.rs",
+    "group": "integration",
+    "lines": 329,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_real_sshd_master_outlives_a_revoke.rs",
+    "group": "integration",
+    "lines": 183,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_real_tunnel_carries_the_scope.rs",
+    "group": "integration",
+    "lines": 1422,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_relayed_session_keeps_its_scope.rs",
+    "group": "integration",
+    "lines": 83,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_resized_pane_says_so.rs",
+    "group": "integration",
+    "lines": 417,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_reviewers_usual_wait_reaches_the_plan.rs",
+    "group": "integration",
+    "lines": 139,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_running_agent_reaches_every_client.rs",
+    "group": "integration",
+    "lines": 33,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_stdio_relay_ends_when_the_daemon_hangs_up.rs",
+    "group": "integration",
+    "lines": 54,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_sweep_rebuilds_the_tunnel_once.rs",
+    "group": "integration",
+    "lines": 213,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_task_notice_reaches_its_member.rs",
+    "group": "integration",
+    "lines": 103,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_terminal_name_reaches_every_client.rs",
+    "group": "integration",
+    "lines": 87,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_ticket_shows_its_pr_stage.rs",
+    "group": "integration",
+    "lines": 294,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/a_worktree_names_its_open_tasks.rs",
+    "group": "integration",
+    "lines": 144,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/agent_panes_over_the_socket.rs",
+    "group": "integration",
+    "lines": 135,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/agent_rows_over_every_transport.rs",
+    "group": "integration",
+    "lines": 515,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/agent_stop_over_the_socket.rs",
+    "group": "integration",
+    "lines": 222,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/an_empty_allowlist_starts_no_tunnel.rs",
+    "group": "integration",
+    "lines": 255,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/an_enrollment_is_logged.rs",
+    "group": "integration",
+    "lines": 128,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/an_orchestrator_starts_from_its_home.rs",
+    "group": "integration",
+    "lines": 909,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/board_reads_sync_over_the_socket.rs",
+    "group": "integration",
+    "lines": 175,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/common/mod.rs",
+    "group": "integration",
+    "lines": 244,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/engine_flow_per_skill.rs",
+    "group": "integration",
+    "lines": 350,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/every_method_is_dispatched.rs",
+    "group": "integration",
+    "lines": 105,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/git_runs_nothing_a_repository_plants.rs",
+    "group": "integration",
+    "lines": 489,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/landing_over_the_socket.rs",
+    "group": "integration",
+    "lines": 210,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/landings_over_the_socket.rs",
+    "group": "integration",
+    "lines": 51,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/lfs_content_under_the_git_sandbox.rs",
+    "group": "integration",
+    "lines": 377,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/marks_are_each_persons.rs",
+    "group": "integration",
+    "lines": 91,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/needs_you_changed_is_announced.rs",
+    "group": "integration",
+    "lines": 198,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/needs_you_goes_to_its_member.rs",
+    "group": "integration",
+    "lines": 214,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/needs_you_reads_every_kind_over_the_socket.rs",
+    "group": "integration",
+    "lines": 225,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/one_daemon_per_home.rs",
+    "group": "integration",
+    "lines": 85,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/only_the_daemon_adopts_charters.rs",
+    "group": "integration",
+    "lines": 118,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/pages_over_the_socket.rs",
+    "group": "integration",
+    "lines": 409,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/passkey_keys_follow_the_sshd.rs",
+    "group": "integration",
+    "lines": 79,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/phones_act_on_a_pull_request.rs",
+    "group": "integration",
+    "lines": 450,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/plan_agents_over_the_socket.rs",
+    "group": "integration",
+    "lines": 121,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/plan_cost_over_the_socket.rs",
+    "group": "integration",
+    "lines": 156,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/plan_last_moved_over_the_socket.rs",
+    "group": "integration",
+    "lines": 88,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/plan_layer_over_the_socket.rs",
+    "group": "integration",
+    "lines": 418,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/plan_suggestions_follow_the_scope.rs",
+    "group": "integration",
+    "lines": 86,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/plan_waits_follow_the_scope.rs",
+    "group": "integration",
+    "lines": 76,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/pr_actions_need_control.rs",
+    "group": "integration",
+    "lines": 54,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/projector_setting.rs",
+    "group": "integration",
+    "lines": 50,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/real_sshd/mod.rs",
+    "group": "integration",
+    "lines": 392,
+    "crate_references": [
+      "common"
+    ]
+  },
+  {
+    "path": "crates/daemon/tests/report_reads_the_board_over_the_socket.rs",
+    "group": "integration",
+    "lines": 141,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/review_requests_reach_needs_you.rs",
+    "group": "integration",
+    "lines": 107,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/revocation_closes_what_it_revoked.rs",
+    "group": "integration",
+    "lines": 847,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/rpc_over_socket.rs",
+    "group": "integration",
+    "lines": 4485,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/ruling_actions_over_the_socket.rs",
+    "group": "integration",
+    "lines": 240,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/rulings_over_the_socket.rs",
+    "group": "integration",
+    "lines": 148,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/stdio_transport.rs",
+    "group": "integration",
+    "lines": 317,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/support/derper.rs",
+    "group": "integration",
+    "lines": 375,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/support/gh_ci.rs",
+    "group": "integration",
+    "lines": 105,
+    "crate_references": [
+      "common"
+    ]
+  },
+  {
+    "path": "crates/daemon/tests/support/gh_pr.rs",
+    "group": "integration",
+    "lines": 297,
+    "crate_references": [
+      "common"
+    ]
+  },
+  {
+    "path": "crates/daemon/tests/support/in_process.rs",
+    "group": "integration",
+    "lines": 134,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/survey_over_the_socket.rs",
+    "group": "integration",
+    "lines": 200,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/the_daemon_keeps_its_log.rs",
+    "group": "integration",
+    "lines": 53,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/the_daemon_log_holds_stderr.rs",
+    "group": "integration",
+    "lines": 102,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/the_owners_orchestrator_runs_a_cutover.rs",
+    "group": "integration",
+    "lines": 186,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/the_pr_watch_paces_itself.rs",
+    "group": "integration",
+    "lines": 65,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/tracking_follows_publication.rs",
+    "group": "integration",
+    "lines": 90,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/workflow_commands_over_socket.rs",
+    "group": "integration",
+    "lines": 96,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/workflow_draft_approval.rs",
+    "group": "integration",
+    "lines": 452,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/workflow_service/adopt.rs",
+    "group": "integration",
+    "lines": 84,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/workflow_service/safety.rs",
+    "group": "integration",
+    "lines": 116,
+    "crate_references": []
+  },
+  {
+    "path": "crates/daemon/tests/workflow_service_over_socket.rs",
+    "group": "integration",
+    "lines": 764,
+    "crate_references": []
+  }
+]

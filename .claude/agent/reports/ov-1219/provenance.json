@@ -1,0 +1,7 @@
+{
+  "sha": "73974f89898d716c36595eade2511ba5f8df7a8f",
+  "origin_main": "73974f89898d716c36595eade2511ba5f8df7a8f",
+  "local_main": "3f78754f936855710dfec920fe3d492f879b610d",
+  "scope": "locked all-feature, unfiltered-platform metadata; selector adds CLI -> daemon",
+  "selector_blob": "9bdedb2a11ca51a640ef168d50ec66dcadc9db1a"
+}

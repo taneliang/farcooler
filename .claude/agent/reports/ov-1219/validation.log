@@ -1,0 +1,34 @@
+PASS: verified main timing/load provenance; all 18 crates and 195,098 daemon lines;
+6,928 historical cases/12 failures retained; 5 real selector scenarios; consumer edges; links.
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 1.249s
+
+OK
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: accepted; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.005527041999999982; warm wall savings: 0.00s.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.005178000000000016; warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: REJECTED; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: not replayed (full fallback or rejected); warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Rust shadow: accepted; skips disabled.
+Reasons: test
+Full wall: 0.01s; selected wall: 0.005560624999999986; warm wall savings: not measured/valid.
+Warm sequential replay is not an end-to-end gate speedup. See inventories and load in artifacts.
+
+Mutation check: removing integration -> daemon makes validate.py fail; original artifact restored.

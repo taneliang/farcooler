@@ -1,0 +1,372 @@
+[
+  {
+    "from": "access",
+    "to": "agents",
+    "files": 9
+  },
+  {
+    "from": "access",
+    "to": "board",
+    "files": 5
+  },
+  {
+    "from": "access",
+    "to": "engine",
+    "files": 1
+  },
+  {
+    "from": "access",
+    "to": "git",
+    "files": 5
+  },
+  {
+    "from": "access",
+    "to": "rpc",
+    "files": 32
+  },
+  {
+    "from": "access",
+    "to": "service",
+    "files": 58
+  },
+  {
+    "from": "access",
+    "to": "watch",
+    "files": 13
+  },
+  {
+    "from": "agents",
+    "to": "access",
+    "files": 12
+  },
+  {
+    "from": "agents",
+    "to": "board",
+    "files": 11
+  },
+  {
+    "from": "agents",
+    "to": "git",
+    "files": 8
+  },
+  {
+    "from": "agents",
+    "to": "rpc",
+    "files": 9
+  },
+  {
+    "from": "agents",
+    "to": "service",
+    "files": 27
+  },
+  {
+    "from": "agents",
+    "to": "watch",
+    "files": 5
+  },
+  {
+    "from": "board",
+    "to": "access",
+    "files": 20
+  },
+  {
+    "from": "board",
+    "to": "agents",
+    "files": 16
+  },
+  {
+    "from": "board",
+    "to": "engine",
+    "files": 5
+  },
+  {
+    "from": "board",
+    "to": "git",
+    "files": 35
+  },
+  {
+    "from": "board",
+    "to": "rpc",
+    "files": 29
+  },
+  {
+    "from": "board",
+    "to": "service",
+    "files": 63
+  },
+  {
+    "from": "board",
+    "to": "watch",
+    "files": 20
+  },
+  {
+    "from": "delivery",
+    "to": "access",
+    "files": 13
+  },
+  {
+    "from": "delivery",
+    "to": "agents",
+    "files": 25
+  },
+  {
+    "from": "delivery",
+    "to": "board",
+    "files": 14
+  },
+  {
+    "from": "delivery",
+    "to": "engine",
+    "files": 2
+  },
+  {
+    "from": "delivery",
+    "to": "git",
+    "files": 1
+  },
+  {
+    "from": "delivery",
+    "to": "rpc",
+    "files": 9
+  },
+  {
+    "from": "delivery",
+    "to": "service",
+    "files": 47
+  },
+  {
+    "from": "delivery",
+    "to": "watch",
+    "files": 38
+  },
+  {
+    "from": "engine",
+    "to": "access",
+    "files": 13
+  },
+  {
+    "from": "engine",
+    "to": "agents",
+    "files": 12
+  },
+  {
+    "from": "engine",
+    "to": "board",
+    "files": 13
+  },
+  {
+    "from": "engine",
+    "to": "git",
+    "files": 14
+  },
+  {
+    "from": "engine",
+    "to": "rpc",
+    "files": 3
+  },
+  {
+    "from": "engine",
+    "to": "service",
+    "files": 23
+  },
+  {
+    "from": "engine",
+    "to": "shell",
+    "files": 3
+  },
+  {
+    "from": "engine",
+    "to": "watch",
+    "files": 8
+  },
+  {
+    "from": "git",
+    "to": "access",
+    "files": 1
+  },
+  {
+    "from": "git",
+    "to": "agents",
+    "files": 3
+  },
+  {
+    "from": "git",
+    "to": "board",
+    "files": 6
+  },
+  {
+    "from": "git",
+    "to": "rpc",
+    "files": 2
+  },
+  {
+    "from": "git",
+    "to": "service",
+    "files": 10
+  },
+  {
+    "from": "git",
+    "to": "shell",
+    "files": 1
+  },
+  {
+    "from": "integration",
+    "to": "shell",
+    "files": 3
+  },
+  {
+    "from": "rpc",
+    "to": "access",
+    "files": 45
+  },
+  {
+    "from": "rpc",
+    "to": "agents",
+    "files": 16
+  },
+  {
+    "from": "rpc",
+    "to": "board",
+    "files": 38
+  },
+  {
+    "from": "rpc",
+    "to": "engine",
+    "files": 5
+  },
+  {
+    "from": "rpc",
+    "to": "git",
+    "files": 5
+  },
+  {
+    "from": "rpc",
+    "to": "service",
+    "files": 31
+  },
+  {
+    "from": "rpc",
+    "to": "shell",
+    "files": 2
+  },
+  {
+    "from": "rpc",
+    "to": "watch",
+    "files": 17
+  },
+  {
+    "from": "service",
+    "to": "access",
+    "files": 16
+  },
+  {
+    "from": "service",
+    "to": "agents",
+    "files": 19
+  },
+  {
+    "from": "service",
+    "to": "board",
+    "files": 21
+  },
+  {
+    "from": "service",
+    "to": "engine",
+    "files": 3
+  },
+  {
+    "from": "service",
+    "to": "git",
+    "files": 15
+  },
+  {
+    "from": "service",
+    "to": "rpc",
+    "files": 5
+  },
+  {
+    "from": "service",
+    "to": "shell",
+    "files": 1
+  },
+  {
+    "from": "service",
+    "to": "watch",
+    "files": 6
+  },
+  {
+    "from": "shell",
+    "to": "access",
+    "files": 2
+  },
+  {
+    "from": "shell",
+    "to": "agents",
+    "files": 1
+  },
+  {
+    "from": "shell",
+    "to": "board",
+    "files": 2
+  },
+  {
+    "from": "shell",
+    "to": "git",
+    "files": 3
+  },
+  {
+    "from": "shell",
+    "to": "rpc",
+    "files": 2
+  },
+  {
+    "from": "shell",
+    "to": "service",
+    "files": 9
+  },
+  {
+    "from": "shell",
+    "to": "watch",
+    "files": 3
+  },
+  {
+    "from": "watch",
+    "to": "access",
+    "files": 3
+  },
+  {
+    "from": "watch",
+    "to": "agents",
+    "files": 12
+  },
+  {
+    "from": "watch",
+    "to": "board",
+    "files": 27
+  },
+  {
+    "from": "watch",
+    "to": "engine",
+    "files": 2
+  },
+  {
+    "from": "watch",
+    "to": "git",
+    "files": 4
+  },
+  {
+    "from": "watch",
+    "to": "rpc",
+    "files": 11
+  },
+  {
+    "from": "watch",
+    "to": "service",
+    "files": 29
+  },
+  {
+    "from": "watch",
+    "to": "shell",
+    "files": 1
+  }
+]

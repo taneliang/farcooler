@@ -1,0 +1,477 @@
+[
+  {
+    "name": "farcooler-agent-core",
+    "src_lines": 828,
+    "test_lines": 0,
+    "normal_dependencies": [],
+    "dependencies": [],
+    "direct_consumers": [
+      "farcooler-agent-hooks",
+      "farcooler-cli",
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-agent-hooks",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-agent-hooks",
+    "src_lines": 1566,
+    "test_lines": 0,
+    "normal_dependencies": [
+      "farcooler-agent-core"
+    ],
+    "dependencies": [
+      "farcooler-agent-core"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-ceremony",
+    "src_lines": 3315,
+    "test_lines": 0,
+    "normal_dependencies": [
+      "farcooler-protocol"
+    ],
+    "dependencies": [
+      "farcooler-protocol"
+    ],
+    "direct_consumers": [
+      "farcooler-client"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-cli",
+    "src_lines": 39496,
+    "test_lines": 1881,
+    "normal_dependencies": [
+      "farcooler-agent-core",
+      "farcooler-agent-hooks",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-protocol",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-transport"
+    ],
+    "dependencies": [
+      "farcooler-agent-core",
+      "farcooler-agent-hooks",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-protocol",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-transport"
+    ],
+    "direct_consumers": [
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-client",
+    "src_lines": 25501,
+    "test_lines": 4106,
+    "normal_dependencies": [
+      "farcooler-ceremony",
+      "farcooler-core",
+      "farcooler-fence",
+      "farcooler-ffi-guard",
+      "farcooler-protocol",
+      "farcooler-tailcat",
+      "farcooler-transport",
+      "farcooler-workflow"
+    ],
+    "dependencies": [
+      "farcooler-ceremony",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-ffi-guard",
+      "farcooler-protocol",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-workflow"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-core",
+    "src_lines": 34412,
+    "test_lines": 518,
+    "normal_dependencies": [
+      "farcooler-ffi-guard",
+      "farcooler-protocol"
+    ],
+    "dependencies": [
+      "farcooler-ffi-guard",
+      "farcooler-protocol"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-store",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-store",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ]
+  },
+  {
+    "name": "farcooler-daemon",
+    "src_lines": 167406,
+    "test_lines": 27623,
+    "normal_dependencies": [
+      "farcooler-agent-core",
+      "farcooler-agent-hooks",
+      "farcooler-core",
+      "farcooler-fence",
+      "farcooler-ffi-guard",
+      "farcooler-protocol",
+      "farcooler-review",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-workflow"
+    ],
+    "dependencies": [
+      "farcooler-agent-core",
+      "farcooler-agent-hooks",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-fence",
+      "farcooler-ffi-guard",
+      "farcooler-protocol",
+      "farcooler-review",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-vt",
+      "farcooler-workflow"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-client"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-fence",
+    "src_lines": 2681,
+    "test_lines": 766,
+    "normal_dependencies": [
+      "farcooler-protocol"
+    ],
+    "dependencies": [
+      "farcooler-protocol"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-ffi-guard",
+    "src_lines": 130,
+    "test_lines": 299,
+    "normal_dependencies": [],
+    "dependencies": [],
+    "direct_consumers": [
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-review",
+      "farcooler-vt"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-review",
+      "farcooler-store",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-vt"
+    ]
+  },
+  {
+    "name": "farcooler-jni",
+    "src_lines": 1384,
+    "test_lines": 0,
+    "normal_dependencies": [
+      "farcooler-client",
+      "farcooler-ffi-guard",
+      "farcooler-vt"
+    ],
+    "dependencies": [
+      "farcooler-client",
+      "farcooler-ffi-guard",
+      "farcooler-vt"
+    ],
+    "direct_consumers": [],
+    "transitive_consumers": []
+  },
+  {
+    "name": "farcooler-protocol",
+    "src_lines": 3348,
+    "test_lines": 0,
+    "normal_dependencies": [
+      "farcooler-workflow"
+    ],
+    "dependencies": [
+      "farcooler-workflow"
+    ],
+    "direct_consumers": [
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ],
+    "transitive_consumers": [
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-jni",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ]
+  },
+  {
+    "name": "farcooler-review",
+    "src_lines": 1582,
+    "test_lines": 0,
+    "normal_dependencies": [
+      "farcooler-ffi-guard"
+    ],
+    "dependencies": [
+      "farcooler-ffi-guard"
+    ],
+    "direct_consumers": [
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-store",
+    "src_lines": 39227,
+    "test_lines": 0,
+    "normal_dependencies": [
+      "farcooler-core",
+      "farcooler-protocol",
+      "farcooler-workflow"
+    ],
+    "dependencies": [
+      "farcooler-core",
+      "farcooler-protocol",
+      "farcooler-workflow"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-tailcat",
+    "src_lines": 1642,
+    "test_lines": 0,
+    "normal_dependencies": [
+      "farcooler-protocol"
+    ],
+    "dependencies": [
+      "farcooler-protocol"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-tmux",
+    "src_lines": 4117,
+    "test_lines": 946,
+    "normal_dependencies": [
+      "farcooler-core",
+      "farcooler-protocol"
+    ],
+    "dependencies": [
+      "farcooler-core",
+      "farcooler-protocol"
+    ],
+    "direct_consumers": [
+      "farcooler-client",
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-transport",
+    "src_lines": 3163,
+    "test_lines": 1472,
+    "normal_dependencies": [
+      "farcooler-core",
+      "farcooler-protocol"
+    ],
+    "dependencies": [
+      "farcooler-core",
+      "farcooler-protocol"
+    ],
+    "direct_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-vt",
+    "src_lines": 4266,
+    "test_lines": 184,
+    "normal_dependencies": [
+      "farcooler-ffi-guard"
+    ],
+    "dependencies": [
+      "farcooler-ffi-guard"
+    ],
+    "direct_consumers": [
+      "farcooler-daemon",
+      "farcooler-jni"
+    ],
+    "transitive_consumers": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ]
+  },
+  {
+    "name": "farcooler-workflow",
+    "src_lines": 1970,
+    "test_lines": 2999,
+    "normal_dependencies": [],
+    "dependencies": [],
+    "direct_consumers": [
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-protocol",
+      "farcooler-store"
+    ],
+    "transitive_consumers": [
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-jni",
+      "farcooler-protocol",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ]
+  }
+]

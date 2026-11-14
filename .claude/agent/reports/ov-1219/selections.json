@@ -1,0 +1,191 @@
+[
+  {
+    "sha": "6afab149ab10a5548dc6033537914945cbd93c0b",
+    "subject": "ov-1085: revert the unrelated poll-interval change; this round ships diagnostics only",
+    "changes": [
+      [
+        "M",
+        "crates/daemon/src/workflow_runtime/coding_tests.rs"
+      ]
+    ],
+    "before": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ],
+    "full": false,
+    "reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "daemon_groups": [
+      "engine"
+    ]
+  },
+  {
+    "sha": "3c6cb253ace546f5aba16184e99c76a5a95b8761",
+    "subject": "ov-1077: a stuck engine build announces itself, so Needs You refreshes without a poll",
+    "changes": [
+      [
+        "M",
+        "crates/daemon/src/engine_stuck.rs"
+      ],
+      [
+        "M",
+        "crates/daemon/src/engine_stuck_tests.rs"
+      ],
+      [
+        "M",
+        "crates/daemon/src/watch.rs"
+      ]
+    ],
+    "before": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-daemon",
+      "farcooler-jni"
+    ],
+    "full": false,
+    "reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "daemon_groups": [
+      "engine",
+      "watch"
+    ]
+  },
+  {
+    "sha": "4d331fabdbf5f4eef2a37dc7d7a990caadc71947",
+    "subject": "ov-1129: refuse send-backs that cannot restart builds",
+    "changes": [
+      [
+        "M",
+        "crates/daemon/src/workflow_runtime/send_back_tests.rs"
+      ],
+      [
+        "M",
+        "crates/daemon/src/workflow_runtime/wire_commands.rs"
+      ],
+      [
+        "M",
+        "crates/workflow/src/reducer.rs"
+      ],
+      [
+        "M",
+        "crates/workflow/src/state.rs"
+      ],
+      [
+        "M",
+        "crates/workflow/tests/routes.rs"
+      ],
+      [
+        "M",
+        "crates/workflow/tests/send_back.rs"
+      ]
+    ],
+    "before": [
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-jni",
+      "farcooler-protocol",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-workflow"
+    ],
+    "full": false,
+    "reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "daemon_groups": [
+      "engine"
+    ]
+  },
+  {
+    "sha": "2cf9644fc949311530afd22920b451260930e707",
+    "subject": "ov-1092: fast mode and standard prices for Fable 5.2 and Mythos 5.2 match the pricing page",
+    "changes": [
+      [
+        "M",
+        "crates/core/src/usage.rs"
+      ]
+    ],
+    "before": [
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-jni",
+      "farcooler-store",
+      "farcooler-tmux",
+      "farcooler-transport"
+    ],
+    "full": false,
+    "reasons": [
+      "reverse closure includes dev/build/optional/all target edges and CLI -> daemon"
+    ],
+    "daemon_groups": []
+  },
+  {
+    "sha": "73974f89898d716c36595eade2511ba5f8df7a8f",
+    "subject": "workflow: return join conflicts to build for rebase (ov-1148)",
+    "changes": [
+      [
+        "M",
+        "crates/daemon/src/workflow_runtime/coding_verbs.rs"
+      ],
+      [
+        "M",
+        "crates/daemon/src/workflow_runtime/coding_verbs_tests.rs"
+      ],
+      [
+        "M",
+        "crates/workflow/src/reducer.rs"
+      ],
+      [
+        "M",
+        "crates/workflow/src/state.rs"
+      ],
+      [
+        "M",
+        "crates/workflow/tests/groups.rs"
+      ],
+      [
+        "M",
+        "docs/workspaces.md"
+      ]
+    ],
+    "before": [
+      "farcooler-agent-core",
+      "farcooler-agent-hooks",
+      "farcooler-ceremony",
+      "farcooler-cli",
+      "farcooler-client",
+      "farcooler-core",
+      "farcooler-daemon",
+      "farcooler-fence",
+      "farcooler-ffi-guard",
+      "farcooler-jni",
+      "farcooler-protocol",
+      "farcooler-review",
+      "farcooler-store",
+      "farcooler-tailcat",
+      "farcooler-tmux",
+      "farcooler-transport",
+      "farcooler-vt",
+      "farcooler-workflow"
+    ],
+    "full": true,
+    "reasons": [
+      "full: M docs/workspaces.md"
+    ],
+    "daemon_groups": [
+      "engine"
+    ]
+  }
+]

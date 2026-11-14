@@ -1,0 +1,226 @@
+{
+  "source": "8a7ce8759c277bfe99bc6b5b30015c8a8b16f290",
+  "count": 6928,
+  "failures": 12,
+  "wall_seconds": 700.841,
+  "sum_case_seconds": 2091.409000000027,
+  "old": [
+    {
+      "old_package": "farcooler-agent-core",
+      "count": 8,
+      "observed_case_seconds": 0.046
+    },
+    {
+      "old_package": "farcooler-agent-hooks",
+      "count": 38,
+      "observed_case_seconds": 0.28800000000000014
+    },
+    {
+      "old_package": "farcooler-ceremony",
+      "count": 104,
+      "observed_case_seconds": 0.6660000000000005
+    },
+    {
+      "old_package": "farcooler-cli",
+      "count": 688,
+      "observed_case_seconds": 58.67199999999994
+    },
+    {
+      "old_package": "farcooler-client",
+      "count": 431,
+      "observed_case_seconds": 106.50499999999988
+    },
+    {
+      "old_package": "farcooler-core",
+      "count": 779,
+      "observed_case_seconds": 7.915000000000007
+    },
+    {
+      "old_package": "farcooler-daemon",
+      "count": 3577,
+      "observed_case_seconds": 1794.6729999999989
+    },
+    {
+      "old_package": "farcooler-fence",
+      "count": 77,
+      "observed_case_seconds": 1.3190000000000004
+    },
+    {
+      "old_package": "farcooler-ffi-guard",
+      "count": 5,
+      "observed_case_seconds": 0.8240000000000001
+    },
+    {
+      "old_package": "farcooler-protocol",
+      "count": 73,
+      "observed_case_seconds": 0.7290000000000003
+    },
+    {
+      "old_package": "farcooler-review",
+      "count": 44,
+      "observed_case_seconds": 0.3640000000000001
+    },
+    {
+      "old_package": "farcooler-store",
+      "count": 655,
+      "observed_case_seconds": 77.1080000000009
+    },
+    {
+      "old_package": "farcooler-tailcat",
+      "count": 10,
+      "observed_case_seconds": 0.05799999999999999
+    },
+    {
+      "old_package": "farcooler-tmux",
+      "count": 104,
+      "observed_case_seconds": 34.70000000000002
+    },
+    {
+      "old_package": "farcooler-transport",
+      "count": 53,
+      "observed_case_seconds": 3.322
+    },
+    {
+      "old_package": "farcooler-vt",
+      "count": 139,
+      "observed_case_seconds": 1.1440000000000006
+    },
+    {
+      "old_package": "farcooler-workflow",
+      "count": 143,
+      "observed_case_seconds": 3.0759999999999983
+    }
+  ],
+  "new": [
+    {
+      "package": "farcooler-agent-core",
+      "count": 8,
+      "observed_case_seconds": 0.046
+    },
+    {
+      "package": "farcooler-agent-hooks",
+      "count": 38,
+      "observed_case_seconds": 0.28800000000000014
+    },
+    {
+      "package": "farcooler-ceremony",
+      "count": 104,
+      "observed_case_seconds": 0.6660000000000005
+    },
+    {
+      "package": "farcooler-cli",
+      "count": 688,
+      "observed_case_seconds": 58.67199999999994
+    },
+    {
+      "package": "farcooler-client",
+      "count": 431,
+      "observed_case_seconds": 106.50499999999988
+    },
+    {
+      "package": "farcooler-core",
+      "count": 779,
+      "observed_case_seconds": 7.915000000000007
+    },
+    {
+      "package": "farcooler-daemon",
+      "count": 105,
+      "observed_case_seconds": 24.37800000000001
+    },
+    {
+      "package": "farcooler-daemon-access",
+      "count": 329,
+      "observed_case_seconds": 60.82400000000001
+    },
+    {
+      "package": "farcooler-daemon-agents",
+      "count": 426,
+      "observed_case_seconds": 70.05900000000028
+    },
+    {
+      "package": "farcooler-daemon-board",
+      "count": 441,
+      "observed_case_seconds": 51.29999999999998
+    },
+    {
+      "package": "farcooler-daemon-delivery",
+      "count": 481,
+      "observed_case_seconds": 500.11700000000013
+    },
+    {
+      "package": "farcooler-daemon-engine",
+      "count": 314,
+      "observed_case_seconds": 357.2240000000001
+    },
+    {
+      "package": "farcooler-daemon-git",
+      "count": 199,
+      "observed_case_seconds": 70.64199999999995
+    },
+    {
+      "package": "farcooler-daemon-integration",
+      "count": 549,
+      "observed_case_seconds": 540.5159999999996
+    },
+    {
+      "package": "farcooler-daemon-service",
+      "count": 531,
+      "observed_case_seconds": 81.44999999999989
+    },
+    {
+      "package": "farcooler-daemon-watch",
+      "count": 202,
+      "observed_case_seconds": 38.16300000000001
+    },
+    {
+      "package": "farcooler-fence",
+      "count": 77,
+      "observed_case_seconds": 1.3190000000000004
+    },
+    {
+      "package": "farcooler-ffi-guard",
+      "count": 5,
+      "observed_case_seconds": 0.8240000000000001
+    },
+    {
+      "package": "farcooler-protocol",
+      "count": 73,
+      "observed_case_seconds": 0.7290000000000003
+    },
+    {
+      "package": "farcooler-review",
+      "count": 44,
+      "observed_case_seconds": 0.3640000000000001
+    },
+    {
+      "package": "farcooler-store",
+      "count": 655,
+      "observed_case_seconds": 77.1080000000009
+    },
+    {
+      "package": "farcooler-tailcat",
+      "count": 10,
+      "observed_case_seconds": 0.05799999999999999
+    },
+    {
+      "package": "farcooler-tmux",
+      "count": 104,
+      "observed_case_seconds": 34.70000000000002
+    },
+    {
+      "package": "farcooler-transport",
+      "count": 53,
+      "observed_case_seconds": 3.322
+    },
+    {
+      "package": "farcooler-vt",
+      "count": 139,
+      "observed_case_seconds": 1.1440000000000006
+    },
+    {
+      "package": "farcooler-workflow",
+      "count": 143,
+      "observed_case_seconds": 3.0759999999999983
+    }
+  ]
+}
