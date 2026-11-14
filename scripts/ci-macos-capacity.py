@@ -124,17 +124,27 @@ def check(texts):
                 if workflow_lock or lock or called_lock or mac[job]:
                     problems.append("Canary baseline must remain outside the background queue on Linux")
             elif not workflow_lock:
+                if name == "nightly.yml" and job.startswith("yield-"):
+                    # Linux gate that waits for main CI; holds no Mac (ov-1226).
+                    if keys.get("runs-on") != "ubuntu-latest" or total[job] != 1 or mac[job]:
+                        problems.append(f"{job} must be one Linux job")
+                    continue
                 if lock:
                     entries.append((f"{name}/{job}", total[job], mac[job]))
                 elif not called_lock:
                     problems.append(f"{name}/{job} escapes background-macos")
+        if name == "nightly.yml":
+            for job, keys in jobs.items():
+                if mac[job] and not any(n.startswith("yield-") for n in proto.needs_of(keys.get("needs"))):
+                    problems.append(f"Nightly {job} must wait on a yield-* gate for main CI")
         if name == "nightly.yml" and counts[name][1] > 1:
             problems.append("Nightly's Apple phases must remain sequential")
     landing = counts["ci.yml"]
     background = max((entry[1] for entry in entries), default=0)
     background_mac = max((entry[2] for entry in entries), default=0)
     recorder = counts["canary-baseline.yml"][0]
-    total = landing[0] + background + recorder
+    # One Nightly yield gate can be waiting beside the background entry.
+    total = landing[0] + background + recorder + 1
     if landing[1] + background_mac > 5:
         problems.append("landing plus shared background exceeds five Macs")
     if total > 20:
@@ -158,6 +168,8 @@ def main():
             ("Nightly pending shard replacement", "nightly.yml", "      queue: max\n", ""),
             ("Nightly cancels shipping", "nightly.yml", "      cancel-in-progress: false", "      cancel-in-progress: true"),
             ("Tunnel escapes", "tunnel-e2e.yml", "  group: background-macos", "  group: tunnel"),
+            ("Nightly iOS UI ignores main CI", "nightly.yml", "needs: [ios, yield-ui]", "needs: [ios]"),
+            ("Nightly perf ignores main CI", "nightly.yml", "needs: [captures, yield-perf]", "needs: [captures]"),
             ("a second Nightly Mac", "nightly.yml", "    runs-on: ubuntu-latest", "    runs-on: xcode-27"),
         ]
         cases += [
@@ -187,7 +199,7 @@ def main():
         simultaneous_problems, simultaneous_counts, _ = check(simultaneous)
         if (not all(any(name in problem for problem in simultaneous_problems)
                     for name in ("site.yml", "web.yml", "relay.yml", "doc-comments.yml"))
-                or total != 17 or simultaneous_counts["site.yml"] != (2, 0)):
+                or total != 18 or simultaneous_counts["site.yml"] != (2, 0)):
             problems.append("simultaneous deployment/landing reservation regression")
         new_workflow = dict(texts, **{"new.yml": "on:\n  push:\njobs:\n  job:\n    runs-on: ubuntu-latest\n"})
         if not check(new_workflow)[0]:
@@ -199,7 +211,7 @@ def main():
     if problems:
         print("\n".join(problems), file=sys.stderr)
         return 1
-    print(f"Mac capacity: landing {counts['ci.yml'][1]} + shared background 1 = 5; total-job upper bound {total}/20")
+    print(f"Mac capacity: landing {counts['ci.yml'][1]} + shared background 1 = 5; total-job upper bound {total}/20 (incl. one Nightly yield gate)")
     print("All triggers/path matches conservatively overlap; reusable calls expanded inside their caller budget")
     print("Workflow peaks (total, macOS): " + str(counts))
     return 0

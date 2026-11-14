@@ -29,5 +29,14 @@ class ConcurrencyTest(unittest.TestCase):
         self.assertNotEqual(group('refs/heads/feature', 1), group('refs/pull/42/merge', 1))
 
 
+class CapacityAndYieldTests(unittest.TestCase):
+    def test_capacity_and_yield(self):
+        import subprocess
+        import sys
+        for script in ("ci-macos-capacity.py", "ci-yield-to-main.py"):
+            with self.subTest(script=script):
+                subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parent / script), "--self-test"], check=True)
+
+
 if __name__ == '__main__':
     unittest.main()

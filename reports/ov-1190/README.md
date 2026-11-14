@@ -194,3 +194,28 @@ or paid runner is assumed.
 Hosted after timing and a comparable three-day queue-p90 comparison remain
 follow-up measurements after landing; local timings cannot substitute for
 those observations.
+
+## Nightly yields to main CI (ov-1226)
+
+CI runs on different refs do not share a concurrency group, so Nightly could
+still start Apple work while a landing's CI was queued. Each Nightly Apple phase
+(`ios`, `ios-ui`, `captures`, `mac-perf`) now `needs` a Linux `yield-*` job that
+runs `scripts/ci-yield-to-main.py`: it polls `gh run list --workflow ci.yml
+--branch main` and waits while a run is queued or running, then lets the phase
+start. Waiting happens on a free Linux runner, outside `background-macos`, so no
+Mac is held. It gives up after 90 minutes and proceeds (a yield, not starvation).
+The capacity model counts one gate (total bound now 18/20) and rejects a Nightly
+Mac job with no gate. `python3 scripts/ci-concurrency-test.py` runs the capacity
+and yield self-tests.
+
+Remaining gap, stated plainly: the gate runs once per phase, so a main push
+arriving mid-phase (for example during the eight-shard iOS UI matrix) still sees
+one background Mac in use; the four-Mac landing reservation covers that. PR-ref
+CI runs are not yielded to. Follow-up ticket text: "CI: Nightly yields per shard
+and to PR runs — move the yield check into each Nightly Apple matrix shard
+(before it takes background-macos) and measure main CI queue time over a week."
+
+Runner labels used and their public free-tier source (GitHub's standard
+runners for public repositories, [runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories)):
+`ubuntu-latest`, `ubuntu-24.04`, `macos-latest`, `xcode-27` (macOS arm64). New
+gate jobs use `ubuntu-latest`. No self-hosted or larger runner appears in `.github/`.

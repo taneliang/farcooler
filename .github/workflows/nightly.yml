@@ -21,6 +21,9 @@
 # (scripts/nightly-report.py). An issue, not a board card: the board is a local
 # tool on the owner's Mac and a runner cannot reach it.
 #
+# Nightly yields to main: a Linux gate before each Apple phase waits while a
+# main CI run is queued or running (scripts/ci-yield-to-main.py, ov-1226).
+#
 # Reserve four macOS slots for landing CI (ov-1190). Each Apple job takes
 # background-macos, shared with shipping, deployments and maintenance.
 # Linux jobs use it too, reserving total-job headroom. queue: max
@@ -146,10 +149,77 @@ jobs:
           overwrite: true
           path: ${{ runner.temp }}/rust-shadow/
 
+  # Linux, outside background-macos: waiting here holds no Mac (ov-1226).
+  yield-ios:
+    name: Yield to main CI (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/ci-yield-to-main.py --self-test
+      - run: ./scripts/ci-yield-to-main.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Linux, outside background-macos: waiting here holds no Mac (ov-1226).
+  yield-ui:
+    name: Yield to main CI (UI)
+    needs: [ios]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/ci-yield-to-main.py --self-test
+      - run: ./scripts/ci-yield-to-main.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Linux, outside background-macos: waiting here holds no Mac (ov-1226).
+  yield-captures:
+    name: Yield to main CI (captures)
+    needs: [ios-ui]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/ci-yield-to-main.py --self-test
+      - run: ./scripts/ci-yield-to-main.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Linux, outside background-macos: waiting here holds no Mac (ov-1226).
+  yield-perf:
+    name: Yield to main CI (perf)
+    needs: [captures]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/ci-yield-to-main.py --self-test
+      - run: ./scripts/ci-yield-to-main.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   # The iOS app and its UI test bundle, built once for every job below, as ci.yml's
   # `ios` job does for the smoke set (the steps are the action's).
   ios:
     name: iOS
+    needs: [yield-ios]
     runs-on: xcode-27
     concurrency:
       group: background-macos
@@ -174,7 +244,7 @@ jobs:
   # nothing makes each fail on the download, saying so.
   ios-ui:
     name: iOS UI (${{ matrix.shard }})
-    needs: [ios]
+    needs: [ios, yield-ui]
     if: ${{ !cancelled() }}
     runs-on: xcode-27
     concurrency:
@@ -203,7 +273,7 @@ jobs:
   # timeout on Oct 23 (ov-722); as two, the second took 35 minutes (78%) on Oct 24.
   captures:
     name: iOS UI ${{ matrix.shard }}
-    needs: [ios, ios-ui]
+    needs: [ios, ios-ui, yield-captures]
     if: ${{ !cancelled() }}
     runs-on: xcode-27
     concurrency:
@@ -316,7 +386,7 @@ jobs:
   # through `report`, which names it.
   mac-perf:
     name: Mac perf gates
-    needs: [captures]
+    needs: [captures, yield-perf]
     # A failed shard must not suppress unrelated perf coverage.
     if: ${{ !cancelled() }}
     runs-on: xcode-27
