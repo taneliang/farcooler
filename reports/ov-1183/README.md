@@ -14,7 +14,9 @@ The bundle step took 1,222 seconds. The single host architecture's Rust
 library build took 91 seconds, daemon 438 seconds, CLI 497 seconds, LFS
 filter 75 seconds. These release builds use ThinLTO; the daemon, CLI and
 filter run serially, alongside the Swift build after the libraries are ready.
-There is no second architecture in this CI build.
+There is no second architecture in this CI build. Each of the three serial
+native invocations logs compilation of the daemon package with its own feature
+graph; this is not a universal/two-architecture build.
 
 The test job's Mac step took 964 seconds, including 284.39 seconds of Swift
 compilation and 517.958 seconds of CeremonyTests execution. AgentKit took
@@ -82,6 +84,16 @@ CeremonyTests region plus its other four bundles. Both shards met their exact
 inventory counts and five-minute load criterion. This comparison motivates the
 partition but does not substitute for two successful final job measurements.
 
-Final candidate measurements pending. A temporary push trigger for this branch collects ordinary CI job
-measurements without opening a PR or adding runner jobs. Remove that trigger
-once two successful under-15-minute runs have been recorded.
+The final implementation's cold cache-population run,
+[43576738289](https://github.com/taneliang/farcooler/actions/runs/43576738289)
+(4c109287f), passed both Swift jobs: bundle **919 s (15m19s)**, tests
+**1,622 s (27m02s)**. This is not an under-15-minute acceptance run. The app
+step took 814 s; native libraries for the tests 257 s, AgentKit 294 s and
+Mac build/tests 855 s. Both compilation and native dependency caches were
+populated successfully. Initial main/SDK/manifest cache misses retain this
+cold-build cost; the target is verified on ordinary cached branch pushes below.
+
+Cached repeat measurements pending. A temporary push trigger for this branch
+collects ordinary CI job measurements without opening a PR or adding runner
+jobs. Remove that trigger once two successful under-15-minute runs have been
+recorded.
