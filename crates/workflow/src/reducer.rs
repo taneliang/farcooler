@@ -212,27 +212,17 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             item.phase = Phase::Cancelled;
                             item.pending = None;
                         }
-                        Outcome::FoldConflict { evidence, files, members } if members.is_empty() => {
+                        Outcome::FoldConflict { evidence, files, members: None } => {
                             if item.run.starts_with("cancel:") || item.group_of.is_none()
                                 || item.definition.stages[item.stage].kind != StageKind::Fold
                             { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
                             route(&mut item, id, input, "conflict", Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                             if item.phase == Phase::Failed {
-                                // Quote unusual paths so control bytes cannot invalidate the stored brief.
-                                let reason = format!("Rebase your existing work onto landing base {} and resolve the cherry-pick conflicts in: {}. Run the affected tests and commit the result. Checks and review will run again for the new candidate.",
-                                    evidence.candidate, serde_json::to_string(files).map_err(|_| Refusal::Invalid)?);
-                                let mut reason = reason;
-                                if reason.len() > MAX_REWORK_REASON_BYTES {
-                                    let mut end = MAX_REWORK_REASON_BYTES - 80;
-                                    while !reason.is_char_boundary(end) { end -= 1; }
-                                    reason.truncate(end);
-                                    reason.push_str("… See the fold receipt for the full conflicting file list.");
-                                }
-                                item.brief = Some(reason);
+                                item.brief = Some(conflict_brief(evidence, files)?);
                             }
                         }
-                        Outcome::FoldConflict { members, evidence, files } => {
+                        Outcome::FoldConflict { members: Some(members), evidence, files } => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             if item.definition.schema != 2 || item.group_of.is_none()
                                 || item.definition.stages[item.stage].kind != StageKind::Fold
@@ -269,6 +259,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             } else {
                                 route(&mut item, id, input, "conflict", Some(evidence),
                                     Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                                if item.phase == Phase::Failed { item.brief = Some(conflict_brief(evidence, files)?); }
                             }
                         }
                         Outcome::Labeled(label, evidence) => {

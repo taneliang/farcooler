@@ -448,7 +448,7 @@ fn workflow_join_checks_the_published_landing_resource_in_other_workspaces() {
     let mut join = definition.stages[0].clone(); join.id = "join".into();
     join.kind = StageKind::Join { group: "landing".into(), adopt: false };
     definition.stages.push(join);
-    definition.groups.insert("landing".into(), GroupDef { limit: 0, exclusive: "old-target".into(),
+    definition.groups.insert("landing".into(), GroupDef { limit: None, exclusive: "old-target".into(),
         steps: vec![definition.stages[0].clone()] });
     let mut input = enqueue("workspace", "build-resource");
     if let Command::Enqueue { definition: d, .. } = &mut input.command { *d = definition.clone(); }

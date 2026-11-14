@@ -858,7 +858,7 @@ fn repeated_fold_conflicts_return_to_build_without_spending_join_rework() {
         let group = log.group_of("a");
         walk_to(&mut log, &group, "fold");
         let e = log.evidence(&group);
-        let next = log.outcome(&group, Outcome::FoldConflict { evidence: e,
+        let next = log.outcome(&group, Outcome::FoldConflict { members: None, evidence: e,
             files: vec!["coding_native.rs".into(), "state.rs".into()] });
         let ticket = &log.state.items["a"];
         let brief = next.effects.iter().find(|e| e.item == "a").unwrap().brief.as_ref().unwrap();
@@ -886,7 +886,7 @@ fn a_conflict_return_waits_for_its_build_resource_and_keeps_a_bounded_brief() {
         resource: "res-a".into(), dependencies: BTreeSet::new(), initial_candidate: None }, Grant::Controller);
     let evidence = log.evidence(&group);
     let files = vec!["a\nstrange-path.rs".into(), "界.rs".repeat(2000)];
-    let next = log.outcome(&group, Outcome::FoldConflict { evidence, files });
+    let next = log.outcome(&group, Outcome::FoldConflict { members: None, evidence, files });
     assert_eq!(log.state.items["a"].phase, Phase::Blocked);
     assert!(next.effects.iter().all(|e| e.item != "a"));
     let brief = log.state.items["a"].brief.clone().unwrap();
@@ -1082,7 +1082,7 @@ fn unlimited_and_published_finite_limits_can_exceed_the_old_thirty_two_ticket_ca
 fn a_diagnosed_fold_conflict_returns_only_bad_members_and_never_bisects_the_healthy_batch() {
     let mut log = Log::new();
     let mut d = verb_ticket();
-    let g = d.groups.get_mut("landing").unwrap(); g.limit = 0;
+    let g = d.groups.get_mut("landing").unwrap(); g.limit = None;
     g.steps[1].routes.insert("conflict".into(), Target::Split { step: "base".into(), otherwise: Box::new(Target::Fail) });
     g.steps[1].limit = 3;
     for name in ["ahead", "a", "bad-one", "b", "bad-two", "c"] {
@@ -1096,16 +1096,19 @@ fn a_diagnosed_fold_conflict_returns_only_bad_members_and_never_bisects_the_heal
     walk_to(&mut log, &group, "fold");
     let evidence = log.evidence(&group);
     for members in [vec![], vec!["foreign".into()], vec!["bad-one".into(), "bad-one".into()]] {
-        assert_eq!(log.try_outcome(&group, Outcome::FoldConflict { members, evidence: evidence.clone() }).unwrap_err(), Refusal::Evidence);
+        assert_eq!(log.try_outcome(&group, Outcome::FoldConflict { members: Some(members), files: vec![], evidence: evidence.clone() }).unwrap_err(), Refusal::Evidence);
     }
     let transition = log.outcome(&group, Outcome::FoldConflict {
-        members: vec!["bad-one".into(), "bad-two".into()], evidence });
+        members: Some(vec!["bad-one".into(), "bad-two".into()]), files: vec!["conflicting.rs".into()], evidence });
     assert_eq!(log.stage(&group), "base");
     assert_eq!(log.state.items[&group].members.iter().map(|m| m.item.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
     for name in ["bad-one", "bad-two"] {
         assert_eq!(log.stage(name), "stage-1");
         assert_eq!(log.state.items[name].phase, Phase::Running);
         assert!(log.state.items[name].brief.as_ref().unwrap().contains("conflict"));
+        assert!(log.state.items[name].brief.as_ref().unwrap().contains("conflicting.rs"));
+        assert_eq!(log.state.items[name].iteration, 0, "integration conflicts spend no review iteration");
+        assert!(log.state.items[name].back_edges.is_empty());
         assert_eq!(log.state.items[name].grouped_in, None);
     }
     assert_eq!(transition.effects.iter().filter(|e| e.item == group).count(), 1);
@@ -1128,7 +1131,7 @@ fn a_diagnosed_conflict_keeps_the_published_failure_policy_and_releases_an_empty
         let group = verb_group(&mut log, d);
         walk_to(&mut log, &group, "fold");
         let evidence = log.evidence(&group);
-        log.outcome(&group, Outcome::FoldConflict { members: vec!["a".into()], evidence });
+        log.outcome(&group, Outcome::FoldConflict { members: Some(vec!["a".into()]), files: vec![], evidence });
         assert_eq!(log.state.items[&group].phase, Phase::Failed);
         assert!(!owns_resource(&log.state.items[&group]));
         assert!(log.state.items[&group].members.is_empty());

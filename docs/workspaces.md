@@ -498,9 +498,12 @@ because one person gets whichever surface delivers first.
 
 ## Join conflicts and review
 
-When a landing fold cannot cherry-pick a candidate, it first follows the group's
-conflict route (normally splitting a batch). If that ends the group before a
-push, its tickets return to Build in their existing worktrees. The build brief
+When a landing fold cannot cherry-pick a candidate, it diagnoses every member
+against the landing base and the healthy members already applied. With a split
+conflict route, only conflicting tickets return to Build in their existing
+worktrees; the healthy batch retries together. Other published conflict routes
+still apply, and a group that ends before a push returns its tickets to Build.
+The build brief
 names the landing base and conflicting files from the fold receipt and asks for
 a rebase, tests, and a commit. This return spends neither the join's back-edge
 allowance nor a review rework iteration; repeated landing races do not exhaust a

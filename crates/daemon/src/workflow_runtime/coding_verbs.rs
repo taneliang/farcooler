@@ -195,7 +195,7 @@ impl Exec {
         }
         if *kind == StageKind::Fold && fact.label == "conflict" {
             return Ok(Outcome::FoldConflict { evidence,
-                members: serde_json::from_value(fact.detail.get("members").cloned().unwrap_or(serde_json::json!([])))?,
+                members: fact.detail.get("members").cloned().map(serde_json::from_value).transpose()?,
                 files: serde_json::from_value(fact.detail.get("files").cloned().unwrap_or(serde_json::json!([])))? });
         }
         Ok(match fact.label.as_str() {
@@ -445,11 +445,15 @@ impl Exec {
                 // Diagnose the whole batch on main, retaining only successful members. This
                 // catches both conflicts with main and conflicts between tickets in one pass.
                 let mut conflicts = Vec::new();
+                let mut files = BTreeSet::new();
                 self.git_recorded(binding, &tree, &["reset", "--hard", &base]).await?;
                 for suspect in members {
                     if *cancel.borrow() { return Ok(Outcome::SafeFailure); }
                     let checkpoint = self.git_recorded(binding, &tree, &["rev-parse", "HEAD"]).await?;
-                    if self.pick_member(binding, &tree, &base, suspect).await?.is_some() {
+                    if let Some(detail) = self.pick_member(binding, &tree, &base, suspect).await? {
+                        if let Some(paths) = detail.get("files").and_then(|v| v.as_array()) {
+                            files.extend(paths.iter().filter_map(|v| v.as_str().map(String::from)));
+                        }
                         conflicts.push(suspect.item.clone());
                         // Aborting a pick only undoes its last commit; discard every earlier
                         // commit from this member before testing the next member.
@@ -458,7 +462,7 @@ impl Exec {
                 }
                 self.git_recorded(binding, &tree, &["reset", "--hard", &base]).await?;
                 self.write_fact(binding, "conflict", &base, serde_json::json!({
-                    "members": conflicts, "first_conflict": conflict }))?;
+                    "members": conflicts, "files": files, "first_conflict": conflict }))?;
                 return self.reconcile_verb(binding, &StageKind::Fold).await;
             }
         }

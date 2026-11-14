@@ -262,7 +262,7 @@ pub enum Outcome {
     CiResult { label: String, evidence: Evidence, run: Option<CiRun> },
     /// A fold receipt carries conflict paths into the next build, including after recovery.
     FoldConflict { evidence: Evidence, #[serde(default)] files: Vec<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")] members: Vec<String> },
+        #[serde(default, skip_serializing_if = "Option::is_none")] members: Option<Vec<String>> },
     Passed(Evidence), Rejected(Evidence), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),

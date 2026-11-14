@@ -139,3 +139,25 @@ fn ci_rules_validate_result_labels_before_spending_a_call() {
     late.id = "late-ci-result".into(); late.source_sequence = done.revision + 1;
     assert_eq!(step(&done, &late), Err(Refusal::Phase));
 }
+
+#[test]
+fn failure_rule_advertises_the_published_retry_allowance() {
+    for allowance in [0, 5] {
+        let mut definition = Definition::coding();
+        definition.stages.truncate(1);
+        definition.max_reworks = 0; definition.rework_target = None;
+        definition.limits = Some(scheduling::Limits { retries: allowance, ..Default::default() });
+        definition.script_policies.insert("failure".into(), policy(HookPoint::RunFails));
+        let state = State::empty("w".into(), 1);
+        let state = step(&state, &input(&state, Command::Enqueue { item: "a".into(), definition,
+            policy_pin: "p".into(), resource: "r".into(), dependencies: BTreeSet::new(), initial_candidate: None },
+            Grant::Controller)).unwrap().state;
+        let mut state = state;
+        // A run already retried three times can still use a larger published allowance.
+        state.items.get_mut("a").unwrap().retries = allowance.min(3);
+        let evidence = Evidence { candidate: "sha".into(), manifest: "m".into(), receipt: "r".into(), policy_pin: "p".into() };
+        let failed = step(&state, &observe(&state, Outcome::Rejected(evidence))).unwrap().state;
+        let call = failed.items["a"].deciding.as_ref().unwrap();
+        assert_eq!(call.input.allowed.iter().any(|m| m == "retry"), allowance > 3);
+    }
+}

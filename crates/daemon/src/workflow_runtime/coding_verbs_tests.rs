@@ -256,7 +256,7 @@ async fn a_conflict_returns_the_ticket_to_build_with_paths_and_frees_the_target(
     let binding = Binding::new("w", &tree.effect, tree.resource_generation.unwrap(), 0,
         &runtime.item_base("w", &tree.effect).unwrap());
     let recovered = runtime.reconcile_verb(&binding, &StageKind::Fold).await.unwrap();
-    assert!(matches!(recovered, Outcome::FoldConflict { ref evidence, ref files }
+    assert!(matches!(recovered, Outcome::FoldConflict { ref evidence, ref files, .. }
         if evidence.candidate == theirs && files == &["shared.txt".to_string()]), "{recovered:?}");
     let tree = runtime.tree(&binding);
     assert!(!tree.exists(), "{}", tree.display());
@@ -1019,7 +1019,7 @@ async fn a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_c
 async fn a_fold_conflict_isolates_all_bad_tickets_and_keeps_the_healthy_batch_together() {
     let (dir, mut runtime) = lander("pass").await;
     let mut definition = batched_push(&runtime, "any", 5000);
-    definition.groups.get_mut("landing").unwrap().limit = 0;
+    definition.groups.get_mut("landing").unwrap().limit = None;
     at_join(&mut runtime, "ahead", &definition).await;
     let script = dir.path().join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
@@ -1062,7 +1062,7 @@ async fn a_fold_conflict_isolates_all_bad_tickets_and_keeps_the_healthy_batch_to
     let fact: serde_json::Value = serde_json::from_slice(&std::fs::read(fact).unwrap()).unwrap();
     let binding: Binding = serde_json::from_value(fact["binding"].clone()).unwrap();
     let recovered = runtime.reconcile_verb(&binding, &StageKind::Fold).await.unwrap();
-    assert!(matches!(recovered, Outcome::FoldConflict { members, .. } if members == ["bad-one", "bad-two", "bad-pair"]));
+    assert!(matches!(recovered, Outcome::FoldConflict { members: Some(members), .. } if members == ["bad-one", "bad-two", "bad-pair"]));
     let mut replay = State::empty("w".into(), 1);
     for event in runtime.events("w").unwrap() { replay = step(&replay, &event).unwrap().state; }
     assert_eq!(state, replay);

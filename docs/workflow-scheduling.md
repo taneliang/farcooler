@@ -80,7 +80,7 @@ these defaults:
 {
   "limits": {
     "retries": 3,
-    "back_edges": 3,
+    "back_edges": 5,
     "send_backs": 5,
     "models": 8,
     "reworks": 2,
@@ -93,7 +93,8 @@ these defaults:
 ```
 
 `limits` sets the allowed maxima; the existing per-step `limit`, `max_attempts`,
-`max_reworks`, group `limit` and definition `send_backs` choose the actual
-allowances within them. The send-back allowance defaults to three, lowered when
+`max_reworks` and definition `send_backs` choose the actual allowances within them.
+`group_members` bounds build followers; landing batches use their own optional
+`GroupDef.limit`, independently of that allowance. The send-back allowance defaults to three, lowered when
 its published maximum is lower. Group definitions inherit execution limits.
 Structural wire-size, identity, evidence and storage safety checks still apply.

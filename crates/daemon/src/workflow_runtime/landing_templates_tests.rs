@@ -414,13 +414,13 @@ async fn the_default_gate_path_reaches_cargo_under_the_home_directory() {
 async fn published_unlimited_batch_merges_old_waiters_on_restart_and_lands_once() {
     use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
     let (_dir, mut runtime) = lander("pass").await;
-    let mut p = plan(Template::BatchedPush, vec![Gate::Command(1)]); p.batch = 1;
+    let mut p = plan(Template::BatchedPush, vec![Gate::Command(1)]); p.batch = Some(1);
     let definition = built(&runtime, &p);
     for item in ["a", "b", "c", "d"] { at_join(&mut runtime, item, &definition).await; }
     for item in ["a", "b", "c", "d"] { assert!(command(&runtime, Command::Queue { item: item.into() }).result.is_ok()); }
     let before = runtime.state("w").unwrap().unwrap();
     assert_eq!(before.items.values().filter(|g| g.group_of.is_some() && g.phase == Phase::Blocked).count(), 3);
-    p.batch = 0;
+    p.batch = None;
     let published = built(&runtime, &p);
     let reply = runtime.wire_command("w", "owner", Action::Publish {
         mutation: Mutation { id: "unlimited-publication".into(), revision: before.revision, epoch: before.epoch, sequence: 1 },
@@ -478,7 +478,7 @@ async fn a_template_accepts_published_large_and_unlimited_batch_sizes() {
     for batch in [0, 40] {
         let bundle = lt::template("batched-push", runtime.coding.as_ref().unwrap(), &["make check".into()], &[],
             &lt::Options { batch: Some(batch), ..Default::default() }).unwrap();
-        assert_eq!(bundle.definition.groups["landing"].limit, batch);
+        assert_eq!(bundle.definition.groups["landing"].limit, if batch == 0 { None } else { Some(batch) });
     }
 }
 
@@ -488,7 +488,7 @@ async fn a_template_accepts_published_large_and_unlimited_batch_sizes() {
 async fn staggered_ready_tickets_join_one_waiter_while_an_active_landing_keeps_its_pin() {
     use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
     let (_dir, mut runtime) = lander("pass").await;
-    let mut p = plan(Template::BatchedPush, vec![Gate::Command(1)]); p.batch = 1;
+    let mut p = plan(Template::BatchedPush, vec![Gate::Command(1)]); p.batch = Some(1);
     let mut definition = built(&runtime, &p);
     definition.groups.get_mut("landing").unwrap().steps[2].progression =
         Progression::AwaitApproval { principal: "owner".into() };
@@ -501,7 +501,7 @@ async fn staggered_ready_tickets_join_one_waiter_while_an_active_landing_keeps_i
     assert!(command(&runtime, Command::Queue { item: "b".into() }).result.is_ok());
     let state = runtime.state("w").unwrap().unwrap();
     let waiting = state.items["b"].grouped_in.clone().unwrap();
-    let mut published = definition.clone(); published.groups.get_mut("landing").unwrap().limit = 0;
+    let mut published = definition.clone(); published.groups.get_mut("landing").unwrap().limit = None;
     let reply = runtime.wire_command("w", "owner", Action::Publish {
         mutation: Mutation { id: "staggered-publication".into(), revision: state.revision, epoch: state.epoch, sequence: 1 },
         expected_pin: None, definition: published.clone(),
