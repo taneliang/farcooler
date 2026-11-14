@@ -781,16 +781,20 @@ mod recovery_tests {
             let window = host.0.create_terminal_window(id, id, "lost reviewer", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
             let panes = host.0.list_tagged_panes().await.unwrap();
             let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
-            let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
+            // Model the vanished pane's now-empty tty with a reserved PTY. Holding its master is the
+            // synchronization point: another concurrent test cannot reuse this tty before recovery reads it.
+            use std::os::fd::FromRawFd;
+            let (mut master, mut slave) = (-1, -1);
+            let mut name = [0 as libc::c_char; 128];
+            assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, name.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
+            let (_master, _slave) = unsafe { (std::fs::File::from_raw_fd(master), std::fs::File::from_raw_fd(slave)) };
+            let tty = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_str().unwrap().to_owned();
+            let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty };
             durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
             let command = runtime.coding_command(&binding).unwrap();
             super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), passed).unwrap();
             std::fs::write(runtime.process_log(&binding), b"saved reviewer output").unwrap();
             assert!(host.0.run(&["kill-server"]).await.unwrap().ok());
-            for _ in 0..100 {
-                if snapshot().unwrap().under_tty(owner.tty.trim_start_matches("/dev/")).is_empty() { break; }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
             let root = runtime.root.clone(); drop(runtime);
             let mut runtime = Runtime::open(&root).unwrap();
             runtime.pump(200).await.unwrap();
