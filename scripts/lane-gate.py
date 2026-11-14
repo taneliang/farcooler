@@ -954,9 +954,13 @@ def _self_test():
     expect("Mac tests use the complete two-process inventory", mac_test.env.get("FARCOOLER_MAC_TEST_PROCESSES"), "2")
     expect("Mac tests revalidate the unified native graph", mac_test.env.get("FARCOOLER_MAC_TEST_UNIFIED_RUST"), "1")
     expect("AgentKit's native preparation uses that same graph", has("swift-tests", "./apps/macos/build-test-native.sh"), True)
+    bundle = next(s for s in plans["swift"] if "build-app.sh" in s.run)
+    expect("bundle uses the shipping Swift release configuration", bundle.run.strip(), "apps/macos/build-app.sh")
+    for key in ("CARGO_PROFILE_RELEASE_LTO", "CARGO_PROFILE_RELEASE_OPT_LEVEL", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
+        expect(f"bundle does not override shipping optimization through {key}", key in bundle.env, False)
     for job in ("swift", "swift-tests"):
         refresh = next(i for i, step in enumerate(plans[job]) if "swift-build-cache.py restore" in step.run)
-        native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh debug" in step.run)
+        native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh" in step.run)
         expect(f"{job} refreshes the watched git index before Cargo", refresh < native and
                "git status --porcelain --untracked-files=no" in plans[job][refresh].run, True)
     expect("the tunnel steps run in crates/tailcat/go", {s.cwd for s in plans["tunnel"]}, {"crates/tailcat/go"})

@@ -1,5 +1,26 @@
 # ov-1183: Swift CI under 15 minutes
 
+## Fix round 1: restore required release coverage
+
+Review correctly rejected the debug bundle measurements below: they do not
+prove the required per-push release check. CI now calls `build-app.sh` with
+its default release configuration and no Rust optimization overrides. Swift
+whole-module optimization, release-only conditional code, Rust opt-level 3
+and ThinLTO, tunnel linkage and every existing bundle check are restored.
+
+The remaining native optimization keeps the daemon package feature `tailcat`
+consistent in the daemon, CLI and filter invocations. The CLI already enabled
+the same dependency feature (`farcooler-tailcat/linked`); `cargo tree` confirms
+the sole difference is `farcooler-daemon` gaining its forwarding feature. No
+production source in that package branches on `cfg(feature = "tailcat")`.
+The LFS filter uses only std, sha2 and libc, not the daemon library or tunnel.
+The same fully optimized native commands run in CI and shipping; Canary and
+Release workflow files and Cargo profiles remain unchanged.
+
+Fresh release-shaped branch measurements are pending. The prior two debug
+runs are retained below for history and no longer count toward acceptance.
+
+
 ## Baseline
 
 [Main run 43557233452](https://github.com/taneliang/farcooler/actions/runs/43557233452).
@@ -161,7 +182,7 @@ the second adds only the first run's report. Durations include setup and post
 steps and exclude queue time, matching the baseline. The temporary branch push
 trigger has now been removed.
 
-## Acceptance evidence
+## Superseded debug-build evidence (not acceptance)
 
 | Job | Main baseline | Branch run 43588280875 | Branch run 43589173606 |
 | --- | ---: | ---: | ---: |
