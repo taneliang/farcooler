@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One command that runs CI's jobs for what a change touches, judged by exit code (ov-1013).
+# Local landing gate: parallel families and affected Rust tests (ov-1185).
+# CI on main retains full suites, release bundle checks, and iOS UI smoke.
 #
 #     scripts/landing-gate                 # this worktree against origin/main
 #     scripts/landing-gate --base main     # any scripts/lane-gate.py option passes through
@@ -15,14 +16,14 @@
 # plain terminal runs lane-gate.py or scripts/heavy.
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-gate=("$here/lane-gate.py" --fail-fast)
+gate=("$here/lane-gate.py" --fail-fast --landing --keep-target)
 for a in "$@"; do
   case "$a" in --dry-run|--self-test|-h|--help) exec python3 "${gate[@]}" "$@" ;; esac
 done
 
-# Under the engine the fold tree's target/ stays after a green gate: the engine hands it to the next group's fold
-# when this tree goes, so that gate rebuilds what changed, not every dependency (ov-1084). The 20 GB ceiling still holds.
-if [ -n "${FARCOOLER_WORKFLOW_RUN:-}" ]; then set -- --keep-target "$@"; fi
+# Every landing keeps target/ warm. The engine hands the fold tree's target/
+# to the next group's fold (ov-1084), rebuilding only what changed.
+# The existing 20 GB ceiling still holds.
 
 plan="$(python3 "${gate[@]}" --dry-run "$@")" || { printf '%s\n' "$plan"; echo "landing-gate: could not plan the change" >&2; exit 2; }
 jobs_line="$(printf '%s\n' "$plan" | sed -n 's/^lane-gate: .* jobs: //p' | head -1)"

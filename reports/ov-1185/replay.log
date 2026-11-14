@@ -1,0 +1,10 @@
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+{
+  "source": "reports/ov-1110/historical-gate.txt",
+  "scale": 0.01,
+  "limitations": "Historical scheduling replay; excludes queue/load wait, new CI steps, parallel CPU/memory and Cargo lock contention. Not three fresh real gates at current load.",
+  "rust_selection": "full; no test-duration or warm-target saving assumed",
+  "median_before_seconds": 2806.0,
+  "median_replayed_seconds": 790.7570374999999
+}
+Trials: [790.76, 791.03, 790.16]

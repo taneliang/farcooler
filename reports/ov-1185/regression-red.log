@@ -1,0 +1,20 @@
+F
+======================================================================
+FAIL: test_parallelism_is_bounded_and_apple_is_serial (policy_tests.LandingTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "scripts/landing-policy-test.py", line 70, in test_parallelism_is_bounded_and_apple_is_serial
+    self.assertEqual([r[1] for r in rows[:2]], ["test", "test"])
+AssertionError: Lists differ: ['family runner', 'family runner'] != ['test', 'test']
+
+First differing element 0:
+'family runner'
+'test'
+
+- ['family runner', 'family runner']
++ ['test', 'test']
+
+----------------------------------------------------------------------
+Ran 1 test in 5.007s
+
+FAILED (failures=1)

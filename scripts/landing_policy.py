@@ -1,0 +1,130 @@
+"""Local landing policy (ov-1185); CI and plain lane-gate retain full proof.
+
+Families have private GitHub environment files. Apple jobs share SwiftPM output
+and run serially. Cargo arbitrates its shared target directory with its own
+lock; do not give each worker a cold target. Admission still uses scripts/heavy.
+"""
+from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+import shlex
+import subprocess
+import time
+
+
+def rust_selection(repo, base, load_module):
+    """Select against a verified green ancestor, including staged/dirty inputs.
+
+    Missing network, metadata, green history, or unknown paths means full. Never
+    treat the previous commit or an arbitrary --base as proof of a green base.
+    """
+    shadow = load_module("landing_rust_shadow", repo / "scripts/rust-shadow.py")
+    try:
+        candidates_file = os.environ.get("CANDIDATES")
+        if candidates_file:
+            with open(candidates_file) as stream:
+                candidates = [json.loads(line)["head_sha"] for line in stream if line.strip()]
+        else:
+            raw = subprocess.run([
+                "gh", "api", "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100",
+                "--jq", ".workflow_runs[].head_sha"], cwd=repo, capture_output=True, text=True,
+                check=True, timeout=30).stdout
+            candidates = raw.splitlines()
+        head = shadow.capture(repo, "git", "rev-parse", "HEAD").strip()
+        green = shadow.green_base(repo, head, candidates)
+        if not green:
+            raise ValueError("no verified green ancestor")
+        # Include BOTH the requested range and changes since green, plus dirty
+        # files. Unknown untracked files force full just like tracked unknowns.
+        merge = shadow.capture(repo, "git", "merge-base", base, "HEAD").strip()
+        changes = []
+        for start in (green, merge):
+            raw = shadow.capture(repo, "git", "diff", "--no-renames", "--name-status", "-z", start).split("\0")
+            changes.extend(zip(raw[0:-1:2], raw[1:-1:2]))
+        raw = shadow.capture(repo, "git", "ls-files", "--others", "--exclude-standard", "-z")
+        changes.extend(("A", p) for p in raw.split("\0") if p)
+        metadata = json.loads(shadow.capture(repo, "cargo", "metadata", "--locked", "--offline",
+                                             "--format-version", "1", "--all-features"))
+        packages, reasons, full = shadow.select(repo, metadata, changes)
+        return {"full": full, "packages": packages, "reasons": reasons, "base": green}
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+        return {"full": True, "packages": [], "reasons": [f"full: {exc}"]}
+
+
+def apply(plans, proposal):
+    """Change only the local default-host nextest; keep features/lints/docs full."""
+    for job, steps in plans.items():
+        for step in steps:
+            if step.skip:
+                continue
+            if job == "swift" and (step.name == "Build Far Cooler.app"
+                                   or "apps/macos/build/$APP_NAME.app" in step.run
+                                   or step.name == "Resolve this channel's app name"):
+                if "macos-entitlements-test.sh" in step.run:
+                    step.run = "./scripts/macos-entitlements-test.sh\n"
+                else:
+                    step.skip = "local landing: release bundle and its consumers run in CI"
+            if job == "rust" and "python3 scripts/rust-shadow.py --out " in step.run:
+                # Shadow runs full + inventories + selected replay; landing runs
+                # once, still under exactly the leak wrappers CI supplies.
+                _, separator, command = step.run.partition(" -- ")
+                if not separator or "cargo nextest run --profile ci --workspace --no-fail-fast" not in command:
+                    raise ValueError("Rust CI command changed; refusing to narrow an unknown shape")
+                step.run = command.rstrip() + "\n"
+                if not proposal["full"]:
+                    expression = " or ".join(f"package(={p})" for p in proposal["packages"])
+                    if not expression:
+                        raise ValueError("empty Rust package selection")
+                    step.run = step.run.rstrip() + " -E " + shlex.quote(expression) + "\n"
+
+
+def families(chosen):
+    groups = {}
+    for job in chosen:
+        # swift build and tests mutate the same .build; iOS shares AgentKit.
+        family = "apple" if job in {"swift-tests", "swift", "ios"} else job
+        groups.setdefault(family, []).append(job)
+    # Start the long critical paths first; light checks use the first freed
+    # worker instead of delaying every heavy family by the wire suite.
+    priority = {"rust": 0, "apple": 1, "android": 2, "rust-lints": 3}
+    return [jobs for family, jobs in sorted(groups.items(), key=lambda item: priority.get(item[0], 4))]
+
+
+def run(chosen, plans, rows, repo, tmp, ctx, logdir, args, run_one_job):
+    """Bounded parallel families, ordered steps, deterministic complete results."""
+    def worker(jobs):
+        own_rows = []
+        failed = False
+        for job in jobs:
+            job_tmp = tmp / job
+            job_tmp.mkdir()
+            try:
+                failed = run_one_job(job, plans, own_rows, repo, job_tmp, ctx, logdir, args) or failed
+            except Exception as exc:
+                own_rows.append((job, "family runner", f"FAIL: {type(exc).__name__}: {exc}", "", ""))
+                failed = True
+        return failed, own_rows
+
+    # Clippy does not consume the binaries/PATH exported by Rust's test setup.
+    # Run its feature variants serially beside the test family. Cargo's build
+    # lock still protects artifacts; test execution can overlap lint compilation.
+    chosen, plans = list(chosen), dict(plans)
+    if "rust" in chosen:
+        lints = [s for s in plans["rust"] if s.run.lstrip().startswith("cargo clippy ")]
+        if lints:
+            plans["rust-lints"] = lints
+            plans["rust"] = [s for s in plans["rust"] if s not in lints]
+            chosen.append("rust-lints")
+    started = time.monotonic()
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = [pool.submit(worker, jobs) for jobs in families(chosen)]
+        failed = False
+        for future in futures:
+            bad, job_rows = future.result()
+            rows.extend(job_rows)
+            failed = bad or failed
+    if "ios" in chosen:
+        rows.append(("ios", "iOS UI smoke", "not run here: CI; use scripts/ios-ui-tests.sh", "", ""))
+    rows.append(("landing", "parallel families wall time", "FAIL" if failed else "pass",
+                 f"{time.monotonic() - started:.2f}", ""))
+    return failed

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Run the CI jobs a lane's change reaches, and print what ran (ov-799).
 
+Plain lane-gate retains full suites; --landing is the local engine policy
+(ov-1185): bounded parallel families, conservative Rust selection against a
+verified green ancestor, release bundle proof left to CI, and warm target kept.
+CI on main remains full proof. Each selection/fallback is saved with step logs.
+
 A lane that says "gated alone" has to have run every full suite CI will run for
 the paths it touched, under the same wrappers (test-leak-check, tmux-leak-check,
 swift-test-guard, nextest --profile ci). That used to be recalled by hand from
@@ -85,6 +90,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import landing_policy  # local-only policy; full CI commands stay in the workflow
 import heavy_lock as hl  # noqa: E402  the machine-wide lock, shared with scripts/heavy
 from heavy_lock import LOCK_POLL, machine_lock  # noqa: E402
 
@@ -679,6 +685,8 @@ def md(cell):
 
 def main(argv):
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
+    ap.add_argument("--landing", action="store_true", help="local landing: parallel families, selected Rust, CI retains release bundle proof")
+    ap.add_argument("--workers", type=int, default=4, choices=range(1, 5), help="maximum concurrent landing families (default 4)")
     ap.add_argument("--base", default="origin/main", help="what the branch is measured against")
     ap.add_argument("--worktree", default=str(ROOT), help="the checkout to gate (default: this one)")
     ap.add_argument("--dry-run", action="store_true", help="print the plan; run nothing")
@@ -725,6 +733,14 @@ def gate(args):
             raise SystemExit(f"lane-gate: no job {j}; jobs are {', '.join(JOBS)}")
     chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
 
+    proposal = None
+    if args.landing:
+        proposal = (landing_policy.rust_selection(repo, args.base, load_module) if "rust" in chosen
+                    else {"full": True, "packages": [], "reasons": ["Rust not reached"]})
+        landing_policy.apply(plans, proposal)
+        print("lane-gate: local landing Rust selection: " + "; ".join(proposal["reasons"]))
+        print(f"lane-gate: landing families: {landing_policy.families(chosen)}; workers: {args.workers}")
+
     # --only (or --skip) leaves out jobs the diff reaches. Say so here, and again in the summary, which is
     # what gets pasted into a report: a summary that reads "all steps passed" must not stand for a gate it skipped.
     left_out = [j for j in JOBS if j in reach and j not in chosen]
@@ -746,6 +762,9 @@ def gate(args):
 
     logdir = pathlib.Path(args.log_dir) if args.log_dir else pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-logs-"))
     logdir.mkdir(parents=True, exist_ok=True)
+    if proposal is not None:
+        import json
+        (logdir / "rust-selection.json").write_text(json.dumps(proposal, indent=2) + "\n")
     rows, failed = [], True  # until run_jobs says otherwise: an exception is a failure
     try:
         failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)
@@ -761,7 +780,7 @@ def gate(args):
         except OSError as e:  # the table is on screen; only the saved copy needs room
             print(f"lane-gate: could not save the summary file: {e.strerror or e}", flush=True)
         shutil.rmtree(tmp, ignore_errors=True)
-    if not failed and not partial and not args.keep_target and not args.dry_run:
+    if not failed and not partial and not args.keep_target and not args.landing and not args.dry_run:
         clean_target_after_pass(repo)
     return 1 if failed else 0
 
@@ -787,6 +806,19 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     # By default one place in line covers all of this gate's heavy jobs, so gates finish one after
     # another, oldest first; releasing between jobs made nine gates each take nine times as long (ov-836).
     with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()):
+        if getattr(args, "landing", False):
+            if between:
+                raise ValueError("--landing cannot release the gate lock between parallel jobs")
+            if any(j in HEAVY for j in chosen) and not args.no_load_wait:
+                wait_for_load()
+            # Wait once before admission, not once per family: our own workers
+            # raise load and must not make later families wait on this gate.
+            import copy
+            admitted = copy.copy(args)
+            admitted.no_load_wait = True
+            if "rust" in chosen:
+                hl.prepare_lane_build(repo)  # trim once, before any worker builds
+            return landing_policy.run(chosen, plans, rows, repo, tmp, ctx, logdir, admitted, run_one_job)
         for j in chosen:
             locked = bool(heavy) and between and j in HEAVY
             with (machine_lock(repo, j) if locked else contextlib.nullcontext()):
@@ -804,8 +836,8 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         wait_for_load()
     env = base_env(repo, tmp, ctx, args.strict_leaks)
     env.update(job_env(j))
-    if j == "rust":  # a lane's target/ stays small: no debug info, a ceiling (ov-837)
-        env.update(hl.prepare_lane_build(repo))
+    if j in {"rust", "rust-lints"}:  # same Cargo profile across parallel Rust workers
+        env.update(hl.lean_cargo_env(repo) if getattr(args, "landing", False) else hl.prepare_lane_build(repo))
     if j == "android" and ctx["steps.jdk21.outputs.path"]:
         env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
     print(f"\n[{j}]", flush=True)
@@ -1437,6 +1469,9 @@ def _self_test():
         print(f"lane-gate self-test: {failure}", file=sys.stderr)
     if failures:
         return 1
+    policy_test = subprocess.run([sys.executable, str(ROOT / "scripts/landing-policy-test.py")])
+    if policy_test.returncode:
+        return policy_test.returncode
     print("lane-gate self-test: ok")
     return 0
 

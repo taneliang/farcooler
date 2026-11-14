@@ -1,0 +1,3358 @@
+{
+  "source": "reports/ov-1110/historical-gate.txt",
+  "scale": 0.01,
+  "limitations": "Historical scheduling replay; excludes queue/load wait, new CI steps, parallel CPU/memory and Cargo lock contention. Not three fresh real gates at current load.",
+  "rust_selection": "full; no test-duration or warm-target saving assumed",
+  "median_before_seconds": 2806.0,
+  "median_replayed_seconds": 790.7570374999999,
+  "trials": [
+    {
+      "trial": 1,
+      "before_seconds": 2806.0,
+      "replayed_wall_seconds": 790.7570374999999,
+      "actual_seconds": 7.907570375,
+      "failed": false,
+      "steps": [
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-tailcat --features linked",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.05621250000000036,
+          "end": 0.05661659999999999,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.057145800000000385,
+          "end": 0.057329100000000355,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+          "source_seconds": 6.0,
+          "replay_seconds": 6.0,
+          "start": 0.057479100000000505,
+          "end": 6.558741600000001,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "xcodebuild -version ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.0617208000000001,
+          "end": 0.06190410000000007,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/macos-test-wrapper-test.sh",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 0.062175000000000424,
+          "end": 8.5438875,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./scripts/build-android-libs.sh",
+          "source_seconds": 54.0,
+          "replay_seconds": 54.0,
+          "start": 0.06859999999999991,
+          "end": 54.571675000000006,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy --workspace --all-targets -- -D warnings",
+          "source_seconds": 37.0,
+          "replay_seconds": 37.0,
+          "start": 0.07134580000000001,
+          "end": 37.5740625,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+          "source_seconds": 24.0,
+          "replay_seconds": 24.0,
+          "start": 6.5607416,
+          "end": 31.064345799999998,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/wait-for-unlock-test.sh",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 8.545625000000001,
+          "end": 13.048066599999999,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/swift-test-guard-test.sh",
+          "source_seconds": 32.0,
+          "replay_seconds": 32.0,
+          "start": 13.0511125,
+          "end": 45.5541791,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 31.0703666,
+          "end": 36.5732,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 36.577495799999994,
+          "end": 37.5964125,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 37.5769416,
+          "end": 42.0797416,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 37.597787499999995,
+          "end": 39.9382666,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 39.941224999999996,
+          "end": 41.1649666,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-daemon --features tailcat --all-targets",
+          "source_seconds": 27.0,
+          "replay_seconds": 27.0,
+          "start": 41.167275,
+          "end": 68.6944416,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 42.0827958,
+          "end": 42.0833125,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+          "source_seconds": 26.0,
+          "replay_seconds": 26.0,
+          "start": 42.0842875,
+          "end": 68.6505291,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/test-leak-check.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 45.557254099999994,
+          "end": 54.0404208,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/mac-capture-stop-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 54.0474875,
+          "end": 55.2969375,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "cargo build -p farcooler-jni",
+          "source_seconds": 14.0,
+          "replay_seconds": 14.0,
+          "start": 54.5756291,
+          "end": 68.9571083,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/capture-duplicates-test.sh",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 55.2995875,
+          "end": 57.80306660000001,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "cargo build --release -p farcooler-vt -p farcooler-client",
+          "source_seconds": 150.0,
+          "replay_seconds": 150.0,
+          "start": 57.807962499999995,
+          "end": 208.1225416,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 26.0,
+          "replay_seconds": 26.0,
+          "start": 68.65756660000001,
+          "end": 95.09782500000001,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo build --workspace --bins ...",
+          "source_seconds": 21.0,
+          "replay_seconds": 21.0,
+          "start": 68.69731660000001,
+          "end": 90.1215458,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew testInstrumentedUnitTest \"-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug\"",
+          "source_seconds": 30.0,
+          "replay_seconds": 30.0,
+          "start": 68.9605416,
+          "end": 99.15249580000001,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/tmux-leak-check.py --self-test",
+          "source_seconds": 22.0,
+          "replay_seconds": 22.0,
+          "start": 90.1280458,
+          "end": 112.30197079999999,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 19.0,
+          "replay_seconds": 19.0,
+          "start": 95.1024458,
+          "end": 114.6043125,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew assembleDebug assembleAndroidTest",
+          "source_seconds": 36.0,
+          "replay_seconds": 36.0,
+          "start": 99.1586666,
+          "end": 135.66148330000001,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/tmux-stale-sockets.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 112.3061791,
+          "end": 112.30643330000001,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/test-leak-check.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 112.3067375,
+          "end": 120.61959580000001,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 9.0,
+          "replay_seconds": 9.0,
+          "start": 114.60551249999999,
+          "end": 124.1074416,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace",
+          "source_seconds": 665.0,
+          "replay_seconds": 665.0,
+          "start": 120.6214333,
+          "end": 786.1240041,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 124.1086458,
+          "end": 128.34273330000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 128.3575541,
+          "end": 129.52077079999998,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel preview",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.5218208,
+          "end": 129.52195,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel stable",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.522175,
+          "end": 129.52222500000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel canary",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.5223708,
+          "end": 129.5224125,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-baseline-test.sh",
+          "source_seconds": 10.0,
+          "replay_seconds": 10.0,
+          "start": 129.5225458,
+          "end": 140.02469580000002,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew assembleRelease",
+          "source_seconds": 106.0,
+          "replay_seconds": 106.0,
+          "start": 135.6631833,
+          "end": 242.1660541,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-shipped.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 140.0264541,
+          "end": 140.026725,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-plan.py --self-test",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 140.0271541,
+          "end": 142.5294958,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/device-keys-readiness.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 142.53070830000001,
+          "end": 142.53094159999998,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/site-proof.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 142.5313666,
+          "end": 142.5315125,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ci-changes.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 142.5320375,
+          "end": 143.7834208,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 143.78419159999999,
+          "end": 152.2853125,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test",
+          "source_seconds": 17.0,
+          "replay_seconds": 17.0,
+          "start": 152.28626250000002,
+          "end": 169.7890458,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/notarytool-retry.sh --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 169.7918291,
+          "end": 171.04326659999998,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/version-test.sh",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 171.0440791,
+          "end": 176.5449416,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/workos-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 176.5457625,
+          "end": 177.5602125,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/appcast-test.sh",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 177.5631208,
+          "end": 177.5634291,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ci-flake-tally-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 177.56395,
+          "end": 178.81504999999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-ui-retry-test.sh",
+          "source_seconds": 56.0,
+          "replay_seconds": 56.0,
+          "start": 178.8156375,
+          "end": 235.3173166,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit",
+          "source_seconds": 88.0,
+          "replay_seconds": 88.0,
+          "start": 208.1278875,
+          "end": 296.629725,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-ui-lease-test.sh",
+          "source_seconds": 63.0,
+          "replay_seconds": 63.0,
+          "start": 235.3193458,
+          "end": 298.8207708,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew testInstrumentedUnitTest \\ ...",
+          "source_seconds": 324.0,
+          "replay_seconds": 324.0,
+          "start": 242.1697041,
+          "end": 566.6298416,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./apps/macos/test.sh",
+          "source_seconds": 429.0,
+          "replay_seconds": 429.0,
+          "start": 296.6314833,
+          "end": 725.9167916,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/copy-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 298.8219666,
+          "end": 298.8220875,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-leak-check.py --lint",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 298.82225409999995,
+          "end": 300.0733666,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/copy-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 300.0746583,
+          "end": 301.2413958,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/shared-core-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 301.2430375,
+          "end": 301.2431708,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/shared-core-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 301.2433333,
+          "end": 302.328175,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "git fetch --no-tags origin main ...",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 302.3290083,
+          "end": 305.8300541,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capability-names.py --self-test ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.83113330000003,
+          "end": 305.8312375,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/claude-prices.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.83140000000003,
+          "end": 305.83144999999996,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/openai-prices.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.8315958,
+          "end": 305.8316333,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/derp-hosts-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.83176660000004,
+          "end": 305.8318083,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/file-size-budget.py --self-test ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.8319375,
+          "end": 305.83197079999997,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/plan-layer-lint.py --self-test ...",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 305.8322166,
+          "end": 307.0705791,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/page-layer-lint.py --self-test ...",
+          "source_seconds": 16.0,
+          "replay_seconds": 16.0,
+          "start": 307.0725166,
+          "end": 323.57395,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/swallow-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.5755875,
+          "end": 323.5757541,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/swallow-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.575925,
+          "end": 323.5759625,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/visual-tokens-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.5760916,
+          "end": 323.5761208,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/visual-tokens-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 323.57623329999996,
+          "end": 324.8269208,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/pixel-scale-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.82784580000003,
+          "end": 324.82794579999995,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/pixel-scale-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.8280833,
+          "end": 324.82811250000003,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-window-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.8282291,
+          "end": 324.8282583,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-window-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.8283666,
+          "end": 324.8283958,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/runloop-spin-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.8285,
+          "end": 324.8285291,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/runloop-spin-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.82866659999996,
+          "end": 324.82869999999997,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capture-window-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.82892499999997,
+          "end": 324.8289583,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capture-window-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.8290666,
+          "end": 324.8290958,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/fresh-script-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.82920409999997,
+          "end": 324.8292333,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/fresh-script-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.82933749999995,
+          "end": 324.829375,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/charter-intercept-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.829475,
+          "end": 324.8295083,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/charter-intercept-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.8296083,
+          "end": 324.8296375,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-agentkit-subset-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 324.82974160000003,
+          "end": 324.8297708,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-agentkit-subset-lint.py",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 324.829875,
+          "end": 327.33108749999997,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/migration-lint.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 327.3330333,
+          "end": 328.58435,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/migration-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 328.58515,
+          "end": 328.5852333,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "if [ \"$(typeshare --version 2>/dev/null)\" != \"typeshare 1.13.4\" ]; then ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 328.58536250000003,
+          "end": 328.5854166,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/gen-wire-types.sh ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 328.58559579999996,
+          "end": 328.58567500000004,
+          "skip": null
+        },
+        {
+          "job": "doc-comments",
+          "command": "./scripts/doc-comment-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 328.6054416,
+          "end": 328.60556249999996,
+          "skip": null
+        },
+        {
+          "job": "doc-comments",
+          "command": "./scripts/doc-comment-check.py --base origin/main --head HEAD",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 328.6058291,
+          "end": 328.6058666,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npm ci",
+          "source_seconds": 6.0,
+          "replay_seconds": 6.0,
+          "start": 328.6108041,
+          "end": 335.0877833,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npx tsc --noEmit",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 335.0885333,
+          "end": 336.34041659999997,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npm test",
+          "source_seconds": 14.0,
+          "replay_seconds": 14.0,
+          "start": 336.3421791,
+          "end": 350.8434875,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npx wrangler deploy --dry-run --outdir /tmp/relay-build",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 350.8451958,
+          "end": 352.0968625,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 352.1111541,
+          "end": 355.3928666,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "./scripts/web-client-tree-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 355.3944,
+          "end": 355.39459999999997,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "./scripts/web-client-tree-check.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 355.3950541,
+          "end": 355.3951583,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm ci",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 355.3955333,
+          "end": 360.66772080000004,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npx tsc --noEmit -p tsconfig.json",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 360.6691666,
+          "end": 360.66930410000003,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm test",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 360.66957080000003,
+          "end": 363.1715958,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm run test:workflow",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 363.1742416,
+          "end": 363.17454580000003,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "cargo test --locked --manifest-path ../../crates/web/Cargo.toml",
+          "source_seconds": 36.0,
+          "replay_seconds": 36.0,
+          "start": 363.1748708,
+          "end": 399.3452875,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "GOOS=js GOARCH=wasm go test -exec \"$(go env GOROOT)/lib/wasm/go_js_wasm_exec\" .",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 399.34748329999996,
+          "end": 404.4607875,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "node scripts/size-gate.mjs --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 404.4630541,
+          "end": 404.46328750000004,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npx tsc --noEmit -p tsconfig.client.json",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 404.46360830000003,
+          "end": 405.7151166,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "node test/browser/plan-render-check.mjs",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 405.71676659999997,
+          "end": 406.7859416,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "python3 - <<'PY' ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 566.6313791,
+          "end": 566.6315457999999,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "xcodebuild -version ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 725.9247333,
+          "end": 725.9248624999999,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "name=\"$(scripts/version.sh app-name)\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.9251375,
+          "end": 725.9252583,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "apps/macos/build-app.sh",
+          "source_seconds": 334.0,
+          "replay_seconds": 0,
+          "start": 725.9254333,
+          "end": 725.9254416,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "scripts/tunnel-smoke.sh \"apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd\"",
+          "source_seconds": 1.0,
+          "replay_seconds": 0,
+          "start": 725.9255708000001,
+          "end": 725.925575,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "out=\"$(\"apps/macos/build/$APP_NAME.app/Contents/Resources/farcooler\" runner mint-node-key)\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.9257041,
+          "end": 725.9257083,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.925825,
+          "end": 725.9258416,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.9259458,
+          "end": 725.9259540999999,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/icon-test.sh",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 725.9260625000001,
+          "end": 728.4270375,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/sparkle-key-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 728.4291999999999,
+          "end": 729.6800625000001,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/gh-download-test.sh",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 729.6812541,
+          "end": 733.1825791,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/macos-entitlements-test.sh",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 733.1844208,
+          "end": 733.1845582999999,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo test --workspace --doc",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 786.1290875,
+          "end": 790.6304125,
+          "skip": null
+        }
+      ]
+    },
+    {
+      "trial": 2,
+      "before_seconds": 2806.0,
+      "replayed_wall_seconds": 791.0316999999999,
+      "actual_seconds": 7.910316999999999,
+      "failed": false,
+      "steps": [
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-tailcat --features linked",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.031745899999968685,
+          "end": 0.03206669999995526,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.032549999999975654,
+          "end": 0.03271670000000171,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+          "source_seconds": 6.0,
+          "replay_seconds": 6.0,
+          "start": 0.03294589999995878,
+          "end": 6.524499999999911,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./scripts/build-android-libs.sh",
+          "source_seconds": 54.0,
+          "replay_seconds": 54.0,
+          "start": 0.05065840000000321,
+          "end": 54.5517834,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "xcodebuild -version ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.05118340000000998,
+          "end": 0.0513624999999962,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/macos-test-wrapper-test.sh",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 0.05195000000002281,
+          "end": 8.190491699999924,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy --workspace --all-targets -- -D warnings",
+          "source_seconds": 37.0,
+          "replay_seconds": 37.0,
+          "start": 0.05800420000001694,
+          "end": 37.42616250000008,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+          "source_seconds": 24.0,
+          "replay_seconds": 24.0,
+          "start": 6.525987500000063,
+          "end": 31.026908399999975,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/wait-for-unlock-test.sh",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 8.191558400000076,
+          "end": 12.698858399999935,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/swift-test-guard-test.sh",
+          "source_seconds": 32.0,
+          "replay_seconds": 32.0,
+          "start": 12.702183400000067,
+          "end": 45.203674999999954,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 31.02807090000006,
+          "end": 36.4613125,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 36.462383399999965,
+          "end": 37.71321669999992,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 37.42704999999997,
+          "end": 41.927983399999924,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 37.71350840000007,
+          "end": 39.887162499999995,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 39.88776670000007,
+          "end": 41.13865000000008,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-daemon --features tailcat --all-targets",
+          "source_seconds": 27.0,
+          "replay_seconds": 27.0,
+          "start": 41.13906249999992,
+          "end": 68.63967090000003,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 41.928466699999944,
+          "end": 41.92855840000007,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+          "source_seconds": 26.0,
+          "replay_seconds": 26.0,
+          "start": 41.92873749999997,
+          "end": 68.30458339999996,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/test-leak-check.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 45.20425839999991,
+          "end": 53.61413749999997,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/mac-capture-stop-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 53.61496250000002,
+          "end": 54.86612500000003,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "cargo build -p farcooler-jni",
+          "source_seconds": 14.0,
+          "replay_seconds": 14.0,
+          "start": 54.55231250000008,
+          "end": 69.02194999999995,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/capture-duplicates-test.sh",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 54.86661670000004,
+          "end": 57.36715419999996,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "cargo build --release -p farcooler-vt -p farcooler-client",
+          "source_seconds": 150.0,
+          "replay_seconds": 150.0,
+          "start": 57.36757499999996,
+          "end": 207.58340840000002,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 26.0,
+          "replay_seconds": 26.0,
+          "start": 68.30565419999992,
+          "end": 94.80665839999993,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo build --workspace --bins ...",
+          "source_seconds": 21.0,
+          "replay_seconds": 21.0,
+          "start": 68.64026669999994,
+          "end": 90.14152499999994,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew testInstrumentedUnitTest \"-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug\"",
+          "source_seconds": 30.0,
+          "replay_seconds": 30.0,
+          "start": 69.02231669999992,
+          "end": 99.52290839999999,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/tmux-leak-check.py --self-test",
+          "source_seconds": 22.0,
+          "replay_seconds": 22.0,
+          "start": 90.14292499999996,
+          "end": 112.64387090000002,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 19.0,
+          "replay_seconds": 19.0,
+          "start": 94.80797089999999,
+          "end": 114.24981249999995,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew assembleDebug assembleAndroidTest",
+          "source_seconds": 36.0,
+          "replay_seconds": 36.0,
+          "start": 99.52376669999995,
+          "end": 136.02443750000006,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/tmux-stale-sockets.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 112.64488749999994,
+          "end": 112.6450042,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/test-leak-check.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 112.64579589999997,
+          "end": 120.91645419999999,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 9.0,
+          "replay_seconds": 9.0,
+          "start": 114.2503584,
+          "end": 123.75148340000005,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace",
+          "source_seconds": 665.0,
+          "replay_seconds": 665.0,
+          "start": 120.91718749999991,
+          "end": 786.4194375,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 123.75215839999996,
+          "end": 128.25282090000005,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 128.26220839999996,
+          "end": 129.51277500000006,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel preview",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.51342920000002,
+          "end": 129.51355420000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel stable",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.51375840000009,
+          "end": 129.51381249999994,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel canary",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.51395839999992,
+          "end": 129.5140042,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-baseline-test.sh",
+          "source_seconds": 10.0,
+          "replay_seconds": 10.0,
+          "start": 129.51414999999997,
+          "end": 140.01473749999994,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew assembleRelease",
+          "source_seconds": 106.0,
+          "replay_seconds": 106.0,
+          "start": 136.02547089999993,
+          "end": 242.52695840000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-shipped.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 140.0152834,
+          "end": 140.01538339999993,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-plan.py --self-test",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 140.01557089999997,
+          "end": 142.51673749999992,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/device-keys-readiness.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 142.51731250000006,
+          "end": 142.5174,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/site-proof.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 142.51753340000005,
+          "end": 142.51757499999994,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ci-changes.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 142.51773750000004,
+          "end": 143.76880839999995,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 143.76925840000004,
+          "end": 152.07599589999992,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test",
+          "source_seconds": 17.0,
+          "replay_seconds": 17.0,
+          "start": 152.0769916999999,
+          "end": 169.43617090000006,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/notarytool-retry.sh --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 169.43835840000006,
+          "end": 170.53653339999997,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/version-test.sh",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 170.53742920000002,
+          "end": 175.8154749999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/workos-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 175.81627920000003,
+          "end": 177.02841669999998,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/appcast-test.sh",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 177.028825,
+          "end": 177.0289042,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ci-flake-tally-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 177.0290417,
+          "end": 178.18838340000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-ui-retry-test.sh",
+          "source_seconds": 56.0,
+          "replay_seconds": 56.0,
+          "start": 178.1887459,
+          "end": 234.4611917,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit",
+          "source_seconds": 88.0,
+          "replay_seconds": 88.0,
+          "start": 207.58459170000006,
+          "end": 296.0252125,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-ui-lease-test.sh",
+          "source_seconds": 63.0,
+          "replay_seconds": 63.0,
+          "start": 234.46281669999996,
+          "end": 297.8898834000001,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew testInstrumentedUnitTest \\ ...",
+          "source_seconds": 324.0,
+          "replay_seconds": 324.0,
+          "start": 242.52839999999995,
+          "end": 566.8832874999999,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./apps/macos/test.sh",
+          "source_seconds": 429.0,
+          "replay_seconds": 429.0,
+          "start": 296.02683340000004,
+          "end": 725.5305083999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/copy-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 297.89083339999996,
+          "end": 297.89091669999993,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-leak-check.py --lint",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 297.8910666999999,
+          "end": 299.12744169999996,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/copy-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 299.12811250000004,
+          "end": 300.37864590000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/shared-core-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 300.3790209,
+          "end": 300.37908749999997,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/shared-core-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 300.37921670000003,
+          "end": 301.5215874999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "git fetch --no-tags origin main ...",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 301.52230840000004,
+          "end": 305.02330420000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capability-names.py --self-test ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.0238792,
+          "end": 305.02395,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/claude-prices.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.0241166999999,
+          "end": 305.0241625,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/openai-prices.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.0242875,
+          "end": 305.0243167,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/derp-hosts-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.02442500000006,
+          "end": 305.02445839999996,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/file-size-budget.py --self-test ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 305.02456670000004,
+          "end": 305.02459589999995,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/plan-layer-lint.py --self-test ...",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 305.02480419999995,
+          "end": 306.27595840000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/page-layer-lint.py --self-test ...",
+          "source_seconds": 16.0,
+          "replay_seconds": 16.0,
+          "start": 306.2764791999999,
+          "end": 322.6920375000001,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/swallow-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 322.69327499999997,
+          "end": 322.69338750000003,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/swallow-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 322.69354169999997,
+          "end": 322.6935749999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/visual-tokens-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 322.69370419999996,
+          "end": 322.69374170000003,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/visual-tokens-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 322.6938625000001,
+          "end": 323.9446041999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/pixel-scale-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.94503750000007,
+          "end": 323.9451000000001,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/pixel-scale-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.9452291999999,
+          "end": 323.9452667,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-window-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.9453749999999,
+          "end": 323.9454084,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-window-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.9455166999999,
+          "end": 323.9455542,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/runloop-spin-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.9456583999999,
+          "end": 323.9456875,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/runloop-spin-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.94582090000006,
+          "end": 323.94584999999995,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capture-window-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.94607089999994,
+          "end": 323.94610420000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capture-window-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.9462166999999,
+          "end": 323.9462459,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/fresh-script-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.94634999999994,
+          "end": 323.9463792,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/fresh-script-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.94648749999993,
+          "end": 323.9465167000001,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/charter-intercept-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.94662089999997,
+          "end": 323.9466500000001,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/charter-intercept-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.94675839999996,
+          "end": 323.9467875000001,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-agentkit-subset-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.9468875,
+          "end": 323.9469208999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-agentkit-subset-lint.py",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 323.94702090000004,
+          "end": 326.4476084,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/migration-lint.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 326.4480000000001,
+          "end": 327.699175,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/migration-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 327.6997249999999,
+          "end": 327.69980840000005,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "if [ \"$(typeshare --version 2>/dev/null)\" != \"typeshare 1.13.4\" ]; then ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 327.6999667,
+          "end": 327.7000041999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/gen-wire-types.sh ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 327.70014589999994,
+          "end": 327.7001792,
+          "skip": null
+        },
+        {
+          "job": "doc-comments",
+          "command": "./scripts/doc-comment-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 327.70912919999995,
+          "end": 327.70920419999993,
+          "skip": null
+        },
+        {
+          "job": "doc-comments",
+          "command": "./scripts/doc-comment-check.py --base origin/main --head HEAD",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 327.70942089999994,
+          "end": 327.7094584,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npm ci",
+          "source_seconds": 6.0,
+          "replay_seconds": 6.0,
+          "start": 327.7133041999999,
+          "end": 334.21408340000005,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npx tsc --noEmit",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 334.21545839999993,
+          "end": 335.46639999999996,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npm test",
+          "source_seconds": 14.0,
+          "replay_seconds": 14.0,
+          "start": 335.4671084,
+          "end": 349.9043042,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npx wrangler deploy --dry-run --outdir /tmp/relay-build",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 349.9054209,
+          "end": 350.9159499999999,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 350.92641669999995,
+          "end": 354.4269249999999,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "./scripts/web-client-tree-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 354.4275541999999,
+          "end": 354.42763339999993,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "./scripts/web-client-tree-check.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 354.4277749999999,
+          "end": 354.4278209,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm ci",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 354.42793750000004,
+          "end": 359.90431249999995,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npx tsc --noEmit -p tsconfig.json",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 359.9052834,
+          "end": 359.90537499999994,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm test",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 359.9055667,
+          "end": 362.35444169999994,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm run test:workflow",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 362.35525000000007,
+          "end": 362.35535419999997,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "cargo test --locked --manifest-path ../../crates/web/Cargo.toml",
+          "source_seconds": 36.0,
+          "replay_seconds": 36.0,
+          "start": 362.3555375,
+          "end": 398.68844590000003,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "GOOS=js GOARCH=wasm go test -exec \"$(go env GOROOT)/lib/wasm/go_js_wasm_exec\" .",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 398.6901,
+          "end": 403.77574589999995,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "node scripts/size-gate.mjs --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 403.77719590000004,
+          "end": 403.7773166999999,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npx tsc --noEmit -p tsconfig.client.json",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 403.7775084,
+          "end": 404.90411250000005,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "node test/browser/plan-render-check.mjs",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 404.9060084000001,
+          "end": 406.0252792,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "python3 - <<'PY' ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 566.8898292,
+          "end": 566.8900624999999,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "xcodebuild -version ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 725.5521542,
+          "end": 725.5523709,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "name=\"$(scripts/version.sh app-name)\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.5528667,
+          "end": 725.5528916999999,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "apps/macos/build-app.sh",
+          "source_seconds": 334.0,
+          "replay_seconds": 0,
+          "start": 725.5531749999999,
+          "end": 725.5531833999999,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "scripts/tunnel-smoke.sh \"apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd\"",
+          "source_seconds": 1.0,
+          "replay_seconds": 0,
+          "start": 725.5534042,
+          "end": 725.5534167000001,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "out=\"$(\"apps/macos/build/$APP_NAME.app/Contents/Resources/farcooler\" runner mint-node-key)\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.55365,
+          "end": 725.5536583999999,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.5538709,
+          "end": 725.5538791999999,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.5540874999999,
+          "end": 725.5540958999999,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/icon-test.sh",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 725.5543209000001,
+          "end": 728.0550291999999,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/sparkle-key-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 728.0562041999999,
+          "end": 729.3077584,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/gh-download-test.sh",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 729.3086875,
+          "end": 732.8129834,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/macos-entitlements-test.sh",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 732.8173916999999,
+          "end": 732.81775,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo test --workspace --doc",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 786.4230084000001,
+          "end": 790.9257709,
+          "skip": null
+        }
+      ]
+    },
+    {
+      "trial": 3,
+      "before_seconds": 2806.0,
+      "replayed_wall_seconds": 790.1559084000002,
+      "actual_seconds": 7.901559084000002,
+      "failed": false,
+      "steps": [
+        {
+          "job": "swift-tests",
+          "command": "xcodebuild -version ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.03190000000010684,
+          "end": 0.03223340000015895,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/macos-test-wrapper-test.sh",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 0.03274590000010846,
+          "end": 8.325183400000036,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-tailcat --features linked",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.03661670000010275,
+          "end": 0.03683340000009139,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 0.037104200000115384,
+          "end": 0.03726670000006038,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+          "source_seconds": 6.0,
+          "replay_seconds": 6.0,
+          "start": 0.03742500000001314,
+          "end": 6.3687625000000025,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./scripts/build-android-libs.sh",
+          "source_seconds": 54.0,
+          "replay_seconds": 54.0,
+          "start": 0.03977090000013561,
+          "end": 54.54237920000011,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy --workspace --all-targets -- -D warnings",
+          "source_seconds": 37.0,
+          "replay_seconds": 37.0,
+          "start": 0.04327090000000311,
+          "end": 37.54581250000015,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+          "source_seconds": 24.0,
+          "replay_seconds": 24.0,
+          "start": 6.369579200000075,
+          "end": 30.8731667,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/wait-for-unlock-test.sh",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 8.325779200000127,
+          "end": 12.826829200000134,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/swift-test-guard-test.sh",
+          "source_seconds": 32.0,
+          "replay_seconds": 32.0,
+          "start": 12.82757090000004,
+          "end": 45.329120899999964,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 30.879529199999922,
+          "end": 36.38143340000006,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 36.384741700000234,
+          "end": 37.40495000000017,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 37.40691250000019,
+          "end": 39.44403340000022,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 37.54852920000005,
+          "end": 42.01780839999998,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 39.447912500000015,
+          "end": 40.70007500000017,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo check -p farcooler-daemon --features tailcat --all-targets",
+          "source_seconds": 27.0,
+          "replay_seconds": 27.0,
+          "start": 40.702416699999944,
+          "end": 68.12073749999996,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 42.0194875,
+          "end": 42.01984170000017,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+          "source_seconds": 26.0,
+          "replay_seconds": 26.0,
+          "start": 42.020649999999904,
+          "end": 68.32671670000003,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/test-leak-check.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 45.33155420000021,
+          "end": 53.48808339999991,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/mac-capture-stop-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 53.49243749999992,
+          "end": 54.744208400000005,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "cargo build -p farcooler-jni",
+          "source_seconds": 14.0,
+          "replay_seconds": 14.0,
+          "start": 54.5456999999999,
+          "end": 68.89608339999995,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/capture-duplicates-test.sh",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 54.745720900000094,
+          "end": 57.24701670000023,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "cargo build --release -p farcooler-vt -p farcooler-client",
+          "source_seconds": 150.0,
+          "replay_seconds": 150.0,
+          "start": 57.24833340000011,
+          "end": 207.64022920000008,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo build --workspace --bins ...",
+          "source_seconds": 21.0,
+          "replay_seconds": 21.0,
+          "start": 68.12503750000012,
+          "end": 89.35614590000007,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 26.0,
+          "replay_seconds": 26.0,
+          "start": 68.3300083999999,
+          "end": 94.57900420000023,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew testInstrumentedUnitTest \"-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug\"",
+          "source_seconds": 30.0,
+          "replay_seconds": 30.0,
+          "start": 68.89898340000009,
+          "end": 99.40082920000002,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/tmux-leak-check.py --self-test",
+          "source_seconds": 22.0,
+          "replay_seconds": 22.0,
+          "start": 89.36172090000021,
+          "end": 111.86605000000007,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 19.0,
+          "replay_seconds": 19.0,
+          "start": 94.5824709,
+          "end": 114.0847959000002,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew assembleDebug assembleAndroidTest",
+          "source_seconds": 36.0,
+          "replay_seconds": 36.0,
+          "start": 99.40263340000008,
+          "end": 135.90563340000017,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/tmux-stale-sockets.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 111.86915000000006,
+          "end": 111.86940420000013,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/test-leak-check.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 111.86973340000002,
+          "end": 120.37270840000005,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 9.0,
+          "replay_seconds": 9.0,
+          "start": 114.08641670000002,
+          "end": 123.5898167000002,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace",
+          "source_seconds": 665.0,
+          "replay_seconds": 665.0,
+          "start": 120.37749590000004,
+          "end": 785.4755624999999,
+          "skip": null
+        },
+        {
+          "job": "rust-lints",
+          "command": "cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 123.59631250000014,
+          "end": 128.09913749999993,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 128.1494459000001,
+          "end": 129.3423292,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel preview",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.34533340000021,
+          "end": 129.34578750000014,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel stable",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.34727499999994,
+          "end": 129.3475292,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/proto-lint.py --channel canary",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 129.34818340000012,
+          "end": 129.34840839999993,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-baseline-test.sh",
+          "source_seconds": 10.0,
+          "replay_seconds": 10.0,
+          "start": 129.3491208999999,
+          "end": 139.51367500000023,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew assembleRelease",
+          "source_seconds": 106.0,
+          "replay_seconds": 106.0,
+          "start": 135.90915000000015,
+          "end": 242.09646669999998,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-shipped.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 139.51741670000004,
+          "end": 139.51796670000007,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/canary-plan.py --self-test",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 139.5189834,
+          "end": 142.02129170000006,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/device-keys-readiness.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 142.02480000000008,
+          "end": 142.02550420000009,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/site-proof.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 142.02645840000017,
+          "end": 142.0268,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ci-changes.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 142.02780839999994,
+          "end": 143.1313166999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test",
+          "source_seconds": 8.0,
+          "replay_seconds": 8.0,
+          "start": 143.13388750000016,
+          "end": 151.58836670000005,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test",
+          "source_seconds": 17.0,
+          "replay_seconds": 17.0,
+          "start": 151.5941999999999,
+          "end": 169.09730839999995,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/notarytool-retry.sh --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 169.10279999999992,
+          "end": 170.26369589999993,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/version-test.sh",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 170.26894590000018,
+          "end": 175.77223340000003,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/workos-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 175.77726250000012,
+          "end": 176.8300374999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/appcast-test.sh",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 176.83304590000012,
+          "end": 176.8334834000001,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ci-flake-tally-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 176.83438339999995,
+          "end": 177.8650209000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-ui-retry-test.sh",
+          "source_seconds": 56.0,
+          "replay_seconds": 56.0,
+          "start": 177.86818340000002,
+          "end": 234.3734125000001,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit",
+          "source_seconds": 88.0,
+          "replay_seconds": 88.0,
+          "start": 207.6420917,
+          "end": 295.9456750000001,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-ui-lease-test.sh",
+          "source_seconds": 63.0,
+          "replay_seconds": 63.0,
+          "start": 234.3774917000001,
+          "end": 297.532275,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "./gradlew testInstrumentedUnitTest \\ ...",
+          "source_seconds": 324.0,
+          "replay_seconds": 324.0,
+          "start": 242.10197089999994,
+          "end": 566.5453750000001,
+          "skip": null
+        },
+        {
+          "job": "swift-tests",
+          "command": "./apps/macos/test.sh",
+          "source_seconds": 429.0,
+          "replay_seconds": 429.0,
+          "start": 295.94924169999996,
+          "end": 725.4537625,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/copy-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 297.53347920000016,
+          "end": 297.5337249999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-leak-check.py --lint",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 297.5341625000002,
+          "end": 298.78501670000014,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/copy-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 298.7856917000002,
+          "end": 299.8845209000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/shared-core-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 299.8853125,
+          "end": 299.8855167000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/shared-core-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 299.8859375000002,
+          "end": 301.1368417,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "git fetch --no-tags origin main ...",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 301.1377459000002,
+          "end": 304.3803125,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capability-names.py --self-test ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 304.3851125,
+          "end": 304.38542920000026,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/claude-prices.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 304.3857917,
+          "end": 304.38592500000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/openai-prices.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 304.38624999999996,
+          "end": 304.3863667,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/derp-hosts-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 304.38663340000005,
+          "end": 304.3867084000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/file-size-budget.py --self-test ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 304.3869583999999,
+          "end": 304.3870709,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/plan-layer-lint.py --self-test ...",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 304.3876749999999,
+          "end": 305.6390541999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/page-layer-lint.py --self-test ...",
+          "source_seconds": 16.0,
+          "replay_seconds": 16.0,
+          "start": 305.6414167,
+          "end": 322.0710917000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/swallow-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 322.0762834000002,
+          "end": 322.07687090000013,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/swallow-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 322.0777999999999,
+          "end": 322.07802090000007,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/visual-tokens-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 322.07886670000005,
+          "end": 322.0791709,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/visual-tokens-lint.py",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 322.0799792000001,
+          "end": 323.33242920000026,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/pixel-scale-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3368125000002,
+          "end": 323.33735840000026,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/pixel-scale-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.33822920000017,
+          "end": 323.3384583999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-window-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.33922090000016,
+          "end": 323.33944589999993,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/test-window-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3401750000002,
+          "end": 323.34050000000013,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/runloop-spin-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.34126669999995,
+          "end": 323.34148340000013,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/runloop-spin-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.34256670000025,
+          "end": 323.3428,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capture-window-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3441334000002,
+          "end": 323.3443833999999,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/capture-window-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3452,
+          "end": 323.3454042000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/fresh-script-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3461042000002,
+          "end": 323.34630000000004,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/fresh-script-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3470209,
+          "end": 323.3472292000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/charter-intercept-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3479209000002,
+          "end": 323.3481417,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/charter-intercept-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3489167000002,
+          "end": 323.34911250000005,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-agentkit-subset-lint.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 323.3498624999999,
+          "end": 323.35005840000014,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/ios-agentkit-subset-lint.py",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 323.35080000000005,
+          "end": 325.66772089999995,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/migration-lint.py --self-test",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 325.6701834000001,
+          "end": 326.8353417,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/migration-lint.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 326.8372083999999,
+          "end": 326.8375250000002,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "if [ \"$(typeshare --version 2>/dev/null)\" != \"typeshare 1.13.4\" ]; then ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 326.8383374999999,
+          "end": 326.83856670000006,
+          "skip": null
+        },
+        {
+          "job": "wire",
+          "command": "./scripts/gen-wire-types.sh ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 326.83943339999996,
+          "end": 326.83963750000015,
+          "skip": null
+        },
+        {
+          "job": "doc-comments",
+          "command": "./scripts/doc-comment-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 326.8900709,
+          "end": 326.89044590000015,
+          "skip": null
+        },
+        {
+          "job": "doc-comments",
+          "command": "./scripts/doc-comment-check.py --base origin/main --head HEAD",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 326.8916583999999,
+          "end": 326.8919209,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npm ci",
+          "source_seconds": 6.0,
+          "replay_seconds": 6.0,
+          "start": 326.9154458999999,
+          "end": 333.4183250000002,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npx tsc --noEmit",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 333.42262500000004,
+          "end": 334.6742167000002,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npm test",
+          "source_seconds": 14.0,
+          "replay_seconds": 14.0,
+          "start": 334.67678340000015,
+          "end": 348.78730840000003,
+          "skip": null
+        },
+        {
+          "job": "relay",
+          "command": "npx wrangler deploy --dry-run --outdir /tmp/relay-build",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 348.7934041999999,
+          "end": 349.9218209000002,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 349.983125,
+          "end": 353.2977542000001,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "./scripts/web-client-tree-check.py --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 353.3048708999999,
+          "end": 353.3054667000002,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "./scripts/web-client-tree-check.py",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 353.3061667000002,
+          "end": 353.3064208999999,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm ci",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 353.3069666999999,
+          "end": 358.6087584000001,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npx tsc --noEmit -p tsconfig.json",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 358.61458749999997,
+          "end": 358.6151334,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm test",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 358.6155958999999,
+          "end": 361.11893340000023,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npm run test:workflow",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 361.12565419999993,
+          "end": 361.1262291999999,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "cargo test --locked --manifest-path ../../crates/web/Cargo.toml",
+          "source_seconds": 36.0,
+          "replay_seconds": 36.0,
+          "start": 361.1266834000002,
+          "end": 397.52378750000014,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "GOOS=js GOARCH=wasm go test -exec \"$(go env GOROOT)/lib/wasm/go_js_wasm_exec\" .",
+          "source_seconds": 5.0,
+          "replay_seconds": 5.0,
+          "start": 397.52732920000005,
+          "end": 402.6546166999999,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "node scripts/size-gate.mjs --self-test",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 402.6590209000002,
+          "end": 402.65939589999994,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "npx tsc --noEmit -p tsconfig.client.json",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 402.65973340000016,
+          "end": 403.8197084,
+          "skip": null
+        },
+        {
+          "job": "web",
+          "command": "node test/browser/plan-render-check.mjs",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 403.82352089999995,
+          "end": 405.07440840000015,
+          "skip": null
+        },
+        {
+          "job": "android",
+          "command": "python3 - <<'PY' ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 566.5572583999999,
+          "end": 566.5578084,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "xcodebuild -version ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 725.5038084000003,
+          "end": 725.5045375000002,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "name=\"$(scripts/version.sh app-name)\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.5061375,
+          "end": 725.5062417000001,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "apps/macos/build-app.sh",
+          "source_seconds": 334.0,
+          "replay_seconds": 0,
+          "start": 725.5071791999999,
+          "end": 725.5072334000001,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "scripts/tunnel-smoke.sh \"apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd\"",
+          "source_seconds": 1.0,
+          "replay_seconds": 0,
+          "start": 725.5080667000001,
+          "end": 725.5081209,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "out=\"$(\"apps/macos/build/$APP_NAME.app/Contents/Resources/farcooler\" runner mint-node-key)\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.5090667000001,
+          "end": 725.5091249999999,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.5099334,
+          "end": 725.5099959000003,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+          "source_seconds": 0.0,
+          "replay_seconds": 0,
+          "start": 725.5107542000001,
+          "end": 725.5108417000002,
+          "skip": "local landing: release bundle and its consumers run in CI"
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/icon-test.sh",
+          "source_seconds": 2.0,
+          "replay_seconds": 2.0,
+          "start": 725.5117292000001,
+          "end": 727.9829334000002,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/sparkle-key-test.sh",
+          "source_seconds": 1.0,
+          "replay_seconds": 1.0,
+          "start": 727.9868792000002,
+          "end": 729.2388500000001,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/gh-download-test.sh",
+          "source_seconds": 3.0,
+          "replay_seconds": 3.0,
+          "start": 729.2407042000001,
+          "end": 732.6004209,
+          "skip": null
+        },
+        {
+          "job": "swift",
+          "command": "./scripts/macos-entitlements-test.sh",
+          "source_seconds": 0.0,
+          "replay_seconds": 0.0,
+          "start": 732.6044875000001,
+          "end": 732.6050084000002,
+          "skip": null
+        },
+        {
+          "job": "rust",
+          "command": "cargo test --workspace --doc",
+          "source_seconds": 4.0,
+          "replay_seconds": 4.0,
+          "start": 785.4807042000001,
+          "end": 789.9362542000002,
+          "skip": null
+        }
+      ]
+    }
+  ]
+}
