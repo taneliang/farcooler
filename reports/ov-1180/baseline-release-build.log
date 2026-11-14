@@ -1,0 +1,112 @@
+
+> Configure project :app
+No Rust core and tunnel found in app/src/main/jniLibs. Run ./scripts/build-android-libs.sh before building the app.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseNativeLibs
+> Task :app:generateReleaseBuildConfig
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so, libimage_processing_util_jni.so, libsurface_util_jni.so. Run with --info option to learn more.
+
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:stageFonts
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:generateReleaseResources FROM-CACHE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:packageReleaseResources FROM-CACHE
+> Task :app:processReleaseNavigationResources FROM-CACHE
+> Task :app:parseReleaseLocalResources FROM-CACHE
+> Task :app:generateReleaseRFile FROM-CACHE
+> Task :app:javaPreCompileRelease FROM-CACHE
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:mergeReleaseArtProfile
+> Task :app:compileReleaseNavigationResources FROM-CACHE
+> Task :app:checkReleaseAarMetadata
+> Task :app:mergeReleaseResources FROM-CACHE
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease FROM-CACHE
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseStartupProfile
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets FROM-CACHE
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:processReleaseManifestForPackage
+> Task :app:processReleaseResources
+
+> Task :app:compileReleaseKotlin
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ceremony/CeremonyStore.kt:621:9 Redundant creation of Json format. Creating instances for each usage can be slow.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/AskAboutTask.kt:52:79 Expression is unused.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/DestinationResolver.kt:242:64 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/DestinationResolver.kt:243:66 Unnecessary non-null assertion (!!) on a non-null receiver of type 'String'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/NeedsYou.kt:335:56 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/PageLive.kt:173:102 Unnecessary safe call on a non-null receiver of type 'Plan'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/PageLive.kt:203:61 Unnecessary safe call on a non-null receiver of type 'Plan'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:363:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:381:52 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:386:9 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:394:13 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/Plan.kt:394:27 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'ArrayList<String>?'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/PlanAgents.kt:83:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/PlanLandings.kt:232:17 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/PlanPrStage.kt:67:47 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/model/PlanPrStage.kt:71:78 No cast needed.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/BoardScreen.kt:405:49 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/BoardScreen.kt:525:23 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/FilesScreen.kt:193:68 'val Icons.Outlined.HelpOutline: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.HelpOutline.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/FirstRunArt.kt:46:33 'fun SemanticsPropertyReceiver.invisibleToUser(): Unit' is deprecated. Use `hideFromAccessibility()` instead.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/FirstRunArt.kt:65:30 'fun SemanticsPropertyReceiver.invisibleToUser(): Unit' is deprecated. Use `hideFromAccessibility()` instead.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/NativeAgentView.kt:173:130 Expression is unused.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/NativeAskRow.kt:80:46 'val Icons.Outlined.HelpOutline: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.HelpOutline.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/NativeAskRow.kt:130:26 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/NativePromptImages.kt:166:17 'fun rememberTransformableState(onTransformation: (Float, Offset, Float) -> Unit): TransformableState' is deprecated. Prefer remembering a TransformableState with a onTransformation lambda that takes the centroid. This centroid (if specified) is the point at which zooming or rotation should happen around which allows for more natural transformations.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/NeedsYouScreen.kt:360:54 Unnecessary safe call on a non-null receiver of type 'Connection'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/NeedsYouScreen.kt:361:83 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/PhoneEmptyRows.kt:36:39 'val Icons.Outlined.CallMerge: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Outlined.CallMerge.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/PlanPageScreens.kt:354:44 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/Sheets.kt:209:45 Condition is always 'true'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/Sheets.kt:215:62 Unnecessary safe call on a non-null receiver of type 'Runner'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/WorkflowRuns.kt:84:39 Unnecessary safe call on a non-null receiver of type 'Presentation'.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/WorkflowRunsView.kt:118:29 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+w: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/app/src/main/java/com/farcooler/ui/WorkspaceScreen.kt:717:5 'fun TabRow(selectedTabIndex: Int, modifier: Modifier = ..., containerColor: Color = ..., contentColor: Color = ..., indicator: ComposableFunction1<List<TabPosition>, Unit> = ..., divider: ComposableFunction0<Unit> = ..., tabs: ComposableFunction0<Unit>): Unit' is deprecated. Replaced with PrimaryTabRow and SecondaryTabRow.
+
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:processReleaseJavaRes
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:expandReleaseArtProfileWildcards
+> Task :app:mergeReleaseJavaResource
+> Task :app:produceReleaseComposeMapping
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:minifyReleaseWithR8
+> Task :app:reportReleaseComposeMappingErrors
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:mergeReleaseComposeMapping FROM-CACHE
+> Task :app:compileReleaseArtProfile
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+[Incubating] Problems report is available at: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/ov1180-baseline/apps/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 23s
+52 actionable tasks: 41 executed, 11 from cache
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.6.1/userguide/configuration_cache_enabling.html

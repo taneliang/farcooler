@@ -1,0 +1,40 @@
+Baseline release mapping regenerated from 49bf5fdb0125957752b8e027f0db6f88ff3f0a40.
+# compiler: R8
+# compiler_version: 9.3.16
+# min_api: 37
+# common_typos_disable
+# {"id":"com.android.tools.r8.mapping","version":"2.2"}
+# pg_map_id: 5a833b24970378115623e38de675c6a3ab6f9f2910e0019b4be9692a1f240124
+# pg_map_hash: SHA-256 8204566e1aa19ba2447385a1c74ac2ea4f66973f2dc0c440d48be8b79e82a94b
+_COROUTINE.ArtificialStackFrames -> R8$$REMOVED$$CLASS$$0:
+The map ID differs from the shipped binary; the extracted class names and line ranges match the reported frames. The release was regenerated without the private Firebase/WorkOS configuration.
+
+androidx.activity.result.contract.ActivityResultContracts$PickMultipleVisualMedia -> n3:
+    4:7:com.farcooler.data.KeyRead com.farcooler.data.Identity.readOutcome$default(com.farcooler.data.Identity,java.lang.String,int,java.lang.Object):205:205 -> N
+    4:7:java.lang.String com.farcooler.data.Identity.privateKey():91 -> N
+    282:285:com.farcooler.data.KeyRead com.farcooler.data.Identity.readOutcome(java.lang.String):207:207 -> Q
+androidx.camera.core.impl.utils.MainThreadAsyncHandler -> ku2:
+    33:36:kotlinx.coroutines.Job kotlinx.coroutines.BuildersKt__Builders_commonKt.launch(kotlinx.coroutines.CoroutineScope,kotlin.coroutines.CoroutineContext,kotlinx.coroutines.CoroutineStart,kotlin.jvm.functions.Function2):52:52 -> B
+    12:16:kotlinx.coroutines.Job kotlinx.coroutines.BuildersKt.launch(kotlinx.coroutines.CoroutineScope,kotlin.coroutines.CoroutineContext,kotlinx.coroutines.CoroutineStart,kotlin.jvm.functions.Function2):1:1 -> C
+    12:16:kotlinx.coroutines.Job kotlinx.coroutines.BuildersKt__Builders_commonKt.launch$default(kotlinx.coroutines.CoroutineScope,kotlin.coroutines.CoroutineContext,kotlinx.coroutines.CoroutineStart,kotlin.jvm.functions.Function2,int,java.lang.Object):43 -> C
+androidx.camera.core.impl.utils.executor.MainThreadExecutor -> lu2:
+    141:146:void kotlinx.coroutines.internal.DispatchedContinuationKt.resumeCancellableWith(kotlin.coroutines.Continuation,java.lang.Object):367:367 -> e0
+com.farcooler.net.Connection -> tv0:
+    106:111:java.lang.Object start(com.farcooler.data.Runner,kotlin.coroutines.Continuation):934:934 -> a0
+com.farcooler.net.Connection$loadBoardsDetached$1 -> ou0:
+    127:136:java.lang.Object com.farcooler.net.Connection.start$default(com.farcooler.net.Connection,com.farcooler.data.Runner,kotlin.coroutines.Continuation,int,java.lang.Object):926:926 -> t
+    127:136:java.lang.Object com.farcooler.net.FleetRepository$reconcile$4.invokeSuspend(java.lang.Object):149 -> t
+com.farcooler.ui.AppModel -> qn:
+    953:955:kotlinx.coroutines.Job kotlinx.coroutines.BuildersKt.launch$default(kotlinx.coroutines.CoroutineScope,kotlin.coroutines.CoroutineContext,kotlinx.coroutines.CoroutineStart,kotlin.jvm.functions.Function2,int,java.lang.Object):1:1 -> <init>
+    953:955:void com.farcooler.net.FleetRepository.<init>(com.farcooler.data.RunnerStore,com.farcooler.data.Settings,com.farcooler.data.ReviewStorage,kotlinx.coroutines.CoroutineScope,com.farcooler.model.BoardReadsStore):114 -> <init>
+    953:955:void <init>(android.app.Application,androidx.lifecycle.SavedStateHandle):165 -> <init>
+kotlin.coroutines.jvm.internal.BaseContinuationImpl -> cu:
+    7:10:void resumeWith(java.lang.Object):34:34 -> j
+kotlinx.coroutines.AbstractCoroutine -> a0:
+    86:98:void kotlinx.coroutines.intrinsics.CancellableKt.startCoroutineCancellable(kotlin.jvm.functions.Function2,java.lang.Object,kotlin.coroutines.Continuation):26:26 -> p0
+    86:98:void kotlinx.coroutines.CoroutineStart.invoke(kotlin.jvm.functions.Function2,java.lang.Object,kotlin.coroutines.Continuation):358 -> p0
+    86:98:void start(kotlinx.coroutines.CoroutineStart,java.lang.Object,kotlin.jvm.functions.Function2):124 -> p0
+kotlinx.coroutines.DispatchedTask -> jb1:
+    105:113:void run():101:101 -> run
+kotlinx.coroutines.EventLoop -> oj1:
+    23:27:boolean processUnconfinedEvent():65:65 -> M

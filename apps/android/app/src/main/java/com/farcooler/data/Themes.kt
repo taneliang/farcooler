@@ -155,6 +155,9 @@ object Themes {
     fun opaque(rgb: Int): Int = rgb or 0xFF000000.toInt()
 
     private fun readBuiltIn(): List<Theme> {
+        // Application startup now asks before a ClientCore exists. Loading
+        // the library here keeps that order from pinning us to the fallback.
+        if (!com.farcooler.core.coreIsAvailable) return listOf(fallback)
         val raw = runCatching { NativeClient.nativeBuiltinThemes() }.getOrNull()
             ?: return listOf(fallback)
         val parsed = runCatching { json.decodeFromString(ThemeList.serializer(), raw) }.getOrNull()

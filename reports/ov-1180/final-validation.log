@@ -1,0 +1,138 @@
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preInstrumentedBuild UP-TO-DATE
+> Task :app:generateInstrumentedBuildConfig UP-TO-DATE
+> Task :app:stageFonts UP-TO-DATE
+> Task :app:generateInstrumentedResources UP-TO-DATE
+> Task :app:packageInstrumentedResources UP-TO-DATE
+> Task :app:processInstrumentedNavigationResources UP-TO-DATE
+> Task :app:parseInstrumentedLocalResources UP-TO-DATE
+> Task :app:generateInstrumentedRFile UP-TO-DATE
+> Task :app:compileInstrumentedKotlin UP-TO-DATE
+> Task :app:javaPreCompileInstrumented UP-TO-DATE
+> Task :app:compileInstrumentedJavaWithJavac UP-TO-DATE
+> Task :app:checkInstrumentedAarMetadata UP-TO-DATE
+> Task :app:mapInstrumentedSourceSetPaths UP-TO-DATE
+> Task :app:compileInstrumentedNavigationResources UP-TO-DATE
+> Task :app:mergeInstrumentedResources UP-TO-DATE
+> Task :app:createInstrumentedCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksInstrumented UP-TO-DATE
+> Task :app:processInstrumentedMainManifest UP-TO-DATE
+> Task :app:processInstrumentedManifest UP-TO-DATE
+> Task :app:processInstrumentedManifestForPackage UP-TO-DATE
+> Task :app:processInstrumentedResources UP-TO-DATE
+> Task :app:bundleInstrumentedClassesToRuntimeJar UP-TO-DATE
+> Task :app:bundleInstrumentedClassesToCompileJar UP-TO-DATE
+> Task :app:preInstrumentedUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileInstrumentedUnitTest UP-TO-DATE
+> Task :app:processInstrumentedJavaRes UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :app:mergeReleaseNativeLibs UP-TO-DATE
+> Task :app:stripReleaseDebugSymbols UP-TO-DATE
+> Task :app:extractReleaseNativeSymbolTables UP-TO-DATE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:checkReleaseDuplicateClasses UP-TO-DATE
+> Task :app:generateReleaseBuildConfig UP-TO-DATE
+> Task :app:generateReleaseResources UP-TO-DATE
+> Task :app:packageReleaseResources UP-TO-DATE
+> Task :app:processReleaseNavigationResources UP-TO-DATE
+> Task :app:parseReleaseLocalResources UP-TO-DATE
+> Task :app:generateReleaseRFile UP-TO-DATE
+> Task :app:compileReleaseKotlin UP-TO-DATE
+> Task :app:javaPreCompileRelease UP-TO-DATE
+> Task :app:compileReleaseJavaWithJavac UP-TO-DATE
+> Task :app:mergeReleaseArtProfile UP-TO-DATE
+> Task :app:checkReleaseAarMetadata UP-TO-DATE
+> Task :app:mapReleaseSourceSetPaths UP-TO-DATE
+> Task :app:compileReleaseNavigationResources UP-TO-DATE
+> Task :app:mergeReleaseResources UP-TO-DATE
+> Task :app:createReleaseCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksRelease UP-TO-DATE
+> Task :app:processReleaseMainManifest UP-TO-DATE
+> Task :app:processReleaseManifest UP-TO-DATE
+> Task :app:processReleaseManifestForPackage UP-TO-DATE
+> Task :app:processReleaseResources UP-TO-DATE
+> Task :app:expandReleaseArtProfileWildcards UP-TO-DATE
+> Task :app:extractProguardFiles UP-TO-DATE
+> Task :app:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :app:processReleaseJavaRes UP-TO-DATE
+> Task :app:mergeReleaseJavaResource UP-TO-DATE
+> Task :app:mergeReleaseStartupProfile UP-TO-DATE
+> Task :app:produceReleaseComposeMapping UP-TO-DATE
+> Task :app:reportReleaseComposeMappingErrors
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets UP-TO-DATE
+> Task :app:compressReleaseAssets UP-TO-DATE
+> Task :app:extractReleaseVersionControlInfo UP-TO-DATE
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:collectReleaseDependencies UP-TO-DATE
+> Task :app:sdkReleaseDependencyData UP-TO-DATE
+> Task :app:writeReleaseAppMetadata UP-TO-DATE
+> Task :app:writeReleaseSigningConfigVersions UP-TO-DATE
+> Task :app:preInstrumentedAndroidTestBuild SKIPPED
+> Task :app:mergeInstrumentedAndroidTestManifest UP-TO-DATE
+> Task :app:processInstrumentedAndroidTestManifest UP-TO-DATE
+> Task :app:generateInstrumentedAndroidTestBuildConfig UP-TO-DATE
+> Task :app:generateInstrumentedAndroidTestResources UP-TO-DATE
+> Task :app:packageInstrumentedAndroidTestResources UP-TO-DATE
+> Task :app:processInstrumentedAndroidTestNavigationResources UP-TO-DATE
+> Task :app:parseInstrumentedAndroidTestLocalResources UP-TO-DATE
+> Task :app:generateInstrumentedAndroidTestRFile UP-TO-DATE
+> Task :app:compileInstrumentedAndroidTestKotlin UP-TO-DATE
+> Task :app:javaPreCompileInstrumentedAndroidTest UP-TO-DATE
+> Task :app:compileInstrumentedAndroidTestJavaWithJavac UP-TO-DATE
+> Task :app:generateInstrumentedAndroidTestAssets UP-TO-DATE
+> Task :app:mergeInstrumentedAndroidTestAssets UP-TO-DATE
+> Task :app:compressInstrumentedAndroidTestAssets UP-TO-DATE
+> Task :app:generateInstrumentedAndroidTestGlobalSynthetics UP-TO-DATE
+> Task :app:checkInstrumentedAndroidTestDuplicateClasses UP-TO-DATE
+> Task :app:desugarInstrumentedAndroidTestFileDependencies UP-TO-DATE
+> Task :app:mergeExtDexInstrumentedAndroidTest UP-TO-DATE
+> Task :app:processInstrumentedAndroidTestJavaRes UP-TO-DATE
+> Task :app:mergeInstrumentedAndroidTestJavaResource UP-TO-DATE
+> Task :app:mergeLibDexInstrumentedAndroidTest UP-TO-DATE
+> Task :app:checkInstrumentedAndroidTestAarMetadata UP-TO-DATE
+> Task :app:mapInstrumentedAndroidTestSourceSetPaths UP-TO-DATE
+> Task :app:compileInstrumentedAndroidTestNavigationResources UP-TO-DATE
+> Task :app:mergeInstrumentedAndroidTestResources UP-TO-DATE
+> Task :app:processInstrumentedAndroidTestResources UP-TO-DATE
+> Task :app:dexBuilderInstrumentedAndroidTest UP-TO-DATE
+> Task :app:mergeProjectDexInstrumentedAndroidTest UP-TO-DATE
+> Task :app:mergeInstrumentedAndroidTestJniLibFolders UP-TO-DATE
+> Task :app:mergeInstrumentedJniLibFolders UP-TO-DATE
+> Task :app:mergeInstrumentedNativeLibs UP-TO-DATE
+> Task :app:mergeInstrumentedAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripInstrumentedAndroidTestDebugSymbols NO-SOURCE
+> Task :app:validateSigningInstrumentedAndroidTest UP-TO-DATE
+> Task :app:writeInstrumentedAndroidTestSigningConfigVersions UP-TO-DATE
+> Task :app:packageInstrumentedAndroidTest UP-TO-DATE
+> Task :app:createInstrumentedAndroidTestApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleInstrumentedAndroidTest UP-TO-DATE
+> Task :app:assembleAndroidTest UP-TO-DATE
+> Task :app:compileInstrumentedUnitTestKotlin
+> Task :app:compileInstrumentedUnitTestJavaWithJavac UP-TO-DATE
+> Task :app:processInstrumentedUnitTestJavaRes UP-TO-DATE
+> Task :app:testInstrumentedUnitTest
+> Task :app:minifyReleaseWithR8
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:mergeReleaseComposeMapping
+> Task :app:convertShrunkResourcesToBinaryRelease UP-TO-DATE
+> Task :app:optimizeReleaseResources UP-TO-DATE
+> Task :app:compileReleaseArtProfile
+> Task :app:lintVitalReportRelease UP-TO-DATE
+> Task :app:lintVitalRelease
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleRelease
+
+[Incubating] Problems report is available at: file:///Users/e-liang/Library/Application%20Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1180-android-launch-fix/apps/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.6.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 2m 17s
+113 actionable tasks: 10 executed, 103 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.6.1/userguide/configuration_cache_enabling.html

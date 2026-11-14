@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.farcooler.ui.AppModelStartupTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-14T07:54:07.076Z" hostname="Cosmo.local" time="4.399">
+  <properties/>
+  <testcase name="everyGlobalStoreIsReadyBeforeAnActivityOrModelExists" classname="com.farcooler.ui.AppModelStartupTest" time="2.904"/>
+  <testcase name="savedRunnerCanStartWhileTheModelIsBeingConstructed" classname="com.farcooler.ui.AppModelStartupTest" time="0.659"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

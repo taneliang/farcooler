@@ -1,0 +1,11 @@
+{
+  "serial": "emulator-5558",
+  "application_id": "com.farcooler.android.local",
+  "build_type": "release",
+  "saved_runner": "127.0.0.1:1",
+  "pid": "26194",
+  "cold_start": true,
+  "resumed": true,
+  "fatal_exceptions": 0,
+  "observation_seconds": 15
+}

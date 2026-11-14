@@ -1,0 +1,7 @@
+Starting: Intent { cmp=com.farcooler.android.local/com.farcooler.ui.MainActivity }
+Status: ok
+LaunchState: COLD
+Activity: com.farcooler.android.local/com.farcooler.ui.MainActivity
+TotalTime: 527
+WaitTime: 529
+Complete

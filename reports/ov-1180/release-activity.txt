@@ -1,0 +1,9 @@
+  ACTIVITY com.farcooler.android.local/com.farcooler.ui.MainActivity 9553037 pid=26194 userId=0 uid=10231 displayId=0(type=INTERNAL)
+    Local Activity a563ad9 State:
+      mResumed=true mStopped=false mFinished=false
+      mIsInMultiWindowMode=false mIsInPictureInPictureMode=false
+      mChangingConfigurations=false
+      mCurrentConfig={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h923dp 420dpi nrml long compactNeeded port -touch -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2424) mAppBounds=Rect(0, 0 - 1080, 2424) mMaxBounds=Rect(0, 0 - 1080, 2424) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0} s.2 fontWeightAdjustment=0}
+      mLoadersStarted=true
+      Active Fragments in ffc058f:
+        #0: q74{39a201c #0 androidx.lifecycle.LifecycleDispatcher.report_fragment_tag}
