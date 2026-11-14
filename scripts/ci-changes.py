@@ -57,6 +57,8 @@ SITE_ONLY = [
     r"services/common/.+",
     r"\.github/workflows/web\.yml",
     r"docs/.+",
+    r"reports/.+",
+    r"\.claude/agent/reports/.+",
     r"[^/]+\.md",
     r"\.github/workflows/site\.yml",
     r"\.github/workflows/site-analytics\.yml",
@@ -204,6 +206,8 @@ def self_test():
         ".github/workflows/web.yml",
         "docs/releasing.md",
         "docs/superpowers/specs/a/b.json",
+        "reports/ov-1157/landing-rca.md",
+        ".claude/agent/reports/ov-1157/landing-rca.md",
         "README.md",
         ".github/workflows/site.yml",
         ".github/workflows/site-analytics.yml",
@@ -230,6 +234,7 @@ def self_test():
         "services/relay/src/lib.rs", "services/site-x/a.ts", "services/sitemap/a.ts", "services/site",
         "services/web", "services/webx/a.ts", "crates/web/src/lib.rs", ".github/workflows/web.ymlx",
         "docs", "docsx/a.md", "mydocs/a.md", "scripts/docs/x.py", "scripts/copy-lint.py",
+        "reports", "reports-extra/a.md", ".claude/agent/reports", ".claude/agent/reports-extra/a.md",
         "scripts/ci-changes.py", "scripts/site-proof-extra.py", "scripts/site-proofs/x",
         "scripts/manager-skill-pressure/scenarios.md",
         ".github/workflows/ci.yml", ".github/workflows/relay.yml", ".github/actions/ios-ui-shard/action.yml",
@@ -258,6 +263,7 @@ def self_test():
         ("a relay change", ["services/relay/src/lib.rs"], {"relay"}),
         ("a web worker change", ["services/web/src/index.ts"], {"web"}),
         ("a docs-only change", ["docs/a.md", "README.md"], set()),
+        ("a report-only change", ["reports/ov-1157/landing-rca.md", ".claude/agent/reports/ov-1157/landing-rca.md"], set()),
         ("a wire change", ["proto/farcooler.proto"], ALL),
         ("Cargo.lock", ["Cargo.lock"], ALL),
         ("the client crate", ["crates/client/src/lib.rs"], ALL),
@@ -273,6 +279,9 @@ def self_test():
         expect(f"{what} selects {sorted(want)}", got, want)
     expect("docs-only sets the docs flag", families(["docs/a.md"])["docs"], True)
     expect("docs-only leaves app off", families(["docs/a.md"])["app"], False)
+    for path in ["reports/ov-1157/landing-rca.md", ".claude/agent/reports/ov-1157/landing-rca.md"]:
+        expect(f"{path} selects only cheap jobs", families([path]),
+               {**{k: False for k in ALL}, "docs": True, "app": False})
     expect("a Swift change leaves docs off", families(["apps/macos/a.swift"])["docs"], False)
     expect("every flag is on when nothing is known", families(None), {k: True for k in [*ALL, "docs", "app"]})
 
