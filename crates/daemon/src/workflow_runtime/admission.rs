@@ -153,8 +153,9 @@ impl Admission {
                 if !reason.as_ref().is_some_and(|r| farcooler_protocol::workflow_commands::valid_rework_reason(r)) {
                     return Err(DomainError::InvalidArgument { what: "reason" });
                 }
-                // The grant changes how the workflow routes, never what it runs (ov-1201): a gate command, an
-                // environment or a hook is how a definition would reach the owner's secrets, flags and deploys.
+                // The grant changes how the workflow routes, never what it runs or who says yes first (ov-1201): a
+                // gate command, an environment or a hook is how a definition would reach the owner's secrets, flags
+                // and deploys, and the approvals and reviews in front of them are what keep those the owner's.
                 // Judged against the configuration this one replaces, which the write takes only while it is
                 // still the workspace's (`expected_pin`), so nothing published in between slips past.
                 let previous = match expected_pin {
@@ -163,7 +164,7 @@ impl Admission {
                     None => None,
                 };
                 if !farcooler_store::workflow_publication::runs_the_same(previous.as_ref(), definition, adapter.as_deref()) {
-                    return Err(DomainError::ScopeDenied { needed: "a person's approval of a draft that changes commands, environment or hooks" });
+                    return Err(DomainError::ScopeDenied { needed: "a person's approval of a draft that changes commands, environment, hooks or the approvals before them" });
                 }
             }
         }

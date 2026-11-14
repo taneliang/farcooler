@@ -13,12 +13,18 @@ pub fn configuration_pin(definition: &Definition, adapter: Option<&AdapterConfig
 pub fn notification_configuration_pin(definition: &Definition, adapter: Option<&AdapterConfiguration>, notifications: Option<&NotificationPolicy>) -> String {
     notifications.map_or_else(|| configuration_pin(definition, adapter), |p| farcooler_workflow::digest(&("workflow-bundle/v2", definition, adapter, p)))
 }
-/// ov-1201: whether a publication runs exactly what `previous` (the configuration it replaces) runs. Every process
-/// the engine starts comes from the adapter configuration: gate and check commands with their environments, the
-/// harness with the hooks files it pins, the reviewer, CI, landing and pull request commands. All of them run as the
-/// runner's Unix user, with whatever credentials its files hold, so only a person may change them. A step's own
-/// `operation.environment` may be dropped, or kept as the same step had it, never added to. Routes, models,
-/// deciders, limits and notifications are free to change.
+/// ov-1201: whether a publication runs exactly what `previous` (the configuration it replaces) runs, under the
+/// approvals it ran under. Every process the engine starts comes from the adapter configuration: gate and check
+/// commands with their environments, the harness with the hooks files it pins, the reviewer, CI, landing and pull
+/// request commands. All of them run as the runner's Unix user, with whatever credentials its files hold, so only
+/// a person may change them. A step's own `operation.environment` may be dropped, or kept as the same step had it,
+/// never added to.
+///
+/// The definition says which of those commands run and who must say yes first (review a2472ebc), so with the
+/// adapter unchanged each step that runs something must be one a step of `previous` ran, behind at least the
+/// approvals and person reviews that step was behind on every way to it. Routes, models, deciders, limits and
+/// notifications are free to change within that: a new route may not pass a decider by, a decider may not be
+/// dropped or swapped, and a configured command no step ran stays unrun.
 pub fn runs_the_same(previous: Option<&Configuration>, definition: &Definition, adapter: Option<&AdapterConfiguration>) -> bool {
     fn environments(definition: &Definition) -> std::collections::BTreeMap<(&str, &str), &std::collections::BTreeMap<String, String>> {
         definition.stages.iter().map(|s| ("", s))
@@ -26,8 +32,104 @@ pub fn runs_the_same(previous: Option<&Configuration>, definition: &Definition, 
             .map(|(group, s)| ((group, s.id.as_str()), &s.operation.environment)).collect()
     }
     let before = previous.map(|c| environments(&c.definition)).unwrap_or_default();
+    let earlier = previous.map(|c| guarded::steps(&c.definition)).unwrap_or_default();
     previous.and_then(|c| c.adapter.as_ref()) == adapter
         && environments(definition).into_iter().all(|(step, e)| e.is_empty() || before.get(&step) == Some(&e))
+        && guarded::steps(definition).into_iter().filter(|(s, _)| !guarded::runs_nothing(s)).all(|(s, guards)|
+            earlier.iter().any(|(was, had)| was.kind == s.kind && was.operation == s.operation && match (&guards, had) {
+                // A step no run reaches still runs nothing new.
+                (None, _) => true,
+                (Some(now), Some(had)) => had.is_subset(now),
+                (Some(_), None) => false,
+            }))
+}
+/// Who must have said yes before each step of a definition starts (ov-1201).
+mod guarded {
+    use farcooler_workflow::{Definition, Progression, Reviewer, Stage, StageKind, Target};
+    use std::collections::{BTreeMap, BTreeSet};
+    /// The principals every way to a step passes; `None` when no run reaches it.
+    pub(super) type Guards = Option<BTreeSet<String>>;
+    /// A step that starts no process: a ticket's column, a join, a path route, a person's or the orchestrator's review.
+    pub(super) fn runs_nothing(stage: &Stage) -> bool {
+        matches!(stage.kind, StageKind::Tracker | StageKind::Join { .. } | StageKind::Route
+            | StageKind::Review(Reviewer::Person(_) | Reviewer::Orchestrator(_)))
+    }
+    fn approver(stage: &Stage) -> Option<String> {
+        match &stage.progression { Progression::AwaitApproval { principal } => Some(principal.clone()), Progression::Automatic => None }
+    }
+    /// A review's decider, whose verdict is behind its `passed` route only.
+    fn reviewer(stage: &Stage) -> Option<String> {
+        match &stage.kind { StageKind::Review(Reviewer::Person(p) | Reviewer::Orchestrator(p)) => Some(p.clone()), _ => None }
+    }
+    /// Every step of `definition` and its groups, with its guards: the deciders on every way to it, its own approver
+    /// included. A group's steps also have the ones on every way to a join that queues into it.
+    pub(super) fn steps(definition: &Definition) -> Vec<(&Stage, Guards)> {
+        let top = must_pass(definition, Some(BTreeSet::new()));
+        let mut out: Vec<(&Stage, Guards)> = definition.stages.iter().zip(top.iter().cloned()).collect();
+        for (name, group) in &definition.groups {
+            let entry = definition.stages.iter().zip(&top)
+                .filter(|(s, _)| matches!(&s.kind, StageKind::Join { group, .. } if group == name))
+                .fold(None, |all: Guards, (_, g)| meet(all, g.clone()));
+            let inner = definition.group_definition(name).map_or_else(|| vec![None; group.steps.len()], |d| must_pass(&d, entry));
+            out.extend(group.steps.iter().zip(inner));
+        }
+        out
+    }
+    /// The deciders both ways pass.
+    fn meet(a: Guards, b: Guards) -> Guards {
+        match (a, b) { (None, x) | (x, None) => x, (Some(a), Some(b)) => Some(a.intersection(&b).cloned().collect()) }
+    }
+    /// Each step's guards, from the first step's `entry`. Every route out counts, a split's step and its fallback,
+    /// falling forward on an unrouted `passed`, a rework, and the orchestrator's send-back to any build step.
+    fn must_pass(definition: &Definition, entry: Guards) -> Vec<Guards> {
+        let stages = &definition.stages;
+        let index: BTreeMap<&str, usize> = stages.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
+        let edges = |i: usize| -> Vec<(usize, bool)> {
+            let stage = &stages[i];
+            let mut out = Vec::new();
+            if definition.schema == 2 {
+                for (label, target) in &stage.routes {
+                    let mut target = target;
+                    loop {
+                        match target {
+                            Target::Step(id) => { out.extend(index.get(id.as_str()).map(|j| (*j, label == "passed"))); break }
+                            Target::Split { step, otherwise } => {
+                                out.extend(index.get(step.as_str()).map(|j| (*j, label == "passed")));
+                                target = otherwise;
+                            }
+                            Target::Done | Target::Fail => break,
+                        }
+                    }
+                }
+                if !stage.routes.contains_key("passed") && i + 1 < stages.len() { out.push((i + 1, true)); }
+            } else {
+                if i + 1 < stages.len() { out.push((i + 1, true)); }
+                if matches!(stage.kind, StageKind::Review(_) | StageKind::Evaluate(_)) {
+                    out.extend(definition.rework_target.as_deref().and_then(|t| index.get(t)).map(|j| (*j, false)));
+                }
+            }
+            out.extend(stages.iter().enumerate().filter(|(_, s)| s.kind == StageKind::Build).map(|(j, _)| (j, false)));
+            out
+        };
+        let mut at: Vec<Guards> = vec![None; stages.len()];
+        if let Some(first) = at.first_mut() { *first = entry; }
+        // Sets only shrink, from unreached to smaller, so this settles.
+        loop {
+            let mut changed = false;
+            for i in 0..stages.len() {
+                let Some(mut through) = at[i].clone() else { continue };
+                through.extend(approver(&stages[i]));
+                for (j, passed) in edges(i) {
+                    let mut out = through.clone();
+                    if passed { out.extend(reviewer(&stages[i])); }
+                    let next = meet(at[j].clone(), Some(out));
+                    if at[j] != next { at[j] = next; changed = true; }
+                }
+            }
+            if !changed { break }
+        }
+        at.into_iter().zip(stages).map(|(g, s)| g.map(|mut g| { g.extend(approver(s)); g })).collect()
+    }
 }
 pub enum Write<'a> {
     PublicationGrant { enabled: bool, revision: u64 },
@@ -362,4 +464,74 @@ mod ov1179_rollback_tests {
         assert!(!runs_the_same(None, &before, None), "nothing to keep");
         assert!(runs_the_same(None, &Definition::tracker("orchestrator"), None));
     }
+    /// ov-1201 (review a2472ebc): with the adapter unchanged, every step that runs something stays behind the
+    /// deciders it was behind: its own approver, and a person's review whose `passed` route is the way to it, a
+    /// group's steps through the join that queues into the group.
+    #[test]
+    fn ov1201_runs_the_same_only_behind_the_same_deciders() {
+        use farcooler_workflow::{GroupDef, OperationSpec, Progression, Reviewer, Stage, StageKind, Target};
+        let step = |id: &str, kind: StageKind, argument: &str| Stage { id: id.into(), kind, progression: Progression::Automatic,
+            max_attempts: 1, operation: OperationSpec { adapter_version: "v1".into(), arguments: vec![argument.into()], environment: Default::default() },
+            routes: Default::default(), limit: 0 };
+        let route = |mut s: Stage, label: &str, to: &str| { s.routes.insert(label.into(), Target::Step(to.into())); s };
+        let approved = |mut s: Stage, by: &str| { s.progression = Progression::AwaitApproval { principal: by.into() }; s };
+        let review = step("review", StageKind::Review(Reviewer::Person("owner".into())), "person:owner");
+        let definition = |stages: Vec<Stage>| { let mut d = Definition::tracker("owner"); d.schema = 2; d.stages = stages; d };
+        let build = step("build", StageKind::Build, "");
+        let deploy = step("deploy", StageKind::Check, "deploy");
+        let lint = step("lint", StageKind::Check, "lint");
+        let configuration = |definition: Definition| Configuration { pin: "p".into(), definition, adapter: None, notifications: None };
+
+        // The deploy waits on the owner's approval.
+        let previous = configuration(definition(vec![build.clone(), approved(deploy.clone(), "owner")]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(runs_the_same(Some(&previous), &definition(vec![approved(build.clone(), "orchestrator"), approved(deploy.clone(), "owner")]), None),
+            "another decider in front");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), deploy.clone()]), None), "approval dropped");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), approved(deploy.clone(), "orchestrator")]), None),
+            "approval reassigned");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), approved(deploy.clone(), "owner"), lint.clone()]), None),
+            "a command no step ran");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), step("deploy-first", StageKind::Check, "deploy"),
+            approved(deploy.clone(), "owner")]), None), "the same command, unapproved, on another step");
+        assert!(runs_the_same(Some(&previous), &definition(vec![build.clone(), approved(deploy.clone(), "owner"),
+            step("deploy-again", StageKind::Check, "deploy")]), None), "again, after the owner's approval");
+
+        // The deploy is behind the owner's review.
+        let previous = configuration(definition(vec![build.clone(), lint.clone(), review.clone(), deploy.clone()]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), route(route(lint.clone(), "passed", "deploy"), "rejected", "review"),
+            review.clone(), deploy.clone()]), None), "routed past the review");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(), lint.clone(), route(review.clone(), "rejected", "deploy"),
+            deploy.clone()]), None), "routed through a rejection");
+        assert!(runs_the_same(Some(&previous), &definition(vec![build.clone(), lint.clone(), route(review.clone(), "rejected", "build"),
+            deploy.clone()]), None), "a rejection sent back to the build");
+        assert!(!runs_the_same(Some(&previous), &definition(vec![build.clone(),
+            step("review", StageKind::Review(Reviewer::Orchestrator("orchestrator".into())), "orchestrator:orchestrator"),
+            deploy.clone()]), None), "review reassigned");
+
+        // A group's deploy is behind the review in front of its join.
+        let grouped = |ticket: Vec<Stage>| { let mut d = definition(ticket);
+            d.groups.insert("g".into(), GroupDef { limit: None, exclusive: "main".into(), steps: vec![step("run", StageKind::Run, "deploy")] }); d };
+        let join = step("join", StageKind::Join { group: "g".into(), adopt: false }, "g");
+        let previous = configuration(grouped(vec![build.clone(), lint.clone(), review.clone(), join.clone()]));
+        assert!(runs_the_same(Some(&previous), &previous.definition, None));
+        assert!(!runs_the_same(Some(&previous), &grouped(vec![build.clone(), route(route(lint.clone(), "passed", "join"), "rejected", "review"),
+            review.clone(), join.clone()]), None), "routed past the review to the join");
+        assert!(runs_the_same(Some(&previous), &grouped(vec![build.clone(), lint.clone(), review.clone(), approved(join.clone(), "orchestrator")]), None),
+            "another decider in front of the join");
+        // A split restarts the group at its step, so that is a way to it too.
+        let split = |gate: Stage| { let mut d = definition(vec![build.clone(), join.clone()]);
+            d.groups.insert("g".into(), GroupDef { limit: None, exclusive: "main".into(),
+                steps: vec![gate, review.clone(), step("run", StageKind::Run, "deploy")] }); d };
+        let previous = configuration(split(step("gate", StageKind::Run, "lint")));
+        let mut splitting = step("gate", StageKind::Run, "lint");
+        splitting.routes.insert("rejected".into(), Target::Split { step: "run".into(), otherwise: Box::new(Target::Fail) });
+        assert!(!runs_the_same(Some(&previous), &split(splitting), None), "split past the review");
+        let previous = configuration(grouped(vec![build.clone(), lint.clone(), review.clone(), join.clone()]));
+        let mut unjoined = grouped(vec![build.clone(), lint.clone(), review.clone()]);
+        unjoined.stages.push(step("other", StageKind::Join { group: "h".into(), adopt: false }, "h"));
+        assert!(runs_the_same(Some(&previous), &unjoined, None), "a group no join queues into runs nothing");
+    }
 }
+

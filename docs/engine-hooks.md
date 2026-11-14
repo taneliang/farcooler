@@ -558,10 +558,30 @@ engine would run it with the owner's credentials.
 So an orchestrator's publication is refused unless its adapter configuration is
 exactly the one it replaces (the bundle at its `--expected-pin`, which the write
 accepts only while it is still the workspace's), and no step gains an
-environment its same step didn't already have. Routes, models, deciders, limits,
-groups and notifications still change freely. A change to commands, environment
-or hooks goes through `workflow propose`, and publishes when a person approves
-the draft. The owner publishes them directly as before.
+environment its same step didn't already have.
+
+An unchanged adapter is not enough on its own, because the definition decides
+which configured commands run and who says yes first. The owner might publish a
+deploy check that waits on the owner's approval, or that only runs after the
+owner's review passes. So each step that starts a process must also be one a
+step of the replaced definition ran, with the same operation, behind at least
+the deciders that step was behind on every way to it. The deciders on a way to
+a step are its own approver, the approvers of the steps before it, and a
+person's or the orchestrator's review whose `passed` route leads on. A group's
+steps also count the deciders on every way to a join that queues into the
+group. Each route counts, including a split's restart step, a rework, and the
+orchestrator's send-back to a build step. That refuses a publication that:
+
+- drops the approval in front of a command, or hands it to someone else
+- routes a step past the owner's review, or sends the review's rejection on to
+  the command
+- runs a configured command that no step of the replaced definition ran
+
+Routes, models, deciders, limits, groups and notifications still change freely
+within that, so adding another approval or review publishes. A change to
+commands, environment, hooks or the deciders in front of them goes through
+`workflow propose`, and publishes when a person approves the draft. The owner
+publishes them directly as before.
 
 | Owner-only action | Gate command | Environment | Hook |
 | --- | --- | --- | --- |
@@ -575,6 +595,16 @@ of these twelve through the orchestrator's grant and checks that the
 configuration did not change. Each one published before the check existed. A
 step's own `operation.environment` cannot carry them either: the coding adapter
 refuses any step whose operation differs from the one it pins.
+
+`ov1201_orchestrator_cannot_unguard_an_owner_published_command` covers the same
+four actions with the adapter left exactly as the owner published it. For each
+one, the owner publishes the command in a gate command, environment or hook,
+behind the owner's approval or review. The orchestrator then tries to drop the
+approval, reassign it, route past the review, route the review's rejection to
+the command, and run a configured check no step ran. All 48 attempts published
+before this check, and all are refused now.
+`ov1201_runs_the_same_only_behind_the_same_deciders` covers the same rules on
+plain definitions, including a group reached through a join and a split.
 
 This covers what publication adds. The orchestrator's own shell runs as the same
 Unix user, so the runner does not stop an agent that runs these commands

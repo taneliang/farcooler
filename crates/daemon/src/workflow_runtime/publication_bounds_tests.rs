@@ -129,3 +129,105 @@ async fn ov1201_owner_only_actions_stay_out_of_orchestrator_publications() {
     assert_eq!(refused(&reply), "scope-denied");
     assert_eq!(runtime.store.workflow_configuration(&w).unwrap(), Some(owners));
 }
+
+/// `definition` with step `id` waiting on `principal`'s approval, or on no one.
+fn approved_by(mut definition: Definition, id: &str, principal: Option<&str>) -> Definition {
+    let stage = definition.stages.iter_mut().find(|s| s.id == id).unwrap();
+    stage.progression = principal.map_or(farcooler_workflow::Progression::Automatic,
+        |p| farcooler_workflow::Progression::AwaitApproval { principal: p.into() });
+    definition
+}
+
+/// Acceptance 4, with the adapter the owner published left exactly as it is (review a2472ebc): the orchestrator
+/// can't take away or reassign the owner's approval of the step that runs an owner-only action, route around the
+/// owner's review in front of it, or start running a configured command no step ran before. Each published before.
+#[tokio::test]
+async fn ov1201_orchestrator_cannot_unguard_an_owner_published_command() {
+    let (_coding, configured) = super::coding_tests::configured(false, "pass").await;
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let mut config = configured.coding.clone().unwrap();
+    let git = std::path::PathBuf::from(svc.store.get_repository(repo).unwrap().canonical_git_dir).canonicalize().unwrap();
+    config.repository = git.parent().unwrap().to_path_buf();
+    config.base = adapters::git(&config.repository, &["rev-parse", "HEAD"]).await.unwrap();
+    adapters::git(&config.repository, &["update-ref", &config.landing_ref, &config.base]).await.unwrap();
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let w = ws.to_string();
+    let (_pane, pid) = alices_pane(&svc, repo, ws, true).await;
+    let short = tempfile::Builder::new().prefix("p").tempdir_in("/tmp").unwrap();
+    let mut runtime = Runtime::open_service(&short.path().join("r"), svc.store.clone()).unwrap();
+    let peer = Peer { client_id: None, scope: Scope::Control };
+    let agent = factory(&svc, &runtime, peer.clone(), Some(pid));
+    let owner = factory(&svc, &runtime, peer, None);
+    ok(&sent(&mut runtime, &owner, ws, &Action::PublicationGrant { mutation: mutation("grant", 0, 1), enabled: true }).await.0);
+    let mut published_anyway = Vec::new();
+    for (action, command, credential) in OWNER_ONLY {
+        for path in CARRIERS {
+            let (changed, definition) = carrying(&runtime.root, short.path(), &config, path, command, credential);
+            let adapter = AdapterConfiguration::Coding(changed.clone());
+            // The step the action runs in: a gate's command and environment run in its check, a hook in the build.
+            let step = match path { Carrier::Hook => "build", _ => "check-0" };
+            let name = |what: &str| format!("{}-{path:?}-{what}", action.replace(' ', "-"));
+            let pin = |runtime: &Runtime| runtime.store.workflow_configuration(&w).unwrap().map(|c| c.pin);
+
+            // The owner's own publication of each form below, then the orchestrator's attempts on it.
+            let mut forms = vec![(approved_by(definition.clone(), step, Some("owner")), vec![
+                ("unapproved", approved_by(definition.clone(), step, None)),
+                ("reassigned", approved_by(definition.clone(), step, Some("orchestrator"))),
+            ])];
+            if step == "check-0" {
+                // The owner's review in front of the check, which the orchestrator routes around or through.
+                let mut reviewed = definition.clone();
+                reviewed.schema = 2;
+                let at = reviewed.stages.iter().position(|s| s.id == "check-0").unwrap();
+                reviewed.stages.insert(at, farcooler_workflow::Stage { id: "owner-review".into(),
+                    kind: StageKind::Review(farcooler_workflow::Reviewer::Person("owner".into())),
+                    progression: farcooler_workflow::Progression::Automatic, max_attempts: 1,
+                    operation: changed.operation("coding-review/v1", "person:owner"), routes: BTreeMap::new(), limit: 0 });
+                // check-1 runs before the review; it now goes past it when it passes, and to it only when it fails.
+                let other = reviewed.stages.iter().position(|s| s.id == "check-1").unwrap();
+                let moved = reviewed.stages.remove(other);
+                reviewed.stages.insert(at, moved);
+                let at = at + 1;
+                let mut skipped = reviewed.clone();
+                skipped.stages[at - 1].routes.insert("passed".into(), farcooler_workflow::Target::Step("check-0".into()));
+                skipped.stages[at - 1].routes.insert("rejected".into(), farcooler_workflow::Target::Step("owner-review".into()));
+                let mut overruled = reviewed.clone();
+                overruled.stages[at].routes.insert("rejected".into(), farcooler_workflow::Target::Step("check-0".into()));
+                forms.push((reviewed, vec![("skipped", skipped), ("overruled", overruled)]));
+                // A configured check no step of the owner's ran.
+                let mut unused = definition.clone();
+                unused.stages.retain(|s| s.id != "check-0");
+                forms.push((unused, vec![("activated", definition.clone())]));
+            }
+            for (form, (owners, attempts)) in forms.into_iter().enumerate() {
+                runtime.validate_publication(&owners, Some(&adapter)).unwrap_or_else(|e| panic!("{action} via {path:?}: {e:?}"));
+                let expected = pin(&runtime);
+                ok(&published(&mut runtime, &owner, ws, &name(&format!("owner{form}")), expected, owners.clone(), changed.clone()).await);
+                let current = runtime.store.workflow_configuration(&w).unwrap();
+                for (what, attempt) in attempts {
+                    runtime.validate_publication(&attempt, Some(&adapter))
+                        .unwrap_or_else(|e| panic!("{action} via {path:?}, {what}, isn't otherwise publishable: {e:?}"));
+                    let expected = pin(&runtime);
+                    let reply = published(&mut runtime, &agent, ws, &name(what), expected, attempt, changed.clone()).await;
+                    // Every bypass that publishes is listed, not just the first.
+                    if refused_as(&reply).as_deref() != Some("scope-denied") { published_anyway.push(name(what)); continue; }
+                    assert_eq!(runtime.store.workflow_configuration(&w).unwrap(), current, "{action} via {path:?}, {what}");
+                }
+                // The grant still does what it is for: another approval, with the owner's kept, publishes.
+                let mut more = owners.clone();
+                more.stages[0].progression = farcooler_workflow::Progression::AwaitApproval { principal: "orchestrator".into() };
+                let expected = pin(&runtime);
+                ok(&published(&mut runtime, &agent, ws, &name(&format!("more{form}")), expected, more, changed.clone()).await);
+            }
+        }
+    }
+    assert!(published_anyway.is_empty(), "the orchestrator published {published_anyway:#?}");
+}
+
+/// The refusal's word, or `None` if `response` admitted the command.
+fn refused_as(response: &farcooler_protocol::v1::Response) -> Option<String> {
+    match &response.outcome {
+        Some(farcooler_protocol::v1::response::Outcome::Error(e)) => Some(farcooler_core::error::word_for(e.code).to_string()),
+        _ => None,
+    }
+}
