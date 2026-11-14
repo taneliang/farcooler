@@ -874,3 +874,45 @@ async fn uncertain_provision_without_quiescence_stays_uncertain() {
         assert!(!runtime.tree(&binding).exists(), "recovery must never run Provision again");
     }
 }
+
+/// A pinned lifecycle-only Claude file used to be accepted even though it could not receive
+/// direction until Stop. Exercise the same persisted native configuration Runtime::open reads.
+#[tokio::test]
+async fn workflow_native_claude_requires_an_active_steering_hook() {
+    let (_dir, runtime, _fake) = super::coding_native::tests::native("pass").await;
+    let root = runtime.root.clone();
+    let original = runtime.coding.clone().unwrap();
+    let CodingHarness::Native { settings: Some(file), .. } = &original.harness else { unreachable!() };
+    let path = file.path.clone();
+    let settings: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    drop(runtime);
+    for fault in ["missing", "not-gating", "foreign-socket", "narrow-matcher", "async", "disabled", "short-timeout"] {
+        let mut value = settings.clone();
+        match fault {
+            "missing" => { value["hooks"].as_object_mut().unwrap().remove("PreToolUse"); }
+            "not-gating" => {
+                let command = value["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap().replace(" --gating", "");
+                value["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command.into();
+            }
+            "foreign-socket" => {
+                let command = value["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap()
+                    .replace(root.join("h.sock").to_str().unwrap(), "/tmp/foreign.sock");
+                value["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command.into();
+            }
+            "narrow-matcher" => value["hooks"]["PreToolUse"][0]["matcher"] = "Read".into(),
+            "async" => value["hooks"]["PreToolUse"][0]["hooks"][0]["async"] = true.into(),
+            "disabled" => value["disableAllHooks"] = true.into(),
+            _ => value["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"] = 0.into(),
+        }
+        let bytes = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let mut config = original.clone();
+        let CodingHarness::Native { settings: Some(file), .. } = &mut config.harness else { unreachable!() };
+        file.digest = digest(&bytes); // Valid pin: refusal must be about registration, not changed bytes.
+        std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+        assert!(Runtime::open(&root).is_err(), "accepted Claude configuration without active steering: {fault}");
+    }
+    std::fs::write(path, serde_json::to_vec(&settings).unwrap()).unwrap();
+    std::fs::write(root.join("coding.json"), serde_json::to_vec(&original).unwrap()).unwrap();
+    Runtime::open(&root).expect("the installed gating hook is accepted");
+}

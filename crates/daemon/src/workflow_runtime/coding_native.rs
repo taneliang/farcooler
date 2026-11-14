@@ -521,9 +521,16 @@ if 'EXPECT_CODEX_HOOKS' in os.environ and pathlib.Path('.codex/hooks.json').read
 # line and hangs up at once, without reading the daemon's answer (ov-1075).
 def hook(event, sid=session, cwd=os.getcwd(), **extra):
     with socket.socket(socket.AF_UNIX) as s:
+        if mode == 'active-steering' and event == 'PreToolUse' and agent == 'claude':
+            # Run the command from the accepted pinned settings, including --gating, through the
+            # actual CLI. Assert Claude's output shape, not the daemon's internal wire response.
+            settings = json.loads(pathlib.Path(os.environ['TEST_CLAUDE_SETTINGS']).read_text())
+            command = settings['hooks']['PreToolUse'][0]['hooks'][0]['command']
+            payload = dict(session_id=sid, cwd=cwd, **extra)
+            reply = subprocess.run(command, shell=True, input=json.dumps(payload), text=True, capture_output=True, check=True)
+            return json.loads(reply.stdout)['hookSpecificOutput']
         s.connect(os.environ['FARCOOLER_NATIVE_HOOK_SOCKET'])
         takes = ['followup'] if mode in ('steering', 'active-steering') and event == 'Stop' and sid == session and cwd == os.getcwd() and 'agent_id' not in extra else []
-        if mode == 'active-steering' and event == 'PreToolUse' and agent == 'claude': takes = ['updated_input']
         s.sendall((json.dumps(dict(agent=agent, event=event, takes=takes, payload=dict(session_id=sid,cwd=cwd,workspace_roots=[cwd],**extra)))+'\n').encode())
         if takes:
             return json.loads(s.makefile().readline())
@@ -537,8 +544,9 @@ if mode in ('steering', 'active-steering'):
         time.sleep(0.01)
     if mode == 'active-steering' and agent == 'claude':
         response = hook('PreToolUse', tool_name='Write', tool_input={'file_path':'result.txt'})
-        assert response['decision']['behavior'] == 'deny', response
-        direction = response['decision']['message']
+        assert response['hookEventName'] == 'PreToolUse', response
+        assert response['permissionDecision'] == 'deny', response
+        direction = response['permissionDecisionReason']
     else:
         # Codex has no mid-turn hook in its pinned configuration: direction gates the final Stop.
         response = hook('Stop')
@@ -574,6 +582,15 @@ else:
 "#).unwrap();
         let CodingHarness::Command(mut process) = runtime.coding.as_ref().unwrap().harness.clone() else { unreachable!() };
         process.argv.clear(); process.timeout_ms = if mode == "foreign-only" { 300 } else { 5000 };
+        if mode == "active-steering" && agent == "claude" {
+            let exe = std::env::current_exe().unwrap();
+            let profile = farcooler_core::scratch::cargo_profile(&exe).unwrap();
+            assert!(profile.join("farcooler").is_file(), "build the hook CLI with cargo build -p farcooler-cli before this test");
+            let bin = dir.path().join("hook-bin"); std::fs::create_dir(&bin).unwrap();
+            std::os::unix::fs::symlink(profile.join("farcooler"), bin.join(farcooler_protocol::CHANNEL.cli_binary_name())).unwrap();
+            process.environment.insert("PATH".into(), format!("{}:{}:/usr/bin:/bin", bin.display(), profile.display()));
+            process.environment.insert("TEST_CLAUDE_SETTINGS".into(), hooks.to_string_lossy().into_owned());
+        }
         if engine { process.environment.insert("EXPECT_CODEX_HOOKS".into(), hooks.to_string_lossy().into_owned()); }
         TEST_ARGV.with(|p| *p.borrow_mut() = Some(vec!["/usr/bin/python3".into(), script.to_string_lossy().into_owned(), mode.into(), agent.into()]));
         let root = runtime.root.clone();

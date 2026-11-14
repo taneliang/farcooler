@@ -109,3 +109,49 @@ Final round 1 checks:
   passed.
 - File-size budget, swallowed-call lint, copy lint, protocol capability check,
   doc-comment check, and `git diff --check`: passed.
+
+## Fix round 2: require Claude's active steering registration
+
+Read the newest ticket finding through the installed Canary CLI. The native
+host validated only lifecycle registrations, allowing a correctly pinned Claude
+settings file without a waiting `PreToolUse` registration. Such a configuration
+could not receive direction before its next tool ran.
+
+`workflow_native_claude_requires_an_active_steering_hook` failed first against
+that persisted native configuration:
+
+```text
+accepted Claude configuration without active steering: missing
+```
+
+Native Claude validation now requires the installed all-tools gating entry,
+including its private endpoint, waiting command, matcher and timeout. It also
+refuses disabled hooks. The regression repins each settings variant so missing,
+non-gating, foreign-endpoint, narrowed, asynchronous, disabled and zero-timeout
+registrations fail for their configuration rather than a stale digest. The
+normal installed configuration still opens.
+
+The existing active-work PTY fixture now executes the command in the accepted
+Claude settings through the freshly built hook CLI. It verifies Claude's actual
+`hookSpecificOutput.permissionDecision` denial and direction before writing or
+committing the candidate. The fixture provides the channel-specific CLI name
+in its private PATH; its first run exposed that name lookup before the fixture
+was corrected. Stop continuation and final-handoff coverage remain in place
+for both harnesses.
+
+Commands remove inherited FARCOOLER_* launch variables except the WorkOS client
+ID, use TMPDIR=/tmp, and run tmux tests under the leak checker. No cargo fmt was
+run.
+
+Final round 2 checks:
+
+- Complete daemon unit suite under `scripts/tmux-leak-check.py`: **3,077 passed**,
+  13 skipped, with no leaked test servers. This includes the configuration
+  regression, active-work delivery through the actual hook CLI, both harnesses'
+  Stop continuation and final handoff, and existing stop/pause/recovery coverage.
+- `cargo clippy -p farcooler-daemon -p farcooler-cli --all-targets -- -D warnings`:
+  passed.
+- File-size budget, doc-comment check, swallowed-call lint, copy lint, protocol
+  capability checks, and `git diff --check`: passed.
+- Workflow service, command and draft-approval socket integration suites under
+  `scripts/tmux-leak-check.py`: **27 passed**, one skipped; no leaked servers.

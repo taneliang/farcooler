@@ -9,6 +9,11 @@ configuration has no mid-turn hook, so it receives direction at its next Stop
 hook as a continuation in the same session, before the step settles. Claude also
 uses this continuation when it reaches Stop without another tool call.
 
+Native Claude settings must include the installed all-tools gating `PreToolUse`
+registration targeting this runtime's private host. Lifecycle-only settings,
+disabled hooks, and altered tool gates are refused when the configuration opens
+and before a native step launches. Other user hooks may coexist with that entry.
+
 Message admission and the final Stop queue check share a lock. Direction accepted
 before that check extends the session; messages after the final check are
 rejected even while the agent row remains visible during capture and quiescence.
