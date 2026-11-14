@@ -1,0 +1,181 @@
+lane-gate: PARTIAL GATE: --only/--skip leaves out rust, swift-tests, swift, ios, android, web, which this diff reaches
+lane-gate: 469 changed file(s) against origin/main; jobs: wire, doc-comments, relay, site, tunnel
+  wire: .github/workflows/canary.yml, .github/workflows/ci.yml, .github/workflows/claude-prices.yml and 226 more
+  doc-comments: .github/workflows/canary.yml, .github/workflows/ci.yml, .github/workflows/claude-prices.yml and 226 more
+  relay: .github/workflows/canary.yml, .github/workflows/ci.yml, .github/workflows/claude-prices.yml and 235 more
+  site: .config/nextest.toml, .config/quarantine.txt, .github/workflows/canary.yml and 293 more
+  tunnel: .config/nextest.toml, .config/quarantine.txt, .github/workflows/canary.yml and 293 more
+
+[wire]
+  run  ./scripts/proto-lint.py --self-test
+  run  ./scripts/proto-lint.py --channel preview
+  run  ./scripts/proto-lint.py --channel stable
+  run  ./scripts/proto-lint.py --channel canary
+  run  ./scripts/canary-baseline-test.sh
+  run  ./scripts/canary-shipped.py --self-test
+  run  ./scripts/canary-plan.py --self-test
+  run  ./scripts/device-keys-readiness.py --self-test
+  run  ./scripts/site-proof.py --self-test
+  run  ./scripts/landing-timing.py --self-test
+  run  ./scripts/ci-changes.py --self-test
+  run  python3 ./scripts/ci-concurrency-test.py
+  run  python3 scripts/quarantine.py --lint
+  run  python3 scripts/rust-shadow-test.py
+  run  python3 scripts/rust-shards.py --self-test
+  run  python3 scripts/macos-rust-tests.py --self-test --check
+  run  python3 scripts/landing-gate-test.py
+  run  HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test
+  run  python3 scripts/gate-evidence-test.py
+  run  python3 scripts/engine-gate-test.py
+  run  HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test
+  run  ./scripts/notarytool-retry.sh --self-test
+  run  ./scripts/version-test.sh
+  run  ./scripts/workos-test.sh
+  run  ./scripts/appcast-test.sh
+  run  ./scripts/ci-flake-tally-test.sh
+  run  ./scripts/ios-ui-retry-test.sh
+  run  ./scripts/ios-ui-lease-test.sh
+  run  ./scripts/copy-lint.py --self-test
+  run  ./scripts/test-leak-check.py --lint
+  run  ./scripts/copy-lint.py
+  run  ./scripts/shared-core-lint.py --self-test
+  run  ./scripts/shared-core-lint.py
+  run  git fetch --no-tags origin main ...
+  run  ./scripts/capability-names.py --self-test ...
+  run  ./scripts/claude-prices.py --self-test
+  run  ./scripts/openai-prices.py --self-test
+  run  ./scripts/derp-hosts-check.py --self-test
+  run  ./scripts/file-size-budget.py --self-test ...
+  run  ./scripts/plan-layer-lint.py --self-test ...
+  run  ./scripts/page-layer-lint.py --self-test ...
+  run  ./scripts/swallow-lint.py --self-test
+  run  ./scripts/swallow-lint.py
+  run  ./scripts/visual-tokens-lint.py --self-test
+  run  ./scripts/visual-tokens-lint.py
+  run  ./scripts/pixel-scale-lint.py --self-test
+  run  ./scripts/pixel-scale-lint.py
+  run  ./scripts/test-window-lint.py --self-test
+  run  ./scripts/test-window-lint.py
+  run  ./scripts/runloop-spin-lint.py --self-test
+  run  ./scripts/runloop-spin-lint.py
+  run  ./scripts/capture-window-lint.py --self-test
+  run  ./scripts/capture-window-lint.py
+  run  ./scripts/fresh-script-lint.py --self-test
+  run  ./scripts/fresh-script-lint.py
+  run  ./scripts/charter-intercept-lint.py --self-test
+  run  ./scripts/charter-intercept-lint.py
+  run  ./scripts/ios-agentkit-subset-lint.py --self-test
+  run  ./scripts/ios-agentkit-subset-lint.py
+  run  ./scripts/migration-lint.py --self-test
+  run  ./scripts/migration-lint.py
+  run  if [ "$(typeshare --version 2>/dev/null)" != "typeshare 1.13.4" ]; then ...
+  run  ./scripts/gen-wire-types.sh ...
+
+[doc-comments]
+  run  ./scripts/doc-comment-check.py --self-test
+  run  ./scripts/doc-comment-check.py --base origin/main --head HEAD
+
+[relay]
+  run  npm ci
+  run  npx tsc --noEmit
+  run  npm test
+  run  npx wrangler deploy --dry-run --outdir /tmp/relay-build
+
+[site]
+  run  npm ci
+  run  npx tsc --noEmit
+  run  npm test
+  run  npx wrangler deploy --dry-run --outdir /tmp/site-build
+  run  npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary
+  run  npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview
+
+[tunnel]
+  run  unformatted="$(gofmt -l .)" ...
+  run  CGO_ENABLED=1 go vet ./... ...
+  run  CGO_ENABLED=0 go vet ./... ...
+## lane-gate summary (PARTIAL)
+
+Branch HEAD eb28c5cc4 against origin/main; logs in /tmp/lane-gate-logs-d44m1c5b
+
+| Job | Command | Result | Secs | Tests |
+| --- | --- | --- | --- | --- |
+| wire | ./scripts/proto-lint.py --self-test | pass | 1 |  |
+| wire | ./scripts/proto-lint.py --channel preview | pass | 0 |  |
+| wire | ./scripts/proto-lint.py --channel stable | pass | 0 |  |
+| wire | ./scripts/proto-lint.py --channel canary | pass | 0 |  |
+| wire | ./scripts/canary-baseline-test.sh | pass | 4 |  |
+| wire | ./scripts/canary-shipped.py --self-test | pass | 0 |  |
+| wire | ./scripts/canary-plan.py --self-test | pass | 1 |  |
+| wire | ./scripts/device-keys-readiness.py --self-test | pass | 0 |  |
+| wire | ./scripts/site-proof.py --self-test | pass | 0 |  |
+| wire | ./scripts/landing-timing.py --self-test | pass | 0 |  |
+| wire | ./scripts/ci-changes.py --self-test | pass | 1 |  |
+| wire | python3 ./scripts/ci-concurrency-test.py | pass | 1 |  |
+| wire | python3 scripts/quarantine.py --lint | pass | 0 |  |
+| wire | python3 scripts/rust-shadow-test.py | pass | 2 |  |
+| wire | python3 scripts/rust-shards.py --self-test | pass | 0 |  |
+| wire | python3 scripts/macos-rust-tests.py --self-test --check | pass | 0 |  |
+| wire | python3 scripts/landing-gate-test.py | pass | 1 |  |
+| wire | HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test | pass | 32 |  |
+| wire | python3 scripts/gate-evidence-test.py | pass | 60 |  |
+| wire | python3 scripts/engine-gate-test.py | pass | 49 |  |
+| wire | HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test | pass | 15 |  |
+| wire | ./scripts/notarytool-retry.sh --self-test | pass | 1 |  |
+| wire | ./scripts/version-test.sh | pass | 3 |  |
+| wire | ./scripts/workos-test.sh | pass | 0 |  |
+| wire | ./scripts/appcast-test.sh | pass | 0 |  |
+| wire | ./scripts/ci-flake-tally-test.sh | pass | 1 |  |
+| wire | ./scripts/ios-ui-retry-test.sh | pass | 76 |  |
+| wire | ./scripts/ios-ui-lease-test.sh | pass | 64 |  |
+| wire | ./scripts/copy-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/test-leak-check.py --lint | pass | 1 |  |
+| wire | ./scripts/copy-lint.py | pass | 1 |  |
+| wire | ./scripts/shared-core-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/shared-core-lint.py | pass | 1 |  |
+| wire | git fetch --no-tags origin main ... | pass | 3 |  |
+| wire | ./scripts/capability-names.py --self-test ... | pass | 0 |  |
+| wire | ./scripts/claude-prices.py --self-test | pass | 0 |  |
+| wire | ./scripts/openai-prices.py --self-test | pass | 0 |  |
+| wire | ./scripts/derp-hosts-check.py --self-test | pass | 0 |  |
+| wire | ./scripts/file-size-budget.py --self-test ... | pass | 0 |  |
+| wire | ./scripts/plan-layer-lint.py --self-test ... | pass | 1 |  |
+| wire | ./scripts/page-layer-lint.py --self-test ... | pass | 6 |  |
+| wire | ./scripts/swallow-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/swallow-lint.py | pass | 0 |  |
+| wire | ./scripts/visual-tokens-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/visual-tokens-lint.py | pass | 1 |  |
+| wire | ./scripts/pixel-scale-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/pixel-scale-lint.py | pass | 0 |  |
+| wire | ./scripts/test-window-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/test-window-lint.py | pass | 0 |  |
+| wire | ./scripts/runloop-spin-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/runloop-spin-lint.py | pass | 0 |  |
+| wire | ./scripts/capture-window-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/capture-window-lint.py | pass | 0 |  |
+| wire | ./scripts/fresh-script-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/fresh-script-lint.py | pass | 0 |  |
+| wire | ./scripts/charter-intercept-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/charter-intercept-lint.py | pass | 0 |  |
+| wire | ./scripts/ios-agentkit-subset-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/ios-agentkit-subset-lint.py | pass | 2 |  |
+| wire | ./scripts/migration-lint.py --self-test | pass | 1 |  |
+| wire | ./scripts/migration-lint.py | pass | 0 |  |
+| wire | if [ "$(typeshare --version 2>/dev/null)" != "typeshare 1.13.4" ]; then ... | pass | 0 |  |
+| wire | ./scripts/gen-wire-types.sh ... | pass | 0 |  |
+| doc-comments | ./scripts/doc-comment-check.py --self-test | pass | 0 |  |
+| doc-comments | ./scripts/doc-comment-check.py --base origin/main --head HEAD | pass | 1 |  |
+| relay | npm ci | pass | 6 |  |
+| relay | npx tsc --noEmit | pass | 1 |  |
+| relay | npm test | pass | 53 | 840 vitest |
+| relay | npx wrangler deploy --dry-run --outdir /tmp/relay-build | pass | 1 |  |
+| site | npm ci | pass | 3 |  |
+| site | npx tsc --noEmit | pass | 1 |  |
+| site | npm test | pass | 3 | 345 vitest |
+| site | npx wrangler deploy --dry-run --outdir /tmp/site-build | pass | 1 |  |
+| site | npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary | pass | 1 |  |
+| site | npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview | pass | 1 |  |
+| tunnel | unformatted="$(gofmt -l .)" ... | pass | 0 |  |
+| tunnel | CGO_ENABLED=1 go vet ./... ... | pass | 14 | 1 go pkgs |
+| tunnel | CGO_ENABLED=0 go vet ./... ... | pass | 12 | 1 go pkgs |
+
+lane-gate: PARTIAL, NOT A FULL GATE: rust, swift-tests, swift, ios, android, web not run (--only/--skip); the steps that ran passed
