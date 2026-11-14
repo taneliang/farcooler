@@ -60,31 +60,115 @@ def parse(text, today):
     return entries, problems
 
 
-def sources(root):
-    """Every .rs file under the repo's Rust trees, as (path, text)."""
-    for sub in ("crates", "test", "services", "apps"):
-        for path in (root / sub).rglob("*.rs"):
-            if "target" not in path.parts:
-                yield path, path.read_text(errors="replace")
+def _clean(text):
+    """The source with comments, strings and char literals blanked, so braces and keywords inside them are inert."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        two = text[i:i + 2]
+        if two == "//":
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+        elif two == "/*":
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if text[i:i + 2] == "/*":
+                    depth, i = depth + 1, i + 2
+                elif text[i:i + 2] == "*/":
+                    depth, i = depth - 1, i + 2
+                else:
+                    i += 1
+        elif (raw := re.match(r'b?r(#*)"', text[i:i + 12])) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            end = text.find('"' + raw.group(1), i + raw.end())
+            i = n if end < 0 else end + 1 + len(raw.group(1))
+        elif text[i] == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+        elif (ch := re.match(r"'(?:\\.[^']*|[^'\\])'", text[i:i + 12])):
+            i += ch.end()
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+_ITEM = re.compile(
+    r"(?P<mod>\bmod\s+(?P<mname>\w+)\s*\{)"
+    r"|(?P<fn>(?P<attrs>(?:#\[[^\]]*\]\s*)+)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(?P<fname>\w+))"
+    r"|(?P<open>\{)|(?P<close>\})")
+_TEST_ATTR = re.compile(r"#\[\s*(?:[\w:]+::)?(?:test|rstest|test_case)\s*(?:\(|\])")
+
+
+def inline_tests(text):
+    """Module-relative names (`a::b::name`) of the #[test] functions in one file's text."""
+    names, stack = [], []
+    for m in _ITEM.finditer(_clean(text)):
+        if m["mod"]:
+            stack.append(m["mname"])
+        elif m["open"]:
+            stack.append(None)
+        elif m["close"]:
+            if stack:
+                stack.pop()
+        elif m["fn"] and any(_TEST_ATTR.match(a) for a in re.findall(r"#\[[^\]]*\]", m["attrs"])):
+            names.append("::".join([x for x in stack if x] + [m["fname"]]))
+    return names
+
+
+def _module(parts):
+    """The module path of a source file given its path parts below src/ (or tests/)."""
+    parts = list(parts)
+    parts[-1] = parts[-1].removesuffix(".rs")
+    if parts[-1] in ("lib", "main", "mod"):
+        parts.pop()
+    return parts
+
+
+def real_tests(root):
+    """Every (binary id, full test name) in the repo's crates, read from source the way nextest names them.
+
+    Static, so the always-on lint needs no build: a unit test is `<package>` (lib) or
+    `<package>::bin/<name>` plus its module path; an integration test is `<package>::<file>`.
+    """
+    found = set()
+    for manifest in sorted(root.glob("crates/*/Cargo.toml")):
+        crate, text = manifest.parent, manifest.read_text()
+        package = re.search(r'^\[package\][^\[]*?^name\s*=\s*"([^"]+)"', text, re.S | re.M)
+        if not package:
+            continue
+        package = package.group(1)
+        has_lib = (crate / "src/lib.rs").exists()
+        declared = re.findall(r'^\[\[bin\]\]\s*\nname\s*=\s*"([^"]+)"(?:\s*\npath\s*=\s*"([^"]+)")?', text, re.M)
+        main_bin = next((n for n, path in declared if path in ("", "src/main.rs")), package)
+        for path in sorted((crate / "src").rglob("*.rs")) if (crate / "src").exists() else []:
+            rel = path.relative_to(crate / "src").parts
+            if rel[0] == "bin":
+                stem = rel[1].removesuffix(".rs")
+                binary, module = f"{package}::bin/{next((n for n, p in declared if p == 'src/' + '/'.join(rel)), stem)}", _module(rel[2:] or ["main"])
+                if len(rel) == 2:
+                    module = []
+            elif has_lib:
+                binary, module = package, _module(rel)
+            else:
+                binary, module = f"{package}::bin/{main_bin}", _module(rel)
+            for name in inline_tests(path.read_text(errors="replace")):
+                found.add((binary, "::".join(module + [name])))
+        for path in sorted((crate / "tests").rglob("*.rs")) if (crate / "tests").exists() else []:
+            rel = path.relative_to(crate / "tests").parts
+            module = _module(rel[1:]) if len(rel) > 1 and rel[-1] != "main.rs" else []
+            if len(rel) > 1 and rel[-1] == "main.rs":
+                module = []
+            for name in inline_tests(path.read_text(errors="replace")):
+                found.add((f"{package}::{rel[0].removesuffix('.rs')}", "::".join(module + [name])))
+    return found
 
 
 def unknown(entries, root):
-    """Entries whose name matches no test: a cheap static check, so the always-on lint needs no build.
-
-    The test's last path segment must be a `fn` somewhere, and an integration
-    test's binary (`package::file`) must have a file or directory by that name.
-    """
-    texts = list(sources(root))
-    problems = []
-    for binary, test, _ticket, _expiry, number in entries:
-        leaf = test.split("::")[-1]
-        if not any(re.search(rf"\bfn\s+{re.escape(leaf)}\b", text) for _p, text in texts):
-            problems.append(f"line {number}: no test function `{leaf}` exists ({binary} {test})")
-        if "::" in binary:
-            stem = binary.split("::", 1)[1]
-            if not any(p.stem == stem or stem in p.parts for p, _t in texts):
-                problems.append(f"line {number}: no test binary `{stem}` exists ({binary} {test})")
-    return problems
+    """Entries whose exact binary id and test name match no real test, so a typo or a rename fails the lint."""
+    real = real_tests(root)
+    return [f"line {number}: no test `{test}` in binary `{binary}` (check the binary id, module path and #[test])"
+            for binary, test, _ticket, _expiry, number in entries if (binary, test) not in real]
 
 
 def lint(path=LIST, root=ROOT, today=None):

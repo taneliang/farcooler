@@ -39,37 +39,65 @@ mod tests {
 
 
 class Lint(unittest.TestCase):
-    def check(self, text, today=TODAY, files=None):
+    def check(self, text, today=TODAY):
         root = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root)
-        (root / "crates/x/tests").mkdir(parents=True)
-        (root / "crates/x/src.rs").write_text("fn real_test() {}\n")
-        (root / "crates/x/tests/a_bin.rs").write_text("fn other() {}\n")
+        crate = root / "crates/x"
+        (crate / "src/server").mkdir(parents=True)
+        (crate / "tests").mkdir()
+        (crate / "Cargo.toml").write_text('[package]\nname = "farcooler-x"\nversion = "0.0.0"\n')
+        (crate / "src/lib.rs").write_text(
+            '// #[test] fn in_a_comment() {}\nfn plain() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn real() {}\n'
+            '    fn helper() {}\n    mod deep {\n        #[tokio::test]\n        async fn nested() {}\n    }\n}\n')
+        (crate / "src/server/mod.rs").write_text("#[test]\nfn in_a_file_module() {}\n")
+        (crate / "tests/a_bin.rs").write_text("#[test]\nfn integration() {}\n")
         entries, problems = q.parse(text, today)
         return problems + q.unknown(entries, root)
 
     def test_good_and_empty(self):
         self.assertEqual(self.check(""), [])
-        self.assertEqual(self.check("# c\n\nx::a_bin m::other ov-1 2026-12-01\nx m::real_test ov-2 2026-11-16\n"), [])
+        self.assertEqual(self.check(
+            "# c\n\nfarcooler-x tests::real ov-1 2026-11-16\nfarcooler-x tests::deep::nested ov-2 2026-12-01\n"
+            "farcooler-x server::in_a_file_module ov-3 2026-12-01\nfarcooler-x::a_bin integration ov-4 2026-12-01\n"), [])
 
-    def test_expired_malformed_unknown_fail(self):
+    def test_expired_malformed_fail(self):
         for text, word in [
-            ("x m::real_test ov-1 2026-11-15\n", "expired"),
-            ("x m::real_test ov-1 2026-01-01\n", "expired"),
-            ("x m::real_test ov-1\n", "field"),
-            ("x m::real_test ticket 2026-12-01\n", "ticket"),
-            ("x m::real_test ov-1 soon\n", "date"),
-            ("x m::real_test ov-1 2026-13-45\n", "date"),
-            ("x m::gone ov-1 2026-12-01\n", "no test function"),
-            ("x::no_such_bin m::other ov-1 2026-12-01\n", "no test binary"),
-            ("x m::real_test ov-1 2026-12-01\nx m::real_test ov-1 2026-12-01\n", "twice"),
+            ("farcooler-x tests::real ov-1 2026-11-15\n", "expired"),
+            ("farcooler-x tests::real ov-1 2026-01-01\n", "expired"),
+            ("farcooler-x tests::real ov-1\n", "field"),
+            ("farcooler-x tests::real ticket 2026-12-01\n", "ticket"),
+            ("farcooler-x tests::real ov-1 soon\n", "date"),
+            ("farcooler-x tests::real ov-1 2026-13-45\n", "date"),
+            ("farcooler-x tests::real ov-1 2026-12-01\nfarcooler-x tests::real ov-1 2026-12-01\n", "twice"),
         ]:
             with self.subTest(text=text):
                 self.assertTrue(any(word in p for p in self.check(text)), self.check(text))
 
-    def test_the_checked_in_list_is_clean_and_empty(self):
+    def test_a_name_matching_no_test_fails(self):
+        for text in [
+            "farcooler-x tests::gone ov-1 2026-12-01\n",                    # renamed or typo
+            "invented tests::real ov-1 2099-01-01\n",                       # nonexistent package
+            "invented::module main ov-1 2099-01-01\n",                      # nonexistent package and binary
+            "farcooler-x invented::module::main ov-1 2099-01-01\n",         # nonexistent module
+            "farcooler-x real ov-1 2026-12-01\n",                           # wrong module path
+            "farcooler-x tests::helper ov-1 2026-12-01\n",                  # a fn, but not a test
+            "farcooler-x tests::plain ov-1 2026-12-01\n",
+            "farcooler-x in_a_comment ov-1 2026-12-01\n",                   # a #[test] inside a comment
+            "farcooler-x::no_such_bin integration ov-1 2026-12-01\n",       # nonexistent test binary
+            "farcooler-x::a_bin tests::real ov-1 2026-12-01\n",             # right test, wrong binary
+            "farcooler-x integration ov-1 2026-12-01\n",                    # integration test under the lib binary
+        ]:
+            with self.subTest(text=text):
+                self.assertTrue(any("no test" in p for p in self.check(text)), self.check(text))
+
+    def test_the_checked_in_list_is_clean(self):
+        # Whatever the list holds, it must be valid today. It may be empty or hold entries.
         self.assertEqual(q.lint(), [])
-        self.assertEqual(q.parse(q.LIST.read_text(), TODAY)[0], [])
+
+    def test_the_real_tree_is_read_like_nextest(self):
+        real = q.real_tests(q.ROOT)
+        self.assertIn(("farcooler-tmux::live_tmux", "resize_and_capture_target_the_exact_window"), real)
+        self.assertTrue(any(b == "farcooler-tmux" and "::" in t for b, t in real))
 
 
 @unittest.skipUnless(shutil.which("cargo-nextest") or (pathlib.Path.home() / ".cargo/bin/cargo-nextest").exists(), "needs cargo-nextest")

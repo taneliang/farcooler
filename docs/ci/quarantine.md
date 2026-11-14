@@ -11,8 +11,9 @@ up to twice. If a rerun passes, the run prints `flaky (quarantined): <binary> <t
 every rerun, the run fails as before. A test that is not listed gets no rerun. With an empty list the command runs unchanged.
 
 **The lint.** `scripts/quarantine.py --lint` (the wire job) fails on a malformed line, a duplicate, an entry on or after its expiry
-date, or a name that matches no test. The name check is static, so it needs no build: the test's last path segment must be a `fn`
-somewhere in the repo, and an integration test's binary (`package::file`) must have a file or directory with that name.
+date, or a name that matches no test. The name check is static, so it needs no build: it reads each crate's source the way nextest names tests and requires the exact
+binary id and full test name to exist as a `#[test]` function (`farcooler-tmux` for a unit test, `farcooler-daemon::a_foo`
+for an integration test file). A typo, a rename, a wrong module path or a plain non-test function fails the lint.
 
 **Removing an entry** when the fix lands is a one-line deletion. To keep one past its expiry, edit the date in the ticket's say-so.
 
