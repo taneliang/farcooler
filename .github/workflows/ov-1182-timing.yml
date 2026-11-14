@@ -174,7 +174,10 @@ jobs:
       # is a reasonable call to make later; making it as a side effect of adding
       # CI is not. Clippy, which finds real defects rather than disagreeing
       # about widths, runs at -D warnings.
+      # All Clippy feature variants run once, on Linux (ov-1182).
+      # Mac keeps its native test build, feature tests and target checks.
       - run: cargo clippy --workspace --all-targets -- -D warnings
+        if: runner.os == 'Linux'
 
       # The line above is `--workspace` at DEFAULT features, and that word is
       # the whole gap these seven lines close: every `tailcat` feature in this
@@ -214,12 +217,19 @@ jobs:
       # way these findings did. Each of the seven was watched to go red on a
       # mutation behind its own feature while `--workspace` above stayed green.
       - run: cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings
+        if: runner.os == 'Linux'
       - run: cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings
+        if: runner.os == 'Linux'
       - run: cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings
+        if: runner.os == 'Linux'
       - run: cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings
+        if: runner.os == 'Linux'
       - run: cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings
+        if: runner.os == 'Linux'
       - run: cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings
+        if: runner.os == 'Linux'
       - run: cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings
+        if: runner.os == 'Linux'
 
       # The `linked` backend on the target it actually ships on. The clippy
       # line above now type-checks it too, but only for THIS job's host arch;
@@ -358,6 +368,7 @@ jobs:
       - run: cargo test --workspace --doc
 
   # Compile the default workspace once, independently of lint/feature checks.
+
   rust-build:
     name: Rust test archive
     runs-on: ubuntu-24.04
