@@ -108,3 +108,69 @@ async fn a_pid_that_started_at_another_time_is_not_stopped() {
     assert!(running(&child), "someone else's process is left alone");
     end(child);
 }
+
+fn read_only(dir: &Path, on: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(if on { 0o555 } else { 0o755 })).unwrap();
+}
+
+#[tokio::test]
+async fn a_first_pause_that_cannot_be_recorded_stops_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let y = Yielding::at(dir.path());
+    let child = builder();
+    let _guard = y.builder(group(&child));
+    read_only(dir.path(), true);
+    let gate = y.gate();
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(running(&child), "no record, no stop: {:?}", states(&child));
+    assert!(!y.paused());
+    read_only(dir.path(), false);
+    drop(gate);
+    end(child);
+}
+
+#[tokio::test]
+async fn an_update_that_cannot_be_recorded_continues_what_was_stopped_and_keeps_the_old_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let y = Yielding::at(dir.path());
+    let (first, second) = (builder(), builder());
+    let g1 = y.builder(group(&first));
+    let gate = y.gate();
+    assert!(stopped(&first));
+    let old = std::fs::read(dir.path().join("yielding.json")).unwrap();
+    read_only(dir.path(), true);
+    let g2 = y.builder(group(&second)); // the update cannot be written
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(running(&first) && running(&second), "{:?} {:?}", states(&first), states(&second));
+    assert_eq!(std::fs::read(dir.path().join("yielding.json")).unwrap(), old, "the valid record is retained");
+    read_only(dir.path(), false);
+    drop((g1, g2, gate));
+    end(first); end(second);
+}
+
+#[tokio::test]
+async fn a_restart_after_an_update_resumes_every_stopped_builder() {
+    let dir = tempfile::tempdir().unwrap();
+    let y = Yielding::at(dir.path());
+    let (first, second) = (builder(), builder());
+    let g1 = y.builder(group(&first));
+    let gate = y.gate();
+    let g2 = y.builder(group(&second));
+    assert!(stopped(&first) && stopped(&second));
+    // A half-written update that died before its rename is left beside the record.
+    std::fs::write(dir.path().join("yielding.json.tmp"), b"[{\"Gro").unwrap();
+    std::mem::forget((g1, g2, gate));
+    let _again = Yielding::at(dir.path());
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(running(&first) && running(&second), "{:?} {:?}", states(&first), states(&second));
+    end(first); end(second);
+}
+
+#[tokio::test]
+async fn an_unreadable_record_is_kept_not_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("yielding.json"), b"[{\"Gro").unwrap();
+    let _y = Yielding::at(dir.path());
+    assert!(dir.path().join("yielding.json").exists());
+}

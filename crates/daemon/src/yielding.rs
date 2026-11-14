@@ -71,10 +71,14 @@ impl Yielding {
     pub(crate) fn at(root: &Path) -> Self {
         let record = root.join("yielding.json");
         if let Ok(raw) = std::fs::read(&record) {
-            if let Ok(left) = serde_json::from_slice::<Vec<Target>>(&raw) {
-                for target in &left { signal(target, libc::SIGCONT); }
+            match serde_json::from_slice::<Vec<Target>>(&raw) {
+                Ok(left) => {
+                    for target in &left { signal(target, libc::SIGCONT); }
+                    let _ = std::fs::remove_file(&record);
+                }
+                // Kept for a person to read: deleting it would hide that builders may still be stopped.
+                Err(e) => tracing::error!(error = %e, path = %record.display(), "the pause record is unreadable; builders it names may still be stopped"),
             }
-            let _ = std::fs::remove_file(&record);
         }
         Self(Arc::new(Inner { state: Default::default(), record: Some(record) }))
     }
@@ -97,22 +101,42 @@ impl Yielding {
     fn change(&self, edit: impl FnOnce(&mut State)) {
         let mut state = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         edit(&mut state);
-        let want = !state.gates.is_empty();
-        if want {
-            // Also covers a builder that is new, and children a native agent forked before it stopped.
-            for target in state.builders.values() { signal(target, libc::SIGSTOP); }
-            self.write(&state);
-            if !state.ticking { state.ticking = true; self.tick(); }
-        } else if state.paused {
-            for target in state.builders.values() { signal(target, libc::SIGCONT); }
-            if let Some(record) = &self.0.record { let _ = std::fs::remove_file(record); }
+        if state.gates.is_empty() {
+            if state.paused {
+                for target in state.builders.values() { signal(target, libc::SIGCONT); }
+                if let Some(record) = &self.0.record { let _ = std::fs::remove_file(record); }
+            }
+            state.paused = false;
+            return;
         }
-        state.paused = want;
+        // The full set that is about to be stopped is on disk, atomically, before any of it stops. If it can't be
+        // written, nothing new is stopped and whatever was stopped is continued: a builder never stays stopped with
+        // no record that a restarted daemon could resume it from.
+        if let Err(e) = self.write(&state) {
+            tracing::warn!(error = %e, "could not record the builders to pause; they keep running during this gate");
+            for target in state.builders.values() { signal(target, libc::SIGCONT); }
+            state.paused = false;
+            return;
+        }
+        // Also covers a builder that is new, and children a native agent forked before it stopped.
+        for target in state.builders.values() { signal(target, libc::SIGSTOP); }
+        state.paused = true;
+        if !state.ticking { state.ticking = true; self.tick(); }
     }
-    fn write(&self, state: &State) {
-        let Some(record) = &self.0.record else { return };
+    /// Replace the record in one step: a reader sees the whole old set or the whole new set, never a part.
+    fn write(&self, state: &State) -> std::io::Result<()> {
+        let Some(record) = &self.0.record else { return Ok(()) };
         let targets: Vec<&Target> = state.builders.values().collect();
-        if let Ok(bytes) = serde_json::to_vec(&targets) { let _ = std::fs::write(record, bytes); }
+        let bytes = serde_json::to_vec(&targets).map_err(std::io::Error::other)?;
+        let temp = record.with_extension("json.tmp");
+        {
+            let mut file = std::fs::File::create(&temp)?;
+            std::io::Write::write_all(&mut file, &bytes)?;
+            file.sync_all()?;
+        }
+        std::fs::rename(&temp, record)?;
+        if let Some(dir) = record.parent() { std::fs::File::open(dir)?.sync_all()?; }
+        Ok(())
     }
     /// While a gate runs, a native PTY may fork descendants before they are stopped: sweep again.
     fn tick(&self) {
@@ -123,7 +147,7 @@ impl Yielding {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 let Some(inner) = weak.upgrade() else { return };
                 let mut state = inner.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                if state.gates.is_empty() { state.ticking = false; return; }
+                if state.gates.is_empty() || !state.paused { state.ticking = false; return; }
                 for target in state.builders.values() { signal(target, libc::SIGSTOP); }
             }
         });
