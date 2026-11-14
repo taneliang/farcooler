@@ -130,6 +130,19 @@ next invocation. Pre-Cargo git status makes the second invocation fresh without
 removing or weakening any fingerprint input. The fixture reproduces the old
 compile/compile/fresh sequence and verifies compile/fresh after the fix.
 
+The index-refresh candidate,
+[43584925203](https://github.com/taneliang/farcooler/actions/runs/43584925203)
+(e26bdc4f8), passed both jobs but narrowly missed: app **919 s (15m19s)**,
+tests **925 s (15m25s)**. The Mac wrapper now revalidated native targets without
+recompiling; its complete build/test step took 310 s. Native preparation took
+271 s (including dependencies newly cached after profile unification), and
+AgentKit took 99 s. The bundle's four native invocations still took 85, 232,
+254 and 121 s. The next candidate disables LLVM optimization only in the CI
+bundle job; shipping's release profile, tunnel linkage and bundle checks remain
+unchanged. The guard self-test now uses a checked caffeinate stand-in, avoiding
+47 s of real display wake/hold calls while preserving the guard's assertions
+and checking the wake/hold wiring itself.
+
 Final cached repeat measurements pending. A temporary push trigger for this branch
 collects ordinary CI job measurements without opening a PR or adding runner
 jobs. Remove that trigger once two successful under-15-minute runs have been

@@ -38,6 +38,21 @@ chmod +x "$scratch/bin/swift"
 printf '#!/bin/bash\nprintf "%%b" "$PMSET_LOG"\n' >"$scratch/bin/pmset"
 chmod +x "$scratch/bin/pmset"
 
+# Exercise the wake/hold command wiring without waking the developer's display
+# or waiting a real second on every synthetic test run (47 s on CI, ov-1183).
+export CAFFEINATE_LOG="$scratch/caffeinate.log"
+cat >"$scratch/bin/caffeinate" <<'STUB'
+#!/bin/bash
+echo "$*" >> "$CAFFEINATE_LOG"
+case "$*" in
+  '-u -t 1') exit 0 ;;
+esac
+[ "$1" = -d ] || exit 99
+shift
+exec "$@"
+STUB
+chmod +x "$scratch/bin/caffeinate"
+
 fail() { echo "FAIL: $1" >&2; exit 1; }
 export PATH="$scratch/bin:$PATH" HOME="$scratch/home"
 run() { MODE="$1" "$scratch/apps/macos/test.sh" 2>&1; }
@@ -79,5 +94,8 @@ if grep -q "the display was off" <<<"$out"; then fail "a display turned on durin
 PMSET_LOG=""
 out="$(run full)" || fail "a full run failed: $out"
 if grep -q "the display was off" <<<"$out"; then fail "an empty power log said the display was off: $out"; fi
+
+grep -q '^-u -t 1$' "$CAFFEINATE_LOG" || fail "the guard did not wake the display"
+grep -q '^-d ' "$CAFFEINATE_LOG" || fail "the guard did not hold the display awake"
 
 echo "ok: test.sh fails a run that ends early or counts fewer tests than the floor, passes a full one, and says when the display was off"
