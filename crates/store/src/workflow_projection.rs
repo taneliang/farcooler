@@ -135,10 +135,12 @@ pub(crate) fn project(tx: &Transaction<'_>, workspace: &str, state: &State, by: 
         // tracking a card must not rewrite them (ov-962); the run that Start makes projects the line.
         let ticket = item.definition.is_ticket() && lead.is_none() && !let_go.contains(name.as_str());
         let differs = have.as_deref() != Some(status.as_str()) || (!ticket && line.as_deref() != Some(stage.as_str()));
-        if differs { moves.push((task, status, stage, have, line, ticket)); }
+        // A run closed as landed names its commit, which the line keeps (ov-1231).
+        let landed = if stage == Stage::Landed { lead.unwrap_or(item).landed.clone().or_else(|| item.landed.clone()) } else { None };
+        if differs { moves.push((task, status, stage, have, line, ticket, landed)); }
     }
     if moves.is_empty() { return Ok(Vec::new()); }
-    let moved = moves.iter().filter_map(|(task, to, _, from, _, _)| Some(BoardMove {
+    let moved = moves.iter().filter_map(|(task, to, _, from, _, _, _)| Some(BoardMove {
         task: uuid::Uuid::from_slice(task).ok()?, from: from.as_deref().and_then(TaskStatus::parse), to: *to })).collect();
     let saved: Vec<String> = {
         let mut statement = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name IN (SELECT value FROM json_each(?1)) ORDER BY name")?;
@@ -156,11 +158,11 @@ pub type BoardListener = std::sync::Arc<dyn Fn(&[BoardMove]) + Send + Sync>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoardMove { pub task: uuid::Uuid, pub from: Option<TaskStatus>, pub to: TaskStatus }
 /// A card to move: its id, where the run puts it, and what the board has now.
-type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>, bool);
+type Move = (Vec<u8>, TaskStatus, Stage, Option<String>, Option<String>, bool, Option<String>);
 fn write(tx: &Transaction<'_>, moves: Vec<Move>, by: Actor) -> Result<()> {
     let now = crate::tasks::now_millis();
     let board = |e: DomainError| WorkflowError::Board(e.to_string());
-    for (task, status, stage, have, line, ticket) in moves {
+    for (task, status, stage, have, line, ticket, landed) in moves {
         let id = uuid::Uuid::from_slice(&task).map_err(|e| WorkflowError::Board(e.to_string()))?;
         if let Some(from) = have.as_deref().and_then(TaskStatus::parse).filter(|from| *from != status) {
             crate::tasks::move_in(tx, id, from, status, by, now).map_err(board)?;
@@ -175,6 +177,9 @@ fn write(tx: &Transaction<'_>, moves: Vec<Move>, by: Actor) -> Result<()> {
         }
         let said = stage.said();
         let extra = serde_json::json!({ "from": line, "to": stage.as_str() });
+        if let Some(sha) = landed {
+            tx.execute("UPDATE ticket_lines SET landed_sha = ?2 WHERE task_id = ?1", params![task, sha])?;
+        }
         crate::ticket_lines::line_event(tx, LineSubject::Ticket(id), "stage", by, said, extra).map_err(board)?;
     }
     Ok(())

@@ -159,6 +159,37 @@ fn a_failed_run_is_on_the_needs_you_list_until_the_controller_cancels_it() {
     assert!(matches!(e, farcooler_core::DomainError::Conflict { what: "engine_owned_ended" }), "{e:?}");
 }
 
+/// ov-1231: a failed run whose work is already on the target closes as landed: it leaves Needs You, and the
+/// plan's line keeps the commit.
+#[test]
+fn a_failed_run_closed_as_landed_leaves_needs_you_and_the_line_keeps_the_commit() {
+    let b = board();
+    enqueue(&b, Definition::coding());
+    let mut revision = 1;
+    for n in 0..5 {
+        let state = b.store.workflow_state(&b.ws.to_string()).unwrap().unwrap();
+        if state.items[&b.task.key].phase == Phase::Failed { break; }
+        let item = &state.items[&b.task.key];
+        let effect = item.pending.clone().expect("a stage is in flight");
+        let claim = b.store.workflow_claim_effect(&state.workspace, &effect, "fixture-runtime", state.revision, state.epoch, 1000, 2000).unwrap().unwrap();
+        assert!(b.store.workflow_admit_effect(&claim, 1001).unwrap());
+        let c = Command::Observe { item: b.task.key.clone(), effect: effect.clone(), run: item.run.clone(), fence: item.fence, outcome: Outcome::SafeFailure };
+        let grant = Grant::Operation { effect, run: item.run.clone(), fence: item.fence };
+        revision = b.store.workflow_apply(&input(&b, &format!("fail-{n}"), state.revision, grant, c)).unwrap().result.unwrap();
+    }
+    assert_eq!(seen(&b), ("needs_decision".into(), Some("needs_you".into())));
+    let sha = "0123456789abcdef0123456789abcdef01234567";
+    let sha_of = |b: &Board| -> Option<String> { b.store.conn().query_row("SELECT landed_sha FROM ticket_lines WHERE task_id=?1",
+        [b.task.id.as_bytes().as_slice()], |r| r.get(0)).unwrap() };
+    assert_eq!(sha_of(&b), None);
+    // A commit that is not a full hash is refused, and the card stays where it was.
+    assert_eq!(command(&b, "short", Command::Land { item: b.task.key.clone(), commit: "abc".into() }), Err(Refusal::Invalid));
+    assert_eq!(seen(&b), ("needs_decision".into(), Some("needs_you".into())));
+    command(&b, "land", Command::Land { item: b.task.key.clone(), commit: sha.into() }).unwrap();
+    assert_eq!(seen(&b), ("done".into(), Some("landed".into())), "the ticket leaves Needs You as Landed");
+    assert_eq!(sha_of(&b).as_deref(), Some(sha), "the landed commit is on the plan");
+}
+
 fn command(b: &Board, n: &str, command: Command) -> Result<u64, Refusal> {
     let state = b.store.workflow_state(&b.ws.to_string()).unwrap().unwrap();
     b.store.workflow_apply(&input(b, n, state.revision, Grant::Controller, command)).unwrap().result

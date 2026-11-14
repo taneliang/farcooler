@@ -57,7 +57,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 policy_pin: policy_pin.clone(), dependencies: dependencies.clone(),
                 resource: resource.clone(), stage: 0, iteration: 0, attempt: 1, fence: 1,
                 phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: initial_candidate.clone(), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: definition.picked_models(&BTreeMap::new()).ok_or(Refusal::Definition)?, tree: None,
@@ -83,7 +83,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             let mut record = Item { execution: None, definition: definition.clone(), pin: definition.pin(),
                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource: resource.clone(),
                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked, run: String::new(), pending: None,
-                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(),
+                candidate: Some(definition.pin()), last_evidence: None, stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(),
                 back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                 members: Vec::new(), handed: Vec::new(), since_ms: 0, group_of: None, grouped_in: None,
                 models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() };
@@ -413,7 +413,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 policy_pin: policy_pin.clone(), dependencies: BTreeSet::new(), resource,
                                 stage: 0, iteration: 0, attempt: 1, fence: 1, phase: Phase::Blocked,
                                 run: String::new(), pending: None, candidate: None, last_evidence: None,
-                                stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
+                                stopping: None, cancel_reason: None, closed: None, failure: None, group_failure: None, deciding: None, hook_calls: BTreeMap::new(), hook_refused: None, ci_reruns: BTreeMap::new(), ci_retry: None, landed: None, rework_history: Vec::new(), back_edges: BTreeMap::new(), retries: 0, pushed: None, wait_since: None,
                                 members: Vec::new(), handed: Vec::new(), since_ms: 0,
                                 group_of: Some(GroupOf { name: name.clone(), pin }),
                                 grouped_in: None, models: BTreeMap::new(), tree: None, sent_back: Vec::new(), brief: None, follows: None, followers: Vec::new() });
@@ -541,6 +541,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
                     // Done is what a landed run is, and the commit is the candidate a landed run keeps.
                     item.candidate = Some(commit.to_ascii_lowercase());
+                    item.landed = item.candidate.clone();
                     item.stage = item.definition.stages.len();
                     item.phase = Phase::Done;
                     item.failure = None; item.brief = None; item.stopping = None;
@@ -628,11 +629,11 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
     // A run that lands takes the tickets that follow it with it (ov-970). A cancelled one hands them back at
     // rest, as they were before it started: cancelling a run drops its own ticket, not the others it carried.
     // A failed one keeps them.
-    let closing: Vec<(String, Phase)> = next.items.values().filter(|i| matches!(i.phase, Phase::Done | Phase::Cancelled))
-        .flat_map(|lead| lead.followers.iter().map(|f| (f.clone(), lead.phase.clone()))).collect();
-    for (follower, phase) in closing {
+    let closing: Vec<(String, Phase, Option<String>)> = next.items.values().filter(|i| matches!(i.phase, Phase::Done | Phase::Cancelled))
+        .flat_map(|lead| lead.followers.iter().map(|f| (f.clone(), lead.phase.clone(), lead.landed.clone()))).collect();
+    for (follower, phase, landed) in closing {
         let Some(ticket) = next.items.get_mut(&follower).filter(|t| t.follows.is_some()) else { continue };
-        if phase == Phase::Done { ticket.stage = ticket.definition.stages.len(); ticket.phase = Phase::Done; }
+        if phase == Phase::Done { ticket.stage = ticket.definition.stages.len(); ticket.phase = Phase::Done; ticket.landed = landed; }
         ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
         ticket.follows = None;
     }

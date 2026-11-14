@@ -44,6 +44,7 @@ the same checks as the command it stands for:
 | start a ticket | `Command::Start` |
 | retry a failed run | `Command::Retry`, still within `MAX_RETRIES` |
 | send a run back with a reason | `Command::SendBack`, within the definition's `send_backs` |
+| close a failed run as landed | `Command::Land`, by `workflow landed`: only the orchestrator, only a `Failed` run, only a commit the remote already holds on the target (ov-1231). Not a hook decision |
 | cancel | `Command::Cancel` |
 | leave it for the orchestrator | nothing: the point stays as it is today |
 
@@ -161,6 +162,15 @@ ov-1108 noted where their branches change it.
   and retries spent, the last evidence, and the log tail path.
 - **May decide**: `retry` (within `MAX_RETRIES`); `send_back` with a reason;
   `cancel` with a reason; `leave` for the orchestrator.
+
+A `Failed` run whose work reached the target another way (a person merged it, a
+pull request landed it) is closed by the orchestrator, not a hook: `workflow
+landed <workspace> <item> --run <run> --pin <pin> --sha <commit>`. The runner
+reads the remote first and refuses a commit that is not an ancestor of the
+target there, or a remote it cannot read. Then the run is `Done` with that
+commit, the ticket shows Landed with the commit on its line, and it leaves Needs
+You. Any phase but `Failed` is refused, as is a group, or a ticket that follows
+another run (it lands with its lead).
 
 `Uncertain` is never a hook point. An uncertain run may have done something
 outside (a push whose result wasn't seen); only a person or the controller's

@@ -116,6 +116,10 @@ pub struct Item {
     /// The last rejected landing gate, retained through a split and subsequent steps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_failure: Option<GroupFailure>,
+    /// The commit an orchestrator closed this run as landed with (ov-1231), when its work reached the target
+    /// outside the run. The board writes it on the ticket's line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed: Option<String>,
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
