@@ -9,6 +9,10 @@ on:
       - .github/workflows/ov1186-cache.yml
 permissions:
   contents: read
+concurrency:
+  group: background-macos
+  cancel-in-progress: false
+  queue: max
 jobs:
   reuse:
     if: github.repository == 'taneliang/farcooler' && github.ref == 'refs/heads/ov-1186-shared-cache-spike'

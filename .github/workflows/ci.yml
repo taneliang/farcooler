@@ -831,12 +831,13 @@ jobs:
 
   rust-tests:
     name: Rust tests (${{ matrix.shard }}/4)
-    needs: [changes, rust-build]
+    needs: [changes, rust-build, android]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         shard: [1, 2, 3, 4]
     env:
@@ -933,7 +934,7 @@ jobs:
   # Build every Mac test target once, then shard the maintained native set.
   rust-macos-build:
     name: Rust native test archive (macOS)
-    needs: changes
+    needs: [changes, swift-tests]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 20
@@ -966,12 +967,13 @@ jobs:
 
   rust-macos-tests:
     name: Rust native tests (macOS ${{ matrix.shard }}/2)
-    needs: [changes, rust-macos-build]
+    needs: [changes, rust-macos-build, swift-tests]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-macos-build.result == 'success' }}
     runs-on: macos-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         shard: [1, 2]
     env:
@@ -1500,6 +1502,7 @@ jobs:
     name: Android ${{ matrix.part }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         part: [unit tests, release build]
     needs: changes
@@ -1569,6 +1572,7 @@ jobs:
     name: Android UI tests (${{ matrix.shard }})
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         shard: [first, rest]
     needs: changes

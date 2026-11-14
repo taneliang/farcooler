@@ -120,18 +120,16 @@ def apply(plans, proposal):
                     step.run = "./scripts/macos-entitlements-test.sh\n"
                 else:
                     step.skip = "local landing: release bundle and its consumers run in CI"
-            if job == "rust" and "python3 scripts/rust-shadow.py --out " in step.run:
-                # Shadow runs full + inventories + selected replay; landing runs
-                # once, still under exactly the leak wrappers CI supplies.
-                _, separator, command = step.run.partition(" -- ")
-                if not separator or "cargo nextest run --profile ci --workspace --no-fail-fast" not in command:
+            if job == "rust" and step.name == "Full Rust workspace (local)":
+                expected = "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast"
+                if step.run.strip() != expected:
                     raise ValueError("Rust CI command changed; refusing to narrow an unknown shape")
-                step.run = command.rstrip() + "\n"
                 if not proposal["full"]:
                     expression = " or ".join(f"package(={p})" for p in proposal["packages"])
                     if not expression:
                         raise ValueError("empty Rust package selection")
                     step.run = step.run.rstrip() + " -E " + shlex.quote(expression) + "\n"
+
 
 
 def families(chosen):

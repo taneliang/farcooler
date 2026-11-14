@@ -54,8 +54,8 @@ class LandingTests(unittest.TestCase):
                 self.assertEqual(done.returncode, code, done.stdout + done.stderr)
                 calls = events.read_text().splitlines()
                 self.assertEqual(calls[1:3], ["unlock", "heavy"])
-                args = ["--landing", "--keep-target", "--base", "main", "--log-dir", "logs"]
-                self.assertEqual(json.loads(calls[0]), ["--landing", "--keep-target", "--dry-run", *args[2:]])
+                args = ["--fail-fast", "--landing", "--keep-target", "--base", "main", "--log-dir", "logs"]
+                self.assertEqual(json.loads(calls[0]), ["--fail-fast", "--landing", "--keep-target", "--dry-run", *args[3:]])
                 self.assertEqual(json.loads(calls[3]), args)
                 self.assertIn("landing-gate: PASS" if code == 0 else "landing-gate: FAIL", done.stdout)
 
@@ -156,7 +156,7 @@ class LandingTests(unittest.TestCase):
             repo = Path(temporary)
             (repo / "scripts").mkdir()
             (repo / ".github/workflows").mkdir(parents=True)
-            for name in ("lane-gate.py", "heavy_lock.py"):
+            for name in ("lane-gate.py", "heavy_lock.py", "process_guard.py"):
                 shutil.copyfile(ROOT / "scripts" / name, repo / "scripts" / name)
             shutil.copyfile(ROOT / ".github/workflows/ci.yml", repo / ".github/workflows/ci.yml")
             result = subprocess.run([sys.executable, str(repo / "scripts/lane-gate.py"), "--help"],
@@ -170,7 +170,7 @@ class LandingTests(unittest.TestCase):
             wf = {"ci": (ROOT / ".github/workflows/ci.yml").read_text(),
                   "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
             plans = {j: lane.steps_for(j, wf, ctx) for j in lane.JOBS}
-        original = next(s.run for s in plans["rust"] if "python3 scripts/rust-shadow.py --out " in s.run)
+        original = next(s.run for s in plans["rust"] if s.name == "Full Rust workspace (local)")
         self.assertIn("--workspace --no-fail-fast", original)
         self.assertIn("apps/macos/test.sh", wf["ci"])
         policy.apply(plans, {"full": False, "packages": ["farcooler-fence"]})
@@ -325,12 +325,14 @@ class LandingTests(unittest.TestCase):
             (repo / ".config").mkdir()
             (repo / ".config/nextest.toml").write_text('[profile.ci]\nfail-fast=false\n')
             def gate(full=False):
-                step = lane.Step("rust", "Full Rust tests and shadow measurement",
-                    'python3 scripts/rust-shadow.py --out unused -- cargo nextest run --offline --profile ci --workspace --no-fail-fast\n')
+                step = lane.Step("rust", "Full Rust workspace (local)",
+                    './scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --offline --profile ci --workspace --no-fail-fast\n')
                 # Match CI's shape; offline is configured in env instead.
                 step.run = step.run.replace("run --offline", "run")
                 plans = {"rust": [step]}
                 policy.apply(plans, {**proposal, "full": full})
+                # This temporary Cargo workspace has no repository wrappers.
+                step.run = step.run.replace("./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- ", "", 1)
                 if not use_nextest:
                     # The wire job has Cargo but does not install nextest.
                     # Still exercise real filtered/workspace failures there;
