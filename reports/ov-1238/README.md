@@ -75,8 +75,34 @@ The first foreground run exposed these semantic overlaps, resolved without dropp
 | ov-1236 / ov-1213 | The capacity fixture waited for a builder to execute while a landing gate deliberately paused it. | The gate now waits for simultaneous admission to separate pools, then checks the admitted builder executes after yielding. Both capacity and pause behavior remain required. |
 | ov-1178 / queued ov-1205 | The native delivery fixture had separate watcher/runtime stores; explicit direction also now fences a tool instead of printing informational context. | Share the runner store in the fixture. Explicit direction denies the pending tool; informational runner acceptance notices return context. Both are consumed once through the authenticated hook before Stop. |
 
-CLI hook fixtures inherit neither this task’s private native hook socket nor its workflow bindings on the final run: those session variables override their scratch sockets. `PATH` selects the working system Python for repository scripts. Final test results follow below.
+CLI hook fixtures inherit neither this task’s private native hook socket nor its workflow bindings on the final run: those session variables override their scratch sockets. `PATH` selects the working system Python for repository scripts. Final test results follow below. The one short-deadline script-hook failure from the initial run passed in the focused, expanded, and final runs without changing its published timeout.
 
 ## Queued prefix
 
 Applied in order: `ov-1157-ci-main-verdict`, `ov-1151-mac-perf-rebased`, `ov-1008-uikit-transcript-spike`, `ov-1149-signed-replies-offline`, `ov-1137-fs-watch-flake`, `ov-1162-remote-reconnect`, `ov-1165-ci-cache`, `ov-1172-definition-phone-approval`, `ov-1186-shared-cache-spike`, `ov-1200-vanished-server-flake`, `ov-1205-steer-codex`, `ov-1207-compose-held-flake`, `ov-1211-spotlight-exclusion`, `ov-1216-gate-fail-fast`, `ov-1209-gate-during-ci`, `ov-1184-ci-android-15`, `ov-1219-crate-split`, `ov-1183-ci-swift-15`, `ov-1215-timing-from-receipts`, `ov-1225-light-review-bypass`, `ov-1230-job-time-matrix`, `ov-1223-pipeline-design`.
+
+## Final validation
+
+All commands ran in the foreground on macOS, with an isolated `CARGO_TARGET_DIR=/tmp/ov-1238-target`, four Cargo build jobs, and four nextest test threads. The Cargo child environment removed inherited `FARCOOLER_*` session bindings and put `/usr/bin:/bin` first on `PATH`; Cargo still supplies the repository’s configured test shell.
+
+| Check | Result |
+| --- | --- |
+| Final acceptance selection: all workflow/store/CLI tests; daemon workflow_runtime, rpc and hook_install; watched-agent messaging and native steering | **2,137 passed, zero failed** (269.640 s; nextest exit 0) |
+| Focused cleanup, builder resources, native delivery, pool capacity and script decisions | **44 passed, zero failed** |
+| Expanded protocol/client/workflow/FFI/Plan, RPC socket/service/draft/publication, yielding, process supervision and answer-wake selection | 3,019 of 3,023 passed before the recipient fallback fix. The four failures were the watched-agent tests; **all four passed in the final acceptance run**. |
+| `python3 scripts/lane-gate.py --self-test` | **Passed**, including all 10 process-supervisor tests |
+| Source commit order/provenance | **190** imported source commits in the specified order, each with its `-x` trailer |
+| History shape | **Zero merge commits** above the recorded `origin/main`; base is still `bfe99f5248d5a18c4743ca5c1b94f573e416d6c2` |
+| Waiting tickets omitted | **None** |
+
+Final nextest command (in the clean child environment described above):
+
+```sh
+cargo nextest run \
+  -p farcooler-workflow -p farcooler-store -p farcooler-cli \
+  -p farcooler-daemon -p farcooler-protocol -p farcooler-client \
+  --test-threads 4 --no-fail-fast \
+  -E 'package(farcooler-workflow) | package(farcooler-store) | package(farcooler-cli) | (package(farcooler-daemon) & (test(workflow_runtime) | test(rpc) | test(hook_install) | test(answer_wake::engine) | test(engine_steering) | test(message_send)))'
+```
+
+The two unused-variable warnings in imported store projection test code remain warnings; there are no compile or test failures in the final acceptance command. Filtered-out tests are not counted as passes. Expanded tests were not rerun wholesale after the final recipient-only fix; the required selection and the entire affected watched-agent module were rerun successfully.
