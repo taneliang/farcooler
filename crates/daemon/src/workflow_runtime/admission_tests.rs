@@ -151,7 +151,7 @@ async fn workflow_held_queue_orchestrator_proof_changes_refuse_without_writes() 
 }
 
 #[test]
-fn only_a_person_may_publish_or_settle_a_push() {
+fn settling_a_push_stays_person_only_and_queue_stays_delegable() {
     use farcooler_protocol::workflow_commands::{parse, Action};
     let mutation = r#""mutation":{"id":"s","revision":3,"epoch":1,"sequence":2}"#;
     let settle = parse(&format!(r#"{{"action":"Settle",{mutation},"item":"a","run":"run","pin":"pin","landed":true}}"#)).unwrap();

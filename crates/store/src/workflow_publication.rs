@@ -166,7 +166,7 @@ fn publication_change(tx: &Transaction<'_>, workspace: &str, previous: Option<&s
             let title = "Workflow published — review change";
             tx.execute("INSERT INTO tasks(id,repository_id,workspace_id,key,title,status,status_since,created_at,resource_version,intent) VALUES(?1,?2,?3,?4,?5,'in_review',?6,?6,1,?7)",
                 params![id.as_bytes().as_slice(),repo,ws.as_bytes().as_slice(),key,title,at,format!("{reason}\nPrevious: {}\nPublished: {pin}\nRestore with: farcooler workflow rollback {workspace}",previous.unwrap_or("none"))])?;
-            crate::tasks::insert_note(tx,id,crate::models::NoteKind::Created,crate::models::Actor::Manager,reason,&change,None)
+            crate::tasks::insert_note(tx,id,crate::models::NoteKind::Created,crate::models::Actor::Manager,reason,&serde_json::json!({"workflow_publication_notice":true,"change":change}),None)
                 .map_err(|e| WorkflowError::Board(e.to_string()))?;
             change["notice_task"] = serde_json::json!(id);
         }

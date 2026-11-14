@@ -32,7 +32,8 @@ pub(crate) fn refuse_unless_at_rest(conn: &Connection, task: uuid::Uuid) -> Doma
 }
 
 /// Open cards no run owns: (workspace, key, column the card is in). The engine tracks these (ov-951).
-/// A rep's desk card is a person's thread, not work, so it is never one (ov-962). Nor is a card the engine
+/// A rep's desk card is a person's thread, and a publication notice is informational (ov-1179): neither is
+/// engine work. Nor is a card the engine
 /// would refuse (a live worker, or what a migrated card keeps; an old landing holds no card, ov-960): it stays out, and asking the
 /// engine each start would write one permanent refusal receipt per card per start.
 pub fn untracked(conn: &Connection, only: Option<uuid::Uuid>) -> rusqlite::Result<Vec<(uuid::Uuid, String, TaskStatus)>> {
@@ -40,6 +41,8 @@ pub fn untracked(conn: &Connection, only: Option<uuid::Uuid>) -> rusqlite::Resul
         WHERE t.status NOT IN ('done','cancelled') AND (?1 IS NULL OR t.id=?1)
         AND NOT EXISTS(SELECT 1 FROM workflow_owned_items o WHERE o.task_id=t.id)
         AND NOT EXISTS(SELECT 1 FROM rep_desks d WHERE d.task_id=t.id)
+        AND NOT EXISTS(SELECT 1 FROM task_notes n WHERE n.task_id=t.id AND n.kind='created'
+            AND json_extract(n.extra,'$.workflow_publication_notice')=1)
         AND NOT EXISTS(SELECT 1 FROM ticket_work w WHERE w.task_id=t.id AND w.ended_at IS NULL)
         AND NOT EXISTS(SELECT 1 FROM terminals x WHERE x.task_id=t.id AND x.exit_code IS NULL AND x.exit_signal IS NULL)
         AND COALESCE((SELECT c.disposition FROM engine_cutover_items c WHERE c.task=t.id),'retained-intent')='retained-intent'

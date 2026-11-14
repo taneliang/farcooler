@@ -367,3 +367,18 @@ fn externally_closed_runs_leave_needs_you_and_the_plan_now_rows() {
         assert!(!b.store.workflow_state(&b.ws.to_string()).unwrap().unwrap().items.contains_key(&b.task.key));
     }
 }
+
+#[test]
+fn ov1179_a_publication_notice_is_informational_not_engine_work() {
+    let store=Store::open_in_memory().unwrap();
+    let repo=store.register_repository_for_test("Publication");
+    let ws=store.ensure_main_workspace(repo).unwrap().id;
+    let definition=Definition::tracker("owner");
+    let actor=crate::workflow::WorkflowActor {person:"owner".into(),device:None,pane:None,orchestrator:true};
+    let receipt=store.workflow_wire_write_by(&ws.to_string(),"p","p",Some(&actor),crate::workflow_publication::Write::Publish {
+        expected_pin:None,definition:&definition,adapter:None,notifications:None,revision:0 }).unwrap();
+    assert!(receipt.result.is_ok());
+    let notice=uuid::Uuid::parse_str(receipt.change.unwrap()["notice_task"].as_str().unwrap()).unwrap();
+    assert_eq!(store.get_task(notice).unwrap().status,TaskStatus::InReview);
+    assert!(store.untracked_tickets(None).unwrap().is_empty(),"an informational publication notice must not advance the engine revision");
+}

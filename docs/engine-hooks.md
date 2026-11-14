@@ -483,3 +483,49 @@ All of it lives in the Rust engine: the decision types and their validation in
 `crates/workflow`, firing and fallback in the reducer, script and agent
 execution in the daemon runtime. Apps only show a subject's decisions and
 `hook_refused`, as they show `failure` today.
+
+## Orchestrator publication grant (ov-1179)
+
+Workflow publication normally requires the owner in person. The owner can grant
+one workspace's orchestrator permission to publish future workflow changes:
+
+```sh
+farcooler workspace set <workspace> --orchestrator-publishes-workflow on
+# Revoke the grant at any time:
+farcooler workspace set <workspace> --orchestrator-publishes-workflow off
+```
+
+Change this grant on its own, from the owner's device or shell. An agent cannot
+grant or revoke it. It starts off, belongs to the workspace, and is checked again
+when the engine consumes a command, including retries. Other agents and other
+workspaces gain no authority. A member leading the workspace may publish from
+that workspace's orchestrator, but cannot enable the grant from their own shell
+or device.
+
+With the grant on, the orchestrator uses the ordinary `workspace set-workflow`
+command with `--reason`, the inspected `--expected-pin`, and its command identity.
+The same definition and adapter validation still applies. Each accepted publish
+retains the old immutable bundle, records the actor, time, reason and diff in its
+receipt, and creates an informational In Review card for the owner. The ordinary
+board notification path announces that card; it does not ask for approval.
+The card is excluded from engine tracking, so notifying the owner does not
+advance the workflow revision or start a run.
+`workflow get <workspace-uuid>` includes the grant and publication history.
+Environment values are excluded from the readable diff; bundle pins retain the
+complete adapter and notification settings for restoration.
+
+The owner in person can restore the preceding bundle with one command:
+
+```sh
+farcooler workflow rollback <workspace-uuid> --reason 'Restore the previous workflow'
+```
+
+Rollback checks the current pin and revision before restoring, records another
+publication, and preserves both bundles. It affects the selection for future
+runs; runs already started retain their pinned definitions. There must be a
+previous published bundle to restore.
+
+This grant delegates only workflow publication. It adds no secret-store write,
+security flag, relay flag or production deployment action to the workflow or RPC
+vocabulary, and does not change the authorization of any other method. Settling
+a push and changing the grant remain person-only operations.
