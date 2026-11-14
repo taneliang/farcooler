@@ -1,0 +1,75 @@
+{
+  "ticket": "ov-1155",
+  "preview": "b954ea25f",
+  "implementation_commit": "22f3ba77987018a6fd0239d84f847f73805db6d8",
+  "checks": {
+    "rust_affected": {
+      "exit_code": 0,
+      "passed": 1059,
+      "not_selected": 4625
+    },
+    "agentkit_plan": {
+      "exit_code": 0,
+      "passed": 178
+    },
+    "mac_plan": {
+      "exit_code": 0,
+      "passed": 37
+    },
+    "web_plan_unit": {
+      "exit_code": 0,
+      "passed": 22
+    },
+    "web_types": {
+      "exit_code": 0
+    },
+    "web_render": {
+      "exit_code": 0,
+      "widths_px": [
+        320,
+        360,
+        1440
+      ]
+    },
+    "ios_frameworks": {
+      "exit_code": 0
+    },
+    "ios_build_for_testing": {
+      "exit_code": 0
+    },
+    "ios_plan_smoke": {
+      "exit_code": null,
+      "executed": 0,
+      "queue_cancel_exit": 143,
+      "reason": "Shared machine-wide gate remained occupied for over an hour"
+    },
+    "copy_lint": {
+      "exit_code": 0
+    },
+    "file_size_budget": {
+      "exit_code": 0
+    },
+    "visual_tokens_lint": {
+      "exit_code": 0
+    },
+    "swallow_lint": {
+      "exit_code": 0
+    },
+    "doc_comment_check": {
+      "exit_code": 0
+    },
+    "diff_check": {
+      "exit_code": 0
+    },
+    "shared_core_lint": {
+      "exit_code": 1,
+      "new_violations_relative_to_preview": 0,
+      "unchanged_preview_failures": 4
+    }
+  },
+  "acceptance": {
+    "both_stacks_integrated": true,
+    "all_gates_pass": false,
+    "conflict_report_complete": true
+  }
+}

@@ -57,7 +57,7 @@ The second ov-1139 commit applied cleanly.
   fixture selection and queue fixture rendering; the queue-only fixture clears
   the roster as well as the pipeline so it exercises the intended empty case.
 
-### Semantic conflict found by the Rust test build
+### Semantic conflicts found by verification
 
 - `crates/client/src/session/workflow/tests/socket.rs`: the imported real-group
   socket fixture used `GroupDef { limit: 8 }`, while the preview's definition
@@ -78,7 +78,7 @@ presentation, CLI/session enrichment, and CI rerun support.
 
 ## Validation
 
-Results will be recorded here after the affected gates finish. Builds use only
+Results below are fresh checks on the integrated branch. Builds use only
 this worktree's `target/`; no build artifacts are redirected to `/tmp`.
 
 Completed lightweight checks (November 14):
@@ -102,3 +102,75 @@ there are zero new violations relative to the preview. See
 `shared-core-baseline-comparison.txt`. All four offending files are unchanged
 by this integration. Changing that unrelated copy or increasing the lint baseline
 would exceed this ticket's conflict-resolution-only scope.
+
+Native preparation and Swift results:
+
+| Gate | Exit | Result |
+| --- | --- | --- |
+| Local CLI and daemon build, two compiler jobs | 0 | Passed |
+| Fresh Mac Rust libraries via `apps/macos/build-vt.sh debug` | 0 | Staged from this worktree's target/debug |
+| AgentKit `swift test --filter Plan` | 0 | 178 tests in 33 suites passed |
+| Mac selected Plan suites | 0 | 37 tests in 5 suites passed |
+| `scripts/build-ios-frameworks.sh` | 0 | Fresh simulator XCFrameworks built |
+| Actual CLI fixture regression after regeneration | 0 | Passed without update mode |
+
+The Mac selection was `PlanColumnViewTests|PlanSectionViewTests|PlanViewTests|PlanStaleTests|PlanReconnectingTests`.
+Swift scratch directories and all Rust products are under this worktree's
+`target/`. Native hook socket/session environment variables were removed from
+test children so they cannot redirect fixture traffic to the parent agent.
+
+The first completed Rust selection ran 1,059 tests: 1,058 passed and the one
+outdated actual-CLI fixture failed. The fixture was regenerated and its isolated
+regression passed, as described above. The clean final selection passed all
+1,059 tests with exit code 0, using the same filters after that correction.
+
+The final Rust command selected `farcooler-client`, `farcooler-cli`,
+`farcooler-daemon`, `farcooler-protocol`, `farcooler-workflow`, and
+`farcooler-store`, with nextest filter:
+
+```text
+test(plan) | test(workflow) | test(route) | test(method) | binary(groups) | binary(send_back)
+```
+
+Its final run passed 1,059 tests in 297.242 seconds, exit 0. This includes the
+real CLI-to-Session-to-Mac fixture regression, workflow close/recovery cases,
+execution-state projection, repeated fold conflicts, group diagnostics and replay.
+The remaining 4,625 discovered cases were outside this affected-test selection.
+
+The generated iOS project and UI test bundle also passed `build-for-testing`
+(exit 0), using the same generic arm64 simulator configuration as CI and
+`-derivedDataPath target/ios-derived`, with two build jobs. The initial build
+attempt found no generated `project.pbxproj`; running
+`apps/ios/generate-project.py` resolved that fresh-checkout setup issue.
+The resulting `.xctestrun` is ready for a Plan/smoke run against these freshly
+built app and test products.
+
+## Acceptance and remaining blockers
+
+1. Both reviewed stacks are on `wave-a-preview`, in order. Conflict resolutions
+   preserve cancellation recovery, external close, fold-conflict recovery,
+   split diagnostics, roster layouts and landing groups. The clean Rust,
+   shared Swift, Mac and web results above cover those interactions.
+2. **Not fully met.** Shared-core lint exits 1 on the same four unchanged
+   preview-base violations. The iOS app and UI tests compile successfully,
+   but the Plan/smoke UI run did not execute: its machine-wide gate was queued
+   for more than an hour on November 14, behind another worktree's gate.
+   That gate spent a substantial part of the wait in the Rust shadow harness's
+   load guard, then advanced to its workspace tests while retaining the lock.
+   Only this ticket's still-waiting wrapper was cancelled (exit 143), after
+   checking that it had no test child. No other process or simulator was stopped.
+   No iOS UI success is claimed. Changing unrelated feature copy is outside
+   the conflict-resolution-only scope. The shared simulator gate was kept in place.
+3. Every textual and semantic conflict and its resolution is listed above.
+
+When the shared gate is available, the remaining UI command is:
+
+```sh
+export PATH="/opt/homebrew/opt/python@3.14/libexec/bin:/opt/homebrew/bin:$PATH"
+XCTESTRUN="$PWD/target/ios-derived/Build/Products/FarCooler_iphonesimulator27.1-arm64.xctestrun" \
+  ./scripts/ios-ui-tests.sh FarCoolerUITests/PhonePlanColumnUITests \
+  $(./scripts/ios-ui-shards.py smoke)
+```
+
+The script retains its device lease, boot-budget and nonzero-executed-test
+checks. Raw build/test logs are retained locally in `target/ov-1155-validation/`.
