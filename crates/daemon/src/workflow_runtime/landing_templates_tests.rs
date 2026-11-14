@@ -538,16 +538,18 @@ async fn staggered_ready_tickets_join_one_waiter_while_an_active_landing_keeps_i
 
 #[tokio::test]
 async fn an_ungrouped_publication_does_not_create_a_grouping_revision() {
-    use farcooler_protocol::workflow_commands::{Action, Mutation};
+    use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
     let (_dir, runtime) = lander("pass").await;
-    let definition = Definition::tracker("owner");
-    let pin = definition.pin();
+    let mut definition = runtime.configured_definition().unwrap();
+    definition.stages[0].progression = Progression::AwaitApproval { principal: "owner".into() };
+    let adapter = Some(AdapterConfiguration::Coding(runtime.coding.clone().unwrap()));
+    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_ref());
     let mutation = |id: &str| Mutation { id: id.into(), revision: 0, epoch: 1, sequence: 1 };
     let reply = runtime.wire_command("w", "owner", Action::Publish { mutation: mutation("p"),
-        expected_pin: None, definition, adapter: None, notifications: None }).unwrap();
+        expected_pin: None, definition, adapter: adapter.map(Box::new), notifications: None }).unwrap();
     assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
     let reply = runtime.wire_command("w", "owner", Action::Enqueue { mutation: mutation("e"),
-        item: "tracker".into(), pin }).unwrap();
+        item: "manual".into(), pin }).unwrap();
     assert!(reply.pointer("/receipt/result/Ok").is_some(), "{reply}");
     let before = runtime.state("w").unwrap().unwrap();
     assert!(before.grouping.is_none());
