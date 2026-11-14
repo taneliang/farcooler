@@ -138,8 +138,8 @@
           "more": [
             "This run has entered a rework iteration."
           ],
-          "outcome": "Running",
-          "reason": "Running: Run gate.",
+          "outcome": "Waiting for a slot",
+          "reason": "Waiting for a slot. The runner has not reported a live claim.",
           "retryLabel": "Try Again",
           "steps": [
             {
@@ -152,7 +152,7 @@
             },
             {
               "label": "Run gate",
-              "state": "Running"
+              "state": "Waiting for a slot"
             },
             {
               "label": "Push changes",
@@ -166,14 +166,14 @@
           "ticket": "group-00000000000000000001-landing"
         },
         "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
-        "phase": "Running",
-        "phaseLabel": "Running",
+        "phase": "WaitingSlot",
+        "phaseLabel": "Waiting for a Slot",
         "policyPin": "policy",
         "reasons": [
           {
-            "kind": "Automatic",
-            "label": "Running",
-            "text": "The engine is executing this stage."
+            "kind": "DependenciesOrResource",
+            "label": "Waiting for a Slot",
+            "text": "Waiting for a slot. The runner has not reported a live claim."
           },
           {
             "kind": "Reworking",
@@ -406,8 +406,8 @@
           "more": [
             "This run has entered a rework iteration."
           ],
-          "outcome": "Running",
-          "reason": "Running: Run gate.",
+          "outcome": "Waiting for a slot",
+          "reason": "Waiting for a slot. The runner has not reported a live claim.",
           "retryLabel": "Try Again",
           "steps": [
             {
@@ -420,7 +420,7 @@
             },
             {
               "label": "Run gate",
-              "state": "Running"
+              "state": "Waiting for a slot"
             },
             {
               "label": "Push changes",
@@ -434,14 +434,14 @@
           "ticket": "group-00000000000000000003-landing"
         },
         "pendingEffect": "wf1:953e63034f7bdfd96ac93484937dfd1252069b28a4e52f2b4096f8fb2a91cf0c",
-        "phase": "Running",
-        "phaseLabel": "Running",
+        "phase": "WaitingSlot",
+        "phaseLabel": "Waiting for a Slot",
         "policyPin": "policy",
         "reasons": [
           {
-            "kind": "Automatic",
-            "label": "Running",
-            "text": "The engine is executing this stage."
+            "kind": "DependenciesOrResource",
+            "label": "Waiting for a Slot",
+            "text": "Waiting for a slot. The runner has not reported a live claim."
           },
           {
             "kind": "Reworking",

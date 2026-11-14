@@ -64,6 +64,14 @@ The second ov-1139 commit applied cleanly.
   now uses `Option<u32>`. Changed it to `Some(8)` to retain the original bounded
   group. The first test build failed with E0308 at this exact initializer.
 
+- `test/fixtures/plan-landing-queue.json`: the imported actual-CLI fixture
+  predated the preview's execution observations. A pending Run without a live
+  claim is now `WaitingSlot`, not `Running`. Regenerated it with the existing
+  `UPDATE_PLAN_LANDING_FIXTURE=1` integration-test updater, then reran the
+  regression without that flag. Both exited 0. CLI/Session equality and the
+  four landing-group rows already passed before the fixture refresh; the
+  refresh changes only two run pages' execution-state text and phase.
+
 All remaining source commits applied cleanly. Clean merges retain the preview's
 execution observations and recovery commands, the external-close path, queue
 presentation, CLI/session enrichment, and CI rerun support.
