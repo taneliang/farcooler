@@ -64,6 +64,8 @@ async fn workflow_execution_phases_follow_claims_and_slots() {
     use std::future::Future;
     let (_dir, mut runtime) = configured(false, "pass").await;
     runtime.set_effect_cap(4);
+    // These first effects provision trees, so their capacity belongs to the work pool.
+    runtime.places().work = 4;
     let definition = runtime.configured_definition().unwrap();
     for n in 0..7 { enqueue_item(&mut runtime, "w", &format!("item-{n}"), definition.clone()); }
     let read = |runtime: &Runtime| runtime.wire_command("w", "owner",

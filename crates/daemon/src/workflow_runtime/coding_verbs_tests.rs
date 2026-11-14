@@ -11,7 +11,7 @@ const GATE: &str = r#"elif stage == 'gate':
         print('landing gate stdout', flush=True)
         print('landing gate stderr', file=sys.stderr, flush=True)
         print('starting gate\nerror: first gate failure\nerror: later gate failure')
-        sys.exit(5)
+        sys.exit(1)
     if mode == 'gate-dirty': pathlib.Path('stray.out').write_text('left behind')
     if mode == 'gate-slow':
         pathlib.Path('half-built.out').write_text('left by the gate')
