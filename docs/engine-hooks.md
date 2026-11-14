@@ -80,8 +80,13 @@ ov-1108 noted where their branches change it.
 
 - **When**: a running effect that takes a build slot ends (a build, check,
   review), or a run leaves the budget.
-- **Today**: `launch_ready` takes the outbox in order up to `effect_cap`
-  (`DEFAULT_EFFECT_CAP = 4`, `workflow_runtime.rs:61`; ov-1106 removes the cap).
+- **Today**: `launch_ready` takes the outbox in order, and each effect takes a
+  place in one of three pools (`Pool::of` in `workflow_runtime/places.rs`):
+  agent sessions (builds and reviews, `DEFAULT_EFFECT_CAP = 4`), landing group
+  steps (`DEFAULT_LANDING_PLACES = 2`) and other work such as provisions and
+  checks (`DEFAULT_WORK_PLACES = 2`). Stops and waits take no place. An effect
+  whose pool is full waits for it, and `workflow get` shows each pool and its
+  queue (ov-1106 removes the caps).
 - **May decide**: the same as point 1. This point exists so a budget rule is
   re-asked when room appears, not only when a ticket becomes eligible. It fires
   often, so only built-in rules and scripts may attach here (see Cost).

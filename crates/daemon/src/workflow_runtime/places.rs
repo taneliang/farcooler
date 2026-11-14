@@ -7,8 +7,9 @@ pub const DEFAULT_EFFECT_CAP: usize = 4;
 /// Most steps of landing groups (fold, gate, push and the rest) that run at once. Each group holds its landing
 /// target, so one group per target works at a time anyway.
 pub const DEFAULT_LANDING_PLACES: usize = 2;
-/// Most other effects (provisions, checks, CI, pull request steps) that run at once.
-pub const DEFAULT_WORK_PLACES: usize = 4;
+/// Most other effects (provisions, checks, runs, pull request steps) that run at once. A ticket-level check or run
+/// can be a heavy command, so this stays low beside the agent and landing pools.
+pub const DEFAULT_WORK_PLACES: usize = 2;
 
 /// Which places an effect takes while it runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]

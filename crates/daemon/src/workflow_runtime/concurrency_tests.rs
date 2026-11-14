@@ -126,19 +126,19 @@ async fn workflow_a_later_landing_on_top_does_not_strand_an_earlier_item_in_ci()
 pub(super) fn hold_builds(dir: &Path) -> (PathBuf, PathBuf) {
     let script = dir.join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
-    let wait = "if stage == 'build':\n    hold = pathlib.Path(os.environ['STARTED']).parent / 'hold'\n    if hold.exists():\n        import time\n        t = time.time()\n        while not (hold.parent / 'go').exists():\n            if time.time() - t > 4: sys.exit(9)\n            time.sleep(0.05)\n";
+    let wait = "if stage == 'build':\n    hold = pathlib.Path(os.environ['STARTED']).parent / 'hold'\n    if hold.exists():\n        import time\n        t = time.time()\n        while not (hold.parent / 'go').exists():\n            if time.time() - t > 12: sys.exit(9)\n            time.sleep(0.05)\n";
     assert!(text.contains("if stage == 'build':\n"));
     std::fs::write(&script, text.replacen("if stage == 'build':\n", wait, 1)).unwrap();
     (dir.join("hold"), dir.join("go"))
 }
 
-/// Asks the sweeping runtime for `w` through its inbox until `what` holds, for up to three seconds, then writes `go`
+/// Asks the sweeping runtime for `w` through its inbox until `what` holds, for up to ten seconds, then writes `go`
 /// so held builds end. Answers whether `what` held while they were held.
 pub(super) fn watch(runtime: &Runtime, go: PathBuf, what: impl Fn(&State) -> bool + Send + 'static) -> tokio::task::JoinHandle<bool> {
     let send = runtime.send.clone();
     tokio::spawn(async move {
         let mut seen = false;
-        for _ in 0..60 {
+        for _ in 0..200 {
             let (reply, state) = oneshot::channel();
             send.send(Inbox::State("w".into(), reply)).await.ok().unwrap();
             if state.await.unwrap().unwrap().is_some_and(|s| what(&s)) { seen = true; break; }
@@ -153,6 +153,8 @@ pub(super) fn watch(runtime: &Runtime, go: PathBuf, what: impl Fn(&State) -> boo
 async fn workflow_a_provision_starts_while_four_builds_hold_every_agent_place() {
     let (dir, mut runtime) = configured(false, "pass").await;
     let (hold, go) = hold_builds(dir.path());
+    // Room for all four provisions at once, whatever the default work places are.
+    runtime.places.lock().unwrap().work = 4;
     let definition = runtime.configured_definition().unwrap();
     for item in ["one", "two", "three", "four"] { enqueue_item(&mut runtime, "w", item, definition.clone()); }
     runtime.pump(2).await.unwrap();
@@ -175,18 +177,25 @@ async fn workflow_a_provision_starts_while_four_builds_hold_every_agent_place() 
 
 #[tokio::test]
 async fn workflow_get_shows_an_effect_waiting_for_a_place() {
-    let (_dir, mut runtime) = configured(false, "pass").await;
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let (hold, go) = hold_builds(dir.path());
     runtime.set_effect_cap(1);
     let definition = runtime.configured_definition().unwrap();
     for item in ["one", "two"] { enqueue_item(&mut runtime, "w", item, definition.clone()); }
     runtime.pump(2).await.unwrap();
+    std::fs::write(&hold, "x").unwrap();
+    // One sweep: the one agent place is held by a build, and the other ticket's build waits for it. The view is read
+    // while the build is held, when the effect is actually waiting.
+    let places = runtime.places.clone();
+    let watcher = watch(&runtime, go, move |_| {
+        let view = places.lock().unwrap().view("w");
+        let waiting = view["waiting"].as_array().unwrap();
+        view["agent"]["cap"] == 1 && view["agent"]["used"] == 1 && waiting.len() == 1
+            && waiting[0]["pool"] == "agent" && waiting[0]["position"] == 1
+            && ["one", "two"].contains(&waiting[0]["item"].as_str().unwrap())
+    });
     runtime.pump(3).await.unwrap();
-    let view = runtime.wire_command("w", "orchestrator", farcooler_protocol::workflow_commands::Action::Get).unwrap();
-    let places = &view["places"];
-    assert_eq!(places["agent"]["cap"], 1, "{places}");
-    let waiting = places["waiting"].as_array().expect("waiting is listed");
-    assert_eq!(waiting.len(), 1, "{places}");
-    assert_eq!(waiting[0]["pool"], "agent");
-    assert_eq!(waiting[0]["position"], 1);
-    assert!(["one", "two"].contains(&waiting[0]["item"].as_str().unwrap()), "{places}");
+    assert!(watcher.await.unwrap(), "the second build waited for the agent place while the first held it");
+    let view = runtime.places.lock().unwrap().view("w");
+    assert!(view["waiting"].as_array().unwrap().is_empty(), "nothing waits once the sweep has ended: {view}");
 }

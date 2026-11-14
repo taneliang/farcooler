@@ -351,18 +351,41 @@ async fn ci_canceled_after_the_push_is_the_cancelled_label() {
 }
 
 #[tokio::test]
-async fn a_wait_leaves_the_effect_cap_alone() {
-    let (_dir, mut runtime) = lander("ci-pending").await;
-    runtime.set_effect_cap(1);
-    let definition = batched_push(&runtime, "any", 800);
+async fn a_wait_leaves_the_work_pool_alone() {
+    let (dir, mut runtime) = lander("ci-pending").await;
+    // One work place, and a CI wait that stays held for seconds. A wait does no work, so it must never take a place:
+    // if `Pool::of` gave it one, the second ticket's check, a work effect, could not start until the wait ended.
+    runtime.places.lock().unwrap().work = 1;
+    let definition = batched_push(&runtime, "any", 6000);
     at_join(&mut runtime, "one", &definition).await;
-    command(&runtime, Command::Queue { item: "one".into() });
-    for time in 2..6 { runtime.pump(time).await.unwrap(); }
+    let (hold, go) = hold_builds(dir.path());
+    std::fs::write(&hold, "x").unwrap();
     enqueue_item(&mut runtime, "w", "two", definition);
-    // One sweep: CI is polled for the group while the new ticket's first step runs beside it.
-    runtime.pump(9).await.unwrap();
-    let state = runtime.state("w").unwrap().unwrap();
-    assert_eq!(state.items["two"].stage, 1, "the ticket moved on while the group waited: {state:?}");
+    command(&runtime, Command::Queue { item: "one".into() });
+    runtime.continuous = true;
+    // Two's build is held until one's group is at its CI wait, then released: its check must run beside the wait.
+    let send = runtime.send.clone();
+    let watcher = tokio::spawn(async move {
+        let (mut released, mut seen) = (false, false);
+        for _ in 0..200 {
+            let (reply, state) = oneshot::channel();
+            send.send(Inbox::State("w".into(), reply)).await.ok().unwrap();
+            // The sweep answers while it runs; once it has ended nothing does, so stop asking.
+            let Ok(state) = tokio::time::timeout(Duration::from_secs(2), state).await else { break };
+            if let Some(s) = state.unwrap().unwrap() {
+                let waiting = s.items.values().any(|i| i.group_of.is_some() && i.stage >= 4);
+                if waiting && !released { std::fs::write(&go, "x").unwrap(); released = true; }
+                if released && waiting && phase_of(&s, "two") == Some(Phase::WaitingJoin) { seen = true; break; }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        std::fs::write(go, "x").unwrap();
+        seen
+    });
+    // Bounded, so a wait that wrongly held the work place fails this test instead of stalling the sweep.
+    let sweep = tokio::time::timeout(Duration::from_secs(40), runtime.pump(301)).await;
+    assert!(watcher.await.unwrap(), "two's check ran while one's CI wait was held");
+    sweep.expect("the sweep ended").unwrap();
 }
 
 #[tokio::test]

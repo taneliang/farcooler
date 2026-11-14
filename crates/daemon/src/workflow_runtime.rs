@@ -437,6 +437,7 @@ impl Runtime {
             }
         }
         self.note_holding(&running);
+        self.places().waiting.clear();
         result
     }
     async fn sweep_loop(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>,
