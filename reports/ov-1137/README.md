@@ -22,6 +22,11 @@ Validation on an aarch64 Linux VM with local scratch repositories:
 - 200 separate invocations of
   `fs_watch::tests::the_index_lock_a_probe_takes_is_not_the_worktree_moving`:
   200 passed, 0 failed. The tested source differs from the committed source
-  only in formatting and comments.
+  only in formatting and comments. The 200 individual logs were rechecked:
+  each reports one passed test and zero failures.
 - `fs_watch::` suite: 23 passed, 0 failed, 1 ignored (the pre-existing
   real-repository watch-count test).
+
+The later workflow return did not include a review finding: the review passed,
+and the subsequent landing wait timed out waiting for a green base. The
+watcher change and its assertion therefore remain intact.
