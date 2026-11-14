@@ -543,6 +543,28 @@ impl Exec {
         crate::effect_runner::save_tail(&log, &bytes)?;
         Ok(())
     }
+    /// Read prose only from the retained, matched native settlement, never as a success verdict.
+    pub(super) fn native_last_message(&self, binding: &Binding) -> Result<Option<String>> {
+        let raw = match self.bytes(&self.native_path(binding, "settled")) {
+            Ok(raw) => raw,
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let settlement: NativeSettlement = serde_json::from_slice(&raw)?;
+        settlement.completion(binding)?;
+        let mut last = None;
+        let mut assembler = MessageAssembler::new();
+        if let NativeSettlement::Launched { hooks, .. } = settlement {
+            for hook in hooks {
+                for event in assembler.accept(hook.agent, &hook.event, &hook.payload) {
+                    if let AgentEvent::Message { role: farcooler_agent_core::event::Role::Agent, text, parent: None } = event {
+                        if !text.is_empty() { last = Some(text); }
+                    }
+                }
+            }
+        }
+        Ok(last)
+    }
     pub(super) fn verify_native_settlement(&self, binding: &Binding, exit: Option<i32>) -> Result<Option<String>> {
         let settlement: NativeSettlement = serde_json::from_slice(&self.bytes(&self.native_path(binding, "settled"))?)?;
         if settlement.completion(binding)?.map(|p| if p { 0 } else { 1 }) != exit {
@@ -658,6 +680,9 @@ if mode == 'barrier':
     while len(list(d.iterdir())) < 2:
         if time.time() - t > 4: sys.exit(9)
         time.sleep(0.05)
+if mode == 'no-changes':
+    hook('Stop', last_assistant_message='I could not read the ticket; the runner request hung.')
+    time.sleep(30)
 if mode in ('background', 'abandon'):
     # Ends its turn with its work uncommitted, as an agent that backgrounds a wait does (ov-1090). `background` is
     # woken when the wait is over and commits in its next turn; `abandon` never comes back.
@@ -799,6 +824,30 @@ else:
                 .filter(|n| n.to_string_lossy().ends_with(".sock")).collect();
             assert!(left.is_empty(), "{agent}: {left:?}");
         }
+    }
+    #[tokio::test]
+    async fn ov_1217_build_without_a_commit_reports_ended_without_changes_and_last_message() {
+        let (_dir, mut runtime, _fake) = native_agent("no-changes", "codex").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        let state = finish(&mut runtime, "w").await;
+        let item = &state.items["one"];
+        assert_eq!(item.phase, Phase::Failed, "{state:?}");
+        assert_eq!(item.failure.as_deref(), Some("The build ended without changes: it made no new commit.\n\nThe agent's last message:\nI could not read the ticket; the runner request hung."));
+        assert!(item.candidate.is_none());
+    }
+    #[tokio::test]
+    async fn ov_1217_no_commit_does_not_reuse_work_already_ahead_of_base() {
+        let (_dir, mut runtime, _fake) = native_agent("no-changes", "codex").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap();
+        let binding = admitted(&runtime).await;
+        let tree = runtime.tree(&binding);
+        adapters::git(&tree, &["-c", "user.name=Test", "-c", "user.email=test@localhost", "-c", "commit.gpgsign=false",
+            "commit", "--allow-empty", "-m", "earlier work"]).await.unwrap();
+        let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+        let outcome = runtime.execute_coding("w", &binding, cancelled).await.unwrap();
+        assert!(matches!(outcome, Outcome::SafeFailureBecause(ref why) if why.contains("ended without changes")
+            && why.contains("the runner request hung")), "{outcome:?}");
     }
     #[tokio::test]
     async fn workflow_native_builds_overlap_each_on_its_own_hook_socket() {

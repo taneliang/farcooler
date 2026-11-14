@@ -19,6 +19,10 @@ struct ProcessFact {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GitSettlement { binding: Binding }
+
+/// HEAD before this attempt started: an adopted branch can already be ahead of the run's base.
+#[derive(Serialize, Deserialize)]
+struct BuildStart { binding: Binding, head: String }
 /// A Provision that failed before it made anything: its binding, and the sentence for the ticket.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -193,13 +197,27 @@ impl Exec {
                             .map_err(|_| Error::Refused("foreign native project hooks"))?;
                         LaunchFile { path: self.tree(binding).join(relative), digest: hooks.digest.clone() }.verify()?;
                     }
-                    let extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
+                    let mut extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
                         codex_hooks: self.codex_hook_override(binding)?,
                         plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(self.native_prompt(binding)?)),
                         ..Default::default() };
-                    let launch = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
+                    let mut launch_command = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
+                    if launch_command.len() > crate::service::MAX_INLINE_LAUNCH_BYTES {
+                        let path = self.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)));
+                        if launch {
+                            let text = self.native_prompt(binding)?;
+                            match self.bytes(&path) {
+                                Ok(raw) if raw == text.as_bytes() => {},
+                                Ok(_) => return Err(Error::Refused("foreign launch brief")),
+                                Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => durable(&path, text.as_bytes())?,
+                                Err(error) => return Err(error),
+                            }
+                        }
+                        extras.prompt = Some(crate::service::LaunchPrompt::File(path));
+                        launch_command = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
+                    }
                     let mut command = process.clone();
-                    command.argv = vec!["/bin/sh".into(), "-c".into(), launch];
+                    command.argv = vec!["/bin/sh".into(), "-c".into(), launch_command];
                     #[cfg(test)]
                     if let Some(argv) = super::coding_native::TEST_ARGV.with(|p| p.borrow().clone()) {
                         command.argv = argv;
@@ -232,15 +250,13 @@ impl Exec {
         let Some(CodingConfig { harness: CodingHarness::Native { prompt, .. }, .. }) = &self.coding else {
             return Err(Error::Refused("not a native harness"));
         };
-        Ok(match &binding.effect.kind {
-            EffectKind::Execute(StageKind::Review(Reviewer::Agent)) => Self::review_prompt(binding),
-            _ => Self::briefed(prompt, &binding.effect, binding.iteration),
-        })
+        self.ticket_prompt(binding, prompt)
     }
+
     /// An agent gate's brief (ov-969). Fixed text, so a recovery rebuilds the same command. The verdict is the
     /// receipt `farcooler workflow verdict` writes: whatever the agent says in its turn decides nothing.
     pub(super) fn reviewing(item: &str) -> String {
-        format!("You are reviewing ticket {item}. Read it first with `farcooler task show {item}`. The work under review is \
+        format!("You are reviewing ticket {item}. The ticket is included below. The work under review is \
             the commits from $FARCOOLER_BASE to $FARCOOLER_CANDIDATE in this worktree. Review it against the ticket. Don't \
             change, commit or stage anything here.\n\nIf it isn't ready, first write what must change, plainly, with \
             `farcooler task note {item} --kind finding --body \"…\"`: a fresh agent makes the fix, and that note is how it \
@@ -249,20 +265,19 @@ impl Exec {
             Only that command's verdict counts. If you end your turn without one, the review hasn't happened, and it \
             runs again.")
     }
-    /// The published prompt, led by the card this run is for. The card's own words are read by the agent
-    /// (`farcooler task show`), not copied here, so a recovery rebuilds the same command whatever the card says now.
+    /// The published prompt, led by the card this run is for. `ticket_prompt` adds the pinned card text,
+    /// so learning the job never depends on a CLI lookup.
     /// What the effect itself carries is said: an adopted branch's earlier work, and why the run was sent back (ov-968).
     /// A build a later step turned back is a fix round: a fresh agent, told so and where the reasons are (ov-1071).
     pub(super) fn briefed(prompt: &str, effect: &farcooler_workflow::Effect, iteration: u8) -> String {
         let item = &effect.item;
         let mut brief = if effect.with.is_empty() {
-            format!("You are working on ticket {item}. Read it first with `farcooler task show {item}`, then do the work it describes.")
+            format!("You are working on ticket {item}. The ticket is included below; do the work it describes.")
         } else {
             // One run for several tickets (ov-970): one branch, and one pull request, for all of them.
             let all: Vec<&str> = std::iter::once(item.as_str()).chain(effect.with.iter().map(String::as_str)).collect();
             let (last, rest) = all.split_last().expect("at least two");
-            format!("You are working on tickets {} and {last}, together, in this one worktree and branch. Read each first with \
-                `farcooler task show <ticket>`, then do the work they describe.", rest.join(", "))
+            format!("You are working on tickets {} and {last}, together, in this one worktree and branch. The tickets are included below; do the work they describe.", rest.join(", "))
         };
         if let Some(tree) = effect.tree.as_ref().filter(|t| t.adopted) {
             brief.push_str(&format!("\n\nThis worktree is on the branch {}, which already has work on it. Read it first with \
@@ -337,6 +352,10 @@ impl Exec {
     }
     async fn run_coding(&self, binding: &Binding, command: CodingCommand,
         cancel: tokio::sync::watch::Receiver<bool>) -> Result<()> {
+        if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)) {
+            let head = self.git_recorded(binding, &self.tree(binding), &["rev-parse", "HEAD"]).await?;
+            durable(&self.build_start_path(binding), &serde_json::to_vec(&BuildStart { binding: binding.clone(), head })?)?;
+        }
         let log = self.process_log(binding);
         // Each admitted effect is invoked at most once. A preexisting artifact is
         // evidence to reconcile, never permission to append a new invocation.
@@ -673,6 +692,9 @@ impl Exec {
         }
         Ok(candidate)
     }
+    fn build_start_path(&self, binding: &Binding) -> PathBuf {
+        self.root.join("receipts").join(format!("{}.build-start.json", digest(&binding.effect)))
+    }
     /// Why a build's tree holds no new commit for it to hand on, said as a sentence for the run, or `None` when it
     /// does (ov-1090): changes left uncommitted, or a HEAD still at the base or at the candidate it was given.
     pub(super) async fn unfinished_build(&self, binding: &Binding, tree: &Path) -> Result<Option<String>> {
@@ -685,8 +707,18 @@ impl Exec {
                 They're still in its worktree, and the build carries on from them.")));
         }
         let head = self.git_recorded(binding, tree, &["rev-parse", "HEAD"]).await?;
-        if head == binding.base || binding.effect.candidate.as_ref() == Some(&head) {
-            return Ok(Some("The build ended its turn without committing anything new.".into()));
+        let started = match self.bytes(&self.build_start_path(binding)) {
+            Ok(raw) => {
+                let start: BuildStart = serde_json::from_slice(&raw)?;
+                if start.binding != *binding { return Err(Error::Refused("foreign build start")); }
+                Some(start.head)
+            }
+            // Old effects did not retain their starting HEAD.
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        if started.as_ref() == Some(&head) || head == binding.base || binding.effect.candidate.as_ref() == Some(&head) {
+            return Ok(Some("The build ended without changes: it made no new commit.".into()));
         }
         Ok(None)
     }
@@ -775,7 +807,14 @@ impl Exec {
         // in the tree, and the step runs again there, so the next agent carries on from it. Never Uncertain: nothing
         // is unknown about a turn that has ended, and Uncertain held ov-1076's and ov-1084's work where no command reached.
         if matches!(kind, StageKind::Build) {
-            if let Some(why) = self.unfinished_build(binding, &tree).await? { return Ok(Outcome::SafeFailureBecause(why)); }
+            if let Some(mut why) = self.unfinished_build(binding, &tree).await? {
+                if self.is_native_agent(binding) {
+                    if let Some(message) = self.native_last_message(binding)? {
+                        why.push_str(&format!("\n\nThe agent's last message:\n{message}"));
+                    }
+                }
+                return Ok(Outcome::SafeFailureBecause(why));
+            }
         }
         let mut candidate = match self.verify_tree(binding).await {
             // A provisioned tree with someone's changes in it fails the step with the sentence, never Uncertain (ov-1074).

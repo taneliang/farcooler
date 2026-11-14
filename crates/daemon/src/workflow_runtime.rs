@@ -20,6 +20,7 @@ mod coding;
 mod coding_review_policy;
 mod service_owner;
 mod coding_execute;
+mod ticket_brief;
 mod coding_native;
 mod native_control;
 mod native_messages;

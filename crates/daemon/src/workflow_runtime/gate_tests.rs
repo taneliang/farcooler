@@ -267,7 +267,7 @@ async fn a_review_runs_with_the_model_its_changed_paths_earn_and_the_workflows_w
     assert_eq!(command.environment.get("FARCOOLER_WORKFLOW_MODEL").map(String::as_str), Some("claude:opus"));
     let prompt = command.environment.get("TEST_LAUNCHED_PROMPT").unwrap();
     assert!(prompt.starts_with("You are reviewing ticket one.") && prompt.ends_with("\n\nRead the lane rules first."), "{prompt}");
-    assert!(prompt.contains("farcooler task note one --kind finding"), "the reviewer is told where its reasons go: {prompt}");
+    assert!(prompt.contains(" task note one --kind finding") && !prompt.contains("`farcooler "), "the reviewer is told where its reasons go: {prompt}");
     assert_eq!(runtime.coding_command(&binding).unwrap(), command);
 }
 
