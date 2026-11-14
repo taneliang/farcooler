@@ -93,7 +93,7 @@ HEAVY = {"tunnel", "rust", "swift-tests", "swift", "ios", "android", "web"}
 APP_JOBS = {"rust", "swift-tests", "swift", "ios", "android", "tunnel"}
 # ci.yml jobs this script covers under another name, or on purpose does not.
 CI_JOB_ALIASES = {
-    "wire": "wire", "tunnel": "tunnel", "rust": "rust", "swift": "swift", "swift-tests": "swift-tests",
+    "wire": "wire", "tunnel": "tunnel", "tunnel-helper": "tunnel", "rust": "rust", "swift": "swift", "swift-tests": "swift-tests",
     "rust-build": "rust", "rust-tests": "rust", "rust-macos-tests": "rust", "rust-macos-build": "rust",
     "ios": "ios", "ios-ui-plan": "ios", "android": "android", "android-build": "android", "android-ui": "android", "relay": "relay", "site": "site", "web": "web",
 }
@@ -301,6 +301,8 @@ def steps_for(job, workflows, ctx):
     ids = ["ios-ui-plan", "ios"] if job == "ios" else [job]
     if job == "android":
         ids = ["android-build", "android-ui:first", "android-ui:rest", "android"]
+    if job == "tunnel":
+        ids = ["tunnel", "tunnel-helper"]
     steps = []
     for ci_spec in ids:
         ci_id, _, shard = ci_spec.partition(":")
@@ -1063,6 +1065,10 @@ def _self_test():
         native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh" in step.run)
         expect(f"{job} refreshes the watched git index before Cargo", refresh < native and
                "git status --porcelain --untracked-files=no" in plans[job][refresh].run, True)
+    for cgo in (0, 1):
+        for command in ("vet ./...", "test -count=1 ./..."):
+            expect(f"tunnel gates cgo={cgo} {command}",
+                   has("tunnel", f"CGO_ENABLED={cgo} go {command}"), True)
     expect("the tunnel steps run in crates/tailcat/go", {s.cwd for s in plans["tunnel"]}, {"crates/tailcat/go"})
     expect("the Android gradle steps run in apps/android", all(s.cwd == "apps/android" for s in plans["android"] if "gradlew" in s.run), True)
     expect("a ${{ }} is filled in", any("${{" in s.run for s in plans["web"]), False)

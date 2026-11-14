@@ -21,11 +21,11 @@
 # (scripts/nightly-report.py). An issue, not a board card: the board is a local
 # tool on the owner's Mac and a runner cannot reach it.
 #
-# Everything runs with all five macOS runners free (nothing else is on a Mac at
-# that hour but a Canary build): five shards start together and the rest
-# take a runner as one finishes. Their job
-# names are the ones the shard budget reads (scripts/ios-ui-shard-budget.py),
-# which now reads this workflow's runs and not ci.yml's.
+# Use at most ONE macOS runner (ov-1190, following the ov-1134 queue report).
+# CI needs four at its widest point. Separate phases and max-parallel on BOTH
+# matrices reserve the other four slots even when main lands during a Nightly.
+# Do not use job concurrency groups: their pending-job replacement can discard
+# matrix entries. The full suite still runs, taking longer overnight.
 name: Nightly
 
 on:
@@ -175,6 +175,7 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         shard: [shell, agent, phone, phone2, phone3, phone4, phone5, phone6, pad]
     steps:
@@ -193,12 +194,13 @@ jobs:
   # timeout on Oct 23 (ov-722); as two, the second took 35 minutes (78%) on Oct 24.
   captures:
     name: iOS UI ${{ matrix.shard }}
-    needs: [ios]
+    needs: [ios, ios-ui]
     if: ${{ !cancelled() }}
     runs-on: xcode-27
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         shard: [captures, captures2, captures3]
     steps:
@@ -291,6 +293,9 @@ jobs:
   # through `report`, which names it.
   mac-perf:
     name: Mac perf gates
+    needs: [captures]
+    # A failed shard must not suppress unrelated perf coverage.
+    if: ${{ !cancelled() }}
     runs-on: xcode-27
     timeout-minutes: 40
     env:

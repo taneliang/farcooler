@@ -363,6 +363,23 @@ def check_workflows(problems):
                 f"{NIGHTLY.name}: `report` does not wait for {', '.join(sorted(others - listed))}; "
                 "it would report before they finish"
             )
+    for job in re.findall(r"^  ([\w-]+):\n", text.split("\njobs:\n", 1)[-1], re.M):
+        body = job_block(job, NIGHTLY) or ""
+        if re.search(r"^    runs-on: (?:xcode|macos)", body, re.M) and job not in {"ios", "ios-ui", "captures", "mac-perf"}:
+            problems.append(f"{NIGHTLY.name}: `{job}` is outside the macOS slot reservation; add it to the phase chain")
+    # ov-1190: the four slots main CI needs must survive a branch Nightly.
+    # Both matrix widths AND the phase dependencies matter; limiting either
+    # matrix alone still lets the other matrix/perf consume the whole pool.
+    for job, predecessor in (("ios-ui", "ios"), ("captures", "ios-ui"), ("mac-perf", "captures")):
+        body = job_block(job, NIGHTLY) or ""
+        needs = re.search(r"^    needs:\s*\[([^\]]*)\]", body, re.M)
+        listed = {n.strip() for n in needs.group(1).split(",")} if needs else set()
+        if predecessor not in listed:
+            problems.append(f"{NIGHTLY.name}: `{job}` must wait for `{predecessor}` to reserve four macOS slots")
+        if not re.search(r"^    if:.*!cancelled\(\)", body, re.M):
+            problems.append(f"{NIGHTLY.name}: `{job}` needs !cancelled() to retain coverage after a failed phase")
+        if job != "mac-perf" and not re.search(r"^      max-parallel: 1\s*$", body, re.M):
+            problems.append(f"{NIGHTLY.name}: `{job}` needs max-parallel: 1 to reserve four macOS slots")
     matrix = shards_of("ios-ui")
     if matrix is None:
         problems.append(f"found no single `shard: [...]` matrix in {NIGHTLY.name}'s `ios-ui` job")
@@ -544,6 +561,11 @@ def self_test():
         r"(?m)^    needs: \[ios, ios-ui, captures,[^\n]*\]$", "    needs: [ios, ios-ui]", t, count=1))
     planted("iOS smoke becoming a shard matrix", "full shards run", lambda t: t.replace(
         "  ios-ui:\n", "  ios-ui:\n    strategy:\n      matrix:\n        shard: [shell, agent]\n"), WORKFLOW)
+    planted("another Mac job", "outside the macOS slot reservation", lambda t: t.replace("    runs-on: ubuntu-latest", "    runs-on: xcode-27", 1))
+    planted("unbounded nightly matrices", "max-parallel: 1", lambda t: t.replace("      max-parallel: 1\n", ""))
+    planted("parallel capture phase", "must wait for `ios-ui`", lambda t: t.replace("needs: [ios, ios-ui]", "needs: [ios]"))
+    planted("parallel perf phase", "must wait for `captures`", lambda t: t.replace("    needs: [captures]\n", ""))
+    planted("failed phase hides coverage", "retain coverage", lambda t: t.replace("if: ${{ !cancelled() }}", "if: ${{ success() }}"))
     planted("no captures job", "no `captures` job", lambda t: t.replace("shard: ${{ matrix.shard }}\n          capture-out", "shard: shell\n          capture-out"))
     planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2, captures3]", "shard: [captures, captures2]"))
     planted(

@@ -362,8 +362,8 @@ jobs:
         run: |
           unformatted="$(gofmt -l .)"
           [ -z "$unformatted" ] || { echo "gofmt wants: $unformatted"; exit 1; }
-      # BOTH cgo settings, and that is not belt-and-braces — it is the only way
-      # every file in this package is type-checked by anything.
+      # Both cgo settings (the helper job below runs 0) are needed for every
+      # file in this package to be type-checked.
       #
       # The package has two entry points and they are mutually exclusive by
       # construction: `exports_cgo.go` imports "C", which Go excludes whenever
@@ -392,9 +392,25 @@ jobs:
         run: |
           CGO_ENABLED=1 go vet ./...
           CGO_ENABLED=1 go test -count=1 ./...
-      # And without it, which is what a Linux runner actually ships: the helper
-      # is built `CGO_ENABLED=0` precisely because a Go c-archive inside a musl
-      # binary segfaults in Go's runtime startup. This is that build.
+
+  # Independent of the cgo archive above (ov-1190). A second free standard
+  # Linux runner tests the helper concurrently; no macOS slot is added.
+  tunnel-helper:
+    name: Tunnel helper (Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: crates/tailcat/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+          cache-dependency-path: crates/tailcat/go/go.sum
+      # The Linux helper ships without cgo because a Go c-archive inside a
+      # musl binary segfaults in Go's runtime startup. Keep vet AND uncached
+      # tests here: cgo=1 does not compile the !cgo implementation at all.
       - name: Vet and test without cgo, which is what Linux ships
         run: |
           CGO_ENABLED=0 go vet ./...
