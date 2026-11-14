@@ -29,11 +29,14 @@ impl Exec {
         let mut ended = Vec::new();
         for workspace in self.store.workflow_workspaces()? {
             let Some(state) = self.state(&workspace)? else { continue };
+            let cleanups = self.store.workflow_cleanups(&workspace)?;
             for (id, item) in &state.items {
                 if item.group_of.is_some() { continue; }
                 let tree = item.tree.as_ref().map(|t| PathBuf::from(&t.path)).unwrap_or_else(|| self.item_tree(&workspace, id));
                 if matches!(item.phase, Phase::WaitingJoin | Phase::Failed | Phase::Cancelled) {
-                    if item.tree.is_none() { ended.push(tree); }
+                    // The durable cleanup owns policy, byte accounting and open-file retries (ov-1203).
+                    // This older sweep is only a fallback for runs with no retained cleanup intent.
+                    if item.tree.is_none() && !cleanups.iter().any(|r| r.effect.item == *id) { ended.push(tree); }
                 } else { live.insert(tree); }
             }
         }

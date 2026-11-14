@@ -1003,18 +1003,35 @@ async fn a_reviewed_ticket_joins_automatically_and_a_landing_gate_leaves_build_c
     assert_eq!(state.items["one"].phase, Phase::Joined);
     let group = group_id(&state);
     until(&mut runtime, |s| s.items.get(&group).is_some_and(|g| g.definition.stages[g.stage].kind == StageKind::Run)).await;
-    // The gate fails unless the next ticket's build runs beside it, even with one build slot.
+    // Both pools admit work even with one build slot. The builder may yield its CPU to the gate (ov-1214).
     let script = dir.path().join("adapter.py");
     let source = std::fs::read_to_string(&script).unwrap();
     let marker = dir.path().join("build-alongside-gate");
-    let gate = format!("elif stage == 'gate':\n    import time\n    marker = pathlib.Path({:?})\n    until = time.time() + 4\n    while not marker.exists() and time.time() < until: time.sleep(0.02)\n    if not marker.exists(): sys.exit(8)\n", marker.to_str().unwrap());
+    let admitted = dir.path().join("build-admitted-alongside-gate");
+    let gate = format!("elif stage == 'gate':\n    import time\n    marker = pathlib.Path({:?})\n    until = time.time() + 4\n    while not marker.exists() and time.time() < until: time.sleep(0.02)\n    if not marker.exists(): sys.exit(8)\n", admitted.to_str().unwrap());
     let build = format!("if stage == 'build':\n    pathlib.Path({:?}).write_text('started')\n", marker.to_str().unwrap());
     std::fs::write(script, source.replace("elif stage == 'gate':\n", &gate).replace("if stage == 'build':\n", &build)).unwrap();
     runtime.continuous = true;
     enqueue_item(&mut runtime, "w", "two", definition);
+    let places = runtime.places.clone();
+    let gate_id = group.clone();
+    let observer = tokio::spawn(async move {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        loop {
+            let both = {
+                let places = places.lock().unwrap();
+                places.holding.iter().any(|p| p.item == gate_id && p.kind == EffectKind::Execute(StageKind::Run))
+                    && places.holding.iter().any(|p| p.item == "two" && p.kind == EffectKind::Execute(StageKind::Build))
+            };
+            if both { std::fs::write(admitted, "admitted").unwrap(); return true; }
+            if tokio::time::Instant::now() >= deadline { return false; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
     runtime.pump(11).await.unwrap();
+    assert!(observer.await.unwrap(), "the landing gate must not consume the builder's place");
     let state = runtime.state("w").unwrap().unwrap();
-    assert!(marker.exists(), "the next build started alongside the gate");
+    assert!(marker.exists(), "the admitted builder resumes after yielding to the gate");
     assert_eq!(phase_of(&state, &group), Some(Phase::Done), "landing gate consumed the build slot");
 }
 

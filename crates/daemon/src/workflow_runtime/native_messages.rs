@@ -65,7 +65,12 @@ impl Exec {
         use tokio::io::AsyncWriteExt;
         // Deny this tool, handing the direction to the agent before it can make the old change.
         // A plain allow would bypass a permission check, and a Stop continuation would arrive late.
-        let response = if tool { serde_json::json!({"decision":{"behavior":"deny", "message":text}}) }
+        // Informational runner notices (ov-1171) provide context; explicit direction still fences the tool.
+        let context = tool && line.agent == farcooler_agent_hooks::Agent::Claude
+            && line.takes.iter().any(|t| t == farcooler_agent_hooks::wire::TAKES_CONTEXT)
+            && claimed.iter().all(|(wake, _)| wake.actor == Actor::Runner);
+        let response = if context { serde_json::json!({"additional_context":text}) }
+            else if tool { serde_json::json!({"decision":{"behavior":"deny", "message":text}}) }
             else { serde_json::json!({"followup_message":text}) };
         let reply = serde_json::to_vec(&response)?;
         let sent = async { stream.write_all(&reply).await?; stream.write_all(b"\n").await }.await;

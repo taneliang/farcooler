@@ -64,7 +64,17 @@ Each row records one source pick that stopped with conflicts. The duplicate stee
 
 ## Integration checks
 
-Pending: compile the full required nextest selection, reconcile any combined field/fixture omissions, and record final targeted test results here.
+The full required selection compiles, including combined `CodingConfig`, `Action`, `Definition`, `Item` and native settlement literals. Compatibility fixes add absent publication reasons and definition defaults, retain fallible process identity in yielding, and accept the added native failure field in receipt patterns.
+
+The first foreground run exposed these semantic overlaps, resolved without dropping tickets:
+
+| Tickets | Observed conflict | Resolution |
+| --- | --- | --- |
+| ov-1213 / ov-1236 | The old target sweep ran before the durable cleanup, losing byte counts and bypassing open-file retry. | A retained cleanup intent owns its item’s policy and deletion; the old sweep remains a fallback for items with no durable intent. |
+| ov-1236 / ov-1213 | The capacity fixture waited for a builder to execute while a landing gate deliberately paused it. | The gate now waits for simultaneous admission to separate pools, then checks the admitted builder executes after yielding. Both capacity and pause behavior remain required. |
+| ov-1178 / queued ov-1205 | The native delivery fixture had separate watcher/runtime stores; explicit direction also now fences a tool instead of printing informational context. | Share the runner store in the fixture. Explicit direction denies the pending tool; informational runner acceptance notices return context. Both are consumed once through the authenticated hook before Stop. |
+
+CLI hook fixtures inherit neither this task’s private native hook socket nor its workflow bindings on the final run: those session variables override their scratch sockets. `PATH` selects the working system Python for repository scripts. Final test results follow below.
 
 ## Queued prefix
 

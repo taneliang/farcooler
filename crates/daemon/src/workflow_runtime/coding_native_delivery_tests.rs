@@ -11,6 +11,7 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
     let (dir, mut runtime, _fake) = tests::native("pass").await;
     runtime.exec.validate_native_host().unwrap();
     let (_service_dir, svc, repo) = crate::test_support::fixture().await;
+    runtime.store = svc.store.clone(); // The native host and watcher share the runner's durable message queue.
     let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
     let primary = svc.store.create_task(ws, "native primary", Actor::Manager).unwrap();
     let task = svc.store.create_task(ws, "native grouped ticket", Actor::Manager).unwrap();
@@ -88,11 +89,16 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
             }
             let received = std::fs::read_to_string(&log).unwrap_or_default();
             let replies: Vec<serde_json::Value> = received.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+            let field = if text.starts_with("Acceptance") { "additionalContext" } else { "permissionDecisionReason" };
             let contexts: Vec<_> = replies.iter().filter(|r|
-                r["hookSpecificOutput"]["additionalContext"].as_str().is_some_and(|c| c.contains(text))).collect();
+                r["hookSpecificOutput"][field].as_str().is_some_and(|c| c.contains(text))).collect();
             assert_eq!(contexts.len(), 1, "CLI never delivered {text}: {received}");
             assert_eq!(contexts[0]["hookSpecificOutput"]["hookEventName"], "PreToolUse");
-            assert!(contexts[0]["hookSpecificOutput"].get("permissionDecision").is_none());
+            if text.starts_with("Acceptance") {
+                assert!(contexts[0]["hookSpecificOutput"].get("permissionDecision").is_none());
+            } else {
+                assert_eq!(contexts[0]["hookSpecificOutput"]["permissionDecision"], "deny");
+            }
             assert!(svc.store.pending_message_wakes().unwrap().is_empty());
             assert!(!finish.exists(), "delivery must precede Stop");
             let pid: i32 = std::fs::read_to_string(&started).unwrap().parse().unwrap();
