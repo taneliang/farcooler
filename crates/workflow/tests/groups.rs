@@ -1140,3 +1140,35 @@ fn a_diagnosed_conflict_keeps_the_published_failure_policy_and_releases_an_empty
         assert_eq!(log.replay_digest(), digest(&log.state));
     }
 }
+
+#[test]
+fn a_split_scripts_own_group_decision_survives_builtin_consolidation() {
+    let mut log = Log::new();
+    let mut definition = ticket();
+    definition.groups.get_mut("landing").unwrap().limit = None;
+    definition.script_policies.insert("split".into(), ScriptPolicy { point: HookPoint::GroupSplits,
+        script: "/tmp/split".into(), digest: digest(&vec![0u8]), timeout_ms: 30,
+        max_calls: 1, fallback: HookMove::OwnGroup });
+    for name in ["x", "a", "b", "c"] {
+        log.enqueue(name, definition.clone());
+        while log.state.items[name].phase != Phase::WaitingJoin { log.pass(name); }
+    }
+    log.queue("x"); let ahead = log.group_of("x");
+    log.queue("a"); log.queue("b"); let pair = log.group_of("a");
+    pass_group(&mut log, &ahead, 3);
+    log.queue("c"); let waiting = log.group_of("c");
+    pass_group(&mut log, &pair, 2);
+    log.reject(&pair); let rest = log.group_of("b");
+    let item = &log.state.items[&rest];
+    let call = item.deciding.as_ref().unwrap().input.call.clone();
+    let grant = Grant::Operation { effect: item.pending.clone().unwrap(), run: item.run.clone(), fence: item.fence };
+    let command = Command::Decide { item: rest.clone(), call: call.clone(), fence: item.fence,
+        policy_pin: item.policy_pin.clone(), result: HookResult::Receipt { manifest: "m".into(),
+            raw: serde_json::json!({"schema":"hook-decision/v1","call":call,"decision":"own_group"}).to_string() } };
+    log.run(command, grant);
+    log.run(Command::Advance, Grant::Controller);
+    assert_eq!(log.group_of("b"), rest, "consolidation must preserve the script's choice");
+    assert_ne!(rest, waiting);
+    assert_eq!(log.state.items[&waiting].members.len(), 1);
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}

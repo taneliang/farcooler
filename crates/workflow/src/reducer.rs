@@ -668,6 +668,13 @@ fn consolidate_groups(state: &mut State) -> Result<(), Refusal> {
             group.members.first().and_then(|m| state.items.get(&m.item))
                 .and_then(|t| t.definition.groups.get(&origin.name)).map_or(Some(1), |g| g.limit)
         };
+        // A settled split script may deliberately keep its own group. Its pending call
+        // already excludes it above; do not undo its choice on this or a later sweep.
+        if group.definition.script_policies.iter().any(|(name, policy)| policy.point == HookPoint::GroupSplits
+            && group.hook_calls.get(name).is_some_and(|calls| *calls > 0)) {
+            state.items.insert(id, group);
+            continue;
+        }
         for (target, cap) in &open {
             let dest = state.items.get_mut(target).ok_or(Refusal::Missing)?;
             if dest.group_of != group.group_of || dest.policy_pin != group.policy_pin || dest.resource != group.resource { continue; }
