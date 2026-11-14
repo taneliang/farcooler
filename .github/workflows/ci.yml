@@ -433,7 +433,12 @@ jobs:
           targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.os }}
+          # The key names what this job builds, not only where (ov-1165): the
+          # dev/test profile with clippy, in the default and `tailcat` feature
+          # sets. rust-cache already folds in the rustc version and the
+          # Cargo manifests, but it never re-saves after an exact-key hit, so a
+          # job whose build set changes must change its key to rebuild the cache.
+          key: ${{ matrix.os }}-dev-test-clippy-features-default-tailcat
 
       # cargo-nextest runs the tests below (ov-540). `cargo test` ran this
       # workspace's ~90 test binaries one after another, so a binary whose
@@ -793,6 +798,9 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Release build of the whole bundle (daemon, CLI, client, vt) (ov-1165).
+          key: release-bundle
       # SwiftPM's downloads (ov-1030): Sparkle's release zip is a binary target
       # fetched from github.com, and an anonymous download of it 504ed in
       # GitHub's Nov 9 incident. Keyed by Package.resolved, so a warm run
@@ -951,6 +959,12 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Release `-p farcooler-vt -p farcooler-client` plus the Mac tests' dev
+          # build. Its cache restored on every one of the last 10 main
+          # runs and still recompiled aws-lc-sys, aws-lc-rs and russh each time, and an exact-key hit never re-saves
+          # (ov-1165). A key naming the build set makes the first run save them.
+          key: release-vt-client-features-with-ssh-plus-mac-tests
       # SwiftPM's downloads (ov-1030): Sparkle's release zip is a binary target
       # fetched from github.com, and an anonymous download of it 504ed in
       # GitHub's Nov 9 incident. Keyed by Package.resolved, so a warm run
