@@ -236,6 +236,8 @@ pub struct Runtime {
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
     next_lease: Option<i64>,
+    /// Pending transient cleanup must wake both idle and occupied dispatch loops (ov-1203).
+    next_cleanup: Option<tokio::time::Instant>,
     continuous: bool,
     #[cfg(test)]
     sweeps: usize,
@@ -347,7 +349,7 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { inbox, send, next_lease: None, continuous: false,
+        let runtime = Self { inbox, send, next_lease: None, next_cleanup: None, continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { activities: Default::default(), places: Default::default(), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), active_trees: Default::default(), #[cfg(test)] user_home: None },
@@ -534,7 +536,8 @@ impl Runtime {
         let mut stopping = false;
         let mut scan = true;
         loop {
-            self.exec.release_builds(&workspaces).await?;
+            let retry = self.exec.release_builds(&workspaces).await?;
+            self.next_cleanup = retry.then(|| tokio::time::Instant::now() + Duration::from_secs(1));
             if scan {
                 scan = self.continuous;
                 let current = self.store.workflow_workspaces()?;
@@ -553,9 +556,11 @@ impl Runtime {
                     }
                 }, if !stopping => Event::Shutdown,
                 message = inbox.recv() => Event::Message(message),
+                _ = build_cleanup::wait_for_retry(self.next_cleanup), if !stopping => Event::CleanupRetry,
             };
             match event {
                 Event::Tick => { scan = true; }
+                Event::CleanupRetry => {},
                 Event::Shutdown => {
                     stopping = true;
                     for job in running.iter() { job.cancel.send_replace(true); }
@@ -894,6 +899,7 @@ impl Runtime {
                             None => std::future::pending::<()>().await,
                         }
                     } => break,
+                    _ = build_cleanup::wait_for_retry(self.next_cleanup) => break,
                 }
             }
         }
@@ -911,6 +917,7 @@ struct Running {
 }
 enum Event {
     Tick,
+    CleanupRetry,
     Finished(usize, Result<Outcome>),
     Shutdown,
     Message(Option<Inbox>),

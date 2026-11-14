@@ -618,3 +618,56 @@ async fn build_cleanup_resumed_run_rebuilds_from_a_cold_target() {
     assert_ne!(state.items["one"].candidate, first, "the build produced a new commit after cleanup");
     assert_eq!(std::fs::read_to_string(tree.join("result.txt")).unwrap(), "draft\n");
 }
+
+// Read the store/files directly: an inbox read would wake the dispatch loop and hide this bug.
+async fn scheduled_cleanup(with_running_effect: bool) {
+    use super::coding_tests::{admitted, configured};
+    let (dir, mut runtime) = configured(false, "cancel").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "ended", definition.clone());
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    runtime.observe("w", &binding.effect, Outcome::SafeFailure, false, 3).unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["ended"].phase, Phase::Failed);
+    let tree = runtime.item_tree("w", "ended");
+    std::fs::create_dir_all(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/output"), b"ended output").unwrap();
+    let open = File::open(tree.join("target/output")).unwrap();
+    if with_running_effect { enqueue(&mut runtime, "w", "running", definition); }
+    let store = runtime.store.clone();
+    let active = runtime.active_trees.clone();
+    let started = dir.path().join("started");
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(async move { runtime.run(shutdown).await.unwrap(); runtime });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let retry = store.workflow_cleanups("w").unwrap().iter()
+                .any(|r| r.result.as_ref().is_some_and(|r| r.retry));
+            if retry && (!with_running_effect || started.exists()) { break; }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }).await.unwrap();
+    assert!(tree.join("target/output").exists());
+    drop(open);
+    let released = tokio::time::timeout(Duration::from_secs(3), async {
+        while tree.join("target").exists() { tokio::time::sleep(Duration::from_millis(20)).await; }
+    }).await.is_ok();
+    if with_running_effect {
+        assert!(!active.lock().unwrap().is_empty(), "cleanup must run before the other effect ends");
+    }
+    // Once cleanup settles, idle runtimes must go back to sleeping without periodic sweeps.
+    if released && !with_running_effect { tokio::time::sleep(Duration::from_millis(1200)).await; }
+    stop.send(true).unwrap();
+    let runtime = task.await.unwrap();
+    assert!(released, "cleanup needs its own wakeup after the open file closes");
+    let record = store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == "ended").unwrap();
+    assert_eq!(record.result.as_ref().unwrap().bytes_freed, 12);
+    assert!(!record.result.unwrap().retry);
+    assert!(runtime.sweeps <= 4, "retry wakeups must be bounded and stop after cleanup settles");
+}
+
+#[tokio::test]
+async fn build_cleanup_scheduled_retry_when_runtime_is_idle() { scheduled_cleanup(false).await; }
+
+#[tokio::test]
+async fn build_cleanup_scheduled_retry_while_another_effect_runs() { scheduled_cleanup(true).await; }

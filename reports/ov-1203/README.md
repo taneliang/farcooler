@@ -64,3 +64,27 @@ Fix-round validation on 2026-11-14:
 - Clippy for daemon, store and workflow, all targets with warnings denied: passed.
 - File-size budget, doc-comment check, swallow lint, protocol lint and diff check: passed.
 - Never ran `cargo fmt`.
+
+## Fix round 2 — wake pending cleanup without unrelated activity
+
+The retry flag did not schedule dispatch: an idle runtime without a lease slept
+indefinitely, and an occupied sweep waited only for effects, commands or shutdown.
+Cleanup now returns whether transient blockers remain. The runtime arms a
+monotonic one-second deadline in both wait paths and clears it when cleanup
+settles. Each attempt still repeats the existing active-tree, later-build,
+repository fence and filesystem checks; shutdown does not wait for cleanup retries.
+
+Two runtime-level regressions hold an output file open for a Failed run, wait
+until cleanup records the transient blocker, then close the file. They inspect
+the filesystem/store directly without sending commands or restarting the runtime.
+One exercises the idle loop and checks bounded sweeps after settlement; the other
+observes deletion while another real build process still runs. Both failed before
+the fix at `cleanup needs its own wakeup after the open file closes` and now pass.
+
+Fix-round validation on 2026-11-14:
+
+- Full workflow runtime suite: 326 passed, 4 ignored, including both new regressions.
+- `cargo clippy -p farcooler-daemon --all-targets -- -D warnings`: passed.
+- File-size budget, doc-comment check, swallow lint, protocol lint and diff check: passed.
+- Runtime tests used approved host execution because sandboxed Git invocation is refused.
+- Never ran `cargo fmt`.

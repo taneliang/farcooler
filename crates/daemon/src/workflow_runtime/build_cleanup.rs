@@ -2,11 +2,21 @@
 use super::*;
 use farcooler_workflow::cleanup::{CleanupEffect, CleanupResult, valid_folder};
 
+/// Retry on a monotonic deadline, only while a transient cleanup blocker remains.
+pub(super) async fn wait_for_retry(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(time) => tokio::time::sleep_until(time).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
 impl Exec {
-    pub(super) async fn release_builds(&self, workspaces: &[String]) -> Result<()> {
+    /// True while a transient blocker still needs a later dispatch wakeup.
+    pub(super) async fn release_builds(&self, workspaces: &[String]) -> Result<bool> {
         self.release_builds_checked(workspaces, || Ok(())).await
     }
-    pub(super) async fn release_builds_checked(&self, workspaces: &[String], mut before_result: impl FnMut() -> Result<()>) -> Result<()> {
+    pub(super) async fn release_builds_checked(&self, workspaces: &[String], mut before_result: impl FnMut() -> Result<()>) -> Result<bool> {
+        let mut retry = false;
         for workspace in workspaces {
             for record in self.store.workflow_cleanups(workspace)? {
                 if record.result.as_ref().is_some_and(|r| !r.retry) { continue; }
@@ -15,7 +25,10 @@ impl Exec {
                 // Defer, rather than settle a skip: a cancellation can end the item before its
                 // already-running future is joined. Its output is released on the next pass.
                 if self.active_trees.lock().unwrap().iter().any(|p| p == &tree
-                    || p.canonicalize().ok().zip(tree.canonicalize().ok()).is_some_and(|(a,b)| a == b)) { continue; }
+                    || p.canonicalize().ok().zip(tree.canonicalize().ok()).is_some_and(|(a,b)| a == b)) {
+                    retry |= record.result.as_ref().is_some_and(|r| r.retry);
+                    continue;
+                }
                 if !self.store.workflow_cleanup_begin(&effect, record.result.as_ref())? { continue; }
                 let mut result = match self.release_build(&effect).await {
                     Ok(result) => result,
@@ -25,9 +38,10 @@ impl Exec {
                 result.bytes_freed = result.bytes_freed.saturating_add(record.result.map_or(0, |r| r.bytes_freed));
                 before_result()?;
                 self.store.workflow_cleanup_result(&effect, &result)?;
+                retry |= result.retry;
             }
         }
-        Ok(())
+        Ok(retry)
     }
     async fn release_build(&self, effect: &CleanupEffect) -> Result<CleanupResult> {
         self.release_build_checked(effect, || {}).await
