@@ -57,6 +57,8 @@ jobs:
             exit 1
           fi
           echo "$out"
+          # Backticks are literal text in the expected diagnostic.
+          # shellcheck disable=SC2016
           if ! grep -qF 'the doc comment on `mod test_agent_tests` now sits on `mod stand_in_agent_tests`' <<<"$out"; then
             echo "::error::the check failed on 621d4182 without refusing its orphaned doc comment"
             exit 1

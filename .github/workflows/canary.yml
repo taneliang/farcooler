@@ -367,6 +367,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.appstoreconnect/private_keys
+          # Key IDs are Apple-issued identifiers; keep the existing path expansion.
+          # shellcheck disable=SC2086
           echo "$APP_STORE_KEY_P8" | base64 --decode \
             > ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_KEY_ID.p8
 
@@ -391,6 +393,7 @@ jobs:
           # for development, but a conflicting code signing identity Apple
           # Distribution has been manually specified" — Xcode asking for the
           # value below in as many words.
+          # shellcheck disable=SC2086 # Apple key IDs are path-safe identifiers.
           xcodebuild -project FarCooler.xcodeproj -scheme FarCooler \
             -configuration Release -destination 'generic/platform=iOS' \
             -archivePath build/FarCooler.xcarchive archive \
@@ -414,6 +417,7 @@ jobs:
           # attempt would be refused as a duplicate build.
           for attempt in 1 2 3; do
             rm -rf build/export
+            # shellcheck disable=SC2086 # Apple key IDs are path-safe identifiers.
             if xcodebuild -exportArchive \
               -archivePath build/FarCooler.xcarchive \
               -exportOptionsPlist ExportOptions.plist \
@@ -884,6 +888,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
+          # Preserve the existing glob and ls behavior.
+          # shellcheck disable=SC2035
           dmg="$(ls *.dmg)"
           ./scripts/notarytool-retry.sh submit "$dmg" \
             --apple-id "$APPLE_ID" \
@@ -935,6 +941,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
+          # Preserve the existing glob and ls behavior.
+          # shellcheck disable=SC2035
           dmg="$(ls *.dmg)"
           build="$(scripts/version.sh build)"
 
