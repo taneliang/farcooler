@@ -1,0 +1,14 @@
+wave-a-preview violations:
+ratchet: apps/android/app/src/main/java/com/farcooler/net/ConnectionTeammate.kt has 1 user-facing strings, the baseline allows 0
+ratchet: apps/ios/FarCooler/ConnectionTeammate.swift has 1 user-facing strings, the baseline allows 0
+ratchet: services/web/src/client/app.ts has 50 user-facing strings, the baseline allows 46
+ratchet: services/web/src/client/saved-copies.ts has 11 user-facing strings, the baseline allows 0
+
+Integrated branch violations:
+ratchet: apps/android/app/src/main/java/com/farcooler/net/ConnectionTeammate.kt has 1 user-facing strings, the baseline allows 0
+ratchet: apps/ios/FarCooler/ConnectionTeammate.swift has 1 user-facing strings, the baseline allows 0
+ratchet: services/web/src/client/app.ts has 50 user-facing strings, the baseline allows 46
+ratchet: services/web/src/client/saved-copies.ts has 11 user-facing strings, the baseline allows 0
+
+Identical failures: True
+New violations relative to preview: []
