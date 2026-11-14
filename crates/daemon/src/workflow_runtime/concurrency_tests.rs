@@ -120,3 +120,73 @@ async fn workflow_a_later_landing_on_top_does_not_strand_an_earlier_item_in_ci()
     let state = runtime.state("w").unwrap().unwrap();
     assert_eq!(state.items["one"].phase, Phase::Done, "{state:?}");
 }
+
+/// Makes every build wait, while a `hold` file sits in the test directory, until a `go` file appears beside it. A
+/// build that waits four seconds fails. Returns the two paths (ov-1198).
+pub(super) fn hold_builds(dir: &Path) -> (PathBuf, PathBuf) {
+    let script = dir.join("adapter.py");
+    let text = std::fs::read_to_string(&script).unwrap();
+    let wait = "if stage == 'build':\n    hold = pathlib.Path(os.environ['STARTED']).parent / 'hold'\n    if hold.exists():\n        import time\n        t = time.time()\n        while not (hold.parent / 'go').exists():\n            if time.time() - t > 4: sys.exit(9)\n            time.sleep(0.05)\n";
+    assert!(text.contains("if stage == 'build':\n"));
+    std::fs::write(&script, text.replacen("if stage == 'build':\n", wait, 1)).unwrap();
+    (dir.join("hold"), dir.join("go"))
+}
+
+/// Asks the sweeping runtime for `w` through its inbox until `what` holds, for up to three seconds, then writes `go`
+/// so held builds end. Answers whether `what` held while they were held.
+pub(super) fn watch(runtime: &Runtime, go: PathBuf, what: impl Fn(&State) -> bool + Send + 'static) -> tokio::task::JoinHandle<bool> {
+    let send = runtime.send.clone();
+    tokio::spawn(async move {
+        let mut seen = false;
+        for _ in 0..60 {
+            let (reply, state) = oneshot::channel();
+            send.send(Inbox::State("w".into(), reply)).await.ok().unwrap();
+            if state.await.unwrap().unwrap().is_some_and(|s| what(&s)) { seen = true; break; }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        std::fs::write(go, "x").unwrap();
+        seen
+    })
+}
+
+#[tokio::test]
+async fn workflow_a_provision_starts_while_four_builds_hold_every_agent_place() {
+    let (dir, mut runtime) = configured(false, "pass").await;
+    let (hold, go) = hold_builds(dir.path());
+    let definition = runtime.configured_definition().unwrap();
+    for item in ["one", "two", "three", "four"] { enqueue_item(&mut runtime, "w", item, definition.clone()); }
+    runtime.pump(2).await.unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert!(state.items.values().all(|i| i.stage == 1), "four builds are next: {state:?}");
+    std::fs::write(&hold, "x").unwrap();
+    enqueue_item(&mut runtime, "w", "five", definition);
+    // One sweep: four builds take every agent place, and the fifth ticket's provision still runs beside them.
+    // `workflow get`'s view shows the four builds holding every agent place while it runs.
+    let places = runtime.places.clone();
+    let watcher = watch(&runtime, go, move |s| {
+        let view = places.lock().unwrap().view("w");
+        s.items["five"].stage >= 1 && view["agent"]["used"] == 4 && view["agent"]["holding"].as_array().is_some_and(|h| h.len() == 4)
+    });
+    runtime.pump(3).await.unwrap();
+    assert!(watcher.await.unwrap(), "the provision must not wait for a build to end");
+    let state = runtime.state("w").unwrap().unwrap();
+    for id in ["one", "two", "three", "four"] { assert_eq!(state.items[id].stage, 2, "{id} built: {state:?}"); }
+}
+
+#[tokio::test]
+async fn workflow_get_shows_an_effect_waiting_for_a_place() {
+    let (_dir, mut runtime) = configured(false, "pass").await;
+    runtime.set_effect_cap(1);
+    let definition = runtime.configured_definition().unwrap();
+    for item in ["one", "two"] { enqueue_item(&mut runtime, "w", item, definition.clone()); }
+    runtime.pump(2).await.unwrap();
+    runtime.pump(3).await.unwrap();
+    let view = runtime.wire_command("w", "orchestrator", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    let places = &view["places"];
+    assert_eq!(places["agent"]["cap"], 1, "{places}");
+    let waiting = places["waiting"].as_array().expect("waiting is listed");
+    assert_eq!(waiting.len(), 1, "{places}");
+    assert_eq!(waiting[0]["pool"], "agent");
+    assert_eq!(waiting[0]["position"], 1);
+    assert!(["one", "two"].contains(&waiting[0]["item"].as_str().unwrap()), "{places}");
+}

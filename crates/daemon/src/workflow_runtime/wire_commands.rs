@@ -66,7 +66,9 @@ impl Runtime {
             let budgets: std::collections::BTreeMap<_, _> = state.iter().flat_map(|s| &s.items)
                 .map(|(id, item)| (id.clone(), farcooler_workflow::back_edge_budgets(item))).collect();
             return Ok(serde_json::json!({"schema":1,"configuration": self.store.workflow_configuration(workspace)?,
-                "back_edge_budgets":budgets, "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops}));
+                "back_edge_budgets":budgets, "state":state, "notices":notices,"notice_deliveries":deliveries, "stops":stops,
+                // What holds each pool's places and what waits for one, so a queued effect is never silent (ov-1198).
+                "places": self.places().view(workspace)}));
         }
         let mutation = match &action {
             Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }

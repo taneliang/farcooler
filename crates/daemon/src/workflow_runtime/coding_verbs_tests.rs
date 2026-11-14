@@ -2,7 +2,7 @@
 //! remote. No network push is ever made (ov-956).
 use super::*;
 use super::coding_tests::{admitted, configured};
-use super::concurrency_tests::enqueue_item;
+use super::concurrency_tests::{enqueue_item, hold_builds, watch};
 use super::coding_verbs::{classify_push, PushVerdict};
 use std::collections::BTreeMap;
 
@@ -363,6 +363,25 @@ async fn a_wait_leaves_the_effect_cap_alone() {
     runtime.pump(9).await.unwrap();
     let state = runtime.state("w").unwrap().unwrap();
     assert_eq!(state.items["two"].stage, 1, "the ticket moved on while the group waited: {state:?}");
+}
+
+#[tokio::test]
+async fn a_landing_group_folds_while_a_build_holds_every_agent_place() {
+    let (dir, mut runtime) = lander("pass").await;
+    let (hold, go) = hold_builds(dir.path());
+    runtime.set_effect_cap(1);
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    enqueue_item(&mut runtime, "w", "two", definition);
+    runtime.pump(300).await.unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["two"].stage, 1, "two's build is next");
+    std::fs::write(&hold, "x").unwrap();
+    assert!(command(&runtime, Command::Queue { item: "one".into() }).result.is_ok());
+    // The build was queued first and holds the one agent place; the group's fold, gate and push must not wait on it.
+    runtime.continuous = true;
+    let watcher = watch(&runtime, go, |s| s.items.values().any(|i| i.group_of.is_some() && i.stage >= 4));
+    runtime.pump(301).await.unwrap();
+    assert!(watcher.await.unwrap(), "the group reached CI while the build held its place");
 }
 
 #[tokio::test]

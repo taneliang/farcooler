@@ -23,6 +23,9 @@ mod coding_settle;
 mod coding_pr;
 mod review_agent;
 mod fold_trees;
+mod places;
+pub use places::{DEFAULT_EFFECT_CAP, DEFAULT_LANDING_PLACES, DEFAULT_WORK_PLACES};
+use places::{Placed, Places, Pool};
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict};
 mod wire_commands;
@@ -59,8 +62,6 @@ pub enum Error {
     #[error("runtime: {0}")]
     Domain(farcooler_core::error::DomainError),
 }
-/// How many effects may run at once. Waiting on a person or on CI is not an effect.
-pub const DEFAULT_EFFECT_CAP: usize = 4;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Never serialized or accepted from a request body. Authority is local to one open.
@@ -206,7 +207,8 @@ pub struct Runtime {
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
     next_lease: Option<i64>,
-    effect_cap: usize,
+    /// Each pool's places, what holds them and what waits for one (ov-1198).
+    places: std::sync::Arc<std::sync::Mutex<Places>>,
     continuous: bool,
     #[cfg(test)]
     sweeps: usize,
@@ -318,7 +320,7 @@ impl Runtime {
         let store = Store::open(root.join("workflow.sqlite"))
             .map_err(|_| Error::Refused("cannot open fixture database"))?;
         let (send, inbox) = mpsc::channel(32);
-        let runtime = Self { inbox, send, next_lease: None, effect_cap: DEFAULT_EFFECT_CAP, continuous: false,
+        let runtime = Self { inbox, send, next_lease: None, places: Default::default(), continuous: false,
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), #[cfg(test)] user_home: None },
@@ -327,8 +329,16 @@ impl Runtime {
         runtime.validate_native_host()?;
         Ok(runtime)
     }
-    /// Most effects (builds, checks, reviews, CI) that run at once across all workspaces.
-    pub fn set_effect_cap(&mut self, cap: usize) { self.effect_cap = cap.max(1); }
+    /// Most agent sessions (builds and reviews) that run at once across all workspaces. A landing group's steps and
+    /// short steps such as provisions have places of their own, so they never wait behind these (ov-1198).
+    pub fn set_effect_cap(&mut self, cap: usize) { self.places().agent = cap.max(1); }
+    fn places(&self) -> std::sync::MutexGuard<'_, Places> {
+        self.places.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    /// Record what holds a place now, for `workflow get`.
+    fn note_holding(&self, running: &[Running]) {
+        self.places().holding = running.iter().filter_map(|j| j.pool.map(|pool| Placed::new(&j.workspace, &j.effect, pool))).collect();
+    }
     pub fn command_handle(&self, controller: &Controller) -> Result<CommandHandle> {
         self.authorize(controller.instance)?;
         Ok(CommandHandle { send: self.send.clone() })
@@ -394,7 +404,7 @@ impl Runtime {
             expected_revision: state.revision, sequence, command }, "runtime", grant, now_ms)
     }
     /// One owned sweep. This API has no delivery cursor, informational ACK or controller dependency.
-    /// Effects run concurrently, at most `effect_cap` at a time. A plain sweep starts what is
+    /// Effects run concurrently, within the places of each one's pool. A plain sweep starts what is
     /// ready now and waits for it; the service loop also starts follow-on effects as each ends.
     pub async fn pump(&mut self, now_ms: i64) -> Result<usize> {
         #[cfg(test)] { self.sweeps += 1; }
@@ -426,6 +436,7 @@ impl Runtime {
                 }
             }
         }
+        self.note_holding(&running);
         result
     }
     async fn sweep_loop(&mut self, now_ms: i64, inbox: &mut mpsc::Receiver<Inbox>,
@@ -518,6 +529,7 @@ impl Runtime {
                 Event::Finished(index, result) => {
                     let job = running.remove(index);
                     futures.remove(index);
+                    self.note_holding(running);
                     let (workspace, effect, binding) = (job.workspace, job.effect, job.binding);
                     let outcome = match result {
                         Ok(outcome) => {
@@ -550,10 +562,20 @@ impl Runtime {
         }
         Ok(count)
     }
-    /// Recover or start every effect that is ready and not already running, within the cap.
+    /// Recover or start every effect that is ready and not already running, within its pool's places. What finds
+    /// its pool full is noted as waiting, in the order it would start (ov-1198).
     async fn launch_ready(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
         futures: &mut Vec<Slot>,
         count: &mut usize) -> Result<()>
+    {
+        let mut waiting = Vec::new();
+        let result = self.launch_ready_noting(workspaces, now_ms, running, futures, count, &mut waiting).await;
+        self.note_holding(running);
+        self.places().waiting = waiting;
+        result
+    }
+    async fn launch_ready_noting(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
+        futures: &mut Vec<Slot>, count: &mut usize, waiting: &mut Vec<Placed>) -> Result<()>
     {
         for workspace in workspaces {
             for stored in self.store.workflow_outbox(workspace)? {
@@ -599,10 +621,15 @@ impl Runtime {
                 if let EffectKind::Stop { operation } = &effect.kind {
                     if running.iter().any(|j| &j.effect.id == operation && &j.workspace == workspace) { continue; }
                 }
-                // A stop must always get through; everything else waits for a free slot.
-                let wait = matches!(effect.kind, EffectKind::Execute(StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr));
-                if !matches!(effect.kind, EffectKind::Stop { .. }) && !wait
-                    && running.iter().filter(|j| !j.wait).count() >= self.effect_cap { continue; }
+                // A stop and a wait take no place; everything else waits for a free place in its own pool, so a
+                // landing group or a provision never waits behind a build (ov-1198).
+                let pool = Pool::of(&effect, item);
+                if let Some(pool) = pool
+                    && running.iter().filter(|j| j.pool == Some(pool)).count() >= self.places().cap(pool)
+                {
+                    waiting.push(Placed::new(workspace, &effect, pool));
+                    continue;
+                }
                 let Some(claim) = self.store.workflow_claim_effect(workspace, &effect.id,
                     &format!("runtime:{}", self.instance), state.revision, state.epoch,
                     now_ms, now_ms.saturating_add(30_000))? else {
@@ -653,7 +680,7 @@ impl Runtime {
                     if exec.coding.is_some() { exec.execute_coding(&run_workspace, &run_binding, cancelled).await }
                     else { exec.execute(&run_workspace, &run_binding).await }
                 })));
-                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, wait });
+                running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool });
             }
         }
         Ok(())
@@ -810,8 +837,8 @@ struct Running {
     effect: Effect,
     binding: Binding,
     cancel: tokio::sync::watch::Sender<bool>,
-    /// Waits for something else (the base, CI) and does no work of its own, so the cap leaves it out.
-    wait: bool,
+    /// The places it holds; None for a stop or a wait on the base, CI or a pull request, which take none.
+    pool: Option<Pool>,
 }
 enum Event {
     Finished(usize, Result<Outcome>),
