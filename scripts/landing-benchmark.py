@@ -20,6 +20,11 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def interrupt(_signal, _frame):
+    """Let normal cleanup end only the benchmark's own process group."""
+    raise KeyboardInterrupt
+
+
 def steps(text):
     """Read the printed table, never a potentially stale worktree summary file."""
     rows = []
@@ -56,6 +61,7 @@ def measure(command, repo, dest, deadline):
     started = time.monotonic()
     samples = []
     timed_out = False
+    interrupted = False
     with (dest / "gate.log").open("w") as log:
         child = subprocess.Popen(command, cwd=repo, stdout=log, stderr=subprocess.STDOUT,
                                  start_new_session=True)
@@ -69,6 +75,8 @@ def measure(command, repo, dest, deadline):
                     if time.monotonic() - started >= deadline:
                         timed_out = True
                         break
+        except KeyboardInterrupt:
+            interrupted = True
         finally:
             if child.poll() is None:
                 os.killpg(child.pid, signal.SIGTERM)
@@ -88,8 +96,9 @@ def measure(command, repo, dest, deadline):
                 pass  # a killed writer may leave its last line incomplete
     measured_steps.sort(key=lambda r: r["start_monotonic"])
     result = {"command": command, "wall_seconds": wall, "exit_code": child.returncode,
-              "timed_out": timed_out, "load_samples": samples, "steps": measured_steps or steps(text),
-              "complete_green": (not timed_out and child.returncode == 0
+              "timed_out": timed_out, "interrupted": interrupted,
+              "load_samples": samples, "steps": measured_steps or steps(text),
+              "complete_green": (not timed_out and not interrupted and child.returncode == 0
                                  and "lane-gate: all steps passed" in text
                                  and "landing-gate: PASS" in text and "PARTIAL" not in text)}
     (dest / "result.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -119,14 +128,18 @@ def report(trials, before):
         return result
     baseline = indexed(before)
     maps = [indexed(t["steps"]) for t in trials]
-    keys = list(dict.fromkeys(k for m in maps for k in m))
+    keys = list(dict.fromkeys(k for m in [baseline, *maps] for k in m))
     lines = ["| Job | Command | Historical seconds | Real 1 | Real 2 | Real 3 |",
              "| --- | --- | ---: | ---: | ---: | ---: |"]
     for key in keys:
-        first = next(mapping[key] for mapping in maps if key in mapping)
+        first = next(mapping[key] for mapping in [*maps, baseline] if key in mapping)
         job, command = first["job"], first["command"]
         values = []
-        for mapping in maps:
+        for number in range(3):
+            if number >= len(maps):
+                values.append("not run")
+                continue
+            mapping = maps[number]
             row = mapping.get(key)
             values.append("not reached" if row is None else
                           f'{row["seconds"]} ({row["result"]})' if row["seconds"] is not None else row["result"])
@@ -137,6 +150,7 @@ def report(trials, before):
 
 
 def main():
+    signal.signal(signal.SIGTERM, interrupt)
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--base", default="origin/main")
     ap.add_argument("--out", required=True, type=Path)
@@ -172,6 +186,8 @@ def main():
         before = steps((ROOT / "reports/ov-1110/historical-gate.txt").read_text())
         (dest / "step-timings.md").write_text(report(trials, before))
         print(f'trial {number}: {result["wall_seconds"]:.2f}s, green={result["complete_green"]}', flush=True)
+        if result["interrupted"]:
+            return 130
     print(json.dumps(summarize(trials, stable)), flush=True)
     return 0 if summarize(trials, stable)["acceptance_1"] else 1
 

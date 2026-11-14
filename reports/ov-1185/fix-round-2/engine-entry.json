@@ -1,0 +1,18 @@
+{
+  "definition_pin": "wf1:d5114d33f9dac18ac321cff533f0887c3ddacb0e9ded6b113ce3e8dbf7fb2e97",
+  "bundle_pin": "wf1:d02a5cc1d24719631e99f953dc485d46586253bab5ca2db03bff9cb0a7591a80",
+  "published_checks": [
+    {
+      "argv": [
+        "/bin/sh",
+        "-c",
+        "scripts/landing-gate"
+      ],
+      "timeout_ms": 10800000
+    }
+  ],
+  "candidate_wrapper_sha256": "8024f394e65613cc36085ddfb8074368a631927e2ec5451420a5b6aec8e4d9ec",
+  "active_older_wrapper_sha256": "d6ccf25ad7e87e7574fdba10df0c87af9819cb7f62c33d83676dffe25c98c96c",
+  "active_older_wrapper_policy_line": "gate=(\"$here/lane-gate.py\")",
+  "candidate_wrapper_policy_line": "gate=(\"$here/lane-gate.py\" --landing --keep-target)"
+}

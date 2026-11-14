@@ -1,0 +1,25 @@
+test_collector_termination_reaps_its_trial_and_preserves_evidence (tests.BenchmarkTests.test_collector_termination_reaps_its_trial_and_preserves_evidence) ... FAIL
+test_comparison_retains_historical_steps_absent_from_every_trial (tests.BenchmarkTests.test_comparison_retains_historical_steps_absent_from_every_trial) ... FAIL
+
+======================================================================
+FAIL: test_collector_termination_reaps_its_trial_and_preserves_evidence (tests.BenchmarkTests.test_collector_termination_reaps_its_trial_and_preserves_evidence)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1185-gate-15/scripts/landing-benchmark-test.py", line 45, in test_collector_termination_reaps_its_trial_and_preserves_evidence
+    self.assertEqual(child.wait(timeout=10), 130, child.stderr.read().decode())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: -15 != 130 : 
+
+======================================================================
+FAIL: test_comparison_retains_historical_steps_absent_from_every_trial (tests.BenchmarkTests.test_comparison_retains_historical_steps_absent_from_every_trial)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1185-gate-15/scripts/landing-benchmark-test.py", line 129, in test_comparison_retains_historical_steps_absent_from_every_trial
+    self.assertIn('swift | release bundle | 123.0 | not reached | not reached | not reached', report)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'swift | release bundle | 123.0 | not reached | not reached | not reached' not found in '| Job | Command | Historical seconds | Real 1 | Real 2 | Real 3 |\n| --- | --- | ---: | ---: | ---: | ---: |\n| rust | nextest | not in capture | 20.0 (pass) | 20.0 (pass) | 20.0 (pass) |\n'
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.090s
+
+FAILED (failures=2)

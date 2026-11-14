@@ -1,6 +1,9 @@
 # ov-1185 — current evidence
 
-See [fix round 1 evidence and remaining acceptance gap](fix-round-1/report.md).
+See [fix round 2 evidence and remaining acceptance gap](fix-round-2/report.md).
+The engine's published command is verified there; the real probe exceeded
+15 minutes in admission, so acceptance 1 remains unmet.
+See also [fix round 1](fix-round-1/report.md).
 The historical scheduling replay below is superseded as acceptance evidence.
 
 ---

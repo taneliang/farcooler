@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Verify real wrapper timing and reject incomplete/failed performance evidence."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 import sys
+import signal
+import time
 
 spec = importlib.util.spec_from_file_location("benchmark", Path(__file__).with_name("landing-benchmark.py"))
 benchmark = importlib.util.module_from_spec(spec)
@@ -14,6 +17,53 @@ spec.loader.exec_module(benchmark)
 
 
 class BenchmarkTests(unittest.TestCase):
+    def test_collector_termination_reaps_its_trial_and_preserves_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ready = root / "ready"
+            (root / "scripts").mkdir()
+            (root / "scripts/landing-gate").write_text('echo $$ > ready\nexec sleep 30\n')
+            (root / "reports/ov-1110").mkdir(parents=True)
+            (root / "reports/ov-1110/historical-gate.txt").write_text("")
+            script = ('import importlib.util, pathlib, signal, sys; '
+                      's=importlib.util.spec_from_file_location("benchmark",sys.argv[1]); '
+                      'b=importlib.util.module_from_spec(s); s.loader.exec_module(b); '
+                      'b.ROOT=pathlib.Path(sys.argv[2]); b.identity=lambda repo: {"head":"fixture"}; '
+                      'sys.argv=["benchmark","--out",sys.argv[3]]; sys.exit(b.main())')
+            output = root.parent / (root.name + "-evidence")
+            child = subprocess.Popen([sys.executable, "-c", script, str(Path(benchmark.__file__)), str(root), str(output)],
+                                     env={k: v for k, v in os.environ.items() if k not in {
+                                         "CI", "HEAVY_LOCK_HELD", "HEAVY_LOAD_LIMIT", "FARCOOLER_LOCK_STATE_CMD",
+                                         "FARCOOLER_LOCK_WAIT_LIMIT_SECONDS", "CANDIDATES"}},
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            try:
+                until = time.monotonic() + 10
+                while not ready.exists() and child.poll() is None and time.monotonic() < until:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "real trial did not start")
+                child.terminate()
+                self.assertEqual(child.wait(timeout=10), 130, child.stderr.read().decode())
+                result = json.loads((output / "trial-1/result.json").read_text())
+                self.assertTrue(result["interrupted"])
+                self.assertFalse(result["complete_green"])
+                self.assertEqual(result["exit_code"], -signal.SIGTERM)
+                self.assertFalse((output / "trial-2").exists())
+                self.assertFalse(json.loads((output / "benchmark.json").read_text())["acceptance_1"])
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int(ready.read_text()), 0)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+                if ready.exists():
+                    try:
+                        os.killpg(int(ready.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                child.stderr.close()
+                import shutil
+                shutil.rmtree(output, ignore_errors=True)
+
     def test_step_timings_survive_without_a_final_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -71,6 +121,15 @@ class BenchmarkTests(unittest.TestCase):
         self.assertIn("not in capture | 50.0 (pass)", report)
         self.assertIn("skipped: CI", report)
         self.assertIn(r"nextest a\|b", report)
+
+    def test_comparison_retains_historical_steps_absent_from_every_trial(self):
+        before = benchmark.steps('| swift | release bundle | pass | 123 | |\n')
+        after = benchmark.steps('| rust | nextest | pass | 20 | |\n')
+        report = benchmark.report([{"steps": after}] * 3, before)
+        self.assertIn('swift | release bundle | 123.0 | not reached | not reached | not reached', report)
+        report = benchmark.report([{"steps": after}], before)
+        self.assertIn('swift | release bundle | 123.0 | not reached | not run | not run', report)
+        self.assertIn('rust | nextest | not in capture | 20.0 (pass) | not run | not run', report)
 
     def test_source_identity_includes_dirty_and_untracked_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -24,6 +24,41 @@ spec.loader.exec_module(lane)
 
 
 class LandingTests(unittest.TestCase):
+    def test_engine_entry_point_keeps_optimized_policy_and_normal_admission(self):
+        # Execute the published engine command against the real wrapper. Stand-ins
+        # record the boundary calls; no actual machine lock or display is touched.
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            scripts = repo / "scripts"
+            scripts.mkdir()
+            shutil.copy(ROOT / "scripts/landing-gate", scripts / "landing-gate")
+            events = repo / "events"
+            (scripts / "lane-gate.py").write_text(
+                'import json, os, sys\n'
+                'with open(os.environ["EVENTS"], "a") as f: '
+                'f.write(json.dumps(sys.argv[1:]) + "\\n")\n'
+                'if "--dry-run" in sys.argv: print("lane-gate: 1 changed file(s); jobs: rust, swift-tests")\n'
+                'else: sys.exit(int(os.environ["GATE_EXIT"]))\n')
+            for name, body in (
+                ("wait-for-unlock", 'echo unlock >> "$EVENTS"\n'),
+                ("heavy", 'echo heavy >> "$EVENTS"\nshift\nexec "$@"\n'),
+            ):
+                path = scripts / name
+                path.write_text("#!/bin/sh\n" + body)
+                path.chmod(0o755)
+            for code in (0, 7):
+                events.write_text("")
+                done = subprocess.run(["/bin/sh", "-c", "scripts/landing-gate --base main --log-dir logs"],
+                                      cwd=repo, env={**os.environ, "EVENTS": str(events), "GATE_EXIT": str(code)},
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, code, done.stdout + done.stderr)
+                calls = events.read_text().splitlines()
+                self.assertEqual(calls[1:3], ["unlock", "heavy"])
+                args = ["--landing", "--keep-target", "--base", "main", "--log-dir", "logs"]
+                self.assertEqual(json.loads(calls[0]), ["--landing", "--keep-target", "--dry-run", *args[2:]])
+                self.assertEqual(json.loads(calls[3]), args)
+                self.assertIn("landing-gate: PASS" if code == 0 else "landing-gate: FAIL", done.stdout)
+
     def test_fixture_hooks_do_not_inherit_the_agents_private_route(self):
         with tempfile.TemporaryDirectory() as temporary, \
                 patch.dict(os.environ, {"FARCOOLER_NATIVE_HOOK_SOCKET": "/tmp/real-agent.sock"}), \

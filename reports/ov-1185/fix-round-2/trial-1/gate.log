@@ -1,0 +1,6 @@
+landing-gate: jobs: wire, doc-comments, relay, tunnel, rust, swift-tests, swift, ios, android, web
+  waiting: 5-minute load average 55.6 is 20 or more
+  waiting: 5-minute load average 71.3 is 20 or more
+  waiting: 5-minute load average 46.4 is 20 or more
+  waiting: 5-minute load average 20.1 is 20 or more
+  waiting for the machine-wide heavy-job lock (python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1185-gate-15/scripts/lane-gate.py' --landing --keep-target --base origin/main --log-dir /private/tmp/ov-1185-round-2-final/trial-1/steps); held by worktree /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow/tree-wf1-7f9847f0e5f8c58cf2873bb39ec0e0bae70aaff18be46e7a27ea837b35f9fc28, PID 66966, started 2026-11-15 00:27:50, running python3 '/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/workflow/tree-wf1-7f9847f0e5f8c58cf2873bb39ec0e0bae70aaff18be46e7a27ea837b35f9fc28/scripts/lane-gate.py' --keep-target (2 in line ahead of you)
