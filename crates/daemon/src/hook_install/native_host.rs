@@ -1,11 +1,12 @@
 use super::{Path, hook_command, parse_hooks_file, entry_runs};
 
-/// Read-only native-host lifecycle and active-steering check using the retained registration grammar.
+/// Read-only native-host lifecycle, active-steering and mid-turn context check.
 /// Other pinned user hooks/settings need not be ours; no merge is performed.
 pub(crate) fn native_completion_targets(text: &str, agent: &str, socket: &Path) -> bool {
     let Some(value) = parse_hooks_file(text) else { return false };
+    if agent == "claude" && value.get("disableAllHooks").is_some_and(|v| v != false) { return false; }
     let events: &[(&str, bool)] = match agent {
-        "claude" => &[("UserPromptSubmit", false), ("Stop", false)],
+        "claude" => &[("UserPromptSubmit", false), ("Stop", false), ("PreToolUse", true)],
         "codex" => &[("SessionStart", false), ("UserPromptSubmit", false), ("Stop", false)],
         "cursor" => &[("sessionStart", false), ("beforeSubmitPrompt", false), ("stop", true)],
         _ => return false,
@@ -22,8 +23,10 @@ pub(crate) fn native_completion_targets(text: &str, agent: &str, socket: &Path) 
     }
     events.iter().all(|(event, gating)| {
         let ours = hook_command(agent, event, socket, *gating);
-        value["hooks"][event].as_array().is_some_and(|entries| entries.iter().any(|entry|
-            entry_runs(entry, &ours, agent != "cursor")))
+        value["hooks"][event].as_array().is_some_and(|entries| entries.iter().any(|entry| {
+            if agent == "claude" && *event == "PreToolUse" { context_entry_runs(entry, &ours) }
+            else { entry_runs(entry, &ours, agent != "cursor") }
+        }))
     })
 }
 
@@ -37,6 +40,23 @@ pub(crate) fn native_codex_hooks(socket: &Path) -> serde_json::Value {
             "timeout": super::CLAUDE_GATE_TIMEOUT_S }]
     }]);
     value
+}
+
+/// A context reply needs stdout from a waiting hook on every tool. The lifecycle grammar deliberately
+/// rejects matchers and timeouts; here accept the engine's wildcard and hold timeout, but no async,
+/// narrowed matcher, or shell suffix that could discard the context before Claude reads it.
+fn context_entry_runs(entry: &serde_json::Value, ours: &str) -> bool {
+    let Some(entry) = entry.as_object() else { return false };
+    if entry.keys().any(|k| k != "matcher" && k != "hooks")
+        || entry.get("matcher").is_some_and(|v| v != "*") { return false; }
+    entry.get("hooks").and_then(serde_json::Value::as_array).is_some_and(|hooks| hooks.iter().any(|hook| {
+        let Some(hook) = hook.as_object() else { return false };
+        hook.keys().all(|k| matches!(k.as_str(), "type" | "command" | "timeout" | "async"))
+            && hook.get("type").is_some_and(|v| v == "command")
+            && hook.get("command").is_some_and(|v| v == ours)
+            && hook.get("async").is_none_or(|v| v == false)
+            && hook.get("timeout").is_none_or(|v| v.as_u64().is_some_and(|s| s >= super::CLAUDE_GATE_TIMEOUT_S))
+    }))
 }
 
 #[cfg(test)]

@@ -213,6 +213,9 @@ impl Exec {
         let text = String::from_utf8(self.bytes(&file.path)?).map_err(|_| Error::Refused("invalid hook text"))?;
         let socket = self.root.join("h.sock");
         if !crate::hook_install::native_completion_targets(&text, agent.as_str(), &socket) {
+            if agent == Agent::Claude {
+                return Err(Error::Refused("native Claude hooks need prompt, stop, and synchronous gating PreToolUse for this private host"));
+            }
             return Err(Error::Refused("native hooks must target this private host and include required active steering hooks"));
         }
         Ok(())
@@ -879,14 +882,12 @@ else:
 
     #[tokio::test]
     async fn native_claude_configuration_refuses_missing_or_non_gating_context_hooks() {
-        let (_dir, runtime, _fake) = native("pass").await;
-        runtime.exec.validate_native_host().unwrap();
-        let CodingHarness::Native { settings: Some(file), .. } = &runtime.coding.as_ref().unwrap().harness else { unreachable!() };
-        let settings: serde_json::Value = serde_json::from_slice(&std::fs::read(&file.path).unwrap()).unwrap();
         for gating in [None, Some(false)] {
+            let (dir, runtime, _fake) = native("pass").await;
+            runtime.exec.validate_native_host().unwrap();
             let mut config = runtime.coding.clone().unwrap();
             let CodingHarness::Native { settings: Some(file), .. } = &mut config.harness else { unreachable!() };
-            let mut broken = settings.clone();
+            let mut broken: serde_json::Value = serde_json::from_slice(&std::fs::read(&file.path).unwrap()).unwrap();
             match gating {
                 None => { broken["hooks"].as_object_mut().unwrap().remove("PreToolUse"); }
                 Some(_) => {
@@ -897,11 +898,15 @@ else:
             let bytes = serde_json::to_vec(&broken).unwrap();
             std::fs::write(&file.path, &bytes).unwrap();
             file.digest = digest(&bytes);
-            assert!(runtime.exec.validate_native_configuration(&config).is_err(), "accepted {gating:?} hook");
-            std::fs::write(runtime.root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
-            assert!(Runtime::open(&runtime.root).is_err(), "reopened {gating:?} hook");
+            let error = runtime.exec.validate_native_configuration(&config).expect_err("missing context hook");
+            assert!(error.to_string().contains("synchronous gating PreToolUse"), "{error}");
+            let root = runtime.root.clone();
+            std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+            drop(runtime); // Release the writer lock so reopen reaches hook validation.
+            assert!(matches!(Runtime::open(&root), Err(Error::Refused(reason))
+                if reason.contains("synchronous gating PreToolUse")), "reopened {gating:?} hook");
+            assert!(!dir.path().join("started").exists(), "a refused configuration never launches");
         }
-        assert!(!runtime.root.parent().unwrap().join("started").exists(), "a refused configuration never launches");
     }
     #[tokio::test]
     async fn workflow_coding_native_real_pty_normalized_hooks_and_quiescence() {
