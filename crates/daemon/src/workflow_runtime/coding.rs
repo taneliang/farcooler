@@ -222,6 +222,9 @@ impl Pinned for CodingConfig {
                     // the launchable check below covers it.
                     if let Some(text) = stage.operation.arguments.get(2) {
                         let options = crate::review_agent::ReviewOptions::read(text).ok_or(Error::Refused("unsound review options"))?;
+                        if options.check.is_some_and(|i| i >= self.checks.len()) {
+                            return Err(Error::Refused("foreign parallel review check"));
+                        }
                         let listed = definition.models.get(&stage.id);
                         if options.models.iter().any(|(_, model)| !listed.is_some_and(|l| l.contains(model))) {
                             return Err(Error::Refused("a review's path rule names a model its step doesn't list"));
@@ -237,7 +240,8 @@ impl Pinned for CodingConfig {
                 // A route reads the ticket's change and answers a label the definition routes. Its rules are the
                 // step's own to choose, so any readable, bounded set of them is pinned; the pin is the rest of it.
                 StageKind::Route if built && !landed && !in_group => {
-                    let rules = stage.operation.arguments.get(1).filter(|a| crate::path_routes::PathRules::read(a).is_some())
+                    let rules = stage.operation.arguments.get(1).filter(|a| crate::path_routes::PathRules::read(a).is_some()
+                        || crate::review_agent::ReviewRoute::read(a).is_some())
                         .ok_or(Error::Refused("unsound path rules"))?;
                     self.operation("coding-route/v1", rules)
                 },

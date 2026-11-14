@@ -10,6 +10,17 @@ use crate::review_agent::ReviewOptions;
 struct ChosenModel { binding: String, model: Option<String>, paths: usize }
 
 impl Exec {
+    /// A deterministic child operation owns its own process, log and receipt. It is derived only from
+    /// the admitted review's pinned options, and never admitted as a separate engine effect.
+    pub(super) fn review_check(&self, binding: &Binding) -> Option<Binding> {
+        let index = Self::review_options(binding)?.check?;
+        let mut check = binding.clone();
+        check.effect.id = format!("{}-check", binding.effect.id);
+        check.effect.kind = EffectKind::Execute(StageKind::Run);
+        check.effect.operation = self.coding.as_ref()?.operation("coding-check/v1", &index.to_string());
+        Some(check)
+    }
+
     /// The options an agent's review gate pinned, if it pinned any.
     pub(super) fn review_options(binding: &Binding) -> Option<ReviewOptions> {
         if !matches!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent))) { return None; }

@@ -136,8 +136,18 @@ impl Exec {
     /// It only reads, so a crash before its fact is written reads again as a fresh attempt. A route no definition can take
     /// yet (`pull_request`) answers `rejected`, which ends the run.
     async fn route_paths(&self, binding: &Binding) -> Result<Outcome> {
-        let rules = binding.effect.operation.arguments.get(1).and_then(|a| crate::path_routes::PathRules::read(a))
-            .ok_or(Error::Refused("unsound path rules"))?;
+        let text = binding.effect.operation.arguments.get(1).ok_or(Error::Refused("missing route rules"))?;
+        if let Some(rules) = crate::review_agent::ReviewRoute::read(text) {
+            let tree = self.tree(binding);
+            self.verify_candidate(binding, &tree).await?;
+            let candidate = binding.effect.candidate.as_deref().filter(|c| sha(c)).ok_or(Error::Refused("missing candidate"))?;
+            let stat = self.git_recorded(binding, &tree, &["diff", "--numstat", "--no-renames", "--no-color", "--ignore-submodules=none", "--no-ext-diff",
+                "--no-textconv", "-z", &binding.base, candidate]).await?;
+            let label = rules.route(&stat).ok_or(Error::Refused("unreadable review diff"))?;
+            self.write_fact(binding, label, candidate, serde_json::json!({ "numstat": stat }))?;
+            return self.reconcile_verb(binding, &StageKind::Route).await;
+        }
+        let rules = crate::path_routes::PathRules::read(text).ok_or(Error::Refused("unsound path rules"))?;
         let tree = self.tree(binding);
         self.verify_candidate(binding, &tree).await?;
         let candidate = binding.effect.candidate.clone().filter(|c| sha(c)).ok_or(Error::Refused("missing candidate"))?;

@@ -411,6 +411,11 @@ impl Exec {
             return Ok(Outcome::Stopped { operation: operation.into(),
                 receipt: digest(&("provision-quiescent/v1", binding, &original_binding)) });
         }
+        if let Some(check) = self.review_check(&original_binding) {
+            if !crate::effect_runner::Owner::reap(&self.owner_path(&check)).await? {
+                return Err(Error::Refused("the parallel gate's process could not be ended"));
+            }
+        }
         if self.is_native_agent(&original_binding) && !self.fact_path(&original_binding).try_exists()? {
             self.settle_interrupted_native(&original_binding, None).await?;
         }
@@ -492,7 +497,16 @@ impl Exec {
                 if matches!(kind, StageKind::Ci) { self.verify_landing(binding).await?; }
                 if matches!(kind, StageKind::Review(Reviewer::Agent)) { self.choose_review_model(binding, &tree).await?; }
                 if matches!(kind, StageKind::Build | StageKind::Review(Reviewer::Agent)) { self.install_codex_hooks(binding, &tree).await?; }
-                self.run_coding(binding, self.coding_command(binding)?, cancel).await?;
+                if let Some(check) = self.review_check(binding) {
+                    // No cleanup while the reviewer reads: both see the same candidate. Both futures are
+                    // drained even on failure, so neither writer survives the stage's result.
+                    let (review, gate) = tokio::join!(
+                        self.run_coding(binding, self.coding_command(binding)?, cancel.clone()),
+                        self.run_coding(&check, self.coding_command(&check)?, cancel));
+                    review?; gate?;
+                } else {
+                    self.run_coding(binding, self.coding_command(binding)?, cancel).await?;
+                }
             }
             StageKind::Land => {
                 self.verify_candidate(binding, &tree).await?;
@@ -604,6 +618,22 @@ impl Exec {
     /// Reconcile facts only. This function can never spawn an adapter command.
     pub(super) async fn reconcile_coding(&self, binding: &Binding) -> Result<Outcome> {
         self.check_binding(&binding.workspace, binding)?;
+        if let Some(check) = self.review_check(binding) {
+            let (review, gate) = tokio::join!(self.reconcile_coding_single(binding), self.reconcile_run(&check));
+            let (review, gate) = (review?, gate?);
+            return Ok(match (review, gate) {
+                (Outcome::Passed(mut evidence), Outcome::Passed(gate)) => {
+                    evidence.manifest = digest(&("parallel-review/v1", &evidence, gate));
+                    evidence.receipt = digest(&("coding-receipt/v1", &evidence.manifest));
+                    Outcome::Passed(evidence)
+                }
+                (Outcome::Passed(_), other) => other,
+                (other, _) => other,
+            });
+        }
+        self.reconcile_coding_single(binding).await
+    }
+    async fn reconcile_coding_single(&self, binding: &Binding) -> Result<Outcome> {
         if let EffectKind::Stop { operation } = &binding.effect.kind { return self.stop_coding(binding, operation).await; }
         let EffectKind::Execute(kind) = &binding.effect.kind else { unreachable!() };
         if super::coding_verbs::is_verb(kind) { return self.reconcile_verb(binding, kind).await; }

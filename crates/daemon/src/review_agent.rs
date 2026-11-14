@@ -21,6 +21,9 @@ pub struct ReviewOptions {
     /// model; the earliest rule any file matches decides, so the list is in order of care. No match keeps the run's pick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<(String, String)>,
+    /// A pinned check index to run alongside this review. Both must pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<usize>,
 }
 impl ReviewOptions {
     /// The text a step pins as its third argument.
@@ -46,7 +49,7 @@ impl ReviewOptions {
 mod tests {
     use super::*;
     fn options() -> ReviewOptions {
-        ReviewOptions { prompt: Some("Read the lane rules.".into()), models: vec![
+        ReviewOptions { prompt: Some("Read the lane rules.".into()), check: None, models: vec![
             ("crates/workflow/**".into(), "claude:opus".into()), ("crates/daemon/src/auth/**".into(), "claude:opus".into()),
             ("apps/**".into(), "claude:sonnet".into())] }
     }
@@ -64,11 +67,66 @@ mod tests {
     fn the_pinned_text_round_trips_and_a_bad_one_is_refused() {
         let o = options();
         assert_eq!(ReviewOptions::read(&o.argument()), Some(o));
-        let many = ReviewOptions { prompt: None, models: (0..=MAX_MODEL_RULES).map(|i| (format!("d{i}/**"), "claude".into())).collect() };
-        let long = ReviewOptions { prompt: Some("x".repeat(MAX_PROMPT_BYTES + 1)), models: vec![] };
+        let many = ReviewOptions { prompt: None, check: None, models: (0..=MAX_MODEL_RULES).map(|i| (format!("d{i}/**"), "claude".into())).collect() };
+        let long = ReviewOptions { prompt: Some("x".repeat(MAX_PROMPT_BYTES + 1)), check: None, models: vec![] };
         for bad in ["", "agent", "{}", r#"{"prompt":"  "}"#, r#"{"models":[["","claude"]]}"#, r#"{"models":[["/abs/**","claude"]]}"#,
             r#"{"models":[["a/**","claude opus"]]}"#, r#"{"prompt":"p","extra":1}"#, &many.argument(), &long.argument()] {
             assert_eq!(ReviewOptions::read(bad), None, "{bad}");
         }
+    }
+}
+
+/// A Route step may choose `light` or `full` before entering distinct review steps (ov-1194).
+/// Security rules take precedence over both size and report paths. Binary changes always get full review.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewRoute {
+    pub under_lines: u64,
+    pub report_paths: Vec<String>,
+    pub full_paths: Vec<String>,
+}
+impl ReviewRoute {
+    pub fn read(text: &str) -> Option<Self> {
+        let rules: Self = serde_json::from_str(text).ok()?;
+        let valid = |paths: &[String]| paths.len() <= MAX_MODEL_RULES && paths.iter().all(|p|
+            !p.is_empty() && p.len() <= 256 && !p.starts_with('/') && !p.contains('\0'));
+        (rules.under_lines > 0 && !rules.full_paths.is_empty() && valid(&rules.report_paths) && valid(&rules.full_paths)).then_some(rules)
+    }
+    /// Numstat with NUL delimiters, no renames: each record is additions, deletions, path.
+    /// Anything unreadable is an error rather than permission to reduce review.
+    pub fn route(&self, numstat: &str) -> Option<&'static str> {
+        if !numstat.is_empty() && !numstat.ends_with('\0') { return None; }
+        let mut lines = 0u64;
+        let mut reports = true;
+        let mut full = false;
+        for record in numstat.split('\0').filter(|r| !r.is_empty()) {
+            let mut fields = record.splitn(3, '\t');
+            let (added, removed, path) = (fields.next()?, fields.next()?, fields.next()?);
+            if path.is_empty() { return None; }
+            full |= path.contains('\u{fffd}') || self.full_paths.iter().any(|g| glob_matches(g, path));
+            reports &= self.report_paths.iter().any(|g| glob_matches(g, path));
+            if added == "-" || removed == "-" { full = true; continue; }
+            lines = lines.checked_add(added.parse::<u64>().ok()?)?.checked_add(removed.parse::<u64>().ok()?)?;
+        }
+        Some(if !full && (lines < self.under_lines || reports) { "light" } else { "full" })
+    }
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    #[test]
+    fn light_review_size_reports_security_and_binary_precedence() {
+        let r = ReviewRoute { under_lines: 10, report_paths: vec!["reports/**".into()], full_paths: vec!["private/**".into(), "**/auth*".into(), "apps/Security.swift".into()] };
+        for (stat, expected) in [("4\t5\tapps/ui.swift\0", "light"), ("5\t5\tapps/ui.swift\0", "full"),
+            ("100\t0\treports/findings.md\0", "light"), ("100\t0\treports/a.md\00\t1\tapps/ui.swift\0", "full"),
+            ("1\t0\tcrates/daemon/src/auth.rs\0", "full"), ("1\t0\tprivate/a\0", "full"),
+            ("1\t0\treports/auth.md\0", "full"), ("1\t0\tapps/Security.swift\0", "full"), ("-\t-\treports/image.png\0", "full"), ("", "light")] {
+            assert_eq!(r.route(stat), Some(expected), "{stat:?}");
+        }
+        for bad in ["bad", "1\t0\ta", "1\t0\t\0", "1\tx\ta\0", "18446744073709551615\t1\ta\0"] { assert_eq!(r.route(bad), None); }
+        assert!(ReviewRoute::read(r#"{"under_lines":10,"report_paths":["reports/**"],"full_paths":["auth/**"]}"#).is_some());
+        for bad in [r#"{"under_lines":10,"report_paths":[],"full_paths":[]}"#, r#"{"under_lines":0,"report_paths":[],"full_paths":["auth/**"]}"#,
+            r#"{"under_lines":10,"report_paths":["/abs"],"full_paths":["auth/**"]}"#] { assert!(ReviewRoute::read(bad).is_none()); }
     }
 }

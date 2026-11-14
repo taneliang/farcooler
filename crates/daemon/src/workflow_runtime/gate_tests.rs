@@ -232,7 +232,7 @@ async fn a_verdict_survives_the_daemon_stopping_before_the_turn_ends() {
 fn with_options(runtime: &Runtime, rule: &str) -> Definition {
     let mut definition = definition(runtime);
     let options = crate::review_agent::ReviewOptions { prompt: Some("Read the lane rules first.".into()),
-        models: vec![(rule.into(), "claude:opus".into())] };
+        check: None, models: vec![(rule.into(), "claude:opus".into())] };
     let gate = definition.stages.iter_mut().find(|s| s.id == "agent-review").unwrap();
     gate.operation.arguments.push(options.argument());
     definition.models.insert("agent-review".into(), vec!["claude:sonnet".into(), "claude:opus".into()]);
@@ -281,4 +281,240 @@ async fn a_review_option_naming_a_model_its_step_doesnt_list_is_refused() {
     let mut garbled = with_options(&runtime, "result.txt");
     garbled.stages.iter_mut().find(|s| s.id == "agent-review").unwrap().operation.arguments[2] = "{}".into();
     assert!(config.validate_definition(&garbled).is_err(), "options that say nothing");
+}
+
+/// ov-1194: use a two-party barrier, so sequential execution fails even on a fast machine.
+async fn parallel_fixture(fail: bool, parallel: bool) -> (tempfile::TempDir, Runtime, super::coding_native::tests::Fake, Definition) {
+    use crate::landing_templates::Host;
+    use farcooler_workflow::templates::{self, Gate, Plan, Template};
+    let (dir, mut runtime, fake) = three_gates("subdir").await;
+    let agent = dir.path().join("gates.py");
+    let text = std::fs::read_to_string(&agent).unwrap();
+    let barrier = r#"
+    d = pathlib.Path(os.environ['STARTED']).parent
+    (d / 'review-ready').touch()
+    deadline = time.time() + 4
+    while not (d / 'gate-ready').exists():
+        if time.time() > deadline: sys.exit(9)
+        time.sleep(0.02)
+"#;
+    std::fs::write(&agent, text.replace("    log = pathlib.Path", &format!("{barrier}    log = pathlib.Path"))).unwrap();
+    let check = dir.path().join("parallel.py");
+    std::fs::write(&check, r#"import pathlib, sys, time
+d = pathlib.Path(sys.argv[1])
+(d / 'gate-ready').touch()
+deadline = time.time() + 4
+while not (d / 'review-ready').exists():
+    if time.time() > deadline: sys.exit(9)
+    time.sleep(0.02)
+sys.exit(int(sys.argv[2]))
+"#).unwrap();
+    let config = runtime.coding.as_mut().unwrap();
+    config.checks[0].argv = vec!["/usr/bin/python3".into(), check.to_string_lossy().into_owned(),
+        dir.path().to_string_lossy().into_owned(), if fail { "7" } else { "0" }.into()];
+    // The group never runs in these tests; its private bare target makes the whole definition publishable.
+    let bare = dir.path().join("remote.git"); std::fs::create_dir(&bare).unwrap();
+    adapters::git(&bare, &["init", "--bare", "--quiet"]).await.unwrap();
+    config.landing = Some(CodingLanding { job: "parallel-test".into(), repository: bare.canonicalize().unwrap(),
+        target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
+    let plan = Plan::new(Template::BatchedPush, vec![Gate::Command(1)]);
+    let mut d = templates::build(&plan, &Host(config)).unwrap();
+    let mut gate = config.stage("light", StageKind::Review(Reviewer::Agent), "coding-review/v1", AGENT_REVIEWER);
+    gate.max_attempts = 1;
+    gate.operation.arguments.push(crate::review_agent::ReviewOptions {
+        prompt: None, models: vec![], check: parallel.then_some(0) }.argument());
+    // A sequential control for the barrier regression test.
+    if !parallel { gate.operation.arguments.pop(); }
+    let mut full = gate.clone(); full.id = "full".into();
+    full.routes.insert("passed".into(), Target::Step("join".into()));
+    let rules = serde_json::json!({"under_lines":100,"report_paths":["reports/**"],"full_paths":["auth/**"]}).to_string();
+    let mut route = config.stage("review-route", StageKind::Route, "coding-route/v1", &rules);
+    route.routes = BTreeMap::from([("light".into(), Target::Step("light".into())), ("full".into(), Target::Step("full".into()))]);
+    d.stages.splice(2..2, [route, full, gate]);
+    d.models = BTreeMap::from([("light".into(), vec!["claude:sonnet".into()]), ("full".into(), vec!["claude:opus".into()])]);
+    config.validate_definition(&d).unwrap();
+    (dir, runtime, fake, d)
+}
+
+#[tokio::test]
+async fn light_review_and_gate_overlap_and_both_are_required_before_join() {
+    for fail in [false, true] {
+        let (dir, mut runtime, _fake, d) = parallel_fixture(fail, true).await;
+        enqueue(&mut runtime, "w", "one", d);
+        let state = settle(&mut runtime, 2).await;
+        assert_eq!(state.items["one"].phase, if fail { Phase::Failed } else { Phase::WaitingJoin });
+        assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:sonnet\n", "one fast review");
+        // Recovery reads both facts; it never launches either command again.
+        let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.effect.model.as_deref() == Some("claude:sonnet")).unwrap();
+        let binding = Binding::new("w", &effect.effect, effect.resource_generation.unwrap(), 0, &runtime.coding.as_ref().unwrap().base);
+        let outcome = runtime.reconcile_coding(&binding).await.unwrap();
+        assert_eq!(matches!(outcome, Outcome::Passed(_)), !fail);
+        assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap().lines().count(), 1);
+    }
+}
+
+/// Controlled before/after measurement using the engine's own stage timestamps, not a wall timer
+/// around test setup. No external model calls; each stand-in spends 500ms doing its work.
+#[tokio::test]
+#[ignore = "ov-1194 stage timing experiment; run with --ignored --nocapture"]
+async fn light_review_stage_timing_before_and_after() {
+    for parallel in [false, true] {
+        let mut samples = Vec::new();
+        for _ in 0..5 {
+            let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, parallel).await;
+            let agent = dir.path().join("gates.py");
+            let text = std::fs::read_to_string(&agent).unwrap();
+            let start = text.find("    d = pathlib.Path(os.environ['STARTED']).parent\n").unwrap();
+            let end = text[start..].find("    log = pathlib.Path").unwrap() + start;
+            std::fs::write(&agent, format!("{}    time.sleep(0.5)\n{}", &text[..start], &text[end..])).unwrap();
+            std::fs::write(dir.path().join("parallel.py"), "import time\ntime.sleep(0.5)\n").unwrap();
+            if !parallel {
+                let config = runtime.coding.as_ref().unwrap();
+                d.stages.insert(2, config.stage("ticket-gate", StageKind::Check, "coding-check/v1", "0"));
+            }
+            enqueue(&mut runtime, "w", "one", d);
+            for _ in 0..20 {
+                runtime.pump(super::now()).await.unwrap();
+                let state = runtime.state("w").unwrap().unwrap();
+                assert!(!matches!(state.items["one"].phase, Phase::Failed | Phase::Uncertain));
+                if state.items["one"].phase == Phase::WaitingJoin {
+                    let effects = runtime.store.workflow_outbox("w").unwrap();
+                    let next = effects.iter().find(|s| s.effect.operation == state.items["one"].definition.stages[2].operation).unwrap();
+                    let ms = runtime.store.workflow_events("w").unwrap().last().unwrap().now_ms - next.effect.created_ms;
+                    samples.push(ms);
+                    break;
+                }
+            }
+        }
+        assert_eq!(samples.len(), 5);
+        samples.sort();
+        println!("ov-1194 {} build-done-to-WaitingJoin ms: {:?}; median {}", if parallel { "after" } else { "before" }, samples, samples[2]);
+    }
+}
+
+#[tokio::test]
+async fn full_review_route_and_reviewer_rejection_remain_effective() {
+    for reject in [false, true] {
+        let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
+        d.stages[2].operation.arguments[1] = serde_json::json!({"under_lines":1,"report_paths":[],"full_paths":["auth/**"]}).to_string();
+        if reject {
+            let agent = dir.path().join("gates.py");
+            let text = std::fs::read_to_string(&agent).unwrap().replace("passed=mode != 'reject'", "passed=False");
+            std::fs::write(agent, text).unwrap();
+        }
+        enqueue(&mut runtime, "w", "one", d);
+        let state = settle(&mut runtime, 2).await;
+        assert_eq!(state.items["one"].phase, if reject { Phase::Failed } else { Phase::WaitingJoin });
+        assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:opus\n");
+    }
+}
+
+#[tokio::test]
+async fn parallel_review_requires_its_gate_receipt_on_recovery_and_a_known_check_at_publication() {
+    let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
+    let gate = d.stages.iter_mut().find(|s| s.id == "light").unwrap();
+    let options = crate::review_agent::ReviewOptions { check: Some(999), ..Default::default() };
+    let good = std::mem::replace(&mut gate.operation.arguments[2], options.argument());
+    assert!(runtime.coding.as_ref().unwrap().validate_definition(&d).is_err());
+    d.stages.iter_mut().find(|s| s.id == "light").unwrap().operation.arguments[2] = good;
+    enqueue(&mut runtime, "w", "one", d);
+    let state = settle(&mut runtime, 2).await;
+    assert_eq!(state.items["one"].phase, Phase::WaitingJoin);
+    let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.effect.model.as_deref() == Some("claude:sonnet")).unwrap();
+    let binding = Binding::new("w", &effect.effect, effect.resource_generation.unwrap(), 0, &runtime.coding.as_ref().unwrap().base);
+    let check = runtime.review_check(&binding).unwrap();
+    std::fs::remove_file(runtime.root.join("receipts").join(format!("{}.process.json", digest(&check.effect)))).unwrap();
+    assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
+    assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap().lines().count(), 1, "recovery doesn't relaunch");
+}
+
+#[tokio::test]
+async fn cancelling_parallel_review_ends_the_owned_gate_before_returning() {
+    let (dir, mut runtime, _fake, d) = parallel_fixture(false, true).await;
+    let script = dir.path().join("parallel.py");
+    let text = std::fs::read_to_string(&script).unwrap().replace("sys.exit(int(sys.argv[2]))", "time.sleep(60)");
+    std::fs::write(script, text).unwrap();
+    enqueue(&mut runtime, "w", "one", d);
+    for time in 2..20 {
+        if at(&runtime.state("w").unwrap().unwrap()).0 == "light" { break; }
+        runtime.pump(time).await.unwrap();
+    }
+    let binding = super::coding_tests::admitted(&runtime).await;
+    let check = runtime.review_check(&binding).unwrap();
+    let owner = runtime.owner_path(&check);
+    let receipt = runtime.provider_path(&binding);
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    let stop = async {
+        for _ in 0..500 {
+            if owner.exists() && receipt.exists() { cancel.send_replace(true); return; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("parallel processes never started");
+    };
+    let (result, ()) = tokio::join!(runtime.execute_coding("w", &binding, cancelled), stop);
+    assert_eq!(result.unwrap(), Outcome::SafeFailure);
+    let owner: crate::effect_runner::Owner = serde_json::from_slice(&std::fs::read(owner).unwrap()).unwrap();
+    assert!(crate::effect_runner::Group::gone(owner.pid).unwrap());
+}
+
+#[tokio::test]
+async fn review_routing_reads_real_git_report_paths_and_binary_numstat() {
+    for binary in [false, true] {
+        let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
+        d.stages[2].operation.arguments[1] = serde_json::json!({"under_lines":1,"report_paths":["reports/**"],"full_paths":["auth/**"]}).to_string();
+        let script = dir.path().join("gates.py");
+        let mut text = std::fs::read_to_string(&script).unwrap();
+        if binary {
+            text = text.replace(".write_text('candidate native PTY')", ".write_bytes(b'candidate\\x00binary')");
+        } else {
+            text = text.replace("    pathlib.Path('result.txt').write_text", "    pathlib.Path('reports').mkdir()\n    pathlib.Path('result.txt').write_text")
+                .replace("'result.txt'", "'reports/a\\tb\\nc.txt'");
+        }
+        std::fs::write(script, text).unwrap();
+        enqueue(&mut runtime, "w", "one", d);
+        let state = settle(&mut runtime, 2).await;
+        assert_eq!(state.items["one"].phase, Phase::WaitingJoin);
+        assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), if binary { "claude:opus\n" } else { "claude:sonnet\n" });
+    }
+}
+
+/// A protected path wins even when both light-review conditions hold on the real Git diff.
+#[tokio::test]
+async fn security_paths_require_full_review_even_for_small_report_only_changes() {
+    let (dir, mut runtime, _fake, mut d) = parallel_fixture(false, true).await;
+    d.stages[2].operation.arguments[1] = serde_json::json!({
+        "under_lines":100,"report_paths":["**"],"full_paths":["result.txt"] }).to_string();
+    runtime.coding.as_ref().unwrap().validate_definition(&d).unwrap();
+    enqueue(&mut runtime, "w", "one", d);
+    let state = settle(&mut runtime, 2).await;
+    assert_eq!(state.items["one"].phase, Phase::WaitingJoin);
+    assert_eq!(std::fs::read_to_string(dir.path().join("reviews")).unwrap(), "claude:opus\n");
+}
+
+#[tokio::test]
+async fn stopping_a_parallel_review_after_restart_reaps_its_gate() {
+    let (_dir, mut runtime, _fake, d) = parallel_fixture(false, true).await;
+    enqueue(&mut runtime, "w", "one", d);
+    for time in 2..20 {
+        if at(&runtime.state("w").unwrap().unwrap()).0 == "light" { break; }
+        runtime.pump(time).await.unwrap();
+    }
+    let binding = super::coding_tests::admitted(&runtime).await;
+    let check = runtime.review_check(&binding).unwrap();
+    // A child left by the old daemon with an unreadable process fact. Cancellation still
+    // needs to end the child before falling back to the reviewer's quiescence receipt.
+    let mut child = tokio::process::Command::new("/bin/sleep").arg("60").process_group(0).kill_on_drop(true).spawn().unwrap();
+    let pid = child.id().unwrap();
+    crate::effect_runner::Owner::write(&runtime.owner_path(&check), pid).unwrap();
+    std::fs::write(runtime.root.join("receipts").join(format!("{}.process.json", digest(&check.effect))), b"{").unwrap();
+    let state = runtime.state("w").unwrap().unwrap();
+    assert!(runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
+        expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into(), reason: None } }, 200).unwrap().result.is_ok());
+    // Reap the simulated orphan concurrently: on macOS a zombie can still hold its group.
+    let (pumped, status) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(runtime.pump(201), child.wait())
+    }).await.expect("Stop must end the child even when its receipt is unreadable");
+    pumped.unwrap(); status.unwrap();
+    assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
+    assert!(crate::effect_runner::Group::gone(pid).unwrap());
 }
