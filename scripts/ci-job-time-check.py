@@ -49,14 +49,23 @@ def limits(text):
 
 
 def limit_for(job_name, limit_map):
-    for template, raw in limit_map.items():
+    matrix = r"\$\{\{\s*matrix\.([\w-]+)\s*\}\}"
+    # Prefer the most specific name when a broad matrix template also matches.
+    for template, raw in sorted(limit_map.items(),
+                                key=lambda item: len(re.sub(matrix, "", item[0])),
+                                reverse=True):
         if "${{" in template:
-            os_part = re.search(r"\$\{\{ matrix\.os \}\}", template)
-            pattern = re.escape(template).replace(re.escape("${{ matrix.os }}"), r"(.+)")
-            m = re.fullmatch(pattern, job_name) if os_part else None
+            parts = list(re.finditer(matrix, template))
+            pattern, end = "", 0
+            for part in parts:
+                pattern += re.escape(template[end:part.start()]) + r"(.+?)"
+                end = part.end()
+            pattern += re.escape(template[end:])
+            m = re.fullmatch(pattern, job_name) if parts else None
             if not m:
                 continue
-            os_name = m.group(1)
+            os_name = next((value for part, value in zip(parts, m.groups())
+                            if part.group(1) == "os"), "")
         elif template == job_name:
             os_name = ""
         else:
@@ -133,16 +142,30 @@ def self_test():
   rust:
     name: Rust (${{ matrix.os }})
     timeout-minutes: ${{ matrix.os == 'macos-latest' && 60 || 35 }}
+  android-part:
+    name: Android ${{ matrix.part }}
+    timeout-minutes: 25
+  android-ui:
+    name: Android UI tests (${{ matrix.shard }})
+    timeout-minutes: 30
 """)
     assert limit_for("Android", lm) == 25 and limit_for("Rust (macos-latest)", lm) == 60
     assert limit_for("Rust (ubuntu-24.04)", lm) == 35 and limit_for("Nope", lm) is None
+    assert limit_for("Android build", lm) == 25
+    assert limit_for("Android UI tests (1)", lm) == 30
+    multi = {"Test ${{ matrix.part }} on ${{ matrix.os }}": "${{ matrix.os == 'macos-latest' && 60 || 35 }}"}
+    assert limit_for("Test build on macos-latest", multi) == 60
+    assert limit_for("Test macos-latest on ubuntu", multi) == 35
+    assert limit_for("Android UI tests (1) extra", {"Android UI tests (${{ matrix.shard }})": "30"}) is None
     runs = [[job("Android", "10:00", "10:20"), job("Rust (macos-latest)", "10:00", "10:40"),
+             job("Android build", "10:00", "10:20"), job("Android UI tests (1)", "10:00", "10:20"),
              job("Rust (ubuntu-24.04)", "10:00", "10:20", "skipped")]]
     rows, over, _ = evaluate(runs, lm)
     assert over == [], over                      # 80% and 67%; the skipped job is ignored
     runs.append([job("Android", "10:00", "10:22")])
     assert evaluate(runs, lm)[1] == ["Android"]  # 22/25 = 88%
-    assert evaluate(runs, lm, scale=0.5)[1] == ["Android", "Rust (macos-latest)"]
+    assert evaluate(runs, lm, scale=0.5)[1] == ["Android", "Android UI tests (1)",
+                                               "Android build", "Rust (macos-latest)"]
     # A check that saw nothing must not pass: no runs at all, or a limited job with no timing.
     assert evaluate([], lm)[2] != [], "zero runs must be a problem"
     missing = evaluate(runs, {**lm, "Renamed": "10"})[2]
