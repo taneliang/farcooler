@@ -169,3 +169,57 @@ summary 14,881 bytes, full reply 38,263 bytes. The fixture also verified
 `--full` definitions and all fifteen Running/build-stage items in every
 sample. The startup failure in the combined attempt remains unexplained;
 the isolated rerun reproduces the original acceptance result.
+
+## Fix round 2: all workflow readers bypass cleanup; RPC status scans use workers
+
+The second review identified an unmarked app Get still entering the effect
+inbox, and worktree removal performing its safety scan on the RPC executor.
+Every Get now uses the committed read path. No marker means the original full
+schema, including definitions and notification history; the CLI summary marker
+still selects the small view. Admission rechecks and nonowner redaction remain
+in the shared reader. The dispatch full-view fix from round 1 is retained.
+
+The removal confirmation scan now runs on a blocking worker. The RPC waits for
+its fresh answer before accepting a typed name or removing anything; a worker
+failure refuses the operation. The original service check still includes dirty
+files, hidden hooks and edited manager skills. The RPC regression verifies
+that absent and incorrect names preserve dirty files, and that a clean worktree
+can still be removed without a name. Existing service safety checks also pass.
+
+The broader status call-path audit also found four Changes handlers whose
+review cache can miss (`change_set`, `file_diff`, `set_base`, `mark_read`), and
+worktree creation/adoption rollback checks. Those operations use the same
+worker seam. Their futures are polled on the blocking worker using the daemon
+runtime's I/O driver, so filesystem inspection and status-result processing
+stay off the RPC executor. Request/result schemas and service safety rules
+are unchanged. Workflow mutations still use the single-writer inbox.
+
+Before the fixes, the stalled-inbox regression failed at its two-second
+deadline specifically for an unmarked Get. The removal source guard failed
+on the direct service scan, and the expanded Changes source guard failed on
+`changes.change_set`. All three pass after the fixes. The guards now cover
+removal, creation and the four Changes handlers, plus the actual stalled-inbox
+RPC test covers summary, explicit full and unmarked full reads.
+
+Round 2 load measurement, using the same isolated CPU-active adapter fixture
+and this worktree's existing CLI: 15 Running build-stage items throughout,
+40 samples, median **0.0113 s**, **p95 0.0147 s**, maximum **0.0157 s**.
+Summary 14,881 bytes; full reply 38,263 bytes, with definitions verified.
+The rebuilt daemon test executable ran alone from `crates/daemon` with
+`TMPDIR=/tmp`; build artifacts stayed in the worktree's `target/`.
+
+Round 2 validation: workflow library suite 348 passed / 5 ignored; workflow
+socket suites 20 passed / 1 helper ignored; RPC scope and regression suite
+13 passed; removal-filter suite 16 passed; existing removal service suite
+6 passed. These fixture runs used access to private git/tmux/socket processes.
+
+The review-filter library suite passed all 104 tests; the socket integration
+for worktree creation and asynchronous PR fills passed both tests. Final
+compiled workflow-read regressions passed all three ordinary checks, and the
+13 RPC scope/source/safety checks passed again after the worker expansion.
+`cargo clippy -p farcooler-daemon --lib --tests -- -D warnings` passed. The
+existing load fixture's needless borrowed socket path was corrected to satisfy
+that test-target lint. File-size budget, swallow lint, staged doc-comment and
+whitespace checks passed. Protocol lint checked the capability table and
+reported that no preview baseline exists. No reducer, coding module, protocol
+schema or service implementation was edited.

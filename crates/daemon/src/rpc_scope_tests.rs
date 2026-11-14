@@ -152,3 +152,61 @@ fn reads_never_require_more_than_read() {
         assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
     }
 }
+
+/// Guard the removal seam too: read-only workflow checks alone missed this scan.
+#[test]
+fn removal_status_scan_runs_on_a_worker() {
+    let source = include_str!("rpc.rs");
+    let removal = source.split("\"worktree.remove\" => {").nth(1).unwrap()
+        .split("\"terminal.create\" => {").next().unwrap();
+    assert!(!removal.contains("svc.removal_needs_confirmation"), "RPC must not run the status scan");
+    assert!(removal.contains("status_work::needs_confirmation"), "removal must still check for uncommitted work");
+    let worker = include_str!("rpc/status_work.rs");
+    assert!(worker.contains("spawn_blocking(move || runtime.block_on(work(svc)))"));
+}
+
+/// Exercise the RPC boundary as well as the service: a missing or wrong name
+/// must preserve dirty files, and a clean worktree still needs no name.
+#[tokio::test]
+async fn removal_rpc_preserves_the_dirty_worktree_confirmation() {
+    let (dir, svc, repo) = crate::test_support::fixture().await;
+    let side = dir.path().join("side");
+    crate::git::git(&dir.path().join("repo"),
+        &["worktree", "add", "-q", "-b", "feat/side", side.to_str().unwrap()]).await.unwrap();
+    crate::reconcile::repository(&svc, repo).await.unwrap();
+    let ws = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter()
+        .find(|w| !w.is_main_checkout).unwrap();
+    let factory = RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()),
+        Arc::new(tokio::sync::Notify::new()), Peer { client_id:None, scope:Scope::HostAdmin });
+    let scratch = side.join("scratch.txt");
+    std::fs::write(&scratch, "work in progress").unwrap();
+    for name in [None, Some("wrong name")] {
+        let reply = factory.handle(Request {
+            method:"worktree.remove".into(), target_resource_id:Some(crate::wire::id_bytes(ws.id)),
+            payload:name.map(|name| request::Payload::TypedConfirmation(
+                farcooler_protocol::v1::TypedConfirmation { typed_confirmation:name.into() })),
+            ..Default::default()
+        }).await;
+        let Some(response::Outcome::Error(error)) = reply.outcome else { panic!("{reply:?}") };
+        assert_eq!(error.code, farcooler_protocol::v1::ErrorCode::ConfirmationRequired as i32);
+        assert_eq!(std::fs::read_to_string(&scratch).unwrap(), "work in progress");
+    }
+    std::fs::remove_file(scratch).unwrap();
+    let reply = factory.handle(Request {
+        method:"worktree.remove".into(), target_resource_id:Some(crate::wire::id_bytes(ws.id)),
+        ..Default::default()
+    }).await;
+    assert!(matches!(reply.outcome, Some(response::Outcome::Result(_))), "{reply:?}");
+    assert!(!side.exists());
+}
+
+/// Explicit Changes reads can also miss their cache and scan the working tree.
+#[test]
+fn changes_status_scans_run_on_a_worker() {
+    let source = include_str!("rpc.rs");
+    for method in ["changes.change_set", "changes.file_diff", "changes.set_base", "changes.mark_read", "worktree.create"] {
+        let arm = source.split(&format!("\"{method}\" => {{")).nth(1).unwrap()
+            .split("\n            \"").next().unwrap();
+        assert!(arm.contains("status_work::run"), "{method} can run git status on a cache miss");
+    }
+}

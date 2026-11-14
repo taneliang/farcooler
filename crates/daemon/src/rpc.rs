@@ -19,6 +19,7 @@ mod watch;
 mod error_response;
 mod screen_revision;
 mod runner_settings;
+mod status_work;
 use error_response::error_response;
 use screen_revision::screen_revision;
 
@@ -783,12 +784,12 @@ impl Rpc {
                 let admission = self.admit(workspace).await?;
                 admission.permits(&action)?;
                 if matches!(action, Action::Propose { .. } | Action::Drafts { .. }) { return crate::workflow_drafts::handle(svc, &self.watcher, workspace, &action); }  // filed and asked of a person here, never the engine (ov-971)
-                // Opt-in keeps shipped apps' full schema intact. CLI reads never enter the effect
-                // inbox, whose per-message cleanup may run git status and prune finished trees.
+                // Every read bypasses the effect inbox and its per-message git/tree cleanup.
+                // Unmarked requests from shipped apps retain their original full schema.
                 let summary = req.accepts.iter().any(|v| v == "workflow_summary_v1");
                 let full = req.accepts.iter().any(|v| v == "workflow_full_v1");
-                let value = if matches!(action, Action::Get) && (summary || full) {
-                    handle.read_get(admission, full).await
+                let value = if matches!(action, Action::Get) {
+                    handle.read_get(admission, full || !summary).await
                 } else { handle.wire_command(admission, action).await }
                     .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
                 if summary && !full {
@@ -1193,19 +1194,23 @@ impl Rpc {
                     None => None,
                     Some(raw) => Some(wire::parse_id(raw).ok_or(DomainError::NotFound)?),
                 };
-                let ws = if p.adopt_existing {
-                    svc.adopt_branch(repository, &p.branch, workspace).await?
-                } else {
-                    svc.create_worktree_with(
-                        repository,
-                        &p.task_name,
-                        &p.branch,
-                        &p.base_revision,
-                        p.fork_only,
-                        workspace,
-                    )
-                    .await?
-                };
+                // Failure rollback checks dirt too, so creation and adoption use the worker.
+                let creation = p.clone();
+                let ws = status_work::run(svc.clone(), move |svc| async move {
+                    let p = creation;
+                    if p.adopt_existing {
+                        svc.adopt_branch(repository, &p.branch, workspace).await
+                    } else {
+                        svc.create_worktree_with(
+                            repository,
+                            &p.task_name,
+                            &p.branch,
+                            &p.base_revision,
+                            p.fork_only,
+                            workspace,
+                        ).await
+                    }
+                }).await?;
                 // A worktree with nothing running in it is a directory.
                 //
                 // Done here rather than as a second call from each client
@@ -1342,7 +1347,7 @@ impl Rpc {
                 // skips the dialog must still be refused. Demanded only for a
                 // dirty worktree: everything committed lives in the branch,
                 // which this never touches.
-                if svc.removal_needs_confirmation(id).await? {
+                if status_work::needs_confirmation(svc.clone(), id).await? {
                     let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
                         return Err(DomainError::ConfirmationRequired);
                     };
@@ -1813,10 +1818,13 @@ impl Rpc {
                 let Some(request::Payload::ChangeSetRequest(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let set = crate::review_ops::change_set(svc, &p).await?;
+                let worktree_id = wire::parse_id(&p.worktree_id);
+                let set = status_work::run(svc.clone(), move |svc| async move {
+                    crate::review_ops::change_set(&svc, &p).await
+                }).await?;
                 // The notice for large files that weren't downloaded lives on
                 // Changes, so its count is made fresh here (ov-199).
-                if let Some(id) = wire::parse_id(&p.worktree_id) {
+                if let Some(id) = worktree_id {
                     if svc.recheck_lfs_pointers(id).await {
                         self.watcher.announce_fleet_changed();
                     }
@@ -1837,14 +1845,18 @@ impl Rpc {
                 let Some(request::Payload::FileDiffRequest(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                Ok(result::Value::FileDiff(crate::review_ops::file_diff(svc, &p).await?))
+                Ok(result::Value::FileDiff(status_work::run(svc.clone(), move |svc| async move {
+                    crate::review_ops::file_diff(&svc, &p).await
+                }).await?))
             }
 
             "changes.set_base" => {
                 let Some(request::Payload::ChangesSetBase(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                Ok(result::Value::ChangeSet(crate::review_ops::set_base(svc, &p).await?))
+                Ok(result::Value::ChangeSet(status_work::run(svc.clone(), move |svc| async move {
+                    crate::review_ops::set_base(&svc, &p).await
+                }).await?))
             }
 
             "changes.mark_read" => {
@@ -1852,7 +1864,9 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let person = self.caller()?; // a member's own pane's is theirs (ov-747)
-                crate::review_ops::mark_read(svc, &p, &person).await?;
+                status_work::run(svc.clone(), move |svc| async move {
+                    crate::review_ops::mark_read(&svc, &p, &person).await
+                }).await?;
                 // A reviewed worktree leaves the runner's review count, which
                 // the lock screen shows and no needs-you item moved for. Only
                 // the owner's review moves it (ov-740); a member's announce

@@ -387,7 +387,7 @@ mod tests {
         let handle = runtime.command_handle(&runtime.controller()).unwrap();
         let (stop, signal) = tokio::sync::watch::channel(false);
         let worker = tokio::spawn(async move { runtime.run(signal).await });
-        let server = UnixListenerServer::bind(&home.join("farcoolerd.sock")).unwrap();
+        let server = UnixListenerServer::bind(home.join("farcoolerd.sock")).unwrap();
         let serve = tokio::spawn(async move { server.serve(move |_| Some((HandshakeConfig { daemon_version:"load-fixture".into() },
             crate::rpc::RpcFactory::new(service.clone(), crate::watch::Watcher::new(service.clone()), Arc::new(tokio::sync::Notify::new()),
                 Peer { client_id:None, scope:Scope::Control }).with_workflow_fixture(handle.clone())))).await });
@@ -460,6 +460,11 @@ mod tests {
         req.accepts.push("workflow_full_v1".into());
         let reply = tokio::time::timeout(Duration::from_secs(2), rpc.handle(req)).await.unwrap();
         assert_eq!(receipt(&reply)["state"], full["state"]);
+        // Shipped apps send no accepts marker and still need the original full schema.
+        let reply = tokio::time::timeout(Duration::from_secs(2), rpc.handle(request(workspace, &Action::Get)))
+            .await.expect("unmarked workflow get waited on the effect inbox");
+        assert_eq!(receipt(&reply)["state"], full["state"]);
+        assert!(receipt(&reply).pointer("/state/items/ov-1/definition").is_some());
     }
     #[tokio::test]
     async fn workflow_owner_can_resolve_a_lost_provision_cancellation_then_reopen() {
