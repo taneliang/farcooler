@@ -12,6 +12,39 @@ import subprocess
 import time
 
 
+def budget_worker(env, workers):
+    """Share the host between families instead of each builder taking every CPU.
+
+    Tests still use CI's profile and groups. Only local scheduling changes;
+    Cargo and Go compilation concurrency do not alter artifact contents.
+    """
+    share = max(1, (os.cpu_count() or 1) // workers)
+    # Cargo serializes writers to a shared profile. A per-family fraction
+    # leaves that single active compiler underfed while other families test.
+    # Cap it at four, retaining room for Swift/Gradle and explicit user limits.
+    env.setdefault("CARGO_BUILD_JOBS", str(max(share, min(4, os.cpu_count() or 1))))
+    env.setdefault("GOMAXPROCS", str(share))
+    # Most integration tests wait on I/O. Dividing this pool between compiler
+    # families serializes those waits; six is the measured stable local pool
+    # documented in nextest.toml. Keep CI's groups and stricter user limits.
+    env.setdefault("NEXTEST_TEST_THREADS", str(min(6, os.cpu_count() or 1)))
+    env["GOFLAGS"] = (env.get("GOFLAGS", "") + f" -p={share}").strip()
+    env["GRADLE_OPTS"] = (env.get("GRADLE_OPTS", "") + f" -Dorg.gradle.workers.max={share}").strip()
+
+
+def record_timing(logdir, job, step, result, started, ended):
+    """Flush each completed step so an interrupted gate retains real timings.
+
+    A job has one worker and one file, so parallel families never interleave
+    JSON writes. These timestamps include preflight and Cargo lock waits.
+    """
+    row = {"job": job, "command": step.label(), "run": step.run,
+           "result": result, "seconds": ended - started,
+           "start_monotonic": started, "end_monotonic": ended}
+    with (logdir / f"{job}-timings.jsonl").open("a") as stream:
+        stream.write(json.dumps(row) + "\n")
+
+
 def rust_selection(repo, base, load_module):
     """Select against a verified green ancestor, including staged/dirty inputs.
 
@@ -57,6 +90,12 @@ def apply(plans, proposal):
         for step in steps:
             if step.skip:
                 continue
+            if job == "web" and "GOOS=js GOARCH=wasm go test" in step.run:
+                # Go/Wasm reserves only 8 KiB for argv + env. A developer's
+                # App Store session is unrelated to this test and can exhaust
+                # that space before any test starts; CI doesn't supply it.
+                # Its runtime has no OS threads, unlike the host Go builders.
+                step.env = {**step.env, "FASTLANE_SESSION": "", "GOMAXPROCS": "1"}
             if job == "swift" and (step.name == "Build Far Cooler.app"
                                    or "apps/macos/build/$APP_NAME.app" in step.run
                                    or step.name == "Resolve this channel's app name"):

@@ -7,7 +7,9 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -22,6 +24,60 @@ spec.loader.exec_module(lane)
 
 
 class LandingTests(unittest.TestCase):
+    def test_fixture_hooks_do_not_inherit_the_agents_private_route(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {"FARCOOLER_NATIVE_HOOK_SOCKET": "/tmp/real-agent.sock"}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            root = Path(temporary)
+            plans = {"relay": [lane.Step("relay", "isolated", 'test -z "${FARCOOLER_NATIVE_HOOK_SOCKET:-}"\n'),
+                               lane.Step("relay", "explicit fixture", 'test "$FARCOOLER_NATIVE_HOOK_SOCKET" = /tmp/fixture.sock\n',
+                                         env={"FARCOOLER_NATIVE_HOOK_SOCKET": "/tmp/fixture.sock"})]}
+            args = argparse.Namespace(no_load_wait=True, strict_leaks=False, landing=False)
+            rows = []
+            self.assertFalse(lane.run_one_job("relay", plans, rows, ROOT, root,
+                                             lane.make_ctx(ROOT, root, "HEAD"), root, args))
+            self.assertEqual([r[2] for r in rows], ["pass", "pass"])
+
+    def test_cpu_budget_reaches_real_steps_without_changing_the_checks(self):
+        command = ('test "$CARGO_BUILD_JOBS" = 4 && test "$GOMAXPROCS" = 2 && '
+                   'test "$NEXTEST_TEST_THREADS" = 6 && test "$GOFLAGS" = "-p=2" && '
+                   'test "$GRADLE_OPTS" = "-Dorg.gradle.workers.max=2" && '
+                   'test "$CARGO_PROFILE_DEV_DEBUG" = 0\n')
+        args = argparse.Namespace(workers=4, strict_leaks=False, no_load_wait=True, landing=True)
+        with tempfile.TemporaryDirectory() as temporary, patch.object(policy.os, "cpu_count", return_value=10), \
+                patch.object(lane.hl, "lean_cargo_env", return_value={"CARGO_PROFILE_DEV_DEBUG": "0"}), \
+                patch.dict(os.environ, {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()):
+            root = Path(temporary)
+            rows = []
+            self.assertFalse(lane.run_one_job("relay", {"relay": [lane.Step("relay", "budget", command)]},
+                                             rows, ROOT, root, lane.make_ctx(ROOT, root, "HEAD"), root, args))
+            self.assertEqual(rows[0][2], "pass")
+        with patch.object(policy.os, "cpu_count", return_value=10):
+            env = {"CARGO_BUILD_JOBS": "1", "GOMAXPROCS": "1", "NEXTEST_TEST_THREADS": "1",
+                   "GOFLAGS": "-mod=readonly", "GRADLE_OPTS": "-Dkeep=true"}
+            policy.budget_worker(env, 4)
+            self.assertEqual(env["CARGO_BUILD_JOBS"], "1")
+            self.assertEqual(env["GOMAXPROCS"], "1")
+            self.assertEqual(env["NEXTEST_TEST_THREADS"], "1")
+            self.assertEqual(env["GOFLAGS"], "-mod=readonly -p=2")
+            self.assertEqual(env["GRADLE_OPTS"], "-Dkeep=true -Dorg.gradle.workers.max=2")
+
+    def test_plain_runner_can_be_loaded_without_optional_landing_policy(self):
+        # Evidence consumers copy the canonical plain runner and heavy lock,
+        # not the opt-in landing implementation. Exercise their real import.
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            (repo / "scripts").mkdir()
+            (repo / ".github/workflows").mkdir(parents=True)
+            for name in ("lane-gate.py", "heavy_lock.py"):
+                shutil.copyfile(ROOT / "scripts" / name, repo / "scripts" / name)
+            shutil.copyfile(ROOT / ".github/workflows/ci.yml", repo / ".github/workflows/ci.yml")
+            result = subprocess.run([sys.executable, str(repo / "scripts/lane-gate.py"), "--help"],
+                                    cwd=repo, env={**os.environ, "PYTHONPATH": ""},
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_ci_unchanged_and_local_bundle_consumers_explicit(self):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = lane.make_ctx(ROOT, Path(tmp), "HEAD")
@@ -42,6 +98,10 @@ class LandingTests(unittest.TestCase):
         entitlements = next(s for s in plans["swift"] if "macos-entitlements-test.sh" in s.run)
         self.assertIsNone(entitlements.skip)
         self.assertEqual(entitlements.run.strip(), "./scripts/macos-entitlements-test.sh")
+        wasm = next(s for s in plans["web"] if "GOOS=js GOARCH=wasm go test" in s.run)
+        self.assertIsNone(wasm.skip)
+        self.assertEqual(wasm.env["FASTLANE_SESSION"], "")
+        self.assertEqual(wasm.env["GOMAXPROCS"], "1")
         # Never filter feature-specific tests, clippy, doctests, or Apple tests.
         self.assertTrue(any("cargo clippy --workspace" in s.run and not s.skip for s in plans["rust"]))
         self.assertTrue(any("cargo test --workspace --doc" in s.run and not s.skip for s in plans["rust"]))
@@ -101,13 +161,17 @@ class LandingTests(unittest.TestCase):
         jobs = ["relay", "site"]
         plans = {j: [lane.Step(j, "export", f'echo FAMILY={j} >> "$GITHUB_ENV"\n'),
                      lane.Step(j, "consume", f'test "$FAMILY" = {j}\n')] for j in jobs}
-        args = argparse.Namespace(workers=2, strict_leaks=False, no_load_wait=True)
+        args = argparse.Namespace(workers=2, strict_leaks=False, no_load_wait=True, landing=True)
         with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):
             t = Path(t)
             rows = []
             self.assertFalse(policy.run(jobs, plans, rows, ROOT, t, lane.make_ctx(ROOT, t, "HEAD"),
                                         t, args, lane.run_one_job))
             self.assertEqual(len([r for r in rows if r[2] == "pass"]), 5)
+            for job in jobs:
+                timings = [json.loads(line) for line in (t / f"{job}-timings.jsonl").read_text().splitlines()]
+                self.assertEqual([r["result"] for r in timings], ["pass", "pass"])
+                self.assertTrue(all(r["seconds"] >= 0 for r in timings))
 
     def test_real_affected_failure_and_unaffected_ci_failure(self):
         with tempfile.TemporaryDirectory(prefix="landing-selection-") as t:

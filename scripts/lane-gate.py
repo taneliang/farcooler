@@ -90,7 +90,6 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-import landing_policy  # local-only policy; full CI commands stay in the workflow
 import heavy_lock as hl  # noqa: E402  the machine-wide lock, shared with scripts/heavy
 from heavy_lock import LOCK_POLL, machine_lock  # noqa: E402
 
@@ -655,6 +654,9 @@ def leak_notes(output):
 
 def base_env(repo, tmp, ctx, strict_leaks=False):
     env = dict(os.environ)
+    # A gate launched inside an agent pane must not route fixture hooks to
+    # that pane's real workflow socket. Tests can still set their own socket.
+    env.pop("FARCOOLER_NATIVE_HOOK_SOCKET", None)
     # CI=true is for the tests' sake; the Mac is still shared with sibling lanes,
     # whose UUID-named leftovers land in the same system temp folder as this
     # lane's. test-leak-check makes those a note, shown in the Result column,
@@ -735,6 +737,7 @@ def gate(args):
 
     proposal = None
     if args.landing:
+        import landing_policy  # optional local policy; plain runners stay self-contained
         proposal = (landing_policy.rust_selection(repo, args.base, load_module) if "rust" in chosen
                     else {"full": True, "packages": [], "reasons": ["Rust not reached"]})
         landing_policy.apply(plans, proposal)
@@ -807,6 +810,7 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     # another, oldest first; releasing between jobs made nine gates each take nine times as long (ov-836).
     with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()):
         if getattr(args, "landing", False):
+            import landing_policy
             if between:
                 raise ValueError("--landing cannot release the gate lock between parallel jobs")
             if any(j in HEAVY for j in chosen) and not args.no_load_wait:
@@ -831,19 +835,29 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
 
 
 def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
+    if getattr(args, "landing", False):
+        import landing_policy
     failed = False
     if j in HEAVY and not args.no_load_wait:
         wait_for_load()
     env = base_env(repo, tmp, ctx, args.strict_leaks)
     env.update(job_env(j))
-    if j in {"rust", "rust-lints"}:  # same Cargo profile across parallel Rust workers
-        env.update(hl.lean_cargo_env(repo) if getattr(args, "landing", False) else hl.prepare_lane_build(repo))
+    if getattr(args, "landing", False):
+        landing_policy.budget_worker(env, args.workers)
+        # Apple/Android also build host Rust binaries in this target. Mixing
+        # debug-info levels replaces shared outputs and defeats the handoff.
+        env.update(hl.lean_cargo_env(repo))
+    elif j in {"rust", "rust-lints"}:
+        env.update(hl.prepare_lane_build(repo))
     if j == "android" and ctx["steps.jdk21.outputs.path"]:
         env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
     print(f"\n[{j}]", flush=True)
     for s in plans[j]:
+        started = time.monotonic()
         if s.skip:
             rows.append((j, s.label(), f"skipped: {s.skip}", "", ""))
+            if getattr(args, "landing", False):
+                landing_policy.record_timing(logdir, j, s, f"skipped: {s.skip}", started, started)
             print(f"  skip {s.label()}  ({s.skip})")
             continue
         print(f"  run  {s.label()}", flush=True)
@@ -852,6 +866,8 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         # (ov-812). The step's own `env:` is laid over it inside run_step.
         result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp, getattr(args, "fail_fast", False))
         rows.append((j, s.label(), result, f"{secs:.0f}", counts))
+        if getattr(args, "landing", False):
+            landing_policy.record_timing(logdir, j, s, result, started, time.monotonic())
         if not ok:
             failed = True
             if log is None:
@@ -1472,6 +1488,9 @@ def _self_test():
     policy_test = subprocess.run([sys.executable, str(ROOT / "scripts/landing-policy-test.py")])
     if policy_test.returncode:
         return policy_test.returncode
+    benchmark_test = subprocess.run([sys.executable, str(ROOT / "scripts/landing-benchmark-test.py")])
+    if benchmark_test.returncode:
+        return benchmark_test.returncode
     print("lane-gate self-test: ok")
     return 0
 
