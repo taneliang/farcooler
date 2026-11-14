@@ -125,6 +125,44 @@ impl<R> Connection<R> {
         self.writer_tx.send(bytes).map_err(|_| ConnectionError::Closed)?;
         Ok(())
     }
+
+    /// A handler's oversized answer is a failed call, not a broken protocol.
+    /// Encoding validates the bound before queuing any bytes, so a small,
+    /// correlated error can safely replace it. Dropping the link here made a
+    /// growing board disconnect every phone on its first sync (ov-1162).
+    async fn send_response(&mut self, response: Response) -> Result<(), ConnectionError> {
+        let mut envelope = WireEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            message_id: ids::new_id(),
+            body: Some(wire_envelope::Body::Response(response)),
+        };
+        match self.send(&envelope).await {
+            Err(ConnectionError::Codec(CodecError::Framing(
+                farcooler_protocol::framing::FramingError::Oversized(bytes, cap),
+            ))) => {
+                let Some(wire_envelope::Body::Response(response)) = envelope.body.as_mut() else { unreachable!() };
+                // Static words and sizes only: neither the request nor its
+                // response contents belong in the daemon's retained log.
+                let kind = match &response.outcome {
+                    Some(response::Outcome::Result(r)) => match &r.value {
+                        Some(farcooler_protocol::v1::result::Value::TaskList(_)) => "task_list",
+                        Some(farcooler_protocol::v1::result::Value::WorkflowReply(_)) => "workflow_reply",
+                        _ => "other",
+                    },
+                    _ => "error",
+                };
+                tracing::warn!(response = kind, bytes, cap, "response exceeds frame cap; keeping connection");
+                response.outcome = Some(response::Outcome::Error(WireErrorMsg {
+                    code: ErrorCode::OperationFailed as i32,
+                    retryable: false,
+                    message: "There’s too much data to show in one response.".into(),
+                    what: "response_too_large".into(),
+                }));
+                self.send(&envelope).await
+            }
+            result => result,
+        }
+    }
 }
 
 impl<R> Drop for Connection<R> {
@@ -503,11 +541,7 @@ where
             (lane, request_id, mut response) = next_finished(&mut running) => {
                 response.request_id = request_id;
                 in_flight -= 1;
-                let sent = conn.send(&WireEnvelope {
-                    protocol_version: PROTOCOL_VERSION,
-                    message_id: ids::new_id(),
-                    body: Some(wire_envelope::Body::Response(response)),
-                }).await;
+                let sent = conn.send_response(response).await;
 
                 // The next request in this lane, now that the one ahead of it
                 // has finished.
@@ -610,11 +644,7 @@ where
             if answering {
                 response.request_id = request_id;
                 answering = conn
-                    .send(&WireEnvelope {
-                        protocol_version: PROTOCOL_VERSION,
-                        message_id: ids::new_id(),
-                        body: Some(wire_envelope::Body::Response(response)),
-                    })
+                    .send_response(response)
                     .await
                     .is_ok();
             }
