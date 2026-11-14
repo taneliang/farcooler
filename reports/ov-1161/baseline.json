@@ -1,0 +1,4011 @@
+[
+  {
+    "run": "43542692133",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 16,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 24,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 122,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 93,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 86,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 48,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 49,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 16,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 85,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 70,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 80,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 24,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 1663,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43542692133",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 18,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 26,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1095,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43542692133",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 14,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 19,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 46,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-partitions.py --self-test",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 108,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 166,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 6,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1195,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 1,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43536261416",
+    "job": "Rust (macos-latest)",
+    "conclusion": "cancelled",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 15,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 28,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 6,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 133,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 99,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 93,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 60,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 48,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 15,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 80,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 13,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 68,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 75,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 482,
+        "conclusion": "cancelled"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 0,
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43536261416",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 26,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1012,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 4,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43536261416",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 46,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-partitions.py --self-test",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 162,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 268,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 13,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1210,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43525814763",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 20,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 89,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 99,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 89,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 47,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 49,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 90,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 14,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 96,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 99,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 25,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 1935,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43525814763",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 22,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 35,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1137,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 13,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43525814763",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 13,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 44,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-partitions.py --self-test",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 124,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 228,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1083,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43513781272",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 6,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 47,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 44,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 37,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 26,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 43,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 43,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 44,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 1346,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43513781272",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 21,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 35,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1229,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 5,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43513781272",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 15,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 30,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 116,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 229,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1071,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43498440945",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 14,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 30,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 121,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 121,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 110,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 60,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 65,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 18,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 95,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 73,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 115,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 24,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 2148,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43498440945",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 21,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 6,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 37,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1100,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43498440945",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 25,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 32,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 162,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 269,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1296,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 5,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43478975878",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 18,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 64,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 6,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 59,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 52,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 39,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 35,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 57,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 52,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 52,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 2654,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43478975878",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 18,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 25,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1271,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 8,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43478975878",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 13,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 31,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 32,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 170,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 271,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1230,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43455076891",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 13,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 35,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 115,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 105,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 91,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 48,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 54,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 14,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 71,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 79,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 86,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 2560,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 6,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43455076891",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 17,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 24,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1126,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 4,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43455076891",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 8,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 19,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 34,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 147,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 263,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1162,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43439314112",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 16,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 35,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 131,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 124,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 102,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 54,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 55,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 88,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 69,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 75,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 1798,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 1,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43439314112",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 14,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 26,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 38,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 1251,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43439314112",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 18,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 31,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 124,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 201,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 972,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 1,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43417448416",
+    "job": "Rust (macos-latest)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 14,
+        "conclusion": "success"
+      },
+      {
+        "name": "Green bases for Rust shadow (ov-1116)",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 14,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run taiki-e/install-action@v2.87.28",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install git-lfs",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install fish",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Make sure there is an sshd to test the fence against",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy --workspace --all-targets -- -D warnings",
+        "seconds": 39,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+        "seconds": 34,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+        "seconds": 30,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+        "seconds": 20,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+        "seconds": 20,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+        "seconds": 6,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+        "seconds": 37,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+        "seconds": 7,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo check -p farcooler-daemon --features tailcat --all-targets",
+        "seconds": 39,
+        "conclusion": "success"
+      },
+      {
+        "name": "Put this channel's CLI where the daemon tests look for it",
+        "seconds": 41,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-leak-check.py --self-test",
+        "seconds": 23,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/tmux-stale-sockets.py --self-test",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Full Rust tests and shadow measurement",
+        "seconds": 1138,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/upload-artifact@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run cargo test --workspace --doc",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 3,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43417448416",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 11,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 19,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/setup-go@v5",
+        "seconds": 26,
+        "conclusion": "success"
+      },
+      {
+        "name": "Resolve this channel's app name",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build Far Cooler.app",
+        "seconds": 725,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled daemon has the tunnel linked",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundled CLI has the tunnel linked",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the bundle is stamped with this commit's version",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the CLI and daemon agree",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/icon-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/sparkle-key-test.sh",
+        "seconds": 2,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/gh-download-test.sh",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-entitlements-test.sh \"apps/macos/build/$APP_NAME.app\"",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/setup-go@v5",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43417448416",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "success",
+    "rust_cache": "hit",
+    "swiftpm_cache": "hit",
+    "steps": [
+      {
+        "name": "Set up job",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Check the runner has Xcode 27",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run actions/checkout@v4",
+        "seconds": 12,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run dtolnay/rust-toolchain@stable",
+        "seconds": 10,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run Swatinem/rust-cache@v2",
+        "seconds": 18,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache SwiftPM downloads",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/macos-test-wrapper-test.sh",
+        "seconds": 4,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/wait-for-unlock-test.sh",
+        "seconds": 5,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/swift-test-guard-test.sh",
+        "seconds": 31,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/test-leak-check.py --self-test",
+        "seconds": 9,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/mac-capture-stop-test.sh",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Run ./scripts/capture-duplicates-test.sh",
+        "seconds": 3,
+        "conclusion": "success"
+      },
+      {
+        "name": "Build the Rust client library for AgentKit's tests",
+        "seconds": 108,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test AgentKit",
+        "seconds": 238,
+        "conclusion": "success"
+      },
+      {
+        "name": "Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Install tmux",
+        "seconds": 13,
+        "conclusion": "success"
+      },
+      {
+        "name": "Test the Mac app",
+        "seconds": 1004,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache the pinned tmux build",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Cache SwiftPM downloads",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run Swatinem/rust-cache@v2",
+        "seconds": 0,
+        "conclusion": "success"
+      },
+      {
+        "name": "Post Run actions/checkout@v4",
+        "seconds": 1,
+        "conclusion": "success"
+      },
+      {
+        "name": "Complete job",
+        "seconds": 2,
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run": "43410702134",
+    "job": "Swift (app build + bundle checks)",
+    "conclusion": "skipped",
+    "rust_cache": "unknown/skipped",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": []
+  },
+  {
+    "run": "43410702134",
+    "job": "Swift (AgentKit + Mac tests)",
+    "conclusion": "skipped",
+    "rust_cache": "unknown/skipped",
+    "swiftpm_cache": "unknown/skipped",
+    "steps": []
+  }
+]
