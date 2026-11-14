@@ -77,6 +77,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -483,7 +484,7 @@ def job_env(job):
     return env
 
 
-def run_step(step, repo, env, logdir, tmp):
+def run_step(step, repo, env, logdir, tmp, fail_fast=False):
     gh_env, gh_path = tmp / "github_env", tmp / "github_path"
     gh_env.write_text("")
     gh_path.write_text("")
@@ -492,7 +493,16 @@ def run_step(step, repo, env, logdir, tmp):
     log = logdir / f"{step.job}-{abs(hash(step.run)) % 10**8}.log"
     started = time.time()
     with open(log, "w") as f:
-        done = subprocess.run(["bash", "-e", "-c", step.run], cwd=cwd, env=e, stdout=f, stderr=subprocess.STDOUT)
+        # A private process group lets a failed landing step stop any children it
+        # left running, without touching processes belonging to another gate.
+        proc = subprocess.Popen(["bash", "-e", "-c", step.run], cwd=cwd, env=e,
+                                stdout=f, stderr=subprocess.STDOUT, start_new_session=fail_fast)
+        code = proc.wait()
+        if fail_fast and code != 0:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
     secs = time.time() - started
     output = log.read_text(errors="replace")
     # What the step left for the ones after it, as GitHub's files do.
@@ -503,7 +513,7 @@ def run_step(step, repo, env, logdir, tmp):
     for p in gh_path.read_text().splitlines():
         if p:
             env["PATH"] = p + os.pathsep + env["PATH"]
-    return done.returncode, secs, output, log
+    return code, secs, output, log
 
 
 NEXTEST_VERSION = re.search(r"cargo-nextest@([\d.]+)", (ROOT / ".github/workflows/ci.yml").read_text())
@@ -570,7 +580,7 @@ def is_shallow(repo):
     return out.returncode == 0 and out.stdout.strip() == "true"
 
 
-def run_step_safely(step, repo, env, logdir, tmp):
+def run_step_safely(step, repo, env, logdir, tmp, fail_fast=False):
     """(result, seconds, counts, ok, log, output) for one step; never raises.
 
     A tool the host lacks, a directory a failed step never made, or anything
@@ -581,7 +591,7 @@ def run_step_safely(step, repo, env, logdir, tmp):
         return f"FAIL: {reason}", 0.0, "", False, None, reason
     was_shallow = is_shallow(repo)
     try:
-        code, secs, output, log = run_step(step, repo, env, logdir, tmp)
+        code, secs, output, log = run_step(step, repo, env, logdir, tmp, fail_fast)
     except Exception as e:  # noqa: BLE001 -- any crash is this step's failure
         reason = DISK_FULL if hl.disk_full(e) else f"lane-gate could not run it: {type(e).__name__}: {e}"
         return f"FAIL: {reason}", 0.0, "", False, None, reason
@@ -657,6 +667,7 @@ def main(argv):
     ap.add_argument("--no-lock", action="store_true", help="skip the machine-wide heavy-job lock (it is off already when CI is set)")
     ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
     ap.add_argument("--keep-target", action="store_true", help="keep the worktree's target/ after a fully green gate (by default a lane worktree's is removed then)")
+    ap.add_argument("--fail-fast", action="store_true", help="stop at the first failed step (for landing gates)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
@@ -757,6 +768,8 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
             locked = bool(heavy) and between and j in HEAVY
             with (machine_lock(repo, j) if locked else contextlib.nullcontext()):
                 failed = run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args) or failed
+            if failed and getattr(args, "fail_fast", False):
+                break
     if "ios" in chosen:
         rows.append(("ios", "iOS UI smoke", "not run here: use scripts/ios-ui-tests.sh", "", ""))
     return failed
@@ -782,7 +795,7 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         # `env` itself, not a copy: what a step writes to $GITHUB_ENV (the
         # swift job's APP_NAME) is read back into it for the steps after
         # (ov-812). The step's own `env:` is laid over it inside run_step.
-        result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp)
+        result, secs, counts, ok, log, output = run_step_safely(s, repo, env, logdir, tmp, getattr(args, "fail_fast", False))
         rows.append((j, s.label(), result, f"{secs:.0f}", counts))
         if not ok:
             failed = True
@@ -791,6 +804,8 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
             else:
                 tail = "\n".join(output.splitlines()[-15:])
                 print(f"  FAILED, log {log}\n" + "\n".join("    " + l for l in tail.splitlines()))
+            if getattr(args, "fail_fast", False):
+                break
     return failed
 
 
@@ -964,6 +979,32 @@ def _self_test():
             failed = run_jobs(["x"], {"x": chain}, rows, t, t, ctx, t, argparse.Namespace(no_load_wait=True, strict_leaks=False))
         expect("a step reads what an earlier step put in GITHUB_ENV", [r[2] for r in rows[:2]], ["pass", "pass"])
         expect("... and an unset variable still fails a step", rows[2][2].startswith("FAIL"), True)
+    # Landing stops at the first failure, including within a job; a lane
+    # still runs the rest and reports every failure.
+    with tempfile.TemporaryDirectory() as d:
+        d = pathlib.Path(d)
+        marker = d / "later"
+        child_marker = d / "child"
+        fixtures = {"first": [Step("first", "fail", f'(sleep 2; touch "{child_marker}") & echo planted-failure; exit 7\n'),
+                              Step("first", "later step", f'touch "{marker}"; exit 8\n')],
+                    "second": [Step("second", "later job", f'touch "{marker}"; exit 9\n')]}
+        ns = argparse.Namespace(no_load_wait=True, strict_leaks=False, fail_fast=True)
+        rows = []
+        capture = io.StringIO()
+        with contextlib.redirect_stdout(capture):
+            failed = run_jobs(["first", "second"], fixtures, rows, d, d, ctx, d, ns)
+        expect("landing fails at the planted failure", failed and len(rows) == 1, True)
+        expect("landing keeps the failure output", "planted-failure" in capture.getvalue(), True)
+        expect("landing does not start later steps or jobs", marker.exists(), False)
+        time.sleep(2.2)
+        expect("landing stops the failed step's background child", child_marker.exists(), False)
+        ns.fail_fast = False
+        fixtures["first"][0] = Step("first", "fail", "echo planted-failure; exit 7\n")
+        rows = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            failed = run_jobs(["first", "second"], fixtures, rows, d, d, ctx, d, ns)
+        expect("a lane reports all failures by default", failed and len(rows) == 3 and all(r[2].startswith("FAIL") for r in rows), True)
+        expect("a lane starts later jobs", marker.exists(), True)
     swift_run = [s for s in plans["swift"] if not s.skip]
     names = [i for i, s in enumerate(swift_run) if 'GITHUB_ENV' in s.run and "APP_NAME=" in s.run]
     users = [i for i, s in enumerate(swift_run) if "$APP_NAME" in s.run]

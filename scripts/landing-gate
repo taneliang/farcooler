@@ -15,7 +15,7 @@
 # plain terminal runs lane-gate.py or scripts/heavy.
 set -u
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-gate=("$here/lane-gate.py")
+gate=("$here/lane-gate.py" --fail-fast)
 for a in "$@"; do
   case "$a" in --dry-run|--self-test|-h|--help) exec python3 "${gate[@]}" "$@" ;; esac
 done
