@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, planView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -48,7 +48,10 @@ import { comparisonButtons, type Opened, registerDevice, waitForReply } from './
 import { type LinkView, Reconnector } from './reconnect'
 import { installSignOut } from './sign-out'
 import { relayCopy, relayRaw } from './relay-client'
-import { SavedCopies } from './saved-copies'
+import { type RecoveryPresenter, type RecoveryView, SavedCopies } from './saved-copies'
+// Bundled shared view: emergency sign-out must also work if WASM cannot load.
+// crates/client's recovery_view test verifies this snapshot against its model.
+import recoveryWords from '../../../../crates/client/src/testdata/recovery-view.json'
 import { StartWatch } from './start'
 import { PaneView } from './terminal'
 import { loadTailcat, type Tailcat, type TunnelConn } from './tunnel'
@@ -1069,6 +1072,7 @@ async function addAgain(session: Session): Promise<void> {
 /// Sign Out stops queued copies, forgets local runners, and reports an
 /// unconfirmed shared-copy delete before leaving the page.
 function signOutForgets(session: () => Session | null): void {
+  const words = recoveryWords
   const form = document.querySelector<HTMLFormElement>('form[action="/sign-out"]')
   if (!form) return
   installSignOut(form, {
@@ -1076,13 +1080,13 @@ function signOutForgets(session: () => Session | null): void {
     call: relayCopy,
     forget: forgetDevice,
     dropSecret,
-    waiting: () => status('Signing out…'),
+    waiting: () => status(words.signingOut),
     failed: (retry, anyway) => status(
-      'Your saved copy may still be at Far Cooler', // platform copy: browser passkey recovery deletion status
-      'Far Cooler couldn’t confirm that your passkey’s shared recovery copy was deleted. It may still restore your runners in browsers using this passkey. Retry, or sign out and clear it later from Saved Copies.', // platform copy: browser passkey recovery deletion guidance
-      { label: 'Retry Delete', run: retry }, // platform copy: browser passkey recovery deletion action
+      words.deleteTitle,
+      words.deleteDetail,
+      { label: words.retry, run: retry },
       anyway,
-      'Sign Out Anyway', // platform copy: browser session sign-out action
+      words.anyway,
     ),
   })
 }
@@ -1096,6 +1100,9 @@ function signOut(): void {
 }
 
 const reload = { label: 'Reload', run: () => location.reload() }
+
+let webLoading: ReturnType<typeof init> | undefined
+const loadWeb = () => webLoading ??= init({ module_or_path: __WASM__.web })
 
 async function boot(): Promise<void> {
   $('reload').addEventListener('click', () => location.reload())
@@ -1113,10 +1120,14 @@ async function boot(): Promise<void> {
     if (document.visibilityState === 'visible') recheckLink()
   })
   window.addEventListener('online', recheckLink)
+  const presentRecovery: RecoveryPresenter = async (count, current) => {
+    await loadWeb()
+    return JSON.parse(recoveryView(count, current)) as RecoveryView
+  }
   const copies = new SavedCopies($('saved-copies') as HTMLDialogElement, relayCopy, () => {
     const passkey = signedIn?.device.passkey
     return passkey ? b64url(passkey.id) : undefined
-  })
+  }, presentRecovery)
   $('show-saved-copies').addEventListener('click', () => void copies.open())
   signOutForgets(() => signedIn)
   $('copy-note-close').addEventListener('click', () => ($('copy-note').hidden = true))
@@ -1142,7 +1153,7 @@ async function start(watch: StartWatch): Promise<void> {
   }
   // Both modules download while the account is checked: after a deploy they
   // are the longest wait, and neither depends on who is signed in.
-  const loading = Promise.all([init({ module_or_path: __WASM__.web }), loadTailcat(__WASM__.tailcat)])
+  const loading = Promise.all([loadWeb(), loadTailcat(__WASM__.tailcat)])
   loading.catch(() => {})
   useConversationWords(planView)
 

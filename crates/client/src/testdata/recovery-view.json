@@ -1,0 +1,17 @@
+{
+  "title": "Saved Copies",
+  "explanation": "Each passkey keeps one sealed recovery copy shared by its browsers. Clearing a copy removes recovery for those browsers; their local runners and passkey stay. An active browser may save a copy again after a touch.",
+  "close": "Close",
+  "loading": "Loading saved copies…",
+  "loadFailed": "Far Cooler couldn’t load your saved copies. Close this window and try again.",
+  "clear": "Clear Copy",
+  "clearFailed": "Far Cooler couldn’t clear that saved copy. Try again.",
+  "signingOut": "Signing out…",
+  "deleteTitle": "Your saved copy may still be at Far Cooler",
+  "deleteDetail": "Far Cooler couldn’t confirm that your passkey’s shared recovery copy was deleted. It may still restore your runners in browsers using this passkey. Retry, or sign out and clear it later from Saved Copies.",
+  "retry": "Retry Delete",
+  "anyway": "Sign Out Anyway",
+  "summary": "2 saved copies.",
+  "passkey": "This browser’s passkey",
+  "cleared": "Saved copy cleared."
+}

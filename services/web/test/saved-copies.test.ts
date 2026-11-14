@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import words from '../../../crates/client/src/testdata/recovery-view.json'
 import { relayRaw } from '../src/client/relay-client'
 import { deleteCopy, SavedCopies } from '../src/client/saved-copies'
 
@@ -32,7 +33,7 @@ describe('account-owned saved copies', () => {
       if (route === 'web/vault') return { status: 200, body: { vaults: [{ credential: 'current' }, { credential: '<junk>' }] } }
       deleted.push(body.credential)
       return { status: fail ? 502 : 200, body: {} }
-    }, () => 'current')
+    }, () => 'current', async (_count, current) => ({ ...words, passkey: current ? words.passkey : 'Another passkey' }))
     await view.open()
     expect(dialog.open).toBe(true)
     const message = dialog.children[3]
@@ -55,8 +56,21 @@ describe('account-owned saved copies', () => {
   it('reports a failed list instead of claiming the account has no copies', async () => {
     vi.stubGlobal('document', { createElement: () => new Element() })
     const dialog = new Element()
-    await new SavedCopies(dialog as unknown as HTMLDialogElement, async () => { throw new Error('offline') }, () => undefined).open()
+    await new SavedCopies(dialog as unknown as HTMLDialogElement, async () => { throw new Error('offline') }, () => undefined, async () => words).open()
     expect(dialog.children[3].textContent).toContain('couldn’t load')
+  })
+
+  it('shows a closeable failure when the presentation module cannot load', async () => {
+    vi.stubGlobal('document', { createElement: () => new Element() })
+    const dialog = new Element()
+    const call = vi.fn()
+    await new SavedCopies(dialog as unknown as HTMLDialogElement, call, () => undefined,
+      async () => { throw new Error('wasm unavailable') }).open()
+    expect(dialog.open).toBe(true)
+    expect(dialog.children[3].textContent).toBe(words.loadFailed)
+    expect(call).not.toHaveBeenCalled()
+    await dialog.children[2].onclick!()
+    expect(dialog.open).toBe(false)
   })
 
   it('keeps an expired-session delete on the page so Sign Out can report its failure', async () => {

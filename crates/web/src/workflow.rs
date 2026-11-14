@@ -11,3 +11,9 @@ pub fn presentation(request: &str) -> String {
 pub fn plan_view(request: &str) -> String {
     farcooler_client::plan_view::json(request)
 }
+
+/// Account-owned recovery copy presentation from the shared client.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = recoveryView))]
+pub fn recovery_view(count: usize, current: bool) -> String {
+    farcooler_client::recovery_view::view(count, current).to_string()
+}
