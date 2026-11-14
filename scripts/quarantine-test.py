@@ -49,7 +49,11 @@ class Lint(unittest.TestCase):
         (crate / "src/lib.rs").write_text(
             '// #[test] fn in_a_comment() {}\nfn plain() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn real() {}\n'
             '    fn helper() {}\n    mod deep {\n        #[tokio::test]\n        async fn nested() {}\n    }\n}\n')
+        (crate / "src/lib.rs").write_text((crate / "src/lib.rs").read_text() + "mod server;\n")
         (crate / "src/server/mod.rs").write_text("#[test]\nfn in_a_file_module() {}\n")
+        (crate / "src/main.rs").write_text("mod cli;\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn in_main() {}\n}\n")
+        (crate / "src/cli.rs").write_text("#[test]\nfn in_cli() {}\n")
+        (crate / "src/orphan.rs").write_text("#[test]\nfn never_compiled() {}\n")
         (crate / "tests/a_bin.rs").write_text("#[test]\nfn integration() {}\n")
         entries, problems = q.parse(text, today)
         return problems + q.unknown(entries, root)
@@ -86,6 +90,10 @@ class Lint(unittest.TestCase):
             "farcooler-x::no_such_bin integration ov-1 2026-12-01\n",       # nonexistent test binary
             "farcooler-x::a_bin tests::real ov-1 2026-12-01\n",             # right test, wrong binary
             "farcooler-x integration ov-1 2026-12-01\n",                    # integration test under the lib binary
+            "farcooler-x tests::in_main ov-1 2026-12-01\n",                 # a main.rs test under the library binary
+            "farcooler-x::bin/farcooler-x tests::real ov-1 2026-12-01\n",   # a lib test under the binary
+            "farcooler-x::bin/other tests::in_main ov-1 2026-12-01\n",      # wrong binary name
+            "farcooler-x orphan::never_compiled ov-1 2026-12-01\n",         # a file no `mod` reaches
         ]:
             with self.subTest(text=text):
                 self.assertTrue(any("no test" in p for p in self.check(text)), self.check(text))

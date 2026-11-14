@@ -125,6 +125,23 @@ def _module(parts):
     return parts
 
 
+def _reach(root_file):
+    """(file, module path) of a target's root file and every file its `mod x;` declarations reach."""
+    out, todo = [], [(root_file, [], root_file.parent)]
+    while todo:
+        path, module, children = todo.pop()
+        if not path.exists():
+            continue
+        out.append((path, module))
+        for name in re.findall(r"\bmod\s+(\w+)\s*;", _clean(path.read_text(errors="replace"))):
+            flat, nested = children / f"{name}.rs", children / name / "mod.rs"
+            if flat.exists():
+                todo.append((flat, module + [name], children / name))
+            elif nested.exists():
+                todo.append((nested, module + [name], children / name))
+    return out
+
+
 def real_tests(root):
     """Every (binary id, full test name) in the repo's crates, read from source the way nextest names them.
 
@@ -141,19 +158,19 @@ def real_tests(root):
         has_lib = (crate / "src/lib.rs").exists()
         declared = re.findall(r'^\[\[bin\]\]\s*\nname\s*=\s*"([^"]+)"(?:\s*\npath\s*=\s*"([^"]+)")?', text, re.M)
         main_bin = next((n for n, path in declared if path in ("", "src/main.rs")), package)
-        for path in sorted((crate / "src").rglob("*.rs")) if (crate / "src").exists() else []:
-            rel = path.relative_to(crate / "src").parts
-            if rel[0] == "bin":
-                stem = rel[1].removesuffix(".rs")
-                binary, module = f"{package}::bin/{next((n for n, p in declared if p == 'src/' + '/'.join(rel)), stem)}", _module(rel[2:] or ["main"])
-                if len(rel) == 2:
-                    module = []
-            elif has_lib:
-                binary, module = package, _module(rel)
-            else:
-                binary, module = f"{package}::bin/{main_bin}", _module(rel)
-            for name in inline_tests(path.read_text(errors="replace")):
-                found.add((binary, "::".join(module + [name])))
+        roots = []  # (root file, binary id): each Cargo target owns the files its `mod x;` lines reach
+        if has_lib:
+            roots.append((crate / "src/lib.rs", package))
+        if (crate / "src/main.rs").exists():
+            roots.append((crate / "src/main.rs", f"{package}::bin/{main_bin}"))
+        for path in sorted((crate / "src/bin").glob("*.rs")) + sorted((crate / "src/bin").glob("*/main.rs")):
+            rel = "src/" + "/".join(path.relative_to(crate / "src").parts)
+            stem = path.stem if path.name != "main.rs" else path.parent.name
+            roots.append((path, f"{package}::bin/{next((n for n, p in declared if p == rel), stem)}"))
+        for root_file, binary in roots:
+            for path, module in _reach(root_file):
+                for name in inline_tests(path.read_text(errors="replace")):
+                    found.add((binary, "::".join(module + [name])))
         for path in sorted((crate / "tests").rglob("*.rs")) if (crate / "tests").exists() else []:
             rel = path.relative_to(crate / "tests").parts
             module = _module(rel[1:]) if len(rel) > 1 and rel[-1] != "main.rs" else []
