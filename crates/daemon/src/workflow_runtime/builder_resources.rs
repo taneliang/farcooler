@@ -8,6 +8,7 @@ use rustix::fs::{flock, FlockOperation};
 const GIB: u64 = 1024 * 1024 * 1024;
 const MIN_FREE: u64 = 25 * GIB;
 pub(super) const CACHE_CAP: u64 = 20 * GIB;
+pub(super) const EXISTING_TARGET: &str = "Build didn't start: target/ already contains output that the engine does not own. Move it aside and retry so build scripts use fresh output.";
 pub(super) const LOW_DISK: &str = "Build didn't start: less than 25 GB of disk space is free. Free some space and retry.";
 
 fn free_bytes(path: &Path) -> std::io::Result<u64> {
@@ -80,6 +81,24 @@ impl Exec {
         // measured stale workspace artifacts with a single undifferentiated CARGO_TARGET_DIR (ov-837).
         self.root.join("builder-targets").join(&digest(&("builder-target/v1", tree))[4..])
     }
+    pub(super) fn builder_target_conflicts(&self, tree: &Path, effect: &Effect) -> Result<bool> {
+        let target = tree.join("target");
+        let metadata = match target.symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        let receipt = self.target_receipt(effect, "owner");
+        if !receipt.try_exists()? { return Ok(true); }
+        let owner: TargetOwner = serde_json::from_slice(&self.bytes(&receipt)?)?;
+        Ok(!metadata.file_type().is_symlink() || owner.link != Some((metadata.dev(), metadata.ino()))
+            || std::fs::read_link(target)? != self.builder_target(tree))
+    }
+    fn staged_builder_link(&self, tree: &Path, effect: &Effect) -> Result<PathBuf> {
+        // A sibling keeps publication on the same volume even for an adopted checkout elsewhere.
+        Ok(tree.parent().ok_or(Error::Refused("missing worktree parent"))?
+            .join(format!(".builder-target-{}", digest(effect))))
+    }
     pub(super) fn build_has_space(&self, tree: &Path) -> Result<bool> {
         #[cfg(test)]
         if let Some(bytes) = self.build_free_bytes { return Ok(bytes >= MIN_FREE); }
@@ -131,23 +150,28 @@ impl Exec {
         (&file).write_all(&now().to_le_bytes())?;
         let receipt = self.target_receipt(effect, "owner");
         if matches!(effect.kind, EffectKind::Execute(StageKind::Build)) && !receipt.try_exists()? {
-            let link = self.link_builder_target(tree, &target).await?;
-            durable(&receipt, &serde_json::to_vec(&TargetOwner { link })?)?;
+            self.link_builder_target(tree, &target, effect).await?;
+        }
+        if matches!(effect.kind, EffectKind::Execute(StageKind::Build)) {
+            self.publish_builder_link(tree, &target, effect)?;
         }
         Ok(file)
     }
     /// Existing build scripts link libraries and execute binaries through the checkout's target/ path. Keep
     /// that path working while Cargo writes into the managed bucket. Never replace tracked or nonignored files.
-    async fn link_builder_target(&self, tree: &Path, cached: &Path) -> Result<Option<(u64, u64)>> {
+    async fn link_builder_target(&self, tree: &Path, cached: &Path, effect: &Effect) -> Result<()> {
         let target = tree.join("target");
         // Ignored does not mean owned. Keep pre-existing directories, files and even dangling links.
         match target.symlink_metadata() {
-            Ok(_) => return Ok(None),
+            Ok(_) => return Err(Error::Refused(EXISTING_TARGET)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
             Err(error) => return Err(error.into()),
         }
-        if !crate::git::git(tree, &["check-ignore", "--quiet", "--", "target/"]).await.is_ok_and(|o| o.ok) { return Ok(None); }
-        if !crate::git::git(tree, &["ls-files", "-z", "--", "target"]).await.is_ok_and(|o| o.ok && o.stdout.is_empty()) { return Ok(None); }
+        if !crate::git::git(tree, &["check-ignore", "--quiet", "--", "target/"]).await.is_ok_and(|o| o.ok)
+            || !crate::git::git(tree, &["ls-files", "-z", "--", "target"]).await.is_ok_and(|o| o.ok && o.stdout.is_empty()) {
+            durable(&self.target_receipt(effect, "owner"), &serde_json::to_vec(&TargetOwner { link: None })?)?;
+            return Ok(());
+        }
         // A directory-only ignore rule (target/) doesn't ignore a symlink. Extend that already-ignored build
         // path in Git's private excludes, leaving committed source and its .gitignore unchanged.
         let exclude = crate::git::git(tree, &["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"]).await
@@ -162,11 +186,47 @@ impl Exec {
             file.write_all(b"\n# Engine-managed build output (ov-1170)\n/target\n")?;
             file.sync_all()?;
         }
-        // symlink fails with AlreadyExists if somebody created target while Git was being checked.
-        std::os::unix::fs::symlink(cached, &target)?;
-        let metadata = target.symlink_metadata()?;
-        File::open(tree)?.sync_all()?;
-        Ok(Some((metadata.dev(), metadata.ino())))
+        // Stage first, then durably record its inode BEFORE publishing target/. A crash before the
+        // receipt leaves only this private sibling; retry adopts that exact staged link. A crash after
+        // publication retains the same inode in the receipt, even if the staging name has been removed.
+        let staged = self.staged_builder_link(tree, effect)?;
+        match std::os::unix::fs::symlink(cached, &staged) {
+            Ok(()) => {},
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {},
+            Err(error) => return Err(error.into()),
+        }
+        let metadata = staged.symlink_metadata()?;
+        if !metadata.file_type().is_symlink() || std::fs::read_link(&staged)? != cached {
+            return Err(Error::Refused("aliased staged builder link"));
+        }
+        File::open(staged.parent().ok_or(Error::Refused("missing staging parent"))?)?.sync_all()?;
+        durable(&self.target_receipt(effect, "owner"), &serde_json::to_vec(&TargetOwner {
+            link: Some((metadata.dev(), metadata.ino())),
+        })?)?;
+        Ok(())
+    }
+    fn publish_builder_link(&self, tree: &Path, cached: &Path, effect: &Effect) -> Result<()> {
+        let owner: TargetOwner = serde_json::from_slice(&self.bytes(&self.target_receipt(effect, "owner"))?)?;
+        let Some(identity) = owner.link else { return Ok(()) };
+        let staged = self.staged_builder_link(tree, effect)?;
+        if let Ok(metadata) = staged.symlink_metadata() {
+            if !metadata.file_type().is_symlink() || (metadata.dev(), metadata.ino()) != identity
+                || std::fs::read_link(&staged)? != cached { return Err(Error::Refused("aliased staged builder link")); }
+            // link(2) publishes the symlink itself, preserving its recorded inode and refusing to
+            // overwrite any target another process created while the Git checks were running.
+            match std::fs::hard_link(&staged, tree.join("target")) {
+                Ok(()) => {},
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {},
+                Err(error) => return Err(error.into()),
+            }
+            File::open(tree)?.sync_all()?;
+            std::fs::remove_file(&staged)?;
+            File::open(staged.parent().ok_or(Error::Refused("missing staging parent"))?)?.sync_all()?;
+        }
+        if tree.join("target").symlink_metadata().is_err() || self.builder_target_conflicts(tree, effect)? {
+            return Err(Error::Refused(EXISTING_TARGET));
+        }
+        Ok(())
     }
     /// Completed cleanup is durable and scoped to each build effect. Archived tickets may be swept again,
     /// but must never claim a user's later output. Older runs without ownership receipts are preserved.
@@ -218,6 +278,12 @@ impl Exec {
                         File::open(&tree)?.sync_all()?;
                     }
                 }
+            }
+            let staged = self.staged_builder_link(&tree, &effect)?;
+            if staged.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink() && Some((m.dev(), m.ino())) == owner.link)
+                && std::fs::read_link(&staged).is_ok_and(|p| p == cached) {
+                std::fs::remove_file(&staged)?;
+                File::open(staged.parent().ok_or(Error::Refused("missing staging parent"))?)?.sync_all()?;
             }
             durable(&cleaned, b"{}")?;
         }

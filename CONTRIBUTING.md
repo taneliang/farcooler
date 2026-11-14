@@ -145,7 +145,10 @@ are evicted least recently used first above 20 GB; live builders hold leases and
 are never evicted. The cache is checked before and after a build. At WaitingJoin,
 Failed or Cancelled, the engine releases that run's bucket and its recorded
 compatibility link, preserving source files and branches. Pre-existing local output is preserved,
-including ignored directories and symlinks in adopted worktrees. Durable cleanup
+including ignored directories and symlinks in adopted worktrees. A build with a
+pre-existing target is refused with a notice to move it aside, so scripts cannot
+consume stale personal artifacts while Cargo writes elsewhere. Compatibility links
+are staged and their ownership is durable before target/ is published. Durable cleanup
 receipts prevent later sweeps from deleting output a person creates after a run
 finishes. Interrupted deletions are retried when the daemon restarts.
 

@@ -320,7 +320,7 @@ async fn adopted_user_rebuild_after_cleanup_survives_archive_and_restart() {
     let cached = runtime.builder_target(&tree);
     std::fs::create_dir(&cached).unwrap();
     std::fs::write(cached.join("user"), "new cached output").unwrap();
-    runtime.prune_builder_targets(&[workspace.clone()]).await.unwrap();
+    runtime.prune_builder_targets(std::slice::from_ref(&workspace)).await.unwrap();
     assert!(tree.join("target/user").exists());
     assert!(runtime.internal(&workspace, Command::Cancel { item: "one".into(), reason: None }, Grant::Controller, 50).unwrap().result.is_ok());
     let definition = runtime.configured_definition().unwrap();
@@ -329,7 +329,7 @@ async fn adopted_user_rebuild_after_cleanup_survives_archive_and_restart() {
     let root = runtime.root.clone();
     drop(runtime);
     let runtime = Runtime::open(&root).unwrap();
-    for _ in 0..2 { runtime.prune_builder_targets(&[workspace.clone()]).await.unwrap(); }
+    for _ in 0..2 { runtime.prune_builder_targets(std::slice::from_ref(&workspace)).await.unwrap(); }
     assert!(tree.join("target/user").exists());
     assert!(cached.join("user").exists());
 }
@@ -363,4 +363,65 @@ async fn cleanup_preserves_an_engine_link_that_was_explicitly_tracked() {
     adapters::git(&tree, &["add", "-f", "--", "target"]).await.unwrap();
     finish(&mut runtime, &workspace).await;
     assert!(tree.join("target").symlink_metadata().unwrap().file_type().is_symlink());
+}
+
+#[tokio::test]
+async fn adopted_existing_target_refuses_before_compiling_or_reading_stale_artifacts() {
+    for preexisting in [false, true] {
+        let (dir, mut runtime, tree, workspace) = adopted().await;
+        // Exercise a real compiler and a target-based consumer when allowed to start. The same
+        // command must be refused before launch if target/ contains somebody else's artifacts.
+        adapter(dir.path(), |s| s.replace("if stage == 'build':\n", "if stage == 'build':\n    pathlib.Path(os.environ['STARTED']).write_text('launched')\n    cache = pathlib.Path(os.environ['CARGO_TARGET_DIR'])\n    (cache / 'debug').mkdir(exist_ok=True)\n    subprocess.run(['/usr/bin/cc', '-x', 'c', '-', '-o', str(cache / 'debug/fresh')], input='int main(void) { return 0; }', text=True, check=True)\n    subprocess.run(['target/debug/fresh'], check=True)\n    pathlib.Path(os.environ['STARTED'] + '.consumed').write_text('yes')\n"));
+        if preexisting {
+            std::fs::create_dir_all(tree.join("target/debug")).unwrap();
+            std::fs::write(tree.join("target/debug/fresh"), "personal artifact").unwrap();
+        }
+        runtime.pump(2).await.unwrap();
+        runtime.pump(3).await.unwrap();
+        if preexisting {
+            assert!(!dir.path().join("started").exists(), "refuse before any build command starts");
+            assert!(!runtime.builder_target(&tree).exists());
+            assert_eq!(std::fs::read_to_string(tree.join("target/debug/fresh")).unwrap(), "personal artifact");
+            let root = runtime.root.clone();
+            drop(runtime);
+            let mut runtime = Runtime::open(&root).unwrap();
+            assert_eq!(finish(&mut runtime, &workspace).await.items["one"].failure.as_deref(), Some(EXISTING_TARGET));
+            assert_eq!(std::fs::read_to_string(tree.join("target/debug/fresh")).unwrap(), "personal artifact");
+        } else {
+            assert!(dir.path().join("started.consumed").exists(), "compiler and target/ consumer agree");
+        }
+    }
+}
+
+#[tokio::test]
+async fn compatibility_link_publication_recovers_at_each_crash_boundary() {
+    for boundary in 0..3 {
+        let (_dir, mut runtime, tree, workspace) = adopted().await;
+        runtime.pump(2).await.unwrap();
+        let effect = runtime.store.workflow_outbox(&workspace).unwrap().into_iter()
+            .find(|s| s.active && matches!(s.effect.kind, EffectKind::Execute(StageKind::Build))).unwrap().effect;
+        let cached = runtime.builder_target(&tree);
+        let staged = runtime.staged_builder_link(&tree, &effect).unwrap();
+        if boundary == 0 {
+            // Interrupted between staging the symlink and persisting ownership: target/ is absent.
+            std::os::unix::fs::symlink(&cached, &staged).unwrap();
+        } else {
+            runtime.link_builder_target(&tree, &cached, &effect).await.unwrap();
+            assert!(tree.join("target").symlink_metadata().is_err(), "publish only after durable ownership");
+            assert!(runtime.target_receipt(&effect, "owner").is_file());
+            if boundary == 2 {
+                // Interrupted after publication but before removing the staged name.
+                std::fs::hard_link(&staged, tree.join("target")).unwrap();
+            }
+        }
+        let root = runtime.root.clone();
+        drop(runtime);
+        let mut runtime = Runtime::open(&root).unwrap();
+        drop(runtime.prepare_builder_target(&tree, &effect).await.unwrap());
+        assert_eq!(std::fs::read_link(tree.join("target")).unwrap(), cached);
+        assert!(staged.symlink_metadata().is_err());
+        finish(&mut runtime, &workspace).await;
+        assert!(tree.join("target").symlink_metadata().is_err(), "no dangling compatibility link after cleanup");
+        assert!(!cached.exists());
+    }
 }
