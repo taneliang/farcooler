@@ -244,7 +244,10 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
         return Err(std::io::Error::other("injected unproved process settlement").into());
     }
     // Forgotten (and continued) before the group is signalled below, so a recycled pgid is never stopped.
-    let paused = builder.map(|y| y.builder(crate::yielding::Target::Group { pid, started: Owner::started_at(pid)? }));
+    let paused = match builder {
+        Some(y) => Some(y.builder(crate::yielding::Target::Group { pid, started: Owner::started_at(pid)? })),
+        None => None,
+    };
     let result = tokio::select! {
         result = tokio::time::timeout(limit, exited(pid)) => Some(result),
         _ = async {

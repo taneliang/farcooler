@@ -957,7 +957,7 @@ else:
         for entry in std::fs::read_dir(runtime.root.join("receipts")).unwrap() {
             let path = entry.unwrap().path();
             if !path.to_string_lossy().ends_with(".native-settled.json") { continue; }
-            let NativeSettlement::Launched { owner, hooks, completed } = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+            let NativeSettlement::Launched { owner, hooks, completed, .. } = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
                 else { panic!("the native step never launched") };
             assert_eq!(completed, Some(true));
             let prompt = hooks.iter().find(|h| h.event == "UserPromptSubmit").unwrap()

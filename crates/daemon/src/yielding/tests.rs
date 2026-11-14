@@ -10,7 +10,7 @@ fn builder() -> std::process::Child {
     child
 }
 fn group(child: &std::process::Child) -> Target {
-    Target::Group { pid: child.id(), started: crate::effect_runner::Owner::started_at(child.id()) }
+    Target::Group { pid: child.id(), started: crate::effect_runner::Owner::started_at(child.id()).unwrap() }
 }
 /// The state letters of every process in the group.
 fn states(child: &std::process::Child) -> Vec<String> {
