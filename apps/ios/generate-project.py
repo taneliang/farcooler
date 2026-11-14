@@ -1312,6 +1312,7 @@ FONTS = [
 # One icon source for both Apple apps. The asset catalog lives under `apps/shared`
 # so iOS can compile it directly and the macOS renderer can use the same master.
 ASSET_CATALOG = "Assets.xcassets"
+WORKFLOW_FIXTURE = "workflow-change-question.txt"
 
 KEYS = [
     "project", "target", "mainGroup", "productsGroup", "sourcesGroup",
@@ -1381,12 +1382,12 @@ ids = {
     for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES
     + NOTIFY_SOURCES + WATCH_SOURCES + WATCH_ONLY_AGENTKIT_SOURCES
     + WATCH_WIDGET_SOURCES + UI_TEST_SOURCES
-    + FRAMEWORKS + FONTS + [ASSET_CATALOG]
+    + FRAMEWORKS + FONTS + [ASSET_CATALOG, WORKFLOW_FIXTURE]
 }
 build_ids = {
     name: oid("build/" + name)
     for name in SOURCES + CEREMONY_SOURCES + AGENTKIT_SOURCES + ACTIVITY_SOURCES
-    + UI_TEST_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG]
+    + UI_TEST_SOURCES + FRAMEWORKS + FONTS + [ASSET_CATALOG, WORKFLOW_FIXTURE]
 }
 
 # A PBXBuildFile is "this file, compiled into THIS target", so a file two targets
@@ -1531,6 +1532,11 @@ def file_refs():
             f"lastKnownFileType = file; path = {name}; sourceTree = \"<group>\"; }};"
         )
     lines.append(
+        f"\t\t{ids[WORKFLOW_FIXTURE]} /* {WORKFLOW_FIXTURE} */ = {{isa = PBXFileReference; "
+        f"lastKnownFileType = text; path = ../../crates/client/src/testdata/{WORKFLOW_FIXTURE}; "
+        "sourceTree = SOURCE_ROOT; };"
+    )
+    lines.append(
         f"\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */ = {{isa = PBXFileReference; "
         f"lastKnownFileType = folder.assetcatalog; name = {ASSET_CATALOG}; "
         f"path = build/{ASSET_CATALOG}; sourceTree = SOURCE_ROOT; }};"
@@ -1591,7 +1597,7 @@ def build_files():
             f"\t\t{build_ids[name]} /* {name} in Frameworks */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
         )
-    for name in FONTS:
+    for name in FONTS + [WORKFLOW_FIXTURE]:
         lines.append(
             f"\t\t{build_ids[name]} /* {name} in Resources */ = {{isa = PBXBuildFile; "
             f"fileRef = {ids[name]}; }};"
@@ -1661,7 +1667,7 @@ source_list = "\n".join(
 )
 framework_list = "\n".join(f"\t\t\t\t{build_ids[n]} /* {n} in Frameworks */," for n in FRAMEWORKS)
 resource_list = "\n".join(
-    f"\t\t\t\t{build_ids[n]} /* {n} in Resources */," for n in FONTS + [ASSET_CATALOG]
+    f"\t\t\t\t{build_ids[n]} /* {n} in Resources */," for n in FONTS + [ASSET_CATALOG, WORKFLOW_FIXTURE]
 )
 source_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in SOURCES)
 framework_children = "\n".join(f"\t\t\t\t{ids[n]} /* {n} */," for n in FRAMEWORKS)
@@ -2099,6 +2105,7 @@ PBXPROJ = f"""// !$*UTF8*$!
 \t\t\t\t{P['uiTestGroup']} /* FarCoolerUITests */,
 \t\t\t\t{P['agentKitGroup']} /* AgentKit */,
 \t\t\t\t{ids[ASSET_CATALOG]} /* {ASSET_CATALOG} */,
+\t\t\t\t{ids[WORKFLOW_FIXTURE]} /* {WORKFLOW_FIXTURE} */,
 \t\t\t\t{P['frameworksGroup']} /* Frameworks */,
 \t\t\t\t{P['productsGroup']} /* Products */,
 \t\t\t);
