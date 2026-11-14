@@ -16,6 +16,10 @@ use uuid::Uuid;
 use super::{Failed, unreadable};
 use crate::tasks::DispatchLink;
 
+#[cfg(test)]
+#[path = "plan_agent_start_rpc_tests.rs"]
+mod rpc_tests;
+
 /// What the engine holds for one ticket.
 #[derive(Debug, PartialEq, Eq)]
 enum Hold {
@@ -53,7 +57,7 @@ enum Seen {
 }
 
 async fn snapshot<L: DispatchLink>(link: &mut L, workspace: Uuid) -> Seen {
-    let Ok(request) = crate::workflow::request(workspace, &Action::Get) else { return Seen::Unanswered };
+    let Ok(request) = crate::workflow::full_request(workspace) else { return Seen::Unanswered };
     let Ok(reply) = link.call(request).await else { return Seen::Unanswered };
     match read(reply) {
         Some(seen) => seen.map_or(Seen::Nothing, Seen::Held),

@@ -201,6 +201,12 @@ pub fn request(workspace:Uuid, action:&Action) -> Result<pb::Request, Box<dyn st
     if matches!(action, Action::Get) { r.accepts.push("workflow_summary_v1".into()); }
     Ok(r)
 }
+/// Read definitions for internal decisions and explicit `--full` inspection.
+pub(crate) fn full_request(workspace:Uuid) -> Result<pb::Request, Box<dyn std::error::Error>> {
+    let mut req = request(workspace,&Action::Get)?;
+    req.accepts = vec!["workflow_full_v1".into()];
+    Ok(req)
+}
 async fn read_deadline<T>(future:impl std::future::Future<Output=T>) -> Result<T, Box<dyn std::error::Error>> {
     tokio::time::timeout(std::time::Duration::from_secs(10), future).await
         .map_err(|_| "Workflow read timed out after 10 seconds. The runner may be busy; try workflow get again.".into())
@@ -226,9 +232,7 @@ pub async fn ask(link:&mut crate::Link, workspace:Uuid, action:&Action) -> Resul
 /// The runner's `workflow get` reply, unprinted, for the commands that draft from it.
 pub async fn get(link:&mut crate::Link, workspace:Uuid) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
-    let mut req = request(workspace,&Action::Get)?;
-    req.accepts = vec!["workflow_full_v1".into()];
-    let reply = read_deadline(link.call(req)).await??;
+    let reply = read_deadline(link.call(full_request(workspace)?)).await??;
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     Ok(serde_json::from_str(&reply.json)?)
 }

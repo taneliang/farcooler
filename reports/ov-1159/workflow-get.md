@@ -131,3 +131,41 @@ Acceptance: p95 is below 2 s with 15 active builds; required caller fields and
 `--full` definitions are verified; workflow summary/full CLI reads never enter
 the actor's git/status or cleanup path. All requested implementation and test
 work is complete.
+
+## Fix round 1: dispatch snapshots keep definitions
+
+The review found one internal read still using the summary marker:
+`plan_agent_start::snapshot`. Dispatch identifies a tracked ticket by
+`items[k].definition.source` and reads model choices from
+`configuration.definition.models`. The summary removes both, so a waiting
+ticket was classified as already running and model selection was lost.
+
+Dispatch snapshots now use an explicit full request, shared with `--full` and
+the internal draft/template reader. The public default stays a summary. The
+other internal request caller, `tasks::runs_a_workflow`, only tests whether
+configuration exists, which the summary preserves.
+
+The new CLI regression uses the real Service and RPC handler, a published
+configuration with two model choices, and an actual tracked ticket. It first
+checks the default summary omits definitions, then calls `snapshot` and checks
+that the WaitingApproval ticket is AtRest (with the same run and pin), both
+models remain available in order, and selecting a configured model succeeds.
+Before the fix, this test failed with `Taken("already has a run under the
+engine")` instead of `AtRest`. With the fix it passes.
+
+Round 1 validation: the full CLI suite passed (634 tests, 1 opt-in test
+ignored), and CLI clippy including tests passed with warnings denied. The
+suite needs access to private socket/process fixtures; a sandboxed run failed
+on permission errors before the permitted run passed. File-size budget,
+swallow lint, doc-comment check and diff whitespace checks passed. All builds
+used this worktree's `target/` with `TMPDIR=/tmp`.
+
+The three daemon workflow-read regressions passed again. The combined Cargo
+run's opt-in load fixture timed out before all build-start markers appeared;
+no latency samples were taken in that attempt. Running the same compiled
+fixture alone from `crates/daemon` passed with the rebuilt CLI: 15 active
+builds, 40 samples, median 0.0130 s, **p95 0.0139 s**, maximum 0.0168 s,
+summary 14,881 bytes, full reply 38,263 bytes. The fixture also verified
+`--full` definitions and all fifteen Running/build-stage items in every
+sample. The startup failure in the combined attempt remains unexplained;
+the isolated rerun reproduces the original acceptance result.
