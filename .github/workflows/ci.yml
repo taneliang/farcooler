@@ -210,6 +210,18 @@ jobs:
           # lane's repository shallow (lane-gate refuses a step that does).
           git fetch --no-tags origin main
           ./scripts/shared-core-lint.py --baseline-not-grown FETCH_HEAD
+      # The daemon's layers only depend downward (ov-1272, step 1 of ov-1219's split):
+      # no module of an implementation layer names the composition layer or a sibling
+      # it may not use. Today's edges are listed in scripts/daemon-layers-allow.txt; a
+      # new one fails, and so does a listed one that no longer exists. Its rules against
+      # planted edges first, then the tree, then the list against main's: a pull request
+      # cannot pass by writing a violation down.
+      - name: Daemon layers
+        run: |
+          ./scripts/daemon-layers.py --self-test
+          ./scripts/daemon-layers.py
+          git fetch --no-tags origin main
+          ./scripts/daemon-layers.py --allowlist-not-grown FETCH_HEAD
       # The capability names the apps ask a runner for are generated from
       # `farcooler_protocol::capability` (ov-154), and `can` takes the
       # generated type, so a misspelling does not compile. A generated file
