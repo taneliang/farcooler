@@ -228,9 +228,19 @@ class LandingTests(unittest.TestCase):
 
     def test_full_rust_forces_the_whole_suite_in_both_modes(self):
         """ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so."""
+        # A private clone with its own last commit touching Rust: the real HEAD may be any ticket's commit.
+        tmp = tempfile.TemporaryDirectory(prefix="full-rust-fixture-")
+        self.addCleanup(tmp.cleanup)
+        repo = Path(tmp.name) / "repo"
+        git_env = ["git", "-c", "commit.gpgsign=false", "-c", "user.name=Test", "-c", "user.email=t@t"]
+        subprocess.run(["git", "clone", "-q", "--no-hardlinks", str(ROOT), str(repo)], check=True, capture_output=True)
+        rs = subprocess.run(["git", "ls-files", "*.rs"], cwd=repo, capture_output=True, text=True, check=True).stdout.split()[0]
+        with open(repo / rs, "a") as f:
+            f.write("\n// fixture change\n")
+        subprocess.run([*git_env, "commit", "-qam", "fixture: touch Rust"], cwd=repo, check=True, capture_output=True)
         def plan(*flags):
-            out = subprocess.run([sys.executable, str(ROOT / "scripts/lane-gate.py"), "--dry-run", "--only", "rust",
-                                  "--base", "HEAD~1", *flags], cwd=ROOT, capture_output=True, text=True)
+            out = subprocess.run([sys.executable, str(repo / "scripts/lane-gate.py"), "--dry-run", "--only", "rust",
+                                  "--base", "HEAD~1", *flags], cwd=repo, capture_output=True, text=True)
             return out.stdout + out.stderr
         for flags in (("--landing", "--full-rust"), ("--full-rust",)):
             with self.subTest(flags=flags):
