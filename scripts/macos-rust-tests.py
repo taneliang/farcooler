@@ -198,7 +198,11 @@ def workflow_errors(ci, nightly):
         errors.append('Linux must retain the full workspace suite with checked partition coverage')
     build = section('rust-macos-build')
     mac = section('rust-macos-tests')
-    if ('cargo nextest archive --locked --profile ci --workspace --archive-file target/rust-macos-tests.tar.zst' not in build
+    # The archive is built by the one producer (ov-1210); that script must keep
+    # archiving the whole workspace.
+    producer = (ROOT / 'scripts/rust-archive.sh').read_text()
+    if ('./scripts/rust-archive.sh target/rust-macos-tests.tar.zst' not in build
+            or 'cargo nextest archive --locked --profile ci --workspace --archive-file "$archive"' not in producer
             or 'runs-on: macos-latest' not in build or 'runs-on: macos-latest' not in mac
             or 'macos-rust-tests.py' not in mac or '--shards 2 --filterset "$selection"' not in mac
             or '--partition hash:${{ matrix.shard }}/2 -E "$selection"' not in mac
@@ -266,7 +270,7 @@ def self_test():
     assert not workflow_errors(ci, nightly)
     assert workflow_errors(ci.replace('--no-fail-fast --archive-file', '-p farcooler-cli --archive-file'), nightly)
     assert workflow_errors(ci, nightly.replace('--workspace --no-fail-fast', '-p farcooler-cli'))
-    assert workflow_errors(ci.replace('archive --locked --profile ci --workspace', 'archive --locked --profile ci -p farcooler-cli'), nightly)
+    assert workflow_errors(ci.replace('rust-archive.sh target/rust-macos-tests', 'rust-archive.sh target/elsewhere'), nightly)
     print('macOS Rust selection self-test: planted uncovered cfg tests and Mac-only crate rejected')
 
 

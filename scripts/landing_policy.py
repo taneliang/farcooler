@@ -122,16 +122,21 @@ def apply(plans, proposal):
                     step.skip = "local landing: release bundle and its consumers run in CI"
             if job == "rust" and step.name == "Full Rust workspace (local)":
                 wrappers = "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- "
-                tail = "cargo nextest run --profile ci --workspace --no-fail-fast"
-                # CI wraps the run in the flaky-test quarantine runner (ov-1229).
-                expected = {wrappers + tail, wrappers + "python3 scripts/quarantine.py run -- " + tail}
-                if step.run.strip() not in expected:
+                tail = "cargo nextest run --profile ci --no-fail-fast --archive-file "
+                # CI wraps the run in the flaky-test quarantine runner (ov-1229);
+                # the local run is the unpartitioned archive run (ov-1210), after
+                # a line or two that link the channel aliases the tests spawn.
+                lines = step.run.rstrip().split("\n")
+                command = lines[-1]
+                if not (command.startswith(wrappers + tail)
+                        or command.startswith(wrappers + "python3 scripts/quarantine.py run -- " + tail)):
                     raise ValueError("Rust CI command changed; refusing to narrow an unknown shape")
                 if not proposal["full"]:
                     expression = " or ".join(f"package(={p})" for p in proposal["packages"])
                     if not expression:
                         raise ValueError("empty Rust package selection")
-                    step.run = step.run.rstrip() + " -E " + shlex.quote(expression) + "\n"
+                    lines[-1] = command + " -E " + shlex.quote(expression)
+                    step.run = "\n".join(lines) + "\n"
 
 
 

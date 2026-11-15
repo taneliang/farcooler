@@ -828,9 +828,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.148
       - name: Build the runtime binaries and test archive
-        run: |
-          cargo build --locked --workspace --bins
-          cargo nextest archive --locked --profile ci --workspace --archive-file target/rust-tests.tar.zst
+        run: ./scripts/rust-archive.sh target/rust-tests.tar.zst
       - uses: actions/upload-artifact@v4
         with:
           name: rust-tests
@@ -967,9 +965,7 @@ jobs:
         with:
           tool: cargo-nextest@0.9.148
       - name: Build the runtime binaries and test archive
-        run: |
-          cargo build --locked --workspace --bins
-          cargo nextest archive --locked --profile ci --workspace --archive-file target/rust-macos-tests.tar.zst
+        run: ./scripts/rust-archive.sh target/rust-macos-tests.tar.zst
       - uses: actions/upload-artifact@v4
         with:
           name: rust-macos-tests

@@ -107,7 +107,10 @@ class CoverageTests(unittest.TestCase):
 
     def test_workflow_runs_all_partitions_and_guard(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
-        self.assertIn('cargo nextest archive --locked --profile ci --workspace --archive-file', workflow)
+        self.assertIn('./scripts/rust-archive.sh target/rust-tests.tar.zst', workflow)
+        self.assertIn('./scripts/rust-archive.sh target/rust-macos-tests.tar.zst', workflow)
+        self.assertIn('cargo nextest archive --locked --profile ci --workspace --archive-file',
+                      (ROOT / 'scripts/rust-archive.sh').read_text())
         self.assertIn('shard: [1, 2, 3, 4]', workflow)
         self.assertIn('--partition hash:${{ matrix.shard }}/4', workflow)
         self.assertIn('python3 scripts/rust-shards.py --archive', workflow)
