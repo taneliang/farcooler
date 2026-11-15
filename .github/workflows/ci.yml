@@ -1104,15 +1104,16 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 35
     # The PR path builds the bundle's Rust binaries without ThinLTO and at
-    # opt-level 1 (ov-1270), as `swift-tests` does. Fat optimisation was about
-    # 8 of this job's 10 warm minutes and 14 of its 17 cold ones, and nothing
-    # below depends on it: the checks read versions, linkage and entitlements.
+    # opt-level 0 (ov-1270). Optimised Rust was about 8 of this job's 10 warm
+    # minutes and 14 of its 17 cold ones (the daemon crate alone took 4 minutes
+    # at opt-level 1), and nothing below depends on it: the checks read
+    # versions, linkage and entitlements, and run the binaries once.
     # Swift still builds `-c release`, so release-only Swift code is compiled
     # here. canary.yml, release.yml and nightly.yml do not set these and keep
     # the shipping profile.
     env:
       CARGO_PROFILE_RELEASE_LTO: "false"
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: "1"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "0"
     steps:
       - name: Check the runner has Xcode 27
         id: toolchain
@@ -1194,7 +1195,7 @@ jobs:
       # building one — so the assembly step is what CI should exercise.
       # Swift keeps the shipping configuration (`-c release`, so the
       # release-only conditional code is compiled). Rust is built fast on this
-      # PR path (no ThinLTO, opt-level 1; see the job's `env`); canary, release
+      # PR path (no ThinLTO, opt-level 0; see the job's `env`); canary, release
       # and nightly keep opt-level 3 + ThinLTO.
       - name: Check native bundle linkage isolation
         run: python3 scripts/macos-bundle-native-test.py

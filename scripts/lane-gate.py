@@ -1097,7 +1097,7 @@ def _self_test():
     # The PR path builds the bundle's Rust fast (ov-1270); shipping optimization
     # is proved by canary, release and nightly, which must never set these.
     expect("PR bundle builds Rust without LTO", bundle.env.get("CARGO_PROFILE_RELEASE_LTO"), "false")
-    expect("PR bundle builds Rust at opt-level 1", bundle.env.get("CARGO_PROFILE_RELEASE_OPT_LEVEL"), "1")
+    expect("PR bundle builds Rust at opt-level 0", bundle.env.get("CARGO_PROFILE_RELEASE_OPT_LEVEL"), "0")
     for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
         expect(f"bundle does not override codegen through {key}", key in bundle.env, False)
     for name in ("canary", "release", "nightly"):
