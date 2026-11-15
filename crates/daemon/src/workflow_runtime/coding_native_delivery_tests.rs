@@ -58,11 +58,8 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
     tokio::pin!(run);
     let delivery = async {
         let started = dir.path().join("started");
-        for _ in 0..300 {
-            if started.exists() { break; }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(started.exists(), "native agent never submitted its prompt");
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_millis(20), || started.exists()).await, "native agent never submitted its prompt");
         for key in [&primary.key, &task.key] {
             assert_eq!(crate::watch_view::lookup(&workspace, key).unwrap().1.terminal_id, terminal(&binding));
         }
