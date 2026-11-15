@@ -40,8 +40,11 @@ the new layout immediately. A step already running finishes, and its result
 is routed by the new layout. A renamed station keeps its work under the new
 name; a removed one is named in the change's **moves** with the station that
 replaces it, and a step that finishes there then enters that replacement, so
-the new process runs in full. The publish is refused while anything would be
-stranded.
+the new process runs in full. Work that has already crossed a once-only
+boundary (a push) never re-enters it: it resumes at the station after that
+boundary, or holds for the orchestrator if there is none to name. Cases the
+design leaves open hold the same way. The publish is refused while anything
+would be stranded.
 `workflow preview` runs the change on a copy of the live pipeline and shows
 exactly where every token ends up before anything is published (section 7).
 
@@ -274,7 +277,8 @@ pub struct Work { pub run: String, pub attempt: u8, pub pending: Option<String>,
 pub struct OpRef { pub adapter: String, pub op: String, pub spec: String }  // spec = digest of what it ran
 pub struct Decision { pub run: String, pub deciders: Vec<String>, pub needs: u8, pub given: Vec<Verdict> }
 pub struct Hold { pub reason: String, pub by: String, pub revision: u64, pub kind: HoldKind }
-pub enum HoldKind { Asked, PolicyLimit { policy: String }, StepFailed, Uncertain, Quarantined }
+pub enum HoldKind { Asked, PolicyLimit { policy: String }, StepFailed, Uncertain, Quarantined,
+                    Crossed { boundary: String } }   // crossed work a publish could not place (7.3)
 pub struct Visit { pub station: StationId, pub arrived: u64, pub started: Option<u64>, pub left: Option<u64>,
     pub ended: Option<String>, pub by: String, pub reason: Option<String>, pub overrode: Option<String> }
 pub enum Outcome {
@@ -820,7 +824,7 @@ leads back before it, and the walkthrough above is unchanged.
 | `Stale`, `Duplicate` | The token moved, or the input was seen |
 | `Invalid`, `Missing`, `Evidence`, `Definition` | Malformed input; `Evidence` also for a plain `Stopped` on an outward stop |
 | `Unauthorized` | The grant doesn't match (`reducer.rs:590-596`) |
-| `Crossed` | Rule 1 of 5.3: a send back to or before a `repeat: once` station the token crossed, or a pull from a batch that crossed |
+| `Crossed` | Rule 1 of 5.3: a send back to or before a `repeat: once` station the token crossed, a release in place of a `Crossed` hold (7.3), or a pull from a batch that crossed |
 | `Stopping` | Work on a tree, batch or resource whose last effect has no stop receipt yet (5.2) |
 | `PersonOnly` | Only for what the owner keeps on the list in section 9; empty if every question is answered "no" |
 | `Stranded` | A publish that would leave a token at no station (7.3) |
@@ -908,7 +912,10 @@ publish:
   preview: <digest of the preview it was checked against>
 ```
 
-The `Publish` event stores the whole layout and `moves` in the log (content
+A publish also carries `after`, one continuation per `repeat: once`
+boundary, saying where work that already crossed it resumes (7.3).
+
+The `Publish` event stores the whole layout, `moves` and `after` in the log (content
 addressed, in the immutable `workflow_genesis`-style table of 10.2 if large),
 so replay needs nothing outside the log.
 
@@ -922,7 +929,8 @@ In the publish event:
   retroactively.
 - A token queued or held at a removed or renamed station moves to the `moves`
   destination: into that queue at its place by priority and original arrival
-  revision, or held there with its hold reason kept.
+  revision, or held there with its hold reason kept. Crossed work is checked
+  by the migration rule (7.3) first.
 - A token awaiting a decision at a station whose deciders changed keeps its
   verdicts already given; new verdicts come from the new deciders, and `needs`
   is the new count.
@@ -953,7 +961,9 @@ that is a fact about running work, not a pin on the token.
   nothing, and keeps **only its translation**, never its old routes. The
   token finishes there; when it answers with label `L`:
   1. `passed` or `skipped`: the token **arrives at `to`** and queues there
-     by priority, as any arrival does. It does not jump to where the old
+     by priority, as any arrival does, unless it has crossed a
+     `repeat: once` boundary that `to` leads back to (the migration rule,
+     below). It does not jump to where the old
      station's `passed` used to lead: the new process from `to` onward runs
      in full, so a station the publish added after it (group review) is not
      bypassed.
@@ -998,6 +1008,111 @@ replacement can reset them:
   round's evidence, and the crossing it settles takes the effect's boundary
   and round.
 
+**Crossed work never re-enters its boundary.** The translations above say
+where work goes by station. One rule, checked after them, says where crossed
+work may not go, and it is the same rule for a removed, renamed, split or
+merged station:
+
+> **The migration rule.** Whenever a publish places a token or batch that
+> has crossed a `repeat: once` boundary K since its last `Reopen` (which
+> starts it afresh, 5.3), counting its batch's crossings for a member and a
+> crossing recorded by the very answer being translated, the place is
+> checked exactly as a `Send` is (5.3, rule 1): it must not be a K station, nor a station from which the new layout can
+> reach one. A place that fails goes to the boundary's **continuation**
+> `after[K]` instead: queued there for `passed`, `skipped` or a moved queued
+> token, held there with the label as its reason for any other label. With
+> no `after[K]`, the token holds where it is with
+> `HoldKind::Crossed { boundary }` for the orchestrator.
+
+"Places" means every placement a publish makes: a queued or held token
+moved by `moves` (7.2); a renamed station re-keyed where the new layout
+puts it; a retired station's answer translated by `retired_route` (`to`,
+or a `labels` target); a stopping or settling step's `then`; a member
+leaving a removed batch station (7.4); and a crossed token that stays at a
+live station the new layout moved before a K station. A token at a
+retired outward station whose effect is still admitted or uncertain settles
+first (5.3, rule 2); the rule applies to the place it settles into. A
+push's `passed` is a crossing label (4.1), so the case the rule exists for,
+a removed push replaced by another push on the same target, never reaches
+the replacement.
+
+How each station change meets the rule:
+
+| Change | Where the old translation would put crossed work | What the rule does |
+|---|---|---|
+| **Removed**, replaced on the same boundary (`boundary: keep`) | At `to`, itself a K station: a second push | `after[K]`, the station after the replacement |
+| **Renamed** | At the new id. The op is unchanged, so a renamed K station's crossing labels are already checked by `validate`; but a renamed post-K station the new layout placed before a K station would lead back to it | Nothing for a renamed K station; `after[K]` for the reordered one |
+| **Split** in two (`to` is the first half) | At the first half. `validate` forbids two K stations in a row on one path, so at most one half is a K station; if the K half comes second, the first half leads to it | `after[K]`, past the K half, whichever half it is |
+| **Merged** (both old ids name the merged station in `moves`) | At the merged station, a K station if either part was | `after[K]`, the station after the merged one |
+
+**How the mapping expresses it.** The publish carries one continuation per
+`repeat: once` boundary the new layout has a station for:
+
+```yaml
+  after: { coding:target:main: land.ci }   # where crossed work resumes
+```
+
+`after[K]` is a live station or a reserved target (4.1), and `validate`
+checks it as the rule checks a place: neither a K station nor one from which
+a K station is reachable. The preview proposes it (7.5): follow the new
+layout's routes from the K stations' crossing labels to the first station
+from which no K station is reachable. That is always the station
+immediately after the boundary, since `validate` already forbids reaching a
+K station from a crossing label.
+
+**When the new layout has nothing after the boundary.**
+
+- *The K station is the last station.* The proposed `after[K]` is the
+  reserved target its `passed` reaches: `finish` inside a batch (so the
+  batch station's `passed` route applies, `done` in 8.1) or `done` at the
+  top level. Crossed work then closes `crossed: true`, as a fresh token
+  would under the new process; the preview lists every token and batch that
+  will close this way without running a station it would have run before
+  the publish (say `land.ci`), and the author may write `hold` instead.
+- *The new layout has no K station at all* (the boundary was dropped, or
+  replaced under `boundary: new`). The rule then refuses nothing: no
+  station can reach K. Crossed work follows `to` and the routes as written.
+- *No continuation can be proposed* (the K stations' continuations
+  disagree; see 7.6). `after[K]` is left unset, or the author writes
+  `after: { K: hold }`: crossed work that fails the check holds `Crossed`
+  where it is. A retired station holding such a token is not deleted.
+
+A `Crossed` hold has only checked exits: `Release { to }` and `Send`, both
+checked by rule 1 of 5.3; `Release` in place is refused `Crossed`;
+`Cancel` closes the token `crossed: true`; `Skip` leaves along the current
+station's `passed` route only if that route passes the check.
+
+**Worked example: a push replaced while a batch is pushing.** The 8.1
+layout. Batch B7 (T1-T3) is working at `land.push`; its push effect E is
+admitted. The orchestrator publishes a layout that replaces `land.push` by
+`land.land` (op `coding.land`, the same target, so boundary
+`coding:target:main`, followed by `land.ci`):
+
+```yaml
+moves:
+  land.push: { to: land.land, boundary: keep }
+after: { coding:target:main: land.ci }     # proposed by the preview
+```
+
+1. *Publish.* `land.push` is retired with E still running under its
+   original spec. Batch B9, queued at `land.push` and never crossed, moves to
+   `land.land`'s queue (7.2); the rule passes it, since it has crossed
+   nothing.
+2. *E answers `passed`* (`main` = `c7`). The crossing (round 1, `c7`) is
+   recorded first. `retired_route` gives `land.land`, a K station; B7 has
+   now crossed K, so the rule sends it to `after[K]`: **B7 queues at
+   `land.ci`**. It does not push again and is not stranded before CI.
+3. *A `Send { B7, to: land.land }` from the orchestrator* is refused
+   `Crossed`, as before the publish.
+4. *Variants.* E's answer is unknown: B7 holds `Uncertain` at the retired
+   `land.push` and, once settled crossed, goes to `land.ci` as in 2; settled
+   not crossed, it follows `retired_route` to `land.land`, which passes the
+   check because nothing crossed. The new layout ends at `land.land` (no
+   `land.ci`): `after[K]` is proposed `finish`, B7's members close
+   `crossed: true`, and the preview said so. The author wrote
+   `after: { coding:target:main: hold }`: B7 holds `Crossed` at the retired
+   `land.push` until the orchestrator sends it on.
+
 **Successive publishes compose.** A retired station's translation names live
 stations only, always. Each later publish rewrites every entry in
 `Pipeline::retired` through its own `moves`: a renamed target is re-keyed, a
@@ -1036,7 +1151,8 @@ A batch is a token for these rules, plus:
   A forming batch's members go there at once. A working batch finishes its
   current inner station, then its members leave one by one to the
   destination, each with the batch's result in its visit. A batch that has
-  crossed finishes its post-crossing stations first (5.3, rule 1).
+  crossed finishes its post-crossing stations first (5.3, rule 1), and each
+  member's destination is checked by the migration rule (7.3).
 - **A bisect in progress** finishes under the batch's current membership; a
   changed `on_reject` applies to the next rejection.
 
@@ -1062,6 +1178,10 @@ edits it:
   replacement's op has the same boundary. Otherwise the preview leaves it
   unset, which refuses the publish, so the author must write
   `boundary: new` (7.3).
+- `after[K]` for each `repeat: once` boundary the new layout has a station
+  for: the first station past the boundary (7.3), or the reserved target
+  that ends there. When the K stations' continuations disagree it is left
+  unset, so crossed work that needs it holds (7.6).
 
 **Preview** is the reducer itself: `step` is pure, so
 `preview(&Pipeline, &Publish) -> Report` applies the publish to a copy of the
@@ -1076,6 +1196,10 @@ live pipeline and diffs the result. Nothing is written. The report lists:
 - policies that will hold something at its next count;
 - outward boundaries: each one kept, added or left with no station, and
   the tokens that crossed it, with their next round;
+- every placement the migration rule changed (7.3), from the translation's
+  place to `after[K]` or to a `Crossed` hold, and every crossed token or
+  batch that will close at a terminal `after[K]` without running a station
+  it would have run before;
 - the adapter's `validate` problems;
 - refusals (`Stranded`, adapter problems, capacity above the host limit).
 
@@ -1084,6 +1208,20 @@ the pipeline moved since, the publish recomputes the preview inside the same
 transaction and is refused only if the new result has a refusal; otherwise it
 goes through and the event stores the final report. The orchestrator's
 playbook: preview, read, publish.
+
+### 7.6 Open migration questions
+
+The migration rule (7.3) decides every case above. These it does not; each
+defaults to holding the work for the orchestrator (`HoldKind::Crossed`,
+with checked exits only) until the owner or a later design decides it.
+
+| # | Case | Default |
+|---|---|---|
+| O1 | **The K stations' continuations disagree.** Two paths each end in a push to `main`, continuing at different stations, so there is no one `after[K]`. Resuming on the path the token was on is plausible, but the old path may no longer exist | Hold for the orchestrator; the preview lists the candidates |
+| O2 | **A token crossed two `repeat: once` boundaries whose continuations differ** (a release pushed to `main` and published to the CMS), and the place fails the check for both | Hold for the orchestrator |
+| O3 | **`after[K]` is an inner station of a batch, but the crossed work is a lone token** (a top-level push replaced by a batched landing). A token can't be at an inner station without a batch, and forming a batch of one after a crossing is undesigned | Hold for the orchestrator |
+| O4 | **A boundary's `repeat` changes between versions** (an adapter upgrade makes `cms:issue` `fresh`, or makes a `fresh` boundary `once`). Whether earlier crossings count under the new rule is undecided | Hold for the orchestrator any crossed work the publish places at, or before, a station on that boundary |
+| O5 | **An adapter upgrade renames a boundary** (same target, new name). The engine can't tell it is the same boundary, so the rule can't apply on its own | The upgrade must name the old boundary; until then, crossed work the publish places at, or before, a station on the new name holds for the orchestrator |
 
 ## 8. Walkthroughs
 
@@ -1700,6 +1838,18 @@ frees that level.
   refused `Crossed`. Replacing it by a push to `release` without
   `boundary: new` is refused, and the preview lists every batch that
   crossed `coding:target:main`.
+- **Crossed work across a replaced push:** the worked example of 7.3, run
+  as written. Assert: B9 queues at `land.land`; B7's `passed` records
+  crossing 1 and B7 queues at `land.ci`, never `land.land`, and no second
+  push effect exists; `Send { B7, to: land.land }` and a `Release` in place
+  of a `Crossed` hold are refused `Crossed`. Variants: unknown then settled
+  crossed (to `land.ci`) and settled not crossed (to `land.land`); a layout
+  ending at `land.land` (B7's members close `crossed: true`, listed in the
+  preview); `after: hold` (B7 held `Crossed` at the retired `land.push`,
+  which is not deleted). The same assertion for a crossed batch queued at a
+  renamed `ci` the new layout puts before `land.land`, and for `land.push`
+  split into `land.prepare` then `land.land` and merged with `land.gate`. A
+  publish whose `after[K]` reaches a K station is refused by `validate`.
 - **Replay** from empty holds at each point.
 
 ## 11. Mapping: every Item field, Phase, Command and Refusal
