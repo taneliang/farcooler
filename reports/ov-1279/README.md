@@ -55,7 +55,7 @@ is itself an error** (see "Fail closed" below).
   ov-1219's `module-edges.json`, not a compiler-resolved graph. It counts test code,
   because a unit test that needs the aggregate `Service` has to move to the
   integration package before its layer can leave the daemon.
-- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 922 entries (704 module edges, 213 globs, 5 aliases),
+- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 924 entries (705 module edges, 214 globs, 5 aliases),
   one `file -> module` or `file -> unresolved: construct` per line. A new edge fails. A listed edge that no longer
   exists also fails, naming the line to delete. In CI, `--allowlist-not-grown
   origin/main` fails when the list holds a line main's does not, so a pull request
@@ -379,4 +379,4 @@ module into its own package is the real proof, because Cargo refuses a cycle, an
 
 - Aliases and globs that resolve to a layer module are refused by any spelling (`crate::`, `super`, `self`, an earlier alias), including the file's own layer. This was already in the carried commits; fixtures `use super as e; use super::*;` and `use crate::engine::*;` prove it, and the allowlisted variant passes.
 - Macros are no longer resolved. A call, inside a layer module, of a `macro_rules!` macro defined in the composition layer whose body contains a `use` or a path into a layer is refused unless allowlisted. A macro defined in a layer module is read by its own text. Fixtures cover a `$crate::` body, the relative `super::tasks::go()` body, a bare `use`, and the allowlisted case.
-- The inventory was recomputed: 922 entries, unchanged, because no call of such a macro exists today. The list only shrinks, and the check runs in the lane gate's light `wire` job and in CI.
+- The inventory was recomputed: 924 entries (922 plus two edges main gained in the rebase: lead_change.rs -> caller_seat and one test glob). The list only shrinks, and the check runs in the lane gate's light `wire` job and in CI.
