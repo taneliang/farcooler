@@ -313,7 +313,7 @@ fn kinds() -> Vec<StageKind> {
         StageKind::Land, StageKind::Ci, StageKind::Tracker, StageKind::Action("x".into()), StageKind::Evaluate("x".into()),
         StageKind::Join { group: "x".into(), adopt: false }, StageKind::AwaitBase, StageKind::Fold, StageKind::Run,
         StageKind::Push, StageKind::AwaitCi, StageKind::Route, StageKind::PushBranch, StageKind::OpenPr,
-        StageKind::PrReady, StageKind::AwaitPr]
+        StageKind::PrReady, StageKind::AwaitPr, StageKind::PushCandidate]
 }
 fn reasons() -> Vec<Reason> {
     vec![Reason::Automatic, Reason::ApprovalRequired, Reason::ReviewRequired, Reason::DependenciesOrResource,
@@ -333,8 +333,9 @@ fn kind_slot(k: &StageKind) -> usize {
     match k { StageKind::Provision => 0, StageKind::Build => 1, StageKind::Check => 2, StageKind::Review(_) => 3,
         StageKind::Land => 4, StageKind::Ci => 5, StageKind::Tracker => 6, StageKind::Action(_) => 7,
         StageKind::Evaluate(_) => 8, StageKind::Join { .. } => 9, StageKind::AwaitBase => 10, StageKind::Fold => 11,
-        StageKind::Run => 12, StageKind::Push => 13, StageKind::AwaitCi => 14, StageKind::RerunCi => 20, StageKind::Route => 15,
-        StageKind::PushBranch => 16, StageKind::OpenPr => 17, StageKind::PrReady => 18, StageKind::AwaitPr => 19 }
+        StageKind::Run => 12, StageKind::Push => 13, StageKind::AwaitCi => 14, StageKind::RerunCi => 21, StageKind::Route => 15,
+        StageKind::PushBranch => 16, StageKind::OpenPr => 17, StageKind::PrReady => 18, StageKind::AwaitPr => 19,
+        StageKind::PushCandidate => 20 }
 }
 fn reason_slot(r: &Reason) -> usize {
     match r { Reason::Automatic => 0, Reason::ApprovalRequired => 1, Reason::ReviewRequired => 2,
@@ -356,7 +357,7 @@ fn every_variant_is_listed() {
         assert_eq!(slots, (0..of).collect::<Vec<_>>(), "the {what} list in `labels` misses a variant, or lists one twice");
     }
     filled(&phases(), phase_slot, 11, "Phase");
-    filled(&kinds(), kind_slot, 20, "StageKind");
+    filled(&kinds(), kind_slot, 21, "StageKind");
     filled(&reasons(), reason_slot, 12, "Reason");
     filled(&actions(), action_slot, 8, "ActionKind");
 }

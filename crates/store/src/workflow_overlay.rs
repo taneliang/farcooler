@@ -76,6 +76,8 @@ impl GroupLanding {
             LandingPhase::Landed => LandingState::Landed,
             LandingPhase::Dropped => LandingState::Dropped,
             LandingPhase::CiFailed => LandingState::Red,
+            // CI on the candidate's branch, before the push (ov-1269): still checking, nothing pushed to the target.
+            LandingPhase::WaitingForCi if self.pushed_sha.is_none() => LandingState::Gating,
             LandingPhase::WaitingForCi if ci.is_some_and(|c| c.status == CiStatus::Passed) => LandingState::Green,
             LandingPhase::WaitingForCi => LandingState::Pushed,
             LandingPhase::GatingLocally => LandingState::Gating,

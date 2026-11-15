@@ -90,7 +90,7 @@ mod guarded {
         !matches!(stage.kind, StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Evaluate(_)
             | StageKind::Ci | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Tracker | StageKind::Route
             | StageKind::Join { adopt: false, .. } | StageKind::Push | StageKind::PushBranch | StageKind::OpenPr
-            | StageKind::PrReady | StageKind::Land)
+            | StageKind::PrReady | StageKind::Land | StageKind::PushCandidate)
     }
     fn decision(group: &str, stage: &Stage, review: bool, principal: &str) -> Decision {
         Decision { group: group.into(), step: stage.id.clone(), review, principal: principal.into(),

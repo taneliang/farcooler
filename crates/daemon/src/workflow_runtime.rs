@@ -42,6 +42,7 @@ mod native_messages;
 mod native_steering_live_tests;
 mod coding_landing;
 mod coding_verbs;
+mod coding_candidate;
 mod coding_ci_rerun;
 mod coding_settle;
 mod close_run;
@@ -585,6 +586,8 @@ impl Runtime {
         loop {
             let retry = self.exec.release_builds(&workspaces).await?;
             self.next_cleanup = retry.then(|| tokio::time::Instant::now() + Duration::from_secs(1));
+            // Ended groups' candidate branches leave the landing remote (ov-1269), off this loop.
+            self.exec.sweep_candidate_branches();
             if scan {
                 scan = self.continuous;
                 let current = self.store.workflow_workspaces()?;
@@ -1023,6 +1026,8 @@ mod observe_tests;
 mod coding_verbs_tests;
 #[cfg(test)]
 mod coding_gate_tests;
+#[cfg(test)]
+mod coding_candidate_tests;
 #[cfg(test)]
 mod coding_ci_rerun_tests;
 #[cfg(test)]

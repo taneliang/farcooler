@@ -142,7 +142,7 @@ impl Exec {
     }
     /// Run git against the network landing remote `url`, in the private landing repository. Its exit, `None`
     /// when it ran out of time or could not start.
-    async fn remote_git(&self, url: &str, args: &[String], log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>)
+    pub(super) async fn remote_git(&self, url: &str, args: &[String], log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>)
         -> Result<(Vec<String>, std::collections::BTreeMap<String, String>, Option<i32>)>
     {
         let (program, environment) = self.landing_environment(url).await?;

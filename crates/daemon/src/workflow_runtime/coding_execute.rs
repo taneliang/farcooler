@@ -551,8 +551,8 @@ impl Exec {
             }
                 spotlight::exclude_builds(&tree).await;
             },
-            StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route =>
-                return self.execute_verb(binding, kind, cancel).await,
+            StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route
+                | StageKind::PushCandidate => return self.execute_verb(binding, kind, cancel).await,
             StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr =>
                 return self.execute_pr_verb(binding, kind, cancel).await,
             StageKind::Build | StageKind::Check | StageKind::Run | StageKind::Review(_) | StageKind::Ci => {

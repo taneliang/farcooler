@@ -43,8 +43,8 @@ pub(super) fn classify_push(exit: Option<i32>, porcelain: &str, remote_after: Op
     }
 }
 pub(super) fn is_verb(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route)
-        || super::coding_pr::is_pr_verb(kind)
+    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Push | StageKind::AwaitCi | StageKind::RerunCi | StageKind::Route
+        | StageKind::PushCandidate) || super::coding_pr::is_pr_verb(kind)
 }
 const COMMIT_IDENTITY: [&str; 8] = ["-c", "user.name=Far Cooler", "-c", "user.email=landing@farcooler.invalid",
     "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"];
@@ -125,6 +125,9 @@ impl Exec {
             StageKind::Fold => Ok(self.fold(binding, cancel).await.unwrap_or_else(|error| {
                 tracing::warn!(%error, "fold infrastructure failed"); Outcome::SafeFailure })),
             StageKind::Push => self.push(binding, cancel).await,
+            // Putting a branch on the remote again is safe, so a push that failed for any reason is tried again.
+            StageKind::PushCandidate => Ok(self.push_candidate(binding, cancel).await.unwrap_or_else(|error| {
+                tracing::warn!(%error, "candidate branch push failed"); Outcome::SafeFailure })),
             StageKind::AwaitCi => Ok(self.await_ci(binding, cancel).await.unwrap_or_else(|error| {
                 tracing::warn!(%error, "await-ci failed"); Outcome::SafeFailure })),
             // An unreadable diff has failed for a reason: it spends an attempt, then ends where a person can see it.

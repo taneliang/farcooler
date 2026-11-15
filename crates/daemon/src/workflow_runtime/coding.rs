@@ -196,6 +196,7 @@ impl Pinned for CodingConfig {
         let (mut provisioned, mut built, mut landed) = (false, false, false);
         let (mut based, mut folded, mut pushed) = (false, false, false);
         let (mut branched, mut opened, mut merged) = (false, false, false);
+        let mut candidate_branched = false;
         for stage in &definition.stages {
             let gate_index = |i: Option<&String>| i.and_then(|s| s.parse::<usize>().ok()).filter(|i| *i < self.checks.len())
                 .ok_or(Error::Refused("unknown configured check"));
@@ -259,6 +260,11 @@ impl Pinned for CodingConfig {
                     pushed = true;
                     self.operation("coding-push/v1", &landing?.target)
                 },
+                // The group's candidate on its own branch, for CI to run on before the push (ov-1269).
+                StageKind::PushCandidate if in_group && folded && !pushed && !candidate_branched => {
+                    candidate_branched = true; landing?;
+                    self.operation("coding-push-candidate/v1", "")
+                },
                 StageKind::PushBranch if built && !in_group && !branched && !landed => {
                     branched = true; landing?; pull_request?;
                     self.operation("coding-push-branch/v1", "")
@@ -275,7 +281,7 @@ impl Pinned for CodingConfig {
                     let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
                     self.wait_operation("coding-await-pr/v1", "", every, patience)
                 },
-                StageKind::AwaitCi if pushed || merged => {
+                StageKind::AwaitCi if pushed || merged || candidate_branched => {
                     let (every, patience) = wait_times(&stage.operation).ok_or(Error::Refused("unsound wait times"))?;
                     let mut expected = self.wait_operation("coding-await-ci/v1", &self.ci.repository, every, patience);
                     // The other workflows the step waits on besides the configured one (ov-1071).

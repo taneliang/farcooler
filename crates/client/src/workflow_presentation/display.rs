@@ -23,6 +23,7 @@ pub(super) fn stage_label(kind: &StageKind) -> &'static str {
         StageKind::Route => "Choose route",
         StageKind::PushBranch => "Push branch", StageKind::OpenPr => "Open pull request",
         StageKind::PrReady => "Mark ready", StageKind::AwaitPr => "Wait for merge",
+        StageKind::PushCandidate => "Start CI",
     }
 }
 pub(super) fn stage_card(stage: &farcooler_workflow::Stage, style: Style) -> StageCard {

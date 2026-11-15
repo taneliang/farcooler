@@ -214,11 +214,13 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
         else if batch > 1 { lines.push(format!("Finished tickets queue together, up to {batch} at a time, and one push puts them on {target}.")); }
         else { lines.push(format!("Each ticket is pushed to {target} on its own.")); }
     } else if kinds(|k| matches!(k, StageKind::OpenPr)) {
-        let base = config.pull_request.as_ref().map_or(target, |p| code(&p.base));
+        let base = config.pull_request.as_ref().map_or(target.clone(), |p| code(&p.base));
         lines.push(format!("Each ticket opens a pull request against {base}. A person merges it."));
     }
     if kinds(|k| matches!(k, StageKind::Route)) { lines.push("Each ticket takes the route its changed files earn: some go straight to landing, some ask you first.".into()); }
-    if kinds(|k| matches!(k, StageKind::AwaitCi)) { lines.push("It waits for CI to pass on what landed.".into()); }
+    if kinds(|k| matches!(k, StageKind::PushCandidate)) {
+        lines.push(format!("Before each push, CI runs on a branch of its own while the gates run, and {target} only moves to a commit CI passed."));
+    } else if kinds(|k| matches!(k, StageKind::AwaitCi)) { lines.push("It waits for CI to pass on what landed.".into()); }
     for (name, policy) in &definition.policies {
         let jobs = policy.rule.rerun_failed.jobs.iter().map(|j| code(j)).collect::<Vec<_>>().join(", ");
         lines.push(format!("Rule {} reruns failed CI jobs once at {} only when every failed job is listed: {jobs}. It then waits for CI again; another failure follows the step's published route.", code(name), code(&policy.step)));
@@ -404,7 +406,7 @@ mod tests {
         let text = summarize("Gate every push on the copy lint.", &b, None, None);
         for want in ["The orchestrator’s reason: `Gate every push on the copy lint.`", "This is the first workflow for this workspace.",
             "What runs as you:", "`/usr/bin/claude`", "Checks that must pass:", "- `make check`", "- `scripts/copy-lint`",
-            "How code lands:", "up to 4 at a time", "`main`", "waits for CI", "Who approves:", "You approve each ticket before it lands."] {
+            "How code lands:", "up to 4 at a time", "`main`", "CI runs on a branch of its own", "Who approves:", "You approve each ticket before it lands."] {
             assert!(text.contains(want), "missing {want:?} in:\n{text}");
         }
     }
