@@ -60,7 +60,7 @@ impl<'a, 'r> Ctx<'a, 'r> {
     }
     pub fn archive_batch(&mut self, b: &str, closed: Closure, reason: Option<String>) {
         let Some(batch) = self.p.batches.remove(b) else { return };
-        if let Some(at) = batch.at.station() { self.free_place(b, &at.to_string()); }
+        if let Some(at) = batch.at.station() { self.free_place(b, at); }
         self.free_place(b, &batch.station);
         // Members still in the batch keep a location that names nothing; give them their batch station.
         for m in &batch.members {

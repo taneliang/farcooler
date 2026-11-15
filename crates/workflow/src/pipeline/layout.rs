@@ -19,8 +19,8 @@ pub struct AdapterUse { pub version: String, pub config: serde_json::Value }
 /// An adapter source that creates tokens at a station.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Intake { pub op: String, pub to: String }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Kind { Agent, Command, Decision, Wait, Batch }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Kind { Agent, #[default] Command, Decision, Wait, Batch }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StationDef {
     pub id: String,
@@ -49,7 +49,6 @@ pub struct StationDef {
     #[serde(default)]
     pub stations: Vec<StationDef>,
 }
-impl Default for Kind { fn default() -> Self { Kind::Command } }
 /// Station policy replaces every ticket-level limit (4.4). A policy never closes a token; at worst it holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Policy {

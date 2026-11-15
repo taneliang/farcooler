@@ -127,8 +127,8 @@ impl<'a, 'r> Ctx<'a, 'r> {
         if let Some(st) = self.p.stations.get_mut(station) { st.queue.retain(|k| k != key); st.working.remove(key); }
         let mut emptied = false;
         if let Some(r) = self.p.retired.get_mut(station) { r.working.remove(key); emptied = r.working.is_empty(); }
-        if emptied && !self.p.tokens.values().any(|t| t.at.station() == Some(station))
-            && !self.p.batches.values().any(|b| b.at.station() == Some(station)) {
+        // A retired station is deleted once nothing runs in it; crossed work it can't place holds elsewhere.
+        if emptied {
             self.p.retired.remove(station);
         }
     }

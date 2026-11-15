@@ -3,60 +3,8 @@
 #[path = "pipeline_support/mod.rs"]
 mod support;
 use farcooler_workflow::pipeline::*;
-use serde_json::{json, Value};
 use support::*;
 
-pub fn assistant() -> Value {
-    json!({ "schema": 3, "name": "assistant-inbox",
-        "adapters": { "mail": { "version": "test/mail", "config": { "account": "me@example.com", "folder": "INBOX" } },
-                      "calendar": { "version": "test/calendar", "config": { "calendar": "primary" } } },
-        "intake": [ { "op": "mail.inbox", "to": "triage" } ],
-        "stations": [
-            { "id": "triage", "kind": "Agent", "op": "mail.triage", "pool": "agents", "models": ["claude:sonnet"],
-              "routes": { "reply": "draft", "schedule": "propose-times", "fyi": "digest", "ignore": "archive" } },
-            { "id": "propose-times", "kind": "Command", "op": "calendar.free_slots", "pool": "work", "routes": { "passed": "draft" } },
-            { "id": "draft", "kind": "Agent", "op": "mail.draft", "pool": "agents", "models": ["claude:opus"], "routes": { "passed": "approve" } },
-            { "id": "approve", "kind": "Decision", "deciders": ["person:me"],
-              "routes": { "approved": "send", "edited": "send", "rejected": "draft", "drop": "archive" },
-              "policy": { "skip": "Orchestrator" } },
-            { "id": "send", "kind": "Command", "op": "mail.send", "pool": "work", "routes": { "passed": "await-reply" } },
-            { "id": "await-reply", "kind": "Wait", "op": "mail.reply", "policy": { "patience_ms": 3 * DAY },
-              "routes": { "replied": "triage", "timeout": "follow-up" } },
-            { "id": "follow-up", "kind": "Agent", "op": "mail.draft_follow_up", "pool": "agents",
-              "routes": { "passed": "approve", "not_needed": "archive" } },
-            { "id": "archive", "kind": "Command", "op": "mail.archive", "pool": "work", "routes": { "passed": "done" } },
-            { "id": "digest", "kind": "Batch", "form": { "window": { "every_ms": DAY, "at_ms": 8 * HOUR } },
-              "routes": { "passed": "archive" },
-              "stations": [
-                { "id": "summarize", "kind": "Agent", "op": "mail.summarize", "models": ["claude:sonnet"] },
-                { "id": "deliver", "kind": "Command", "op": "mail.send_digest" } ] }
-        ] })
-}
-pub fn content() -> Value {
-    json!({ "schema": 3, "name": "weekly-research-brief",
-        "adapters": { "files": { "version": "test/files", "config": { "root": "content/" } },
-                      "cms": { "version": "test/cms", "config": { "site": "blog", "list": "weekly" } } },
-        "intake": [ { "op": "files.board_column", "to": "research" } ],
-        "stations": [
-            { "id": "research", "kind": "Agent", "op": "files.research", "pool": "agents", "models": ["claude:opus"], "policy": { "attempts": 2 } },
-            { "id": "outline", "kind": "Agent", "op": "files.outline", "pool": "agents" },
-            { "id": "pick", "kind": "Decision", "deciders": ["orchestrator"], "routes": { "approved": "write", "rejected": "research", "drop": "archive" } },
-            { "id": "write", "kind": "Agent", "op": "files.write", "pool": "agents", "models": ["claude:opus"] },
-            { "id": "fact-check", "kind": "Agent", "op": "files.fact_check", "pool": "agents", "models": ["codex:gpt-5.5"],
-              "routes": { "rejected": "write", "passed": "issue" }, "policy": { "rework": 2 } },
-            { "id": "issue", "kind": "Batch", "form": { "window": { "every_ms": 7 * DAY, "at_ms": 0 }, "size": 6 },
-              "on_reject": "ReturnSuspects", "routes": { "returned": "write", "passed": "archive" },
-              "stations": [
-                { "id": "assemble", "kind": "Command", "op": "cms.assemble" },
-                { "id": "edit", "kind": "Agent", "op": "cms.edit_issue", "models": ["claude:opus"] },
-                { "id": "editor", "kind": "Decision", "deciders": ["person:editor", "orchestrator"], "needs": 1,
-                  "routes": { "approved": "publish", "rejected": "rejected" } },
-                { "id": "publish", "kind": "Command", "op": "cms.publish", "routes": { "passed": "measure" } },
-                { "id": "measure", "kind": "Wait", "op": "cms.stats", "policy": { "patience_ms": 7 * DAY },
-                  "routes": { "measured": "finish", "timeout": "finish" } } ] },
-            { "id": "archive", "kind": "Command", "op": "files.archive", "routes": { "passed": "done" } }
-        ] })
-}
 fn next_window(now: i64, every: i64, at: i64) -> i64 { ((now - at).div_euclid(every) + 1) * every + at }
 fn decide(run: &mut Run, by: Option<&str>, s: &Subject, station: &str, verdict: &str, suspects: &[&str]) {
     let command = Command::Decide { subject: s.clone(), station: station.into(), verdict: verdict.into(),

@@ -50,8 +50,8 @@ impl<'a, 'r> Ctx<'a, 'r> {
         }
         for id in &new.order {
             let def = &new.nodes[id].def;
-            let capacity = def.capacity.or_else(|| def.pool.as_ref().and_then(|p| self.p.pools.get(p)).map(|p| p.capacity))
-                .unwrap_or(u16::MAX);
+            // A station without its own capacity is bound by its pool alone, so raising the pool raises it.
+            let capacity = def.capacity.unwrap_or(u16::MAX);
             let window = def.form.as_ref().and_then(|f| f.window.as_ref()).map(|w| w.index(self.now()));
             let st = stations.entry(id.clone()).or_insert_with(|| Station { kind: def.kind, queue: Vec::new(),
                 working: BTreeSet::new(), capacity, held: None, draining: false, window });

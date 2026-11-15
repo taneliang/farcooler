@@ -210,7 +210,7 @@ impl<'a, 'r> Ctx<'a, 'r> {
         let Location::Awaiting { station: at, mut decision } = self.at(s).clone() else { return Err(Refusal::Stale) };
         if at != station || !valid_key(verdict) { return Err(Refusal::Stale); }
         let by = self.by();
-        if !decision.deciders.iter().any(|d| *d == by) { return Err(Refusal::Unauthorized); }
+        if !decision.deciders.contains(&by) { return Err(Refusal::Unauthorized); }
         decision.given.push(Verdict { by: by.clone(), label: verdict.into() });
         let approvals = decision.given.iter().filter(|v| v.label == "approved").count();
         let needs = decision.needs as usize;
