@@ -5,7 +5,7 @@
 crates/daemon/src/access_migration.rs -> service
 crates/daemon/src/access_migration_tests.rs -> rpc_people
 crates/daemon/src/agent_panes.rs -> reps
-crates/daemon/src/agent_panes.rs -> watch
+crates/daemon/src/agent_panes.rs -> watch/answer_wake
 crates/daemon/src/agent_supervisor/replay_fit_tests.rs -> wire
 crates/daemon/src/allowlist.rs -> service
 crates/daemon/src/answered_for.rs -> people
@@ -27,7 +27,7 @@ crates/daemon/src/caller_person.rs -> service
 crates/daemon/src/caller_person_tests.rs -> test_support
 crates/daemon/src/caller_seat.rs -> proc_table
 crates/daemon/src/caller_seat.rs -> service
-crates/daemon/src/caller_seat.rs -> watch
+crates/daemon/src/caller_seat.rs -> watch/answer_wake
 crates/daemon/src/change_set.rs -> hook_install
 crates/daemon/src/charter_draft.rs -> pastes
 crates/daemon/src/charter_draft.rs -> skill_install
@@ -118,6 +118,7 @@ crates/daemon/src/cutover_grant_tests.rs -> test_support
 crates/daemon/src/cutover_grant_tests.rs -> watch
 crates/daemon/src/engine_moves.rs -> task_starts
 crates/daemon/src/engine_moves.rs -> watch
+crates/daemon/src/engine_moves.rs -> watch/task_notice
 crates/daemon/src/engine_steering.rs -> caller_seat
 crates/daemon/src/engine_steering.rs -> people
 crates/daemon/src/engine_steering.rs -> rpc
@@ -148,7 +149,7 @@ crates/daemon/src/fs_watch.rs -> review
 crates/daemon/src/fs_watch/settle.rs -> review
 crates/daemon/src/git.rs -> codex_trust
 crates/daemon/src/git.rs -> hook_install
-crates/daemon/src/hook_fence_tests.rs -> watch
+crates/daemon/src/hook_fence_tests.rs -> watch/answer_wake
 crates/daemon/src/hook_ingress.rs -> claims
 crates/daemon/src/hook_ingress.rs -> paths
 crates/daemon/src/hook_ingress.rs -> registry_binding
@@ -224,6 +225,7 @@ crates/daemon/src/people_actor_tests.rs -> rpc
 crates/daemon/src/people_actor_tests.rs -> service
 crates/daemon/src/people_actor_tests.rs -> test_support
 crates/daemon/src/people_actor_tests.rs -> watch
+crates/daemon/src/people_actor_tests.rs -> watch/answer_wake
 crates/daemon/src/people_actor_tests.rs -> wire
 crates/daemon/src/people_enrolled_tests.rs -> rpc
 crates/daemon/src/people_enrolled_tests.rs -> service
@@ -354,6 +356,7 @@ crates/daemon/src/service.rs -> pr_timing
 crates/daemon/src/service.rs -> reps
 crates/daemon/src/service.rs -> review
 crates/daemon/src/service.rs -> watch
+crates/daemon/src/service.rs -> watch/answer_wake
 crates/daemon/src/service.rs -> wire
 crates/daemon/src/service.rs -> worker_seen
 crates/daemon/src/service.rs -> workflow_runtime
@@ -391,10 +394,12 @@ crates/daemon/src/task_ops.rs -> people
 crates/daemon/src/task_ops.rs -> service
 crates/daemon/src/task_ops.rs -> test_support
 crates/daemon/src/task_ops.rs -> watch
+crates/daemon/src/task_ops.rs -> watch/task_notice
 crates/daemon/src/task_ops.rs -> wire
 crates/daemon/src/task_ops.rs -> workflow_drafts
 crates/daemon/src/task_starts.rs -> service
 crates/daemon/src/task_starts.rs -> watch
+crates/daemon/src/task_starts.rs -> watch/task_notice
 crates/daemon/src/task_starts.rs -> wire
 crates/daemon/src/task_starts_tests.rs -> workspace_ops
 crates/daemon/src/teammate_bind_tests.rs -> rpc
@@ -438,7 +443,6 @@ crates/daemon/src/watch/answer_wake/bring.rs -> wire
 crates/daemon/src/watch/answer_wake/bring_tests.rs -> runtime
 crates/daemon/src/watch/answer_wake/check_in.rs -> test_support
 crates/daemon/src/watch/answer_wake/check_in.rs -> watch
-crates/daemon/src/watch/answer_wake/codex_turn_tests.rs -> watch
 crates/daemon/src/watch/answer_wake/compose.rs -> pastes
 crates/daemon/src/watch/answer_wake/compose.rs -> paths
 crates/daemon/src/watch/answer_wake/compose.rs -> runtime
@@ -449,7 +453,6 @@ crates/daemon/src/watch/answer_wake/compose/codex.rs -> watch
 crates/daemon/src/watch/answer_wake/compose/held.rs -> watch
 crates/daemon/src/watch/answer_wake/compose/pending.rs -> runtime
 crates/daemon/src/watch/answer_wake/compose/pending.rs -> watch
-crates/daemon/src/watch/answer_wake/compose_bad_read_tests.rs -> watch
 crates/daemon/src/watch/answer_wake/compose_codex_tests.rs -> review
 crates/daemon/src/watch/answer_wake/compose_codex_tests.rs -> runtime
 crates/daemon/src/watch/answer_wake/compose_codex_tests.rs -> watch
@@ -483,7 +486,6 @@ crates/daemon/src/watch/answer_wake/finish.rs -> runtime
 crates/daemon/src/watch/answer_wake/finish.rs -> watch
 crates/daemon/src/watch/answer_wake/finish_tests.rs -> runtime
 crates/daemon/src/watch/answer_wake/follow_race_tests.rs -> runtime
-crates/daemon/src/watch/answer_wake/hidden_turn_tests.rs -> watch
 crates/daemon/src/watch/answer_wake/input_mark_tests.rs -> runtime
 crates/daemon/src/watch/answer_wake/input_mark_tests.rs -> watch
 crates/daemon/src/watch/answer_wake/interrupt.rs -> runtime
@@ -537,7 +539,6 @@ crates/daemon/src/watch/answer_wake/tests.rs -> task_ops
 crates/daemon/src/watch/answer_wake/tests.rs -> test_support
 crates/daemon/src/watch/answer_wake/tests.rs -> watch
 crates/daemon/src/watch/answer_wake/tmux_bracketing.rs -> paste_mode
-crates/daemon/src/watch/answer_wake/web_tests.rs -> watch
 crates/daemon/src/watch/answer_wake/worker_tests.rs -> runtime
 crates/daemon/src/watch/answer_wake/worker_tests.rs -> watch
 crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs -> effect_runner
@@ -579,6 +580,7 @@ crates/daemon/src/watch/task_notice.rs -> push
 crates/daemon/src/watch/task_notice.rs -> review
 crates/daemon/src/watch/task_notice.rs -> review_ops
 crates/daemon/src/watch/task_notice.rs -> service
+crates/daemon/src/watch/task_notice.rs -> watch
 crates/daemon/src/watch/task_notice.rs -> wire
 crates/daemon/src/watch/task_notice/tests.rs -> rpc
 crates/daemon/src/watch/task_notice/tests.rs -> service
@@ -608,7 +610,7 @@ crates/daemon/src/workflow_drafts.rs -> task_ops
 crates/daemon/src/workflow_drafts.rs -> watch
 crates/daemon/src/workflow_notices.rs -> claude_registry
 crates/daemon/src/workflow_notices.rs -> log_join
-crates/daemon/src/workflow_notices.rs -> watch
+crates/daemon/src/workflow_notices.rs -> watch/answer_wake
 crates/daemon/src/workflow_runtime/adapters.rs -> ci_watch
 crates/daemon/src/workflow_runtime/adapters.rs -> hook_install
 crates/daemon/src/workflow_runtime/admission.rs -> caller_person
@@ -640,7 +642,7 @@ crates/daemon/src/workflow_runtime/coding_native.rs -> proc_table
 crates/daemon/src/workflow_runtime/coding_native.rs -> runtime
 crates/daemon/src/workflow_runtime/coding_native.rs -> service
 crates/daemon/src/workflow_runtime/coding_native.rs -> skill_install
-crates/daemon/src/workflow_runtime/coding_native.rs -> watch
+crates/daemon/src/workflow_runtime/coding_native.rs -> watch/answer_wake
 crates/daemon/src/workflow_runtime/coding_native.rs -> watch_view
 crates/daemon/src/workflow_runtime/coding_native_delivery_tests.rs -> hook_install
 crates/daemon/src/workflow_runtime/coding_native_delivery_tests.rs -> people

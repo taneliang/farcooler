@@ -81,6 +81,12 @@ class Layers:
                 return "delivery"
         return self.of_module(stem)
 
+    def of_segs(self, segs):
+        """The layer of a module path from the crate root: a watch module named for delivery is delivery."""
+        if segs[0] == "watch" and len(segs) > 1 and segs[1].startswith(DELIVERY_PREFIXES):
+            return "delivery"
+        return self.of_module(segs[0])
+
     def problems(self):
         """Faults in the table itself: an unknown layer, a cycle, a module claimed twice."""
         found = []
@@ -111,55 +117,149 @@ class Layers:
 
 # ---- reading Rust ----------------------------------------------------------------------------
 
-_BLOCK = re.compile(r"/\*.*?\*/", re.S)
-_LINE = re.compile(r"//[^\n]*")
-_CRATE = re.compile(r"\bcrate::(?:\{|([A-Za-z_][A-Za-z0-9_]*))")
+_TOKEN = re.compile(
+    r"//[^\n]*|/\*.*?\*/|(?<!\w)b?r(#*)\".*?\"\1|b?\"(?:\\.|[^\"\\])*\"|(?<!\w)b?'(?:\\.|[^\\'\n])'", re.S)
+_START = re.compile(r"(?<![\w.$])(?<!::)(?:crate|self|super)::")
+_MOD_OPEN = re.compile(r"\bmod\s+([A-Za-z_]\w*)\s*\{")
+_MOD_DECL = re.compile(
+    r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+([A-Za-z_]\w*)\s*;")
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+DELIVERY_PREFIXES = ("answer_wake", "task_notice")
 
 
-def code_only(text):
-    """The text without comments (doc comments included), so prose naming `crate::x` is not a reference."""
-    return _LINE.sub("", _BLOCK.sub("", text))
+def mask(text):
+    """The text with comments, strings and chars blanked to spaces, so positions still line up.
+
+    Prose or a string naming `crate::x` is not a reference, and a brace in a string is not a block.
+    """
+    return _TOKEN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
-def group_heads(text, start):
-    """The first path segment of each item in the `{ ... }` opening at text[start]."""
-    heads, depth, item, i = [], 0, "", start
-    while i < len(text):
-        c = text[i]
-        if c == "{":
-            depth += 1
-            if depth > 1:
-                item += c
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                heads.append(item)
-                break
-            item += c
-        elif c == "," and depth == 1:
-            heads.append(item)
-            item = ""
-        else:
-            item += c
+def mod_blocks(masked):
+    """(open, close, name) of every inline `mod name { ... }`, by position."""
+    opens = {m.end() - 1: m.group(1) for m in _MOD_OPEN.finditer(masked)}
+    stack, blocks = [], []
+    for m in re.finditer(r"[{}]", masked):
+        if m.group() == "{":
+            stack.append((m.start(), opens.get(m.start())))
+        elif stack:
+            o, name = stack.pop()
+            if name:
+                blocks.append((o, m.start(), name))
+    return sorted(blocks)
+
+
+def chain_at(blocks, pos):
+    """The inline modules enclosing pos, outermost first."""
+    return [name for o, c, name in blocks if o < pos < c]
+
+
+def skip_ws(text, i):
+    while i < len(text) and text[i].isspace():
         i += 1
-    out = []
-    for h in heads:
-        m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)", h)
-        if m:
-            out.append(m.group(1))
-    return out
+    return i
 
 
-def references(text):
-    """Every top-level name reached through `crate::`, in a path or a `use crate::{a, b::c}` group."""
-    text = code_only(text)
-    found = set()
-    for m in _CRATE.finditer(text):
-        if m.group(1):
-            found.add(m.group(1))
-        else:
-            found.update(group_heads(text, m.end() - 1))
+def parse_tree(text, i, prefix, out):
+    """Read a use-tree or path from text[i], adding each leaf path (a list of segments) to out."""
+    i = skip_ws(text, i)
+    if i < len(text) and text[i] == "{":
+        i += 1
+        while i < len(text):
+            i = parse_tree(text, i, prefix, out)
+            i = skip_ws(text, i)
+            if i < len(text) and text[i] == ",":
+                i += 1
+                continue
+            if i < len(text) and text[i] == "}":
+                i += 1
+            break
+        return i
+    m = _IDENT.match(text, i)
+    if not m:
+        out.append(prefix)  # `*`, or a path that stops short
+        return i + 1 if i < len(text) and text[i] == "*" else i
+    path = prefix + [m.group()]
+    j = skip_ws(text, m.end())
+    if text.startswith("::", j):
+        return parse_tree(text, j + 2, path, out)
+    out.append(path[:-1] if m.group() == "self" and prefix else path)
+    return m.end()
+
+
+def resolve(leaf, here):
+    """A leaf path as the list of segments from the crate root, or None when it leaves the crate.
+
+    `here` is the module the path is written in: crate::a::b is a::b, `super::x` one up from here,
+    `self::x` here.
+    """
+    if leaf[0] == "crate":
+        return leaf[1:]
+    if leaf[0] == "self":
+        return here + leaf[1:]
+    n = 0
+    while n < len(leaf) and leaf[n] == "super":
+        n += 1
+    if n > len(here):
+        return None
+    return here[:len(here) - n] + leaf[n:]
+
+
+def references(text, module=()):
+    """Every path the code names inside the crate, resolved to segments from the crate root.
+
+    `module` is where the file sits in the crate (its mod path); super:: and self:: are read against it,
+    and against any inline `mod x { }` the reference is inside.
+    """
+    masked = mask(text)
+    blocks = mod_blocks(masked)
+    found, pos = set(), 0
+    while True:
+        m = _START.search(masked, pos)
+        if not m:
+            break
+        leaves = []
+        end = parse_tree(masked, m.start(), [], leaves)
+        here = list(module) + chain_at(blocks, m.start())
+        for leaf in leaves:
+            full = resolve(leaf, here)
+            if full:
+                found.add(tuple(full))
+        pos = max(end, m.end())
     return found
+
+
+def module_paths(src, texts):
+    """The mod path of each file (rel path -> segments), read from `mod x;` and #[path] declarations.
+
+    A file nothing declares falls back to the module its location implies.
+    """
+    def implied(rel):
+        parts = list(pathlib.PurePosixPath(rel).parts)
+        parts[-1] = parts[-1].removesuffix(".rs")
+        return parts[:-1] if parts[-1] == "mod" else parts
+
+    paths = {"lib.rs": []} if "lib.rs" in texts else {}
+    queue = list(paths)
+    while queue:
+        rel = queue.pop()
+        text = texts[rel]
+        masked = mask(text)
+        blocks = mod_blocks(masked)
+        d = pathlib.PurePosixPath(rel)
+        base = d.parent if d.stem in ("lib", "main", "mod") else d.parent / d.stem
+        for m in _MOD_DECL.finditer(masked):
+            name = m.group(2)
+            attr = re.search(r'path\s*=\s*"([^"]+)"', text[m.start(1):m.end(1)])
+            if attr:
+                cands = [(d.parent / attr.group(1)).as_posix()]
+            else:
+                cands = [(base / f"{name}.rs").as_posix(), (base / name / "mod.rs").as_posix()]
+            child = next((c for c in cands if c in texts), None)
+            if child and child not in paths:
+                paths[child] = paths[rel] + chain_at(blocks, m.start()) + [name]
+                queue.append(child)
+    return {rel: paths.get(rel, implied(rel)) for rel in texts}
 
 
 # ---- the scan --------------------------------------------------------------------------------
@@ -169,25 +269,38 @@ def load(root):
 
 
 def scan(root, layers):
-    """(violations, unclaimed): violations are `file -> module` strings; unclaimed are files no layer owns."""
+    """(violations, unclaimed): violations are `file -> module` strings; unclaimed are files no layer owns.
+
+    A target is a top-level module, or `watch/answer_wake` / `watch/task_notice` for a path into delivery.
+    """
     src = root / SRC
-    modules = {p.relative_to(src).parts[0].removesuffix(".rs") for p in src.rglob("*.rs")}
+    files = sorted(src.rglob("*.rs"))
+    texts = {p.relative_to(src).as_posix(): p.read_text(errors="replace") for p in files}
+    modules = {rel.split("/")[0].removesuffix(".rs") for rel in texts}
+    watch_subs = {rel.split("/")[1].removesuffix(".rs") for rel in texts if rel.startswith("watch/")}
+    mod_of = module_paths(src, texts)
     violations, unclaimed = {}, []
-    for path in sorted(src.rglob("*.rs")):
-        rel = path.relative_to(src).as_posix()
-        mine = layers.of_file(rel)
+    for rel in texts:
+        # By where the module sits, so a test that `#[path]` hangs under another module is that module's.
+        mine = layers.of_segs(mod_of[rel]) if mod_of[rel] else layers.of_file(rel)
         if mine is None:
             unclaimed.append(rel)
             continue
         if mine == "composition":
             continue
-        for ref in sorted(references(path.read_text(errors="replace"))):
-            if ref not in modules:
+        for segs in sorted(references(texts[rel], mod_of[rel])):
+            top = segs[0]
+            if top not in modules:
                 continue  # an item defined in lib.rs (Result, a macro), not a module
-            theirs = layers.of_module(ref)
+            target = top
+            if top == "watch" and len(segs) > 1 and segs[1] in watch_subs:
+                prefix = next((x for x in DELIVERY_PREFIXES if segs[1].startswith(x)), None)
+                if prefix:
+                    target = f"watch/{prefix}"
+            theirs = "delivery" if target.startswith("watch/") else layers.of_module(top)
             if theirs is None or theirs == mine or theirs in layers.allowed[mine]:
                 continue
-            violations[f"{SRC}/{rel} -> {ref}"] = (mine, theirs)
+            violations[f"{SRC}/{rel} -> {target}"] = (mine, theirs)
     return violations, unclaimed
 
 
@@ -312,6 +425,37 @@ def self_test():
     expect("a module no layer claims is refused", {"stray.rs": ""}, "", 1, ["no layer claims"])
     expect("a watch file under answer_wake is delivery, which may not use watch",
            {"watch/answer_wake/x.rs": "use crate::watch::W;"}, "", 1, ["delivery may not use watch"])
+    expect("super:: from a top-level module is read against the crate root",
+           {"engine.rs": "use super::rpc::Call;"}, "", 1, ["engine.rs -> rpc"])
+    expect("super::super from a nested module reaches the crate root",
+           {"engine/deep.rs": "use super::super::rpc::Call;"}, "", 1, ["engine/deep.rs -> rpc"])
+    expect("super:: from a nested module stays inside its own module",
+           {"engine/deep.rs": "use super::rpc::Call; use super::{tasks_like, X};"}, "", 0)
+    expect("a use-group after super:: is read", {"engine.rs": "use super::{rpc, git, tasks};"}, "", 2)
+    expect("self:: stays inside its own module", {"engine.rs": "use self::rpc::Call;"}, "", 0)
+    expect("a test hung under a module by #[path] reads super:: as that module",
+           {"lib.rs": "mod engine;", "engine.rs": '#[path = "engine_tests.rs"]\nmod tests;',
+            "engine_tests.rs": "use super::rpc::A; use super::super::tasks::B;"}, "", 1, ["engine_tests.rs -> tasks"])
+    expect("super:: inside an inline mod is read against that file's module",
+           {"engine.rs": "mod t { use super::rpc::A; use super::super::tasks::B; }"}, "", 1, ["engine.rs -> tasks"])
+    expect("a brace in a string does not shift the module read",
+           {"engine.rs": 'fn f() { let _ = "{ mod x {"; } mod t { use super::super::rpc::A; }'}, "", 1, ["engine.rs -> rpc"])
+    expect("a path after a field colon is read", {"engine.rs": "fn f() { S { id:crate::tasks::id() } }"}, "", 1)
+    expect("delivery to delivery is not an edge",
+           {"watch/answer_wake/x.rs": "use crate::watch::answer_wake::Y; use super::Z; use super::super::task_notice::T;",
+            "watch/task_notice.rs": ""}, "", 0)
+    expect("delivery reaching watch through super:: is refused",
+           {"watch/answer_wake/x.rs": "use super::super::holds::H;", "watch/holds.rs": ""}, "", 1,
+           ["x.rs -> watch", "delivery may not use watch"])
+    expect("a layer that may use watch may use delivery in it",
+           {"watch/answer_wake.rs": "", "watch/helper.rs": "use super::answer_wake::A; use crate::watch::answer_wake::B;"},
+           "", 0)
+    expect("a layer that may not use delivery is refused a path into it",
+           {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch::answer_wake::A;"}, "", 1,
+           ["engine.rs -> watch/answer_wake", "engine may not use delivery"])
+    expect("a group naming watch and delivery is split by owner",
+           {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch::{answer_wake, holds};"}, "", 2,
+           ["-> watch/answer_wake", "engine.rs -> watch  "])
     expect("the composition layer may use anything", {"rpc.rs": "use crate::tasks::T; use crate::git::G;"}, "", 0)
     listed = "crates/daemon/src/engine.rs -> tasks\n"
     expect("a listed violation passes", {"engine.rs": "use crate::tasks::Row;"}, listed, 0)
