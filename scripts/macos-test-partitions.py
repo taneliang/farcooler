@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from unittest import mock
 
@@ -169,7 +170,9 @@ def experiment(args):
               "suite": args.suite, "shards": results}
     (args.out / "timing.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
-    return int(any(r["rc"] or not r.get("valid_measurement", False) for r in results))
+    if any(not r["valid_measurement"] for r in results):
+        print("Timing is not a valid measurement: five-minute load reached 20 or more.")
+    return int(any(r["rc"] for r in results))
 
 
 def self_test():
@@ -213,15 +216,21 @@ def self_test():
                "HEAVY_LOCK_HELD": "1"}
         for omit in (False, True):
             out = base / ("missing" if omit else "green")
-            # Only fake Swift runs here: their correctness must not depend on
-            # the host's current load. Actual measurements always sample it.
+            # Each shard starts below the threshold, then observes a loaded run.
+            samples = threading.local()
+            def loaded_run():
+                samples.count = getattr(samples, "count", 0) + 1
+                return (0., 0., 0.) if samples.count <= 2 else (25., 25., 25.)
             with mock.patch.dict(os.environ, {**env, "OMIT_TEST": "1" if omit else ""}), \
                     mock.patch(__name__ + ".FLOOR", floor), \
-                    mock.patch("os.getloadavg", return_value=(0., 0., 0.)), \
+                    mock.patch("os.getloadavg", side_effect=loaded_run), \
                     mock.patch(__name__ + ".discover_runtime", return_value=runtime), \
                     (base / "run.log").open("w") as log, contextlib.redirect_stdout(log):
                 rc = experiment(argparse.Namespace(out=out, suite=None, processes=2))
             assert (rc != 0) == omit, (base / "run.log").read_text()
+            report = json.loads((out / "timing.json").read_text())
+            assert all(s["load_peak"][1] == 25 and not s["valid_measurement"] for s in report["shards"])
+            assert (base / "run.log").read_text().count("Timing is not a valid measurement") == 1
             if omit:
                 assert "below the floor" in (out / "1.log").read_text()
         floor.write_text("4\n")
@@ -233,7 +242,7 @@ def self_test():
                 assert "below the floor" in str(error)
             else:
                 raise AssertionError("a truncated discovered inventory was accepted")
-    print("ok: exact shard counts and the checked-in inventory floor reject missing tests")
+    print("ok: loaded passing shards succeed; failed shards and missing tests fail")
 
 
 def main():
