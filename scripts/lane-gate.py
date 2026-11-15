@@ -337,25 +337,41 @@ def steps_for(job, workflows, ctx):
                 run = expand(run, step_ctx)
             steps.append(Step(job, name, run, wd, env, skip))
     if job == "rust":
-        # CI runs one prebuilt archive in partitions. The local equivalent is
-        # one unfiltered workspace run, under the same wrappers and profile.
-        # Read the command from CI; reject an unfamiliar or narrowed prefix.
+        # CI builds one archive per platform and runs it in partitions. The
+        # local gate uses the same producer (scripts/rust-archive.sh, ov-1210)
+        # and the same archive, then runs it unpartitioned under the same
+        # wrappers and profile. Read both commands from CI; reject an
+        # unfamiliar or narrowed prefix.
         shard = job_block(text, "rust-tests")
         full = [p for p in parse_steps(shard or []) if p[0] == "Full Rust workspace shard"]
         if len(full) != 1:
             raise ValueError("CI must define exactly one full Rust workspace shard command")
         _name, run, wd, env = full[0]
-        prefix, archive, _remote = run.partition(" --archive-file ")
+        prefix, sep, archive = run.partition(" --archive-file ")
         match = re.fullmatch(
             r"(\./scripts/test-leak-check\.py -- \./scripts/tmux-leak-check\.py -- (?:python3 scripts/quarantine\.py run -- )?cargo nextest run --profile \S+) --no-fail-fast",
             prefix.strip())
-        if not archive or not match:
+        if not sep or not match:
             raise ValueError("cannot derive an unfiltered local Rust suite from CI's shard command")
+        archive, partitions = re.subn(r" --partition hash:\$\{\{ matrix\.shard \}\}/\d+$", "", archive.strip())
+        if partitions != 1 or " -E " in f" {archive} ":
+            raise ValueError(f"CI's Rust shard command must end in exactly one --partition and no filter: {archive!r}")
+        build = [p for p in parse_steps(job_block(text, "rust-build") or [])
+                 if p[0] == "Build the runtime binaries and test archive"]
+        if len(build) != 1 or not re.fullmatch(r"\./scripts/rust-archive\.sh (\S+)\n?", build[0][1]):
+            raise ValueError("CI's Rust archive job must run scripts/rust-archive.sh and nothing else")
+        archive_file = build[0][1].split()[1]
+        if archive != archive_file and not archive.startswith(archive_file + " "):
+            raise ValueError("CI's Rust shards must run the archive its build job produces")
+        produce = Step(job, "Rust test archive (local)", build[0][1], build[0][2], build[0][3])
+        aliases = ('for name in farcooler-local farcooler-preview farcooler-canary; do\n'
+                   '  ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"\n'
+                   'done\n')
         local = Step(job, "Full Rust workspace (local)",
-                     match[1] + " --workspace --no-fail-fast\n", wd, env)
+                     aliases + match[1] + " --no-fail-fast --archive-file " + archive + "\n", wd, env)
         before_doc = next((i for i, step in enumerate(steps)
                            if step.run.strip() == "cargo test --workspace --doc"), len(steps))
-        steps.insert(before_doc, local)
+        steps[before_doc:before_doc] = [produce, local]
     if job == "web":
         web_asset_skips(steps)
     return steps
@@ -1005,7 +1021,8 @@ def _self_test():
         ("wire", "./scripts/proto-lint.py --channel canary"),
         ("wire", "./scripts/copy-lint.py"),
         ("wire", "./scripts/test-leak-check.py --lint"),
-        ("rust", "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest run --profile ci --workspace"),
+        ("rust", "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest run --profile ci --no-fail-fast --archive-file target/rust-tests.tar.zst"),
+        ("rust", "./scripts/rust-archive.sh target/rust-tests.tar.zst"),
         ("rust", "cargo clippy --workspace --all-targets -- -D warnings"),
         ("rust", "cargo test --workspace --doc"),
         ("swift-tests", "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit"),
@@ -1024,7 +1041,7 @@ def _self_test():
     ]:
         expect(f"{job} runs {needle}", has(job, needle), True)
     expect("local gate runs one full Rust workspace suite", sum(
-        "cargo nextest run --profile ci --workspace" in s.run and not s.skip
+        "cargo nextest run --profile ci --no-fail-fast --archive-file" in s.run and not s.skip
         for s in plans["rust"]), 1)
     native = parse_steps(job_block(text, "rust-macos-tests") or [])
     expect("CI retains its filtered Mac native tests", sum(
@@ -1033,10 +1050,16 @@ def _self_test():
     expect("local gate does not replay filtered Mac CI tests", any(
         s.name == "macOS native Rust tests" and not s.skip for s in plans["rust"]), False)
     expect("local Rust runs the full workspace exactly once", sum(
-        "cargo nextest run --profile ci --workspace" in step.run and not step.skip
+        "cargo nextest run --profile ci --no-fail-fast --archive-file" in step.run and not step.skip
         for step in plans["rust"]), 1)
-    expect("local Rust needs neither CI archives nor partition filters", any(
-        "--archive-file" in step.run or "--partition" in step.run
+    expect("local Rust builds the archive once, with CI's producer, before running it", [
+        i for i, step in enumerate(plans["rust"])
+        if step.run.strip() == "./scripts/rust-archive.sh target/rust-tests.tar.zst"
+        and not step.skip] and [
+        i for i, step in enumerate(plans["rust"]) if "cargo nextest run --profile ci --no-fail-fast --archive-file" in step.run][0] > [
+        i for i, step in enumerate(plans["rust"]) if step.run.strip().startswith("./scripts/rust-archive.sh")][0], True)
+    expect("local Rust runs every partition's worth: no partition or filter", any(
+        "--partition" in step.run or " -E " in step.run
         for step in plans["rust"] if not step.skip), False)
     narrowed = dict(wf, ci=text.replace("--no-fail-fast --archive-file", "-E package(farcooler-cli) --no-fail-fast --archive-file", 1))
     try:
@@ -1045,6 +1068,17 @@ def _self_test():
         pass
     else:
         failures.append("a narrowed CI prefix silently narrowed the local Rust gate")
+    for label, bad in [
+            ("an inlined archive build", text.replace("./scripts/rust-archive.sh target/rust-tests.tar.zst",
+                                                      "cargo nextest archive --locked --profile ci --workspace --archive-file target/rust-tests.tar.zst", 1)),
+            ("shards on another archive", text.replace("--archive-file target/rust-tests.tar.zst",
+                                                       "--archive-file target/other.tar.zst", 1))]:
+        try:
+            steps_for("rust", dict(wf, ci=bad), ctx)
+        except ValueError:
+            pass
+        else:
+            failures.append(f"{label} did not stop the local Rust gate deriving from CI")
     # Nothing that only installs on a CI runner is run, and the skip is recorded.
     for j in JOBS:
         for s in plans[j]:

@@ -171,10 +171,11 @@ class LandingTests(unittest.TestCase):
                   "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
             plans = {j: lane.steps_for(j, wf, ctx) for j in lane.JOBS}
         original = next(s.run for s in plans["rust"] if s.name == "Full Rust workspace (local)")
-        self.assertIn("--workspace --no-fail-fast", original)
+        self.assertIn("--no-fail-fast --archive-file target/rust-tests.tar.zst", original)
+        self.assertNotIn("--partition", original)
         self.assertIn("apps/macos/test.sh", wf["ci"])
         policy.apply(plans, {"full": False, "packages": ["farcooler-fence"]})
-        nextest = next(s.run for s in plans["rust"] if "--workspace --no-fail-fast" in s.run)
+        nextest = next(s.run for s in plans["rust"] if "--no-fail-fast --archive-file" in s.run)
         self.assertIn("test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest", nextest)
         self.assertIn("-E 'package(=farcooler-fence)'", nextest)
         self.assertNotIn("rust-shadow.py", nextest)
@@ -326,13 +327,15 @@ class LandingTests(unittest.TestCase):
             (repo / ".config/nextest.toml").write_text('[profile.ci]\nfail-fast=false\n')
             def gate(full=False):
                 step = lane.Step("rust", "Full Rust workspace (local)",
-                    './scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --offline --profile ci --workspace --no-fail-fast\n')
+                    './scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --offline --profile ci --no-fail-fast --archive-file target/rust-tests.tar.zst\n')
                 # Match CI's shape; offline is configured in env instead.
                 step.run = step.run.replace("run --offline", "run")
                 plans = {"rust": [step]}
                 policy.apply(plans, {**proposal, "full": full})
                 # This temporary Cargo workspace has no repository wrappers.
                 step.run = step.run.replace("./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- ", "", 1)
+                # No archive in this scratch workspace: run the same selection live.
+                step.run = step.run.replace(" --archive-file target/rust-tests.tar.zst", "", 1)
                 if not use_nextest:
                     # The wire job has Cargo but does not install nextest.
                     # Still exercise real filtered/workspace failures there;
