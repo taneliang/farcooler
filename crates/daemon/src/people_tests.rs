@@ -890,3 +890,68 @@ async fn worktree_remove_refuses_an_adopted_orchestrator_from_a_builder() {
     assert_eq!(refused(&caller, req).await.as_deref(), Some("scope-denied:"));
     assert!(r.svc.store.get_terminal(pane.id).is_ok());
 }
+
+/// ov-1286: a lead handed on replaces the sitting orchestrator, so an agent
+/// never hands it on. On the local socket every caller is `host_admin`; the
+/// lead's builder and the orchestrator itself are refused `scope-denied` and
+/// nothing moves, and the owner, in person, still hands it on.
+#[tokio::test]
+async fn an_agent_never_hands_the_lead_on() {
+    let r = runner().await;
+    let set = |lead: &str| Request {
+        method: "workspace.set_settings".into(),
+        target_resource_id: Some(id_bytes(r.workspace)),
+        payload: Some(request::Payload::WorkspaceSetSettings(pb::WorkspaceSetSettings {
+            lead: Some(lead.into()),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    let snapshot = r.svc.inventory.refresh().await;
+    let pid = |pane: Uuid| snapshot.claimants(pane).into_iter().next().unwrap().stamp.pid as i32;
+    for (who, pane) in [("an agent", r.agent.id), ("the orchestrator", r.orchestrator.id)] {
+        let agent = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid(pane)));
+        assert_eq!(refused(&agent, set("bob")).await.as_deref(), Some("scope-denied:"), "{who}");
+        assert_eq!(r.svc.store.workspace_lead(r.workspace).unwrap(), None, "{who} handed the lead on");
+        let seated = r.svc.orchestrator_seat(r.workspace).await.unwrap().0.map(|t| t.id);
+        assert_eq!(seated, Some(r.orchestrator.id), "{who} replaced the orchestrator");
+    }
+    let person = factory(&r.svc, None, Scope::HostAdmin);
+    assert_eq!(refused(&person, set("bob")).await, None, "the owner, in person");
+    assert_eq!(r.svc.store.workspace_lead(r.workspace).unwrap().as_deref(), Some("bob"));
+}
+
+/// ov-1286: `worktree.remove` checks for an orchestrator among the
+/// worktree's panes with the seat locks held, the lock every promotion
+/// takes. A pane promoted after the request arrived but before its panes are
+/// stopped is still found: the builder is refused, and the orchestrator and
+/// its worktree are left.
+#[tokio::test]
+async fn worktree_remove_finds_an_orchestrator_promoted_after_the_request() {
+    let r = runner().await;
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let wt = r.svc.create_worktree(repo, "wt-race", "feature/race", "main").await.unwrap();
+    let pane = r.svc.create_terminal(wt.id, "Soon adopted", "claude").await.unwrap();
+    r.svc.store.set_terminal_workspace(pane.id, r.workspace).unwrap();
+    r.svc.stop_terminal(r.orchestrator.id).await.unwrap();
+    r.svc.store.set_terminal_role(r.orchestrator.id, farcooler_store::models::TerminalRole::Shell).unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    let pid = snapshot.claimants(r.agent.id).into_iter().next().unwrap().stamp.pid as i32;
+    let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid));
+    let req = Request { method: "worktree.remove".into(), target_resource_id: Some(id_bytes(wt.id)), ..Default::default() };
+
+    // The seat is held, as a promotion holds it, so the removal waits on it.
+    let seat = r.svc.orchestrator_locks.hold(r.workspace).await;
+    let removal = tokio::spawn(async move { refused(&caller, req).await });
+    tokio::time::timeout(std::time::Duration::from_secs(20), r.svc.orchestrator_locks.waiting.notified())
+        .await
+        .expect("the removal waits for the seat lock");
+    // The promotion lands in between, and lets the seat go.
+    r.svc.store.set_terminal_role(pane.id, farcooler_store::models::TerminalRole::Orchestrator).unwrap();
+    drop(seat);
+
+    assert_eq!(removal.await.unwrap().as_deref(), Some("scope-denied:"));
+    assert_eq!(r.svc.store.get_terminal(pane.id).unwrap().role, farcooler_store::models::TerminalRole::Orchestrator);
+    assert!(r.svc.store.get_worktree(wt.id).is_ok(), "the worktree is left");
+    assert!(std::path::Path::new(&wt.worktree_path).exists());
+}
