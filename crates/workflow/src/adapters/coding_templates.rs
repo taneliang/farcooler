@@ -79,11 +79,13 @@ pub fn layout(plan: &Plan, config: &Value) -> Result<Layout, Refusal> {
     }
     let batch = if t.batched() { plan.batch } else { Some(1) };
     let size = batch.map(|n| u16::try_from(n).unwrap_or(u16::MAX));
+    // reducer.rs: landing infrastructure in a group (base, fold, gates, CI) gets three attempts.
+    let infra = |mut s: StationDef| { s.policy.attempts = Some(3); s };
     let folds = || {
-        let mut inner = vec![wait("base", "base", plan.base_patience_ms),
-            route(station("fold", Kind::Command, Some("fold"), None), "conflict", "returned")];
+        let mut inner = vec![infra(wait("base", "base", plan.base_patience_ms)),
+            infra(route(station("fold", Kind::Command, Some("fold"), None), "conflict", "returned"))];
         for (n, i) in commands.iter().enumerate() {
-            inner.push(route(station(&format!("gate-{n}"), Kind::Command, Some(&format!("gate:{i}")), None), "red", "rejected"));
+            inner.push(infra(route(station(&format!("gate-{n}"), Kind::Command, Some(&format!("gate:{i}")), None), "red", "rejected")));
         }
         inner
     };
@@ -98,7 +100,7 @@ pub fn layout(plan: &Plan, config: &Value) -> Result<Layout, Refusal> {
         Template::BatchedPush | Template::TicketPush => {
             let mut inner = folds();
             inner.push(route(station("push", Kind::Command, Some("push"), None), "refused", "base"));
-            if plan.ci { inner.push(ci(plan, &config)); }
+            if plan.ci { inner.push(infra(ci(plan, &config))); }
             stations.push(batch_station(inner, 1, None, true));
         }
         Template::TicketPr => {

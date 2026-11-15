@@ -38,6 +38,8 @@ struct World {
     ci: VecDeque<&'static str>,
     /// The orchestrator's interventions: (ticket, at station, what), each once.
     act: Vec<(&'static str, &'static str, Act)>,
+    /// A landing step fails this many times, saying nothing went out (a safe failure), then answers as usual.
+    fails: BTreeMap<&'static str, u32>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Act { Cancel, SendBack, Retry }
@@ -50,6 +52,7 @@ impl World {
         let built = |m: &String| builds.get(m).copied().unwrap_or(0);
         let local = station.rsplit('.').next().unwrap();
         // A step inside a landing batch is named `<batch>.<step>`; a ticket's own step is not.
+        if let Some(n) = self.fails.get_mut(local).filter(|n| **n > 0 && station.contains('.')) { *n -= 1; return ("fail", vec![]); }
         match (station.contains('.'), local) {
             (true, "base") => (self.base.pop_front().unwrap_or("passed"), vec![]),
             (true, "fold") => {
@@ -278,7 +281,7 @@ impl New {
             match self.r.at(&t) {
                 new::Location::Working { work, .. } | new::Location::Stopping { work, .. } if work.pending.is_some() => { self.answer(&s); return true; }
                 new::Location::Awaiting { station, .. } => {
-                    let (label, _) = self.world.answer(&station, &[t.clone()], &self.builds);
+                    let (label, _) = self.world.answer(&station, std::slice::from_ref(&t), &self.builds);
                     let verdict = if label == "passed" { "approved" } else { label };
                     let grant = self.decider(&s);
                     self.r.send(grant, new::Command::Decide { subject: s, station, verdict: verdict.into(), suspects: vec![],
@@ -440,6 +443,11 @@ fn scenarios() -> Vec<Scenario> {
         Scenario { intended: &["a: old done, new held:join", "landings: old [[\"a\"]], new []", "builds: old {\"a\": 2}, new {\"a\": 1}"],
             ..sc("a base that never comes ends the group (groups.rs)", plan(BatchedPush, cmd()), &["a"],
                 { let mut w = world(); w.base = VecDeque::from(["timeout"]); w }) },
+        sc("landing safe failures retry twice without splitting (groups.rs)", plan(BatchedPush, cmd()), &["a", "b"],
+            { let mut w = world(); w.fails.insert("fold", 2); w.fails.insert("gate-0", 2); w }),
+        Scenario { intended: &["a: old done, new held:join", "landings: old [[\"a\"]], new []", "builds: old {\"a\": 2}, new {\"a\": 1}"],
+            ..sc("a third safe failure stops the landing (groups.rs)", plan(BatchedPush, cmd()), &["a"],
+                { let mut w = world(); w.fails.insert("fold", 3); w }) },
         // groups.rs: the CI rerun policy.
         Scenario { rerun: true, ..sc("a listed CI failure reruns once, then green lands (groups.rs)", plan(BatchedPush, cmd()), &["a"],
             { let mut w = world(); w.ci = VecDeque::from(["red:flaky"]); w }) },
