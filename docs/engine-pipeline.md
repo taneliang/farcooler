@@ -42,8 +42,11 @@ name; a removed one is named in the change's **moves** with the station that
 replaces it, and a step that finishes there then enters that replacement, so
 the new process runs in full. Work that has already crossed a once-only
 boundary (a push) never re-enters it: it resumes at the station after that
-boundary, or holds for the orchestrator if there is none to name. Cases the
-design leaves open hold the same way. The publish is refused while anything
+boundary. If the new layout ends at the boundary, crossed work closes as
+done, as fresh work would; the preview lists any that would close without
+running a station it would have run before (say CI), and the author may hold
+it instead. Only when no single continuation can be named does crossed work
+hold for the orchestrator. Cases the design leaves open hold the same way. The publish is refused while anything
 would be stranded.
 `workflow preview` runs the change on a copy of the live pipeline and shows
 exactly where every token ends up before anything is published (section 7).
