@@ -194,6 +194,38 @@ class LandingTests(unittest.TestCase):
         self.assertTrue(any("cargo test --workspace --doc" in s.run and not s.skip for s in plans["rust"]))
         self.assertTrue(any("apps/macos/test.sh" in s.run and not s.skip for s in plans["swift-tests"]))
 
+    def test_real_workspace_leaf_narrows_and_shared_inputs_select_everything(self):
+        """ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph."""
+        shadow = lane.load_module("rust_shadow_real", ROOT / "scripts/rust-shadow.py")
+        metadata = json.loads(subprocess.run(
+            ["cargo", "metadata", "--offline", "--locked", "--format-version", "1", "--all-features"],
+            cwd=ROOT, capture_output=True, text=True, check=True).stdout)
+        everything = sorted(p["name"] for p in metadata["packages"] if p["id"] in set(metadata["workspace_members"]))
+        leaf, _, full = shadow.select(ROOT, metadata, [("M", "crates/vt/src/lib.rs")])
+        self.assertFalse(full)
+        self.assertIn("farcooler-vt", leaf)
+        self.assertLess(len(leaf), len(everything))
+        for path in ("crates/protocol/src/lib.rs",          # the shared wire crate
+                     "Cargo.lock", "Cargo.toml",
+                     "crates/cli/build.rs", "crates/protocol/build.rs",  # build scripts
+                     "rust-toolchain.toml", "rust-toolchain", ".cargo/config.toml"):
+            with self.subTest(path=path):
+                names, _, full = shadow.select(ROOT, metadata, [("M", path)])
+                self.assertTrue(full)
+                self.assertEqual(names, everything)
+        # A narrow proposal reaches the plain lane gate's nextest step, and CI's workflow is untouched.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = lane.make_ctx(ROOT, Path(tmp), "HEAD")
+            wf = {"ci": (ROOT / ".github/workflows/ci.yml").read_text(),
+                  "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
+            steps = lane.steps_for("rust", wf, ctx)
+        step = next(s for s in steps if s.name == "Full Rust workspace (local)")
+        policy.apply_rust("rust", step, {"full": False, "packages": leaf})
+        self.assertIn("-E ", step.run)
+        self.assertIn("package(=farcooler-vt)", step.run)
+        self.assertNotIn("package(=", wf["ci"])  # CI on main keeps the full suite
+
+
     def test_parallelism_is_bounded_and_apple_is_serial(self):
         self.assertEqual(policy.families(["rust", "swift-tests", "swift", "ios", "android"]),
                          [["rust"], ["swift-tests", "swift", "ios"], ["android"]])

@@ -120,27 +120,35 @@ def apply(plans, proposal):
                     step.run = "./scripts/macos-entitlements-test.sh\n"
                 else:
                     step.skip = "local landing: release bundle and its consumers run in CI"
-            if job == "rust" and step.name == "Full Rust workspace (local)":
-                wrappers = "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- "
-                tail = "cargo nextest run --profile gate --no-fail-fast --archive-file "
-                # CI wraps the run in the flaky-test quarantine runner (ov-1229);
-                # the local run is the unpartitioned archive run (ov-1210), after
-                # a line or two that link the channel aliases the tests spawn.
-                lines = step.run.rstrip().split("\n")
-                command = lines[-1]
-                # The gate (not CI on main) also reruns what failed once, alone (ov-1285).
-                rerun = "python3 scripts/gate-flaky.py run -- "
-                if not (command.startswith(wrappers + tail)
-                        or command.startswith(wrappers + "python3 scripts/quarantine.py run -- " + tail)
-                        or command.startswith(wrappers + rerun + "python3 scripts/quarantine.py run -- " + tail)):
-                    raise ValueError("Rust CI command changed; refusing to narrow an unknown shape")
-                if not proposal["full"]:
-                    expression = " or ".join(f"package(={p})" for p in proposal["packages"])
-                    if not expression:
-                        raise ValueError("empty Rust package selection")
-                    lines[-1] = command + " -E " + shlex.quote(expression)
-                    step.run = "\n".join(lines) + "\n"
+            apply_rust(job, step, proposal)
 
+
+def apply_rust(job, step, proposal):
+    """Narrow the default-host nextest step to the selected packages (ov-1268).
+
+    Shared by the landing gate and the plain lane gate. Features, lints and
+    doctests stay full, and CI on main always runs the whole suite.
+    """
+    if job == "rust" and step.name == "Full Rust workspace (local)":
+        wrappers = "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- "
+        tail = "cargo nextest run --profile gate --no-fail-fast --archive-file "
+        # CI wraps the run in the flaky-test quarantine runner (ov-1229);
+        # the local run is the unpartitioned archive run (ov-1210), after
+        # a line or two that link the channel aliases the tests spawn.
+        lines = step.run.rstrip().split("\n")
+        command = lines[-1]
+        # The gate (not CI on main) also reruns what failed once, alone (ov-1285).
+        rerun = "python3 scripts/gate-flaky.py run -- "
+        if not (command.startswith(wrappers + tail)
+                or command.startswith(wrappers + "python3 scripts/quarantine.py run -- " + tail)
+                or command.startswith(wrappers + rerun + "python3 scripts/quarantine.py run -- " + tail)):
+            raise ValueError("Rust CI command changed; refusing to narrow an unknown shape")
+        if not proposal["full"]:
+            expression = " or ".join(f"package(={p})" for p in proposal["packages"])
+            if not expression:
+                raise ValueError("empty Rust package selection")
+            lines[-1] = command + " -E " + shlex.quote(expression)
+            step.run = "\n".join(lines) + "\n"
 
 
 def families(chosen):

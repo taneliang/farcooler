@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the CI jobs a lane's change reaches, and print what ran (ov-799).
 
-Plain lane-gate retains full suites; --landing is the local engine policy
-(ov-1185): bounded parallel families, conservative Rust selection against a
+Rust tests are narrowed to the crates a change reaches, in the plain gate and in --landing (ov-1268; --full-rust
+turns it off). --landing is also the local engine policy (ov-1185): bounded parallel families, conservative Rust selection against a
 verified green ancestor, release bundle proof left to CI, and warm target kept.
 CI on main remains full proof. Each selection/fallback is saved with step logs.
 
@@ -37,9 +37,8 @@ coverage: their union over the combined diff selects the platform suites.
 Wire and doc-comments always run; docs and reports need no builds. Tunnel and
 site retain CI coverage for every non-doc change. Cross-cutting
 inputs (Cargo.lock, the protocol crate, workflows, unknown paths) run everything.
-The ov-1116 reverse crate closure is printed for Rust changes. It remains an
-impact diagnostic: CI still runs the full Rust suite, so this gate retains it,
-including doctests and feature checks, rather than enabling shadow skips here.
+The ov-1116 reverse crate closure narrows the default-host nextest run (ov-1268). Doctests, feature checks and
+clippy stay full, and CI on main still runs the whole Rust suite, so a miss is caught within one CI run.
 
 The ios job runs the steps of .github/actions/ios-ui-build that compile: the
 Rust xcframeworks, the generated project, and `xcodebuild build-for-testing` of
@@ -835,6 +834,7 @@ def md(cell):
 
 def main(argv):
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
+    ap.add_argument("--full-rust", action="store_true", help="run the whole Rust suite even when the change only reaches some crates (ov-1268)")
     ap.add_argument("--landing", action="store_true", help="local landing: parallel families, selected Rust, CI retains release bundle proof")
     ap.add_argument("--workers", type=int, default=4, choices=range(1, 5), help="maximum concurrent landing families (default 4)")
     ap.add_argument("--base", default=os.environ.get("FARCOOLER_BASE") or "origin/main",
@@ -910,6 +910,14 @@ def gate(args):
         landing_policy.apply(plans, proposal)
         print("lane-gate: local landing Rust selection: " + "; ".join(proposal["reasons"]))
         print(f"lane-gate: landing families: {landing_policy.families(chosen)}; workers: {args.workers}")
+    elif "rust" in chosen and not args.full_rust:
+        # ov-1268: the lane gate skips Rust tests a change cannot affect, same as landing. Anything the
+        # selector does not understand is full, and CI on main always runs the whole suite.
+        import landing_policy
+        proposal = landing_policy.rust_selection(repo, args.base, load_module)
+        for step in plans["rust"]:
+            if not step.skip:
+                landing_policy.apply_rust("rust", step, proposal)
 
     # --only (or --skip) leaves out jobs the diff reaches. Say so here, and again in the summary, which is
     # what gets pasted into a report: a summary that reads "all steps passed" must not stand for a gate it skipped.
@@ -924,7 +932,12 @@ def gate(args):
         print(f"  {j}: {', '.join(why) if why else 'always'}{more}")
     if "rust" in chosen:
         print(f"lane-gate: Rust impact: {rust_impact(repo, inputs)}")
-        print("lane-gate: Rust coverage: full CI suite retained (ov-1116 skips disabled)")
+        if proposal is None:
+            print("lane-gate: Rust coverage: full suite (--full-rust or landing selection off)")
+        elif proposal["full"]:
+            print("lane-gate: Rust coverage: full suite (" + "; ".join(proposal["reasons"]) + ")")
+        else:
+            print(f"lane-gate: Rust coverage: nextest runs only {', '.join(proposal['packages'])}; CI on main runs the full suite (ov-1268)")
     if not any(j in HEAVY for j in chosen):
         print("lane-gate: no builds selected")
     if args.dry_run:
