@@ -237,5 +237,28 @@ check "and commits nothing" "$before" "$(commits)"
 case "$out" in *"::error::"*"pi tag 1 (pi) was removed"*) got=said ;; *) got="$out" ;; esac
 check "and says what broke" said "$got"
 
+# ov-1243: with BASELINE_BRANCH set (as the workflow does), a recording never touches
+# main: it goes to that branch, on top of main's head, and main's own file is as it was.
+rec_branch() {
+  rmtree "$scratch/ci"
+  git clone --quiet "$scratch/origin.git" "$scratch/ci" 2>/dev/null
+  (cd "$scratch/ci" && BASELINE_BRANCH=canary-baseline "$SCRIPT" "$1")
+}
+branch_proto() { git -C "$scratch/origin.git" show canary-baseline:proto/baseline/canary.proto | tail -n 1; }
+g="$(land eta 8)"
+main_before="$(git -C "$scratch/origin.git" rev-parse main)"
+was="$(baseline_proto)"
+rec_branch "$g" >/dev/null
+check "a branch recording leaves main's head alone" "$main_before" "$(git -C "$scratch/origin.git" rev-parse main)"
+check "and main's baseline as it was" "$was" "$(baseline_proto)"
+check "and records on the branch" "$(msg eta)" "$(branch_proto)"
+check "which sits one commit above main" "$main_before" "$(git -C "$scratch/origin.git" rev-parse canary-baseline^)"
+h="$(land theta2 9)"
+rec_branch "$h" >/dev/null
+check "a later recording rewrites the branch" "$(msg theta2)" "$(branch_proto)"
+before="$(git -C "$scratch/origin.git" rev-parse canary-baseline)"
+rec_branch "$g" >/dev/null 2>&1
+check "an older commit does not move the branch backwards" "$before" "$(git -C "$scratch/origin.git" rev-parse canary-baseline)"
+
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

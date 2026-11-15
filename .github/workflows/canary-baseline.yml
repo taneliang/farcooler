@@ -90,6 +90,10 @@ jobs:
         if: steps.shipped.outputs.shipped == 'true'
         env:
           TITLE: ${{ github.event.workflow_run.display_title }}
+          # Never main (ov-1243): a push there behind a landing group's back wastes the
+          # group's gate and leaves a head CI never runs on. The branch holds main plus this
+          # commit; the orchestrator lands it as ordinary work.
+          BASELINE_BRANCH: canary-baseline
         run: |
           set -euo pipefail
           shipped=$(scripts/canary-shipped.py --commit "$TITLE")

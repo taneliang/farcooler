@@ -40,6 +40,13 @@ set -euo pipefail
 
 shipped="${1:?usage: canary-baseline.sh <shipped commit>}"
 baseline=proto/baseline/canary.proto
+# WHERE IT IS PUSHED (ov-1243). Never main in CI: a push to main behind a landing group's back
+# made the group's gate useless (base_moved) and, as GITHUB_TOKEN pushes start no workflow,
+# left main's head with no CI run. The workflow sets BASELINE_BRANCH=canary-baseline, a branch
+# holding main plus this one commit, rewritten (with a lease) on each recording; the
+# orchestrator lands it as ordinary work. Until it lands, main's file lags, which canary.yml's
+# `wire` job already tolerates (--since-baseline). Unset, it is main, as the tests exercise.
+target="${BASELINE_BRANCH:-main}"
 # Resolved now: the checkout below moves the tree, and this path with it.
 lint="$(cd "$(dirname "$0")" && pwd)/proto-lint.py"
 # No lint, no baseline: an unchecked proto is exactly what this must not record.
@@ -91,14 +98,30 @@ for attempt in 1 2 3; do
     exit 0
   fi
 
-  if [ -f "$baseline" ]; then
-    recorded="$(sed -n '1s#^// Shipped by Canary at \([0-9a-f]\{40\}\)\..*#\1#p' "$baseline")"
+  # The baseline to compare with: main's, or the branch's when it holds a recording main lacks.
+  current="$baseline"
+  lease=""
+  if [ "$target" != main ]; then
+    if git fetch --quiet --no-tags origin "+refs/heads/$target:refs/remotes/origin/$target" 2>/dev/null; then
+      tip="$(git rev-parse "refs/remotes/origin/$target")"
+      lease="--force-with-lease=refs/heads/$target:$tip"
+      if ! git merge-base --is-ancestor "$tip" HEAD; then
+        current="$(mktemp)"
+        git show "$tip:$baseline" > "$current"
+      fi
+    else
+      lease="--force-with-lease=refs/heads/$target:"
+    fi
+  fi
+
+  if [ -f "$current" ]; then
+    recorded="$(sed -n '1s#^// Shipped by Canary at \([0-9a-f]\{40\}\)\..*#\1#p' "$current")"
     # A recorded commit this checkout cannot find (history rewritten) cannot be
     # compared, so it does not block; one it can find must be an ancestor.
     if [ -n "$recorded" ] && git cat-file -e "$recorded^{commit}" 2>/dev/null \
       && ! git merge-base --is-ancestor "$recorded" "$shipped"; then
       # Older than the baseline, so the baseline must still read it.
-      if ! problems="$("$lint" --compare "$new" "$baseline" 2>&1)"; then
+      if ! problems="$("$lint" --compare "$new" "$current" 2>&1)"; then
         refuse "$problems" "$recorded, the canary wire baseline, breaks the wire $shipped shipped, so both are in the field and disagree. Ship a fix that restores compatibility with $shipped."
       fi
       echo "::warning::the canary wire baseline records $recorded, which $shipped does not descend from, so it was not advanced"
@@ -107,13 +130,13 @@ for attempt in 1 2 3; do
     # Staged or not is beside the point here: the file is compared directly,
     # so a FIRST baseline (untracked, invisible to `git diff`) still counts as
     # a change. That trap is the one promote.yml's baseline job fell into.
-    if cmp -s <(tail -n +2 "$baseline") <(tail -n +2 "$new"); then
+    if cmp -s <(tail -n +2 "$current") <(tail -n +2 "$new"); then
       echo "canary baseline unchanged"
       exit 0
     fi
     # The same rules CI's and Canary's `wire` jobs apply, so what is refused
     # here is exactly what the lint would have refused before the ship.
-    if ! problems="$("$lint" --compare "$baseline" "$new" 2>&1)"; then
+    if ! problems="$("$lint" --compare "$current" "$new" 2>&1)"; then
       refuse "$problems" "$shipped breaks the wire Canary already shipped, so the baseline was not advanced. Ship a fix that restores compatibility."
     fi
   fi
@@ -131,8 +154,13 @@ from git history — see scripts/proto-lint.py for why the file exists."
 
   # Never forced. A rejected push means main moved; forcing would erase
   # whatever moved it.
-  if git push --quiet origin HEAD:main; then
-    echo "canary baseline recorded from $shipped"
+  if [ "$target" = main ]; then
+    git push --quiet origin HEAD:main && pushed=1 || pushed=0
+  else
+    git push --quiet $lease origin "HEAD:refs/heads/$target" && pushed=1 || pushed=0
+  fi
+  if [ "$pushed" = 1 ]; then
+    echo "canary baseline recorded from $shipped on $target"
     exit 0
   fi
   echo "::warning::push of the canary baseline was rejected (attempt $attempt); retrying from the new main"
