@@ -1323,6 +1323,41 @@ mod recovery_tests {
             assert!(!dir.path().join("started").exists(),"recovery launched an adapter");
         }
     }
+    /// ov-1259: a pinned file that changed after publishing refuses the launch before anything runs, and the item says
+    /// which file, on the run that `workflow get` and the board read, instead of ending Failed with no reason.
+    #[tokio::test]
+    async fn workflow_service_changed_pinned_file_names_it_on_the_item() {
+        use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
+        let (dir, mut runtime) = configured(false, "pass").await;
+        let svc = crate::service::Service::open_in(dir.path().join("state")).await.unwrap();
+        let repo_root = svc.store.create_repository_root(svc.host_id,dir.path().to_str().unwrap(),0).unwrap();
+        let repo = svc.store.create_repository(svc.host_id,repo_root.id,"private",
+            runtime.repository().join(".git").to_str().unwrap(),"").unwrap();
+        let workspace = svc.store.ensure_main_workspace(repo.id).unwrap().id.to_string();
+        runtime.store = svc.store.clone();
+        let settings = dir.path().join("settings.json");
+        std::fs::write(&settings,serde_json::to_vec(&crate::hook_install::claude_settings(&runtime.root.join("h.sock"))).unwrap()).unwrap();
+        let config = runtime.coding.as_mut().unwrap();
+        let CodingHarness::Command(mut process) = config.harness.clone() else { unreachable!() };
+        process.argv.clear();
+        let pinned = LaunchFile { path:settings.canonicalize().unwrap(),digest:digest(&std::fs::read(&settings).unwrap()) };
+        config.harness = CodingHarness::Native { preset:"claude".into(), settings:Some(pinned.clone()),
+            project_hooks:None, codex_hooks:None, plugin_dir:None, prompt:"unused".into(), process };
+        let definition = config.definition().unwrap();
+        let adapter = Some(AdapterConfiguration::Coding(config.clone()));
+        let pin = farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
+        let m = |id: &str, revision, sequence| Mutation { id:id.into(),revision,epoch:1,sequence };
+        runtime.wire_command(&workspace,"owner",Action::Publish { reason:None, notifications:None, mutation:m("p",0,1),expected_pin:None,
+            definition,adapter:adapter.map(Box::new) }).unwrap();
+        runtime.wire_command(&workspace,"owner",Action::Enqueue { mutation:m("e",0,1),item:"one".into(),pin }).unwrap();
+        let root = runtime.root.clone(); drop(runtime);
+        std::fs::write(&settings,"changed by an update").unwrap();
+        let mut runtime = Runtime::open_service(&root,svc.store.clone()).unwrap();
+        let state = finish(&mut runtime,&workspace).await;
+        let failure = state.items["one"].failure.as_deref().unwrap_or_default();
+        assert!(failure.contains(&pinned.path.display().to_string()) && failure.contains("re-pin"), "{failure:?}");
+        assert!(!dir.path().join("started").exists(),"nothing ran on a changed pin");
+    }
     /// ov-1130: an install removed the server after the verdict and output were saved, before settlement.
     #[tokio::test]
     async fn workflow_native_review_vanished_server_keeps_output_and_recorded_verdict() {

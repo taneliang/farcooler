@@ -74,13 +74,31 @@ pub fn held(get: &serde_json::Value) -> Result<Held, Box<dyn std::error::Error>>
         };
         return Ok(Held { pin: None, adapter: None, source: None, suggested });
     };
-    let adapter = match configuration.get("adapter").filter(|a| !a.is_null()) {
+    // The runner's re-pin of the published adapter, when a pinned file changed since (ov-1259): a draft pins to the
+    // files as they are now, never to a digest copied from the publication that stopped being true.
+    let adapter = match get.get("repinned_adapter").filter(|a| !a.is_null()).or_else(|| configuration.get("adapter").filter(|a| !a.is_null())) {
         Some(a) => { let AdapterConfiguration::Coding(config) = serde_json::from_value(a.clone())?; Some(config) }
         None => None,
     };
     Ok(Held { pin: configuration.get("pin").and_then(|p| p.as_str()).map(String::from),
         source: configuration.pointer("/definition/source").and_then(|s| s.as_str()).map(String::from), adapter, suggested: Ok(None) })
 }
+
+/// `workspace re-pin` (ov-1259): the published definition with its adapter pinned to the files as they are now, both of
+/// which the runner computes (`repinned_definition`, `repinned_adapter`). `None` when every pin still holds, so there is nothing to publish.
+pub fn repinned(get: &serde_json::Value) -> Result<Option<Bundle>, Box<dyn std::error::Error>> {
+    get.get("configuration").filter(|c| !c.is_null()).ok_or("This workspace has no published workflow to re-pin.")?;
+    let Some(adapter) = get.get("repinned_adapter").filter(|a| !a.is_null()) else {
+        if get.get("engine_codex_hooks").is_none() { return Err("This runner is too old to re-pin a workflow. Update Far Cooler on it first.".into()); }
+        return Ok(None);
+    };
+    // The definition names the adapter's pin in every step, so the runner re-pins it too.
+    let definition = get.get("repinned_definition").ok_or("the runner sent no re-pinned definition")?;
+    Ok(Some(Bundle { definition: serde_json::from_value(definition.clone())?, adapter: serde_json::from_value(adapter.clone())? }))
+}
+
+/// Why a re-pin draft is filed, when the person gives no reason of their own.
+pub const REPIN_REASON: &str = "Re-pin the published workflow to its files as they are now. Only the pinned file digests change.";
 
 pub fn list() -> String {
     Template::ALL.iter().map(|t| format!("{:<14} {}\n", t.name(), t.about())).collect()
@@ -173,6 +191,28 @@ mod tests {
         }
     }
 
+    /// ov-1259: a draft pins to the runner's re-pin of the published adapter, never to a digest copied from it, and
+    /// `workspace re-pin` is the published definition with that adapter, or nothing when every pin holds.
+    #[test]
+    fn drafts_pin_to_the_files_as_they_are_now() {
+        let mut fresh = config();
+        fresh.ci.workflow = "repinned".into();
+        let mut reply = get(None);
+        reply["engine_codex_hooks"] = serde_json::json!({"path": "/h.json", "digest": "wf1:h"});
+        assert!(repinned(&reply).unwrap().is_none(), "every pin holds");
+        let mut old = reply.clone();
+        old.as_object_mut().unwrap().remove("engine_codex_hooks");
+        assert!(repinned(&old).is_err(), "a runner too old to say is refused, not read as current");
+        let definition = serde_json::to_value(lt::template("ticket-push", &fresh, &["make check".into()], &[], &Default::default()).unwrap().definition).unwrap();
+        reply["repinned_definition"] = definition.clone();
+        reply["repinned_adapter"] = serde_json::to_value(AdapterConfiguration::Coding(fresh.clone())).unwrap();
+        let held = held(&reply).unwrap();
+        assert_eq!(held.adapter.as_ref(), Some(&fresh));
+        assert_eq!(held.pin.as_deref(), Some("wf1:abc"), "still drafted against the published pin");
+        let bundle = repinned(&reply).unwrap().unwrap();
+        assert_eq!(bundle.adapter, AdapterConfiguration::Coding(fresh));
+        assert_eq!(serde_json::to_value(&bundle.definition).unwrap(), definition);
+    }
     #[test]
     fn the_list_names_all_four_templates() {
         let text = list();

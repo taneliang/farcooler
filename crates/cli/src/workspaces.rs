@@ -102,6 +102,23 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// Re-pin the published workflow to its files as they are now: the same definition, with every pinned file's
+    /// digest computed again by the runner and the engine's own hooks moved to this build's. Prints the bundle (or
+    /// writes it with --out) for `workspace set-workflow`; with --propose, files it as a draft for a person instead.
+    /// Says so and changes nothing when every pin still holds.
+    RePin {
+        workspace: String,
+        /// File the bundle as a workflow draft, which a person approves, instead of printing it.
+        #[arg(long, conflicts_with = "out")]
+        propose: bool,
+        /// Why, for the draft's card. A plain re-pin needs none.
+        #[arg(long, requires = "propose")]
+        reason: Option<String>,
+        #[command(flatten)]
+        output: crate::landing_templates::Output,
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// One workflow draft: what it does, and whether a person approved it.
     WorkflowDraftShow { workspace: String, draft: String, #[arg(long)] repo: Option<String> },
     /// Every workflow draft for a workspace, newest first, with where each stands.
@@ -675,6 +692,23 @@ async fn workspace_via(
             let action = crate::landing_templates::propose_action(reason.as_deref().unwrap_or("Review this workflow definition."), bundle);
             let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &action).await?;
             crate::landing_templates::print_draft(&reply, json)?;
+        }
+
+        WorkspaceCmd::RePin { workspace, propose, reason, output, repo } => {
+            let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
+            let get = crate::workflow::get(&mut link, uuid_of(&ws.id)).await?;
+            let Some(bundle) = crate::landing_templates::repinned(&get)? else {
+                eprintln!("Every file the published workflow pins still matches. Nothing to re-pin.");
+                return Ok(());
+            };
+            if propose {
+                let action = crate::landing_templates::propose_action(reason.as_deref().unwrap_or(crate::landing_templates::REPIN_REASON), bundle);
+                let reply = crate::workflow::ask(&mut link, uuid_of(&ws.id), &action).await?;
+                crate::landing_templates::print_draft(&reply, json)?;
+            } else {
+                let held = crate::landing_templates::held(&get)?;
+                crate::landing_templates::deliver(&bundle, &[], &held, uuid_of(&ws.id), &output)?;
+            }
         }
 
         WorkspaceCmd::WorkflowDraftShow { workspace, draft, repo } => {

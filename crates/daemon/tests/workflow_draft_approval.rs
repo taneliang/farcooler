@@ -500,3 +500,51 @@ async fn an_approved_draft_announces_its_publication_to_the_owner() {
     drop(link);
     host.close().await;
 }
+
+/// ov-1259: an app update that writes the engine's hooks differently never changes the file a published workflow
+/// pins, so its runs keep launching on it, and at start the engine files the re-pin draft for a person itself, once.
+/// `workflow get` says the re-pinned adapter, which `workspace re-pin` and `landing-template` draft on.
+#[tokio::test]
+async fn an_update_that_changes_the_engines_hooks_files_a_repin_draft_and_strands_nothing() {
+    if as_a_person("an_update_that_changes_the_engines_hooks_files_a_repin_draft_and_strands_nothing").await { return; }
+    let (dir, mut config) = configured().await;
+    let host = Host::open(dir.path()).await;
+    let (ws, mut link) = (host.workspace, host.connect().await);
+    // What an older build wrote, at the name it used: the same hooks, laid out differently.
+    let engine = host.service.root_dir().join("workflow").canonicalize().unwrap().join("h.sock");
+    let older = host.service.root_dir().join("workflow-claude-hooks.json");
+    let text = format!("{}\n", serde_json::to_string(&farcooler_daemon::hook_install::claude_settings(&engine)).unwrap());
+    std::fs::write(&older, &text).unwrap();
+    let pinned = farcooler_daemon::workflow_runtime::LaunchFile { path: older.canonicalize().unwrap(), digest: farcooler_workflow::digest(&text.as_bytes().to_vec()) };
+    config.harness = CodingHarness::Native { preset: "claude".into(), settings: Some(pinned.clone()), project_hooks: None, codex_hooks: None,
+        plugin_dir: None, prompt: "Work the ticket.".into(), process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 60_000 } };
+    let live = bundle(&config, "ticket-push", "make check");
+    let state = call(&mut link, ws, Action::Get).await;
+    let receipt = call(&mut link, ws, Action::Publish { reason: None, notifications: None, adapter: Some(Box::new(live.adapter.clone())), expected_pin: None,
+        definition: live.definition.clone(), mutation: Mutation { id: "older".into(), revision: state["state"]["revision"].as_u64().unwrap_or(0), epoch: 1, sequence: 1 } }).await;
+    assert!(receipt.pointer("/receipt/result/Ok").is_some(), "{receipt}");
+    let published = pin(&host);
+
+    let filed = farcooler_daemon::workflow_starter::file_repin_drafts(&host.service, &host.watcher);
+    assert_eq!(filed.len(), 1, "one draft for the one workspace");
+    let farcooler_protocol::workflow_config::AdapterConfiguration::Coding(next) = &filed[0].adapter;
+    let CodingHarness::Native { settings: Some(fresh), .. } = &next.harness else { panic!("{:?}", next.harness) };
+    assert!(fresh.path != pinned.path && fresh.digest != pinned.digest, "the draft moves to this build's file: {fresh:?}");
+    // Only the pin changes: the definition is the one the new adapter drafts, which names its pin in every step.
+    assert_eq!(filed[0].definition, bundle(next, "ticket-push", "make check").definition);
+    assert_ne!(filed[0].definition, live.definition);
+    assert_eq!(filed[0].reason, farcooler_daemon::workflow_starter::REPIN_REASON);
+    // The pinned file is as it was published, so every item pinned to it still launches; nothing was published.
+    assert_eq!(farcooler_workflow::digest(&std::fs::read(&pinned.path).unwrap()), pinned.digest);
+    assert_eq!(pin(&host), published);
+    let card = host.service.store.get_task(filed[0].task.unwrap()).unwrap();
+    assert_eq!(card.status, TaskStatus::NeedsDecision, "a person approves it");
+    // Not asked again while it waits, nor at the next start.
+    assert!(farcooler_daemon::workflow_starter::file_repin_drafts(&host.service, &host.watcher).is_empty());
+
+    let got = call(&mut link, ws, Action::Get).await;
+    assert_eq!(got["repinned_adapter"]["config"]["harness"]["Native"]["settings"]["digest"], serde_json::json!(fresh.digest), "{got}");
+    assert_eq!(got["repinned_definition"], serde_json::json!(filed[0].definition), "{got}");
+    drop(link);
+    host.close().await;
+}

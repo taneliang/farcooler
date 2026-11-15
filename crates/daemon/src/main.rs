@@ -354,6 +354,11 @@ async fn run(selected: &paths::RuntimeSelection) -> Result<(), i32> {
     // processes reading the same screens.
     let watcher = Watcher::new(service.clone());
     tokio::spawn(watcher.clone().run());
+    // A published workflow that pins the engine's own hook files keeps running on them across an update; when this
+    // build writes them differently, the engine files the re-pin draft for a person itself (ov-1259).
+    for draft in farcooler_daemon::workflow_starter::file_repin_drafts(&service, &watcher) {
+        eprintln!("filed workflow draft {} to re-pin the engine's hooks for workspace {}", draft.id, draft.workspace);
+    }
     #[cfg(unix)]
     let (check_in_shutdown, check_in_shutdown_rx) = tokio::sync::watch::channel(false);
     #[cfg(unix)]

@@ -79,6 +79,21 @@ pub enum Error {
     /// name, or one that isn't valid. Every other workflow error reaches the caller as not found.
     #[error("runtime: {0}")]
     Domain(farcooler_core::error::DomainError),
+    /// A file the published workflow pins by digest no longer holds what was published (ov-1259). Kept apart from
+    /// `Refused` so the item records which file, in words, instead of failing with no reason.
+    #[error("runtime refused: native settings changed: {}", .0.display())]
+    Changed(std::path::PathBuf),
+}
+impl Error {
+    /// What a person reads on an item this error stopped before anything ran, when it is one they can act on.
+    pub(crate) fn reason(&self) -> Option<String> {
+        match self {
+            Error::Domain(refused) => Some(refused.to_string()),
+            Error::Changed(path) => Some(format!("{} changed after this workflow was published, so its pin no longer matches \
+                and nothing ran. Re-pin the workflow (`farcooler workspace re-pin`) and publish it, then retry.", path.display())),
+            _ => None,
+        }
+    }
 }
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -736,8 +751,8 @@ impl Runtime {
                             // A refusal that is a sentence (an unreadable landing remote, ov-1059) stays on the run.
                             let outcome = if matches!(effect.kind, EffectKind::Stop { .. }) {
                                 Outcome::Uncertain
-                            } else if let Error::Domain(refused) = &error {
-                                Outcome::SafeFailureBecause(refused.to_string())
+                            } else if let Some(reason) = error.reason() {
+                                Outcome::SafeFailureBecause(reason)
                             } else { Outcome::SafeFailure };
                             if self.observe(workspace, &effect, outcome, false, clock())? { *count += 1; }
                         }

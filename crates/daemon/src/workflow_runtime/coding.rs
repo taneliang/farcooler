@@ -312,9 +312,10 @@ impl Pinned for CodingConfig {
 }
 impl FileValidation for LaunchFile {
     fn verify(&self) -> Result<()> {
-        if self.path.canonicalize()? != self.path || digest(&bounded_file(&self.path)?) != self.digest {
-            return Err(Error::Refused("native settings changed"));
-        }
+        // A missing or unreadable file is a changed one too, and says which (ov-1259).
+        let same = self.path.canonicalize().is_ok_and(|p| p == self.path)
+            && bounded_file(&self.path).is_ok_and(|bytes| digest(&bytes) == self.digest);
+        if !same { return Err(Error::Changed(self.path.clone())); }
         Ok(())
     }
 }
