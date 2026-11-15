@@ -107,6 +107,11 @@ impl Run {
             reason: "first layout".into() }).expect("the fixture layout publishes");
         run
     }
+    /// The same driver carrying on from a pipeline made elsewhere (a migration): replay starts from it.
+    pub fn resume(p: Pipeline, adapters: Adapters<'static>) -> Self {
+        let n = p.source_sequences.values().copied().max().unwrap_or(0);
+        Run { start: p.clone(), p, adapters, log: Vec::new(), effects: Vec::new(), now: 1_000, host: BTreeMap::new(), n, answers: 0 }
+    }
     pub fn input(&mut self, grant: Grant, command: Command) -> Input {
         self.n += 1;
         Input { schema: 3, id: format!("input-{}", self.n), workspace: "workspace".into(), expected_revision: self.p.revision,
