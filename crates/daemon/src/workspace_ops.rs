@@ -204,6 +204,10 @@ pub async fn set_settings(
         if scope != Scope::HostAdmin {
             return Err(DomainError::ScopeDenied { needed: "host_admin" });
         }
+        // A new lead replaces the sitting orchestrator (`lead_change::follow_lead` starts the new one in the person's
+        // seat), so only a person hands it on, never an agent in a pane: on the local socket every caller with no
+        // preamble is `host_admin` (ov-1286).
+        refuse_unless_a_person(svc, caller.1).await?;
         svc.store.get_workspace(id)?;
         if let Some(handle) = handle {
             svc.store.member(handle).map_err(|_| DomainError::InvalidArgument { what: "lead" })?;
@@ -333,7 +337,15 @@ pub async fn refuse_an_agent_moving_the_orchestrator_seat(
     let seats = wire::terminal_role_from_wire(req.role) == Some(TerminalRole::Orchestrator);
     let unseats = svc.store.get_terminal(terminal)?.role == TerminalRole::Orchestrator;
     if !seats && !unseats { return Ok(()); }
+    refuse_unless_a_person(svc, caller_pid).await
+}
+
+/// Refuse `scope-denied` (`person`) a caller its process doesn't show is a person: an agent, in a pane or out of
+/// one, or a caller the runner can't read (`caller_seat`). For the calls that move who holds a workspace's
+/// orchestrator seat (ov-1267, ov-1286).
+pub(crate) async fn refuse_unless_a_person(svc: &Service, caller_pid: Option<i32>) -> Result<()> {
     if crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
+        tracing::info!("refused: a seat change from a caller who isn't a person");
         return Err(DomainError::ScopeDenied { needed: "person" });
     }
     Ok(())

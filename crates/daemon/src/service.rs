@@ -3244,6 +3244,14 @@ impl Service {
     /// untouched. A dirty worktree still requires the caller to have
     /// confirmed, decided by `removal_needs_confirmation`.
     pub async fn remove_worktree(&self, id: Uuid) -> Result<()> {
+        self.remove_worktree_as(id, crate::caller_seat::Seat::Person).await
+    }
+
+    /// `remove_worktree`, for `caller`: refused `scope-denied` when a pane in it is an orchestrator `caller` may not
+    /// displace (`caller_seat::authorize_terminal`). Checked with every workspace seat lock of the repository held, the
+    /// lock every promotion to orchestrator and every orchestrator start takes (`seat_lock`), and the panes stopped
+    /// under the same locks: no pane becomes an orchestrator between the check and its removal (ov-1286).
+    pub async fn remove_worktree_as(&self, id: Uuid, caller: crate::caller_seat::Seat) -> Result<()> {
         let ws = self.store.get_worktree(id)?;
         farcooler_core::names::check_tree_removal(&ws.worktree_path)
             .map_err(|message| DomainError::refused(message.into()))?;
@@ -3304,10 +3312,17 @@ impl Service {
         // has nothing to stop, and that is no reason to keep the worktree; a
         // record that will not delete is, because `terminals.worktree_id` is a
         // foreign key with no cascade and the worktree row is about to go.
-        for term in self.store.list_terminals_for_worktree(ws.id)? {
+        let seats = self.hold_worktree_seats(&ws).await?;
+        let terminals = self.store.list_terminals_for_worktree(ws.id)?;
+        for term in &terminals {
+            crate::caller_seat::authorize_terminal(self, caller, term.id)?;
+        }
+        for term in terminals {
             let _ = self.stop_terminal(term.id).await;
             self.remove_terminal(term.id).await?;
         }
+        // Released before the repository's lock: nothing here takes a seat lock while holding that one.
+        drop(seats);
 
         let lock = self.repo_lock(repo.id);
         let _guard = lock.lock().await;
@@ -3327,6 +3342,26 @@ impl Service {
 
         // The worktree row goes with the directory; the BRANCH stays.
         self.store.delete_worktree(id, ws.resource_version)
+    }
+
+    /// The seat locks (`lead_change::Locks`) of every workspace a pane in `worktree` can sit in: its repository's,
+    /// and any a pane in it names, taken in id order. A pane moved to a workspace outside the set while they were
+    /// being taken is looked for again.
+    async fn hold_worktree_seats(&self, worktree: &models::Worktree) -> Result<Vec<tokio::sync::OwnedMutexGuard<()>>> {
+        for _ in 0..4 {
+            let mut workspaces: std::collections::BTreeSet<Uuid> =
+                self.store.list_workspaces(Some(worktree.repository_id))?.into_iter().map(|w| w.id).collect();
+            workspaces.extend(self.store.list_terminals_for_worktree(worktree.id)?.into_iter().filter_map(|t| t.workspace_id));
+            let mut guards = Vec::with_capacity(workspaces.len());
+            for workspace in &workspaces {
+                guards.push(self.orchestrator_locks.hold(*workspace).await);
+            }
+            let held = self.store.list_terminals_for_worktree(worktree.id)?;
+            if held.iter().filter_map(|t| t.workspace_id).all(|w| workspaces.contains(&w)) {
+                return Ok(guards);
+            }
+        }
+        Err(DomainError::ResourceConflict)
     }
 
     // ---- terminals ----

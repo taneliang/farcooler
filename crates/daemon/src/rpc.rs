@@ -1373,13 +1373,11 @@ impl Rpc {
                         return Err(DomainError::ConfirmationRequired);
                     }
                 }
-                // An adopted orchestrator can be in this worktree. Check all
-                // targets before removing any pane.
+                // An adopted orchestrator can be in this worktree: every pane
+                // is checked before any is removed, under the seat locks a
+                // promotion takes, so none becomes one in between (ov-1286).
                 let caller = crate::caller_seat::caller_seat(svc, self.caller_pid).await;
-                for terminal in svc.store.list_terminals_for_worktree(id)? {
-                    crate::caller_seat::authorize_terminal(svc, caller, terminal.id)?;
-                }
-                svc.remove_worktree(id).await?;
+                svc.remove_worktree_as(id, caller).await?;
                 // Same reasoning as `worktree.create`: this mutation writes
                 // the worktree row itself, so the reconcile pass that
                 // follows finds nothing gone and stays quiet. Without this,
