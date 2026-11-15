@@ -535,7 +535,8 @@ nothing went out.
 | Cheap checks, gate (`Run`) | command | `coding.check`, `coding.gate` | |
 | Group review (new, owner's Nov 15 suggestion) | agent | `coding.group_review` | one reviewer on the folded tree |
 | Push, Land | command, outward | `coding.push`, `coding.land` | |
-| AwaitCi, Ci | wait | `coding.ci` | `again` rule = today's rerun policy |
+| PushCandidate (ov-1269) | command | `coding.push_candidate` | the folded commit on `landing/<id>` so CI runs during the gate; the branch goes when the batch ends |
+| AwaitCi, Ci | wait | `coding.ci` | `again` rule = today's rerun policy; in a push batch it sits before the push |
 | PushBranch, OpenPr, PrReady | command | `coding.push_branch`, `.open_pr`, `.pr_ready` | |
 | AwaitPr | wait, outward | `coding.merged` | outward: a person can merge at any time |
 | Tracker | none | | a token `Resting` in a board column |

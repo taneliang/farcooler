@@ -62,6 +62,8 @@ commit, workflow and event. If GitHub cannot confirm the send, the effect stays
 `Uncertain`, with its count spent. Replaying the event log reads the recorded
 CI facts and reproduces the same decisions without contacting GitHub.
 
-A group's CI rejection still fails the group. As with other CI failures after
-a push, tickets keep the commit that already landed; rerunning CI cannot undo
-a push or send those commits back through landing.
+A group's CI rejection still fails the group. In the push templates CI runs on
+the group's candidate branch before the push (ov-1269), so a rejection there
+lands nothing and the tickets go back to their builds. As with other CI
+failures after a push, tickets keep the commit that already landed; rerunning
+CI cannot undo a push or send those commits back through landing.
