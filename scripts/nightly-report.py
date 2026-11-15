@@ -27,6 +27,7 @@ commit range.
 
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -91,12 +92,43 @@ def duplicate_groups(log):
     return [g for g in groups if g]
 
 
+def stale_skipped(selection, rust_classes):
+    """The failing `rust <crate>` classes whose crate the gate's selection left out.
+
+    `selection` is (selected crate names, full) as scripts/rust-shadow.py select() returns it for the
+    commits since the last green nightly. A full selection skips nothing."""
+    names, full = selection
+    if full:
+        return []
+    return sorted(c.removeprefix("rust ") for c in rust_classes if c.removeprefix("rust ") not in names)
+
+
+def range_selection(previous, sha, runner=None):
+    """(selected crates, full) for previous..sha, or None when it cannot be worked out."""
+    runner = runner or sh
+    if not previous:
+        return None
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("nightly_rust_shadow", Path(__file__).resolve().parent / "rust-shadow.py")
+        shadow = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shadow)
+        repo = Path(runner("git", "rev-parse", "--show-toplevel").strip())
+        raw = runner("git", "diff", "--no-renames", "--name-status", "-z", f"{previous}..{sha}").split("\0")
+        changes = list(zip(raw[0:-1:2], raw[1:-1:2]))
+        metadata = json.loads(runner("cargo", "metadata", "--format-version", "1", "--all-features"))
+        names, _, full = shadow.select(repo, metadata, changes)
+        return names, full
+    except (RuntimeError, ValueError, KeyError, OSError):
+        return None
+
+
 def classify(jobs):
     """The jobs of this run that did not pass, apart from the report job."""
     return [j for j in jobs if j.get("conclusion") in BAD and j.get("name") != OWN_JOB]
 
 
-def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget=False, gates=()):
+def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget=False, gates=(), selection=None):
     """The issue text, short paragraphs and bullets."""
     lines = [f"The nightly iOS UI run on `{sha[:9]}` ({when}) went red: {run_url}", ""]
     if failures:
@@ -105,10 +137,22 @@ def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget
             for cls, methods in classes.items():
                 lines.append(f"- `{cls}` ({job}): " + ", ".join(f"`{m}`" for m in methods))
         lines.append("")
-    if any(c.startswith("rust ") for _, classes in failures for c in classes):
-        lines += ["The Rust failures above came from a full run with no test selection. If the lane gate or landing "
-                  "skipped that test for the change that broke it, the selection missed it: add the input it did not see "
-                  "(scripts/rust-shadow.py).", ""]
+    rust = [c for _, classes in failures for c in classes if c.startswith("rust ")]
+    if rust:
+        lines += ["## Rust failures and the gate's selection", "",
+                  "These came from a full run with no test selection (ov-1268)."]
+        if selection is None:
+            lines += ["The commit range or the crate graph could not be read, so which of them the lane gate and landing "
+                      "would have skipped is unknown."]
+        else:
+            stale = stale_skipped(selection, rust)
+            if stale:
+                lines += ["The lane gate's selection over this range would have **skipped** these crates, so the failing "
+                          "test there is the stale skipped test: " + ", ".join(f"`{c}`" for c in stale) + ". "
+                          "Add the input the selection did not see (scripts/rust-shadow.py)."]
+            else:
+                lines += ["The selection over this range includes every failing crate, so this is an ordinary failure, not a skipped test."]
+        lines.append("")
     if gates:
         lines += ["## Captures that show the same picture twice", ""]
         for job, groups in gates:
@@ -148,7 +192,7 @@ def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget
     return "\n".join(lines)
 
 
-def plan(env, jobs, logs, previous, commits, open_issues, more=0):
+def plan(env, jobs, logs, previous, commits, open_issues, more=0, selection=None):
     """What to do, as a list of ("create"|"comment"|"close", payload) steps.
 
     `logs` maps a job's id to its log text, `previous` is the last green
@@ -177,7 +221,7 @@ def plan(env, jobs, logs, previous, commits, open_issues, more=0):
             silent.append((job["name"], "as " + ("cancelled (a timeout looks the same)" if job["conclusion"] == "cancelled" else job["conclusion"])
                            + (" (its log could not be read)" if unread else "")))
     when = (env.get("NIGHTLY_DATE") or "")
-    text = body(run_url, sha, when or "tonight", failures, silent, commits, previous, more, budget, gates)
+    text = body(run_url, sha, when or "tonight", failures, silent, commits, previous, more, budget, gates, selection)
     if open_issues:
         return [("comment", (open_issues[0], text))]
     names = sorted({cls for _, classes in failures for cls in classes})
@@ -252,6 +296,8 @@ def run_live():
     steps = plan(
         {**env, "NIGHTLY_DATE": sh("date", "-u", "+%Y-%m-%d").strip()},
         jobs, logs, previous, commits, open_issues, more,
+        range_selection(previous, sha) if any("rust " in c for j in classify(jobs)
+                                              for c in failing_tests(logs.get(j["id"], ""))) else None,
     )
     if not steps:
         print("nightly-report: green, and no issue is open")
@@ -293,6 +339,18 @@ def self_test():
            failing_tests("2026-10-15T11:40:01Z         FAIL [   1.234s] farcooler-daemon script_hooks::a_test\n"
                          "        PASS [   0.1s] farcooler-vt ok::test\n"),
            {"rust farcooler-daemon": ["script_hooks::a_test"]})
+    expect("a crate the selection left out is the stale skipped test",
+           stale_skipped((["farcooler-vt"], False), ["rust farcooler-daemon", "rust farcooler-vt"]), ["farcooler-daemon"])
+    expect("a full selection skips nothing", stale_skipped(([], True), ["rust farcooler-daemon"]), [])
+    rust_env = {"GITHUB_REPOSITORY": "o/r", "GITHUB_RUN_ID": "1", "GITHUB_SHA": "a" * 40}
+    rlog = "2026-10-15T11:40:01Z         FAIL [   1.234s] farcooler-daemon script_hooks::a_test\n"
+    rjobs = [{"id": 9, "name": "Rust (macOS)", "conclusion": "failure"}]
+    named = plan(rust_env, rjobs, {9: rlog}, "b" * 40, [], [], 0, (["farcooler-vt"], False))[0][1][1]
+    expect("the report names the stale skipped crate", "would have **skipped** these crates" in named and "`farcooler-daemon`" in named, True)
+    seen = plan(rust_env, rjobs, {9: rlog}, "b" * 40, [], [], 0, (["farcooler-daemon"], False))[0][1][1]
+    expect("a selected crate is an ordinary failure", "ordinary failure, not a skipped test" in seen, True)
+    unknown = plan(rust_env, rjobs, {9: rlog}, None, [], [], 0, None)[0][1][1]
+    expect("an unreadable range says so", "is unknown" in unknown, True)
     expect("no failures in a clean log", failing_tests("Test Case '-[FarCoolerUITests.X y]' passed"), {})
     expect("a test killed at its allowance is named", failing_tests(
         "Test Case '-[FarCoolerUITests.ConversationCapturesUITests testCaptures]' exceeded execution time allowance of 6 minutes."),

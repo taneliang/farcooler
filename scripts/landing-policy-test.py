@@ -227,14 +227,18 @@ class LandingTests(unittest.TestCase):
 
 
     def test_full_rust_forces_the_whole_suite_in_both_modes(self):
-        """ov-1268: --full-rust beats --landing's selection; plain gate selects only with --select-rust."""
+        """ov-1268: --full-rust beats --landing's selection; both modes select only with --select-rust."""
         base = subprocess.run(["git", "rev-list", "-n1", "HEAD", "--", "crates/vt/src"], cwd=ROOT,
                               capture_output=True, text=True, check=True).stdout.strip() + "~1"
         def plan(*flags):
             out = subprocess.run([sys.executable, str(ROOT / "scripts/lane-gate.py"), "--dry-run", "--only", "rust",
                                   "--base", base, *flags], cwd=ROOT, capture_output=True, text=True)
             return out.stdout + out.stderr
-        landing = plan("--landing", "--full-rust")
+        default = plan("--landing")  # no shadow samples yet: landing keeps the whole suite too
+        self.assertIn("Rust coverage: full suite", default)
+        self.assertIn("no shadow samples yet", default)
+        self.assertNotIn("nextest runs only", default)
+        landing = plan("--landing", "--select-rust", "--full-rust")
         self.assertIn("Rust coverage: full suite", landing)
         self.assertIn("--full-rust", landing)
         self.assertNotIn("nextest runs only", landing)
