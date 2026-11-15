@@ -37,8 +37,11 @@ still be touching.
 **Process changes apply at once; nothing is pinned.** A published change
 takes effect in the event that publishes it. Queued and held tokens follow
 the new layout immediately. A step already running finishes, and its result
-is routed by the new layout. A removed or renamed station is named in the
-change's **moves**; the publish is refused while anything would be stranded.
+is routed by the new layout. A renamed station keeps its work under the new
+name; a removed one is named in the change's **moves** with the station that
+replaces it, and a step that finishes there then enters that replacement, so
+the new process runs in full. The publish is refused while anything would be
+stranded.
 `workflow preview` runs the change on a copy of the live pipeline and shows
 exactly where every token ends up before anything is published (section 7).
 
@@ -82,7 +85,7 @@ Sections 5.4 and 9 give each reason in full.
 | Publishing, settling and the other person-only actions become owner questions, each with its own reason (Q1-Q7, section 9) | Same |
 | A published change applies to work in flight at once. The first pass let a running step finish "under the version it started with"; now its result is routed by the new layout, and a removed station's tokens move by the change's `moves`, previewed first (section 7) | "should follow the new process immediately… some way to transition work without interrupting them… Def don't pin tickets to workflow versions" |
 | Limits are per workspace; the first pass's host-wide pools become an optional host limit (section 6) | "Agent limits should be set per workspace as well… Workspaces should be independent. If the user needs to set a host level limit they should still be able to do that" |
-| The landing rules (never go back across a push; settle before moving) are generalized to any **outward** step, so a sent email gets the same protection as a push (section 5.3) | Follows from the non-engineering intent |
+| The landing rules (never go back across a push; settle before moving) are generalized to any **outward** step. A push stays `repeat: once`; a sent email is `repeat: fresh`, so a second reply or a follow-up is a new round with fresh evidence and a fresh idempotency key, and no crossing is ever undone (section 5.3) | Follows from the non-engineering intent |
 | Kept from the first pass: one identity for life; limits are station policy that holds rather than kills; explicit ordered queues with priority; replay, fencing and crash recovery; safe stopping; bisecting in place; cheap checks and group review before the gate; a cutover with no period of two engines | The ticket's constraints |
 
 ## 1. Where the code is today
@@ -144,8 +147,9 @@ coding verbs:
   own state on each token and batch, which the core stores but never reads.
 - **Outward step**: an operation that changes something outside the engine
   that can't be taken back: a push, a merge, a sent email, a published post,
-  a deploy. The adapter declares which of its operations are outward; the
-  core enforces the rules for them (5.3).
+  a deploy. The adapter declares which of its operations are outward, and
+  whether each may cross once (a push) or again in fresh rounds (an email);
+  the core enforces the rules for them (5.3).
 - **Intake**: an adapter source that creates tokens, such as new mail threads
   or a research topic list.
 
@@ -156,10 +160,10 @@ coding verbs:
 | The published workflow and its digest | Its key, forever | Its state blob: for coding, the tree, branch, base, candidate commit, pushed commit, PR number, CI run and rerun counts |
 | Each station's queue, working set, capacity, hold, drain | Where it is (`Location`) | What an operation needs and produces |
 | Pools and their capacity | Its priority | How an outcome becomes a label (a fold conflict is label `conflict`) |
-| Batches: members, location, crossing record, bisect progress | Its brief and last failure | Which members are suspects when a batch fails |
+| Batches: member keys, location, crossing record, bisect progress | Its brief and last failure | Which members are suspects when a batch fails; what each member joined with (coding: its candidate) |
 | The event log, idempotence, epoch | Its visits (all history and overrides) | Board fields to show (branch, PR link, recipient) |
 | Fences and stop receipts | Its dependencies, followers, picked models | Execution, reconcile, stop, probe |
-| Holds and policy counts | Its crossing record, if an outward step took it out | Validation of a layout's use of its operations |
+| Holds and policy counts; the archive of closed tokens and batches | Its crossings, one per outward operation that took something out | Validation of a layout's use of its operations; what an effect needs to run (coding: tree, candidates, CI run) |
 
 ### 2.3 Core types
 
@@ -187,13 +191,17 @@ pub struct Published { pub digest: String, pub layout: Layout, pub adapters: BTr
 pub struct AdapterRef { pub version: String, pub config_digest: String }   // e.g. "coding/v1"
 pub struct Station { pub kind: Kind, pub queue: Vec<String>, pub working: BTreeSet<String>,
     pub capacity: u16, pub held: Option<Hold>, pub draining: bool }
+/// A station a publish removed while work was still running in it: only its translation, never its old routes.
+pub struct Retired { pub kind: Kind, pub working: BTreeSet<String>, pub to: StationId,
+    pub labels: BTreeMap<String, Target> }
+pub enum Target { Station(StationId), Done, Finish, Rejected, Returned }   // 4.1
 pub struct Pool { pub capacity: u16, pub held_by: BTreeSet<String> }
 pub struct Token {
     pub at: Location,
     pub priority: i32,
     pub data: BTreeMap<String, Opaque>,       // per adapter; the core stores and passes it, never reads it
     pub evidence: Option<Evidence>,
-    pub crossing: Option<Crossing>,
+    pub crossings: Vec<Crossing>,             // every outward operation it crossed, in order (5.3)
     pub brief: Option<String>,
     pub failure: Option<String>,
     pub models: BTreeMap<StationId, String>,
@@ -202,12 +210,47 @@ pub struct Token {
     pub visits: Vec<Visit>,
     pub fence: u64,
 }
-pub struct Batch { pub at: Location, pub members: Vec<Member>, pub data: BTreeMap<String, Opaque>,
-    pub crossing: Option<Crossing>, pub suspects: Vec<String>, pub bisect: Option<Bisect>,
+pub struct Batch { pub at: Location, pub members: Vec<Membership>, pub data: BTreeMap<String, Opaque>,
+    pub crossings: Vec<Crossing>, pub suspects: Vec<String>, pub bisect: Option<Bisect>,
     pub visits: Vec<Visit>, pub fence: u64 }
+/// One token in a batch. What the token joined with (for coding, its candidate commit) is the adapter's.
+pub struct Membership { pub token: String, pub joined: u64, pub data: BTreeMap<String, Opaque> }
 pub struct Opaque { pub version: String, pub value: serde_json::Value, pub digest: String }
 pub struct Evidence { pub artifact: String, pub manifest: String, pub receipt: String, pub spec: String }
-pub struct Crossing { pub station: StationId, pub artifact: String, pub receipt: String, pub revision: u64 }
+/// `round` counts this token's crossings at this station: 1 for the first send, 2 for the second (5.3).
+pub struct Crossing { pub station: StationId, pub round: u32, pub artifact: String, pub receipt: String,
+    pub revision: u64 }
+/// What a later step needs to know about a token or batch that has left live state (today's
+/// `Archived`/`ArchivedGroup`, state.rs:150-166, without `candidate` and `pushed`).
+pub struct Archived {
+    pub closed: Closure,                      // Done, Cancelled; and its reason
+    pub reason: Option<String>,
+    pub crossings: Vec<Crossing>,             // what it took out into the world, as opaque artifacts
+    pub batch: Option<ArchivedBatch>,         // for a batch: what the board needs to keep drawing it
+    pub data: BTreeMap<String, Opaque>,       // the adapter's last data (coding: candidate, pushed commit)
+}
+pub enum Closure { Done, Cancelled }
+pub struct ArchivedBatch { pub name: String, pub members: Vec<String>, pub since_ms: i64 }
+/// One unit of work for the runtime. Every field is core; whatever an adapter needs to run it (coding's tree,
+/// its members' candidates, a CI rerun's run) is in `data`, copied from the subject when the effect is made.
+pub struct Effect {
+    pub id: String,
+    pub subject: Subject,                     // Token(key) or Batch(id); today `item`
+    pub run: String,
+    pub epoch: u64,
+    pub fence: u64,
+    pub resources: Vec<String>,               // opaque names from the catalog, e.g. "coding:target:main"
+    pub kind: EffectKind,
+    pub op: OpRef,                            // op.spec: digest of the exact operation spec it runs
+    pub created_ms: i64,
+    pub model: Option<String>,                // agent steps
+    pub brief: Option<String>,                // agent steps: why it was sent back
+    pub followers: Vec<String>,               // tokens riding on this one; today `with`
+    pub members: Vec<String>,                 // a batch effect's member keys, in order
+    pub idempotency: String,                  // outward ops: (subject, station, round); stable across retries
+    pub data: BTreeMap<String, Opaque>,       // per adapter: coding puts tree, candidates, ci_retry here
+}
+pub enum Subject { Token(String), Batch(String) }
 pub enum Location {
     Resting { column: String },
     Queued { station: StationId },
@@ -218,7 +261,7 @@ pub enum Location {
     InBatch { batch: String },
     Riding { lead: String },
     Held { station: StationId, hold: Hold },
-    Closed { crossed: bool },
+    Closed { crossed: bool },                 // crossed = !crossings.is_empty()
 }
 pub struct Work { pub run: String, pub attempt: u8, pub pending: Option<String>, pub op: OpRef,
     pub stopping: Option<String>, pub uncertain: bool, pub wait_since: Option<i64>,
@@ -238,17 +281,24 @@ pub enum Outcome {
 pub enum EffectKind { Execute(OpRef), Probe(OpRef), Stop { operation: String } }
 ```
 
-`Effect` keeps today's fields (`state.rs:252-264`) with `item` renamed
-`token`, `kind` as above, `resource` replaced by `resources: Vec<String>`
-(opaque names the adapter gave, such as `coding:target:main`), and
-`definition_pin`/`policy_pin` replaced by `op.spec`, the digest of the exact
-operation spec the effect ran. That is a record of what ran, not a pin on the
-token.
+Every field of today's `Effect` (`state.rs:252-283`), `Member`
+(`state.rs:125`), `Archived` and `ArchivedGroup` (`state.rs:150-166`) has a
+place above or in an adapter's `data`; section 11.1 maps each one. In short:
+`candidate`, `Member::candidate`, `tree`, `ci_retry`, `Archived::candidate`
+and `ArchivedGroup::pushed` all become coding data; `definition_pin` and
+`policy_pin` become `op.spec`, a record of what ran, not a pin on the token;
+`operation: OperationSpec` (`definition.rs:54-58`) is the published
+operation, named by `op` and digested into `op.spec`.
 
-A CI check in the repository (`scripts/`, run in CI) greps the core module
-for `branch`, `commit`, `base`, `push`, `pull_request`, `ci`, `git`, `fold`
-and `gate` as identifiers, so the line stays where it is drawn. It is
-mutation-tested: adding `branch: String` to `Token` must turn it red.
+A CI check in the repository (`scripts/`, run in CI) greps every type and
+field name in the core module (`crates/workflow/src/pipeline/`, including
+`Effect`, `Membership`, `Archived`, `Outcome` and `Input`) for `branch`,
+`commit`, `candidate`, `base`, `push`, `pull_request`, `pr`, `ci`, `git`,
+`tree`, `fold` and `gate` as whole segments of a snake_case or CamelCase
+identifier (so `pr` matches `open_pr` but not `priority`), so the line
+stays where it is drawn. It is mutation-tested: adding `branch: String` to
+`Token`, `candidate: String` to `Membership` or `pushed` to `ArchivedBatch`
+must each turn it red.
 
 ### 2.4 One workflow per workspace, with the door open
 
@@ -294,7 +344,8 @@ Result<Transition, Refusal>`, with no clock and no I/O, as today
   patience, `again`, skip, lot size.
 - **Decisions**: deciders, how many verdicts are needed, verdicts given.
 - **Outward steps and crossings**: what an adapter declares outward, the
-  settle-before-move rule, and "never back across a crossing".
+  settle-before-move rule, `repeat: once` versus `fresh`, rounds, and "a
+  crossing is never undone".
 - **Fencing, stopping, the log, replay, crash recovery**: unchanged from the
   first pass.
 
@@ -309,13 +360,16 @@ The execution half lives in the daemon.
 /// Pure. Linked into the reducer; chosen by the version string in the published workflow.
 pub trait AdapterRules {
     fn version(&self) -> &'static str;
-    /// Every operation: the station kinds it may run under, the labels it can answer, whether it is outward,
-    /// the resources it holds while it runs, and what it needs and makes (for validation).
+    /// Every operation: the station kinds it may run under, the labels it can answer, whether it is outward
+    /// and if so its `repeat` (`once` or `fresh`, 5.3), the resources it holds while it runs, and what it
+    /// needs and makes (for validation).
     fn catalog(&self) -> &[OpSpec];
     /// A layout's use of this adapter's operations, in order: today's coding.rs:204-280 order rules.
     fn validate(&self, layout: &Layout, config: &serde_json::Value) -> Result<(), Vec<Problem>>;
-    /// Whether an operation may start for this token or batch now, and with what arguments and resources.
-    /// Sees the token's visits, so it can accept a skipped station (5.1) as the orchestrator's choice.
+    /// Whether an operation may start for this token or batch now, and with what arguments, resources and
+    /// effect data (`Effect::data`: everything the execution half needs, such as coding's tree and the
+    /// members' candidates). Sees the visits and crossings, so it can accept a skipped station (5.1) as the
+    /// orchestrator's choice and refuse a `fresh` outward start whose evidence predates the last crossing.
     fn start(&self, op: &str, subject: &Subject, config: &serde_json::Value) -> Result<StartPlan, Refusal>;
     /// An answer becomes a label, new adapter data, and optionally "again": run this station once more with
     /// these facts (the CI rerun rule, today ci.rs). The core spends the `again` count before it emits.
@@ -363,8 +417,11 @@ Everything below leaves the core and becomes `coding/v1`:
 |---|---|
 | `RunTree` (`state.rs:110-114`): worktree name, branch, path, base, adopted | Token data |
 | `candidate`, `pushed` (`state.rs:34,54`) | Token and batch data. The core keeps only `Evidence::artifact` (an opaque id) and `Crossing` |
+| `Member::candidate` (`state.rs:125`) | `Membership::data["coding"]`: the candidate the ticket joined with |
+| `Archived::candidate`, `ArchivedGroup::pushed` (`state.rs:150-166`) | `Archived::data["coding"]`; the core keeps the `Crossing` with its opaque artifact |
+| `Effect::candidate`, `members`, `tree`, `ci_retry` (`state.rs:261-283`) | `Effect::data["coding"]`, filled by `start`; the core's `Effect::members` is keys only |
 | `StageKind` coding verbs (`definition.rs:21-52`) | Operations: `coding.provision`, `.build`, `.check`, `.review`, `.route`, `.base`, `.fold`, `.gate`, `.group_review`, `.push`, `.ci`, `.push_branch`, `.open_pr`, `.pr_ready`, `.pr_reviews`, `.merged`, `.land` |
-| `lands()` (`definition.rs:488`) | `outward: true` on `.push`, `.land`, `.merged` |
+| `lands()` (`definition.rs:488`) | `outward: once` on `.push`, `.land`, `.merged` (5.3) |
 | `makes_candidate`, `needs_candidate` (`definition.rs:489-502`) and the order rules (`coding.rs:204-280`) | `catalog()` needs/makes and `validate()` |
 | `Outcome::FoldConflict`, `Outcome::CiResult` (`state.rs:240-248`) | Adapter answers mapped by `observe` to labels `conflict`, `passed`, `red`, `cancelled`, with the conflict files and CI run in its data |
 | CI rerun policy, `CiRun`, `CiRetry` (`ci.rs`) | `observe` returning `again`; its count is the core's `again` policy |
@@ -387,13 +444,36 @@ Everything below leaves the core and becomes `coding/v1`:
 | `batch` | Its inner stations do | Forms batches from its queue by policy, then carries each batch through its own inner stations | Each member's label: `passed`, `returned`, `crossed` | Landing group, weekly issue, daily digest |
 
 A station's `op` names `<adapter>.<operation>`; the adapter's catalog says
-which kinds each operation may run under. Labels route to stations;
-`passed` with no route goes to the next station in the list, and any other
-unrouted label holds the token (`HoldKind::StepFailed`), never closes it.
-Inside a batch, an inner station may route to two batch outcomes:
-`rejected` starts the batch's `on_reject` policy (4.5), and `returned` sends
-the members the adapter names (a fold's conflicting tickets) out along the
-batch station's `returned` route while the rest carry on.
+which kinds each operation may run under.
+
+**Routing, exactly.** When a token or batch leaves a station with label `L`:
+
+1. If the station's `routes` has `L`, it goes to that target.
+2. Otherwise, if `L` is `passed`, it goes to the next station in the list.
+   `skipped` (5.1) goes wherever `passed` would, or at a decision station
+   wherever `approved` would; the visit says `skipped`. Past the last station of the top-level list it goes
+   to `done`; past the last inner station of a batch, to `finish`.
+3. Any other label holds it at that station (`HoldKind::StepFailed`, the
+   label as its reason). Nothing closes by falling through.
+
+A decision's verdicts (`approved`, `rejected`, `edited`, ...) are labels
+like any other, so a decision station must route each verdict it should act
+on; an unrouted verdict holds. A route target is a station id or one of
+these reserved targets (`validate` refuses any other name):
+
+| Target | Where | Means |
+|---|---|---|
+| `done` | top level | Close the token: `Closed { crossed }`, `Archived { closed: Done }`, with its crossings and adapter data kept. Reopen brings it back under the same key |
+| `finish` | inside a batch | The batch is complete: its members leave together with label `passed`, routed by the batch station's routes (rule 1-3 again, one level up) |
+| `rejected` | inside a batch | Start the batch's `on_reject` policy (4.5) |
+| `returned` | inside a batch | The members the adapter names (a fold's conflicting tickets) leave along the batch station's `returned` route; the rest carry on to the next inner station |
+
+`validate` also refuses a layout where a decision station has no route for
+`approved`, or where a `repeat: once` outward station can be reached again
+from any of its **crossing** labels (5.3). The catalog splits an outward
+operation's labels into crossing ones (`passed` for a push) and not-crossed
+ones (`refused`); a route from a not-crossed label may loop back, because
+nothing went out.
 
 ### 4.2 Coding stations as configurations
 
@@ -463,7 +543,11 @@ changed paths that meet failing tests); under `bisect` the batch re-runs the
 rejecting station on halves of its members, on the same inputs, until it has
 found the members that fail; nothing outward runs while bisecting. The ones
 found leave with the output as their brief (policy `returns`, then a hold);
-the rest pass the station together and go on as one batch. For coding: an
+the rest pass the station together and go on as one batch. Under
+`return_suspects` there is no bisect: the suspects leave along `returned` at
+once and the rest re-enter the rejecting station without them (a decision
+asks its deciders again, about the smaller batch). Under `hold` the batch
+holds whole for the orchestrator. For coding: an
 8-ticket batch with one bad ticket costs five gates, one push and one CI run,
 against seven gates, three pushes and three CI runs today.
 
@@ -482,7 +566,7 @@ pin or fence on the wire. If the token has moved, the command is refused
 | Change priority | `Prioritize { token, priority }` | Re-places it; applies at every later station |
 | Hold, release | `Hold { token, reason }`, `Release { token, to? }` | A working token goes through `Stopping` first (5.2) |
 | Pull from a batch, even mid-step | `Pull { token, reason }` | Leaves the batch and holds; a working batch stops and re-runs without it (5.2) |
-| Send anywhere before where it is, any number of times | `Send { token, to, reason }` | Queues there by priority, brief = reason; through `Stopping` if working; never back across a crossing (5.3) |
+| Send anywhere before where it is, any number of times | `Send { token, to, reason }` | Queues there by priority, brief = reason; through `Stopping` if working; never back across a `repeat: once` crossing; back across a `repeat: fresh` crossing starts a new round (5.3) |
 | Run a step again | `Send { token, to: <same station> }` | No cap |
 | **Skip any station** | `Skip { token or batch, station, reason }` | Leaves as `skipped` along its `passed` route, through `Stopping` if working. **This includes the gate before a push**: the reason is written in the visit, and the adapter's `start` sees the skip (3.3) |
 | Decide on a person's behalf | `Skip` at the decision station | Same, unless the station's policy is `skip: person` (Q7) |
@@ -542,12 +626,48 @@ operation is outward (the adapter's catalog says so). For coding these are
 `coding.push`, `coding.land` and `coding.merged`; for an assistant,
 `mail.send`; for content, `cms.publish`; for a company, `deploy.production`.
 
-**Rule 1: never back across a crossing.** A token or batch whose outward step
-crossed (the core's `Crossing` is set) is never sent back before that station
-or cancelled as if it hadn't happened; a further change is a `Reopen` under
-the same key, which the adapter starts afresh (for coding, on the new base;
-today's `Reopen`, `reducer.rs:56-80`). A batch that crossed can't be pulled
-from (`reducer.rs:274-279`).
+**Rule 1: a crossing is never undone, and only a `fresh` one is repeated.**
+Every crossing is appended to the token's (or batch's) `crossings` and is
+never removed: no command, route or publish can make the engine believe an
+outward step didn't happen. A `Cancel` after a crossing closes the token as
+`Closed { crossed: true }` with its crossings kept; there is no command that
+undoes a crossing. Beyond that, each outward operation declares in the
+catalog how it may be repeated:
+
+- **`repeat: once`** (`coding.push`, `coding.land`, `coding.merged`,
+  `cms.publish`). The thing that crossed can't cross again: a pushed commit
+  is on the target, a published issue is live. So a token or batch that
+  crossed it is never sent back to it or before it, by any means. Routes:
+  `validate` refuses a layout where the station is reachable again from
+  any of its crossing labels (4.1). Interventions: a
+  `Send` to a station from which the crossed station is reachable is refused
+  `Crossed`. A further change is a `Reopen` under the same key, which the
+  adapter starts afresh (for coding, on the new base; today's `Reopen`,
+  `reducer.rs:56-80`). A batch that crossed can't be pulled from
+  (`reducer.rs:274-279`). This is the first pass's lost-push protection,
+  unchanged.
+- **`repeat: fresh`** (`mail.send`, `deploy.production`). Each crossing is a
+  new act with new content: a second reply, a follow-up, the next deploy.
+  Routes may loop back before the station (an answer arrives, the thread goes
+  back to triage), and a `Send` back before it is allowed. Either starts a
+  new **round**; three rules keep a round from being a repeat of the last:
+  1. *Fresh evidence.* The adapter's `start` refuses (`Evidence`) unless the
+     token's evidence was made after its last crossing at this station (for
+     mail, a draft approved since the last send). A retry loop or a stale
+     route can't send the old message again.
+  2. *Fresh idempotency.* The effect's `idempotency` is
+     `(token, station, round)`, with `round` = crossings at this station + 1.
+     Retries and reconciles of one round share it (for mail it becomes the
+     `Message-ID`); round 2 can never be mistaken for round 1 in the sent
+     folder, and round 1's message can never settle round 2.
+  3. *History, not state.* The new round appends a crossing; earlier ones
+     stay. Interventions never name a crossing: `Send` back always means "do
+     another round", never "undo the last one", and the board shows rounds
+     as a list (sent 1, sent 2) so the orchestrator and the person can see
+     which happened.
+
+Rule 2 applies to every round on its own: while a round's effect is
+admitted or uncertain, the token settles before it moves.
 
 **Rule 2: settle before moving.** While an outward effect is `admitted` or
 `uncertain` in the outbox, or the token waits at an outward wait (a merge a
@@ -585,18 +705,41 @@ pass. Batch B7 (T1-T3) at `land.push`, push effect E admitted. The push lands
 `Cancel { T3 }`, `Send { T1, build }`: B7 goes to `Settling`, all three are
 recorded, nothing moves. Another crash; recovery reconciles E first, then the
 stop; `stop` answers `Settled { original: Labeled(passed, c7) }`. B7's
-crossing is set to `c7`, T1-T3 stay members, B7 goes to `land.ci`, the three
+crossing (round 1, `c7`) is appended, T1-T3 stay members, B7 goes to `land.ci`, the three
 requests are recorded as overruled `Crossed`. Had the remote refused the push,
 T2 would leave, B7 refold without it, T3 close, T1 queue at build. Had the
 remote been unreadable, B7 would hold for `Settle`.
 
-**The same for an email.** Token M4 at `send`, `mail.send` admitted; the
-daemon dies after the server accepted the message. The person, seeing a
-wrong recipient in the draft, cancels M4. M4 goes to `Settling`; `mail/v1`'s
-`stop` finds the message id in the sent folder; M4's crossing is recorded,
-the cancel is overruled `Crossed`, and M4 goes to `await_reply`. The board
-says the mail went out, so the person sends a correction instead of
-believing it was stopped.
+**The same for an email, over several rounds.** Thread M4 in the assistant
+workflow (8.3), where `send` is `mail.send`, `repeat: fresh`.
+
+1. *Round 1.* Triage `reply`, draft D1, the person approves, `send` runs
+   with idempotency `(M4, send, 1)`, `Message-ID` derived from it. It
+   answers `passed`; crossing 1 (artifact D1, the message id) is appended;
+   M4 waits at `await-reply`.
+2. *A reply arrives.* `await-reply` answers `replied`, routed to `triage`:
+   round 2 begins by an ordinary route, no `Reopen`. Triage `reply`, draft
+   D2 (evidence made after crossing 1), approved, `send` starts with
+   `(M4, send, 2)`. Had a stale route or a retry tried to start `send` with
+   D1, `start` would refuse `Evidence`.
+3. *Crash after the second send.* The server accepts D2; the daemon dies
+   before `Observe`. On restart round 2's effect is `uncertain`. Meanwhile
+   the person, seeing a wrong recipient in D2, cancels M4: M4 goes to
+   `Settling`, nothing moves. Recovery reconciles the effect first;
+   `mail/v1` looks in the sent folder for round 2's `Message-ID`, finds it,
+   and answers `Settled { original: passed }`. Crossing 2 is appended (1 is
+   untouched), the cancel is overruled `Crossed`, and M4 goes to
+   `await-reply`. The board shows "sent 1, sent 2", so the person sends a
+   correction (round 3) or cancels again, which now closes M4
+   `crossed: true`. Had the sent folder held only round 1's message, round
+   2 is proved not crossed: the cancel applies and M4 closes with crossing 1
+   only. Round 1's message can't settle round 2, because its id differs.
+4. *A follow-up.* No reply in 3 days: `await-reply` answers `timeout`,
+   routed to `follow-up`, which drafts D3 and goes to `approve`, then
+   `send` as round 3 with `(M4, send, 3)`. Same rules.
+
+A push could never do step 2: `coding.push` is `repeat: once`, so no route
+leads back before it, and the walkthrough above is unchanged.
 
 ### 5.4 What still refuses, and why none is a count
 
@@ -605,7 +748,7 @@ believing it was stopped.
 | `Stale`, `Duplicate` | The token moved, or the input was seen |
 | `Invalid`, `Missing`, `Evidence`, `Definition` | Malformed input; `Evidence` also for a plain `Stopped` on an outward stop |
 | `Unauthorized` | The grant doesn't match (`reducer.rs:590-596`) |
-| `Crossed` | Rule 1 of 5.3: a send-back or cancel across a crossing |
+| `Crossed` | Rule 1 of 5.3: a send back to or before a `repeat: once` station the token crossed, or a pull from a batch that crossed |
 | `Stopping` | Work on a tree, batch or resource whose last effect has no stop receipt yet (5.2) |
 | `PersonOnly` | Only for what the owner keeps on the list in section 9; empty if every question is answered "no" |
 | `Stranded` | A publish that would leave a token at no station (7.3) |
@@ -618,17 +761,21 @@ follower, `Resource` while a resource is held (section 11.4 maps each).
 
 ## 6. Limits: per workspace, with an optional host limit
 
-**Per workspace.** Each workspace declares its pools in its limits, outside
-the workflow layout (so a later second workflow shares them, 2.4):
+**Per workspace.** Each workspace declares its pools in its **workspace
+settings**, a document beside the workflow, not inside it (so a later second
+workflow shares them, 2.4; section 8 shows one per walkthrough):
 
 ```yaml
-limits:
-  pools: { agents: 4, work: 2, landing: 1 }
+workspace:
+  limits: { pools: { agents: 4, work: 2, landing: 1 } }
 ```
 
 Stations name a pool; each station also has its own capacity (default: its
-pool's). Pools and capacities are in the reducer state, set by the publish
-and changed by `SetCapacity`, which the orchestrator may send at any time.
+pool's; a station may set `capacity` lower or higher, and the pool still
+binds). Pools and capacities are in the reducer state, set from the settings
+and the layout, and changed by `SetCapacity { pool: agents, n }` or
+`SetCapacity { station: build, n }`, which the orchestrator may send at any
+time.
 With no host limit, a workspace's starts depend only on its own state:
 workspaces are independent, and one never waits for another.
 
@@ -660,8 +807,8 @@ always wins.**
   goes first.
 - Lowering either limit stops nothing running; it only delays new starts.
 
-**Who sets which.** A workspace's pools are its orchestrator's (by publish or
-`SetCapacity`). The host limit is the user's, because it spans workspaces and
+**Who sets which.** A workspace's pools are its orchestrator's (in the
+settings or by `SetCapacity`). The host limit is the user's, because it spans workspaces and
 one workspace's orchestrator shouldn't take another's share (Q6).
 
 **At the cutover** today's host-wide caps (4 agent, 2 landing, 2 work,
@@ -680,9 +827,11 @@ workflow in force per pipeline; no token remembers an older one.
 publish:
   layout: { ... }                 # the whole new workflow
   moves:                          # only for stations that are removed or renamed
-    review: code-review           # renamed: tokens go to the same place in the new layout
-    checks: { to: gate }          # removed: where its tokens go
-  reason: "add group review before the gate"
+    review: { rename: code-review }           # same station, new id
+    land.checks:                              # removed: replaced by another station
+      to: land.group-review                   # where its tokens go, and where its passes go
+      labels: { red: rejected }               # its other labels; unlisted ones hold at `to`
+  reason: "replace cheap checks with group review before the gate"
   preview: <digest of the preview it was checked against>
 ```
 
@@ -717,22 +866,56 @@ that is a fact about running work, not a pin on the token.
   command) applies at the next start. To use the new operation now, the
   orchestrator sends `Send { token, to: <same station> }`, which stops the old
   step safely (5.2) and queues it.
-- **Its station was removed or renamed:** the station becomes **retired**:
-  it stays in `Pipeline::retired` with its old routes and policy, takes no new
-  arrivals, and starts nothing. The token finishes there. When it answers,
-  its label is routed by the retired station's routes; a route to a station
-  that no longer exists goes through `moves`. When the retired station is
-  empty, it is deleted. The board shows it greyed with its working tokens, so
-  nothing is hidden.
+- **Its station was renamed** (`{ rename: new-id }`): nothing retires. A
+  rename is allowed only when the kind and `op` are unchanged (otherwise it is
+  a replacement, below, and `validate` says so). In the publish event the
+  station's queue, working set, holds and every visit's station id are
+  re-keyed to the new id; the running step answers at the new id and is
+  routed by the **new** layout's routes for it, exactly as if it had always
+  had that name.
+- **Its station was removed** (`{ to, labels }`): the station becomes
+  **retired**. It stays in `Pipeline::retired`, takes no new arrivals, starts
+  nothing, and keeps **only its translation**, never its old routes. The
+  token finishes there; when it answers with label `L`:
+  1. `passed` or `skipped`: the token **arrives at `to`** and queues there
+     by priority, as any arrival does. It does not jump to where the old
+     station's `passed` used to lead: the new process from `to` onward runs
+     in full, so a station the publish added after it (group review) is not
+     bypassed.
+  2. `L` listed in `labels`: it goes to that target (a live station or a
+     reserved target of 4.1, such as `rejected` inside a batch), by the
+     routing rules of 4.1.
+  3. Any other label: held at `to` with `L` as its reason
+     (`HoldKind::StepFailed`), as an unrouted label is anywhere.
+
+  When the retired station is empty it is deleted. The board shows it greyed
+  with its working tokens, so nothing is hidden.
 - **Its station is a decision or wait:** as a queued token (7.2): it moves to
   the `moves` destination at once, and a wait's probe effect is stopped
   (5.2), unless the wait is outward, in which case it settles first (5.3).
 - A step stopping or settling at publish time (5.2, 5.3) keeps doing so; its
-  `then` is mapped through `moves` if it names a removed station.
+  `then` is mapped through `moves` (a rename re-keys it; a removal maps it to
+  `to`).
+
+**Successive publishes compose.** A retired station's translation names live
+stations only, always. Each later publish rewrites every entry in
+`Pipeline::retired` through its own `moves`: a renamed target is re-keyed, a
+removed target is replaced by that removal's `to` (and a `labels` target by
+the same rule), and a retired station that is itself named again is
+unchanged. So if publish 1 retires `checks` with `to: group-review` and
+publish 2, while `checks` still has a running batch, replaces `group-review`
+with `review-2`, the batch's eventual `passed` arrives at `review-2`. Nothing
+can route into a deleted station, however late the answer.
+
+**One function, three uses.** The translation above is one pure function,
+`retired_route(&Retired, label) -> Target`. The reducer uses it on `Observe`;
+the preview (7.5) uses it to list where each running step's possible labels
+will go; the rehearsal (10.3) asserts against it.
 
 **Stranding is refused.** The publish is refused `Stranded` if any token,
-batch, or `then` would end at a station that neither exists nor is in
-`moves`. Rename is a `moves` entry; there is no other way to rename.
+batch, `then`, or retired translation would end at a station that neither
+exists nor is in `moves`. Rename is a `moves` entry; there is no other way to
+rename.
 
 ### 7.4 A batch mid-gate
 
@@ -742,7 +925,9 @@ A batch is a token for these rules, plus:
   routed by the new layout. Stations added before it (the owner's group
   review) are not run for this batch; stations added after it are.
 - **The batch station's inner stations were reordered or removed:** as 7.3,
-  station by station; a retired inner station finishes its batch.
+  station by station. A retired inner station finishes its batch, which then
+  arrives at its `to` (on `passed`), follows `labels` (`red: rejected` starts
+  `on_reject`), or holds at `to`.
 - **Batch formation changed** (size 8 to 4): applies to the next batch
   formed; a formed batch keeps its members.
 - **The batch station itself was removed** (the workspace stops batching):
@@ -757,10 +942,21 @@ A batch is a token for these rules, plus:
 ### 7.5 Who writes the mapping, and how a change is previewed
 
 **Who writes `moves`:** whoever publishes (the orchestrator, or a person if
-Q1 reserves it). `workflow preview` proposes it: a removed station's
-default destination is the next surviving station on its `passed` route,
-and a station whose id changed but whose kind and op did not is proposed as a
-rename. The author accepts or edits it.
+Q1 reserves it). `workflow preview` proposes it, and the author accepts or
+edits it:
+
+- A station whose id changed but whose kind and op did not is proposed as a
+  `rename`.
+- A removed station's `to` is the station that now stands in its place: where
+  the **new** layout sends a `passed` token from the removed station's old
+  predecessor. For `land.checks` (after `land.fold`) in a layout that put
+  `group-review` after `fold`, that is `land.group-review`, not `land.gate`.
+  With no predecessor, the new layout's first station after it in list order.
+- Its `labels` are its old non-`passed` routes, each target mapped through
+  the same `moves` (`red: rejected` stays `red: rejected`; `rejected: build`
+  becomes `rejected: code-build` if `build` was renamed). A label whose old
+  target was removed with no `to` is left out, so it would hold, and the
+  preview says so.
 
 **Preview** is the reducer itself: `step` is pure, so
 `preview(&Pipeline, &Publish) -> Report` applies the publish to a copy of the
@@ -768,8 +964,10 @@ live pipeline and diffs the result. Nothing is written. The report lists:
 
 - every token and batch whose location changes, from and to;
 - each queue before and after, in order;
-- retired stations and the work finishing in them;
-- what the new routes will do with each running step's possible labels;
+- retired stations, the work finishing in them, and their translations after
+  composing with any earlier retired entries (7.3);
+- what each running step's possible labels will do: by the new routes for a
+  live or renamed station, by `retired_route` for a retired one;
 - policies that will hold something at its next count;
 - the adapter's `validate` problems;
 - refusals (`Stranded`, adapter problems, capacity above the host limit).
@@ -782,18 +980,26 @@ playbook: preview, read, publish.
 
 ## 8. Walkthroughs
 
-Each is a complete workflow in the schema-3 definition format, shown as
-YAML (the stored form is JSON). Unlisted `passed` routes go to the next
-station.
+Each is two documents in the schema-3 format, shown as YAML (the stored form
+is JSON): the **workspace settings** (limits, and the person-only `publish`
+setting of Q1, which the orchestrator can't change) and the **workflow** (what
+`Publish` carries). Routing follows 4.1 exactly: a routed label goes to its
+target; an unrouted `passed` goes to the next station, or `done` / `finish`
+past the last; every other unrouted label holds. Each layout below is followed
+by a trace of every label each station can answer, so nothing relies on
+prose.
 
 ### 8.1 Far Cooler: fully agentic
 
 ```yaml
+workspace:
+  limits: { pools: { agents: 4, work: 2, landing: 1 } }
+  publish: orchestrator
+---
 schema: 3
 name: agentic-batched-push
 adapters:
   coding: { version: coding/v1, config: { repository: ., target: main, ci: ci.yml, checks: [...] } }
-limits: { pools: { agents: 4, work: 2, landing: 1 } }
 stations:
   - { id: provision, kind: command, op: coding.provision, pool: work }
   - { id: build, kind: agent, op: coding.build, pool: agents,
@@ -809,7 +1015,7 @@ stations:
     form: { size: 8, order: priority }
     on_reject: bisect
     policy: { returns: 1 }
-    routes: { returned: build }
+    routes: { returned: build, passed: done }
     stations:
       - { id: base, kind: wait, op: coding.base, policy: { patience: 3h } }
       - { id: fold, kind: command, op: coding.fold, routes: { conflict: returned } }
@@ -817,19 +1023,38 @@ stations:
       - { id: group-review, kind: agent, op: coding.group_review, models: [claude:opus],
           routes: { rejected: rejected } }
       - { id: gate, kind: command, op: coding.gate, routes: { red: rejected } }
-      - { id: push, kind: command, op: coding.push }          # outward
-      - { id: ci, kind: wait, op: coding.ci, policy: { patience: 3h, again: 1 } }   # red: unrouted, holds
+      - { id: push, kind: command, op: coding.push, routes: { refused: base } }   # outward, repeat: once
+      - { id: ci, kind: wait, op: coding.ci, policy: { patience: 3h, again: 1 } }
 ```
+
+Trace:
+
+- `provision` passed → `build` → `review`; `review` rejected → `build`
+  (a third rejection holds by `rework: 2`), passed → `route`.
+- `route` passed → `land`; `needs_review` → `decide`; `decide` approved →
+  `land`, rejected → `build`.
+- `land.base` passed → `fold`; `timeout` holds (the target hasn't moved in
+  3 h: something is wrong). `fold` conflict → `returned` (those tickets go to
+  `build`, the rest go on), passed → `checks`. `checks`, `group-review`,
+  `gate`: a failure → `rejected` (bisect), passed → next.
+- `push` passed → `ci`, with the crossing recorded. `refused` (the target
+  moved; nothing crossed) → back to `base` to refold. `validate` accepts the
+  loop because `refused` is a not-crossed label in the catalog (4.1); from
+  `passed`, nothing leads back to `push`.
+- `ci` passed → `finish` → `land` passed → `done`: every member closes
+  `crossed: true`. `red` (after one adapter rerun) or `timeout` holds: the
+  batch has crossed, so a fix is a new ticket or a `Reopen`; no route may lead
+  back before `push`.
 
 | Station | Who decides |
 |---|---|
 | review | An agent's receipt; two rejections hold for the orchestrator |
 | decide | The orchestrator, for changes the route rule flags (security paths, migrations) |
 | land.gate | The gate command; the orchestrator may skip it with a reason |
-| land.ci red | Holds for the orchestrator after one adapter rerun; the batch has crossed, so a fix is a new ticket or a `Reopen` |
+| land.ci red | Holds for the orchestrator after one adapter rerun |
 
-Every skip, send, hold and capacity change is the orchestrator's. No station
-needs a person.
+Every skip, send, hold, publish and capacity change is the orchestrator's. No
+station needs a person.
 
 ### 8.2 A company with human pull request review
 
@@ -837,18 +1062,22 @@ Agents build; people review on GitHub; two approvals are required, one from
 code owners; a person merges; a release manager signs off production.
 
 ```yaml
+workspace:
+  limits: { pools: { agents: 2, work: 2 } }
+  publish: person                              # Q1: only a person publishes, so Q7's reservations stick
+---
 schema: 3
 name: company-human-review
 adapters:
   coding: { version: coding/v1, config: { repository: ., pull_request: { repository: acme/app, base: main } } }
-  deploy: { version: command/v1, config: { staging: [./deploy, staging], production: [./deploy, production] } }
-limits: { pools: { agents: 2, work: 2 } }
+  deploy: { version: command/v1, config: { staging: [./deploy, staging],
+            production: { run: [./deploy, production], outward: fresh, reconcile: [./deploy, status] } } }
 stations:
   - { id: provision, kind: command, op: coding.provision, pool: work }
   - { id: build, kind: agent, op: coding.build, pool: agents, models: [claude:opus] }
   - { id: self-review, kind: agent, op: coding.review, pool: agents, routes: { rejected: build },
       policy: { rework: 2 } }
-  - { id: open-pr, kind: command, op: coding.open_pr, pool: work }      # push_branch + open + ready
+  - { id: open-pr, kind: command, op: coding.open_pr, pool: work }      # push_branch + open/update + ready
   - { id: pr-ci, kind: wait, op: coding.ci, policy: { patience: 2h }, routes: { red: build } }
   - id: code-review
     kind: decision
@@ -857,16 +1086,36 @@ stations:
     source: coding.pr_reviews                  # GitHub reviews arrive as verdicts
     routes: { approved: merged, changes_requested: build }
     policy: { skip: person }                   # Q7: only a person may waive review here
-  - { id: merged, kind: wait, op: coding.merged, policy: { patience: 14d } }   # outward; a person merges
+  - { id: merged, kind: wait, op: coding.merged, policy: { patience: 14d },   # outward, repeat: once
+      routes: { passed: main-ci } }
   - { id: main-ci, kind: wait, op: coding.ci, policy: { patience: 2h } }
   - { id: staging, kind: command, op: deploy.staging, pool: work }
   - id: release
     kind: decision
     deciders: [person:release-manager]
-    routes: { approved: production }           # rejected: unrouted, holds
+    routes: { approved: production }
     policy: { skip: person }
-  - { id: production, kind: command, op: deploy.production, pool: work }       # outward
+  - { id: production, kind: command, op: deploy.production, pool: work, routes: { passed: done } }
 ```
+
+Trace:
+
+- `provision` → `build` → `self-review`; rejected → `build` (third holds),
+  passed → `open-pr` → `pr-ci`.
+- `pr-ci` red → `build` (the branch push is not outward; the PR is updated
+  on the next `open-pr`), passed → `code-review`, `timeout` holds.
+- `code-review` approved (two approvals, one a code owner) → `merged`;
+  `changes_requested` → `build`, with the comments as the brief. Any other
+  verdict holds.
+- `merged` passed (a person merged; crossing recorded) → `main-ci`.
+  `closed` (the PR closed unmerged; not crossed) holds for the orchestrator,
+  which may `Send` it to `build` or `Cancel` it. `timeout` (14 days) holds.
+- `main-ci` passed → `staging`; `red` or `timeout` holds: the merge crossed,
+  so the fix is a new ticket or a `Reopen`.
+- `staging` passed → `release`. `release` approved → `production`;
+  `rejected` holds, so the release manager's reason is on the board for the
+  orchestrator to act on (a new ticket, or `Cancel`).
+- `production` passed → `done`; `failed` holds.
 
 | Station | Who decides |
 |---|---|
@@ -874,13 +1123,15 @@ stations:
 | code-review | People on GitHub: two approvals, one from a code owner. `changes_requested` sends the ticket back to build with the review comments as its brief. Skipping is a person's (`skip: person`) |
 | merged | A person merges on GitHub; outward, so interventions settle first (5.3) |
 | release | The release manager. Skipping is a person's |
+| publish | A person (`publish: person` in the workspace settings), so the two `skip: person` reservations can't be published away by the orchestrator |
 
 Branch protection on GitHub still enforces the approvals. The engine's
 station mirrors them so the board shows where each ticket waits and who it
-waits on. `deploy` uses a generic `command/v1` adapter: `production` is
-declared outward, so the deploy command must accept an idempotency key and
-answer a reconcile query (3.2); otherwise its unknown outcomes hold for
-`Settle`.
+waits on. `deploy` uses a generic `command/v1` adapter, whose config declares
+which commands are outward: `production` is `outward: fresh` (every deploy is
+a new act), so the command receives the effect's idempotency key and
+`reconcile` answers from `./deploy status`; without a reconcile command, its
+unknown outcomes hold for `Settle`.
 
 ### 8.3 A personal assistant: inbox triage, draft, approve, send
 
@@ -888,14 +1139,18 @@ Tokens are mail threads, created by intake. A daily digest batches what needs
 the person's attention but no reply.
 
 ```yaml
+workspace:
+  limits: { pools: { agents: 2, work: 2 } }
+  publish: orchestrator
+---
 schema: 3
 name: assistant-inbox
 adapters:
   mail: { version: mail/v1, config: { account: me@example.com, folder: INBOX } }
   calendar: { version: calendar/v1, config: { calendar: primary } }
-limits: { pools: { agents: 2, work: 2 } }
 intake:
-  - { op: mail.inbox, filter: "is:unread -category:promotions", to: triage }
+  - { op: mail.inbox, filter: "is:unread -category:promotions", to: triage }   # a new thread only; a reply on a
+                                                                              # live thread answers its wait
 stations:
   - id: triage
     kind: agent
@@ -903,36 +1158,60 @@ stations:
     pool: agents
     models: [claude:sonnet]
     routes: { reply: draft, schedule: propose-times, fyi: digest, ignore: archive }
-  - { id: propose-times, kind: command, op: calendar.free_slots, pool: work }
-  - { id: draft, kind: agent, op: mail.draft, pool: agents, models: [claude:opus] }
+  - { id: propose-times, kind: command, op: calendar.free_slots, pool: work, routes: { passed: draft } }
+  - { id: draft, kind: agent, op: mail.draft, pool: agents, models: [claude:opus], routes: { passed: approve } }
   - id: approve
     kind: decision
     deciders: [person:me]
-    routes: { approved: send, rejected: draft, edited: send }
+    routes: { approved: send, edited: send, rejected: draft, drop: archive }
     policy: { skip: orchestrator }              # the orchestrator may send routine replies for me
-  - { id: send, kind: command, op: mail.send, pool: work }          # outward
+  - { id: send, kind: command, op: mail.send, pool: work,          # outward, repeat: fresh
+      routes: { passed: await-reply } }
   - { id: await-reply, kind: wait, op: mail.reply, policy: { patience: 3d },
       routes: { replied: triage, timeout: follow-up } }
-  - { id: follow-up, kind: agent, op: mail.draft_follow_up, pool: agents, routes: { passed: approve } }
-  - { id: archive, kind: command, op: mail.archive, pool: work }
+  - { id: follow-up, kind: agent, op: mail.draft_follow_up, pool: agents,
+      routes: { passed: approve, not_needed: archive } }
+  - { id: archive, kind: command, op: mail.archive, pool: work, routes: { passed: done } }
   - id: digest
     kind: batch
     form: { window: "daily 08:00" }
+    routes: { passed: archive }
     stations:
       - { id: summarize, kind: agent, op: mail.summarize, models: [claude:sonnet] }
-      - { id: deliver, kind: command, op: mail.send_digest }       # outward
+      - { id: deliver, kind: command, op: mail.send_digest }       # outward, repeat: once (per batch)
 ```
+
+Trace:
+
+- Intake creates a token at `triage`. `reply` → `draft`; `schedule` →
+  `propose-times` → `draft`; `fyi` → `digest`; `ignore` → `archive`. Any
+  other label holds.
+- `draft` → `approve`. `approved` or `edited` (the person changed the draft;
+  the edit is the new evidence) → `send`; `rejected` → `draft` with the
+  person's note as brief; `drop` → `archive`.
+- `send` passed (crossing appended) → `await-reply`; `refused` (the server
+  rejected it; not crossed) holds.
+- `await-reply` `replied` → `triage`: a new round on the same thread (5.3).
+  `timeout` → `follow-up`, which answers `passed` → `approve` (a follow-up
+  draft for the person) or `not_needed` → `archive`.
+- `archive` passed → `done`: the thread closes, `crossed: true` if anything
+  was sent. If a new message arrives on a closed thread, intake `Reopen`s
+  the same token at `triage`.
+- `digest`: `summarize` → `deliver` → `finish` → `digest` passed →
+  `archive` → `done` for every FYI thread in it. `ignore` threads never
+  enter the digest.
 
 | Station | Who decides |
 |---|---|
 | triage | An agent's label |
 | approve | The person, by default. The orchestrator may approve on their behalf with a reason (a reply confirming a meeting time it proposed), because `skip: orchestrator`. A stricter person sets `skip: person` |
-| send, deliver | Outward: an unknown result settles from the sent folder (5.3) |
+| send | Outward, `repeat: fresh`: each round needs a draft approved since the last send, and an unknown result settles from the sent folder by that round's `Message-ID` (5.3, with the second-reply, crash and follow-up walk-through) |
+| deliver | Outward, `repeat: once` per digest; each day's digest is a new batch |
 
 What this asks of the core, and gets: intake (tokens created by an adapter),
 two adapters in one workflow, a batch formed by a time window rather than a
-size, a wait with patience routing to a follow-up, and an outward step that
-isn't code. A window batch forms on the runtime's `Advance` tick, whose
+size, a wait with patience routing to a follow-up, an outward step that
+isn't code, and an outward step that repeats by rounds. A window batch forms on the runtime's `Advance` tick, whose
 `now_ms` is in the input, so replay forms the same batch.
 
 ### 8.4 Research and content: a weekly brief
@@ -941,12 +1220,15 @@ Topics come from a board column; each becomes an article; articles for the
 week publish together as one issue.
 
 ```yaml
+workspace:
+  limits: { pools: { agents: 3, work: 1 } }
+  publish: orchestrator
+---
 schema: 3
 name: weekly-research-brief
 adapters:
   files: { version: files/v1, config: { root: content/ } }
   cms: { version: cms/v1, config: { site: blog, list: weekly } }
-limits: { pools: { agents: 3, work: 1 } }
 intake:
   - { op: files.board_column, column: "Topics", to: research }
 stations:
@@ -959,20 +1241,39 @@ stations:
     routes: { approved: write, rejected: research, drop: archive }
   - { id: write, kind: agent, op: files.write, pool: agents, models: [claude:opus] }
   - { id: fact-check, kind: agent, op: files.fact_check, pool: agents, models: [codex:gpt-5.5],
-      routes: { rejected: write }, policy: { rework: 2 } }
+      routes: { rejected: write, passed: issue }, policy: { rework: 2 } }
   - id: issue
     kind: batch
     form: { window: "weekly fri 09:00", size: 6, order: priority }
     on_reject: return_suspects
-    routes: { returned: write }
+    routes: { returned: write, passed: archive }
     stations:
       - { id: assemble, kind: command, op: cms.assemble }
       - { id: edit, kind: agent, op: cms.edit_issue, models: [claude:opus] }
-      - { id: editor, kind: decision, deciders: [person:editor, orchestrator], needs: 1 }
-      - { id: publish, kind: command, op: cms.publish }      # outward
-      - { id: measure, kind: wait, op: cms.stats, policy: { patience: 7d } }
-  - { id: archive, kind: command, op: files.archive }
+      - { id: editor, kind: decision, deciders: [person:editor, orchestrator], needs: 1,
+          routes: { approved: publish, rejected: rejected } }
+      - { id: publish, kind: command, op: cms.publish,                 # outward, repeat: once
+          routes: { passed: measure } }
+      - { id: measure, kind: wait, op: cms.stats, policy: { patience: 7d },
+          routes: { measured: finish, timeout: finish } }
+  - { id: archive, kind: command, op: files.archive, routes: { passed: done } }
 ```
+
+Trace:
+
+- Intake creates a token at `research` → `outline` → `pick`. `approved` →
+  `write`; `rejected` → `research` with the reason as brief; `drop` →
+  `archive` → `done`.
+- `write` → `fact-check`; `rejected` → `write` (third holds), passed →
+  `issue`, where it waits for Friday's batch.
+- `issue`: `assemble` → `edit` → `editor`. `approved` → `publish`;
+  `rejected` → `rejected`, so `return_suspects`: the articles the editor
+  marked leave along `returned` → `write`, and the rest re-enter `editor`
+  as a smaller issue. Any other verdict holds the issue.
+- `publish` passed (crossing appended to the batch and every member) →
+  `measure`; a not-crossed `refused` holds. `measure` answers `measured` or,
+  after 7 days, `timeout`; both → `finish` → `issue` passed → `archive` →
+  `done`. `publish` is `repeat: once`: a correction is a new ticket.
 
 | Station | Who decides |
 |---|---|
@@ -981,16 +1282,17 @@ stations:
 | issue.editor | The editor or the orchestrator, whichever answers first (`needs: 1`) |
 | issue.publish | Outward: a lost publish settles from the CMS before any pull or cancel |
 
-`return_suspects` uses the adapter's `suspects()` (`cms/v1` names the
-articles the editor marked) to send those back to `write` while the rest of
-the issue publishes.
-
 ### 8.5 What the walkthroughs changed in the model
 
-Writing these forced four changes, each now in sections 2-4: intake (8.3,
-8.4); several adapters per workflow (8.3); time-window batch formation (8.3,
-8.4); and decisions with counts and groups, fed by an adapter source (8.2).
-Nothing in the four layouts needed a core concept named after code.
+Writing and then tracing these forced seven changes, each now in sections
+2-5: intake (8.3, 8.4); several adapters per workflow (8.3); time-window
+batch formation (8.3, 8.4); decisions with counts and groups, fed by an
+adapter source (8.2); explicit terminal targets `done` and `finish`, with
+"nothing closes by falling through" (all four); workspace settings as their
+own document, so `publish: person` is stated rather than implied (8.2); and
+outward operations that repeat by rounds (`repeat: fresh`, 8.3), while a
+push stays `repeat: once`. Nothing in the four layouts needed a core concept
+named after code.
 
 ## 9. Every action still reserved to a person
 
@@ -1079,7 +1381,10 @@ deletes the old reducer. Each step lands on its own and leaves main working.
    reading the old state, the old log (for queue order), each pending
    effect's dispatch status (`workflow_outbox.dispatch_state`,
    `store/src/workflow.rs:187-188`) and other workspaces' occupancy. It moves
-   each item's coding fields into the token's `coding` data (11.1). Also adds
+   each item's coding fields into the token's `coding` data, each member's
+   candidate into its `Membership::data`, each archive entry's `candidate` and
+   `pushed` into `Archived::data`, and each kept effect's `candidate`,
+   `members`, `tree` and `ci_retry` into `Effect::data` (11.1). Also adds
    the snapshot table of 10.2, unused. Tested on fixtures for every phase and
    dispatch status, and on copies of the live store through the existing
    rehearsal (`crates/store/src/engine_cutover/rehearsal.rs`) with the cases
@@ -1177,46 +1482,75 @@ in step 2, inside the cutover transaction in step 3, and afterwards as
 
 ### 10.3 Rehearsal: twelve builds, four places
 
-Kept from the first pass, with its limits renamed.
+Kept from the first pass, with its limits renamed. A start needs room at
+three levels (station, workspace pool, host), so there is one case per level
+in which that level alone is full and the other two have room, and each
+asserts both that nothing starts and that the start comes on the event that
+frees that level.
 
-- **Before.** One workspace, build pool 4. Twelve tickets `Running` at
-  build: A1-A4 `admitted`, P1-P8 `pending` in that outbox order; P6 and P7
-  are speed tickets. A second workspace holds one admitted build. Host limit
-  `agents: 5`.
+- **Before.** One workspace: pool `agents: 4`, station `build` (pool
+  `agents`) capacity 4. Twelve tickets `Running` at build: A1-A4 `admitted`,
+  P1-P8 `pending` in that outbox order; P6 and P7 are speed tickets. A second
+  workspace holds one admitted build. Host limit `agents: 5`.
 - **Cutover.** Build `working` is exactly A1-A4 with their original effect
   ids, runs, fences and resource generations, outbox rows still `admitted`.
   The build queue is P1-P8 in order; their rows are `suppressed`, a claim
-  returns nothing, an `Observe` is refused. `Genesis` emitted nothing; the
-  host pool is 5 of 5.
-- **The workspace pool binds.** `Prioritize { P6, 10 }`,
-  `Prioritize { P7, 10 }`, then `Observe` A2 passed: exactly one new build
-  effect, for P6, new id, fence `old + 1`; `working` A1, A3, A4, P6 (4 of 4);
-  queue P7, P1-P5, P8; host 5 of 5. The other workspace's build ends (host 4
-  of 5): nothing is emitted and P7 is still first, because the workspace pool
-  is full and section 6 needs room at every level. `Observe` A1 passed: one
-  effect, for P7. A second run replaces that `Observe` with a logged
-  `SetCapacity { build, 5 }`: P7 starts on that event.
-- **The host limit binds.** From the same cutover state, a logged
-  `SetCapacity { build, 6 }` first: it emits nothing (host 5 of 5) although
-  the station has two free places. `Observe` A2 passed: only P6 starts (host
-  5 of 5). The other workspace's build ends: P7 starts; P1 still waits with a
-  station place free.
-- **No host limit.** From the same cutover state with the host limit cleared
-  by a person: the other workspace's build no longer counts; `Observe` A2
-  passed starts P6 and nothing more (workspace pool 4).
+  returns nothing, an `Observe` is refused. `Genesis` emitted nothing.
+  Counts: station 4 of 4, pool 4 of 4, host 5 of 5. Each case below starts
+  from this state with `Prioritize { P6, 10 }` and `Prioritize { P7, 10 }`
+  (queue P6, P7, P1-P5, P8), which emit nothing.
+- **Only the workspace pool binds.** `SetCapacity { station: build, 8 }`:
+  nothing (pool and host full). The other workspace's build ends: host 4 of
+  5, station 4 of 8, pool 4 of 4, and still nothing is emitted: the pool
+  alone blocks. `SetCapacity { pool: agents, 5 }`: exactly one new build
+  effect, for P6, on that event, new id, fence `old + 1` (station 5 of 8,
+  pool 5 of 5, host 5 of 5). `Observe` A2 passed: one effect, for P7.
+- **Only the station binds.** A person clears the host limit (a logged
+  input); `SetCapacity { pool: agents, 8 }`: nothing is emitted, because
+  station `build` is 4 of 4 while the pool is 4 of 8 and there is no host
+  limit: the station alone blocks. `SetCapacity { station: build, 5 }`: P6
+  starts on that event; P7 waits (station 5 of 5). `Observe` A2 passed: P7.
+- **Only the host limit binds.** `SetCapacity { pool: agents, 8 }`,
+  `SetCapacity { station: build, 8 }`: nothing is emitted, though station and
+  pool each have four free places: host 5 of 5 alone blocks. `Observe` A2
+  passed: only P6 starts (host 5 of 5 again). The other workspace's build
+  ends: exactly one start, P7, on that event; P1 still waits with station and
+  pool places free.
+- **No host limit, default limits.** A person clears the host limit: the
+  other workspace's build no longer counts. `Observe` A2 passed starts P6 and
+  nothing more (station and pool 4 of 4).
 - **Crash** inside the cutover transaction leaves the old store under the old
   incarnation; after commit, before any claim, restart reconciles A1-A4 first
   and no P effect exists.
 - **A push that landed, its `Observe` lost**: the walk-through of 5.3, run as
   written, plus the refused-push and unreadable-remote variants.
-- **A publish mid-flight:** after the cutover, publish a layout that adds
-  `group-review` before `land.gate` and removes `land.checks` with
-  `moves: { land.checks: land.group-review }`, while one batch is working at
-  `land.checks` and another is queued for it. Assert: the working batch
-  finishes at the retired `land.checks` and its `passed` goes to
-  `group-review`; the queued batch moves to `group-review`'s queue at once;
-  the retired station is deleted when empty; the preview taken before
-  publishing equals the state after.
+- **A publish mid-flight:** after the cutover, on a layout with `land.checks`
+  routing `passed` to `land.gate`, publish one that puts `group-review`
+  before `land.gate` and removes `land.checks` with
+  `moves: { land.checks: { to: land.group-review, labels: { red: rejected } } }`,
+  while batches B1 and B2 are working at `land.checks` and B3 is queued for
+  it. Assert: B3 moves to `group-review`'s queue in the publish event; B1
+  answers `passed` and **arrives at `group-review`** (queued, not at
+  `gate`); B2 answers `red` and starts `on_reject: bisect`, not a hold; a
+  `conflict` answer from a variant B2 would hold at `group-review`. The
+  preview taken before publishing lists exactly these three outcomes from
+  `retired_route` and equals the state after.
+- **Two publishes over one retired station:** as above, but before B1
+  answers, a second publish replaces `group-review` with `review-2`
+  (`moves: { land.group-review: { to: land.review-2 } }`). Assert: the
+  retired `land.checks` translation now reads `to: land.review-2`; B1's
+  `passed` arrives at `review-2`; a publish that removed `review-2` without a
+  `moves` entry is refused `Stranded` while `land.checks` is still occupied;
+  the retired station is deleted when empty.
+- **A rename mid-step:** rename `review` to `code-review` while a token is
+  working there. Assert: no retired station; the working token and every
+  visit are re-keyed; its `rejected` answer follows the new layout's
+  `code-review` routes.
+- **Rounds:** the 5.3 email walk-through with the `test/mail` adapter,
+  including the crash after the second send, the proved-not-sent variant,
+  a `start` of `send` with round 1's draft refused `Evidence`, and a layout
+  that routes from `land.push` `passed` back to `land.base` refused by
+  `validate`.
 - **Replay** from empty holds at each point.
 
 ## 11. Mapping: every Item field, Phase, Command and Refusal
@@ -1243,9 +1577,9 @@ Kept from the first pass, with its limits renamed.
 | `rework_history` | `visits` ending `rejected` | One history |
 | `back_edges` | Derived from `visits`, counted by policy | Limits become policy |
 | `retries` | Derived from `visits`; no cap | |
-| `members` | `Batch::members` | |
+| `members` | `Batch::members`: `Membership { token, joined, data }`; each `Member::candidate` goes to `data["coding"]` | A candidate is coding's |
 | `group_of` | Removed | A batch is not an item with a definition |
-| `pushed` | `Batch::crossing` (core) plus coding data `pushed` (the commit) | Crossing is core; what crossed is the adapter's |
+| `pushed` | `Batch::crossings` (core, the commit as an opaque artifact) plus coding data `pushed` | Crossing is core; what crossed is the adapter's |
 | `handed` | Archived batch's members | |
 | `since_ms` | Derived from the last visit and the log's `now_ms` | |
 | `grouped_in` | `Location::InBatch` | |
@@ -1261,8 +1595,29 @@ Kept from the first pass, with its limits renamed.
 | `ci_reruns` | Derived from `visits` ending `again` at the CI station | `again` policy |
 | `ci_retry` | `Work::again` holding coding's `CiRetry` | Binds the rerun to its run |
 
+**`Effect` (`state.rs:252-283`), `Member`, `Archived`, `ArchivedGroup`
+(`state.rs:125-166`):**
+
+| Today | In the new model | Why |
+|---|---|---|
+| `Effect::id`, `run`, `epoch`, `fence`, `created_ms`, `model`, `brief` | Same fields on the core `Effect` | Core |
+| `Effect::item` | `Effect::subject` (`Token` or `Batch`) | A batch isn't an item |
+| `Effect::resource` | `Effect::resources`, opaque names from the catalog | |
+| `Effect::definition_pin`, `policy_pin` | `Effect::op.spec` | A record of what ran, not a pin |
+| `Effect::kind` (`Execute(StageKind)`, `Stop`) | `EffectKind::{Execute(OpRef), Probe(OpRef), Stop}` | Operations are the adapter's |
+| `Effect::operation` (`OperationSpec`, `definition.rs:54-58`) | The published station's operation, named by `op`, digested into `op.spec` | |
+| `Effect::with` | `Effect::followers` | |
+| `Effect::members` (`Vec<Member>`) | `Effect::members` (keys only) plus each candidate in `Effect::data["coding"]` | |
+| `Effect::candidate`, `tree`, `ci_retry` | `Effect::data["coding"]`, filled by the adapter's `start` | Coding's |
+| New | `Effect::idempotency` | Outward rounds (5.3) |
+| `Member { item, candidate }` | `Membership { token, joined, data }` | |
+| `Archived::phase` | `Archived::closed` (`Done`, `Cancelled`) plus `reason` | |
+| `Archived::candidate` | `Archived::data["coding"]` | Coding's |
+| `Archived::group` (`ArchivedGroup { name, tickets, pushed, since_ms }`) | `Archived::batch` (`ArchivedBatch { name, members, since_ms }`); `pushed` becomes `Archived::crossings` plus `data["coding"]` | |
+
 `State`: `schema` 3; `workspace`, `revision`, `epoch`, `seen`,
-`source_sequences`, `archive` unchanged; `items` splits into `tokens` and
+`source_sequences` unchanged; `archive` keeps its keys with the new
+`Archived` shape above; `items` splits into `tokens` and
 `batches`; `workflow`, `stations`, `retired` and `pools` are new.
 `MAX_RETRIES`, `DEFAULT_SEND_BACKS`, `MAX_SEND_BACKS`, `MAX_BACK_EDGE_LIMIT`
 and `max_reworks` become policy defaults with no cap behind them; `MAX_ITEMS`
