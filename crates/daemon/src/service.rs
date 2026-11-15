@@ -3539,6 +3539,7 @@ impl Service {
         harness: &str,
         replace: bool,
         handoff: Option<&str>,
+        caller: crate::caller_seat::Seat,
     ) -> Result<models::Terminal> {
         let harness = harness.trim();
         validate::command_preset(harness)?;
@@ -3551,6 +3552,12 @@ impl Service {
         let live = self.orchestrator_seat(workspace).await?.0;
         if live.is_some() && !replace {
             return Err(DomainError::InvalidArgument { what: "orchestrator_taken" });
+        }
+        if let Some(ref live) = live {
+            if replace && caller != crate::caller_seat::Seat::Person
+                && caller != crate::caller_seat::Seat::Agent(Some(live.id)) {
+                return Err(DomainError::ScopeDenied { needed: "workspace orchestrator" });
+            }
         }
         // Everything the new start needs that can fail is found before the
         // live one is stopped: its row, and its home. A `--replace` that

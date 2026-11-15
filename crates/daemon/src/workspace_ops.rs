@@ -367,9 +367,10 @@ pub async fn start_orchestrator(
     watcher: &Watcher,
     workspace: Uuid,
     req: &pb::WorkspaceStartOrchestrator,
+    caller: crate::caller_seat::Seat,
 ) -> Result<Uuid> {
     let handoff = Some(req.handoff_task.trim()).filter(|k| !k.is_empty());
-    let terminal = svc.start_orchestrator(workspace, &req.harness, req.replace, handoff).await?;
+    let terminal = svc.start_orchestrator_from(workspace, &req.harness, req.replace, handoff, caller).await?;
     if let Ok(groups) = svc.layout(terminal.worktree_id).await {
         watcher.publish_layout(terminal.worktree_id, &groups);
     }
@@ -620,6 +621,37 @@ mod tests {
         let listed = list(&svc, Some(repo), Scope::HostAdmin).unwrap();
         let main = &listed.items[0];
         assert!(main.home.is_some() && main.charter_path.is_some(), "{main:?}");
+    }
+
+    #[tokio::test]
+    async fn only_the_person_or_live_orchestrator_can_replace_its_seat() {
+        use crate::caller_seat::Seat;
+        use farcooler_store::models::TerminalRole;
+        let (_dir, svc, repo) = fixture().await;
+        let watcher = crate::watch::Watcher::new(svc.clone());
+        let main = svc.store.main_workspace(repo).unwrap().id;
+        let worktree = svc.store.list_worktrees_for_repository(repo).unwrap()[0].id;
+        let other = create(&svc, &watcher, repo, &pb::WorkspaceCreate { name: "Other".into(), task_prefix: "oth".into() }, Scope::HostAdmin).unwrap();
+        let other = Uuid::from_slice(&other.id).unwrap();
+        let req = pb::WorkspaceStartOrchestrator { harness: "claude".into(), replace: true, ..Default::default() };
+        // The app's launch has no existing seat, including when replace is set.
+        let first = start_orchestrator(&svc, &watcher, main, &req, Seat::Person).await.unwrap();
+        let foreign = start_orchestrator(&svc, &watcher, other, &req, Seat::Person).await.unwrap();
+        let builder = svc.store.create_terminal_for_test(worktree, main);
+        let reviewer = svc.store.create_terminal_for_test(worktree, main);
+        svc.store.set_terminal_role(builder, TerminalRole::Agent).unwrap();
+        svc.store.set_terminal_role(reviewer, TerminalRole::Agent).unwrap();
+        for (name, caller) in [("builder", builder), ("reviewer", reviewer), ("other orchestrator", foreign)] {
+            let result = start_orchestrator(&svc, &watcher, main, &req, Seat::Agent(Some(caller))).await;
+            assert!(matches!(result, Err(DomainError::ScopeDenied { .. })), "{name}: {result:?}");
+            assert_eq!(svc.live_orchestrator(main).unwrap().map(|t| t.id), Some(first));
+        }
+        let second = start_orchestrator(&svc, &watcher, main, &req, Seat::Agent(Some(first))).await.unwrap();
+        assert_ne!(first, second);
+        let third = start_orchestrator(&svc, &watcher, main, &req, Seat::Person).await.unwrap();
+        assert_ne!(second, third);
+        svc.stop_terminal(third).await.unwrap();
+        svc.stop_terminal(foreign).await.unwrap();
     }
 
     /// The wake switch reads on for every workspace until it's set, is set by

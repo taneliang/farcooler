@@ -130,8 +130,15 @@ impl Service {
         replace: bool,
         handoff: Option<&str>,
     ) -> Result<models::Terminal> {
+        self.start_orchestrator_from(workspace, harness, replace, handoff, crate::caller_seat::Seat::Person).await
+    }
+
+    pub(crate) async fn start_orchestrator_from(
+        &self, workspace: Uuid, harness: &str, replace: bool, handoff: Option<&str>,
+        caller: crate::caller_seat::Seat,
+    ) -> Result<models::Terminal> {
         let _seat = self.orchestrator_locks.hold(workspace).await;
-        let result = self.start_orchestrator_held(workspace, harness, replace, handoff).await;
+        let result = self.start_orchestrator_held(workspace, harness, replace, handoff, caller).await;
         self.workflow_notice_wake.notify_one();
         result
     }
@@ -270,7 +277,7 @@ impl Service {
             return Ok(None);
         }
         tracing::info!(terminal = %term.id, %workspace, "starting an orchestrator afresh on its new lead's login");
-        let fresh = self.start_orchestrator_held(workspace, &term.command_preset, live.is_some(), None).await?;
+        let fresh = self.start_orchestrator_held(workspace, &term.command_preset, live.is_some(), None, crate::caller_seat::Seat::Person).await?;
         if live.is_none() {
             match self.remove_terminal(term.id).await {
                 Ok(()) | Err(DomainError::NotFound) => {}

@@ -2139,7 +2139,8 @@ impl Rpc {
                 let Some(request::Payload::WorkspaceStartOrchestrator(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                let terminal = crate::workspace_ops::start_orchestrator(svc, &self.watcher, id, &p).await?;
+                let caller = crate::caller_seat::caller_seat(svc, self.caller_pid).await;
+                let terminal = crate::workspace_ops::start_orchestrator(svc, &self.watcher, id, &p, caller).await?;
                 self.terminal_result(terminal).await
             }
 
