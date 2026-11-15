@@ -51,7 +51,7 @@ is itself an error** (see "Fail closed" below).
   ov-1219's `module-edges.json`, not a compiler-resolved graph. It counts test code,
   because a unit test that needs the aggregate `Service` has to move to the
   integration package before its layer can leave the daemon.
-- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 706 entries,
+- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 709 entries,
   one `file -> module` or `file -> unresolved: construct` per line. A new edge fails. A listed edge that no longer
   exists also fails, naming the line to delete. In CI, `--allowlist-not-grown
   origin/main` fails when the list holds a line main's does not, so a pull request
