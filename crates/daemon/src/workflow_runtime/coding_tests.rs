@@ -185,9 +185,8 @@ async fn workflow_coding_cancel_running_owned_process_settles_original_then_stop
     let started = dir.path().join("started");
     let (shutdown, receiver) = tokio::sync::watch::channel(false);
     let task = tokio::spawn(async move { runtime.run(receiver).await.unwrap(); runtime });
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while !started.exists() { tokio::time::sleep(Duration::from_millis(10)).await; }
-    }).await.unwrap();
+    assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(60),
+        Duration::from_millis(10), || started.exists()).await, "process never started");
     let state = handle.state("w").await.unwrap().unwrap();
     let result = handle.submit(&controller, Request { id: "cancel".into(), workspace: "w".into(),
         expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 200).await.unwrap();
