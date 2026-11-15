@@ -2,7 +2,7 @@
 # `file -> unresolved: construct` for what the scanner refuses to guess at.
 # A line here is debt: it can only be deleted, never added. The check fails when a
 # listed edge no longer exists (delete the line) or an unlisted one appears.
-# Which of ov-1219's steps clears each is in .claude/agent/reports/ov-1276/README.md.
+# Which of ov-1219's steps clears each is in .claude/agent/reports/ov-1279/README.md.
 crates/daemon/src/access_migration.rs -> service
 crates/daemon/src/access_migration_tests.rs -> rpc_people
 crates/daemon/src/access_migration_tests.rs -> unresolved: glob super::*

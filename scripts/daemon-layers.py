@@ -22,8 +22,9 @@ The scanner reads text, so it fails closed (ov-1276): a construct it cannot reso
 certainty is itself an error, named by file and line, unless listed as `file -> unresolved:
 construct`. These are an alias of the crate root or of a layer module (`use crate as x`,
 `use crate::rpc as y`, `use super as z`, `extern crate self as x`), a glob import of the
-root or of another layer's module, and macro-built paths (`$crate::`, `$x::`, `use $p`,
-a `:path` argument, `include!`).
+root or of another layer's module, a call of a composition-layer macro_rules macro whose body has a
+`use` or a path into a layer (bodies are not resolved), and macro-built paths (`$crate::`, `$x::`,
+`use $p`, a `:path` argument, `include!`). What it does not see is under "Known limits" in the report.
 Comments are not references. Tests that sit beside a module (`x_tests.rs`) are
 part of its layer, which is the point: a unit test that still needs the whole
 `service` has to move to the integration package before its layer can split.
@@ -54,7 +55,7 @@ ALLOW_HEADER = """\
 # `file -> unresolved: construct` for what the scanner refuses to guess at.
 # A line here is debt: it can only be deleted, never added. The check fails when a
 # listed edge no longer exists (delete the line) or an unlisted one appears.
-# Which of ov-1219's steps clears each is in .claude/agent/reports/ov-1276/README.md.
+# Which of ov-1219's steps clears each is in .claude/agent/reports/ov-1279/README.md.
 """
 
 
@@ -314,21 +315,27 @@ def names_a_layer_module(resolved, layers, mine, modules):
 _MACRO_DEF = re.compile(r"\bmacro_rules!\s*([A-Za-z_]\w*)\s*[{(\[]")
 
 
-def reaching_macros(texts, modules):
-    """Names of macro_rules macros, defined in any file, whose body names a layer module or `$crate::`.
+_BODY_USE = re.compile(r"(?<![\w.$])use\s")
+_BODY_PATH = re.compile(r"(?<![\w.$])(?:crate|self|super)\s*::\s*(?:(?:self|super)\s*::\s*)*([A-Za-z_]\w*)")
 
-    Their expansion at a call site is invisible to the scanner, so a call is refused (see unresolved).
+
+def reaching_macros(texts, modules, composition_files):
+    """Names of macro_rules macros defined in the composition layer whose body has a `use` or a path into a layer.
+
+    The body is not resolved (ov-1279): a `use`, or any `crate::`/`self::`/`super::` path whose first
+    segment is a daemon module (relative spellings included, since the call site decides what they mean),
+    is enough. A call from a layer module is refused (see unresolved), unless allowlisted.
     """
     out = set()
-    for rel, text in texts.items():
-        masked = mask(text)
+    for rel in composition_files:
+        masked = mask(texts[rel])
         for m in _MACRO_DEF.finditer(masked):
             depth, i = 1, m.end()
             while i < len(masked) and depth:
                 depth += (masked[i] in "{([") - (masked[i] in "})]")
                 i += 1
             body = masked[m.end():i]
-            if _MACRO_CRATE.search(body) or any(r and r[0] in modules for r in references(body)):
+            if _BODY_USE.search(body) or any(p.group(1) in modules for p in _BODY_PATH.finditer(body)):
                 out.add(m.group(1))
     return out
 
@@ -361,7 +368,7 @@ def unresolved(text, module, layers, mine, modules, macros=()):
                 found.append((f"glob {'::'.join(prefix)}::*", line(m.start())))
     for name in sorted(macros):
         for m in re.finditer(r"(?<![\w$])" + re.escape(name) + r"!\s*[{(\[]", masked):
-            found.append((f"call of {name}!, whose expansion names a layer module", line(m.start())))
+            found.append((f"call of {name}!, whose body has a use or a layer path", line(m.start())))
     for kind, rx in (("macro path $crate::", _MACRO_CRATE), ("macro path $fragment::", _MACRO_FRAGMENT),
                      ("macro use of a $fragment", _MACRO_USE), ("macro takes a path argument", _MACRO_PATH_ARG),
                      ("include! of another file", _INCLUDE)):
@@ -422,7 +429,8 @@ def scan(root, layers):
     modules = {rel.split("/")[0].removesuffix(".rs") for rel in texts}
     watch_subs = {rel.split("/")[1].removesuffix(".rs") for rel in texts if rel.startswith("watch/")}
     mod_of = module_paths(src, texts)
-    macros = reaching_macros(texts, modules)
+    composition_files = [rel for rel in texts if (layers.of_segs(mod_of[rel]) if mod_of[rel] else layers.of_file(rel)) == "composition"]
+    macros = reaching_macros(texts, modules, composition_files)
     violations, unclaimed, refused = {}, [], {}
     for rel in texts:
         # By where the module sits, so a test that `#[path]` hangs under another module is that module's.
@@ -676,6 +684,17 @@ def self_test():
     expect("a macro in lib.rs that builds a forbidden edge is refused at its call",
            {"lib.rs": "macro_rules! inject { () => { use crate::rpc::Call; } } mod engine; mod rpc;",
             "engine.rs": "inject!();"}, "", 1, ["refused: call of inject!", "engine.rs:1"])
+    expect("a composition macro whose body uses a relative layer path is refused at its call",
+           {"rpc.rs": "macro_rules! rel { () => { super::tasks::go() }; }", "engine.rs": "fn f() { rel!(); }"}, "", 1,
+           ["refused: call of rel!", "engine.rs:1"])
+    expect("a composition macro whose body is a bare use is refused at its call",
+           {"rpc.rs": "macro_rules! u { ($p:tt) => { use std::fmt; }; }", "engine.rs": "u!(x);"}, "", 1,
+           ["refused: call of u!"])
+    expect("a call of a composition macro passes once allowlisted",
+           {"rpc.rs": "macro_rules! rel { () => { self::git::go() }; }", "engine.rs": "fn f() { rel!(); }"},
+           "crates/daemon/src/engine.rs -> unresolved: call of rel!, whose body has a use or a layer path\n", 0)
+    expect("a macro defined in a layer module is read by its own text, not refused at its call",
+           {"engine.rs": "macro_rules! own { () => { crate::git::go() }; } fn f() { own!(); }"}, "", 0)
     expect("a macro that names no layer module is called freely",
            {"lib.rs": "macro_rules! plain { () => { 1 } }", "engine.rs": "fn f() { plain!(); }"}, "", 0)
     expect("a glob from a delivery file into watch is refused",
