@@ -297,9 +297,8 @@ def names_a_layer_module(resolved, layers, mine, modules):
     """A path that is the crate root, or a top-level module (or a delivery module in watch) of another layer.
 
     Naming one through an alias or a glob lets later paths reach it with nothing here to read them by.
-    The file's own layer is no exception when the path is spelled from the crate root or an alias; only a
-    relative `super`/`self` path into the file's own layer is let through (see relative_own), since
-    `use super::*` in a test module is everywhere and reaches no other layer.
+    The file's own layer is no exception, and neither is the spelling: `crate::`, `super::`, `self::` or an
+    alias all count once they resolve to a layer module.
     """
     if resolved is None:
         return False
@@ -311,11 +310,6 @@ def names_a_layer_module(resolved, layers, mine, modules):
             resolved[0] == "watch" and resolved[1].startswith(DELIVERY_PREFIXES))):
         return False
     return True
-
-def relative_own(leaf, resolved, layers, mine):
-    """`super::*` or `self as x` that stays inside the file's own layer."""
-    return bool(leaf) and bool(resolved) and leaf[0] in ("super", "self") and layers.of_segs(resolved) == mine
-
 
 _MACRO_DEF = re.compile(r"\bmacro_rules!\s*([A-Za-z_]\w*)\s*[{(\[]")
 
@@ -360,12 +354,10 @@ def unresolved(text, module, layers, mine, modules, macros=()):
         leaves, renamed, globs = [], [], []
         parse_tree(masked, m.end(), [], leaves, renamed, globs)
         for name, leaf in renamed:
-            if (r := resolve(leaf, here, alias)) is not None and names_a_layer_module(r, layers, mine, modules) \
-                    and not relative_own(leaf, r, layers, mine):
+            if (r := resolve(leaf, here, alias)) is not None and names_a_layer_module(r, layers, mine, modules):
                 found.append((f"alias {'::'.join(leaf)} as {name}", line(m.start())))
         for prefix, _ in globs:
-            if (r := resolve(prefix, here, alias)) is not None and names_a_layer_module(r, layers, mine, modules) \
-                    and not relative_own(prefix, r, layers, mine):
+            if (r := resolve(prefix, here, alias)) is not None and names_a_layer_module(r, layers, mine, modules):
                 found.append((f"glob {'::'.join(prefix)}::*", line(m.start())))
     for name in sorted(macros):
         for m in re.finditer(r"(?<![\w$])" + re.escape(name) + r"!\s*[{(\[]", masked):
@@ -668,8 +660,14 @@ def self_test():
     expect("a glob into delivery from outside it is refused",
            {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch::answer_wake::*;"}, "", 2,
            ["refused: glob crate::watch::answer_wake::*"])
-    expect("a glob of the file's own module in a test module passes",
-           {"engine.rs": "mod t { use super::*; }"}, "", 0)
+    expect("a glob of the file's own module in a test module is refused too",
+           {"engine.rs": "mod t { use super::*; }"}, "", 1, ["refused: glob super::*"])
+    expect("a relative alias and glob that resolve to a layer module are refused",
+           {"engine/deep.rs": "use super as e; use super::*;"}, "", 2,
+           ["refused: alias super as e", "refused: glob super::*"])
+    expect("a relative alias and glob that resolve to a layer module pass once allowlisted",
+           {"engine/deep.rs": "use super as e; use super::*;"},
+           "crates/daemon/src/engine/deep.rs -> unresolved: alias super as e\ncrates/daemon/src/engine/deep.rs -> unresolved: glob super::*\n", 0)
     expect("a crate-rooted glob of the own layer's module is refused too",
            {"engine.rs": "use crate::engine::*;"}, "", 1, ["refused: glob crate::engine::*"])
     expect("a crate-rooted alias of the own layer's module is refused too",

@@ -51,7 +51,7 @@ is itself an error** (see "Fail closed" below).
   ov-1219's `module-edges.json`, not a compiler-resolved graph. It counts test code,
   because a unit test that needs the aggregate `Service` has to move to the
   integration package before its layer can leave the daemon.
-- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 709 entries,
+- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 922 entries,
   one `file -> module` or `file -> unresolved: construct` per line. A new edge fails. A listed edge that no longer
   exists also fails, naming the line to delete. In CI, `--allowlist-not-grown
   origin/main` fails when the list holds a line main's does not, so a pull request
@@ -73,7 +73,7 @@ the file and line. Files in the composition layer may use anything, so they are 
 | --- | --- | --- |
 | Alias of the crate root | `use crate as x;` `use crate::{self as x};` `extern crate self as x;` `use super as z;` where it reaches the root | Later `x::rpc::Y` paths reach any layer |
 | Alias of a layer module | `use crate::rpc as y;` `use super as z;` where it reaches a top-level module, `use crate::watch::answer_wake as a;` | Later `y::…` paths can reach into the module under a name nothing reads |
-| Glob of the root or of another layer's module | `use crate::*;` `use crate::rpc::*;` `use crate::git::*;` `use crate::watch::answer_wake::*;` `use super::super::*;` | Names arrive with no path to read; a glob of the file's own module (`use super::*` in a test module) is fine |
+| Glob of the root or of another layer's module | `use crate::*;` `use crate::rpc::*;` `use crate::git::*;` `use crate::watch::answer_wake::*;` `use super::super::*;` | Names arrive with no path to read; `use super::*` in a test module is a glob of the file's own layer module and is refused too (211 allowlisted; each clears when the test imports what it uses by name) |
 | Paths a macro builds or takes | `$crate::x`, `$m::go()`, `use $p;`, a `$p:path` argument | The path is only known when the macro expands |
 | `include!` | `include!("other.rs")` | Pulls in text the scan never reads |
 
@@ -371,3 +371,8 @@ the real proof: cargo refuses a cycle.
 
 - Aliases and globs that name a layer module are refused in the file's own layer too, when spelled from the crate root (`use crate::engine as e;`, `use crate::engine::*;`). Only a relative `super`/`self` path that stays in the file's own layer passes, because `use super::*` in a test module is everywhere and reaches no other layer. Three own-layer `use crate::landing_templates as lt` aliases joined the allowlist (706 to 709).
 - A `macro_rules!` macro, defined in any file (lib.rs included), whose body names a layer module or `$crate::` is refused at every call in a layered file, since its expansion is invisible to the scanner.
+
+## Fix round 2
+
+- The own-layer exemption (`relative_own`) is gone. An alias or glob that resolves to a layer module is refused whatever its spelling or layer: `use super as e; use super::*;` in `engine/deep.rs` now fails, and `use self as z` there still passes because `self` names the deeper module, not the layer root. Fixtures cover both, plus the allowlisted case.
+- 213 new `unresolved: glob super::*` / `super::super::*` entries joined the allowlist (709 to 922), nearly all `use super::*` in test modules. They are debt like the rest and clear by importing by name.
