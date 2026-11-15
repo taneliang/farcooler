@@ -66,7 +66,7 @@ Each is a question, with a recommendation; strike any you disagree with.
 | Q2 | **Writing to the secret store** | Yes. A secret is the one input the orchestrator can't check and can leak; a person types it once |
 | Q3 | **Security flags** (granting the orchestrator or an agent a wider permission mode, sandbox exceptions, clearing a security hold) | Yes, for widening; no for narrowing |
 | Q4 | **Production deploys** | Not in Far Cooler (it has none). In a template that deploys, the deploy decision is a person's by default; the workspace can hand it to the orchestrator |
-| Q5 | **Settling an outward step whose result is unknown** (a push or a send that may or may not have happened) | No: the orchestrator settles, but only with evidence it read from the outside world (the remote's ref, the sent folder), recorded |
+| Q5 | **Settling an outward step whose result is unknown** (a push or a send that may or may not have happened) | No: the orchestrator settles, but only with evidence it read from the outside world, recorded. "Crossed" needs positive evidence of that round; "not crossed" needs an authoritative rejection and proof nothing is still in flight. Not finding it is never enough |
 | Q6 | **Grants and roles, and the host limit** | Yes. These are where authority and cross-workspace limits come from; one workspace's orchestrator shouldn't widen its own powers or take another workspace's share |
 | Q7 | **May a workflow reserve a station to a person** (skip or decide only by a person, for compliance)? | Yes, as opt-in station policy `skip: person`. Off in every Far Cooler template; on for the company template's code review and production deploy |
 
@@ -85,7 +85,7 @@ Sections 5.4 and 9 give each reason in full.
 | Publishing, settling and the other person-only actions become owner questions, each with its own reason (Q1-Q7, section 9) | Same |
 | A published change applies to work in flight at once. The first pass let a running step finish "under the version it started with"; now its result is routed by the new layout, and a removed station's tokens move by the change's `moves`, previewed first (section 7) | "should follow the new process immediately… some way to transition work without interrupting them… Def don't pin tickets to workflow versions" |
 | Limits are per workspace; the first pass's host-wide pools become an optional host limit (section 6) | "Agent limits should be set per workspace as well… Workspaces should be independent. If the user needs to set a host level limit they should still be able to do that" |
-| The landing rules (never go back across a push; settle before moving) are generalized to any **outward** step. A push stays `repeat: once`; a sent email is `repeat: fresh`, so a second reply or a follow-up is a new round with fresh evidence and a fresh idempotency key, and no crossing is ever undone (section 5.3) | Follows from the non-engineering intent |
+| The landing rules (never go back across a push; settle before moving) are generalized to any **outward** step. A push stays `repeat: once`; a sent email is `repeat: fresh`, so a second reply or a follow-up is a new round with fresh evidence and a fresh idempotency key, and no crossing is ever undone. Crossings and rounds belong to the operation's boundary in the world, not the station, so renaming or replacing a station can't reset them; an unknown outcome is settled only by positive evidence or a proved rejection, never by absence (sections 3.2, 5.3, 7.3) | Follows from the non-engineering intent |
 | Kept from the first pass: one identity for life; limits are station policy that holds rather than kills; explicit ordered queues with priority; replay, fencing and crash recovery; safe stopping; bisecting in place; cheap checks and group review before the gate; a cutover with no period of two engines | The ticket's constraints |
 
 ## 1. Where the code is today
@@ -217,9 +217,13 @@ pub struct Batch { pub at: Location, pub members: Vec<Membership>, pub data: BTr
 pub struct Membership { pub token: String, pub joined: u64, pub data: BTreeMap<String, Opaque> }
 pub struct Opaque { pub version: String, pub value: serde_json::Value, pub digest: String }
 pub struct Evidence { pub artifact: String, pub manifest: String, pub receipt: String, pub spec: String }
-/// `round` counts this token's crossings at this station: 1 for the first send, 2 for the second (5.3).
-pub struct Crossing { pub station: StationId, pub round: u32, pub artifact: String, pub receipt: String,
-    pub revision: u64 }
+/// One outward act that happened. Identity is `boundary` + `round`, never the station's id: `boundary` is the
+/// adapter's name for what in the world the operation changes (`coding:target:main`, `mail:send`; 5.3), so a
+/// rename or a replacement of the station can't reset rounds or lose a repeat-once boundary. `round` counts
+/// this token's crossings of that boundary (1 for the first send, 2 for the second) and is copied from the
+/// effect, never recomputed. `station` is history for the board, re-keyed on rename like a visit's.
+pub struct Crossing { pub boundary: String, pub round: u32, pub effect: String, pub station: StationId,
+    pub artifact: String, pub receipt: String, pub revision: u64 }
 /// What a later step needs to know about a token or batch that has left live state (today's
 /// `Archived`/`ArchivedGroup`, state.rs:150-166, without `candidate` and `pushed`).
 pub struct Archived {
@@ -247,7 +251,8 @@ pub struct Effect {
     pub brief: Option<String>,                // agent steps: why it was sent back
     pub followers: Vec<String>,               // tokens riding on this one; today `with`
     pub members: Vec<String>,                 // a batch effect's member keys, in order
-    pub idempotency: String,                  // outward ops: (subject, station, round); stable across retries
+    pub idempotency: String,                  // outward ops: (subject, boundary, round), fixed when the effect
+                                              // is made; no rename, replacement or publish ever changes it
     pub data: BTreeMap<String, Opaque>,       // per adapter: coding puts tree, candidates, ci_retry here
 }
 pub enum Subject { Token(String), Batch(String) }
@@ -292,7 +297,7 @@ operation, named by `op` and digested into `op.spec`.
 
 A CI check in the repository (`scripts/`, run in CI) greps every type and
 field name in the core module (`crates/workflow/src/pipeline/`, including
-`Effect`, `Membership`, `Archived`, `Outcome` and `Input`) for `branch`,
+`Effect`, `Membership`, `Archived`, `Crossing`, `Outcome` and `Input`) for `branch`,
 `commit`, `candidate`, `base`, `push`, `pull_request`, `pr`, `ci`, `git`,
 `tree`, `fold` and `gate` as whole segments of a snake_case or CamelCase
 identifier (so `pr` matches `open_pr` but not `priority`), so the line
@@ -344,7 +349,9 @@ Result<Transition, Refusal>`, with no clock and no I/O, as today
   patience, `again`, skip, lot size.
 - **Decisions**: deciders, how many verdicts are needed, verdicts given.
 - **Outward steps and crossings**: what an adapter declares outward, the
-  settle-before-move rule, `repeat: once` versus `fresh`, rounds, and "a
+  settle-before-move rule, boundaries (an opaque name per outward
+  operation, which crossings and rounds belong to), `repeat: once` versus
+  `fresh`, rounds, the standard of proof for settling (3.2), and "a
   crossing is never undone".
 - **Fencing, stopping, the log, replay, crash recovery**: unchanged from the
   first pass.
@@ -361,7 +368,9 @@ The execution half lives in the daemon.
 pub trait AdapterRules {
     fn version(&self) -> &'static str;
     /// Every operation: the station kinds it may run under, the labels it can answer, whether it is outward
-    /// and if so its `repeat` (`once` or `fresh`, 5.3), the resources it holds while it runs, and what it
+    /// and if so its `boundary` (a function of the op and the config, e.g. `coding:target:<ref>`), `repeat`
+    /// (`once` or `fresh`) and `dedupe` (`server` only if the outside world itself refuses a second act with
+    /// the same idempotency key; otherwise `none`) (5.3), the resources it holds while it runs, and what it
     /// needs and makes (for validation).
     fn catalog(&self) -> &[OpSpec];
     /// A layout's use of this adapter's operations, in order: today's coding.rs:204-280 order rules.
@@ -402,12 +411,40 @@ agents too. For an agent station the adapter only supplies the working folder,
 the material the agent gets, and how its receipt becomes a label (`start`,
 `observe`). For coding that is today's worktree, brief and verdict receipt.
 
-**An outward operation must be reconcilable.** The adapter declares an
-operation outward only if `reconcile` and `stop` can say from the outside
-world whether it happened (the remote's ref for a push; the sent folder and a
-message id for an email). An adapter that cannot (a plain shell command that
-sends something) still runs, but every unknown outcome of it holds for a
-`Settle` (Q5).
+**An outward operation must be reconcilable, and its answers have a
+standard of proof.** The adapter declares an operation outward only if
+`reconcile` and `stop` can look at the outside world for it (the remote's ref
+for a push; the sent folder and the message id for an email). Each answer is
+one of three, and the adapter may give only what its evidence supports:
+
+| Answer | Required evidence | The core then |
+|---|---|---|
+| **Crossed** (`Labeled(passed)`) | *Positive* evidence naming this exact round: the remote's ref is the effect's commit; a sent message carrying this round's id | Appends the crossing with the effect's `boundary` and `round` |
+| **Not crossed** (`Labeled(refused)`) | Both: *authoritative non-acceptance* (the remote rejected the push; the mail server answered a permanent error to this round's submission, recorded in the journal before the crash) **and** *quiescence* (no attempt for this idempotency key can still complete: the connection or request that carried it is known closed, and no other sender holds it) | Frees the token; `then` applies; a retry may start the same round again |
+| **Unknown** (`Uncertain`) | Anything else, **including absence**: no sent copy found, a ref read failed, an attempt that may still be in flight | Holds `Uncertain`; the token keeps place, resources and ownership; nothing is retried |
+
+Absence is never proof. "Not in the sent folder" says nothing on its own:
+the server may accept a message without filing a copy, file it late, or
+still be accepting it. The adapter's look-up is not assumed complete or
+atomic with acceptance.
+
+An identifier is not a deduplication guarantee. A round's `Message-ID`
+identifies that round when it is found; it doesn't stop a second submission
+from being delivered. So for an operation with `dedupe: none` (mail, a
+deploy command, a push to a remote without a lease), the runtime never runs
+an `uncertain` round's effect again; it only reconciles it. A new attempt of
+the same round is allowed only after a *Not crossed* answer or a `Settle
+{ crossed: false }` that meets the same standard (Q5). `dedupe: server` is
+for an outside API that does refuse a repeated key; there a retry of the
+same round is safe and may be how it reconciles.
+
+While a token holds `Uncertain`, the runtime re-runs `reconcile` on the
+`Advance` tick with backoff. A later *Crossed* or *Not crossed* answer
+settles it as if it had come first; *Unknown* changes nothing.
+
+An adapter that cannot reconcile at all (a plain shell command that sends
+something) still runs, but every unknown outcome of it holds for a `Settle`
+(Q5).
 
 ### 3.3 What the coding adapter owns
 
@@ -631,17 +668,25 @@ Every crossing is appended to the token's (or batch's) `crossings` and is
 never removed: no command, route or publish can make the engine believe an
 outward step didn't happen. A `Cancel` after a crossing closes the token as
 `Closed { crossed: true }` with its crossings kept; there is no command that
-undoes a crossing. Beyond that, each outward operation declares in the
-catalog how it may be repeated:
+undoes a crossing. A crossing belongs to a **boundary**, not to a station:
+the adapter's catalog names, for each outward operation, what in the world it
+changes (`coding:target:main` for `.push`, `.land` and `.merged` to `main`;
+`mail:send` for `mail.send`; `cms:issue` for `cms.publish`). Every station
+whose operation has boundary K is "a K station"; rounds, freshness and
+repeat-once are all counted per boundary. `validate` refuses a layout or
+catalog in which two operations share a boundary but differ in `repeat`.
+Beyond that, each boundary declares how it may be repeated:
 
 - **`repeat: once`** (`coding.push`, `coding.land`, `coding.merged`,
   `cms.publish`). The thing that crossed can't cross again: a pushed commit
   is on the target, a published issue is live. So a token or batch that
-  crossed it is never sent back to it or before it, by any means. Routes:
-  `validate` refuses a layout where the station is reachable again from
-  any of its crossing labels (4.1). Interventions: a
-  `Send` to a station from which the crossed station is reachable is refused
-  `Crossed`. A further change is a `Reopen` under the same key, which the
+  crossed boundary K is never sent back to a K station or before one, by
+  any means. Routes: `validate` refuses a layout where any K station is
+  reachable from a K station's crossing labels (4.1). Interventions: a
+  `Send` to a station from which any K station is reachable is refused
+  `Crossed`. Because the check names the boundary, it still holds after the
+  station that crossed was renamed, replaced or removed (7.3). A further
+  change is a `Reopen` under the same key, which the
   adapter starts afresh (for coding, on the new base; today's `Reopen`,
   `reducer.rs:56-80`). A batch that crossed can't be pulled from
   (`reducer.rs:274-279`). This is the first pass's lost-push protection,
@@ -652,14 +697,18 @@ catalog how it may be repeated:
   back to triage), and a `Send` back before it is allowed. Either starts a
   new **round**; three rules keep a round from being a repeat of the last:
   1. *Fresh evidence.* The adapter's `start` refuses (`Evidence`) unless the
-     token's evidence was made after its last crossing at this station (for
+     token's evidence was made after its last crossing of this boundary (for
      mail, a draft approved since the last send). A retry loop or a stale
      route can't send the old message again.
   2. *Fresh idempotency.* The effect's `idempotency` is
-     `(token, station, round)`, with `round` = crossings at this station + 1.
-     Retries and reconciles of one round share it (for mail it becomes the
-     `Message-ID`); round 2 can never be mistaken for round 1 in the sent
-     folder, and round 1's message can never settle round 2.
+     `(token, boundary, round)`, with `round` = the highest round the token
+     has crossed on this boundary + 1, computed once when the effect is made
+     and stored in it. Reconciles of one round share it (for mail it becomes
+     the `Message-ID`); round 2 can never be mistaken for round 1 in the sent
+     folder, and round 1's message can never settle round 2. The settled
+     crossing takes its `round` from the effect, not from a recount. While
+     a round is admitted or uncertain no next round can start (rule 2 holds
+     the token), so two effects never share a round.
   3. *History, not state.* The new round appends a crossing; earlier ones
      stay. Interventions never name a crossing: `Send` back always means "do
      another round", never "undo the last one", and the board shows rounds
@@ -686,14 +735,21 @@ person can make at any time), `Hold`, `Pull`, `Send`, `Skip`, `Stop` and
    exactly as the original's own `Observe` would have; members stay; the
    token or batch follows its `passed` route. `then` is dropped and the
    request is recorded as overruled `Crossed`, with the receipt.
-4. **Unknown:** `Held { Uncertain }` at the station, everything still owned,
-   `then` kept in the hold. Only `Settle` releases it: `crossed: true`
-   continues as in 3, `crossed: false` as in 5. Whether `Settle` is the
-   orchestrator's (with evidence) or a person's is Q5.
-5. **Proved not crossed** (the target refused the push, the mail server
-   rejected the message, the pull request closed unmerged), or
-   `Settle { crossed: false }`: only now does `then` apply, in the same event
-   that frees place and resources.
+4. **Unknown** (by the standard of 3.2, which includes "no record found"):
+   `Held { Uncertain }` at the station, everything still owned, `then` kept
+   in the hold, the effect never run again. A later reconcile that answers
+   crossed or not crossed releases it, as does `Settle`: `crossed: true`
+   continues as in 3, `crossed: false` as in 5. A `Settle` carries its
+   evidence as a typed record (a ref read, a sent copy, a recorded rejection
+   plus a closed attempt, a person's judgment), which the adapter's
+   `observe` checks against the same standard; an orchestrator's `Settle`
+   whose only evidence is absence is refused `Evidence`. Whether `Settle` is
+   the orchestrator's (with evidence) or a person's is Q5.
+5. **Proved not crossed** (authoritative non-acceptance and quiescence, 3.2:
+   the target refused the push, the mail server permanently rejected this
+   round's submission and the connection that carried it is closed, the pull
+   request closed unmerged), or `Settle { crossed: false }`: only now does
+   `then` apply, in the same event that frees place and resources.
 
 A pending outward effect (never claimed) cannot have crossed: the command's
 transaction suppresses it (`store/src/workflow.rs:346-351`), and 5.2 applies.
@@ -714,29 +770,45 @@ remote been unreadable, B7 would hold for `Settle`.
 workflow (8.3), where `send` is `mail.send`, `repeat: fresh`.
 
 1. *Round 1.* Triage `reply`, draft D1, the person approves, `send` runs
-   with idempotency `(M4, send, 1)`, `Message-ID` derived from it. It
+   with idempotency `(M4, mail:send, 1)`, `Message-ID` derived from it. It
    answers `passed`; crossing 1 (artifact D1, the message id) is appended;
    M4 waits at `await-reply`.
 2. *A reply arrives.* `await-reply` answers `replied`, routed to `triage`:
    round 2 begins by an ordinary route, no `Reopen`. Triage `reply`, draft
    D2 (evidence made after crossing 1), approved, `send` starts with
-   `(M4, send, 2)`. Had a stale route or a retry tried to start `send` with
+   `(M4, mail:send, 2)`. Had a stale route or a retry tried to start `send` with
    D1, `start` would refuse `Evidence`.
-3. *Crash after the second send.* The server accepts D2; the daemon dies
-   before `Observe`. On restart round 2's effect is `uncertain`. Meanwhile
-   the person, seeing a wrong recipient in D2, cancels M4: M4 goes to
-   `Settling`, nothing moves. Recovery reconciles the effect first;
-   `mail/v1` looks in the sent folder for round 2's `Message-ID`, finds it,
-   and answers `Settled { original: passed }`. Crossing 2 is appended (1 is
-   untouched), the cancel is overruled `Crossed`, and M4 goes to
-   `await-reply`. The board shows "sent 1, sent 2", so the person sends a
-   correction (round 3) or cancels again, which now closes M4
-   `crossed: true`. Had the sent folder held only round 1's message, round
-   2 is proved not crossed: the cancel applies and M4 closes with crossing 1
-   only. Round 1's message can't settle round 2, because its id differs.
+3. *Crash after the second send.* The daemon dies while round 2's
+   submission is out, before `Observe`. On restart round 2's effect is
+   `uncertain`. Meanwhile the person, seeing a wrong recipient in D2,
+   cancels M4: M4 goes to `Settling`, nothing moves. Recovery reconciles the
+   effect first, and what happens next depends only on what `mail/v1` can
+   prove (3.2):
+   - *A sent copy with round 2's `Message-ID` is found:* `Settled
+     { original: passed }`. Crossing 2 is appended with the effect's
+     boundary and round (1 is untouched), the cancel is overruled
+     `Crossed`, and M4 goes to `await-reply`. The board shows "sent 1, sent
+     2", so the person sends a correction (round 3) or cancels again, which
+     now closes M4 `crossed: true`. Round 1's sent copy can't settle round
+     2, because its id differs.
+   - *The server accepted D2 but no sent copy is visible* (it doesn't file
+     submissions, or files them late): the sent folder holds only round 1's
+     message. That is absence, not proof: the answer is *Unknown*. M4 holds
+     `Uncertain` with the cancel kept in the hold, keeps its place and
+     ownership, and round 2 is not sent again. A later reconcile that finds
+     the copy settles it crossed; otherwise the orchestrator or a person
+     `Settle`s with evidence (a reply quoting D2, the provider's delivery
+     log; Q5).
+   - *The submission may still be in flight* (the sending connection's
+     state is unknown, or a relay still holds it): *Unknown*, the same hold.
+     Even a later permanent rejection only settles it not crossed once the
+     attempt is also known closed.
+   - *Proved not crossed:* the journal recorded the server's permanent
+     rejection of round 2's submission and the connection is closed. Only
+     now does the cancel apply; M4 closes with crossing 1 only.
 4. *A follow-up.* No reply in 3 days: `await-reply` answers `timeout`,
    routed to `follow-up`, which drafts D3 and goes to `approve`, then
-   `send` as round 3 with `(M4, send, 3)`. Same rules.
+   `send` as round 3 with `(M4, mail:send, 3)`. Same rules.
 
 A push could never do step 2: `coding.push` is `repeat: once`, so no route
 leads back before it, and the walkthrough above is unchanged.
@@ -831,6 +903,7 @@ publish:
     land.checks:                              # removed: replaced by another station
       to: land.group-review                   # where its tokens go, and where its passes go
       labels: { red: rejected }               # its other labels; unlisted ones hold at `to`
+    send: { to: send-relay, boundary: keep }  # outward replaced: say whether the boundary carries on (7.3)
   reason: "replace cheap checks with group review before the gate"
   preview: <digest of the preview it was checked against>
 ```
@@ -869,10 +942,12 @@ that is a fact about running work, not a pin on the token.
 - **Its station was renamed** (`{ rename: new-id }`): nothing retires. A
   rename is allowed only when the kind and `op` are unchanged (otherwise it is
   a replacement, below, and `validate` says so). In the publish event the
-  station's queue, working set, holds and every visit's station id are
-  re-keyed to the new id; the running step answers at the new id and is
-  routed by the **new** layout's routes for it, exactly as if it had always
-  had that name.
+  station's queue, working set, holds, every visit's station id and every
+  crossing's `station` are re-keyed to the new id; the running step answers
+  at the new id and is routed by the **new** layout's routes for it, exactly
+  as if it had always had that name. A crossing's identity (`boundary`,
+  `round`, `effect`) and a running effect's `idempotency` are untouched: they
+  never contained the station id.
 - **Its station was removed** (`{ to, labels }`): the station becomes
   **retired**. It stays in `Pipeline::retired`, takes no new arrivals, starts
   nothing, and keeps **only its translation**, never its old routes. The
@@ -896,6 +971,32 @@ that is a fact about running work, not a pin on the token.
 - A step stopping or settling at publish time (5.2, 5.3) keeps doing so; its
   `then` is mapped through `moves` (a rename re-keys it; a removal maps it to
   `to`).
+
+**Outward stations: rename versus replacement.** Because crossings, rounds
+and idempotency belong to the boundary (5.3), neither a rename nor a
+replacement can reset them:
+
+- A **rename** keeps the op, so it keeps the boundary. A thread that crossed
+  `mail:send` twice at `send` and then reaches the renamed `send-reply`
+  starts round 3; its old draft is refused `Evidence` there as it would have
+  been at `send`.
+- A **replacement** whose new op has the **same** boundary (a `mail.send`
+  through another relay; `coding.land` in place of `coding.push` to the same
+  target) carries on: rounds continue, and a token that crossed a
+  `repeat: once` boundary still can't be sent before the new station.
+  `moves` says `boundary: keep`, and `validate` checks that the boundaries
+  really match.
+- A replacement whose op has a **different** boundary (pushing to `release`
+  instead of `main`), or a publish that leaves no station on a boundary
+  that a live or retired token has crossed, must say `boundary: new` on that
+  `moves` entry, and the preview lists every token that crossed the old
+  boundary. Without it the publish is refused `Definition`. The old
+  crossings stay on the tokens either way; what `boundary: new` records is
+  that the author knows the new station starts its own round 1.
+- An outward effect admitted or uncertain in a renamed or retired station
+  keeps the idempotency it was made with; its reconcile looks for that
+  round's evidence, and the crossing it settles takes the effect's boundary
+  and round.
 
 **Successive publishes compose.** A retired station's translation names live
 stations only, always. Each later publish rewrites every entry in
@@ -957,6 +1058,10 @@ edits it:
   becomes `rejected: code-build` if `build` was renamed). A label whose old
   target was removed with no `to` is left out, so it would hold, and the
   preview says so.
+- A removed outward station's entry is proposed `boundary: keep` when its
+  replacement's op has the same boundary. Otherwise the preview leaves it
+  unset, which refuses the publish, so the author must write
+  `boundary: new` (7.3).
 
 **Preview** is the reducer itself: `step` is pure, so
 `preview(&Pipeline, &Publish) -> Report` applies the publish to a copy of the
@@ -969,6 +1074,8 @@ live pipeline and diffs the result. Nothing is written. The report lists:
 - what each running step's possible labels will do: by the new routes for a
   live or renamed station, by `retired_route` for a retired one;
 - policies that will hold something at its next count;
+- outward boundaries: each one kept, added or left with no station, and
+  the tokens that crossed it, with their next round;
 - the adapter's `validate` problems;
 - refusals (`Stranded`, adapter problems, capacity above the host limit).
 
@@ -1205,7 +1312,7 @@ Trace:
 |---|---|
 | triage | An agent's label |
 | approve | The person, by default. The orchestrator may approve on their behalf with a reason (a reply confirming a meeting time it proposed), because `skip: orchestrator`. A stricter person sets `skip: person` |
-| send | Outward, `repeat: fresh`: each round needs a draft approved since the last send, and an unknown result settles from the sent folder by that round's `Message-ID` (5.3, with the second-reply, crash and follow-up walk-through) |
+| send | Outward, boundary `mail:send`, `repeat: fresh`, `dedupe: none`: each round needs a draft approved since the last send; an unknown result settles crossed only when a sent copy with that round's `Message-ID` is found, not crossed only on a recorded rejection with the connection closed, and otherwise holds without resending (5.3, with the second-reply, crash and follow-up walk-through) |
 | deliver | Outward, `repeat: once` per digest; each day's digest is a new batch |
 
 What this asks of the core, and gets: intake (tokens created by an adapter),
@@ -1336,8 +1443,14 @@ that trusts its orchestrator changes it by publishing.
 lands twice or loses a landing. *Reason to drop:* the orchestrator can read
 the same evidence a person would (the remote's ref, the sent folder).
 *Recommendation:* the orchestrator settles, but only by attaching evidence it
-read outside the engine (the ref value, the message id), which the event
-records; a person can always settle too.
+read outside the engine, which the event records, and to the standard of 3.2:
+`crossed: true` with positive evidence of that exact round (the ref value, a
+sent copy with the round's message id, a reply quoting it);
+`crossed: false` only with an authoritative rejection and proof the attempt
+is over. Absence ("not in the sent folder") is not evidence either way, so
+with nothing better the token stays held. A person can always settle too,
+and may settle on judgment (they asked the recipient); the event records
+that it was a person's judgment.
 
 **Q6. Grants and roles, and the host limit.** *Reason:* grants are where the
 orchestrator's authority comes from, so it can't grant itself more; the host
@@ -1546,11 +1659,47 @@ frees that level.
   working there. Assert: no retired station; the working token and every
   visit are re-keyed; its `rejected` answer follows the new layout's
   `code-review` routes.
-- **Rounds:** the 5.3 email walk-through with the `test/mail` adapter,
-  including the crash after the second send, the proved-not-sent variant,
-  a `start` of `send` with round 1's draft refused `Evidence`, and a layout
-  that routes from `land.push` `passed` back to `land.base` refused by
-  `validate`.
+- **Rounds:** the 5.3 email walk-through with the `test/mail` adapter
+  (`dedupe: none`; its fake server can accept, reject, file or not file a
+  sent copy, and keep a submission open), including a `start` of `send`
+  with round 1's draft refused `Evidence`, and a layout that routes from
+  `land.push` `passed` back to `land.base` refused by `validate`. The crash
+  after the second send runs in four variants, each with the person's
+  `Cancel` recorded during `Settling`:
+  - *sent copy found:* crossing 2 appended (boundary `mail:send`, round 2,
+    the effect's id), cancel overruled `Crossed`, M4 at `await-reply`;
+  - *accepted, no sent copy visible:* M4 `Held { Uncertain }` with the
+    cancel in the hold; no new effect is emitted for round 2 (the outbox
+    holds exactly one row for `(M4, mail:send, 2)`); no crossing 2; a
+    `Settle { crossed: false }` from the orchestrator citing only the empty
+    sent folder is refused `Evidence`. The fake server then files the copy;
+    the next `Advance` reconcile settles crossed as in the first variant;
+  - *submission still open:* the same hold, and a permanent rejection
+    reported while the fake connection stays open still answers Unknown;
+    once the connection closes, the rejection settles not crossed;
+  - *rejected and closed:* the cancel applies; M4 closes with crossing 1
+    only, `crossed: true`.
+- **A rename between rounds:** M4 has crossed round 1 at `send` and waits at
+  `await-reply`. Publish `moves: { send: { rename: send-reply } }`. Assert:
+  crossing 1 still has boundary `mail:send`, round 1, its effect id and
+  receipt, with `station` re-keyed to `send-reply`; on `replied`, the next
+  `send-reply` effect has idempotency `(M4, mail:send, 2)`; a start with D1
+  is refused `Evidence`.
+- **A rename during an admitted send, then a crash:** round 2's effect at
+  `send` is admitted; publish the same rename; the daemon dies. Assert: the
+  effect's id and idempotency `(M4, mail:send, 2)` are unchanged by the
+  publish; after restart reconcile looks for round 2's `Message-ID`; the
+  settled crossing is boundary `mail:send`, round 2, at `send-reply`; the
+  next round is 3.
+- **Replacing an outward station:** replace `send` by `send-relay` (op
+  `mail.send_relay`, boundary `mail:send`) with `boundary: keep`: rounds
+  continue at 3. The same publish without a `boundary` entry, or with
+  `boundary: keep` for an op of another boundary, is refused. For coding,
+  replacing `land.push` by a `coding.land` station on the same target with
+  `boundary: keep`: a `Send` of a crossed batch to `land.base` is still
+  refused `Crossed`. Replacing it by a push to `release` without
+  `boundary: new` is refused, and the preview lists every batch that
+  crossed `coding:target:main`.
 - **Replay** from empty holds at each point.
 
 ## 11. Mapping: every Item field, Phase, Command and Refusal
@@ -1609,7 +1758,8 @@ frees that level.
 | `Effect::with` | `Effect::followers` | |
 | `Effect::members` (`Vec<Member>`) | `Effect::members` (keys only) plus each candidate in `Effect::data["coding"]` | |
 | `Effect::candidate`, `tree`, `ci_retry` | `Effect::data["coding"]`, filled by the adapter's `start` | Coding's |
-| New | `Effect::idempotency` | Outward rounds (5.3) |
+| New | `Effect::idempotency`: `(subject, boundary, round)`, fixed when the effect is made | Outward rounds (5.3); no publish changes it (7.3) |
+| `pushed`, the only crossing record today | `Crossing { boundary, round, effect, station, artifact, receipt, revision }` | Identity is the boundary and round, so renames and replacements keep it (7.3) |
 | `Member { item, candidate }` | `Membership { token, joined, data }` | |
 | `Archived::phase` | `Archived::closed` (`Done`, `Cancelled`) plus `reason` | |
 | `Archived::candidate` | `Archived::data["coding"]` | Coding's |
