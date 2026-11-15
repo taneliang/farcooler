@@ -189,6 +189,25 @@ pub fn apply(cmd: &mut std::process::Command, pins: &[Pin]) {
     }
 }
 
+/// The environment one git is started with: guarded (`pins` given) it gets
+/// the pins, the work tree and git-lfs's `PATH`.
+///
+/// Unguarded (a test): no pins, flags or work tree, but not the test
+/// runner's `GIT_` variables either, which no guarded git ever gets.
+/// The landing gate's `GIT_OPTIONAL_LOCKS=0` kept status from
+/// rewriting the index, so no hook ran and the control failed (ov-1250).
+pub fn prepare(cmd: &mut std::process::Command, pins: Option<&[Pin]>, cwd: &std::path::Path) {
+    if let Some(pins) = pins {
+        apply(cmd, pins);
+        pin_work_tree(cmd, cwd);
+        if let Some(path) = crate::git_lfs::path(child_path()) {
+            cmd.env("PATH", path);
+        }
+    } else {
+        strip_inherited(cmd);
+    }
+}
+
 /// Remove every `GIT_` variable `cmd` would inherit from the daemon.
 pub fn strip_inherited(cmd: &mut std::process::Command) {
     for (key, _) in std::env::vars_os() {
