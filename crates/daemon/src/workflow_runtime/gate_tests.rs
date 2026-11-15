@@ -217,11 +217,9 @@ async fn a_verdict_survives_the_daemon_stopping_before_the_turn_ends() {
     let receipt = PathBuf::from(runtime.coding_command(&binding).unwrap().environment["FARCOOLER_RECEIPT"].clone());
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
     let stop = async {
-        for _ in 0..500 {
-            if receipt.exists() { cancel.send_replace(true); return; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("the reviewer gave no verdict");
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_millis(10), || receipt.exists()).await, "the reviewer gave no verdict");
+        cancel.send_replace(true);
     };
     let (outcome, ()) = tokio::join!(runtime.execute_coding("w", &binding, cancelled), stop);
     assert!(matches!(outcome.unwrap(), Outcome::Passed(_)));
@@ -449,11 +447,9 @@ async fn cancelling_parallel_review_ends_the_owned_gate_before_returning() {
     let receipt = runtime.provider_path(&binding);
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
     let stop = async {
-        for _ in 0..500 {
-            if owner.exists() && receipt.exists() { cancel.send_replace(true); return; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("parallel processes never started");
+        assert!(super::wait_until(tokio::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_millis(10), || owner.exists() && receipt.exists()).await, "parallel processes never started");
+        cancel.send_replace(true);
     };
     let (result, ()) = tokio::join!(runtime.execute_coding("w", &binding, cancelled), stop);
     assert_eq!(result.unwrap(), Outcome::SafeFailure);

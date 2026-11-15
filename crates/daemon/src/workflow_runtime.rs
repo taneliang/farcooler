@@ -1017,6 +1017,15 @@ mod landing_templates_tests;
 #[cfg(test)]
 mod coding_pr_tests;
 #[cfg(test)]
+async fn wait_until(deadline: tokio::time::Instant, interval: std::time::Duration, mut condition: impl FnMut() -> bool) -> bool {
+    loop {
+        if condition() { return true; }
+        if tokio::time::Instant::now() >= deadline { return false; }
+        tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
+    }
+}
+
+#[cfg(test)]
 mod gate_tests;
 #[cfg(test)]
 mod send_back_tests;
