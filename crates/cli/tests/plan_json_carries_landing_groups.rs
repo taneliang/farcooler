@@ -46,7 +46,6 @@ impl Handler for Runner {
                 result::Value::Plan(pb::Plan { now_ms: 300_000, cards: vec![pb::PlanCard {
                     task_id: id(Uuid::from_u128(1)), key: "ov-1".into(), status: pb::TaskStatus::InReview as i32,
                     title: "Keep the complete long ticket title visible when the landing queue wraps on a narrow phone screen".into(),
-                    ..Default::default()
                 }], ..Default::default() })
             }
             "workflow.get" => {

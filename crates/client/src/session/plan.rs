@@ -23,7 +23,7 @@ impl Session {
     /// so Mac, phone and wasm receive the authenticated engine presentation.
     pub async fn plan_with_workflow(&self, workspace: Uuid) -> Result<serde_json::Value, SessionError> {
         let plan = self.plan(workspace).await?;
-        let read = self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS).then(|| async {
+        let read = self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS).then_some(async {
             let r = crate::plan_json::workflow_request(workspace);
             self.value_requiring(&r.method, Some(workspace), r.payload, r.required_capabilities).await
         });

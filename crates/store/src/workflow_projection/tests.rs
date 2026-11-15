@@ -165,7 +165,6 @@ fn a_failed_run_is_on_the_needs_you_list_until_the_controller_cancels_it() {
 fn a_failed_run_closed_as_landed_leaves_needs_you_and_the_line_keeps_the_commit() {
     let b = board();
     enqueue(&b, Definition::coding());
-    let mut revision = 1;
     for n in 0..5 {
         let state = b.store.workflow_state(&b.ws.to_string()).unwrap().unwrap();
         if state.items[&b.task.key].phase == Phase::Failed { break; }
@@ -175,7 +174,7 @@ fn a_failed_run_closed_as_landed_leaves_needs_you_and_the_line_keeps_the_commit(
         assert!(b.store.workflow_admit_effect(&claim, 1001).unwrap());
         let c = Command::Observe { item: b.task.key.clone(), effect: effect.clone(), run: item.run.clone(), fence: item.fence, outcome: Outcome::SafeFailure };
         let grant = Grant::Operation { effect, run: item.run.clone(), fence: item.fence };
-        revision = b.store.workflow_apply(&input(&b, &format!("fail-{n}"), state.revision, grant, c)).unwrap().result.unwrap();
+        b.store.workflow_apply(&input(&b, &format!("fail-{n}"), state.revision, grant, c)).unwrap().result.unwrap();
     }
     assert_eq!(seen(&b), ("needs_decision".into(), Some("needs_you".into())));
     let sha = "0123456789abcdef0123456789abcdef01234567";

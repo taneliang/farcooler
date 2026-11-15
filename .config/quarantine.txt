@@ -15,3 +15,4 @@
 #
 #   farcooler-daemon::a_foo  tests::it_waits  ov-9999  2026-12-01
 farcooler-daemon  workflow_runtime::coding_tests::workflow_coding_two_tickets_start_with_different_models_and_each_build_launches_its_own  ov-1220  2026-11-29
+farcooler-daemon  git_sandbox::alone::a_planted_hook_is_refused_with_the_pins_off  ov-1248  2026-11-29

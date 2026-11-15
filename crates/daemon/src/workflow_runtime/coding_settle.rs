@@ -80,6 +80,7 @@ impl Runtime {
 /// Test hook: what runs, once, the moment the remote read for a workspace's `landed` finishes, standing in for the
 /// caller losing authority while that read was pending.
 #[cfg(test)]
+#[allow(clippy::type_complexity)] // Test-only one-shot callbacks, keyed by workspace to isolate parallel tests.
 pub(super) static AFTER_LANDED_READ: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Box<dyn FnOnce() + Send>>>> =
     std::sync::LazyLock::new(Default::default);
 

@@ -111,6 +111,7 @@ pub(crate) async fn owned(tree: &Path, argv: &[String], environment: &std::colle
 }
 
 /// Like `owned`, and a builder's group pauses while a landing gate runs (ov-1214).
+#[allow(clippy::too_many_arguments)] // Keep the ownership boundary's inputs explicit, including yielding.
 pub(crate) async fn owned_yielding(tree: &Path, argv: &[String], environment: &std::collections::BTreeMap<String, String>,
     log: &Path, limit: Duration, cancel: tokio::sync::watch::Receiver<bool>, owner: Option<&Path>,
     builder: Option<&crate::yielding::Yielding>) -> Result<Option<i32>, ProcessFailure>
