@@ -270,6 +270,57 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                 if item.phase == Phase::Failed { item.brief = Some(conflict_brief(evidence, files)?); }
                             }
                         }
+                        Outcome::GateRejected { members, evidence, brief, failure } => {
+                            if !valid_rework_reason(brief) || item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
+                            if item.definition.schema != 2 || item.group_of.is_none()
+                                || !matches!(item.definition.stages[item.stage].kind, StageKind::Run | StageKind::Check)
+                                || item.pushed.is_some()
+                                || members.iter().collect::<BTreeSet<_>>().len() != members.len()
+                                || members.iter().any(|id| !item.members.iter().any(|m| &m.item == id))
+                            { return Err(Refusal::Evidence); }
+                            evidence_matches(&item, evidence)?;
+                            if failure.job.is_empty() || failure.job.len() > 1024 || failure.first_line.len() > 4096
+                                || failure.job.chars().any(char::is_control) || failure.first_line.chars().any(char::is_control)
+                            { return Err(Refusal::Evidence); }
+                            item.group_failure = Some(failure.clone());
+                            // A published non-splitting failure policy still decides as written.
+                            if let Target::Split { step, .. } = target_of(&item, "rejected")
+                                && !members.is_empty() {
+                                for member in members {
+                                    let mut ticket = next.items.remove(member).ok_or(Refusal::Missing)?;
+                                    ticket.grouped_in = None;
+                                    if let Some(build) = ticket.definition.stages.iter().position(|s| s.kind == StageKind::Build) {
+                                        ticket.brief = Some(brief.clone());
+                                        ticket.candidate = None; ticket.stage = build; ticket.attempt = 1;
+                                        ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                                        ticket.phase = Phase::Blocked;
+                                    } else {
+                                        route(&mut ticket, member, input, "rejected", None,
+                                            Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                                        ticket.brief = Some(brief.clone());
+                                    }
+                                    next.items.insert(member.clone(), ticket);
+                                }
+                                item.members.retain(|m| !members.contains(&m.item));
+                                if item.members.is_empty() {
+                                    item.pending = None; item.last_evidence = Some(evidence.clone());
+                                    item.phase = Phase::Failed;
+                                } else {
+                                    // Removing at least one member bounds this retry by the original batch size.
+                                    // Like a half split, it spends no review/back-edge budget.
+                                    item.pending = None; item.ci_retry = None;
+                                    item.last_evidence = Some(evidence.clone());
+                                    item.stage = item.definition.stages.iter().position(|s| s.id == step).ok_or(Refusal::Definition)?;
+                                    item.candidate = None; item.attempt = 1;
+                                    item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                                    enter(&mut item, id, input, &mut effects)?;
+                                }
+                            } else {
+                                route(&mut item, id, input, "rejected", Some(evidence),
+                                    Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                                if item.phase == Phase::Failed { item.brief = Some(brief.clone()); }
+                            }
+                        }
                         Outcome::Labeled(label, evidence) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             let stage = &item.definition.stages[item.stage];
@@ -601,6 +652,8 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
         let result = if label == "landed" { group.pushed.clone() } else { group.candidate.clone() };
         let rebase = (label == "rejected" && group.definition.stages[group.stage].kind == StageKind::Fold)
             .then(|| group.brief.clone()).flatten();
+        let gate_brief = (label == "rejected" && matches!(group.definition.stages[group.stage].kind, StageKind::Run | StageKind::Check))
+            .then(|| group.brief.clone()).flatten();
         let members = std::mem::take(&mut group.members);
         // Remember whom it ran: the board still draws a finished group with its tickets.
         group.handed = members.iter().map(|m| m.item.clone()).collect();
@@ -610,7 +663,11 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             if let StageKind::Join { adopt: true, .. } = ticket.definition.stages[ticket.stage].kind {
                 if matches!(label, "passed" | "landed") && result.is_some() { ticket.candidate = result.clone(); }
             }
-            if let Some((reason, build)) = rebase.as_ref().and_then(|reason| ticket.definition.stages.iter()
+            if label == "dropped" && !ticket.definition.stages[ticket.stage].routes.contains_key("dropped") {
+                ticket.pending = None;
+                ticket.phase = Phase::WaitingJoin;
+                ticket.fence = ticket.fence.checked_add(1).ok_or(Refusal::Limit)?;
+            } else if let Some((reason, build)) = rebase.as_ref().and_then(|reason| ticket.definition.stages.iter()
                 .position(|s| s.kind == StageKind::Build).map(|build| (reason, build))) {
                 // A stale base is integration work, not a rejected review. It spends no back edge or iteration.
                 // Queue like other join returns; enter() still enforces dependencies, resources and approval.
@@ -622,6 +679,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                 ticket.phase = Phase::Blocked;
             } else {
                 route(&mut ticket, &member.item, input, label, None, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
+                if let Some(brief) = &gate_brief { ticket.brief = Some(brief.clone()); }
             }
             next.items.insert(member.item, ticket);
         }

@@ -691,9 +691,27 @@ impl Exec {
             }).or_else(|| output.lines().find(|l| !l.trim().is_empty()))
                 .unwrap_or("The gate changed its candidate or exited unsuccessfully.");
             let plain = |s: &str, limit| s.chars().filter(|c| !c.is_control()).take(limit).collect::<String>();
-            Outcome::RejectedWithDetails(evidence, farcooler_workflow::GroupFailure {
+            let failure = farcooler_workflow::GroupFailure {
                 job: plain(&command.argv.join(" "), 256), first_line: plain(first, 1000), split: false,
-            })
+            };
+            if binding.effect.members.is_empty() { return Ok(Outcome::RejectedWithDetails(evidence, failure)); }
+            let diagnostics = gate_diagnostics(&output);
+            let mut members = Vec::new();
+            let effects = self.store.workflow_outbox(&binding.workspace)?;
+            for member in &binding.effect.members {
+                // Compare with the member's own pinned provision base, never with another ticket's
+                // candidate or the folded result. Reconciliation uses the same immutable outbox.
+                let Some(original) = effects.iter().rev().find(|s| s.effect.item == member.item
+                    && s.effect.candidate.as_ref() == Some(&member.candidate)) else { continue };
+                let base = self.item_base(&binding.workspace, &original.effect)?;
+                let paths = self.git_recorded(binding, &self.repository(), &["-c", "core.quotepath=off", "diff",
+                    "--name-only", "--no-renames", "-z", &base, &member.candidate]).await?;
+                if paths.split('\0').filter(|p| !p.is_empty()).any(|p| diagnostic_names(&diagnostics, p)) {
+                    members.push(member.item.clone());
+                }
+            }
+            let brief = bounded_gate_brief(&failure.job, &diagnostics);
+            Outcome::GateRejected { evidence, members, brief, failure }
         })
     }
     pub(super) async fn verify_tree(&self, binding: &Binding) -> Result<String> {
@@ -932,4 +950,47 @@ fn cut_at(text: &str, max: usize) -> (&str, bool) {
     if text.len() <= max { return (text, false); }
     let end = (0..=max).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
     (&text[..end], true)
+}
+
+/// Lane-gate prints changed-file summaries and passing commands too. Only failed command blocks
+/// are evidence of breakage; attributing its header would eject innocent members of every job.
+pub(super) fn gate_diagnostics(output: &str) -> String {
+    let mut failed = false;
+    let mut command = "";
+    let mut lines = Vec::new();
+    for line in output.lines() {
+        if line.starts_with("  run  ") { command = line.trim(); failed = false; }
+        else if line.starts_with("  FAILED, log ") {
+            failed = true; lines.push(command); lines.push(line.trim());
+        } else if failed && line.starts_with("    ") { lines.push(line.trim()); }
+        else { failed = false; }
+    }
+    if lines.is_empty() {
+        let all: Vec<_> = output.lines().collect();
+        for (n, line) in all.iter().enumerate() {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("error") || lower.contains("failed") || lower.contains("failure") {
+                lines.extend(all[n..all.len().min(n + 3)].iter().copied());
+            }
+        }
+    }
+    lines.join("\n")
+}
+pub(super) fn diagnostic_names(diagnostics: &str, path: &str) -> bool {
+    let path_char = |c: char| c.is_alphanumeric() || "_./-".contains(c);
+    diagnostics.match_indices(path).any(|(n, _)| {
+        let prefix = &diagnostics[..n];
+        let rooted = prefix.ends_with('/') && prefix.rsplit(|c| !path_char(c)).next().is_some_and(|p| p.starts_with('/') || p == "./");
+        (rooted || prefix.chars().next_back().is_none_or(|c| !path_char(c)))
+            && diagnostics[n + path.len()..].chars().next().is_none_or(|c| !path_char(c))
+    })
+}
+pub(super) fn bounded_gate_brief(job: &str, diagnostics: &str) -> String {
+    let text = format!("Landing gate failed: {job}\nRepair the failing checks, run the affected tests and commit the result.\n{diagnostics}");
+    let mut brief = String::new();
+    for c in text.chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')) {
+        if brief.len() + c.len_utf8() > farcooler_workflow::MAX_REWORK_REASON_BYTES { break; }
+        brief.push(c);
+    }
+    brief
 }

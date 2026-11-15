@@ -296,6 +296,9 @@ pub enum Outcome {
     /// A fold receipt carries conflict paths into the next build, including after recovery.
     FoldConflict { evidence: Evidence, #[serde(default)] files: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")] members: Option<Vec<String>> },
+    /// Digest-verified gate diagnostics and the members whose changed paths they name.
+    /// An empty member list takes the published anonymous-failure route.
+    GateRejected { evidence: Evidence, members: Vec<String>, brief: String, failure: GroupFailure },
     Passed(Evidence), Rejected(Evidence), RejectedWithDetails(Evidence, GroupFailure), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),

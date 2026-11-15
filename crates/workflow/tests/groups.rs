@@ -252,7 +252,7 @@ fn a_failed_group_rejects_its_members_through_their_own_routes() {
     assert_eq!(log.state.items[&group].since_ms, 1000, "and when it reached the phase it ended in");
 }
 #[test]
-fn a_cancelled_group_drops_its_members_and_an_unrouted_drop_fails_them() {
+fn a_cancelled_group_waits_until_stopped_before_returning_members() {
     let mut log = Log::new();
     log.join_group("a"); log.queue("a");
     let group = log.group_of("a");
@@ -261,7 +261,7 @@ fn a_cancelled_group_drops_its_members_and_an_unrouted_drop_fails_them() {
     assert_eq!(log.state.items["a"].phase, Phase::Joined, "not until it has really stopped");
     let stop = log.state.items[&group].stopping.clone().unwrap();
     log.outcome(&group, Outcome::Stopped { operation: stop, receipt: "quiet".into() });
-    assert_eq!(log.state.items["a"].phase, Phase::Failed);
+    assert_eq!(log.state.items["a"].phase, Phase::WaitingJoin);
     assert_eq!(log.stage("a"), "join");
 }
 #[test]
@@ -1325,4 +1325,87 @@ fn landing_safe_failures_retry_twice_without_splitting() {
     }
     log.outcome(&group, Outcome::SafeFailure);
     assert_eq!(log.state.items[&group].phase, Phase::Failed);
+}
+
+#[test]
+fn a_cancelled_group_returns_its_members_to_waiting_at_the_join() {
+    let mut log = Log::new();
+    log.join_group("a"); log.queue("a");
+    let group = log.group_of("a");
+    log.run(Command::Cancel { item: group.clone(), reason: None }, Grant::Controller);
+    if log.state.items[&group].pending.is_some() {
+        let operation = log.state.items[&group].stopping.clone().unwrap();
+        log.outcome(&group, Outcome::Stopped { operation, receipt: "stop-receipt".into() });
+    }
+    assert_eq!(log.state.items["a"].phase, Phase::WaitingJoin);
+    assert_eq!(log.stage("a"), "join");
+    assert!(log.state.items["a"].grouped_in.is_none());
+    log.queue("a");
+    assert!(log.state.items["a"].grouped_in.is_some());
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn a_named_gate_breaker_returns_with_output_and_the_rest_retry_together() {
+    let mut log = Log::new();
+    for t in ["x", "a", "b", "c"] {
+        let mut d = ticket(); d.groups.get_mut("landing").unwrap().limit = Some(4);
+        log.enqueue(t, d);
+        while log.state.items[t].phase != Phase::WaitingJoin { log.pass(t); }
+    }
+    for t in ["x", "a", "b", "c"] { log.queue(t); }
+    let ahead = log.group_of("x"); let group = log.group_of("a");
+    pass_group(&mut log, &ahead, 3); pass_group(&mut log, &group, 2);
+    let evidence = log.evidence(&group);
+    let brief = "Landing gate failed: copy lint\nratchet: broken.rs has extra strings";
+    let transition = log.outcome(&group, Outcome::GateRejected { evidence, members: vec!["b".into()], brief: brief.into(),
+        failure: GroupFailure { job: "copy lint".into(), first_line: "ratchet: broken.rs".into(), split: false } });
+    assert_eq!(log.state.items["b"].brief.as_deref(), Some(brief));
+    assert_eq!(log.stage("b"), "stage-1");
+    assert!(log.state.items["b"].grouped_in.is_none());
+    assert_eq!(log.group_of("a"), log.group_of("c"));
+    assert_eq!(log.state.items[&group].members.iter().map(|m| m.item.as_str()).collect::<Vec<_>>(), ["a", "c"]);
+    assert_eq!(log.stage(&group), "base");
+    assert!(transition.effects.iter().any(|e| e.item == "b" && e.brief.as_deref() == Some(brief)));
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn an_unnamed_gate_failure_still_halves_the_batch_and_briefs_the_singleton() {
+    let mut log = Log::new();
+    for t in ["x", "a", "b"] { log.join_group(t); log.queue(t); }
+    let ahead = log.group_of("x"); let group = log.group_of("a");
+    pass_group(&mut log, &ahead, 3); pass_group(&mut log, &group, 2);
+    let reject = |log: &mut Log, id: &str| {
+        let evidence = log.evidence(id);
+        log.outcome(id, Outcome::GateRejected { evidence, members: vec![], brief: "error: unnamed failure".into(),
+            failure: GroupFailure { job: "gate".into(), first_line: "error: unnamed failure".into(), split: false } });
+    };
+    reject(&mut log, &group);
+    assert_ne!(log.group_of("a"), log.group_of("b"));
+    assert_eq!(log.state.items[&group].members.len(), 1);
+    pass_group(&mut log, &group, 2); reject(&mut log, &group);
+    assert_eq!(log.state.items["a"].brief.as_deref(), Some("error: unnamed failure"));
+    assert_eq!(log.stage("a"), "stage-1");
+    assert_eq!(log.replay_digest(), digest(&log.state));
+}
+
+#[test]
+fn gate_attribution_refuses_foreign_members_and_releases_an_empty_group() {
+    let mut log = Log::new();
+    log.join_group("a"); log.queue("a");
+    let group = log.group_of("a"); pass_group(&mut log, &group, 2);
+    let answer = |members| Outcome::GateRejected { evidence: log.evidence(&group), members,
+        brief: "error: broken.rs".into(), failure: GroupFailure { job: "gate".into(), first_line: "error".into(), split: false } };
+    let foreign = answer(vec!["foreign".into()]); let duplicate = answer(vec!["a".into(), "a".into()]);
+    let valid = answer(vec!["a".into()]);
+    assert_eq!(log.try_outcome(&group, foreign).unwrap_err(), Refusal::Evidence);
+    assert_eq!(log.try_outcome(&group, duplicate).unwrap_err(), Refusal::Evidence);
+    log.outcome(&group, valid);
+    assert_eq!(log.state.items[&group].phase, Phase::Failed);
+    assert!(log.state.items[&group].members.is_empty());
+    assert!(!owns_resource(&log.state.items[&group]));
+    assert_eq!(log.stage("a"), "stage-1");
+    assert_eq!(log.state.items["a"].brief.as_deref(), Some("error: broken.rs"));
+    assert_eq!(log.replay_digest(), digest(&log.state));
 }

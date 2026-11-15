@@ -1006,6 +1006,8 @@ mod observe_tests;
 #[cfg(test)]
 mod coding_verbs_tests;
 #[cfg(test)]
+mod coding_gate_tests;
+#[cfg(test)]
 mod coding_ci_rerun_tests;
 #[cfg(test)]
 mod coding_remote_tests;

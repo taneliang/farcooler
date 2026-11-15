@@ -12,6 +12,9 @@ const GATE: &str = r#"elif stage == 'gate':
         print('landing gate stderr', file=sys.stderr, flush=True)
         print('starting gate\nerror: first gate failure\nerror: later gate failure')
         sys.exit(1)
+    if mode == 'named-breaker' and pathlib.Path('services/web/src/client/saved-copies.ts').exists():
+        sys.stdout.buffer.write(pathlib.Path(os.environ['FAILURE_FIXTURE']).read_bytes())
+        sys.exit(1)
     if mode == 'gate-dirty': pathlib.Path('stray.out').write_text('left behind')
     if mode == 'gate-slow':
         pathlib.Path('half-built.out').write_text('left by the gate')
@@ -62,6 +65,8 @@ pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
         .replace("conclusion='failure' if mode == 'ci-fail'", "conclusion='failure' if mode == 'ci-fail' or (mode == 'base-red' and candidate == os.environ['RED'])")
         // `base-pending`: CI on that base never finishes.
         .replace("status='in_progress' if mode == 'ci-pending'", "status='in_progress' if mode == 'ci-pending' or (mode == 'base-pending' and candidate == os.environ['RED'])");
+    let text = text.replace("    pathlib.Path(name).write_text('candidate iteration",
+        "    if mode == 'named-breaker' and os.environ['FARCOOLER_WORKFLOW_ITEM'] == 'breaker':\n        bad = pathlib.Path('services/web/src/client/saved-copies.ts')\n        bad.parent.mkdir(parents=True, exist_ok=True)\n        bad.write_text('extra copy')\n        subprocess.check_call(['/usr/bin/git', 'add', '--', str(bad)])\n    pathlib.Path(name).write_text('candidate iteration");
     assert!(text.contains("elif stage == 'gate'") && text.contains("name = 'shared.txt'") && text.contains("'cancelled'")
         && text.contains("UNRUN_SUBJECT") && text.contains("mode == 'base-red'") && text.contains("mode == 'base-pending'"));
     std::fs::write(&script, text).unwrap();
