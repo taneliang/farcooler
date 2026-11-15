@@ -822,9 +822,8 @@ def base_env(repo, tmp, ctx, strict_leaks=False):
 
 def make_ctx(repo, tmp, base):
     sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    jdk = java_home(21)
     return {"runner.temp": str(tmp), "github.sha": sha, "matrix.os": "local", "base": base,
-            "steps.jdk21.outputs.path": jdk, "runner.os": "macOS", "runner.arch": "ARM64",
+            "steps.jdk21.outputs.path": "", "runner.os": "macOS", "runner.arch": "ARM64",
             # The local gate runs the Android checks itself; model CI's join as successful.
             "needs.changes.result": "success", "needs.changes.outputs.android": "true",
             "needs.android-build.result": "success", "needs.android-ui.result": "success"}
@@ -1133,8 +1132,10 @@ def _self_test():
     changes = load_module("ci_changes", ROOT / "scripts" / "ci-changes.py")
     ios_plan = load_module("ios_ui_plan", ROOT / "scripts" / "ios-ui-plan.py")
     ios_rel = lambda f: bool(ios_plan.RELEVANT.match(f))
-    with tempfile.TemporaryDirectory() as t:
+    from unittest import mock
+    with tempfile.TemporaryDirectory() as t, mock.patch.object(sys.modules[__name__], "jdk_candidates", side_effect=AssertionError("unexpected JDK discovery")):
         ctx = make_ctx(ROOT, pathlib.Path(t), "origin/main")
+    expect("planning defers JDK discovery to preflight", ctx["steps.jdk21.outputs.path"], "")
     ctx["steps.jdk21.outputs.path"] = ctx["steps.jdk21.outputs.path"] or "/jdk21"
     wf = {"ci": text, "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
 
