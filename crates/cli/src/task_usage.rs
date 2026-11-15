@@ -1,8 +1,8 @@
 //! `farcooler task usage`: what agents spent on one task (ov-195).
 //!
 //! `--json` prints `farcooler_core::usage_words::TaskSpend` with the lines it
-//! says (`usage_json::Shown`), which the Mac's Usage section draws; otherwise the same words that section says,
-//! from the same `usage_words`.
+//! says (`usage_json::Shown`), which the Mac's Usage section draws; otherwise the
+//! same words that section says, from the same `usage_words`.
 
 use std::error::Error;
 
