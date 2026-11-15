@@ -1103,6 +1103,16 @@ jobs:
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
     timeout-minutes: 35
+    # The PR path builds the bundle's Rust binaries without ThinLTO and at
+    # opt-level 1 (ov-1270), as `swift-tests` does. Fat optimisation was about
+    # 8 of this job's 10 warm minutes and 14 of its 17 cold ones, and nothing
+    # below depends on it: the checks read versions, linkage and entitlements.
+    # Swift still builds `-c release`, so release-only Swift code is compiled
+    # here. canary.yml, release.yml and nightly.yml do not set these and keep
+    # the shipping profile.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "1"
     steps:
       - name: Check the runner has Xcode 27
         id: toolchain
@@ -1122,7 +1132,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # Release build of the whole bundle (daemon, CLI, client, vt) (ov-1165).
-          key: release-bundle
+          key: release-bundle-fast
       # SwiftPM's downloads (ov-1030): Sparkle's release zip is a binary target
       # fetched from github.com, and an anonymous download of it 504ed in
       # GitHub's Nov 9 incident. Keyed by Package.resolved, so a warm run
