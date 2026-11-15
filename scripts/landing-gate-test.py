@@ -90,7 +90,10 @@ class LandingTests(unittest.TestCase):
                     condition)
                 self.assertIsNotNone(match, f"unrecognized CI condition for {job}: {condition}")
                 if job != "ios":
-                    self.assertIn("    needs: changes", block)
+                    needs = next((l.strip()[len("needs:"):].strip() for l in block
+                                  if l.startswith("    needs:")), "")
+                    self.assertIn("changes", [d.strip() for d in needs.strip("[]").split(",")],
+                                  f"{job}: must need changes")
                 if flags[match[1]]:
                     required.add(job)
             with self.subTest(path=path):

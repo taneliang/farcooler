@@ -2,7 +2,7 @@
 
 ## Result
 
-Carried unchanged. Gate result: **NOT all green** (one real failure, reported below, not fixed).
+Carried unchanged, plus one test-only fix commit (ov-1256 follow-up). Gate result: **all green**.
 
 - Branch `ov-1261-carry-four`, based on origin/main `adfde91c0`; 137 cherry-picks (`-x`), no conflicts, no empty picks.
 - Order and counts: ov-1257-mac-tests-not-load (1), ov-1254-engine-train-main (130), ov-1253-pipeline-design-3 (5), ov-1256-ci-shards-early (1).
@@ -10,14 +10,15 @@ Carried unchanged. Gate result: **NOT all green** (one real failure, reported be
 - Tree diff against a plain in-order merge of the four branches onto origin/main: empty.
 - Conflicts resolved: none.
 
-## Checks (PATH=/opt/homebrew/bin:$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin, foreground)
+## Change beyond the carry (fix round 1)
 
-- `cargo clippy --workspace --all-targets -- -D warnings`: pass.
-- `./scripts/file-size-budget.py`: pass (2138 files, 27 grandfathered).
-- `CI=true ./scripts/lane-gate.py --base origin/main --only wire,doc-comments < /dev/null`: **FAIL**, two wire steps:
-  - `scripts/macos-rust-tests.py --self-test --check`: environment only. With that PATH `python3` is `/usr/bin/python3` 3.9.6 and the script needs 3.11+. Run with `python3.14` it passes. Fix the PATH (python3 on it), not the code.
-  - `scripts/landing-gate-test.py` (`test_gate_covers_ci_job_conditions_including_unconditional_jobs`): **real**. ov-1256 changed `.github/workflows/ci.yml` so the `relay` job (and others) have `needs: [changes, rust-tests, android]`. main's test (from ov-1240) asserts `"    needs: changes"` in each conditional job block at scripts/landing-gate-test.py:93. ov-1256 did not update that test, so the combination fails. Not changed here, per the ticket.
+- `scripts/landing-gate-test.py`: `test_gate_covers_ci_job_conditions_including_unconditional_jobs` now accepts `needs:` as a scalar or a list, and passes when `changes` is among the entries. ov-1256 made several jobs `needs: [changes, rust-tests, android]`, which the old literal `needs: changes` check rejected. `ci.yml` and every carried commit are untouched.
 
-## Needed from the owner
+## Checks (foreground; PATH with python3 = 3.14 first, then /opt/homebrew/bin:$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin)
 
-Decide the fix for the landing-gate test (relax the assertion to accept `needs: [changes, ...]`, or amend ov-1256). Both are code changes outside "carry only". Doc-comments and the other wire steps pass.
+- `cargo clippy --workspace --all-targets -- -D warnings`: pass (first round; no Rust changed since).
+- `./scripts/file-size-budget.py`: pass (first round; no source size changed).
+- `python3.14 scripts/landing-gate-test.py`: 6 tests OK.
+- `HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test`: ok.
+- `./scripts/lane-gate.py --dry-run --base origin/main`: runs; Linux-only web steps skipped as designed.
+- `CI=true ./scripts/lane-gate.py --base origin/main --only wire,doc-comments < /dev/null`: pass (wire and doc-comments all pass). The stock PATH's `python3` is 3.9.6, but `macos-rust-tests.py` needs 3.11+, so python3 was pointed at python3.14.
