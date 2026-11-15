@@ -7,7 +7,7 @@ use super::types::*;
 impl<'a, 'r> Ctx<'a, 'r> {
     /// Form batches at batch station `station` from its queue, by its `form` policy.
     pub fn form(&mut self, station: &str) {
-        let form = self.graph.nodes[station].def.form.clone().unwrap_or(Form { size: Some(8), window: None });
+        let form = self.graph.nodes[station].def.form.clone().unwrap_or(Form { size: Some(8), ..Form::default() });
         let size = form.size.unwrap_or(u16::MAX).max(1) as usize;
         let eligible: Vec<String> = self.p.stations[station].queue.iter().filter(|k| {
             self.p.tokens.get(*k).is_some_and(|t| matches!(&t.at, Location::Queued { station: q } if q == station)
@@ -21,7 +21,7 @@ impl<'a, 'r> Ctx<'a, 'r> {
                 if last.is_none_or(|l| index <= l) { return; }
                 eligible.chunks(size).map(<[String]>::to_vec).collect()
             }
-            None => eligible.chunks(size).filter(|c| c.len() == size).map(<[String]>::to_vec).collect(),
+            None => eligible.chunks(size).map(<[String]>::to_vec).collect(),
         };
         for members in groups {
             if !self.room(station, "") { break; }

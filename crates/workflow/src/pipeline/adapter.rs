@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use super::layout::{Kind, Layout};
 use super::step::Refusal;
-use super::types::{Crossing, Evidence, Opaque, Outcome, Subject, Visit};
+use super::types::{Crossing, Evidence, Membership, Opaque, Outcome, Subject, Visit};
 
 /// Pure. Chosen by the version string in the published workflow; replay runs the same rules.
 pub trait AdapterRules {
@@ -15,8 +15,9 @@ pub trait AdapterRules {
     fn validate(&self, layout: &Layout, config: &serde_json::Value) -> Result<(), Vec<Problem>>;
     /// Whether `op` may start for this subject now, and with what resources and effect data.
     fn start(&self, op: &str, subject: &View, config: &serde_json::Value) -> Result<StartPlan, Refusal>;
-    /// An answer becomes a label, new adapter data, and optionally "run me again with these facts".
-    fn observe(&self, op: &str, subject: &View, outcome: &Outcome) -> Result<Applied, Refusal>;
+    /// An answer becomes a label, new adapter data, and optionally "run me again with these facts" (whose rule,
+    /// such as which failures may run again, can be the config's).
+    fn observe(&self, op: &str, subject: &View, outcome: &Outcome, config: &serde_json::Value) -> Result<Applied, Refusal>;
     /// Which members of a batch an answer points at.
     fn suspects(&self, batch: &View, outcome: &Outcome) -> Vec<String>;
     /// Fields the boards show, read from this adapter's data.
@@ -65,6 +66,8 @@ pub struct View<'a> {
     pub crossings: &'a [Crossing],
     pub visits: &'a [Visit],
     pub members: &'a [String],
+    /// A batch's members as they joined, with what each joined with (its data); empty for a token.
+    pub memberships: &'a [Membership],
 }
 /// The adapters linked into this build, by version string.
 #[derive(Default)]

@@ -29,7 +29,7 @@ impl AdapterRules for Fixture {
         }
         Ok(StartPlan { resources: Vec::new(), data: None, spec: format!("{}:{op}", self.version) })
     }
-    fn observe(&self, op: &str, _: &View, outcome: &Outcome) -> Result<Applied, Refusal> {
+    fn observe(&self, op: &str, _: &View, outcome: &Outcome, _: &Value) -> Result<Applied, Refusal> {
         let Outcome::Labeled { label, data, .. } = outcome else { return Err(Refusal::Invalid) };
         let spec = self.ops.iter().find(|o| o.name == op).ok_or(Refusal::Definition)?;
         if !spec.labels.contains(label) { return Err(Refusal::Invalid); }

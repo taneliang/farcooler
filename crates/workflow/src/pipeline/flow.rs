@@ -79,10 +79,10 @@ impl<'a, 'r> Ctx<'a, 'r> {
         match s {
             Subject::Token(k) => { let t = &self.p.tokens[k];
                 View { subject: s, station, data: &t.data, evidence: t.evidence.as_ref(), crossings: &t.crossings,
-                    visits: &t.visits, members } }
+                    visits: &t.visits, members, memberships: &[] } }
             Subject::Batch(k) => { let b = &self.p.batches[k];
                 View { subject: s, station, data: &b.data, evidence: None, crossings: &b.crossings,
-                    visits: &b.visits, members } }
+                    visits: &b.visits, members, memberships: &b.members } }
         }
     }
 
@@ -387,7 +387,7 @@ impl<'a, 'r> Ctx<'a, 'r> {
                 let use_ = self.p.workflow.as_ref().unwrap().layout.adapters.get(&work.op.adapter).cloned().ok_or(Refusal::Definition)?;
                 let rules = self.adapters.get(&use_.version).ok_or(Refusal::Definition)?;
                 let members = self.members(s, station);
-                let applied = rules.observe(&work.op.op, &self.view(s, station, &members), outcome)?;
+                let applied = rules.observe(&work.op.op, &self.view(s, station, &members), outcome, &use_.config)?;
                 let spec = rules.catalog(&use_.config).into_iter().find(|o| o.name == work.op.op);
                 match s {
                     Subject::Token(k) => { let t = self.p.tokens.get_mut(k).unwrap();
@@ -444,7 +444,10 @@ impl<'a, 'r> Ctx<'a, 'r> {
             Subject::Batch(k) => {
                 let b = self.p.batches.get_mut(k).unwrap();
                 b.crossings.push(c.clone());
+                let home = b.station.clone();
                 for m in b.members.clone() { if let Some(t) = self.p.tokens.get_mut(&m.token) { t.crossings.push(c.clone()); } }
+                let frees = self.graph.node(&home).and_then(|n| n.def.form.as_ref()).is_some_and(|f| f.free_on_crossing);
+                if frees && self.graph.repeat(boundary) == Some(super::adapter::Repeat::Once) { self.free_place(k, &home); }
             }
         }
     }

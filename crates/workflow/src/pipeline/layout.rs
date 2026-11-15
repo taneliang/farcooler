@@ -73,13 +73,18 @@ impl Policy {
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Skipper { #[default] Orchestrator, Person }
-/// How a batch station forms batches from its queue. A window forms when `now_ms` enters a new window.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// How a batch station forms batches from its queue. A window forms when `now_ms` enters a new window; with
+/// no window a batch forms whenever the station has room, from what is queued, up to `size`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Form {
     #[serde(default)]
     pub size: Option<u16>,
     #[serde(default)]
     pub window: Option<Window>,
+    /// A batch gives up its place at the batch station once it crosses a `repeat: once` boundary, so the next
+    /// batch forms while it finishes the stations after the crossing (it can never go back before them).
+    #[serde(default)]
+    pub free_on_crossing: bool,
 }
 /// Windows of `every_ms`, each starting `at_ms` past a multiple of it (a weekly Friday 09:00 window is
 /// `every_ms` one week and `at_ms` the offset of Friday 09:00 from the epoch's week start).
