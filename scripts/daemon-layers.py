@@ -124,6 +124,9 @@ _MOD_OPEN = re.compile(r"\bmod\s+([A-Za-z_]\w*)\s*\{")
 _MOD_DECL = re.compile(
     r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+([A-Za-z_]\w*)\s*;")
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_AS = re.compile(r"as\s+([A-Za-z_][A-Za-z0-9_]*)")
+_USE = re.compile(r"(?<![\w.$])use\s+")
+_EXTERN_SELF = re.compile(r"\bextern\s+crate\s+self\s+as\s+([A-Za-z_]\w*)")
 DELIVERY_PREFIXES = ("answer_wake", "task_notice")
 
 
@@ -160,13 +163,17 @@ def skip_ws(text, i):
     return i
 
 
-def parse_tree(text, i, prefix, out):
-    """Read a use-tree or path from text[i], adding each leaf path (a list of segments) to out."""
+def parse_tree(text, i, prefix, out, aliases=None):
+    """Read a use-tree or path from text[i], adding each leaf path (a list of segments) to out.
+
+    A leaf renamed with `as` is also added to aliases (when given) as (name, path), and the rename
+    is read past so a group's later leaves are still found.
+    """
     i = skip_ws(text, i)
     if i < len(text) and text[i] == "{":
         i += 1
         while i < len(text):
-            i = parse_tree(text, i, prefix, out)
+            i = parse_tree(text, i, prefix, out, aliases)
             i = skip_ws(text, i)
             if i < len(text) and text[i] == ",":
                 i += 1
@@ -182,17 +189,25 @@ def parse_tree(text, i, prefix, out):
     path = prefix + [m.group()]
     j = skip_ws(text, m.end())
     if text.startswith("::", j):
-        return parse_tree(text, j + 2, path, out)
-    out.append(path[:-1] if m.group() == "self" and prefix else path)
+        return parse_tree(text, j + 2, path, out, aliases)
+    leaf = path[:-1] if m.group() == "self" and prefix else path
+    out.append(leaf)
+    am = _AS.match(text, j)
+    if am:
+        if aliases is not None and am.group(1) != "_":
+            aliases.append((am.group(1), leaf))
+        return am.end()
     return m.end()
 
 
-def resolve(leaf, here):
+def resolve(leaf, here, alias=None):
     """A leaf path as the list of segments from the crate root, or None when it leaves the crate.
 
     `here` is the module the path is written in: crate::a::b is a::b, `super::x` one up from here,
     `self::x` here.
     """
+    if alias and leaf[0] in alias:
+        return list(alias[leaf[0]]) + leaf[1:]
     if leaf[0] == "crate":
         return leaf[1:]
     if leaf[0] == "self":
@@ -213,20 +228,52 @@ def references(text, module=()):
     """
     masked = mask(text)
     blocks = mod_blocks(masked)
+    alias = aliases_of(masked, blocks, module)
+    start = _START
+    if alias:
+        names = "|".join(sorted(map(re.escape, alias)))
+        start = re.compile(r"(?<![\w.$])(?<!::)(?:crate|self|super|" + names + r")::")
     found, pos = set(), 0
     while True:
-        m = _START.search(masked, pos)
+        m = start.search(masked, pos)
         if not m:
             break
         leaves = []
         end = parse_tree(masked, m.start(), [], leaves)
         here = list(module) + chain_at(blocks, m.start())
         for leaf in leaves:
-            full = resolve(leaf, here)
+            full = resolve(leaf, here, alias)
             if full:
                 found.add(tuple(full))
         pos = max(end, m.end())
     return found
+
+
+def aliases_of(masked, blocks, module):
+    """Names the file gives to a path inside the crate: `use crate as root`, `use crate::{self as root}`,
+    `use crate::watch as w`, `extern crate self as root`; each as the segments it stands for.
+
+    An alias is read for the whole file, however deep it was declared, which can only over-report.
+    """
+    pending, alias = [], {}
+    for m in _EXTERN_SELF.finditer(masked):
+        alias[m.group(1)] = ()
+    for m in _USE.finditer(masked):
+        found, leaves = [], []
+        parse_tree(masked, m.end(), [], leaves, found)
+        here = list(module) + chain_at(blocks, m.start())
+        pending += [(name, leaf, here) for name, leaf in found]
+    progress = True
+    while progress:
+        progress = False
+        for name, leaf, here in pending:
+            if name in alias or not (leaf[0] in ("crate", "self", "super") or leaf[0] in alias):
+                continue
+            full = resolve(leaf, here, alias)
+            if full is not None:
+                alias[name] = tuple(full)
+                progress = True
+    return alias
 
 
 def module_paths(src, texts):
@@ -456,6 +503,27 @@ def self_test():
     expect("a group naming watch and delivery is split by owner",
            {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch::{answer_wake, holds};"}, "", 2,
            ["-> watch/answer_wake", "engine.rs -> watch  "])
+    expect("a crate-root alias reaches the composition layer",
+           {"engine.rs": "use crate as root; use root::rpc::Call;"}, "", 1, ["engine.rs -> rpc"])
+    expect("a grouped crate-root alias is read",
+           {"engine.rs": "use crate::{self as root, git}; fn f() { root::rpc::go(); }"}, "", 1, ["engine.rs -> rpc"])
+    expect("a braced crate-root alias is read", {"engine.rs": "use {crate as r}; use r::{git, tasks};"}, "", 1,
+           ["engine.rs -> tasks"])
+    expect("extern crate self as an alias is read", {"engine.rs": "extern crate self as me; use me::rpc::X;"}, "", 1,
+           ["engine.rs -> rpc"])
+    expect("an alias of an alias is followed", {"engine.rs": "use crate as a; use a as b; use b::rpc::X;"}, "", 1,
+           ["engine.rs -> rpc"])
+    expect("an allowed import through a crate-root alias passes",
+           {"engine.rs": "use crate as root; use root::git::Repo;"}, "", 0)
+    expect("an alias of a module is followed", {"engine.rs": "use crate::tasks as t; fn f() { t::all(); }"}, "", 1,
+           ["engine.rs -> tasks"])
+    expect("an alias that leaves the crate is not a reference",
+           {"engine.rs": "use std::fmt as root; use root::rpc::X;"}, "", 0)
+    expect("an alias into delivery is split by owner",
+           {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch as w; use w::answer_wake::A;"}, "", 2,
+           ["engine.rs -> watch/answer_wake"])
+    expect("a rename inside a group does not hide later leaves",
+           {"engine.rs": "use crate::{git as g, rpc};"}, "", 1, ["engine.rs -> rpc"])
     expect("the composition layer may use anything", {"rpc.rs": "use crate::tasks::T; use crate::git::G;"}, "", 0)
     listed = "crates/daemon/src/engine.rs -> tasks\n"
     expect("a listed violation passes", {"engine.rs": "use crate::tasks::Row;"}, listed, 0)

@@ -35,7 +35,10 @@ later slices) know their work. The check is `scripts/daemon-layers.py`.
   `super::x` and `self::x` are read against where the file sits in the module tree
   (read from `mod x;` and `#[path]` declarations, and from any inline `mod x { }`
   the path is inside), so `use super::rpc::X` in a top-level `engine.rs` is an edge
-  to `rpc`, while the same line in `engine/deep.rs` stays inside `engine`. A file's
+  to `rpc`, while the same line in `engine/deep.rs` stays inside `engine`. A rename is
+  followed: after `use crate as root;`, `use crate::{self as root}` or
+  `extern crate self as root;`, `root::rpc::X` is an edge to `rpc`, and
+  `use crate::watch as w;` makes `w::answer_wake::X` an edge to delivery. A file's
   layer is that of the module it sits under, so a `#[path]` test hung beneath
   another module is that module's. A path into `watch::answer_wake*` or
   `watch::task_notice*` is an edge to delivery, written `watch/answer_wake` or
