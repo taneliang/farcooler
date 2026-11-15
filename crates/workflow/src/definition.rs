@@ -49,6 +49,9 @@ pub enum StageKind {
     PrReady,
     /// Wait for the pull request to be merged. The merge commit becomes the item's candidate.
     AwaitPr,
+    /// Group steps (ov-1269). Put the folded candidate on the group's own branch of the landing remote, so CI runs
+    /// on it while the gate does. A CI wait after it judges that exact commit before the push moves the target.
+    PushCandidate,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationSpec {
@@ -186,7 +189,7 @@ impl Definition {
             { return Err(Refusal::Definition); }
             // Landing verbs are routed (schema 2); the ones that act on a group's members are for groups.
             if !routed && is_verb(&stage.kind) { return Err(Refusal::Definition); }
-            if !in_group && matches!(stage.kind, StageKind::Fold | StageKind::AwaitBase | StageKind::Push) {
+            if !in_group && matches!(stage.kind, StageKind::Fold | StageKind::AwaitBase | StageKind::Push | StageKind::PushCandidate) {
                 return Err(Refusal::Definition);
             }
             // A route reads a ticket's own change, which a group has no single answer for.
@@ -375,6 +378,34 @@ impl Definition {
         for (p, stage) in self.stages.iter().enumerate() {
             if matches!(stage.kind, StageKind::Push) && !judged[p] { return Err(Refusal::Definition); }
         }
+        // A group that puts its candidate on a branch for CI (ov-1269) pushes only what that CI passed: every path into
+        // a push crosses a CI wait that passed after the branch push, with no new candidate made since. A CI wait
+        // before any push has nothing else to look at, so it needs the branch push behind it.
+        if in_group {
+            let walk = |gives: &dyn Fn(usize, &str, &[bool]) -> Option<bool>| -> Vec<bool> {
+                let mut holds = vec![true; n];
+                holds[0] = false;
+                loop {
+                    let mut changed = false;
+                    for &(from, label, to) in &edges {
+                        let Some(to) = to else { continue };
+                        let out = gives(from, label, &holds).unwrap_or_else(|| !makes_candidate(&self.stages[from].kind) && holds[from]);
+                        if holds[to] && !out { holds[to] = false; changed = true; }
+                    }
+                    if !changed { return holds; }
+                }
+            };
+            let branched = walk(&|from, label, _| (self.stages[from].kind == StageKind::PushCandidate).then_some(label == "passed"));
+            let green = walk(&|from, label, _| (self.stages[from].kind == StageKind::AwaitCi).then(|| label == "passed" && branched[from]));
+            let branches = self.stages.iter().any(|s| s.kind == StageKind::PushCandidate);
+            for (p, stage) in self.stages.iter().enumerate() {
+                let pushed_before = self.stages[..p].iter().any(|s| s.kind == StageKind::Push);
+                if (branches && stage.kind == StageKind::Push && !green[p])
+                    || (stage.kind == StageKind::AwaitCi && !pushed_before && !branched[p]) {
+                    return Err(Refusal::Definition);
+                }
+            }
+        }
         // A pull request needs its branch pushed, and waiting on one or readying it needs it opened.
         for (p, stage) in self.stages.iter().enumerate() {
             let needs = match stage.kind {
@@ -496,7 +527,8 @@ pub fn emits_unrouted(kind: &StageKind, label: &str) -> bool {
 }
 /// The landing verbs: all of them need routes, so they are for schema 2.
 fn is_verb(kind: &StageKind) -> bool {
-    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route) || is_pr_verb(kind)
+    matches!(kind, StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route
+        | StageKind::PushCandidate) || is_pr_verb(kind)
 }
 /// The waits: a restart only makes them look again, and they keep their first deadline.
 pub fn is_wait(kind: &StageKind) -> bool { matches!(kind, StageKind::AwaitBase | StageKind::AwaitCi | StageKind::AwaitPr) }
@@ -511,7 +543,7 @@ fn needs_candidate(kind: &StageKind) -> bool {
     matches!(kind, StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci
         | StageKind::Tracker | StageKind::Evaluate(_) | StageKind::Join { .. }
         | StageKind::Fold | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route
-        | StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr)
+        | StageKind::PushBranch | StageKind::OpenPr | StageKind::PrReady | StageKind::AwaitPr | StageKind::PushCandidate)
 }
 /// What a step's result becomes the item's candidate. Waiting for the base takes the base as the
 /// candidate, which the fold then builds on and replaces.

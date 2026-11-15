@@ -145,9 +145,11 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
     let (every, base_wait, ci_wait) = (plan.every_ms, plan.base_patience_ms, plan.ci_patience_ms);
     let mode = if plan.green_base { "green" } else { "any" };
     let mut groups = BTreeMap::new();
-    let folds = |m: &Maker| -> Vec<Stage> {
+    // `candidate`: put the folded commit on the group's branch first, so CI runs on it while the gates do (ov-1269).
+    let folds = |m: &Maker, candidate: bool| -> Vec<Stage> {
         let mut steps = vec![routed(m.wait("base", StageKind::AwaitBase, "coding-await-base/v1", mode, every, base_wait), "timeout", Target::Fail, 0),
             ending(m.stage("fold", StageKind::Fold, "coding-fold/v1", ""), "conflict", split("base"))];
+        if candidate { steps.push(m.stage("candidate", StageKind::PushCandidate, "coding-push-candidate/v1", "")); }
         for (n, i) in commands.iter().enumerate() {
             steps.push(ending(m.stage(&format!("gate-{n}"), StageKind::Run, "coding-gate/v1", &i.to_string()), "rejected", split("base")));
         }
@@ -158,11 +160,13 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
             let mut join = m.stage("join", StageKind::Join { group: "landing".into(), adopt: true }, "coding-join/v1", "landing");
             join.max_attempts = 1;
             stages.push(routed(join, "rejected", step("build"), 1));
-            let mut steps = folds(&m);
-            steps.push(routed(m.stage("push", StageKind::Push, "coding-push/v1", &pins.landing_target()), "base_moved", step("base"), 2));
+            // With CI, the group's candidate gets it while the gates run, and the push moves the target only to a
+            // commit CI passed: the run on the candidate's branch is the target's, the same commit (ov-1269).
+            let mut steps = folds(&m, plan.ci);
             if plan.ci {
                 steps.push(m.wait("ci", StageKind::AwaitCi, "coding-await-ci/v1", &pins.ci_subject(), every, ci_wait));
             }
+            steps.push(routed(m.stage("push", StageKind::Push, "coding-push/v1", &pins.landing_target()), "base_moved", step("base"), 2));
             groups.insert("landing".to_string(), GroupDef { limit: batch, exclusive: pins.landing_resource(), steps });
         }
         Template::TicketPr => {
@@ -183,7 +187,7 @@ pub fn build(plan: &Plan, pins: &dyn Pins) -> Result<Definition, Refusal> {
             stages.push(m.stage("ready", StageKind::PrReady, "coding-pr-ready/v1", ""));
             stages.push(ending(routed(m.wait("merged", StageKind::AwaitPr, "coding-await-pr/v1", "", every, 14 * 24 * 3_600_000),
                 "changes_requested", step("build"), 2), "closed", Target::Fail));
-            groups.insert("rehearsal".to_string(), GroupDef { limit: batch, exclusive: pins.landing_resource(), steps: folds(&m) });
+            groups.insert("rehearsal".to_string(), GroupDef { limit: batch, exclusive: pins.landing_resource(), steps: folds(&m, false) });
         }
     }
     let definition = Definition { schema: 2, source: plan.source.clone(), stages, max_reworks: 0, rework_target: None, groups, models: BTreeMap::new(), send_backs: None, build_folders: None, script_policies: Default::default(), start_policy: None, limits: None, policies: Default::default() };

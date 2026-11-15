@@ -54,11 +54,13 @@ fn an_uncapped_batch_holds_every_ticket_ready_and_its_splits_take_no_limit() {
     assert_eq!(limits, vec![("fold", 0), ("gate-0", 0)]);
 }
 #[test]
-fn a_push_template_lands_through_base_fold_gate_push_ci() {
+fn a_push_template_lands_through_base_fold_candidate_gate_ci_push() {
     let d = make(&plan(Template::BatchedPush));
     assert_eq!(ids(&d), ["provision", "build", "join"]);
     let g = &d.groups["landing"];
-    assert_eq!(kinds(&g.steps), [&StageKind::AwaitBase, &StageKind::Fold, &StageKind::Run, &StageKind::Push, &StageKind::AwaitCi]);
+    // ov-1269: CI runs on the candidate's branch while the gate runs, and the push waits for it.
+    assert_eq!(kinds(&g.steps), [&StageKind::AwaitBase, &StageKind::Fold, &StageKind::PushCandidate, &StageKind::Run,
+        &StageKind::AwaitCi, &StageKind::Push]);
     assert_eq!(g.exclusive, "ref:origin:main");
     let mut p = plan(Template::BatchedPush); p.ci = false; p.green_base = false;
     let d = make(&p);
@@ -177,7 +179,7 @@ fn a_batched_push_walks_from_a_ticket_to_a_landed_group_and_every_ticket_is_done
     w.finish();
     assert!(done(&w, "one"));
     let group = w.visited.iter().find(|(i, _)| i != "one").map(|(i, _)| i.clone()).expect("a group item ran");
-    assert_eq!(passed_through(&w, &group), ["base", "fold", "gate-0", "push", "ci"]);
+    assert_eq!(passed_through(&w, &group), ["base", "fold", "candidate", "gate-0", "ci", "push"]);
     assert_eq!(passed_through(&w, "one"), ["provision", "build"]);
 }
 #[test]
@@ -298,4 +300,72 @@ fn a_route_step_is_refused_in_a_group_and_in_an_unrouted_definition() {
     let route = d.stages.remove(2);
     d.groups.get_mut("landing").unwrap().steps.insert(0, route);
     assert!(d.validate().is_err());
+}
+
+/// Walk one ticket's group up to its CI wait on the candidate's branch (ov-1269).
+fn at_candidate_ci() -> (Walk, String) {
+    let mut w = Walk::new();
+    w.enqueue("one", make(&plan(Template::BatchedPush)));
+    loop {
+        let group = w.state.items.keys().find(|i| *i != "one").cloned();
+        if let Some(group) = group.filter(|g| w.at(g) == "ci") { return (w, group); }
+        assert!(w.tick(), "the group never reached its CI wait");
+    }
+}
+fn ci(w: &mut Walk, group: &str, label: &str, failure: Option<GroupFailure>) {
+    w.outcome(group, |evidence| Outcome::CiResult { label: label.into(), evidence, run: None, failure: failure.clone() });
+}
+#[test]
+fn a_green_candidate_ci_lets_the_push_move_the_target_to_that_commit() {
+    let (mut w, group) = at_candidate_ci();
+    let candidate = w.state.items[&group].candidate.clone();
+    assert_eq!(w.state.items[&group].pushed, None, "nothing has moved the target yet");
+    ci(&mut w, &group, "passed", None);
+    assert_eq!(w.at(&group), "push");
+    w.pass(&group);
+    let landed = w.state.items.get(&group).and_then(|g| g.pushed.clone())
+        .or_else(|| w.state.archive.get(&group).and_then(|a| a.group.as_ref()).and_then(|g| g.pushed.clone()));
+    assert_eq!(landed, candidate, "the target moves to the commit CI passed, and no second CI wait follows");
+    assert!(done(&w, "one"));
+}
+#[test]
+fn a_red_candidate_ci_fails_the_group_naming_the_job_and_never_pushes() {
+    let (mut w, group) = at_candidate_ci();
+    let failure = GroupFailure { job: "Rust tests (Linux, shard 2)".into(), first_line: "assertion failed".into(), split: false };
+    ci(&mut w, &group, "rejected", Some(failure.clone()));
+    let g = &w.state.items[&group];
+    assert_eq!(g.phase, Phase::Failed);
+    assert_eq!(g.pushed, None, "main is untouched");
+    assert_eq!(g.group_failure.as_ref().map(|f| f.job.as_str()), Some("Rust tests (Linux, shard 2)"));
+    assert!(!w.visited.iter().any(|(i, s)| i == &group && s == "push"));
+    // The ticket hears `rejected`, not `landed`, and goes back to its build.
+    assert_eq!(w.at("one"), "build");
+}
+#[test]
+fn a_cancelled_candidate_ci_fails_the_group_and_never_pushes() {
+    let (mut w, group) = at_candidate_ci();
+    ci(&mut w, &group, "cancelled", None);
+    let g = &w.state.items[&group];
+    assert_eq!((&g.phase, &g.pushed), (&Phase::Failed, &None));
+    assert_eq!(w.at("one"), "build");
+}
+#[test]
+fn a_group_that_branches_its_candidate_pushes_only_what_ci_passed() {
+    let d = make(&plan(Template::BatchedPush));
+    let group = |edit: &dyn Fn(&mut Vec<Stage>)| {
+        let mut d = d.clone();
+        edit(&mut d.groups.get_mut("landing").unwrap().steps);
+        d.validate()
+    };
+    assert_eq!(group(&|_| {}), Ok(()));
+    // The push before the CI wait: the target would move to a commit CI hasn't passed.
+    assert_eq!(group(&|s| { let push = s.pop().unwrap(); s.insert(4, push); }), Err(Refusal::Definition));
+    // No CI wait at all after the branch push.
+    assert_eq!(group(&|s| { s.remove(4); }), Err(Refusal::Definition));
+    // A CI wait before any push, with no branch push to look at.
+    assert_eq!(group(&|s| { s.remove(2); }), Err(Refusal::Definition));
+    // A ticket's own steps never branch a candidate: that is the group's.
+    let mut ticket = d.clone();
+    ticket.stages.insert(2, d.groups["landing"].steps[2].clone());
+    assert_eq!(ticket.validate(), Err(Refusal::Definition));
 }

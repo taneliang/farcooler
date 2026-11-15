@@ -357,7 +357,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             // Landing infrastructure gets two retries, independent of code-rejection routes.
                             let stage = &item.definition.stages[item.stage];
                             let attempts = if item.group_of.is_some() && matches!(stage.kind,
-                                StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::AwaitCi) {
+                                StageKind::AwaitBase | StageKind::Fold | StageKind::Run | StageKind::AwaitCi | StageKind::PushCandidate) {
                                 3
                             } else { stage.max_attempts };
                             if item.attempt >= attempts {
@@ -907,7 +907,7 @@ fn evidence_matches(item: &Item, e: &Evidence) -> Result<(), Refusal> {
     { return Err(Refusal::Evidence); }
     if matches!(item.definition.stages[item.stage].kind,
         StageKind::Check | StageKind::Review(_) | StageKind::Land | StageKind::Ci | StageKind::Tracker | StageKind::Evaluate(_)
-        | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route)
+        | StageKind::Run | StageKind::Push | StageKind::AwaitCi | StageKind::Route | StageKind::PushCandidate)
         && item.candidate.as_ref() != Some(&e.candidate)
     { return Err(Refusal::Evidence); }
     Ok(())
