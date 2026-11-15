@@ -78,7 +78,12 @@ pub fn answer() -> i32 {
             run(["ar", "rcs", "libtailcat.a", "fixture.o"], cwd=archive_dir)
 
         archive(41)
-        env = dict(os.environ, FARCOOLER_BUNDLE_TAILCAT_DIR=str(archive_dir))
+        # The fixture pins its own release profile and the assertions below read
+        # it back; the PR path's CARGO_PROFILE_RELEASE_* overrides (ov-1270) must
+        # not leak in and change what is being tested.
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith("CARGO_PROFILE_RELEASE_")}
+        env["FARCOOLER_BUNDLE_TAILCAT_DIR"] = str(archive_dir)
         # CI forces ANSI color; compiler-command assertions need plain output.
         command = ["cargo", "build", "--color", "never", "--offline", "--message-format=json", "--release", "-p", "farcooler-cli",
                    "-p", "farcooler-daemon", "--bins", "--features",
