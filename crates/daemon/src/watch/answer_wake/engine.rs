@@ -17,8 +17,23 @@ struct QueuedContext {
 }
 static CONTEXT: std::sync::Mutex<Vec<QueuedContext>> = std::sync::Mutex::new(Vec::new());
 
-pub(crate) fn forget_context(terminal: uuid::Uuid) {
+/// Each run's bracketed-paste follower, by its terminal id: pane ids are per tmux server, and every run has its own.
+static BRACKETING: std::sync::Mutex<Vec<(uuid::Uuid, std::sync::Arc<crate::paste_mode::Following>)>> = std::sync::Mutex::new(Vec::new());
+
+/// The run's terminal is no longer listed: drop its queued context and its bracketed-paste follower.
+pub(crate) fn forget_run(terminal: uuid::Uuid) {
     CONTEXT.lock().unwrap().retain(|q| q.terminal != terminal);
+    BRACKETING.lock().unwrap().retain(|(id, _)| *id != terminal);
+}
+
+/// On a tmux older than 3.7, which renders `bracket_paste_flag` as nothing (Ubuntu 24.04's 3.4), follow the run's
+/// pane output so the pump can learn whether its agent asked for bracketed paste (`paste_mode`, ov-1263). The engine
+/// calls this before it lets the agent start, so the agent's first DECSET 2004 is seen. A tmux that reports the flag
+/// is asked once and nothing is followed. A subscription that fails leaves the mode unknown, which is never typed into.
+pub(crate) async fn follow_bracketing(terminal: uuid::Uuid, runtime: crate::runtime::Runtime, pane: String) {
+    let modes = std::sync::Arc::new(crate::paste_mode::Following::new());
+    BRACKETING.lock().unwrap().push((terminal, modes.clone()));
+    modes.follow(runtime, pane).await;
 }
 
 /// Called only after the native host validates the hook's agent, tree and session. Unclaimed
@@ -126,7 +141,7 @@ impl Watcher {
         // Other agents wait for an empty box between turns. Never paste into a shell, dialog or draft.
         if !between(preset, pid).await || rules.classify(preset, &screen) != AgentActivity::Idle
             || composer::read(preset, &screen) != composer::Composer::Empty
-            || runtime.tmux.pane_bracketed_paste(&pane.pane_id).await.ok() != Some(Some(true)) {
+            || bracketed(&runtime, &pane).await != Some(true) {
             return waiting();
         }
         match self.service.store.claim_wake(wake) {
@@ -156,6 +171,26 @@ impl Watcher {
         }
         Some(self.settle(wake, Some(task), Some("Paste left in the engine agent's composer; not sent".into())))
     }
+}
+
+/// Whether the engine pane's program asked for bracketed paste: tmux's own flag, or, on a tmux older than 3.7 which
+/// renders that flag as nothing (Ubuntu 24.04's 3.4), what following the pane's output has seen (ov-1263).
+async fn bracketed(runtime: &crate::runtime::Runtime, pane: &farcooler_core::inventory::TaggedPane) -> Option<bool> {
+    #[cfg(test)]
+    let tmux_may_say = !crate::paste_mode::forced_old_tmux();
+    #[cfg(not(test))]
+    let tmux_may_say = true;
+    if tmux_may_say {
+        match runtime.tmux.pane_bracketed_paste(&pane.pane_id).await {
+            Ok(Some(on)) => return Some(on),
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+    }
+    let modes = BRACKETING.lock().unwrap().iter().find(|(id, _)| *id == pane.terminal_id).map(|(_, m)| m.clone())?;
+    let record = modes.record(&pane.pane_id)?;
+    let pid = runtime.tmux.pane_pid(&pane.pane_id).await.ok()?;
+    record.bracketed(pid)
 }
 
 // Claude's spinner can disappear before its turn does. Its live session registry wins over the screen.
@@ -232,6 +267,24 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         panic!("scratch agent never drew its box");
+    }
+
+    /// What the engine does before it lets its agent start: follow the pane for bracketed paste, which a tmux older
+    /// than 3.7 can't report (ov-1263). The scratch agent is already running, so it then sets bracketing again, as
+    /// `settle_stand_in` has a stand-in do, and the follower sees it.
+    async fn bracketing_followed(dir: &std::path::Path, workspace: &str, item: &str) {
+        let (runtime, pane) = crate::watch_view::lookup(workspace, item).unwrap();
+        follow_bracketing(pane.terminal_id, runtime, pane.pane_id).await;
+        for mode in ["working", "idle"] {
+            let shown = || std::fs::read_to_string(dir.join("log")).unwrap_or_default().matches(&format!("MODE {mode}\n")).count();
+            let before = shown();
+            std::fs::write(dir.join("control"), mode).unwrap();
+            for _ in 0..300 {
+                if shown() > before { break; }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert!(shown() > before, "scratch agent never redrew as {mode}");
+        }
     }
 
     async fn send(watcher: &Watcher, task: &Task, text: &str) -> pb::MessageSent {
@@ -364,6 +417,7 @@ mod tests {
             let (server, pane) = scratch(dir.path(), "claude").await;
             assert!(svc.store.get_terminal(pane.terminal_id).is_err(), "engine PTY isn't a legacy terminal");
             let listed = crate::watch_view::publish_effect(&ws.to_string(), &effect, server.0.clone(), pane.clone());
+            bracketing_followed(dir.path(), &ws.to_string(), &effect.item).await;
             for key in std::iter::once(&effect.item).chain(&effect.with) {
                 assert_eq!(crate::watch_view::lookup(&ws.to_string(), key).unwrap().1.terminal_id, pane.terminal_id);
             }
@@ -445,6 +499,7 @@ mod tests {
             let watcher = Watcher::new(svc.clone());
             let (server, pane) = scratch(dir.path(), "claude").await;
             let _listed = crate::watch_view::publish(&ws.to_string(), &task.key, server.0.clone(), pane);
+            bracketing_followed(dir.path(), &ws.to_string(), &task.key).await;
             std::fs::write(dir.path().join("control"), mode).unwrap();
             for _ in 0..300 {
                 if std::fs::read_to_string(dir.path().join("log")).unwrap().contains(&format!("MODE {mode}")) { break; }

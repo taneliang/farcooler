@@ -448,6 +448,8 @@ impl Exec {
         // Every ticket this run owns can watch and message it (ov-1171). Declared after `host`, so
         // all tickets are unlisted before the server is reaped, on success, failure or cancellation.
         let _watchable = crate::watch_view::publish_effect(&binding.workspace, &binding.effect, tmux.clone(), pane.clone());
+        // Before the barrier, so a tmux older than 3.7 still learns the agent's first bracketed-paste request (ov-1263).
+        crate::watch::answer_wake::engine::follow_bracketing(id, runtime.clone(), owner.pane.clone()).await;
         tmux.send_keys(&window.pane_id, "\n").await.map_err(|_| Error::Refused("native launch delivery uncertain"))?;
         // A build stopped on a question, or never heard from, is told in Needs You (ov-1077).
         let heard_from = std::sync::atomic::AtomicBool::new(false);

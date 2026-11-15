@@ -62,6 +62,9 @@ impl Exec {
             return Ok(skip("worktree provision/claim fence is unavailable"));
         } else { None };
         if effect.uncertain { return Ok(skip("run is Uncertain")); }
+        // An adopted worktree is a person's (ov-968): its build folders may hold their own output, which the run
+        // neither made nor may delete (ov-1263).
+        if effect.tree.as_ref().is_some_and(|t| t.adopted) { return Ok(skip("worktree is adopted; its output is a person's")); }
         if let Some(why) = self.store.workflow_cleanup_skip(effect)? { return Ok(skip(&why)); }
         let tree = effect.tree.as_ref().map_or_else(|| self.item_tree(&effect.workspace, &effect.item), |t| PathBuf::from(&t.path));
         if !tree.try_exists()? { return Ok(skip("worktree is absent")); }

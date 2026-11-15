@@ -175,7 +175,9 @@ async fn adopted() -> (tempfile::TempDir, Runtime, PathBuf, String) {
     let workspace = runtime.store.create_workspace(repository.id, "Adopted", "ad").unwrap().id.to_string();
     runtime.host = Some(WorktreeHost { dir: dir.path().join("trees"), install_id: "test".into(), locks: Default::default() });
     ignore_target(&runtime);
-    let tree = dir.path().join("adopted");
+    // Canonical, as a person's worktree path is: on macOS the temp dir sits behind the /var -> /private/var link, and
+    // the build cleanup skips a non-canonical tree, so without this the test passed there and failed on Linux (ov-1263).
+    let tree = dir.path().canonicalize().unwrap().join("adopted");
     adapters::git(&runtime.repository(), &["worktree", "add", "-b", "adopted", tree.to_str().unwrap(), "HEAD"]).await.unwrap();
     let receipt = runtime.apply(Request { id: "track".into(), workspace: workspace.clone(), expected_revision: 0, sequence: 1,
         command: Command::Enqueue { item: "one".into(), definition: Definition::ticket(), policy_pin: "p".into(),

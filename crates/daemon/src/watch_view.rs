@@ -40,7 +40,7 @@ impl Drop for Listed {
         if let Ok(mut live) = LIVE.lock() {
             if let Some((_, pane)) = live.remove(&self.0)
                 && !live.values().any(|(_, p)| p.terminal_id == pane.terminal_id) {
-                crate::watch::answer_wake::engine::forget_context(pane.terminal_id);
+                crate::watch::answer_wake::engine::forget_run(pane.terminal_id);
             }
         }
     }
