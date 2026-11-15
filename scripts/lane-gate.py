@@ -553,6 +553,20 @@ def node_check(path, major, arch, timeout=1):
         return False
 
 
+def java_check(home, minimum, timeout=1):
+    """Verify the executable works and agrees with its JDK release metadata."""
+    major = jdk_major(home)
+    if major < minimum:
+        return False
+    try:
+        out = subprocess.run([str(pathlib.Path(home) / "bin/java"), "-version"],
+                             capture_output=True, text=True, timeout=timeout)
+        match = re.search(r'version "(?:1\.)?(\d+)', out.stderr + out.stdout)
+        return out.returncode == 0 and bool(match) and int(match.group(1)) == major
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def toolchain_preflight(chosen, repo, env, system=None, machine=None, node_candidates=None, jdk_homes=None):
     """Resolve only tools used by selected jobs, before any job starts."""
     system = system or sys.platform
@@ -585,14 +599,28 @@ def toolchain_preflight(chosen, repo, env, system=None, machine=None, node_candi
         if not current:
             java = shutil.which("java", path=env.get("PATH", ""))
             current = str(pathlib.Path(java).resolve().parent.parent) if java else ""
-        jdk = current if current and jdk_major(current) >= 17 and (pathlib.Path(current) / "bin/java").is_file() else ""
-        if not jdk and system == "darwin":
-            homes = jdk_candidates() if jdk_homes is None else jdk_homes
-            jdk = java_home(17, [h for h in homes if (pathlib.Path(h) / "bin/java").is_file()])
+        homes = [current] if current else []
+        homes += jdk_candidates() if jdk_homes is None else jdk_homes
+        homes = list(dict.fromkeys(homes))
+        # Bound all probes together, including broken executables and duplicate homes.
+        deadline = time.monotonic() + 2
+        valid = []
+        for home in homes:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if java_check(home, 17, min(0.5, remaining)):
+                valid.append(home)
+        jdk = current if current in valid else java_home(17, valid)
         if not jdk:
-            raise ValueError(f"JDK 17 or newer is required (JAVA_HOME/PATH: {current or 'missing'}); install JDK 17 and set JAVA_HOME to its home")
+            raise ValueError(f"A working JDK 17 or newer is required (JAVA_HOME/PATH: {current or 'missing'}); install JDK 17 and set JAVA_HOME to its home")
+        capture = java_home(21, valid)
+        if not capture:
+            raise ValueError("A working JDK 21 or newer is required for Android capture tests; install JDK 21 and set JAVA_HOME to its home")
         result["JAVA_HOME"] = jdk
+        result["CAPTURE_JDK"] = capture
         print(f"lane-gate: JDK {jdk_major(jdk)}: {jdk}", flush=True)
+        print(f"lane-gate: capture JDK {jdk_major(capture)}: {capture}", flush=True)
         sdk = env.get("ANDROID_HOME") or env.get("ANDROID_SDK_ROOT")
         if not sdk and system == "darwin":
             sdk = str(pathlib.Path.home() / "Library/Android/sdk")
@@ -866,6 +894,9 @@ def gate(args):
     if not args.dry_run:
         try:
             args.toolchain_env = toolchain_preflight(chosen, repo, os.environ)
+            if "CAPTURE_JDK" in args.toolchain_env:
+                ctx["steps.jdk21.outputs.path"] = args.toolchain_env["CAPTURE_JDK"]
+                plans["android"] = steps_for("android", workflows, ctx)
         except ValueError as e:
             shutil.rmtree(tmp, ignore_errors=True)
             print_summary([("lane-gate", "toolchain preflight", f"FAIL: {e}", "", "")],
@@ -1489,9 +1520,10 @@ def _self_test():
         # Reject each broken PATH tool first, then prove macOS fallback is used.
         bin11 = pathlib.Path(jdk11) / "bin"
         bin17 = pathlib.Path(jdk17) / "bin"
-        for directory in (bin11, bin17):
+        bin21 = pathlib.Path(jdk21) / "bin"
+        for directory, version in ((bin11, "11.0.12"), (bin17, "17.0.9"), (bin21, "21.0.1")):
             directory.mkdir()
-            (directory / "java").write_text("#!/bin/sh\n")
+            (directory / "java").write_text(f"#!/bin/sh\necho 'openjdk version \"{version}\"' >&2\n")
             (directory / "java").chmod(0o755)
         badbin, goodbin, sdk = t / "bad-node", t / "good-node", t / "sdk"
         for directory, arch in ((badbin, "x64"), (goodbin, "arm64")):
@@ -1514,18 +1546,39 @@ def _self_test():
         except ValueError as e:
             java_error = str(e)
         expect("JDK 11 fails first with a fix", "JDK 17" in java_error and "JAVA_HOME" in java_error, True)
-        selected = toolchain_preflight(["relay", "android"], ROOT, env, "darwin", "arm64", [str(goodbin / "node")], [jdk11, jdk17])
+        selected = toolchain_preflight(["relay", "android"], ROOT, env, "darwin", "arm64", [str(goodbin / "node")], [jdk11, jdk17, jdk21])
         expect("native node and JDK 17 replace broken PATH tools", (selected["PATH"].split(os.pathsep)[0], selected["JAVA_HOME"], selected["ANDROID_HOME"]), (str(goodbin), jdk17, str(sdk)))
         try:
-            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(t / "missing")}, "darwin", "arm64", [], [jdk17])
+            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(t / "missing")}, "darwin", "arm64", [], [jdk17, jdk21])
             sdk_error = ""
         except ValueError as e:
             sdk_error = str(e)
         expect("missing SDK fails with a fix", "ANDROID_HOME" in sdk_error, True)
+        broken = fake_jdk("broken", "17.0.9")
+        (pathlib.Path(broken) / "bin").mkdir()
+        broken_java = pathlib.Path(broken) / "bin/java"
+        broken_java.write_text("#!/bin/sh\necho 'Bad CPU type' >&2\nexit 126\n")
+        broken_java.chmod(0o755)
+        selected = toolchain_preflight(["android"], ROOT, {**env, "JAVA_HOME": broken}, "darwin", "arm64", [], [broken, jdk17, jdk21])
+        expect("unusable Java falls back to a working JDK", (selected["JAVA_HOME"], selected["CAPTURE_JDK"]), (jdk17, jdk21))
+        try:
+            toolchain_preflight(["android"], ROOT, {**env, "JAVA_HOME": jdk17}, "darwin", "arm64", [], [jdk17])
+            capture_error = ""
+        except ValueError as e:
+            capture_error = str(e)
+        expect("JDK 17 alone fails preflight with a capture install hint", "JDK 21" in capture_error and "install" in capture_error, True)
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"JAVA_HOME": jdk17, "ANDROID_HOME": str(sdk)}), \
+             mock.patch.object(sys.modules[__name__], "jdk_candidates", return_value=[jdk17]), \
+             mock.patch.object(sys.modules[__name__], "jobs_for", return_value={"android": []}), \
+             mock.patch.object(sys.modules[__name__], "run_jobs") as jobs, \
+             mock.patch.object(sys.modules[__name__], "print_summary"):
+            status = main(["--worktree", str(ROOT), "--base", "HEAD", "--only", "android"])
+            expect("JDK 17-only gate fails before jobs run", (status, jobs.called), (1, False))
         incomplete = t / "incomplete-sdk"
         incomplete.mkdir()
         try:
-            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(incomplete)}, "darwin", "arm64", [], [jdk17])
+            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(incomplete)}, "darwin", "arm64", [], [jdk17, jdk21])
             package_error = ""
         except ValueError as e:
             package_error = str(e)
