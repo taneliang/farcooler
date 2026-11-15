@@ -848,3 +848,45 @@ async fn orchestrator_can_manage_other_agent_panes() {
         }
     }
 }
+
+/// agent.stop must enforce the same seat rule as terminal.stop.
+#[tokio::test]
+async fn agent_stop_obeys_orchestrator_seat() {
+    for who in ["builder", "person", "orchestrator"] {
+        let r = runner().await;
+        let agent = r.svc.store.pane_agent(r.orchestrator.id).unwrap().unwrap();
+        let snapshot = r.svc.inventory.refresh().await;
+        let pane = if who == "builder" { r.agent.id } else { r.orchestrator.id };
+        let pid = snapshot.claimants(pane).into_iter().next().unwrap().stamp.pid as i32;
+        let caller = factory(&r.svc, None, Scope::Control)
+            .with_caller_pid(if who == "person" { None } else { Some(pid) });
+        let req = Request { method: "agent.stop".into(), payload: Some(request::Payload::AgentStop(pb::AgentStop {
+            agent_id: id_bytes(agent.id), actor: "manager".into(), reason: None,
+        })), ..Default::default() };
+        let result = refused(&caller, req).await;
+        if who == "builder" {
+            assert_eq!(result.as_deref(), Some("scope-denied:"));
+            assert!(r.svc.store.agent(agent.id).unwrap().ended_at.is_none());
+        } else {
+            assert_eq!(result, None, "{who}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn worktree_remove_refuses_an_adopted_orchestrator_from_a_builder() {
+    let r = runner().await;
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let wt = r.svc.create_worktree(repo, "wt-seat", "feature/seat", "main").await.unwrap();
+    let pane = r.svc.create_terminal(wt.id, "Adopted", "claude").await.unwrap();
+    r.svc.store.set_terminal_workspace(pane.id, r.workspace).unwrap();
+    // Free the workspace seat, then adopt a pane on the worktree.
+    r.svc.stop_terminal(r.orchestrator.id).await.unwrap();
+    r.svc.set_terminal_role(pane.id, farcooler_store::models::TerminalRole::Orchestrator).await.unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    let pid = snapshot.claimants(r.agent.id).into_iter().next().unwrap().stamp.pid as i32;
+    let caller = factory(&r.svc, None, Scope::Control).with_caller_pid(Some(pid));
+    let req = Request { method: "worktree.remove".into(), target_resource_id: Some(id_bytes(wt.id)), ..Default::default() };
+    assert_eq!(refused(&caller, req).await.as_deref(), Some("scope-denied:"));
+    assert!(r.svc.store.get_terminal(pane.id).is_ok());
+}

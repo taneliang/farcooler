@@ -69,6 +69,8 @@ pub(crate) async fn dispatch(
                 ..Default::default()
             };
             crate::people::gate(svc, peer, caller_pid, &as_stop)?;
+            let caller = crate::caller_seat::caller_seat(svc, caller_pid).await;
+            crate::caller_seat::authorize_terminal(svc, caller, terminal)?;
             let worktree = svc.store.get_terminal(terminal)?.worktree_id;
             svc.stop_terminal(terminal).await?;
             // Recorded once the pane is stopped, so a stop that failed

@@ -3555,7 +3555,7 @@ impl Service {
         }
         if let Some(ref live) = live {
             if replace {
-                crate::caller_seat::authorize_orchestrator(caller, live.id)?;
+                crate::caller_seat::authorize_terminal(self, caller, live.id)?;
             }
         }
         // Everything the new start needs that can fail is found before the

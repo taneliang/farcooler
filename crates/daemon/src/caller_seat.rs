@@ -84,6 +84,14 @@ pub(crate) fn authorize_orchestrator(caller: Seat, target: Uuid) -> farcooler_co
     }
 }
 
+/// Protect any orchestrator targeted by a pane lifecycle operation.
+pub(crate) fn authorize_terminal(svc: &crate::service::Service, caller: Seat, target: Uuid) -> farcooler_core::error::Result<()> {
+    if svc.store.get_terminal(target)?.role == farcooler_store::models::TerminalRole::Orchestrator {
+        authorize_orchestrator(caller, target)?;
+    }
+    Ok(())
+}
+
 /// One row of the process table: its parent and its terminal.
 #[derive(Debug, Clone)]
 pub struct Proc {
