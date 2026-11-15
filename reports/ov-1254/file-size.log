@@ -1,0 +1,4 @@
+Command: ['./scripts/file-size-budget.py']
+file-size-budget: ok, 2138 files, 27 grandfathered.
+
+Exit: 0; seconds: 0.338

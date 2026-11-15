@@ -1,0 +1,152 @@
+Command: ['./scripts/lane-gate.py', '--base', 'origin/main', '--only', 'wire,doc-comments']
+lane-gate: PARTIAL GATE: --only/--skip leaves out relay, site, tunnel, rust, swift-tests, swift, ios, android, web, which this diff reaches
+lane-gate: 243 changed file(s) against origin/main; jobs: wire, doc-comments
+  wire: Cargo.lock, crates/agent-hooks/src/wire.rs, crates/client/src/ffi.rs and 140 more
+  doc-comments: Cargo.lock, crates/agent-hooks/src/wire.rs, crates/client/src/ffi.rs and 140 more
+lane-gate: no builds selected
+
+[wire]
+  run  ./scripts/proto-lint.py --self-test
+  run  ./scripts/proto-lint.py --channel preview
+  run  ./scripts/proto-lint.py --channel stable
+  run  ./scripts/proto-lint.py --channel canary
+  run  ./scripts/canary-baseline-test.sh
+  run  ./scripts/canary-shipped.py --self-test
+  run  ./scripts/canary-plan.py --self-test
+  run  ./scripts/device-keys-readiness.py --self-test
+  run  ./scripts/site-proof.py --self-test
+  run  ./scripts/landing-timing.py --self-test
+  run  ./scripts/ci-changes.py --self-test
+  run  python3 ./scripts/ci-concurrency-test.py
+  run  python3 scripts/quarantine.py --lint
+  run  python3 scripts/rust-shadow-test.py
+  run  python3 scripts/rust-shards.py --self-test
+  run  python3 scripts/macos-rust-tests.py --self-test --check
+  FAILED, log /tmp/lane-gate-logs-6ucc5wlq/wire-15075066.log
+    macos-rust-tests.py requires Python 3.11 or later (stdlib tomllib)
+  run  python3 scripts/landing-gate-test.py
+  run  HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test
+  run  python3 scripts/gate-evidence-test.py
+  run  python3 scripts/engine-gate-test.py
+  run  HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test
+  run  ./scripts/notarytool-retry.sh --self-test
+  run  ./scripts/version-test.sh
+  run  ./scripts/workos-test.sh
+  run  ./scripts/appcast-test.sh
+  run  ./scripts/ci-flake-tally-test.sh
+  run  ./scripts/ios-ui-retry-test.sh
+  run  ./scripts/ios-ui-lease-test.sh
+  run  ./scripts/copy-lint.py --self-test
+  run  ./scripts/test-leak-check.py --lint
+  run  ./scripts/copy-lint.py
+  run  ./scripts/shared-core-lint.py --self-test
+  run  ./scripts/shared-core-lint.py
+  run  git fetch --no-tags origin main ...
+  run  ./scripts/capability-names.py --self-test ...
+  run  ./scripts/claude-prices.py --self-test
+  run  ./scripts/openai-prices.py --self-test
+  run  ./scripts/derp-hosts-check.py --self-test
+  run  ./scripts/file-size-budget.py --self-test ...
+  run  ./scripts/plan-layer-lint.py --self-test ...
+  run  ./scripts/page-layer-lint.py --self-test ...
+  run  ./scripts/swallow-lint.py --self-test
+  run  ./scripts/swallow-lint.py
+  run  ./scripts/visual-tokens-lint.py --self-test
+  run  ./scripts/visual-tokens-lint.py
+  run  ./scripts/pixel-scale-lint.py --self-test
+  run  ./scripts/pixel-scale-lint.py
+  run  ./scripts/test-window-lint.py --self-test
+  run  ./scripts/test-window-lint.py
+  run  ./scripts/runloop-spin-lint.py --self-test
+  run  ./scripts/runloop-spin-lint.py
+  run  ./scripts/capture-window-lint.py --self-test
+  run  ./scripts/capture-window-lint.py
+  run  ./scripts/fresh-script-lint.py --self-test
+  run  ./scripts/fresh-script-lint.py
+  run  ./scripts/charter-intercept-lint.py --self-test
+  run  ./scripts/charter-intercept-lint.py
+  run  ./scripts/ios-agentkit-subset-lint.py --self-test
+  run  ./scripts/ios-agentkit-subset-lint.py
+  run  ./scripts/migration-lint.py --self-test
+  run  ./scripts/migration-lint.py
+  run  if [ "$(typeshare --version 2>/dev/null)" != "typeshare 1.13.4" ]; then ...
+  run  ./scripts/gen-wire-types.sh ...
+
+[doc-comments]
+  run  ./scripts/doc-comment-check.py --self-test
+  run  ./scripts/doc-comment-check.py --base origin/main --head HEAD
+## lane-gate summary (PARTIAL)
+
+Branch HEAD 1b621f55e against origin/main; logs in /tmp/lane-gate-logs-6ucc5wlq
+
+| Job | Command | Result | Secs | Tests |
+| --- | --- | --- | --- | --- |
+| wire | ./scripts/proto-lint.py --self-test | pass | 1 |  |
+| wire | ./scripts/proto-lint.py --channel preview | pass | 0 |  |
+| wire | ./scripts/proto-lint.py --channel stable | pass | 0 |  |
+| wire | ./scripts/proto-lint.py --channel canary | pass | 0 |  |
+| wire | ./scripts/canary-baseline-test.sh | pass | 5 |  |
+| wire | ./scripts/canary-shipped.py --self-test | pass | 0 |  |
+| wire | ./scripts/canary-plan.py --self-test | pass | 1 |  |
+| wire | ./scripts/device-keys-readiness.py --self-test | pass | 0 |  |
+| wire | ./scripts/site-proof.py --self-test | pass | 0 |  |
+| wire | ./scripts/landing-timing.py --self-test | pass | 0 |  |
+| wire | ./scripts/ci-changes.py --self-test | pass | 1 |  |
+| wire | python3 ./scripts/ci-concurrency-test.py | pass | 1 |  |
+| wire | python3 scripts/quarantine.py --lint | pass | 0 |  |
+| wire | python3 scripts/rust-shadow-test.py | pass | 1 |  |
+| wire | python3 scripts/rust-shards.py --self-test | pass | 0 |  |
+| wire | python3 scripts/macos-rust-tests.py --self-test --check | FAIL (exit 1) | 0 |  |
+| wire | python3 scripts/landing-gate-test.py | pass | 1 |  |
+| wire | HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test | pass | 31 |  |
+| wire | python3 scripts/gate-evidence-test.py | pass | 33 |  |
+| wire | python3 scripts/engine-gate-test.py | pass | 27 |  |
+| wire | HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test | pass | 15 |  |
+| wire | ./scripts/notarytool-retry.sh --self-test | pass | 0 |  |
+| wire | ./scripts/version-test.sh | pass | 2 |  |
+| wire | ./scripts/workos-test.sh | pass | 0 |  |
+| wire | ./scripts/appcast-test.sh | pass | 0 |  |
+| wire | ./scripts/ci-flake-tally-test.sh | pass | 1 |  |
+| wire | ./scripts/ios-ui-retry-test.sh | pass | 76 |  |
+| wire | ./scripts/ios-ui-lease-test.sh | pass | 64 |  |
+| wire | ./scripts/copy-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/test-leak-check.py --lint | pass | 1 |  |
+| wire | ./scripts/copy-lint.py | pass | 1 |  |
+| wire | ./scripts/shared-core-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/shared-core-lint.py | pass | 1 |  |
+| wire | git fetch --no-tags origin main ... | pass | 3 |  |
+| wire | ./scripts/capability-names.py --self-test ... | pass | 0 |  |
+| wire | ./scripts/claude-prices.py --self-test | pass | 0 |  |
+| wire | ./scripts/openai-prices.py --self-test | pass | 0 |  |
+| wire | ./scripts/derp-hosts-check.py --self-test | pass | 0 |  |
+| wire | ./scripts/file-size-budget.py --self-test ... | pass | 0 |  |
+| wire | ./scripts/plan-layer-lint.py --self-test ... | pass | 0 |  |
+| wire | ./scripts/page-layer-lint.py --self-test ... | pass | 3 |  |
+| wire | ./scripts/swallow-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/swallow-lint.py | pass | 0 |  |
+| wire | ./scripts/visual-tokens-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/visual-tokens-lint.py | pass | 1 |  |
+| wire | ./scripts/pixel-scale-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/pixel-scale-lint.py | pass | 0 |  |
+| wire | ./scripts/test-window-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/test-window-lint.py | pass | 0 |  |
+| wire | ./scripts/runloop-spin-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/runloop-spin-lint.py | pass | 0 |  |
+| wire | ./scripts/capture-window-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/capture-window-lint.py | pass | 0 |  |
+| wire | ./scripts/fresh-script-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/fresh-script-lint.py | pass | 0 |  |
+| wire | ./scripts/charter-intercept-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/charter-intercept-lint.py | pass | 0 |  |
+| wire | ./scripts/ios-agentkit-subset-lint.py --self-test | pass | 0 |  |
+| wire | ./scripts/ios-agentkit-subset-lint.py | pass | 2 |  |
+| wire | ./scripts/migration-lint.py --self-test | pass | 1 |  |
+| wire | ./scripts/migration-lint.py | pass | 0 |  |
+| wire | if [ "$(typeshare --version 2>/dev/null)" != "typeshare 1.13.4" ]; then ... | pass | 0 |  |
+| wire | ./scripts/gen-wire-types.sh ... | pass | 0 |  |
+| doc-comments | ./scripts/doc-comment-check.py --self-test | pass | 0 |  |
+| doc-comments | ./scripts/doc-comment-check.py --base origin/main --head HEAD | pass | 1 |  |
+
+lane-gate: FAILED (PARTIAL, NOT A FULL GATE: relay, site, tunnel, rust, swift-tests, swift, ios, android, web not run by --only/--skip)
+
+Exit: 1; seconds: 281.481

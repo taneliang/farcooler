@@ -1,0 +1,45 @@
+Command: ['/tmp/ov-1254-target/debug/farcooler', 'workflow', '--help']
+Control an explicitly configured workflow
+
+Usage: farcooler workflow [OPTIONS] <COMMAND>
+
+Commands:
+  get                   Read current state; --full includes definitions and notification history
+  rollback              Restore the previous workflow bundle, retaining a new audit entry. Owner in person only
+  enqueue               Admit against the exact configuration pin selected from get
+  approve               Approve only the run, candidate and definition that were inspected
+  review                Accept a semantic review or request rework using the inspected evidence JSON file
+  rework                Request bounded rework with a reason tied to the exact inspected evidence
+  cancel                Request cancellation of the inspected run
+  resolve-cancellation  Close an Uncertain cancellation after you have checked that its processes have ended and its external effects are accounted for. Owner in person only. --reason records what was lost and what you checked. Then reopen the ticket to run it again. A push must be settled with `settle` instead
+  close                 Close work completed outside this run. --sha must be a full commit on the landing target; --continues-under names another open ticket in this workspace. Any active operation is stopped before the card closes
+  retry                 Run a failed item's step again, within its published retry allowance
+  resolve               Settle a run whose worktree step is Uncertain because its git never finished, or a cancel waiting on one. The runner looks first: with nothing of the tree there (no directory, no worktree git lists, no branch it would have made), the step fails and can be retried; anything there is named, to take away by hand first
+  queue                 Queue a ticket waiting at its join step into the open group for that step
+  leave                 Take a queued ticket out of a group that has not left yet
+  settle                Settle a push whose outcome was lost, after looking at the target yourself. The runner reads the target first and refuses a word it contradicts. Pass `--landed true` if the commit is on the target
+  track                 Bring a ticket under the engine with no run: it sits in Backlog until the orchestrator moves it
+  move                  Move a tracked ticket to a column: backlog, todo, doing, review or decision; done or cancelled close it
+  start                 Start a run on a tracked ticket under the published definition `--start-pin`
+  send-back             Send a run back to its build step, which starts again in the same worktree. The agent is told --reason. Taken while the run waits for a review, an approval or its landing group, or has failed, or while its build is Uncertain once that build's agent has ended
+  landed                Close a failed run as landed, when its commit is already on the target branch. The runner reads the remote first and refuses a commit that is not on the target there. Taken only while the run is Failed
+  reopen                Reopen a closed ticket: it comes back as a ticket at rest, in --column (todo when left out), under its own name
+  watch                 Stream a running engine agent's terminal to stdout, read-only: its picture, then live bytes, until the agent's turn ends. Nothing is ever sent to the agent. Owner only
+  pause                 Suspend the current native agent step and its timeout, keeping the same run and session
+  resume                Continue a paused native agent step in the same session
+  verdict               For an agent the engine started to review a ticket: record your verdict. Only this counts; what you say in your turn doesn't. Run it before you end your turn, or the review runs again. Writes the step's receipt locally and talks to no runner
+  help                  Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Emit machine-readable JSON. The Mac app consumes this rather than scraping human output
+
+      --runner <TARGET>
+          Operate on another runner, as `user@host` or an ssh config alias.
+          
+          Runs the same protocol over ssh, so this flag reaches a runner exactly as your own ssh does: one ssh can't reach, this can't either. A runner's tunnel is the apps' route into it, and is not what this flag uses.
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Exit: 0; seconds: 0.023

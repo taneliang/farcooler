@@ -1,0 +1,39 @@
+Command: ['cargo', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']
+   Compiling aws-lc-rs v1.17.3
+    Checking aws-lc-sys v0.43.0
+    Checking farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/daemon)
+    Checking farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/tmux)
+    Checking farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/store)
+    Checking farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/fence)
+    Checking farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/ceremony)
+    Checking russh v0.62.4
+    Checking farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/transport)
+    Checking farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/core)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/client)
+    Checking farcooler-tailcat v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/tailcat)
+    Checking farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/protocol)
+error: unnecessary closure used with `bool::then`
+  --> crates/client/src/session/plan.rs:26:20
+   |
+26 |           let read = self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS).then(|| async {
+   |  ____________________^
+27 | |             let r = crate::plan_json::workflow_request(workspace);
+28 | |             self.value_requiring(&r.method, Some(workspace), r.payload, r.required_capabilities).await
+29 | |         });
+   | |__________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_lazy_evaluations
+   = note: `-D clippy::unnecessary-lazy-evaluations` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::unnecessary_lazy_evaluations)]`
+help: use `then_some` instead
+   |
+26 ~         let read = self.can(farcooler_protocol::capability::WORKFLOW_COMMANDS).then_some(async {
+27 +             let r = crate::plan_json::workflow_request(workspace);
+28 +             self.value_requiring(&r.method, Some(workspace), r.payload, r.required_capabilities).await
+29 ~         });
+   |
+
+error: could not compile `farcooler-client` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+
+Exit: 101; seconds: 10.860

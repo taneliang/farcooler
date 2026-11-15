@@ -1,0 +1,7 @@
+Command: ['cargo', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']
+    Checking farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/cli)
+    Checking farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/daemon)
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/client)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.81s
+
+Exit: 0; seconds: 0.977

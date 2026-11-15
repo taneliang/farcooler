@@ -1,0 +1,47 @@
+Command: ['cargo', 'clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']
+    Checking farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/client)
+    Checking farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/daemon)
+    Checking farcooler-ffi-guard v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/ffi-guard)
+    Checking farcooler-review v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/review)
+    Checking farcooler-workflow v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/workflow)
+    Checking farcooler-agent-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/agent-core)
+    Checking farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1254-engine-train-main/crates/cli)
+error: unnecessary closure used with `bool::then`
+   --> crates/cli/src/plan.rs:293:24
+    |
+293 |   ...   let read = supported.then(|| async {
+    |  __________________^
+294 | | ...       let request = farcooler_client::plan_json::workflow_request(workspace);
+295 | | ...       let answer = link.call(request).await.map_err(farcooler_client::session::SessionError::from)?;
+296 | | ...       answer.value.ok_or_else(|| farcooler_client::session::SessionError::Protocol("workflow.get returned nothing".into()))
+297 | | ...   });
+    | |________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#unnecessary_lazy_evaluations
+    = note: `-D clippy::unnecessary-lazy-evaluations` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::unnecessary_lazy_evaluations)]`
+help: use `then_some` instead
+    |
+293 ~             let read = supported.then_some(async {
+294 +                 let request = farcooler_client::plan_json::workflow_request(workspace);
+295 +                 let answer = link.call(request).await.map_err(farcooler_client::session::SessionError::from)?;
+296 +                 answer.value.ok_or_else(|| farcooler_client::session::SessionError::Protocol("workflow.get returned nothing".into()))
+297 ~             });
+    |
+
+error: could not compile `farcooler-cli` (bin "farcooler") due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `farcooler-cli` (bin "farcooler" test) due to 1 previous error
+error: very complex type used. Consider factoring parts into `type` definitions
+  --> crates/daemon/src/workflow_runtime/coding_settle.rs:83:38
+   |
+83 | ...R_LANDED_READ: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Box<dyn FnOnce() + Send>>>> =
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#type_complexity
+   = note: `-D clippy::type-complexity` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: could not compile `farcooler-daemon` (lib test) due to 1 previous error
+
+Exit: 101; seconds: 24.965

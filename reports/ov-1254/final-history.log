@@ -1,0 +1,13 @@
+Command: ['/usr/bin/python3', '/tmp/ov-1254-verify.py']
+origin/main is the recorded base and an ancestor; merge count: 0
+No patch duplicates of main among 128 branch commits
+All 127 imported source trailers match manifest order
+Main review_agent.rs, git.rs and git_guard.rs are byte-identical
+crates/daemon/src/git.rs: 1494 lines
+crates/daemon/src/rpc.rs: 2394 lines
+Both required quarantine entries present
+All combined engine verbs appear in built CLI help
+git diff --check: passed
+Temporary Python symlink removed
+
+Exit: 0; seconds: 0.110
