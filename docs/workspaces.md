@@ -342,6 +342,11 @@ have to start another. Make it the orchestrator:
 - **From a terminal**, run `farcooler terminal set-role <terminal>
   orchestrator`. The same command takes `agent` and `shell`.
 
+Only a person seats an orchestrator or steps one down, from the Mac or their
+own shell. An agent's pane is refused, in every workspace: the orchestrator
+publishes its workspace's workflow, so a builder that could take the seat could
+publish too.
+
 A workspace has at most one orchestrator. If it already has one, the Mac asks
 whether to replace it: the old orchestrator keeps running as an ordinary
 terminal, and yours takes over the board. The command refuses instead, and you

@@ -367,6 +367,18 @@ async fn ov1267_the_orchestrator_repins_the_engines_own_hooks_and_nothing_else()
     ok(&published(&mut runtime, &owner, ws, "owners", None, definition.clone(), config.clone()).await);
     let base = runtime.store.workflow_configuration(&w).unwrap().unwrap();
 
+    // A publish the check refuses writes nothing: asking what this build would pin names its hook files, never
+    // writes them (security review, finding 3).
+    let builds_files = || std::fs::read_dir(svc.root_dir()).unwrap().filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("workflow-") && n.contains("-hooks-")).collect::<Vec<_>>();
+    assert_eq!(builds_files(), Vec::<String>::new());
+    let mut stray = config.clone();
+    if let CodingHarness::Native { process, .. } = &mut stray.harness { process.environment.insert("STRAY".into(), "1".into()); }
+    let reply = published(&mut runtime, &agent, ws, "stray", Some(base.pin.clone()), definition.clone(), stray).await;
+    assert_eq!(refused(&reply), "scope-denied", "the orchestrator changed an environment");
+    assert_eq!(builds_files(), Vec::<String>::new(), "the refused publish's permission check wrote the engine's hook files");
+
     // Someone edits the owner's Codex hooks since. A re-pin of every file takes that edit up: refused.
     std::fs::write(&codex, crate::hook_install::native_codex_hooks(&engine.join("h.sock")).to_string() + "\n").unwrap();
     let everything = repin(&svc, &config, Repin::Everything);

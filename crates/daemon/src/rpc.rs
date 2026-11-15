@@ -2191,7 +2191,7 @@ impl Rpc {
                 let Some(request::Payload::TerminalSetRole(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                crate::workspace_ops::refuse_an_agent_seating_a_member(svc, terminal, &p, self.caller_pid).await?;
+                crate::workspace_ops::refuse_an_agent_moving_the_orchestrator_seat(svc, terminal, &p, self.caller_pid).await?;
                 crate::workspace_ops::set_role(svc, &self.watcher, terminal, &p).await?;
                 self.terminal_result(terminal).await
             }

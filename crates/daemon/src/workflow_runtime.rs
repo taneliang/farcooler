@@ -68,6 +68,8 @@ mod admission_tests;
 #[cfg(test)]
 mod publication_bounds_tests;
 #[cfg(test)]
+mod seat_tests;
+#[cfg(test)]
 mod member_tests;
 #[cfg(test)]
 mod review_tests;

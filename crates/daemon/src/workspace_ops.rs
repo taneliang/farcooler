@@ -318,19 +318,21 @@ pub async fn assign_worktree(
     Ok(wire::worktree(&view, scope))
 }
 
-/// A member-led workspace's orchestrator is seated by a person, never by an agent (R-111, L5). On the local socket
-/// the people gate takes every caller for the owner, and the seat checks only the pane's login, so without this a
-/// lead's builder agent could make its own pane the orchestrator and drive the engine as it. The owner's
-/// workspaces keep what they had: the owner's agents act as the owner anyway.
-pub async fn refuse_an_agent_seating_a_member(
+/// A workspace's orchestrator is seated and unseated by a person, never by an agent, in every workspace, owner-led
+/// or member-led (R-111, L5; ov-1267). The orchestrator publishes its workspace's workflow (`Admission::permits`),
+/// so a builder or reviewer that could make its own pane the orchestrator, or step the live one down to take the
+/// seat, could publish; on the local socket the people gate takes every caller for the owner, so nothing else stops
+/// it. A pane that isn't and won't be an orchestrator stays anyone's to recast.
+pub async fn refuse_an_agent_moving_the_orchestrator_seat(
     svc: &Service,
     terminal: Uuid,
     req: &pb::TerminalSetRole,
     caller_pid: Option<i32>,
 ) -> Result<()> {
-    if wire::terminal_role_from_wire(req.role) != Some(farcooler_store::models::TerminalRole::Orchestrator) { return Ok(()); }
-    let Some(workspace) = svc.store.get_terminal(terminal)?.workspace_id else { return Ok(()) };
-    if svc.store.workspace_lead(workspace)?.is_none() { return Ok(()); }
+    use farcooler_store::models::TerminalRole;
+    let seats = wire::terminal_role_from_wire(req.role) == Some(TerminalRole::Orchestrator);
+    let unseats = svc.store.get_terminal(terminal)?.role == TerminalRole::Orchestrator;
+    if !seats && !unseats { return Ok(()); }
     if crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
         return Err(DomainError::ScopeDenied { needed: "person" });
     }
