@@ -1094,8 +1094,16 @@ def _self_test():
     expect("AgentKit's native preparation uses that same graph", has("swift-tests", "./apps/macos/build-test-native.sh"), True)
     bundle = next(s for s in plans["swift"] if "build-app.sh" in s.run)
     expect("bundle uses the shipping Swift release configuration", bundle.run.strip(), "apps/macos/build-app.sh")
-    for key in ("CARGO_PROFILE_RELEASE_LTO", "CARGO_PROFILE_RELEASE_OPT_LEVEL", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
-        expect(f"bundle does not override shipping optimization through {key}", key in bundle.env, False)
+    # The PR path builds the bundle's Rust fast (ov-1270); shipping optimization
+    # is proved by canary, release and nightly, which must never set these.
+    expect("PR bundle builds Rust without LTO", bundle.env.get("CARGO_PROFILE_RELEASE_LTO"), "false")
+    expect("PR bundle builds Rust at opt-level 0", bundle.env.get("CARGO_PROFILE_RELEASE_OPT_LEVEL"), "0")
+    for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
+        expect(f"bundle does not override codegen through {key}", key in bundle.env, False)
+    for name in ("canary", "release", "nightly"):
+        text = (ROOT / f".github/workflows/{name}.yml").read_text()
+        for key in ("CARGO_PROFILE_RELEASE_LTO", "CARGO_PROFILE_RELEASE_OPT_LEVEL"):
+            expect(f"{name}.yml keeps shipping optimization (no {key})", key in text, False)
     for job in ("swift", "swift-tests"):
         refresh = next(i for i, step in enumerate(plans[job]) if "swift-build-cache.py restore" in step.run)
         native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh" in step.run)
