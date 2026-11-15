@@ -16,15 +16,21 @@ fn local_output(dir: &Path) {
 #[tokio::test]
 async fn a_running_builder_is_paused_while_a_landing_gate_runs_and_resumes_after() {
     let (dir, mut runtime) = lander("pass").await;
+    // The gate and the builder start together, and the builder is stopped for as long as the gate runs: on a loaded host the
+    // default 5 s limit can expire before the gate has seen it (the limit runs while the builder is stopped, too).
+    let coding = runtime.coding.as_mut().unwrap();
+    for check in &mut coding.checks { check.timeout_ms = 120_000; }
+    if let CodingHarness::Command(build) = &mut coding.harness { build.timeout_ms = 120_000; }
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "first", &definition).await;
     let shared = dir.path().to_string_lossy().into_owned();
     adapter(dir.path(), |s| {
-        let setup = format!("import time, pathlib\nshared = pathlib.Path({shared:?})\ndef wait(name):\n    deadline = time.monotonic() + 4\n    while not (shared / name).exists():\n        assert time.monotonic() < deadline, name\n        (shared / 'beat').write_text(str(time.time()))\n        time.sleep(0.02)\n");
-        // The builder beats while it waits, and can only notice the gate saw it paused once it runs again.
+        let setup = format!("import time, pathlib, subprocess\nshared = pathlib.Path({shared:?})\ndef wait(name):\n    deadline = time.monotonic() + 60\n    while not (shared / name).exists():\n        assert time.monotonic() < deadline, name\n        time.sleep(0.02)\n");
+        // The builder only waits. It cannot report that it was stopped, and under load it may be stopped before it has run a line.
         let build = "if stage == 'build':\n    wait('gate-saw-it-stopped')\n    (shared / 'resumed').write_text(str(os.getpriority(os.PRIO_PROCESS, 0)))\n";
-        // The gate waits for the builder to have started and then gone quiet: a paused builder stops beating.
-        let gate = "elif stage == 'gate':\n    (shared / 'gate-nice').write_text(str(os.getpriority(os.PRIO_PROCESS, 0)))\n    deadline = time.monotonic() + 3\n    while True:\n        beat = shared / 'beat'\n        if beat.exists() and time.time() - float(beat.read_text() or 0) > 0.5: break\n        assert time.monotonic() < deadline, 'builder was never paused'\n        time.sleep(0.05)\n    (shared / 'gate-saw-it-stopped').write_text('yes')\n    time.sleep(0.3)\n";
+        // The gate finds the builder itself, by its command line, and polls its real process state until the OS reports it stopped
+        // (SIGSTOP shows as 'T'). The signal is asynchronous and the builder may start after the gate, so a single look can miss it.
+        let gate = "elif stage == 'gate':\n    (shared / 'gate-nice').write_text(str(os.getpriority(os.PRIO_PROCESS, 0)))\n    deadline = time.monotonic() + 60\n    while True:\n        rows = subprocess.run(['ps', '-axww', '-o', 'stat=,command='], capture_output=True, text=True).stdout.splitlines()\n        if any(r.split(None, 1)[0].startswith('T') and r.rstrip().endswith('adapter.py build') for r in rows if r.strip()): break\n        assert time.monotonic() < deadline, 'builder was never paused'\n        time.sleep(0.05)\n    (shared / 'gate-saw-it-stopped').write_text('yes')\n    time.sleep(0.3)\n";
         setup + &s.replace("if stage == 'build':\n", build).replace("elif stage == 'gate':\n", gate)
     });
     command(&runtime, Command::Queue { item: "first".into() });
