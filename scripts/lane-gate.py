@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the CI jobs a lane's change reaches, and print what ran (ov-799).
 
-Rust tests are narrowed to the crates a change reaches, in the plain gate and in --landing (ov-1268; --full-rust
-turns it off). --landing is also the local engine policy (ov-1185): bounded parallel families, conservative Rust selection against a
+Rust tests are narrowed to the crates a change reaches in --landing, and in the plain gate with --select-rust (ov-1268;
+--full-rust forces the whole suite in both). --landing is also the local engine policy (ov-1185): bounded parallel families, conservative Rust selection against a
 verified green ancestor, release bundle proof left to CI, and warm target kept.
 CI on main remains full proof. Each selection/fallback is saved with step logs.
 
@@ -834,7 +834,8 @@ def md(cell):
 
 def main(argv):
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
-    ap.add_argument("--full-rust", action="store_true", help="run the whole Rust suite even when the change only reaches some crates (ov-1268)")
+    ap.add_argument("--full-rust", action="store_true", help="run the whole Rust suite even when the change only reaches some crates, plain or --landing (ov-1268)")
+    ap.add_argument("--select-rust", action="store_true", help="plain gate only: narrow nextest to the crates the change reaches. Off until the nightly shadow record (ov-1116) has samples with zero misses (ov-1268); --landing always selects")
     ap.add_argument("--landing", action="store_true", help="local landing: parallel families, selected Rust, CI retains release bundle proof")
     ap.add_argument("--workers", type=int, default=4, choices=range(1, 5), help="maximum concurrent landing families (default 4)")
     ap.add_argument("--base", default=os.environ.get("FARCOOLER_BASE") or "origin/main",
@@ -905,12 +906,13 @@ def gate(args):
     proposal = None
     if args.landing:
         import landing_policy  # optional local policy; plain runners stay self-contained
-        proposal = (landing_policy.rust_selection(repo, args.base, load_module) if "rust" in chosen
-                    else {"full": True, "packages": [], "reasons": ["Rust not reached"]})
+        proposal = (landing_policy.rust_selection(repo, args.base, load_module)
+                    if "rust" in chosen and not args.full_rust
+                    else {"full": True, "packages": [], "reasons": ["--full-rust" if args.full_rust and "rust" in chosen else "Rust not reached"]})
         landing_policy.apply(plans, proposal)
         print("lane-gate: local landing Rust selection: " + "; ".join(proposal["reasons"]))
         print(f"lane-gate: landing families: {landing_policy.families(chosen)}; workers: {args.workers}")
-    elif "rust" in chosen and not args.full_rust:
+    elif "rust" in chosen and args.select_rust and not args.full_rust:
         # ov-1268: the lane gate skips Rust tests a change cannot affect, same as landing. Anything the
         # selector does not understand is full, and CI on main always runs the whole suite.
         import landing_policy
@@ -933,7 +935,7 @@ def gate(args):
     if "rust" in chosen:
         print(f"lane-gate: Rust impact: {rust_impact(repo, inputs)}")
         if proposal is None:
-            print("lane-gate: Rust coverage: full suite (--full-rust or landing selection off)")
+            print("lane-gate: Rust coverage: full suite (plain gate selects only with --select-rust; no shadow samples yet, ov-1268)")
         elif proposal["full"]:
             print("lane-gate: Rust coverage: full suite (" + "; ".join(proposal["reasons"]) + ")")
         else:

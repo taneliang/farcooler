@@ -226,6 +226,23 @@ class LandingTests(unittest.TestCase):
         self.assertNotIn("package(=", wf["ci"])  # CI on main keeps the full suite
 
 
+    def test_full_rust_forces_the_whole_suite_in_both_modes(self):
+        """ov-1268: --full-rust beats --landing's selection; plain gate selects only with --select-rust."""
+        base = subprocess.run(["git", "rev-list", "-n1", "HEAD", "--", "crates/vt/src"], cwd=ROOT,
+                              capture_output=True, text=True, check=True).stdout.strip() + "~1"
+        def plan(*flags):
+            out = subprocess.run([sys.executable, str(ROOT / "scripts/lane-gate.py"), "--dry-run", "--only", "rust",
+                                  "--base", base, *flags], cwd=ROOT, capture_output=True, text=True)
+            return out.stdout + out.stderr
+        landing = plan("--landing", "--full-rust")
+        self.assertIn("Rust coverage: full suite", landing)
+        self.assertIn("--full-rust", landing)
+        self.assertNotIn("nextest runs only", landing)
+        both = plan("--select-rust", "--full-rust")
+        self.assertIn("Rust coverage: full suite", both)
+        self.assertNotIn("nextest runs only", both)
+        self.assertIn("Rust coverage: full suite", plan())  # plain gate is full until the shadow record has samples
+
     def test_parallelism_is_bounded_and_apple_is_serial(self):
         self.assertEqual(policy.families(["rust", "swift-tests", "swift", "ios", "android"]),
                          [["rust"], ["swift-tests", "swift", "ios"], ["android"]])

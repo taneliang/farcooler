@@ -46,6 +46,10 @@ SWIFT_FAILED = re.compile(r'✘ Test "(.+?)" failed after')
 # the report once called "ended without a test verdict" (ov-732). The group's files follow on indented lines.
 DUPLICATES = re.compile(r"capture-duplicates: these are the same bytes under different names")
 GROUP_FILE = re.compile(r"^(?:\S+Z )?  (\S+\.png)\s*$")
+# cargo nextest, as the Rust jobs print it: `        FAIL [   1.234s] farcooler-daemon script_hooks::a_test`.
+# Those jobs run the whole workspace with no selection (ov-1268), so a failure here that the lane gate skipped
+# names the stale test the gate and landing selection could not see.
+NEXTEST_FAIL = re.compile(r"^(?:\S+Z )?\s*(?:FAIL|TIMEOUT|SIGABRT|SIGSEGV)\s+\[\s*[\d.]+s\]\s+(\S+)\s+(\S+)")
 BAD = ("failure", "cancelled", "timed_out")
 LOG_LIMIT = 40  # commits listed
 BUDGET_JOB = "iOS UI shard budget"
@@ -67,6 +71,8 @@ def failing_tests(log):
             add(m.group(1), f"{m.group(2)} (over its time allowance)")
         elif m := SWIFT_FAILED.search(line):
             add("swift test", m.group(1))
+        elif m := NEXTEST_FAIL.search(line):
+            add("rust " + m.group(1), m.group(2))
     return found
 
 
@@ -99,6 +105,10 @@ def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget
             for cls, methods in classes.items():
                 lines.append(f"- `{cls}` ({job}): " + ", ".join(f"`{m}`" for m in methods))
         lines.append("")
+    if any(c.startswith("rust ") for _, classes in failures for c in classes):
+        lines += ["The Rust failures above came from a full run with no test selection. If the lane gate or landing "
+                  "skipped that test for the change that broke it, the selection missed it: add the input it did not see "
+                  "(scripts/rust-shadow.py).", ""]
     if gates:
         lines += ["## Captures that show the same picture twice", ""]
         for job, groups in gates:
@@ -279,6 +289,10 @@ def self_test():
     )
     expect("failures are read, once each, and passes are not",
            failing_tests(log), {"PlanUITests": ["testA", "testB"], "ActionFailureTests": ["testD"]})
+    expect("a nextest failure is named by crate and test",
+           failing_tests("2026-10-15T11:40:01Z         FAIL [   1.234s] farcooler-daemon script_hooks::a_test\n"
+                         "        PASS [   0.1s] farcooler-vt ok::test\n"),
+           {"rust farcooler-daemon": ["script_hooks::a_test"]})
     expect("no failures in a clean log", failing_tests("Test Case '-[FarCoolerUITests.X y]' passed"), {})
     expect("a test killed at its allowance is named", failing_tests(
         "Test Case '-[FarCoolerUITests.ConversationCapturesUITests testCaptures]' exceeded execution time allowance of 6 minutes."),
