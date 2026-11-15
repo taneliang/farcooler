@@ -114,8 +114,8 @@ impl Run {
     }
     pub fn input(&mut self, grant: Grant, command: Command) -> Input {
         self.n += 1;
-        Input { schema: 3, id: format!("input-{}", self.n), workspace: "workspace".into(), expected_revision: self.p.revision,
-            epoch: 1, source: "fixture".into(), source_sequence: self.n, now_ms: self.now, grant, command,
+        Input { schema: 3, id: format!("input-{}", self.n), workspace: self.p.workspace.clone(), expected_revision: self.p.revision,
+            epoch: self.p.epoch, source: "fixture".into(), source_sequence: self.n, now_ms: self.now, grant, command,
             busy_resources: BTreeSet::new(), host: self.host.clone() }
     }
     pub fn send(&mut self, grant: Grant, command: Command) -> Result<Vec<Effect>, Refusal> {
