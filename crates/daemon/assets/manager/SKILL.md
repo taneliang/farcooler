@@ -191,8 +191,10 @@ out before the group leaves. A push whose outcome was lost: look at the target y
 ```
 {{cli}} landing show <N> --repo <repo>
 ```
-**Drafting the workflow.** You propose; a person publishes, never you. `workspace workflow-draft <ws> <template> --reason "<the
-owner's words>"` files one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) and asks the owner to approve
+**Changing the workflow.** You publish your workspace's workflow: `workspace set-workflow <ws> --file <f> --reason "<why>"`, and
+after an app update `workspace re-pin <ws> --out <f>` first. The owner sees each on a card and can roll it back. A changed command,
+environment, hook or approval before one needs a person, as does all of it once the owner reserves publishing: draft it.
+`workspace workflow-draft <ws> <template> --reason "<the owner's words>"` files one of four templates (`batched-push`, `ticket-push`, `ticket-pr`, `batched-pr`) and asks the owner to approve
 it on the board. For a complete definition and adapter bundle, use `workspace workflow-draft <ws> --file <bundle.json> --reason "<the owner's words>"`; the card shows its field changes for the person to review. A gate is a command (`--gate`, the whole list each time; `--gate-env NAME=value`), an agent the engine starts
 (`--agent-gate`), you (`--orchestrator-gate`) or the owner (`--person-gate owner`); each holds the ticket for its verdict.
 `--route 'site/**=ask'` routes by changed paths, and `ask` holds those tickets for the owner's word. PR templates aren't live: in PR mode draft none and tell the owner the engine

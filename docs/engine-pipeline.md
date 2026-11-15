@@ -68,7 +68,7 @@ Each is a question, with a recommendation; strike any you disagree with.
 
 | # | Still needs a person? | Recommendation |
 |---|---|---|
-| Q1 | **Publishing a workflow** | No by default: the orchestrator publishes. A workspace setting `publish: person` (set only by a person) reserves it, for teams that want it |
+| Q1 | **Publishing a workflow** | **Answered (owner, Nov 15): no.** The workspace's orchestrator publishes, with a reason. The owner can reserve it to a person per workspace |
 | Q2 | **Writing to the secret store** | Yes. A secret is the one input the orchestrator can't check and can leak; a person types it once |
 | Q3 | **Security flags** (granting the orchestrator or an agent a wider permission mode, sandbox exceptions, clearing a security hold) | Yes, for widening; no for narrowing |
 | Q4 | **Production deploys** | Not in Far Cooler (it has none). In a template that deploys, the deploy decision is a person's by default; the workspace can hand it to the orchestrator |
@@ -1553,9 +1553,26 @@ every later token goes through, including which stations a person must
 decide (Q7); an orchestrator that can publish can remove those. *Reason to
 drop it:* the owner wants the orchestrator to run the process, and preview
 (7.5) makes a change's effect exact before it applies.
-*Recommendation:* drop it by default; offer a workspace setting
-`publish: person`, itself set only by a person, so a company can keep it.
-Every publish records its reason and preview.
+*Answered (owner, Nov 15, ov-1267): dropped.* A workspace's own orchestrator
+publishes its workflow and re-pins it, from its pane, with
+`workspace set-workflow --reason`. Builders, reviewers and other agents are
+refused, and so is another workspace's orchestrator. A publish with no reason
+is refused. Each receipt records the actor (person, device, pane, and that it
+was the orchestrator), the reason, and the pins before and after. The owner
+sees each one on an informational In Review card, and can restore the
+previous bundle with `workflow rollback`. The owner reserves publishing to a
+person with `workspace set <ws> --orchestrator-publishes-workflow off` (the
+`publish: person` setting above). Only the owner in person can change that
+setting.
+
+What the orchestrator publishes still runs only what the owner already ran
+(`docs/engine-hooks.md`, ov-1201): no new command, environment or hook, and no
+approval in front of one taken away. Those changes go through a draft a person
+approves. The one exception is a re-pin of the engine's own hook files after
+an app update. This build writes those files, so the orchestrator publishes
+that move itself (`workspace re-pin`). Without that exception, the engine
+stopped for about 2.5 hours on Nov 15 while a draft waited. A re-pin that also
+takes up an edit to any other pinned file still needs a person.
 
 **Q2. Writing to the secret store.** *Reason:* a secret is the one input the
 orchestrator can neither verify nor take back once it's been used or shown;

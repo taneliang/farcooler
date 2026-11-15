@@ -486,18 +486,20 @@ execution in the daemon runtime. Apps only show a subject's decisions and
 
 ## Orchestrator publication grant (ov-1179)
 
-Workflow publication normally requires the owner in person. The owner can grant
-one workspace's orchestrator permission to publish future workflow changes:
+A workspace's own orchestrator publishes its workflow (ov-1267: the owner's
+answer to Q1 of `docs/engine-pipeline.md` section 9). The owner can reserve
+publishing to a person for one workspace, and lift that reservation again:
 
 ```sh
-farcooler workspace set <workspace> --orchestrator-publishes-workflow on
-# Revoke the grant at any time:
 farcooler workspace set <workspace> --orchestrator-publishes-workflow off
+# Let the orchestrator publish again:
+farcooler workspace set <workspace> --orchestrator-publishes-workflow on
 ```
 
 Change this grant on its own, from the owner's device or shell. An agent cannot
-grant or revoke it. It starts off, belongs to the workspace, and is checked again
-when the engine consumes a command, including retries. Other agents and other
+grant or revoke it. It starts on (before ov-1267 it started off), belongs to the
+workspace, and is checked again when the engine consumes a command, including
+retries. Other agents and other
 workspaces gain no authority. A member leading the workspace may publish from
 that workspace's orchestrator, but cannot enable the grant from their own shell
 or device.
@@ -607,7 +609,16 @@ may pick at Start, or a model of an agent with no hooks of its own, does not. A
 command harness runs its command whatever the model, so models there stay free.
 
 Routes, models, deciders, limits, groups and notifications still change freely
-within that, so adding another approval or review publishes. A change to
+within that, so adding another approval or review publishes.
+
+One adapter change publishes too (ov-1267): a re-pin that moves only the
+engine's own hook files (`workflow-claude-hooks-*.json` and
+`workflow-codex-hooks-*.json` under the runtime root) to the ones this build
+writes. The build fixes those files' content, so the move adds no command.
+The publication is judged against the replaced bundle with that move applied,
+so the rest must run the same as above. A re-pin that also takes up an edit to
+another pinned file, such as Claude settings or a repository's hooks, is
+refused and goes through a draft. A change to
 commands, environment, hooks or the deciders in front of them goes through
 `workflow propose`, and publishes when a person approves the draft. The owner
 publishes them directly as before.

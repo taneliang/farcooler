@@ -105,6 +105,8 @@ pub enum WorkspaceCmd {
     /// Re-pin the published workflow to its files as they are now: the same definition, with every pinned file's
     /// digest computed again by the runner and the engine's own hooks moved to this build's. Prints the bundle (or
     /// writes it with --out) for `workspace set-workflow`; with --propose, files it as a draft for a person instead.
+    /// The orchestrator publishes a re-pin of the engine's own hooks itself; one that takes up another file's edit
+    /// needs a person.
     /// Says so and changes nothing when every pin still holds.
     RePin {
         workspace: String,
@@ -174,7 +176,8 @@ pub enum WorkspaceCmd {
     /// as they are.
     Set {
         workspace: String,
-        /// Let this workspace's orchestrator publish workflows. Only the owner in person can change this grant.
+        /// Whether this workspace's orchestrator publishes its workflow: on unless reserved. off reserves publishing
+        /// to a person. Only the owner in person can change it.
         #[arg(long, value_name="on|off")]
         orchestrator_publishes_workflow: Option<OnOff>,
         #[command(flatten)]

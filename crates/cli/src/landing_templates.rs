@@ -1,6 +1,6 @@
 //! `workspace landing-templates`, `landing-template` and `import-landing` (ov-959): draft a landing
-//! definition for a person to publish. Drafting changes nothing on the runner; publishing is
-//! `workspace set-workflow`, which only a person may do.
+//! definition to publish. Drafting changes nothing on the runner; publishing is `workspace set-workflow`,
+//! which the owner and the workspace's orchestrator do (ov-1267).
 use clap::Args;
 use farcooler_daemon::landing_templates::{self as lt, Bundle, Extra};
 use farcooler_protocol::workflow_config::AdapterConfiguration;

@@ -1129,7 +1129,8 @@ mod tests {
         // a ticket takes, which fields of `workflow get` each write names, and
         // drafting through `workflow-draft`, for the dispatch and hand landing
         // they replace: twelve lines net. 373 once the pressure test added the queue, track and move commands, --adopt and ask (ov-1012).
-        assert!(lines <= 373, "{lines} lines");
+        // 375 once the orchestrator publishes its own workflow and re-pins (ov-1267): two lines.
+        assert!(lines <= 375, "{lines} lines");
     }
 
     #[test]
