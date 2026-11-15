@@ -663,6 +663,7 @@ crates/daemon/src/workflow_runtime/decider_tests.rs -> test_support
 crates/daemon/src/workflow_runtime/decider_tests.rs -> watch
 crates/daemon/src/workflow_runtime/gate_tests.rs -> review_agent
 crates/daemon/src/workflow_runtime/landed_tests.rs -> test_support
+crates/daemon/src/workflow_runtime/landing_templates_tests.rs -> unresolved: alias crate::landing_templates as lt
 crates/daemon/src/workflow_runtime/main_bundle_tests.rs -> review_agent
 crates/daemon/src/workflow_runtime/main_bundle_tests.rs -> service
 crates/daemon/src/workflow_runtime/member_tests.rs -> service
@@ -694,7 +695,9 @@ crates/daemon/src/workflow_service.rs -> test_support
 crates/daemon/src/workflow_starter.rs -> hook_install
 crates/daemon/src/workflow_starter.rs -> service
 crates/daemon/src/workflow_starter.rs -> skill_install
+crates/daemon/src/workflow_starter.rs -> unresolved: alias crate::landing_templates as lt
 crates/daemon/src/workflow_starter.rs -> watch
+crates/daemon/src/workflow_summary.rs -> unresolved: alias crate::landing_templates as lt
 crates/daemon/src/workspace_home.rs -> watch
 crates/daemon/src/workspace_ops.rs -> landing_read
 crates/daemon/src/workspace_ops.rs -> lead_change

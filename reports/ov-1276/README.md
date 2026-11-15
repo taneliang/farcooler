@@ -366,3 +366,8 @@ the real proof: cargo refuses a cycle.
 ./scripts/daemon-layers.py
 ./scripts/daemon-layers.py --report
 ```
+
+## Fix round 1
+
+- Aliases and globs that name a layer module are refused in the file's own layer too, when spelled from the crate root (`use crate::engine as e;`, `use crate::engine::*;`). Only a relative `super`/`self` path that stays in the file's own layer passes, because `use super::*` in a test module is everywhere and reaches no other layer. Three own-layer `use crate::landing_templates as lt` aliases joined the allowlist (706 to 709).
+- A `macro_rules!` macro, defined in any file (lib.rs included), whose body names a layer module or `$crate::` is refused at every call in a layered file, since its expansion is invisible to the scanner.

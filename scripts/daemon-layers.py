@@ -297,7 +297,9 @@ def names_a_layer_module(resolved, layers, mine, modules):
     """A path that is the crate root, or a top-level module (or a delivery module in watch) of another layer.
 
     Naming one through an alias or a glob lets later paths reach it with nothing here to read them by.
-    A module of the file's own layer is fine: `use super::*` in a test module is everywhere.
+    The file's own layer is no exception when the path is spelled from the crate root or an alias; only a
+    relative `super`/`self` path into the file's own layer is let through (see relative_own), since
+    `use super::*` in a test module is everywhere and reaches no other layer.
     """
     if resolved is None:
         return False
@@ -308,10 +310,36 @@ def names_a_layer_module(resolved, layers, mine, modules):
     if len(resolved) > 2 or (len(resolved) == 2 and not (
             resolved[0] == "watch" and resolved[1].startswith(DELIVERY_PREFIXES))):
         return False
-    return layers.of_segs(resolved) != mine
+    return True
+
+def relative_own(leaf, resolved, layers, mine):
+    """`super::*` or `self as x` that stays inside the file's own layer."""
+    return bool(leaf) and bool(resolved) and leaf[0] in ("super", "self") and layers.of_segs(resolved) == mine
 
 
-def unresolved(text, module, layers, mine, modules):
+_MACRO_DEF = re.compile(r"\bmacro_rules!\s*([A-Za-z_]\w*)\s*[{(\[]")
+
+
+def reaching_macros(texts, modules):
+    """Names of macro_rules macros, defined in any file, whose body names a layer module or `$crate::`.
+
+    Their expansion at a call site is invisible to the scanner, so a call is refused (see unresolved).
+    """
+    out = set()
+    for rel, text in texts.items():
+        masked = mask(text)
+        for m in _MACRO_DEF.finditer(masked):
+            depth, i = 1, m.end()
+            while i < len(masked) and depth:
+                depth += (masked[i] in "{([") - (masked[i] in "})]")
+                i += 1
+            body = masked[m.end():i]
+            if _MACRO_CRATE.search(body) or any(r and r[0] in modules for r in references(body)):
+                out.add(m.group(1))
+    return out
+
+
+def unresolved(text, module, layers, mine, modules, macros=()):
     """Constructs the scanner cannot follow with certainty, as (description, line) pairs.
 
     Each is refused outright rather than guessed at: a rename of the crate root or of a layer module,
@@ -332,11 +360,16 @@ def unresolved(text, module, layers, mine, modules):
         leaves, renamed, globs = [], [], []
         parse_tree(masked, m.end(), [], leaves, renamed, globs)
         for name, leaf in renamed:
-            if names_a_layer_module(resolve(leaf, here, alias), layers, mine, modules):
+            if (r := resolve(leaf, here, alias)) is not None and names_a_layer_module(r, layers, mine, modules) \
+                    and not relative_own(leaf, r, layers, mine):
                 found.append((f"alias {'::'.join(leaf)} as {name}", line(m.start())))
         for prefix, _ in globs:
-            if names_a_layer_module(resolve(prefix, here, alias), layers, mine, modules):
+            if (r := resolve(prefix, here, alias)) is not None and names_a_layer_module(r, layers, mine, modules) \
+                    and not relative_own(prefix, r, layers, mine):
                 found.append((f"glob {'::'.join(prefix)}::*", line(m.start())))
+    for name in sorted(macros):
+        for m in re.finditer(r"(?<![\w$])" + re.escape(name) + r"!\s*[{(\[]", masked):
+            found.append((f"call of {name}!, whose expansion names a layer module", line(m.start())))
     for kind, rx in (("macro path $crate::", _MACRO_CRATE), ("macro path $fragment::", _MACRO_FRAGMENT),
                      ("macro use of a $fragment", _MACRO_USE), ("macro takes a path argument", _MACRO_PATH_ARG),
                      ("include! of another file", _INCLUDE)):
@@ -397,6 +430,7 @@ def scan(root, layers):
     modules = {rel.split("/")[0].removesuffix(".rs") for rel in texts}
     watch_subs = {rel.split("/")[1].removesuffix(".rs") for rel in texts if rel.startswith("watch/")}
     mod_of = module_paths(src, texts)
+    macros = reaching_macros(texts, modules)
     violations, unclaimed, refused = {}, [], {}
     for rel in texts:
         # By where the module sits, so a test that `#[path]` hangs under another module is that module's.
@@ -406,7 +440,7 @@ def scan(root, layers):
             continue
         if mine == "composition":
             continue
-        for what, ln in unresolved(texts[rel], mod_of[rel], layers, mine, modules):
+        for what, ln in unresolved(texts[rel], mod_of[rel], layers, mine, modules, macros):
             key = f"{SRC}/{rel} -> unresolved: {what}"
             refused.setdefault(key, (mine, []))[1].append(ln)
         for segs in sorted(references(texts[rel], mod_of[rel])):
@@ -636,7 +670,16 @@ def self_test():
            ["refused: glob crate::watch::answer_wake::*"])
     expect("a glob of the file's own module in a test module passes",
            {"engine.rs": "mod t { use super::*; }"}, "", 0)
-    expect("a glob of the own layer's module passes", {"engine.rs": "use crate::engine::*;"}, "", 0)
+    expect("a crate-rooted glob of the own layer's module is refused too",
+           {"engine.rs": "use crate::engine::*;"}, "", 1, ["refused: glob crate::engine::*"])
+    expect("a crate-rooted alias of the own layer's module is refused too",
+           {"engine.rs": "use crate::engine as e; use crate::engine::*;"}, "", 2,
+           ["refused: alias crate::engine as e", "refused: glob crate::engine::*"])
+    expect("a macro in lib.rs that builds a forbidden edge is refused at its call",
+           {"lib.rs": "macro_rules! inject { () => { use crate::rpc::Call; } } mod engine; mod rpc;",
+            "engine.rs": "inject!();"}, "", 1, ["refused: call of inject!", "engine.rs:1"])
+    expect("a macro that names no layer module is called freely",
+           {"lib.rs": "macro_rules! plain { () => { 1 } }", "engine.rs": "fn f() { plain!(); }"}, "", 0)
     expect("a glob from a delivery file into watch is refused",
            {"watch/answer_wake/x.rs": "use super::super::*;"}, "", 2, ["refused: glob super::super::*"])
     expect("a glob of a std or other crate path is not a layer glob", {"engine.rs": "use std::collections::*;"}, "", 0)
