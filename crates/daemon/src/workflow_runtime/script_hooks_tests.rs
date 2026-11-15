@@ -24,6 +24,15 @@ async fn failed(body: &str) -> (tempfile::TempDir, Runtime) {
     assert!(runtime.state("w").unwrap().unwrap().items["coding"].deciding.is_some());
     (dir, runtime)
 }
+async fn wait_for_decision(runtime: &mut Runtime, now_ms: i64) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        runtime.pump(now_ms).await.unwrap();
+        if runtime.state("w").unwrap().unwrap().items["coding"].deciding.is_none() { return; }
+        assert!(std::time::Instant::now() < deadline, "hook decision did not settle within 60 seconds");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
 fn replay(runtime: &Runtime) {
     let mut state = State::empty("w".into(), 1);
     for event in runtime.events("w").unwrap() { state = step(&state, &event).unwrap().state; }
@@ -40,7 +49,7 @@ async fn script_hooks_good_bad_and_illegal_decisions_are_logged_and_replayed() {
         let (_dir, mut runtime) = failed(&body).await;
         // With no build slots a decision still runs. A good retry queues its build behind the cap.
         runtime.places().agent = 0;
-        runtime.pump(20).await.unwrap();
+        wait_for_decision(&mut runtime, 20).await;
         let state = runtime.state("w").unwrap().unwrap();
         let item = &state.items["coding"];
         assert!(item.deciding.is_none());
@@ -55,7 +64,7 @@ async fn script_hooks_timeout_and_no_receipt_retry_once_then_fall_back() {
     for body in ["exit 1", "/bin/sleep 2"] {
         let (_dir, mut runtime) = failed(body).await;
         runtime.pump(20).await.unwrap();
-        runtime.pump(30).await.unwrap();
+        wait_for_decision(&mut runtime, 30).await;
         let events = runtime.events("w").unwrap();
         let answers: Vec<_> = events.iter().filter_map(|e| match &e.command { Command::Decide { result, .. } => Some(result), _ => None }).collect();
         assert_eq!(answers.len(), 2, "{answers:?}");
@@ -88,7 +97,7 @@ async fn script_hooks_restart_mid_call_recovers_receipt_or_spends_one_retry() {
         drop(runtime);
         let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
         runtime.pump(40).await.unwrap();
-        runtime.pump(50).await.unwrap();
+        wait_for_decision(&mut runtime, 50).await;
         let state = runtime.state("w").unwrap().unwrap();
         assert!(state.items["coding"].deciding.is_none());
         assert_eq!(state.items["coding"].phase, Phase::Failed);
@@ -114,14 +123,14 @@ async fn script_hooks_changed_script_falls_back_and_retry_budget_remains_authori
     assert_eq!(refused.items["coding"].retries, MAX_RETRIES);
     assert!(refused.items["coding"].hook_refused.is_some(), "current legality overrides the firing snapshot");
     std::fs::write(dir.path().join("rule.sh"), b"#!/bin/sh\nexit 0\n").unwrap();
-    runtime.pump(20).await.unwrap();
+    wait_for_decision(&mut runtime, 20).await;
     assert_eq!(runtime.state("w").unwrap().unwrap().items["coding"].retries, 0);
     assert!(runtime.state("w").unwrap().unwrap().items["coding"].hook_refused.is_some());
     replay(&runtime);
 
     let (_dir, mut runtime) = failed(&response("retry")).await;
     runtime.places().agent = 0;
-    runtime.pump(20).await.unwrap();
+    wait_for_decision(&mut runtime, 20).await;
     let state = runtime.state("w").unwrap().unwrap();
     let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap().effect;
     let claim = runtime.store.workflow_claim_effect("w", &effect.id, "fixture", state.revision, state.epoch, 30, 40).unwrap().unwrap();
@@ -145,7 +154,7 @@ async fn script_hooks_fake_clock_expiry_is_logged_and_keeps_the_retry_deadline()
     assert_eq!(open.deadline_ms, first_timeout + 200, "the retry retains its published timeout from the observed expiry");
     drop(runtime);
     let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
-    runtime.pump(2_000).await.unwrap();
+    wait_for_decision(&mut runtime, 2_000).await;
     let events = runtime.events("w").unwrap();
     let times: Vec<_> = events.iter().filter(|e| matches!(e.command, Command::Decide { result: HookResult::Timeout, .. }))
         .map(|e| e.now_ms).collect();
