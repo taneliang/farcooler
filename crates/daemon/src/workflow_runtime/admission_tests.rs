@@ -165,16 +165,22 @@ fn settling_a_push_stays_person_only_and_queue_stays_delegable() {
 /// real shell in a tagged tmux pane: its id and root pid. As `orchestrator`,
 /// the workspace's orchestrator, marked as an agent's; else her own shell.
 pub(super) async fn alices_pane(svc: &Arc<Service>, repo: Uuid, workspace: Uuid, orchestrator: bool) -> (Uuid, i32) {
+    use farcooler_store::models::TerminalRole;
+    alices_pane_as(svc, repo, workspace, if orchestrator { TerminalRole::Orchestrator } else { TerminalRole::Shell }).await
+}
+/// `alices_pane` in `role`: an orchestrator, an agent (a builder's or a reviewer's pane), or her own shell.
+pub(super) async fn alices_pane_as(svc: &Arc<Service>, repo: Uuid, workspace: Uuid, role: farcooler_store::models::TerminalRole) -> (Uuid, i32) {
     use farcooler_store::{models::{TerminalRole, TerminalUpdate}, claude_logins::TerminalLogin};
     let worktree = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
     let t = svc.create_terminal(worktree.id, "alice's pane", "shell").await.unwrap();
-    if orchestrator {
+    let agent = role != TerminalRole::Shell;
+    if agent {
         svc.store.update_terminal(t.id, t.resource_version, TerminalUpdate {
             title: t.title, command_preset: "claude".into(), intent: t.intent,
             runtime_confirmed: t.runtime_confirmed, exit_code: t.exit_code, exit_signal: t.exit_signal,
             lease_generation: t.lease_generation, epoch: t.epoch, columns: t.columns, rows: t.rows,
         }).unwrap();
-        svc.store.set_terminal_role(t.id, TerminalRole::Orchestrator).unwrap();
+        svc.store.set_terminal_role(t.id, role).unwrap();
     }
     svc.store.set_terminal_workspace(t.id, workspace).unwrap();
     svc.store.set_member("alice", "Alice", &[]).unwrap();
@@ -186,7 +192,7 @@ pub(super) async fn alices_pane(svc: &Arc<Service>, repo: Uuid, workspace: Uuid,
     svc.inventory.refresh().await;
     let pid = svc.inventory_snapshot().panes.iter().find(|p| p.terminal_id == t.id).unwrap().stamp.pid as i32;
     let seat = crate::caller_seat::caller_seat(svc, Some(pid)).await;
-    assert_eq!(seat, if orchestrator { crate::caller_seat::Seat::Agent(Some(t.id)) } else { crate::caller_seat::Seat::Person });
+    assert_eq!(seat, if agent { crate::caller_seat::Seat::Agent(Some(t.id)) } else { crate::caller_seat::Seat::Person });
     (t.id, pid)
 }
 
@@ -360,8 +366,10 @@ async fn ov1179_only_the_granted_workspace_orchestrator_publishes() {
     let grant = |enabled, revision| Action::PublicationGrant { mutation: mutation(if enabled {"grant"} else {"revoke"}, revision, 1), enabled };
     let publication = Action::Publish { reason:Some("Make the board track work".into()), notifications:None, adapter:None,
         mutation:mutation("publish",0,1), expected_pin:None, definition:Definition::tracker("owner") };
+    // On unless a person reserves it (ov-1267): the owner reserves it here, so the grant below is what lifts it.
+    ok(&sent(&mut runtime, &owner, ws, &Action::PublicationGrant { mutation: mutation("reserve", 0, 1), enabled: false }).await.0);
     let (response, _) = sent(&mut runtime, &agent, ws, &publication).await;
-    assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "off by default");
+    assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "published while reserved");
     let (response, _) = sent(&mut runtime, &agent, ws, &grant(true, 0)).await;
     assert!(matches!(response.outcome, Some(response::Outcome::Error(_))), "agent grants itself authority");
     let (response, _) = sent(&mut runtime, &owner, ws, &grant(true, 0)).await;
@@ -474,4 +482,72 @@ async fn ov1179_publication_grant_preserves_runner_admin_operation_boundaries() 
         assert!(svc.store.member("bob").is_ok());
         assert!(svc.store.member("carol").is_err());
     }
+}
+
+/// ov-1267 (owner, Nov 15: "you may absolutely publish workflows"): a workspace's own orchestrator publishes its
+/// workflow from its pane with no grant asked for first. Each publish needs a reason and records who sent it, why,
+/// and the pins before and after. A builder's or a reviewer's agent pane in the same workspace, and another
+/// workspace's orchestrator, stay refused, as does every orchestrator once the owner reserves publishing.
+#[tokio::test]
+async fn ov1267_the_workspace_orchestrator_publishes_and_no_other_agent_does() {
+    use farcooler_store::models::TerminalRole;
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let w = ws.to_string();
+    let other = svc.store.create_workspace(repo, "Other", "oth").unwrap().id;
+    let (_, builder) = alices_pane_as(&svc, repo, ws, TerminalRole::Agent).await;
+    let (_, reviewer) = alices_pane_as(&svc, repo, ws, TerminalRole::Agent).await;
+    let (_, elsewhere) = alices_pane_as(&svc, repo, other, TerminalRole::Orchestrator).await;
+    let (pane, orchestrator) = alices_pane_as(&svc, repo, ws, TerminalRole::Orchestrator).await;
+    let mut runtime = Runtime::open_service(&svc.root_dir().join("publication-test"), svc.store.clone()).unwrap();
+    let peer = Peer { client_id: None, scope: Scope::Control };
+    let rpc = |pid| factory(&svc, &runtime, peer.clone(), Some(pid));
+    let (agent, builder, reviewer, elsewhere) = (rpc(orchestrator), rpc(builder), rpc(reviewer), rpc(elsewhere));
+    let owner = factory(&svc, &runtime, peer.clone(), None);
+    let sequence = std::cell::Cell::new(1);
+    let publish = |id: &str, revision, expected: Option<String>, reason: Option<&str>, definition| Action::Publish {
+        reason: reason.map(String::from), notifications: None, adapter: None,
+        mutation: mutation(id, revision, sequence.replace(sequence.get() + 1)), expected_pin: expected, definition };
+
+    // Builder, reviewer and another workspace's orchestrator: refused before anything is written.
+    for (who, rpc) in [("a builder", &builder), ("a reviewer", &reviewer), ("another workspace's orchestrator", &elsewhere)] {
+        let before = snapshot(&runtime, ws);
+        let (reply, _) = sent(&mut runtime, rpc, ws, &publish("stray", 0, None, Some("Track the board"), Definition::tracker("owner"))).await;
+        assert_eq!(refused(&reply), "scope-denied", "{who} published");
+        assert_eq!(snapshot(&runtime, ws), before, "{who} wrote");
+    }
+    // No reason: refused, nothing written.
+    let before = snapshot(&runtime, ws);
+    let (reply, _) = sent(&mut runtime, &agent, ws, &publish("bare", 0, None, None, Definition::tracker("owner"))).await;
+    assert!(matches!(reply.outcome, Some(response::Outcome::Error(_))), "published with no reason");
+    assert_eq!(snapshot(&runtime, ws), before);
+
+    // The orchestrator publishes, with no grant asked for first.
+    let first = Definition::tracker("owner");
+    let reply = sent(&mut runtime, &agent, ws, &publish("first", 0, None, Some("Track the board"), first.clone())).await.0;
+    ok(&reply);
+    let audit = receipt(&reply)["receipt"].clone();
+    assert_eq!(audit["actor"], serde_json::json!({"person": "member:alice", "pane": pane, "orchestrator": true}));
+    assert_eq!(audit["change"]["reason"], "Track the board");
+    assert_eq!(audit["change"]["previous"], serde_json::Value::Null);
+    let first_pin = runtime.store.workflow_configuration(&w).unwrap().unwrap().pin;
+    assert_eq!(audit["change"]["pin"], serde_json::json!(first_pin));
+    // A second publish records the pin it replaced and the one it set.
+    let revision = runtime.state(&w).unwrap().map_or(0, |s| s.revision);
+    let reply = sent(&mut runtime, &agent, ws, &publish("second", revision, Some(first_pin.clone()), Some("Let the orchestrator decide"),
+        Definition::tracker("orchestrator"))).await.0;
+    ok(&reply);
+    let audit = receipt(&reply)["receipt"].clone();
+    let second_pin = runtime.store.workflow_configuration(&w).unwrap().unwrap().pin;
+    assert_ne!(first_pin, second_pin);
+    assert_eq!((audit["change"]["previous"].clone(), audit["change"]["pin"].clone()), (serde_json::json!(first_pin), serde_json::json!(second_pin)));
+    assert!(audit["change"]["notice_task"].is_string(), "the owner is shown the change: {audit}");
+
+    // The owner reserves publishing to a person; the orchestrator is refused from then on.
+    let revision = runtime.state(&w).unwrap().map_or(0, |s| s.revision);
+    ok(&sent(&mut runtime, &owner, ws, &Action::PublicationGrant { mutation: mutation("reserve", revision, 1), enabled: false }).await.0);
+    let before = snapshot(&runtime, ws);
+    let (reply, _) = sent(&mut runtime, &agent, ws, &publish("third", revision, Some(second_pin), Some("Once more"), Definition::tracker("owner"))).await;
+    assert_eq!(refused(&reply), "scope-denied", "published past the owner's reservation");
+    assert_eq!(snapshot(&runtime, ws), before);
 }

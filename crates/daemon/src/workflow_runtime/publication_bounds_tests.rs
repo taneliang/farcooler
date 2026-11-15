@@ -321,3 +321,73 @@ async fn ov1206_a_model_change_cannot_activate_an_unused_hook() {
     }
     assert!(published_anyway.is_empty(), "the orchestrator published {published_anyway:#?}");
 }
+
+/// ov-1267: an app update writes the engine's own hooks differently, and the published workflow still pins the older
+/// build's file (ov-1259). The orchestrator publishes the runner's re-pin itself, with a reason, rather than filing a
+/// draft and waiting on a person: only the engine's own hook files move, to the ones this build writes. A re-pin that
+/// also takes up another pinned file's edit (here the Codex hooks a step could launch) still needs a person.
+#[tokio::test]
+async fn ov1267_the_orchestrator_repins_the_engines_own_hooks_and_nothing_else() {
+    use crate::workflow_starter::{repin, repin_definition, Repin};
+    let (_coding, configured) = super::coding_tests::configured(false, "pass").await;
+    let (_dir, svc, repo) = crate::test_support::short_fixture().await;
+    let mut config = configured.coding.clone().unwrap();
+    let git = std::path::PathBuf::from(svc.store.get_repository(repo).unwrap().canonical_git_dir).canonicalize().unwrap();
+    config.repository = git.parent().unwrap().to_path_buf();
+    config.base = adapters::git(&config.repository, &["rev-parse", "HEAD"]).await.unwrap();
+    adapters::git(&config.repository, &["update-ref", &config.landing_ref, &config.base]).await.unwrap();
+    let ws = svc.store.ensure_main_workspace(repo).unwrap().id;
+    let w = ws.to_string();
+    let (_pane, pid) = alices_pane(&svc, repo, ws, true).await;
+    // The engine runs where the engine's own hook files point.
+    let engine = svc.root_dir().join("workflow");
+    std::fs::create_dir_all(&engine).unwrap();
+    let engine = engine.canonicalize().unwrap();
+    let mut runtime = Runtime::open_service(&engine, svc.store.clone()).unwrap();
+    let peer = Peer { client_id: None, scope: Scope::Control };
+    let agent = factory(&svc, &runtime, peer.clone(), Some(pid));
+    let owner = factory(&svc, &runtime, peer, None);
+
+    // What an older build wrote, at the name it used: the same hooks, laid out differently. A Codex hooks file of
+    // the owner's sits beside it, which a step picking a Codex model could launch.
+    let older = svc.root_dir().canonicalize().unwrap().join("workflow-claude-hooks.json");
+    let text = format!("{}\n", serde_json::to_string(&crate::hook_install::claude_settings(&engine.join("h.sock"))).unwrap());
+    std::fs::write(&older, &text).unwrap();
+    let codex = svc.root_dir().canonicalize().unwrap().join("owners-codex-hooks.json");
+    let codex_text = crate::hook_install::native_codex_hooks(&engine.join("h.sock")).to_string();
+    std::fs::write(&codex, &codex_text).unwrap();
+    config.harness = CodingHarness::Native { preset: "claude".into(),
+        settings: Some(LaunchFile { path: older.clone(), digest: farcooler_workflow::digest(&text.into_bytes()) }),
+        project_hooks: None, codex_hooks: Some(LaunchFile { path: codex.clone(), digest: farcooler_workflow::digest(&codex_text.clone().into_bytes()) }),
+        plugin_dir: None, prompt: "implement the selected task".into(),
+        process: CodingCommand { argv: vec![], environment: Default::default(), timeout_ms: 5000 } };
+    let mut definition = config.definition().unwrap();
+    definition.models = [("build".to_string(), vec!["claude:opus".to_string(), "codex:gpt-5.5".to_string()])].into();
+    runtime.validate_publication(&definition, Some(&AdapterConfiguration::Coding(config.clone()))).unwrap();
+    ok(&published(&mut runtime, &owner, ws, "owners", None, definition.clone(), config.clone()).await);
+    let base = runtime.store.workflow_configuration(&w).unwrap().unwrap();
+
+    // Someone edits the owner's Codex hooks since. A re-pin of every file takes that edit up: refused.
+    std::fs::write(&codex, crate::hook_install::native_codex_hooks(&engine.join("h.sock")).to_string() + "\n").unwrap();
+    let everything = repin(&svc, &config, Repin::Everything);
+    let everything_definition = repin_definition(&definition, &config, &everything).unwrap();
+    runtime.validate_publication(&everything_definition, Some(&AdapterConfiguration::Coding(everything.clone()))).unwrap();
+    let reply = published(&mut runtime, &agent, ws, "everything", Some(base.pin.clone()), everything_definition, everything).await;
+    assert_eq!(refused(&reply), "scope-denied", "the orchestrator re-pinned a file the engine doesn't write");
+    assert_eq!(runtime.store.workflow_configuration(&w).unwrap().as_ref(), Some(&base));
+
+    // The engine's own hooks, moved to this build's: published by the orchestrator, and recorded as such.
+    std::fs::write(&codex, &codex_text).unwrap();
+    let next = repin(&svc, &config, Repin::AppOwned);
+    assert_ne!(next, config, "the re-pin moves the hooks");
+    let next_definition = repin_definition(&definition, &config, &next).unwrap();
+    let reply = published(&mut runtime, &agent, ws, "repin", Some(base.pin.clone()), next_definition.clone(), next.clone()).await;
+    ok(&reply);
+    let audit = super::admission_tests::receipt(&reply)["receipt"].clone();
+    assert_eq!(audit["actor"]["orchestrator"], true);
+    assert_eq!(audit["change"]["reason"], "Publish repin");
+    assert_eq!(audit["change"]["previous"], serde_json::json!(base.pin));
+    let current = runtime.store.workflow_configuration(&w).unwrap().unwrap();
+    assert_eq!((current.definition, current.adapter), (next_definition, Some(AdapterConfiguration::Coding(next))));
+    assert_eq!(audit["change"]["pin"], serde_json::json!(current.pin));
+}

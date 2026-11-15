@@ -163,7 +163,13 @@ impl Admission {
                         .ok_or(DomainError::ScopeDenied { needed: "person" })?),
                     None => None,
                 };
-                if !farcooler_store::workflow_publication::runs_the_same(previous.as_ref(), definition, adapter.as_deref()) {
+                // An app update's re-pin of the engine's own hooks counts as the configuration it replaces (ov-1267):
+                // this build wrote those files, so the orchestrator publishes it rather than waiting on a person.
+                let same = |previous: Option<&farcooler_store::workflow_publication::Configuration>|
+                    farcooler_store::workflow_publication::runs_the_same(previous, definition, adapter.as_deref());
+                if !same(previous.as_ref())
+                    && !previous.as_ref().and_then(|p| crate::workflow_starter::engine_repinned(&self.service, p)).is_some_and(|p| same(Some(&p)))
+                {
                     return Err(DomainError::ScopeDenied { needed: "a person's approval of a draft that changes commands, environment, hooks or the approvals before them" });
                 }
             }

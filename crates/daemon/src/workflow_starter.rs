@@ -213,6 +213,19 @@ pub fn repin(svc: &Service, config: &CodingConfig, scope: Repin) -> CodingConfig
     }
     next
 }
+/// `published` with the engine's own hook files moved to the ones this build writes (`Repin::AppOwned`) and its
+/// definition re-pinned to match, or `None` when nothing moves. What an orchestrator may publish on its own after an
+/// app update (ov-1267): the build fixes those files' content, so the move changes no command the owner didn't run.
+pub fn engine_repinned(svc: &Service, published: &farcooler_store::workflow_publication::Configuration)
+    -> Option<farcooler_store::workflow_publication::Configuration>
+{
+    let Some(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(config)) = &published.adapter else { return None };
+    let next = repin(svc, config, Repin::AppOwned);
+    if &next == config { return None; }
+    let definition = repin_definition(&published.definition, config, &next)?;
+    Some(farcooler_store::workflow_publication::Configuration { pin: published.pin.clone(), definition,
+        adapter: Some(farcooler_protocol::workflow_config::AdapterConfiguration::Coding(next)), notifications: published.notifications.clone() })
+}
 /// A landing that is a bare repository on this runner, whose config file is pinned (not a network remote).
 fn landing_is_local(landing: &CodingLanding) -> bool {
     let to = landing.repository.to_string_lossy();

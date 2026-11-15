@@ -191,11 +191,14 @@ pub enum Write<'a> {
 }
 impl Store {
 
-    /// Latest grant is read again at command consumption; revocation also stops receipt replay.
+    /// Whether the workspace's own orchestrator publishes its workflow. On unless a person reserved publishing to
+    /// a person (`publish: person`, a grant receipt with `enabled: false`): the owner's answer to Q1 of
+    /// docs/engine-pipeline.md section 9 (ov-1267). Read again at command consumption; a reservation also stops
+    /// receipt replay.
     pub fn orchestrator_publishes_workflow(&self, workspace: &str) -> Result<bool> {
         Ok(self.conn().query_row("SELECT json_extract(receipt,'$.change.enabled') FROM workflow_wire_receipts
             WHERE workspace=?1 AND json_extract(receipt,'$.change.kind')='grant' ORDER BY rowid DESC LIMIT 1",
-            [workspace],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(false))
+            [workspace],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(true))
     }
     pub fn workflow_publication_history(&self, workspace: &str) -> Result<Vec<Receipt>> {
         history(&self.conn(), workspace)
@@ -469,6 +472,8 @@ mod ov1179_rollback_tests {
         let second = Definition::tracker("orchestrator");
         {
             let store = Store::open(&path).unwrap();
+            assert!(store.orchestrator_publishes_workflow("ws").unwrap(),"the orchestrator publishes unless a person reserves it (ov-1267)");
+            store.workflow_wire_write_by("ws","reserve","r",Some(&actor),Write::PublicationGrant {enabled:false,revision:0}).unwrap();
             assert!(!store.orchestrator_publishes_workflow("ws").unwrap());
             store.workflow_wire_write_by("ws","grant","g",Some(&actor),Write::PublicationGrant {enabled:true,revision:0}).unwrap();
             assert!(store.orchestrator_publishes_workflow("ws").unwrap());
@@ -489,7 +494,7 @@ mod ov1179_rollback_tests {
         assert_eq!(store.workflow_wire_write_by("ws","rollback","r",Some(&actor),rollback()).unwrap(),result);
         assert_eq!(result.change.as_ref().unwrap()["reason"],"Revert a bad change");
         let history=store.workflow_publication_history("ws").unwrap();
-        assert_eq!(history.len(),4,"replays and refusals add no audit event");
+        assert_eq!(history.len(),5,"replays and refusals add no audit event");
         assert_eq!(history.last().unwrap().actor.as_ref(),Some(&actor));
         store.workflow_wire_write_by("ws","revoke","off",Some(&actor),Write::PublicationGrant {enabled:false,revision:0}).unwrap();
         assert!(!store.orchestrator_publishes_workflow("ws").unwrap());

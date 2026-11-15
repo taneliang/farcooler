@@ -59,12 +59,19 @@ impl Drop for ScratchDir {
 /// the same adoption path a live daemon uses.
 pub(crate) async fn fixture() -> (ScratchDir, Arc<Service>, Uuid) { fixture_at(false).await }
 
+/// `fixture` under `/tmp`, so the engine can run at the service's own `workflow` directory, where the engine's
+/// hook files point (`workflow_starter::repin`), within a Unix socket path's length.
+pub(crate) async fn short_fixture() -> (ScratchDir, Arc<Service>, Uuid) {
+    fixture_in(tempfile::Builder::new().prefix("f").tempdir_in("/tmp").unwrap(), false).await
+}
+
 /// `fixture` over a database from before the cutover, at `legacy`: for a test
 /// of the cutover itself or of pre-cutover behavior (ov-1024).
 pub(crate) async fn legacy_fixture() -> (ScratchDir, Arc<Service>, Uuid) { fixture_at(true).await }
 
-async fn fixture_at(legacy: bool) -> (ScratchDir, Arc<Service>, Uuid) {
-    let dir = tempfile::tempdir().unwrap();
+async fn fixture_at(legacy: bool) -> (ScratchDir, Arc<Service>, Uuid) { fixture_in(tempfile::tempdir().unwrap(), legacy).await }
+
+async fn fixture_in(dir: tempfile::TempDir, legacy: bool) -> (ScratchDir, Arc<Service>, Uuid) {
     let state = dir.path().join("state");
     std::fs::create_dir_all(&state).unwrap();
     if legacy { farcooler_store::testing::legacy_database_for_tests(&state.join("farcooler.db")); }
