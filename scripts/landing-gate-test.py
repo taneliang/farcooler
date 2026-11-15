@@ -64,7 +64,9 @@ class LandingTests(unittest.TestCase):
                 block = lane.job_block(workflow, job)
                 condition = next((line.strip()[4:] for line in block
                                   if line.startswith("    if:")), None)
-                if condition is None:
+                # Skipped only for main's push of a commit CI already passed on its landing
+                # branch (ov-1269), which a local gate never is: these always run here.
+                if condition is None or condition == "${{ !cancelled() && needs.changes.outputs.proven != 'true' }}":
                     required.add(job)
                     continue
                 if condition == "${{ always() }}":

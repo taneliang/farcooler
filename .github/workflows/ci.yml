@@ -22,7 +22,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # `landing/**`: a landing group's candidate (ov-1269). The engine pushes the
+    # folded commit there as soon as the fold succeeds, so CI runs while its
+    # local gate does, and moves main to that same commit only once this run
+    # passes. Main's own run of that commit then runs nothing (see `changes`).
+    branches: [main, 'landing/**']
     # The canary workflow's own baseline commit touches only this file. Without
     # this, its run supersedes and cancels the CI of the commit it records.
     paths-ignore: ['proto/baseline/canary.proto']
@@ -30,6 +34,9 @@ on:
 
 concurrency:
   # Main runs need distinct groups: GitHub also replaces pending runs in a group.
+  # Every other ref, a landing branch included, has one group that cancels: a
+  # group that folds again after main moved force-pushes its branch, and the
+  # run on the commit it replaced is one nobody will push.
   group: ci-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.run_id || 'shared' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
@@ -68,6 +75,10 @@ jobs:
       android: ${{ steps.changes.outputs.android }}
       web: ${{ steps.changes.outputs.web }}
       relay: ${{ steps.changes.outputs.relay }}
+      # Main's push of a commit that already passed CI on its landing branch
+      # (ov-1269): every flag above is off, and the jobs that don't read them
+      # skip on this one.
+      proven: ${{ steps.changes.outputs.proven }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,10 +98,24 @@ jobs:
             why="$(head -c 200 "$RUNNER_TEMP/gh.err" | tr '\n' ' ')"
             echo "CANDIDATES_ERROR=${why:-gh exited non-zero}" >> "$GITHUB_ENV"
           fi
+      # The green CI runs of this exact commit, on any branch, for a push to
+      # main. A failed listing writes nothing, and then everything runs.
+      - name: List the green CI runs of this commit
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -uo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$AFTER&event=push&status=success&per_page=100" \
+            --jq '.workflow_runs[] | {head_sha, head_branch}' > "$RUNNER_TEMP/proven.ndjson" 2> "$RUNNER_TEMP/proven.err" \
+            || { echo "could not list this commit's green runs: $(head -c 200 "$RUNNER_TEMP/proven.err" | tr '\n' ' ')"; : > "$RUNNER_TEMP/proven.ndjson"; }
       - name: Decide whether the app jobs run
         id: changes
         env:
           EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PROVEN: ${{ runner.temp }}/proven.ndjson
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           AFTER: ${{ github.event.after }}
@@ -109,6 +134,9 @@ jobs:
   # rather than something discovered from git history. See the script for why.
   wire:
     name: Wire compatibility
+    # Runs whatever `changes` says, bar a commit CI already passed (ov-1269).
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.proven != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -416,8 +444,8 @@ jobs:
     name: Tunnel helper (Go)
     # Capacity only (ov-1256): these short Linux checks use the slots after
     # Rust/Android, reserving four simultaneous shards plus background work.
-    needs: [rust-tests, android]
-    if: ${{ !cancelled() }}
+    needs: [changes, rust-tests, android]
+    if: ${{ !cancelled() && needs.changes.outputs.proven != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -1453,6 +1481,8 @@ jobs:
   # holds this file and nightly.yml to the shape the tiers need.
   ios-ui-plan:
     name: iOS UI plan
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.proven != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

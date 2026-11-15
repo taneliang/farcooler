@@ -124,9 +124,23 @@ def report(rows, over):
 def fetch(count):
     def gh(*a):
         return json.loads(subprocess.check_output(["gh", *a], text=True))
-    ids = gh("run", "list", "--workflow", "ci.yml", "--branch", "main",
-             "--status", "success", "--limit", str(count), "--json", "databaseId")
-    return [gh("run", "view", str(i["databaseId"]), "--json", "jobs")["jobs"] for i in ids]
+    # Main's run of a commit CI already passed on its landing branch runs no job (ov-1269): the
+    # timings that count are main's full runs and the landing candidates' runs.
+    runs = gh("run", "list", "--workflow", "ci.yml", "--event", "push",
+              "--status", "success", "--limit", str(count * 8), "--json", "databaseId,headBranch")
+    ids = [r for r in runs if timed_branch(r.get("headBranch"))]
+    jobs = (gh("run", "view", str(i["databaseId"]), "--json", "jobs")["jobs"] for i in ids)
+    return [j for j in jobs if ran_jobs(j)][:count]
+
+
+def ran_jobs(jobs):
+    """Whether a run ran anything past `changes`: main's run of a proven commit only decides to skip."""
+    return sum(x.get("conclusion") == "success" for x in jobs) > 1
+
+
+def timed_branch(branch):
+    """Runs on main, and on a landing candidate's branch, whose run is the one main's verdict comes from."""
+    return branch == "main" or (isinstance(branch, str) and branch.startswith("landing/") and len(branch) > len("landing/"))
 
 
 def job(name, start, end, conclusion="success"):
@@ -171,6 +185,10 @@ def self_test():
     missing = evaluate(runs, {**lm, "Renamed": "10"})[2]
     assert missing == ["Renamed"], missing       # limited in ci.yml, absent from the runs
     assert evaluate(runs, lm)[2] == [], "all limited jobs present"
+    # ov-1269: candidates' runs count, and main's run of a proven commit (only `changes` ran) doesn't.
+    assert timed_branch("main") and timed_branch("landing/0123456789abcdef")
+    assert not timed_branch("landing/") and not timed_branch("feature") and not timed_branch(None)
+    assert ran_jobs(runs[0]) and not ran_jobs([job("Changes", "10:00", "10:01"), job("Android", "10:00", "10:00", "skipped")])
     print("ci-job-time-check: self-test passed")
 
 

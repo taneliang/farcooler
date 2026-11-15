@@ -198,7 +198,7 @@ def main():
             ("native shards overlap Swift build", "ci.yml", "needs: [changes, rust-macos-build, swift, swift-tests]", "needs: [changes, rust-macos-build, swift-tests]"),
             ("native shards overlap Swift tests", "ci.yml", "needs: [changes, rust-macos-build, swift, swift-tests]", "needs: [changes, rust-macos-build, swift]"),
             ("short Linux checks overlap Rust/Android", "ci.yml", "needs: [changes, rust-tests, android]", "needs: changes"),
-            ("tunnel helper overlaps Rust/Android", "ci.yml", "needs: [rust-tests, android]", "needs: []"),
+            ("tunnel helper overlaps Rust/Android", "ci.yml", "needs: [changes, rust-tests, android]", "needs: [changes]"),
             ("Doc comments outside the budget", "doc-comments.yml", "group: background-macos", "group: doc-comments"),
             ("Site outside the budget", "site.yml", "group: background-macos", "group: site"),
             ("Web outside the budget", "web.yml", "group: background-macos", "group: web"),

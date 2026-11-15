@@ -15,13 +15,15 @@ BUSY = ("queued", "in_progress", "waiting", "pending", "requested")
 
 
 def main_ci_busy(runs):
-    """Whether any run of ci.yml on main is still waiting or running."""
-    return any(r.get("status") in BUSY and r.get("headBranch") == "main" for r in runs)
+    """Whether any run of ci.yml on main, or on a landing candidate's branch, is still waiting or running.
+    A candidate's run is the one main's verdict comes from (ov-1269): main's own run of it does nothing."""
+    return any(r.get("status") in BUSY and (r.get("headBranch") == "main" or str(r.get("headBranch")).startswith("landing/"))
+               for r in runs)
 
 
 def fetch():
     out = subprocess.run(
-        ["gh", "run", "list", "--workflow", "ci.yml", "--branch", "main", "--limit", "20",
+        ["gh", "run", "list", "--workflow", "ci.yml", "--event", "push", "--limit", "40",
          "--json", "status,headBranch"], capture_output=True, text=True, check=True).stdout
     return json.loads(out)
 
@@ -31,6 +33,9 @@ def self_test():
     ok = ok and main_ci_busy([{"status": "in_progress", "headBranch": "main"}])
     ok = ok and not main_ci_busy([{"status": "completed", "headBranch": "main"}])
     ok = ok and not main_ci_busy([{"status": "in_progress", "headBranch": "feature"}])
+    ok = ok and main_ci_busy([{"status": "in_progress", "headBranch": "landing/0123456789abcdef"}])
+    ok = ok and not main_ci_busy([{"status": "completed", "headBranch": "landing/0123456789abcdef"}])
+    ok = ok and not main_ci_busy([{"status": "in_progress", "headBranch": "landingx"}])
     ok = ok and not main_ci_busy([])
     if not ok:
         print("yield decision self-test failed", file=sys.stderr)

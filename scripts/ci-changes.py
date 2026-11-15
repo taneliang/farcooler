@@ -8,7 +8,17 @@ and Linux, Android, iOS and the UI shards) wait on its `app` output:
     EVENT=pull_request BASE=<sha> HEAD=<sha> scripts/ci-changes.py
     scripts/ci-changes.py --self-test
 
-It writes `app=true|false` to $GITHUB_OUTPUT and says why. `false` only when
+It writes `app=true|false` to $GITHUB_OUTPUT and says why.
+
+A push to main of a commit that already passed CI as a landing group's
+candidate (ov-1269) runs nothing again: the engine pushes the folded commit
+to `landing/<id>` first, CI runs there while the local gate does, and main
+then moves to that same commit. Same commit, same tree, same verdict. With
+`PROVEN=<file>` (the green CI runs whose head is AFTER, one JSON object of
+`head_sha` and `head_branch` per line) and `REF=refs/heads/main`, a green run
+on a `landing/` branch turns every flag off and `proven` on, so only the
+`changes` job runs. Anything else, an unreadable file included, judges the
+push as below. `false` only when
 every changed file is on the SITE_ONLY allowlist below; a single file off it,
 or anything this script cannot work out, is `true`: a skipped test is the one
 failure nobody sees.
@@ -90,7 +100,7 @@ DOCS = pattern(DOCS_ONLY)
 # wire in proto/, Cargo.*, every crate the apps link, the toolchain, scripts, the
 # workflows and actions), reaches ALL of them: a job a change can break never skips.
 FAMILIES = ["rust", "apple", "android", "web", "relay"]
-FLAGS = [*FAMILIES, "docs", "app", "non_docs"]
+FLAGS = [*FAMILIES, "docs", "app", "non_docs", "proven"]
 # crates/android (farcooler-jni) is linked by Android only; crates/cli is built by the Mac
 # (apps/macos/test.sh `cargo build --bins`) and not by Android; crates/web is its own
 # wasm workspace, linked by neither app (checked with `cargo metadata`, ov-1021). Every
@@ -116,7 +126,7 @@ NARROW = [
 def families(files):
     """{flag: bool} for a list of changed files; None (unknown) turns every flag on."""
     if files is None:
-        return {k: True for k in FLAGS}
+        return {**{k: True for k in FLAGS}, "proven": False}
     hit = set()
     app = docs = False
     for f in files:
@@ -128,7 +138,43 @@ def families(files):
             app = True
             hit |= narrow if narrow is not None else set(FAMILIES)
     return {**{k: k in hit for k in FAMILIES}, "docs": docs, "app": app,
-            "non_docs": any(not DOCS.fullmatch(f) for f in files)}
+            "non_docs": any(not DOCS.fullmatch(f) for f in files), "proven": False}
+
+
+LANDING_PREFIX = "landing/"
+
+
+def proven_by(event, ref, after, runs):
+    """The landing branch whose green CI run already judged this push to main, or None (ov-1269)."""
+    if event != "push" or ref != "refs/heads/main" or not re.fullmatch(r"[0-9a-f]{40}", after or ""):
+        return None
+    for run in runs:
+        branch = run.get("head_branch") if isinstance(run, dict) else None
+        if run.get("head_sha") == after and isinstance(branch, str) and branch.startswith(LANDING_PREFIX) \
+                and len(branch) > len(LANDING_PREFIX):
+            return branch
+    return None
+
+
+def read_runs(path):
+    """The JSON objects in an ndjson file; an unreadable file is no runs, so everything runs."""
+    try:
+        text = pathlib.Path(path).read_text() if path else ""
+    except OSError:
+        return []
+    runs = []
+    for line in text.splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            return []
+        if isinstance(value, dict):
+            runs.append(value)
+    return runs
+
+
+def proven_flags():
+    return {**{k: False for k in FLAGS}, "proven": True}
 
 
 def canary_plan():
@@ -183,14 +229,19 @@ def _decide(repo, event, after, base, head, candidates, listing_error):
 
 
 def main():
-    error = os.environ.get("CANDIDATES_ERROR", "").strip()
-    candidates = [] if error else canary_plan().read_candidates(os.environ.get("CANDIDATES"))
-    flags, why = decide_flags(
-        pathlib.Path.cwd(), os.environ.get("EVENT", ""), os.environ.get("AFTER", ""),
-        os.environ.get("BASE", ""), os.environ.get("HEAD", ""),
-        candidates, error,
-    )
-    print(f"::notice::{why}" if error and os.environ.get("EVENT") == "push" else why)
+    event, after = os.environ.get("EVENT", ""), os.environ.get("AFTER", "")
+    branch = proven_by(event, os.environ.get("REF", ""), after, read_runs(os.environ.get("PROVEN")))
+    if branch:
+        flags, why, error = proven_flags(), f"{after[:8]} already passed CI on {branch}, the landing candidate main moved to: nothing runs again.", ""
+    else:
+        error = os.environ.get("CANDIDATES_ERROR", "").strip()
+        candidates = [] if error else canary_plan().read_candidates(os.environ.get("CANDIDATES"))
+        flags, why = decide_flags(
+            pathlib.Path.cwd(), event, after,
+            os.environ.get("BASE", ""), os.environ.get("HEAD", ""),
+            candidates, error,
+        )
+    print(f"::notice::{why}" if error and event == "push" else why)
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
         with open(out, "a") as f:
@@ -293,7 +344,7 @@ def self_test():
     expect("docs-only leaves app off", families(["docs/a.md"])["app"], False)
     for path in ["reports/ov-1157/landing-rca.md", ".claude/agent/reports/ov-1157/landing-rca.md"]:
         expect(f"{path} selects only cheap jobs", families([path]),
-               {**{k: False for k in ALL}, "docs": True, "app": False, "non_docs": False})
+               {**{k: False for k in ALL}, "docs": True, "app": False, "non_docs": False, "proven": False})
     expect("a Swift change leaves docs off", families(["apps/macos/a.swift"])["docs"], False)
     for files, want in [
         (["docs/a.md", "README.md", "reports/run.txt", ".claude/agent/reports/a.md"], False),
@@ -304,7 +355,7 @@ def self_test():
         ([".claude/agent/reports"], True),
     ]:
         expect(f"non-doc CI suites for {files}", families(files)["non_docs"], want)
-    expect("every flag is on when nothing is known", families(None), {k: True for k in [*ALL, "docs", "app", "non_docs"]})
+    expect("every flag is on when nothing is known", families(None), {**{k: True for k in [*ALL, "docs", "app", "non_docs"]}, "proven": False})
 
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp)
@@ -369,13 +420,13 @@ def self_test():
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("the script exits 0", done.returncode, 0)
         expect("site files keep non-doc suites on", outputs.read_text() if outputs.exists() else None,
-               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=true\n")
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=true\nproven=false\n")
         outputs.unlink()
         env.update(EVENT="pull_request", BASE=b, HEAD=c)
         done = subprocess.run([sys.executable, __file__], cwd=repo, env=env, capture_output=True, text=True)
         expect("a docs-only PR exits 0", done.returncode, 0)
         expect("docs-only writes non-doc suites off", outputs.read_text() if outputs.exists() else None,
-               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=false\n")
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=true\napp=false\nnon_docs=false\nproven=false\n")
         outputs.unlink()
         env.update(EVENT="push", AFTER=c)
         env["CANDIDATES_ERROR"] = "gh: Server Error (HTTP 502)"
@@ -383,7 +434,40 @@ def self_test():
         expect("a failed listing exits 0", done.returncode, 0)
         expect("with a notice", done.stdout.startswith("::notice::could not list the green CI runs"), True)
         expect("and writes every flag on", outputs.read_text() if outputs.exists() else None,
-               "rust=true\napple=true\nandroid=true\nweb=true\nrelay=true\ndocs=true\napp=true\nnon_docs=true\n")
+               "rust=true\napple=true\nandroid=true\nweb=true\nrelay=true\ndocs=true\napp=true\nnon_docs=true\nproven=false\n")
+
+    # ov-1269: main's push of a commit CI already passed on a landing branch runs nothing again; nothing else does.
+    sha = "a" * 40
+    main, green = "refs/heads/main", [{"head_sha": sha, "head_branch": "landing/0123456789abcdef"}]
+    expect("a candidate green on its landing branch proves main's push", proven_by("push", main, sha, green), "landing/0123456789abcdef")
+    expect("... not for another commit", proven_by("push", main, "b" * 40, green), None)
+    expect("... not on a branch other than main", proven_by("push", "refs/heads/landing/0123456789abcdef", sha, green), None)
+    expect("... not for a pull request", proven_by("pull_request", main, sha, green), None)
+    expect("... not from main's own run", proven_by("push", main, sha, [{"head_sha": sha, "head_branch": "main"}]), None)
+    expect("... not from a branch that only starts like one", proven_by("push", main, sha, [{"head_sha": sha, "head_branch": "landingx/a"}]), None)
+    expect("... not from a bare prefix", proven_by("push", main, sha, [{"head_sha": sha, "head_branch": "landing/"}]), None)
+    expect("... not with no AFTER", proven_by("push", main, "", green), None)
+    expect("... not with no runs", proven_by("push", main, sha, []), None)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        expect("an unreadable runs file is no runs", read_runs(tmp / "missing"), [])
+        (tmp / "bad").write_text("{not json\n")
+        expect("a garbled runs file is no runs", read_runs(tmp / "bad"), [])
+        proven = tmp / "proven"
+        proven.write_text("".join(json.dumps(r) + "\n" for r in green))
+        outputs = tmp / "out"
+        env = {**os.environ, "EVENT": "push", "REF": main, "AFTER": sha, "PROVEN": str(proven), "GITHUB_OUTPUT": str(outputs),
+               "CANDIDATES_ERROR": "never read"}
+        done = subprocess.run([sys.executable, __file__], cwd=tmp, env=env, capture_output=True, text=True)
+        expect("a proven push exits 0", done.returncode, 0)
+        expect("and says which branch proved it", "landing/0123456789abcdef" in done.stdout, True)
+        expect("and turns every job off but itself", outputs.read_text() if outputs.exists() else None,
+               "rust=false\napple=false\nandroid=false\nweb=false\nrelay=false\ndocs=false\napp=false\nnon_docs=false\nproven=true\n")
+        outputs.unlink()
+        env["REF"] = "refs/heads/landing/0123456789abcdef"
+        done = subprocess.run([sys.executable, __file__], cwd=tmp, env=env, capture_output=True, text=True)
+        expect("the candidate's own push is judged in full", "proven=false" in (outputs.read_text() if outputs.exists() else ""), True)
 
     for failure in failures:
         print(f"ci-changes self-test: {failure}", file=sys.stderr)

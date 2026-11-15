@@ -216,7 +216,8 @@ def smoke_report():
     """Print the smoke job's time from ci.yml's last runs; a slow one is a warning."""
     try:
         listed = gh_json(
-            "run", "list", "-R", REPO, "--workflow", "ci.yml", "--branch", "main",
+            # Pushes: main's, and the landing candidates' that main's verdict comes from (ov-1269).
+            "run", "list", "-R", REPO, "--workflow", "ci.yml", "--event", "push",
             "--status", "completed", "-L", str(RUNS * 6), "--json", "databaseId",
         )
         lists = [
