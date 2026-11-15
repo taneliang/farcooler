@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Run the CI jobs a lane's change reaches, and print what ran (ov-799).
 
-Rust tests are narrowed to the crates a change reaches only with --select-rust, plain or --landing (ov-1268; off until the
-nightly shadow record has samples with zero misses; --full-rust forces the whole suite). --landing is also the local engine policy (ov-1185): bounded parallel families, conservative Rust selection against a
+Rust tests are narrowed by default to the crates the Cargo graph says a change reaches, plain or --landing (ov-1278);
+anything the selector cannot map, and --full-rust, run the whole suite. rust-selection.json in the log directory names
+the test binaries run and skipped. CI on main runs the full suite on every push, so a wrong skip turns main red. --landing is also the local engine policy (ov-1185): bounded parallel families, conservative Rust selection against a
 verified green ancestor, release bundle proof left to CI, and warm target kept.
 CI on main remains full proof. Each selection/fallback is saved with step logs.
 
@@ -324,8 +325,6 @@ def steps_for(job, workflows, ctx):
                     skip = "checks the runner, installs the watchOS platform or packages products for CI's UI shards"
             elif SETUP.search(hay):
                 skip = "installs a toolchain on a CI runner"
-            elif name == "Green bases for Rust shadow (ov-1116)":
-                skip = "CI lists verified green bases; local shadow safely proposes full without that evidence"
             elif job == "rust" and name == "macOS native Rust tests":
                 skip = "local gate runs the full Rust suite; the filtered Mac CI replay would duplicate it"
             elif job == "web" and WEB_LINUX_ONLY.search(hay):
@@ -440,6 +439,22 @@ def jobs_for(files, site, ios_relevant, commands, families):
     return reach
 
 
+def rust_proposal(repo, args, chosen, landing_policy):
+    """The Rust selection for this gate run: on by default (ov-1278), full when --full-rust says so or the selector cannot map a change."""
+    if "rust" not in chosen:
+        return {"full": True, "packages": [], "reasons": ["Rust not reached"], "selected_binaries": [], "skipped_binaries": []}
+    if args.full_rust:
+        return landing_policy.forced_full(repo, load_module, "--full-rust")
+    return landing_policy.rust_selection(repo, args.base, load_module)
+
+
+def write_rust_evidence(logdir, proposal):
+    """Every gate run saves which Rust test binaries it selected and skipped (ov-1278), so a red main traces to a skip."""
+    import json
+    if proposal is not None:
+        (pathlib.Path(logdir) / "rust-selection.json").write_text(json.dumps(proposal, indent=2) + "\n")
+
+
 def rust_impact(repo, inputs):
     """Reuse ov-1116's conservative crate selector without enabling its skips.
 
@@ -451,7 +466,7 @@ def rust_impact(repo, inputs):
                          for status, path in inputs):
         return "full workspace (cross-cutting, deleted or unknown input)"
     try:
-        shadow = load_module("rust_shadow", repo / "scripts/rust-shadow.py")
+        shadow = load_module("rust_select", repo / "scripts/rust-select.py")
         metadata = subprocess.run(["cargo", "metadata", "--offline", "--locked",
                                    "--format-version", "1", "--all-features"],
                                   cwd=repo, capture_output=True, text=True, check=True)
@@ -835,7 +850,6 @@ def md(cell):
 def main(argv):
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
     ap.add_argument("--full-rust", action="store_true", help="run the whole Rust suite even when the change only reaches some crates, plain or --landing (ov-1268)")
-    ap.add_argument("--select-rust", action="store_true", help="narrow nextest to the crates the change reaches, plain or --landing. Off until the nightly shadow record (ov-1116) has samples with zero misses (ov-1268)")
     ap.add_argument("--landing", action="store_true", help="local landing: parallel families, CI retains release bundle proof")
     ap.add_argument("--workers", type=int, default=4, choices=range(1, 5), help="maximum concurrent landing families (default 4)")
     ap.add_argument("--base", default=os.environ.get("FARCOOLER_BASE") or "origin/main",
@@ -906,20 +920,14 @@ def gate(args):
     proposal = None
     if args.landing:
         import landing_policy  # optional local policy; plain runners stay self-contained
-        # ov-1268: the nightly shadow record has no samples yet, so landing keeps the whole suite until --select-rust.
-        select = "rust" in chosen and args.select_rust and not args.full_rust
-        why = ("--full-rust" if args.full_rust else "no shadow samples yet: --select-rust to narrow") if "rust" in chosen else "Rust not reached"
-        proposal = (landing_policy.rust_selection(repo, args.base, load_module) if select
-                    else {"full": True, "packages": [], "reasons": [why]})
+        proposal = rust_proposal(repo, args, chosen, landing_policy)
         landing_policy.apply(plans, proposal)
         print("lane-gate: local landing Rust selection: " + "; ".join(proposal["reasons"]))
         print(f"lane-gate: landing families: {landing_policy.families(chosen)}; workers: {args.workers}")
-    elif "rust" in chosen and args.select_rust and not args.full_rust:
-        # ov-1268: the lane gate skips Rust tests a change cannot affect, same as landing. Anything the
-        # selector does not understand is full, and CI on main always runs the whole suite.
+    else:
         import landing_policy
-        proposal = landing_policy.rust_selection(repo, args.base, load_module)
-        for step in plans["rust"]:
+        proposal = rust_proposal(repo, args, chosen, landing_policy)
+        for step in (plans["rust"] if "rust" in chosen else []):
             if not step.skip:
                 landing_policy.apply_rust("rust", step, proposal)
 
@@ -937,11 +945,12 @@ def gate(args):
     if "rust" in chosen:
         print(f"lane-gate: Rust impact: {rust_impact(repo, inputs)}")
         if proposal is None:
-            print("lane-gate: Rust coverage: full suite (plain gate selects only with --select-rust; no shadow samples yet, ov-1268)")
+            print("lane-gate: Rust coverage: full suite (selection unavailable)")
         elif proposal["full"]:
             print("lane-gate: Rust coverage: full suite (" + "; ".join(proposal["reasons"]) + ")")
         else:
-            print(f"lane-gate: Rust coverage: nextest runs only {', '.join(proposal['packages'])}; CI on main runs the full suite (ov-1268)")
+            print(f"lane-gate: Rust coverage: nextest runs only {', '.join(proposal['packages'])}; "
+                  f"{len(proposal['skipped_binaries'])} test binaries skipped (rust-selection.json); CI on main runs the full suite (ov-1278)")
     if not any(j in HEAVY for j in chosen):
         print("lane-gate: no builds selected")
     if args.dry_run:
@@ -955,9 +964,7 @@ def gate(args):
 
     logdir = pathlib.Path(args.log_dir) if args.log_dir else pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-logs-"))
     logdir.mkdir(parents=True, exist_ok=True)
-    if proposal is not None:
-        import json
-        (logdir / "rust-selection.json").write_text(json.dumps(proposal, indent=2) + "\n")
+    write_rust_evidence(logdir, proposal)
     rows, failed = [], True  # until run_jobs says otherwise: an exception is a failure
     try:
         failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)

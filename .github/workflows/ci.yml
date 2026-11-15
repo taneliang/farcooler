@@ -152,7 +152,7 @@ jobs:
       - run: python3 ./scripts/ci-concurrency-test.py
       # The flaky-test quarantine list (ov-1229): well formed, unexpired, naming real tests.
       - run: python3 scripts/quarantine.py --lint
-      - run: python3 scripts/rust-shadow-test.py
+      - run: python3 scripts/rust-select-test.py
       - run: python3 scripts/rust-shards.py --self-test
       - uses: actions/setup-python@v5
         with:
@@ -456,16 +456,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Green bases for Rust shadow (ov-1116)
-        if: runner.os == 'Linux'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # A failed/partial listing is no evidence: planner falls back to full.
-          if ! gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
-            --jq '.workflow_runs[] | {head_sha}' > "$RUNNER_TEMP/rust-green.ndjson"; then
-            rm -f "$RUNNER_TEMP/rust-green.ndjson"
-          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

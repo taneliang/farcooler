@@ -113,7 +113,7 @@ class LandingTests(unittest.TestCase):
             self.assertEqual(selected([path]), {"wire", "doc-comments"})
 
     def test_crate_selector_is_used_and_never_filters_ci_rust_steps(self):
-        shadow = load("rust-shadow")
+        shadow = load("rust-select")
         result = subprocess.CompletedProcess([], 0, stdout="{}")
         with patch.object(lane, "load_module", return_value=shadow), \
                 patch.object(lane.subprocess, "run", return_value=result) as metadata, \

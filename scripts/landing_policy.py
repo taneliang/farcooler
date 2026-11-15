@@ -68,7 +68,7 @@ def rust_selection(repo, base, load_module):
     Missing network, metadata, green history, or unknown paths means full. Never
     treat the previous commit or an arbitrary --base as proof of a green base.
     """
-    shadow = load_module("landing_rust_shadow", repo / "scripts/rust-shadow.py")
+    shadow = load_module("landing_rust_select", repo / "scripts/rust-select.py")
     try:
         candidates_file = os.environ.get("CANDIDATES")
         if candidates_file:
@@ -96,9 +96,35 @@ def rust_selection(repo, base, load_module):
         metadata = json.loads(shadow.capture(repo, "cargo", "metadata", "--locked", "--offline",
                                              "--format-version", "1", "--all-features"))
         packages, reasons, full = shadow.select(repo, metadata, changes)
-        return {"full": full, "packages": packages, "reasons": reasons, "base": green}
+        return with_binaries(shadow, metadata, {"full": full, "packages": packages, "reasons": reasons, "base": green})
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
-        return {"full": True, "packages": [], "reasons": [f"full: {exc}"]}
+        return {"full": True, "packages": [], "reasons": [f"full: {exc}"], "selected_binaries": [], "skipped_binaries": [],
+                "binaries_note": "unavailable: selection failed before the workspace was read"}
+
+
+def with_binaries(shadow, metadata, proposal):
+    """Name the test binaries the proposal runs and skips, for the gate's evidence (ov-1278).
+
+    A red main is traced to a skip by reading the last landing's rust-selection.json.
+    """
+    names = set(proposal["packages"])
+    if proposal["full"]:
+        names = {p["name"] for p in metadata["packages"] if p["id"] in set(metadata["workspace_members"])}
+    run, skipped = shadow.test_binaries(metadata, names)
+    return {**proposal, "selected_binaries": run, "skipped_binaries": skipped}
+
+
+def forced_full(repo, load_module, reason):
+    """The whole suite on request (--full-rust), still with every binary named in the evidence."""
+    proposal = {"full": True, "packages": [], "reasons": [reason], "selected_binaries": [], "skipped_binaries": [],
+                "binaries_note": "unavailable: workspace metadata could not be read"}
+    try:
+        shadow = load_module("landing_rust_select", repo / "scripts/rust-select.py")
+        metadata = json.loads(shadow.capture(repo, "cargo", "metadata", "--locked", "--offline",
+                                             "--format-version", "1", "--all-features"))
+        return with_binaries(shadow, metadata, {k: proposal[k] for k in ("full", "packages", "reasons")})
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return proposal
 
 
 def apply(plans, proposal):

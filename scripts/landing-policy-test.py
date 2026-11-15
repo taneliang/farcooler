@@ -178,7 +178,7 @@ class LandingTests(unittest.TestCase):
         nextest = next(s.run for s in plans["rust"] if "--no-fail-fast --archive-file" in s.run)
         self.assertIn("test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/gate-flaky.py run -- python3 scripts/quarantine.py run -- cargo nextest", nextest)
         self.assertIn("-E 'package(=farcooler-fence)'", nextest)
-        self.assertNotIn("rust-shadow.py", nextest)
+        self.assertNotIn("rust-select.py", nextest)
         for s in plans["swift"]:
             if "apps/macos/build/$APP_NAME.app" in s.run or "build-app.sh" in s.run:
                 self.assertIsNotNone(s.skip)
@@ -196,7 +196,7 @@ class LandingTests(unittest.TestCase):
 
     def test_real_workspace_leaf_narrows_and_shared_inputs_select_everything(self):
         """ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph."""
-        shadow = lane.load_module("rust_shadow_real", ROOT / "scripts/rust-shadow.py")
+        shadow = lane.load_module("rust_select_real", ROOT / "scripts/rust-select.py")
         metadata = json.loads(subprocess.run(
             ["cargo", "metadata", "--offline", "--locked", "--format-version", "1", "--all-features"],
             cwd=ROOT, capture_output=True, text=True, check=True).stdout)
@@ -227,25 +227,40 @@ class LandingTests(unittest.TestCase):
 
 
     def test_full_rust_forces_the_whole_suite_in_both_modes(self):
-        """ov-1268: --full-rust beats --landing's selection; both modes select only with --select-rust."""
-        base = subprocess.run(["git", "rev-list", "-n1", "HEAD", "--", "crates/vt/src"], cwd=ROOT,
-                              capture_output=True, text=True, check=True).stdout.strip() + "~1"
+        """ov-1278: selection is the default in both modes; --full-rust beats it in both, and the evidence says so."""
         def plan(*flags):
             out = subprocess.run([sys.executable, str(ROOT / "scripts/lane-gate.py"), "--dry-run", "--only", "rust",
-                                  "--base", base, *flags], cwd=ROOT, capture_output=True, text=True)
+                                  "--base", "HEAD~1", *flags], cwd=ROOT, capture_output=True, text=True)
             return out.stdout + out.stderr
-        default = plan("--landing")  # no shadow samples yet: landing keeps the whole suite too
-        self.assertIn("Rust coverage: full suite", default)
-        self.assertIn("no shadow samples yet", default)
-        self.assertNotIn("nextest runs only", default)
-        landing = plan("--landing", "--select-rust", "--full-rust")
-        self.assertIn("Rust coverage: full suite", landing)
-        self.assertIn("--full-rust", landing)
-        self.assertNotIn("nextest runs only", landing)
-        both = plan("--select-rust", "--full-rust")
-        self.assertIn("Rust coverage: full suite", both)
-        self.assertNotIn("nextest runs only", both)
-        self.assertIn("Rust coverage: full suite", plan())  # plain gate is full until the shadow record has samples
+        for flags in (("--landing", "--full-rust"), ("--full-rust",)):
+            with self.subTest(flags=flags):
+                out = plan(*flags)
+                self.assertIn("Rust coverage: full suite (--full-rust)", out)
+                self.assertNotIn("nextest runs only", out)
+        self.assertNotIn("--select-rust", (ROOT / "scripts/lane-gate.py").read_text().split("def main")[1])
+
+    def test_evidence_names_selected_and_skipped_binaries_and_reads_back(self):
+        """ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them."""
+        shadow = lane.load_module("rust_select_evidence", ROOT / "scripts/rust-select.py")
+        metadata = json.loads(subprocess.run(
+            ["cargo", "metadata", "--offline", "--locked", "--format-version", "1", "--all-features"],
+            cwd=ROOT, capture_output=True, text=True, check=True).stdout)
+        names, reasons, full = shadow.select(ROOT, metadata, [("M", "crates/vt/src/lib.rs")])
+        self.assertFalse(full)
+        narrow = policy.with_binaries(shadow, metadata, {"full": False, "packages": names, "reasons": reasons})
+        everything = policy.forced_full(ROOT, lane.load_module, "--full-rust")
+        self.assertTrue(everything["full"])
+        self.assertEqual(everything["skipped_binaries"], [])
+        self.assertIn("farcooler-vt", narrow["selected_binaries"])
+        self.assertTrue(narrow["skipped_binaries"])
+        self.assertEqual(sorted(narrow["selected_binaries"] + narrow["skipped_binaries"]), everything["selected_binaries"])
+        self.assertTrue(all(b.split("::")[0] in names for b in narrow["selected_binaries"]))
+        self.assertFalse(any(b.split("::")[0] in names for b in narrow["skipped_binaries"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            lane.write_rust_evidence(tmp, narrow)
+            saved = json.loads((Path(tmp) / "rust-selection.json").read_text())
+        self.assertEqual(saved["selected_binaries"], narrow["selected_binaries"])
+        self.assertEqual(saved["skipped_binaries"], narrow["skipped_binaries"])
 
     def test_parallelism_is_bounded_and_apple_is_serial(self):
         self.assertEqual(policy.families(["rust", "swift-tests", "swift", "ios", "android"]),
