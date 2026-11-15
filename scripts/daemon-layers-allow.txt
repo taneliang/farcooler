@@ -223,6 +223,7 @@ crates/daemon/src/landing_read_tests.rs -> unresolved: glob super::*
 crates/daemon/src/landing_read_tests.rs -> workspace_ops
 crates/daemon/src/landing_tests.rs -> unresolved: glob super::*
 crates/daemon/src/layout.rs -> unresolved: glob super::*
+crates/daemon/src/lead_change.rs -> caller_seat
 crates/daemon/src/lead_change.rs -> claude_logins
 crates/daemon/src/lead_change.rs -> service
 crates/daemon/src/lead_change.rs -> watch
@@ -806,6 +807,7 @@ crates/daemon/src/workflow_runtime/coding_execute.rs -> ci_watch
 crates/daemon/src/workflow_runtime/coding_execute.rs -> hook_install
 crates/daemon/src/workflow_runtime/coding_execute.rs -> service
 crates/daemon/src/workflow_runtime/coding_execute.rs -> unresolved: glob super::*
+crates/daemon/src/workflow_runtime/coding_gate_tests.rs -> unresolved: glob super::*
 crates/daemon/src/workflow_runtime/coding_landing.rs -> unresolved: glob super::*
 crates/daemon/src/workflow_runtime/coding_native.rs -> foreground
 crates/daemon/src/workflow_runtime/coding_native.rs -> hook_install
