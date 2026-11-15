@@ -42,6 +42,22 @@ fail-fast = false
 test-threads = "num-cpus"
 
 
+# The local lane gate and the landing gate (ov-1285), never CI on main, which
+# stays strict so a real flake still shows. A hung test held three landings for
+# 600 s each (workflow_get_shows_an_effect_waiting_for_a_place, which passes in
+# about a second), so the gate stops one after 120 s. scripts/gate-flaky.py
+# reruns whatever failed or timed out, once and alone, and reports it as FLAKY.
+[profile.gate]
+inherits = "ci"
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+# Known slow: the live tmux stress rounds take 70-120 s when the machine is
+# busy, so they keep the default profile's ten minutes.
+[[profile.gate.overrides]]
+filter = 'binary(live_tmux)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
+
 # tmux tests that wrap the real `tmux` in a script that sleeps 1.5 s per verb.
 # Their timings are the point of them, and `SlowTmux` in
 # crates/tmux/src/server.rs used a process-wide mutex so only one ran at a

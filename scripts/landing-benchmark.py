@@ -120,7 +120,8 @@ def report(trials, before):
             job = "rust" if row["job"] == "rust-lints" else row["job"]
             command = row["command"]
             if ("cargo nextest run --profile ci --workspace" in command
-                    or "cargo nextest run --profile ci --no-fail-fast --archive-file" in command):
+                    or "cargo nextest run --profile ci --no-fail-fast --archive-file" in command
+                    or "cargo nextest run --profile gate --no-fail-fast --archive-file" in command):
                 command = "default-host Rust tests (including historical shadow, when present)"
             key = (job, command)
             occurrence = occurrences.get(key, 0)

@@ -292,6 +292,10 @@ def summary_text(data):
     for job in data["selected"]:
         for receipt in data["jobs"][job]:
             rows.append(json.dumps({"job": job, **receipt}, sort_keys=True))
+    for job in data["selected"]:
+        for receipt in data["jobs"][job]:
+            for line in receipt.get("flaky", []):
+                rows.append(f"{job} step {receipt['index']} {line}")
     rows.append("error: " + str(data["error"]))
     rows.append("invalidated: " + str(data["invalidated"]))
     return "\n".join(rows) + "\n"
@@ -359,8 +363,10 @@ def validate_chain(directory, sha, scope, seen=None, budget=None):
             if step["skip"]:
                 require(receipt == {"index": i, "skip": step["skip"]}, "skip cannot claim execution")
                 continue
-            require(set(receipt) == {"index", "command", "cwd", "env", "exit", "log_sha256", "updates", "paths", "error"},
+            require(set(receipt) - {"flaky"} == {"index", "command", "cwd", "env", "exit", "log_sha256", "updates", "paths", "error"},
                     "incomplete execution receipt")
+            require("flaky" not in receipt or (isinstance(receipt["flaky"], list) and receipt["flaky"] and
+                    all(isinstance(v, str) and v.startswith("FLAKY: ") for v in receipt["flaky"])), "invalid flaky list")
             require(receipt["command"] == step["run"] and receipt["cwd"] == step["cwd"] and
                     receipt["env"] == {**env, **step["env"]}, "command/cwd/environment mismatch")
             require(receipt["exit"] is None or type(receipt["exit"]) is int, "exit must be numeric or unknown")
@@ -429,6 +435,11 @@ def execute_step(step, index, env, repo, tmp, log):
         finally:
             out.flush()
             receipt["log_sha256"] = file_digest(log)
+            # Tests scripts/gate-flaky.py had to rerun (ov-1285). Only a passing rerun prints this exact prefix,
+            # and it is recorded beside the exit code so the sealed summary carries it. Older evidence has no key.
+            flaky = [l for l in log.read_text(errors="replace").splitlines() if l.startswith("FLAKY: ")]
+            if flaky:
+                receipt["flaky"] = flaky
     try:
         lines = gh_env.read_text().splitlines()
         require(all("=" in line for line in lines), "unsupported GITHUB_ENV syntax")

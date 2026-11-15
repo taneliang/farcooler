@@ -43,7 +43,7 @@ class EvidenceTest(unittest.TestCase):
         # this fixture executes only wire/doc-comments jobs.
         jobs.append("  rust-build:\n    steps:\n      - name: Build the runtime binaries and test archive\n        run: ./scripts/rust-archive.sh target/tests.tar.zst\n")
         jobs.append("  rust-tests:\n    steps:\n      - name: Full Rust workspace shard\n        run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --no-fail-fast --archive-file target/tests.tar.zst --partition hash:${{ matrix.shard }}/4\n")
-        jobs[0] = "  wire:\n    steps:\n      - run: mkdir -p .fixture; printf 'wire\\n' >> .fixture/wire-count\n      - run: printf 'raw wire output\\n'\n"
+        jobs[0] = "  wire:\n    steps:\n      - run: mkdir -p .fixture; printf 'wire\\n' >> .fixture/wire-count\n      - run: printf 'raw wire output\\nFLAKY: pkg::bin a_test: first 1.2s (failed), rerun 1.0s (passed)\\n'\n"
         (self.repo / ".github/workflows/ci.yml").write_text("jobs:\n" + "".join(jobs))
         # The producer is deliberately stateful, like a transient first-attempt
         # failure. Its state is an ignored fixture output, never reused as a pass.
@@ -136,6 +136,20 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual((self.root / "first").stat().st_mode & 0o777, 0o700)
         for p in (self.root / "first").iterdir():
             self.assertEqual(p.stat().st_mode & 0o777, 0o400)
+
+    def test_flaky_tests_are_in_the_receipt_and_the_sealed_summary(self):
+        self.first()
+        directory = self.root / "first"
+        data = json.loads((directory / "manifest.json").read_text())
+        line = "FLAKY: pkg::bin a_test: first 1.2s (failed), rerun 1.0s (passed)"
+        self.assertEqual(data["jobs"]["wire"][1]["flaky"], [line])
+        self.assertNotIn("flaky", data["jobs"]["wire"][0])
+        self.assertIn(f"wire step 1 {line}\n", (directory / "summary.txt").read_text())
+        # The key is optional, so evidence sealed before this existed still validates, but when present it must
+        # be a non-empty list of FLAKY lines.
+        data["jobs"]["wire"][1]["flaky"] = ["not a flaky line"]
+        self.rewrite(directory, data)
+        self.assertIn("invalid flaky list", self.checker(1).stderr)
 
     def test_v1_missing_unsealed_and_existing_directory_refused(self):
         v1 = self.root / "v1.txt"

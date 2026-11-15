@@ -176,7 +176,7 @@ class LandingTests(unittest.TestCase):
         self.assertIn("apps/macos/test.sh", wf["ci"])
         policy.apply(plans, {"full": False, "packages": ["farcooler-fence"]})
         nextest = next(s.run for s in plans["rust"] if "--no-fail-fast --archive-file" in s.run)
-        self.assertIn("test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest", nextest)
+        self.assertIn("test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/gate-flaky.py run -- python3 scripts/quarantine.py run -- cargo nextest", nextest)
         self.assertIn("-E 'package(=farcooler-fence)'", nextest)
         self.assertNotIn("rust-shadow.py", nextest)
         for s in plans["swift"]:
@@ -324,10 +324,10 @@ class LandingTests(unittest.TestCase):
                 candidates.write_text("")
                 self.assertTrue(policy.rust_selection(repo, "HEAD", loader)["full"])
             (repo / ".config").mkdir()
-            (repo / ".config/nextest.toml").write_text('[profile.ci]\nfail-fast=false\n')
+            (repo / ".config/nextest.toml").write_text('[profile.gate]\nfail-fast=false\n')
             def gate(full=False):
                 step = lane.Step("rust", "Full Rust workspace (local)",
-                    './scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --offline --profile ci --no-fail-fast --archive-file target/rust-tests.tar.zst\n')
+                    './scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --offline --profile gate --no-fail-fast --archive-file target/rust-tests.tar.zst\n')
                 # Match CI's shape; offline is configured in env instead.
                 step.run = step.run.replace("run --offline", "run")
                 plans = {"rust": [step]}

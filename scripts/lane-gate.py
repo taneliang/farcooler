@@ -367,8 +367,13 @@ def steps_for(job, workflows, ctx):
         aliases = ('for name in farcooler-local farcooler-preview farcooler-canary; do\n'
                    '  ln -sf "$PWD/target/debug/farcooler" "$PWD/target/debug/$name"\n'
                    'done\n')
+        # The gate, unlike CI on main, reruns a failed or timed-out test once, alone, and stops a hung one
+        # after 120 s (profile gate); scripts/gate-flaky.py reports what it had to rerun as FLAKY (ov-1285).
+        gate_prefix = re.sub(r"(?:python3 scripts/quarantine\.py run -- )?cargo nextest run --profile \S+$",
+                             "python3 scripts/gate-flaky.py run -- python3 scripts/quarantine.py run -- "
+                             "cargo nextest run --profile gate", match[1])
         local = Step(job, "Full Rust workspace (local)",
-                     aliases + match[1] + " --no-fail-fast --archive-file " + archive + "\n", wd, env)
+                     aliases + gate_prefix + " --no-fail-fast --archive-file " + archive + "\n", wd, env)
         before_doc = next((i for i, step in enumerate(steps)
                            if step.run.strip() == "cargo test --workspace --doc"), len(steps))
         steps[before_doc:before_doc] = [produce, local]
@@ -661,10 +666,23 @@ def run_step_safely(step, repo, env, logdir, tmp, fail_fast=False):
         result += f" [env-gap: {gap}]"
     if code != 0 and NO_SPACE.search(output):
         result += "; the disk is full (\"No space left on device\" in its output)"
+    flaky_lines = flaky_notes(output)
+    if flaky_lines:
+        result += f"; FLAKY x{len(flaky_lines)} (rerun passed, listed below)"
+        FLAKY_LINES.extend(flaky_lines)
     notes = "" if "--self-test" in step.run else leak_notes(output)  # a self-test prints notes on purpose
     if notes:
         result += f"; {notes}"
     return result, secs, count_tests(output), code == 0, log, output
+
+
+FLAKY_LINE = re.compile(r"^FLAKY: .+$", re.M)
+FLAKY_LINES = []  # every FLAKY line this run's steps printed (scripts/gate-flaky.py), for the summary
+
+
+def flaky_notes(output):
+    """The `FLAKY: <binary> <test>: first Ns (failed), rerun Ns (passed)` lines a step printed (ov-1285)."""
+    return FLAKY_LINE.findall(output)
 
 
 LEAK_NOTE = re.compile(r"test-leak-check: note: (\d+) new (entries|plists) appeared")
@@ -950,6 +968,9 @@ def print_summary(rows, repo, base, logdir, failed, left_out=(), write_to=None):
     lines += [f"Branch HEAD {sha[:9]} against {base}; logs in {logdir}", ""]
     lines += ["| Job | Command | Result | Secs | Tests |", "| --- | --- | --- | --- | --- |"]
     lines += ["| " + " | ".join(md(c) for c in r) + " |" for r in rows]
+    if FLAKY_LINES:
+        lines += ["", "### FLAKY tests (each failed in the main run and passed alone on one rerun; the orchestrator files a ticket per line of .config/flaky-log.tsv)", ""]
+        lines += [f"- {line}" for line in FLAKY_LINES]
     note = f" (PARTIAL, NOT A FULL GATE: {', '.join(left_out)} not run by --only/--skip)" if left_out else ""
     if failed:
         last = "lane-gate: FAILED" + note
@@ -1021,7 +1042,7 @@ def _self_test():
         ("wire", "./scripts/proto-lint.py --channel canary"),
         ("wire", "./scripts/copy-lint.py"),
         ("wire", "./scripts/test-leak-check.py --lint"),
-        ("rust", "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/quarantine.py run -- cargo nextest run --profile ci --no-fail-fast --archive-file target/rust-tests.tar.zst"),
+        ("rust", "./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- python3 scripts/gate-flaky.py run -- python3 scripts/quarantine.py run -- cargo nextest run --profile gate --no-fail-fast --archive-file target/rust-tests.tar.zst"),
         ("rust", "./scripts/rust-archive.sh target/rust-tests.tar.zst"),
         ("rust", "cargo clippy --workspace --all-targets -- -D warnings"),
         ("rust", "cargo test --workspace --doc"),
@@ -1041,8 +1062,13 @@ def _self_test():
     ]:
         expect(f"{job} runs {needle}", has(job, needle), True)
     expect("local gate runs one full Rust workspace suite", sum(
-        "cargo nextest run --profile ci --no-fail-fast --archive-file" in s.run and not s.skip
+        "cargo nextest run --profile gate --no-fail-fast --archive-file" in s.run and not s.skip
         for s in plans["rust"]), 1)
+    expect("the local gate reruns failures once, alone, through scripts/gate-flaky.py (ov-1285)", sum(
+        "python3 scripts/gate-flaky.py run -- python3 scripts/quarantine.py run -- cargo nextest run --profile gate" in s.run
+        and not s.skip for s in plans["rust"]), 1)
+    expect("CI on main keeps its strict profile and never reruns (ov-1285)", (
+        "gate-flaky" in text, "--profile gate" in text, "--profile ci --no-fail-fast --archive-file" in text), (False, False, True))
     native = parse_steps(job_block(text, "rust-macos-tests") or [])
     expect("CI retains its filtered Mac native tests", sum(
         name == "macOS native Rust tests" and "--partition" in run and "-E" in run
@@ -1050,13 +1076,13 @@ def _self_test():
     expect("local gate does not replay filtered Mac CI tests", any(
         s.name == "macOS native Rust tests" and not s.skip for s in plans["rust"]), False)
     expect("local Rust runs the full workspace exactly once", sum(
-        "cargo nextest run --profile ci --no-fail-fast --archive-file" in step.run and not step.skip
+        "cargo nextest run --profile gate --no-fail-fast --archive-file" in step.run and not step.skip
         for step in plans["rust"]), 1)
     expect("local Rust builds the archive once, with CI's producer, before running it", [
         i for i, step in enumerate(plans["rust"])
         if step.run.strip() == "./scripts/rust-archive.sh target/rust-tests.tar.zst"
         and not step.skip] and [
-        i for i, step in enumerate(plans["rust"]) if "cargo nextest run --profile ci --no-fail-fast --archive-file" in step.run][0] > [
+        i for i, step in enumerate(plans["rust"]) if "cargo nextest run --profile gate --no-fail-fast --archive-file" in step.run][0] > [
         i for i, step in enumerate(plans["rust"]) if step.run.strip().startswith("./scripts/rust-archive.sh")][0], True)
     expect("local Rust runs every partition's worth: no partition or filter", any(
         "--partition" in step.run or " -E " in step.run
@@ -1567,6 +1593,31 @@ def _self_test():
         with contextlib.redirect_stdout(io.StringIO()):
             print_summary(rows[:0], ROOT, "HEAD", "/tmp", False, ["rust"], dest)
         expect("a partial run saves verdict partial", "verdict: partial\n" in dest.read_text(), True)
+    # A test that fails once then passes lets the gate pass and shows as FLAKY in the summary; one that fails
+    # its rerun fails the step (ov-1285). A fake `cargo nextest` stands in for the real one.
+    flaky_mod = load_module("gate_flaky", ROOT / "scripts" / "gate-flaky.py")
+    for pass_on, want_ok, want_flaky in ((1, True, True), (2, False, False)):
+        with tempfile.TemporaryDirectory() as t:
+            t = pathlib.Path(t)
+            for name in ("cargo", "cargo-nextest"):
+                (t / name).write_text(flaky_mod.FAKE_CARGO)
+                (t / name).chmod(0o755)
+            (t / "logs").mkdir()
+            step = Step("rust", "n", f"python3 '{ROOT}/scripts/gate-flaky.py' run -- cargo nextest run --profile gate\n", "", {})
+            env = {**os.environ, "PATH": f"{t}{os.pathsep}{os.environ['PATH']}", "FAKE_STATE": str(t / "state"),
+                   "PASS_ON": str(pass_on), "GATE_FLAKY_LOG": str(t / "flaky.tsv")}
+            del FLAKY_LINES[:]
+            result, _secs, _counts, ok, _log, output = run_step_safely(step, ROOT, env, t / "logs", t)
+            with contextlib.redirect_stdout(io.StringIO()) as shown:
+                print_summary([("rust", "n", result, "1", "")], ROOT, "HEAD", "/tmp", not ok, [])
+            expect(f"a test that needs {pass_on} rerun pass(es): the step's verdict", ok, want_ok)
+            expect(f"a test that needs {pass_on} rerun pass(es): FLAKY in the step and the summary",
+                   ("FLAKY: pkg::bin a_test: first 1.2s (failed), rerun" in output, "FLAKY x1" in result,
+                    "### FLAKY tests" in shown.getvalue(), "- FLAKY: pkg::bin a_test" in shown.getvalue()), (want_flaky,) * 4)
+            expect("only a passing rerun is logged as flaky", (t / "flaky.tsv").exists(), want_flaky)
+            del FLAKY_LINES[:]
+    if subprocess.call([sys.executable, str(ROOT / "scripts/gate-flaky.py"), "--self-test"]):
+        failures.append("scripts/gate-flaky.py --self-test failed")
     gap_step = Step("rust", "n", "cargo nextest run --profile ci\n")
     expect("a git-lfs gap", env_gap(gap_step, "panicked: CI installs git-lfs, and it isn't on PATH"), "git-lfs-missing")
     expect("the same words from another command", env_gap(Step("wire", "n", "./scripts/x.sh\n"), "git-lfs isn't on PATH"), "")

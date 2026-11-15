@@ -254,13 +254,13 @@ def load_inventory(file=None, live=False):
     return None
 
 
-def nextest_config(base, entries, report):
+def nextest_config(base, entries, report, profile="ci"):
     """The repo's nextest config plus a rerun override per listed test and a JUnit report."""
-    text = base + "\n[profile.ci.junit]\npath = " + json.dumps(str(report)) + "\n"
+    text = base + f"\n[profile.{profile}.junit]\npath = " + json.dumps(str(report)) + "\n"
     for binary, test, *_ in entries:
         # Exact regexes, so a name is never read as a filter expression.
         exact = lambda s: "^" + re.escape(s).replace("/", r"\/") + "$"
-        text += ("\n[[profile.ci.overrides]]\nfilter = " + json.dumps(f"binary_id(/{exact(binary)}/) and test(/{exact(test)}/)")
+        text += (f"\n[[profile.{profile}.overrides]]\nfilter = " + json.dumps(f"binary_id(/{exact(binary)}/) and test(/{exact(test)}/)")
                  + f"\nretries = {RERUNS}\n")
     return text
 
@@ -290,16 +290,18 @@ def run(command, base=None, entries=None, say=print, inventory=None):
         entries, problems = parse(LIST.read_text(), dt.datetime.now(dt.timezone.utc).date())
         if problems:
             raise ValueError("; ".join(problems))
-    if not entries:
+    junit = os.environ.get("GATE_JUNIT")  # scripts/gate-flaky.py wants the JUnit report even with nothing listed
+    if not entries and not junit:
         return subprocess.call(command)
-    if command[:3] != ["cargo", "nextest", "run"] or command[command.index("--profile") + 1:][:1] != ["ci"]:
-        raise ValueError("expected cargo nextest run --profile ci ...")
-    missing = unknown(entries, ROOT, inventory if inventory is not None else live_inventory())
+    profile = command[command.index("--profile") + 1:][:1] if "--profile" in command else []
+    if command[:3] != ["cargo", "nextest", "run"] or profile not in (["ci"], ["gate"]):
+        raise ValueError("expected cargo nextest run --profile ci (or gate) ...")
+    missing = unknown(entries, ROOT, inventory if inventory is not None else live_inventory()) if entries else []
     if missing:
         raise ValueError("; ".join(missing))
     with tempfile.TemporaryDirectory(prefix="quarantine-") as tmp:
-        report, config = pathlib.Path(tmp, "junit.xml"), pathlib.Path(tmp, "nextest.toml")
-        config.write_text(nextest_config(base, entries, report))
+        report, config = pathlib.Path(junit or pathlib.Path(tmp, "junit.xml")), pathlib.Path(tmp, "nextest.toml")
+        config.write_text(nextest_config(base, entries, report, profile[0]))
         rc = subprocess.call([*command, "--config-file", str(config)])
         listed = {(b, t) for b, t, *_ in entries}
         tickets = {(b, t): k for b, t, k, *_ in entries}
