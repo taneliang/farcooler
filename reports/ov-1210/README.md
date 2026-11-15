@@ -18,10 +18,10 @@ cannot drift into a second build graph.
 | Job | Before | After |
 | --- | --- | --- |
 | Linux archive | 4.0 | 4.0 |
-| Linux shards 1-4 | 9.9 / 11.5 / 9.7 / 12.9 | 9.3 / 11.6 / 9.3 / 10.2 |
+| Linux shards 1-4 | 9.9 / 11.5 / 9.7 / 12.8 | 10.4 / 11.6 / 9.4 / 10.2 |
 | Mac archive | 14.5 | 7.8 |
-| Mac shards 1-2 | 8.1 / 4.0 | 9.1 / 8.6 |
-| Linux Rust check job | 8.2 | 8.0 |
+| Mac shards 1-2 | 8.1 / 4.0 | 9.0 / 8.5 |
+| Linux Rust check job | 8.2 | 7.9 |
 | First start to last Linux Rust job done | 22.8 | 15.8 |
 | First start to last Mac Rust job done | 22.7 | 16.9 |
 
