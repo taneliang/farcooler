@@ -213,7 +213,9 @@ jobs:
       # The daemon's layers only depend downward (ov-1272, step 1 of ov-1219's split):
       # no module of an implementation layer names the composition layer or a sibling
       # it may not use. Today's edges are listed in scripts/daemon-layers-allow.txt; a
-      # new one fails, and so does a listed one that no longer exists. Its rules against
+      # new one fails, and so does a listed one that no longer exists. A construct it
+      # cannot resolve (a crate-root or layer-module alias, a glob of a layer module, a
+      # macro-built path) fails too (ov-1276). Its rules against
       # planted edges first, then the tree, then the list against main's: a pull request
       # cannot pass by writing a violation down.
       - name: Daemon layers

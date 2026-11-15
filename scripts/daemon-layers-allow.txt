@@ -1,7 +1,8 @@
-# Today's forbidden daemon layer edges (ov-1272): `file -> module`.
+# Today's forbidden daemon layer edges (ov-1272, ov-1276): `file -> module`, or
+# `file -> unresolved: construct` for what the scanner refuses to guess at.
 # A line here is debt: it can only be deleted, never added. The check fails when a
 # listed edge no longer exists (delete the line) or an unlisted one appears.
-# Which of ov-1219's steps clears each is in .claude/agent/reports/ov-1272/README.md.
+# Which of ov-1219's steps clears each is in .claude/agent/reports/ov-1276/README.md.
 crates/daemon/src/access_migration.rs -> service
 crates/daemon/src/access_migration_tests.rs -> rpc_people
 crates/daemon/src/agent_panes.rs -> reps
@@ -345,6 +346,7 @@ crates/daemon/src/reps_tests.rs -> watch
 crates/daemon/src/reps_tests.rs -> wire
 crates/daemon/src/review_ops.rs -> people
 crates/daemon/src/review_ops.rs -> service
+crates/daemon/src/review_ops.rs -> unresolved: alias crate::stack as st
 crates/daemon/src/review_ops.rs -> watch
 crates/daemon/src/review_ops.rs -> wire
 crates/daemon/src/service.rs -> by_hand
@@ -542,6 +544,7 @@ crates/daemon/src/watch/answer_wake/tmux_bracketing.rs -> paste_mode
 crates/daemon/src/watch/answer_wake/worker_tests.rs -> runtime
 crates/daemon/src/watch/answer_wake/worker_tests.rs -> watch
 crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs -> effect_runner
+crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs -> unresolved: alias crate::workflow_notices as notices
 crates/daemon/src/watch/answer_wake/workflow_notice_tests.rs -> workflow_notices
 crates/daemon/src/watch/idle_walk_tests.rs -> test_support
 crates/daemon/src/watch/marks.rs -> people
