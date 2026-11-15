@@ -96,10 +96,12 @@ pub struct Run {
 }
 pub fn tok(k: &str) -> Subject { Subject::Token(k.into()) }
 impl Run {
-    pub fn new(pools: &[(&str, u16)], workflow: Value) -> Self {
+    pub fn new(pools: &[(&str, u16)], workflow: Value) -> Self { Self::with(pools, workflow, adapters()) }
+    /// The same driver with another set of linked adapters (the coding tests link `coding/v1`).
+    pub fn with(pools: &[(&str, u16)], workflow: Value, adapters: Adapters<'static>) -> Self {
         let pools: BTreeMap<String, u16> = pools.iter().map(|(k, n)| (k.to_string(), *n)).collect();
         let p = Pipeline::new("workspace", 1, &pools);
-        let mut run = Run { start: p.clone(), p, adapters: adapters(), log: Vec::new(), effects: Vec::new(),
+        let mut run = Run { start: p.clone(), p, adapters, log: Vec::new(), effects: Vec::new(),
             now: 1_000, host: BTreeMap::new(), n: 0, answers: 0 };
         run.orch(Command::Publish { layout: layout(workflow), moves: BTreeMap::new(), after: BTreeMap::new(),
             reason: "first layout".into() }).expect("the fixture layout publishes");
