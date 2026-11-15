@@ -42,6 +42,26 @@ extension Markdown {
     /// the Mac's folded report (ov-788).
     @MainActor public static var drawnBytes: Int { MarkdownPiece.drawnBytes }
 }
+
+/// A count of the bytes drawn under one view tree (ov-1245). A test puts one
+/// in the environment (`.drawTally(_:)`) so it reads only its own render's
+/// draws: `Markdown.drawnBytes` is process-wide, and any other suite drawing
+/// Markdown in parallel moves it.
+@MainActor public final class DrawTally {
+    public var bytes = 0
+    public init() {}
+}
+
+extension EnvironmentValues {
+    @Entry var drawTally: DrawTally?
+}
+
+extension View {
+    /// Counts the Markdown drawn under this view into `tally`.
+    public func drawTally(_ tally: DrawTally) -> some View {
+        environment(\.drawTally, tally)
+    }
+}
 #endif
 
 extension EnvironmentValues {
@@ -102,6 +122,9 @@ struct MarkdownPiece: View, Equatable {
 
     @Environment(\.taskKeyLinker) private var linker
     @Environment(\.selectsText) private var selectsText
+    #if DEBUG
+    @Environment(\.drawTally) private var drawTally
+    #endif
     #if os(iOS)
     /// The iPhone's conversation selects ranges (ov-609): `SelectableText`.
     @Environment(\.selectsRanges) private var selectsRanges
@@ -129,6 +152,7 @@ struct MarkdownPiece: View, Equatable {
     var body: some View {
         #if DEBUG
         let _ = Self.drawnBytes += bytes
+        let _ = drawTally?.bytes += bytes
         #endif
         let selects = !open && selectsText
         content

@@ -78,9 +78,12 @@ extension NativeHarnessTests {
         // About 30 KB, as a lane's report runs.
         let report = (0..<400).map { "Line \($0) of the report: the lane ran its tests and wrote what it saw." }
             .joined(separator: "\n\n")
-        let before = Markdown.drawnBytes
-        _ = try #require(await Self.pixels(FoldedMarkdown(text: report, lines: AgentConversation.harnessLines)))
-        let drawn = Markdown.drawnBytes - before
+        // This render's own tally, not the process-wide count: other suites
+        // draw Markdown in parallel (ov-1245).
+        let tally = DrawTally()
+        _ = try #require(await Self.pixels(
+            FoldedMarkdown(text: report, lines: AgentConversation.harnessLines).drawTally(tally)))
+        let drawn = tally.bytes
         #expect(drawn > 0, "nothing was drawn, so this proved nothing")
         #expect(drawn < 2_000, "a folded report of \(report.utf8.count) bytes drew \(drawn)")
     }
