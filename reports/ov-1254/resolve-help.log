@@ -5,37 +5,37 @@ Usage: farcooler workflow resolve [OPTIONS] --run <RUN> --pin <PIN> --command-id
 
 Arguments:
   <WORKSPACE>
-          
+
 
   <ITEM>
-          
+
 
 Options:
       --json
           Emit machine-readable JSON. The Mac app consumes this rather than scraping human output
 
       --run <RUN>
-          
+
 
       --pin <PIN>
-          
+
 
       --runner <TARGET>
           Operate on another runner, as `user@host` or an ssh config alias.
-          
+
           Runs the same protocol over ssh, so this flag reaches a runner exactly as your own ssh does: one ssh can't reach, this can't either. A runner's tunnel is the apps' route into it, and is not what this flag uses.
 
       --command-id <COMMAND_ID>
           Keep this identity and every argument unchanged when retrying a lost reply
 
       --revision <REVISION>
-          
+
 
       --epoch <EPOCH>
-          
+
 
       --sequence <SEQUENCE>
-          
+
 
   -h, --help
           Print help (see a summary with '-h')

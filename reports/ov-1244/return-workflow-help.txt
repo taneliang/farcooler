@@ -35,7 +35,7 @@ Options:
 
       --runner <TARGET>
           Operate on another runner, as `user@host` or an ssh config alias.
-          
+
           Runs the same protocol over ssh, so this flag reaches a runner exactly as your own ssh does: one ssh can't reach, this can't either. A runner's tunnel is the apps' route into it, and is not what this flag uses.
 
   -h, --help

@@ -104,3 +104,7 @@ All four acceptance items are satisfied. No textual conflicts needed resolution
 on this rebuild; the only additional reconciliation is the explicitly required
 quarantine restoration and the behavior-preserving lint corrections documented
 above. All foreground validation commands finished before the final report commit.
+
+The post-commit range whitespace check exposed blank lines containing spaces in
+imported and freshly captured CLI help. Normalized those help artifacts only;
+`git diff --check origin/main..HEAD` passes after this documentation cleanup.
