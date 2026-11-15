@@ -12,6 +12,7 @@ pub use execution::*;
 pub mod hooks;
 pub use hooks::*;
 pub mod templates;
+pub mod pipeline;
 pub use definition::*;
 pub use reducer::*;
 pub use state::*;
