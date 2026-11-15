@@ -14,4 +14,3 @@
 # Blank lines and lines starting with # are ignored. Example:
 #
 #   farcooler-daemon::a_foo  tests::it_waits  ov-9999  2026-12-01
-farcooler-daemon  git_sandbox::alone::a_planted_hook_is_refused_with_the_pins_off  ov-1248  2026-11-29

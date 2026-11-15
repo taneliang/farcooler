@@ -264,6 +264,12 @@ async fn spawn_bounded(
         if let Some(path) = crate::git_lfs::path(crate::git_guard::child_path()) {
             cmd.env("PATH", path);
         }
+    } else {
+        // Unguarded (a test): no pins, flags or work tree, but not the test
+        // runner's `GIT_` variables either, which no guarded git ever gets.
+        // The landing gate's `GIT_OPTIONAL_LOCKS=0` kept status from
+        // rewriting the index, so no hook ran and the control failed (ov-1250).
+        crate::git_guard::strip_inherited(&mut cmd);
     }
     if let Some(index) = index {
         cmd.env("GIT_INDEX_FILE", index);

@@ -176,11 +176,7 @@ pub fn fixed() -> Vec<Pin> {
 /// in the environment, so git's children, and git run by someone else, get
 /// it too.
 pub fn apply(cmd: &mut std::process::Command, pins: &[Pin]) {
-    for (key, _) in std::env::vars_os() {
-        if key.as_bytes().starts_with(b"GIT_") {
-            cmd.env_remove(key);
-        }
-    }
+    strip_inherited(cmd);
     cmd.env("GIT_CONFIG_COUNT", pins.len().to_string());
     for (i, (key, value)) in pins.iter().enumerate() {
         cmd.env(format!("GIT_CONFIG_KEY_{i}"), key);
@@ -190,6 +186,15 @@ pub fn apply(cmd: &mut std::process::Command, pins: &[Pin]) {
     cmd.env("GIT_NO_LAZY_FETCH", "1");
     if let Some(path) = child_path() {
         cmd.env("PATH", path);
+    }
+}
+
+/// Remove every `GIT_` variable `cmd` would inherit from the daemon.
+pub fn strip_inherited(cmd: &mut std::process::Command) {
+    for (key, _) in std::env::vars_os() {
+        if key.as_bytes().starts_with(b"GIT_") {
+            cmd.env_remove(key);
+        }
     }
 }
 

@@ -854,6 +854,31 @@ mod alone {
         f.refused_by_the_sandbox_alone().await;
     }
 
+    /// The control holds whatever `GIT_` variables the test runner has. The
+    /// landing gate exports `GIT_OPTIONAL_LOCKS=0` and a `GIT_CONFIG_*` pin
+    /// (`scripts/landing_policy.py`); passed on, status never rewrote the
+    /// index, no hook ran, and the test above failed only there (ov-1250).
+    /// Runs that test again in a child of this binary with that environment.
+    #[test]
+    fn the_control_ignores_the_runners_git_environment() {
+        let name = "git_sandbox::alone::a_planted_hook_is_refused_with_the_pins_off";
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--test-threads", "1"])
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "diff.autoRefreshIndex")
+            .env("GIT_CONFIG_VALUE_0", "false")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "{name} under the gate's git environment:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
     #[tokio::test]
     async fn a_planted_filter_is_refused_with_the_pins_off() {
         let f = Fixture::new("*.txt filter=evil\n");
