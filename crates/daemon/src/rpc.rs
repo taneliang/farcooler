@@ -1056,6 +1056,9 @@ impl Rpc {
                 let Some(request::Payload::ClientRevoke(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                // An admin request: never from a pane, as `member.remove` (S4, ov-1286). On the local socket an
+                // agent is `host_admin`, and could otherwise revoke the owner's phone and every device it added.
+                crate::person_access::refuse_admin_from_pane(svc, self.caller_pid).await?;
                 tracing::info!(by = self.who(), client = %p.client_id, with_added = p.with_added, "revoking a device");
                 Ok(result::Value::ClientList(crate::person_access::revoke(svc, self.peer.client_id.as_deref(), &p).await?))
             }

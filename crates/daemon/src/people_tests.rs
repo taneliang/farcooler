@@ -955,3 +955,25 @@ async fn worktree_remove_finds_an_orchestrator_promoted_after_the_request() {
     assert!(r.svc.store.get_worktree(wt.id).is_ok(), "the worktree is left");
     assert!(std::path::Path::new(&wt.worktree_path).exists());
 }
+
+/// ov-1286: revoking a device decides who may log in here, as removing a
+/// member does, so it's never asked from a pane: an agent, on the local
+/// socket and so `host_admin`, is refused `person_only` before anything is
+/// read, and a person gets past that refusal to the revoke itself.
+#[tokio::test]
+async fn an_agent_never_revokes_a_device() {
+    let r = runner().await;
+    let revoke = || Request {
+        method: "client.revoke".into(),
+        payload: Some(request::Payload::ClientRevoke(pb::ClientRevoke { client_id: "phone-o".into(), with_added: true })),
+        ..Default::default()
+    };
+    let snapshot = r.svc.inventory.refresh().await;
+    let pid = |pane: Uuid| snapshot.claimants(pane).into_iter().next().unwrap().stamp.pid as i32;
+    for (who, pane) in [("an agent", r.agent.id), ("the orchestrator", r.orchestrator.id)] {
+        let agent = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid(pane)));
+        assert_eq!(refused(&agent, revoke()).await.as_deref(), Some("resource-conflict:person_only"), "{who}");
+    }
+    let person = factory(&r.svc, None, Scope::HostAdmin);
+    assert_ne!(refused(&person, revoke()).await.as_deref(), Some("resource-conflict:person_only"), "a person");
+}
