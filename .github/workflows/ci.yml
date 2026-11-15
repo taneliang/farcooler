@@ -1182,8 +1182,10 @@ jobs:
       # The full bundle, not `swift build`. `build-app.sh` is the thing that has
       # gone wrong before — it once copied a stale Rust binary instead of
       # building one — so the assembly step is what CI should exercise.
-      # Keep the shipping configuration: Swift release optimization and Rust
-      # opt-level 3 + ThinLTO, including the release-only conditional code.
+      # Swift keeps the shipping configuration (`-c release`, so the
+      # release-only conditional code is compiled). Rust is built fast on this
+      # PR path (no ThinLTO, opt-level 1; see the job's `env`); canary, release
+      # and nightly keep opt-level 3 + ThinLTO.
       - name: Check native bundle linkage isolation
         run: python3 scripts/macos-bundle-native-test.py
       - name: Build Far Cooler.app
