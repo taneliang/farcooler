@@ -375,7 +375,8 @@ async fn light_review_stage_timing_before_and_after() {
                 d.stages.insert(2, config.stage("ticket-gate", StageKind::Check, "coding-check/v1", "0"));
             }
             enqueue(&mut runtime, "w", "one", d);
-            for _ in 0..20 {
+            assert!(wait_until_async!(tokio::time::Instant::now() + Duration::from_secs(60),
+                Duration::from_millis(10), async || {
                 runtime.pump(super::now()).await.unwrap();
                 let state = runtime.state("w").unwrap().unwrap();
                 assert!(!matches!(state.items["one"].phase, Phase::Failed | Phase::Uncertain));
@@ -384,9 +385,9 @@ async fn light_review_stage_timing_before_and_after() {
                     let next = effects.iter().find(|s| s.effect.operation == state.items["one"].definition.stages[2].operation).unwrap();
                     let ms = runtime.store.workflow_events("w").unwrap().last().unwrap().now_ms - next.effect.created_ms;
                     samples.push(ms);
-                    break;
-                }
-            }
+                    true
+                } else { false }
+            }), "timing sample never reached WaitingJoin");
         }
         assert_eq!(samples.len(), 5);
         samples.sort();

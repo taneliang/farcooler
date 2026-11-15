@@ -109,10 +109,8 @@ async fn as_a_person(name: &str) -> bool {
     common::as_a_person("ov971-person", name, std::time::Duration::from_secs(120)).await
 }
 async fn settles(host: &Host, card: Uuid, to: TaskStatus) {
-    for _ in 0..200 {
-        if host.service.store.get_task(card).unwrap().status == to { return; }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
+    if common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_millis(25), async || host.service.store.get_task(card).unwrap().status == to).await { return; }
     let said: Vec<_> = host.service.store.notes_for(card, Some(NoteKind::Finding)).unwrap().into_iter().map(|n| n.body).collect();
     panic!("the card never reached {to:?}; it is {:?}: {said:?}", host.service.store.get_task(card).unwrap().status);
 }

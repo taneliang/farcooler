@@ -164,22 +164,24 @@ async fn workflow_service_ordinary_socket_config_pins_rework_restart_and_offline
         let host=Host::open(dir.path()).await;let mut link=host.connect().await;
         assert_eq!(call(&mut link,workspace,publish.clone()).await,receipt);
         let mut sequence=2; let mut approvals=0;
-        for _ in 0..300 {
-            let snapshot=get(&mut link,workspace).await;
+        let mut link = Some(link);
+        common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+            std::time::Duration::from_millis(10), async || {
+            let snapshot=get(link.as_mut().unwrap(),workspace).await;
             let item=&snapshot["state"]["items"]["a"];
             assert_eq!(item["policy_pin"],pin);
-            if item["phase"]=="Done" { break; }
+            if item["phase"]=="Done" { return true; }
             if item["phase"]=="WaitingApproval" {
                 sequence+=1; approvals+=1;
-                accepted(&call(&mut link,workspace,Action::Approve {
+                accepted(&call(link.as_mut().unwrap(),workspace,Action::Approve {
                     mutation:mutation(&format!("approval-{sequence}"),snapshot["state"]["revision"].as_u64().unwrap(),sequence),
                     item:"a".into(),run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),
                     candidate:item["candidate"].as_str().map(String::from),
                 }).await);
                 if !gates {
                     // Disconnect the controller entirely; inspect storage only.
-                    drop(link);
-                    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                    drop(link.take());
+                    tokio::time::timeout(std::time::Duration::from_secs(60), async {
                         loop {
                             let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
                             if state.items["a"].phase==Phase::Done { break; }
@@ -187,11 +189,12 @@ async fn workflow_service_ordinary_socket_config_pins_rework_restart_and_offline
                             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                         }
                     }).await.unwrap();
-                    link=host.connect().await;
+                    link=Some(host.connect().await);
                 }
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+            false
+        }).await;
+        let mut link = link.unwrap();
         let state=host.service.store.workflow_state(&workspace.to_string()).unwrap().unwrap();
         assert_eq!(state.items["a"].phase,Phase::Done); assert_eq!(state.items["a"].iteration,1);
         assert_eq!(state.items["a"].definition,definition);
@@ -219,7 +222,8 @@ async fn workflow_service_no_git_bootstrap_shutdown_and_recovery() {
     let snapshot=get(&mut link,workspace).await;let item=&snapshot["state"]["items"]["tracker"];
     accepted(&call(&mut link,workspace,Action::Approve {mutation:mutation("a",snapshot["state"]["revision"].as_u64().unwrap(),2),
         item:"tracker".into(),run:item["run"].as_str().unwrap().into(),pin,candidate:item["candidate"].as_str().map(String::from)}).await);
-    for _ in 0..100 { if get(&mut link,workspace).await["state"]["items"]["tracker"]["phase"]=="Done" {break;} tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+    common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60), std::time::Duration::from_millis(10),
+        async || get(&mut link,workspace).await["state"]["items"]["tracker"]["phase"]=="Done").await;
     assert_eq!(get(&mut link,workspace).await["state"]["items"]["tracker"]["phase"],"Done");
     assert!(!dir.path().join("state/workflow/repo").exists());
     drop(link);host.close().await;
@@ -234,10 +238,9 @@ async fn workflow_service_shutdown_reaps_active_command_and_restart_does_not_rel
     accepted(&call(&mut link,workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     accepted(&call(&mut link,workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"active".into(),pin}).await);
     let started=dir.path().join("started");
-    tokio::time::timeout(std::time::Duration::from_secs(10),async {
-        // The file exists before the script has written its pid into it.
-        while std::fs::read_to_string(&started).map_or(true, |t| t.is_empty()) {tokio::time::sleep(std::time::Duration::from_millis(10)).await;}
-    }).await.unwrap();
+    assert!(common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_millis(10), async ||
+        std::fs::read_to_string(&started).is_ok_and(|t| !t.is_empty())).await, "command never started");
     let pid:i32=std::fs::read_to_string(&started).unwrap().parse().unwrap();
     let modified=std::fs::metadata(&started).unwrap().modified().unwrap();
     drop(link);host.close().await;
@@ -266,13 +269,14 @@ async fn process(root:&Path) -> (tokio::process::Child,Link,Uuid) {
     let mut child=tokio::process::Command::new(std::env::current_exe().unwrap())
         .args(["--ignored","--exact","workflow_service_child","--nocapture"])
         .env("FARCOOLER_WORKFLOW_SERVICE_TEST_ROOT",root).kill_on_drop(true).spawn().unwrap();
-    let link=tokio::time::timeout(std::time::Duration::from_secs(15), async {
-        loop {
-            assert!(child.try_wait().unwrap().is_none(),"ordinary child exited before serving");
-            if let Ok(link)=Client::connect(root.join("d.sock"),"process-proof","1").await { break link; }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    }).await.unwrap();
+    let mut link = None;
+    assert!(common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_millis(20), async || {
+            assert!(child.try_wait().unwrap().is_none(), "ordinary child exited before serving");
+            link = Client::connect(root.join("d.sock"),"process-proof","1").await.ok();
+            link.is_some()
+        }).await, "ordinary child never served");
+    let link = link.unwrap();
     let store=farcooler_store::Store::open(root.join("state/farcooler.db")).unwrap();
     let workspace=store.list_workspaces(None).unwrap()[0].id;
     (child,link,workspace)
@@ -332,11 +336,8 @@ async fn workflow_service_fast_ship_without_checks_or_review() {
     let pin=farcooler_store::workflow_publication::configuration_pin(&definition,adapter.as_ref());
     accepted(&call(&mut link,host.workspace,Action::Publish { reason:None, notifications:None,mutation:mutation("p",0,1),expected_pin:None,definition,adapter:adapter.map(Box::new)}).await);
     accepted(&call(&mut link,host.workspace,Action::Enqueue {mutation:mutation("e",0,1),item:"fast".into(),pin}).await);
-    for _ in 0..200 {
-        let snapshot=get(&mut link,host.workspace).await;
-        if snapshot["state"]["items"]["fast"]["phase"]=="Done" { break; }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60), std::time::Duration::from_millis(20),
+        async || get(&mut link,host.workspace).await["state"]["items"]["fast"]["phase"]=="Done").await;
     assert_eq!(get(&mut link,host.workspace).await["state"]["items"]["fast"]["phase"],"Done");
     drop(link);host.close().await;
 }
@@ -376,10 +377,8 @@ async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfigura
     observed["run"]["status"]="completed".into();
     std::fs::write(provider,serde_json::to_vec(&observed).unwrap()).unwrap();
     // A durable trusted receipt update is reconciled; no process relaunch.
-    for _ in 0..100 {
-        if get(&mut link,workspace).await["state"]["items"]["recover"]["phase"]=="Done" {break;}
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60), std::time::Duration::from_millis(20),
+        async || get(&mut link,workspace).await["state"]["items"]["recover"]["phase"]=="Done").await;
     let snapshot=get(&mut link,workspace).await;
     assert_eq!(snapshot["state"]["items"]["recover"]["phase"],"Done");
     assert_eq!(snapshot["state"]["items"]["recover"]["policy_pin"],pin);

@@ -79,11 +79,11 @@ async fn accepted_native_claude_delivers_message_and_acceptance_before_turn_ends
                     ..Default::default()
                 }).unwrap();
             }
-            for _ in 0..300 {
-                watcher.pump_wakes().await;
-                if std::fs::read_to_string(&log).unwrap_or_default().contains(text) { break; }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
+            assert!(wait_until_async!(tokio::time::Instant::now() + Duration::from_secs(60),
+                Duration::from_millis(20), async || {
+                    watcher.pump_wakes().await;
+                    std::fs::read_to_string(&log).unwrap_or_default().contains(text)
+                }), "CLI never delivered {text}");
             let received = std::fs::read_to_string(&log).unwrap_or_default();
             let replies: Vec<serde_json::Value> = received.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
             let field = if text.starts_with("Acceptance") { "additionalContext" } else { "permissionDecisionReason" };

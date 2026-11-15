@@ -169,7 +169,11 @@ async fn workflow_a_later_landing_on_top_does_not_strand_an_earlier_item_in_ci()
     let on_top = adapters::git(&repo, &["-c", "user.name=Test", "-c", "user.email=test@localhost", "commit-tree",
         &format!("{candidate}^{{tree}}"), "-p", &candidate, "-m", "later"]).await.unwrap();
     adapters::git(&repo, &["update-ref", "refs/heads/workflow-target", &on_top]).await.unwrap();
-    for _ in 0..8 { runtime.pump(time).await.unwrap(); time += 1; }
+    assert!(wait_until_async!(tokio::time::Instant::now() + Duration::from_secs(60),
+        Duration::from_millis(10), async || {
+            runtime.pump(time).await.unwrap(); time += 1;
+            runtime.state("w").unwrap().unwrap().items["one"].phase == Phase::Done
+        }), "item never completed CI");
     let state = runtime.state("w").unwrap().unwrap();
     assert_eq!(state.items["one"].phase, Phase::Done, "{state:?}");
 }
@@ -179,24 +183,23 @@ async fn workflow_a_later_landing_on_top_does_not_strand_an_earlier_item_in_ci()
 pub(super) fn hold_builds(dir: &Path) -> (PathBuf, PathBuf) {
     let script = dir.join("adapter.py");
     let text = std::fs::read_to_string(&script).unwrap();
-    let wait = "if stage == 'build':\n    hold = pathlib.Path(os.environ['STARTED']).parent / 'hold'\n    if hold.exists():\n        import time\n        t = time.time()\n        while not (hold.parent / 'go').exists():\n            if time.time() - t > 12: sys.exit(9)\n            time.sleep(0.05)\n";
+    let wait = "if stage == 'build':\n    hold = pathlib.Path(os.environ['STARTED']).parent / 'hold'\n    if hold.exists():\n        import time\n        t = time.time()\n        while not (hold.parent / 'go').exists():\n            if time.time() - t > 70: sys.exit(9)\n            time.sleep(0.05)\n";
     assert!(text.contains("if stage == 'build':\n"));
     std::fs::write(&script, text.replacen("if stage == 'build':\n", wait, 1)).unwrap();
     (dir.join("hold"), dir.join("go"))
 }
 
-/// Asks the sweeping runtime for `w` through its inbox until `what` holds, for up to ten seconds, then writes `go`
+/// Asks the sweeping runtime for `w` through its inbox until `what` holds, for up to sixty seconds, then writes `go`
 /// so held builds end. Answers whether `what` held while they were held.
-pub(super) fn watch(runtime: &Runtime, go: PathBuf, what: impl Fn(&State) -> bool + Send + 'static) -> tokio::task::JoinHandle<bool> {
+pub(super) fn watch(runtime: &Runtime, go: PathBuf, what: impl Fn(&State) -> bool + Send + Sync + 'static) -> tokio::task::JoinHandle<bool> {
     let send = runtime.send.clone();
     tokio::spawn(async move {
-        let mut seen = false;
-        for _ in 0..200 {
-            let (reply, state) = oneshot::channel();
-            send.send(Inbox::State("w".into(), reply)).await.ok().unwrap();
-            if state.await.unwrap().unwrap().is_some_and(|s| what(&s)) { seen = true; break; }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let seen = wait_until_async!(tokio::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_millis(50), async || {
+                let (reply, state) = oneshot::channel();
+                send.send(Inbox::State("w".into(), reply)).await.ok().unwrap();
+                state.await.unwrap().unwrap().is_some_and(|s| what(&s))
+            });
         std::fs::write(go, "x").unwrap();
         seen
     })

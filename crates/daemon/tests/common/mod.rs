@@ -242,3 +242,13 @@ pub async fn as_a_person(prefix: &str, name: &str, wait: std::time::Duration) ->
     assert_eq!(std::fs::read_to_string(status).unwrap(), "0", "{output}");
     true
 }
+
+/// Poll an asynchronous condition until it succeeds or the deadline expires.
+pub async fn wait_until(deadline: tokio::time::Instant, interval: std::time::Duration,
+    mut condition: impl AsyncFnMut() -> bool) -> bool {
+    loop {
+        if condition().await { return true; }
+        if tokio::time::Instant::now() >= deadline { return false; }
+        tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
+    }
+}

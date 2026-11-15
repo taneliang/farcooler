@@ -1,4 +1,6 @@
 //! Existing transport/RPC admission and isolated runtime, including reconnect receipts.
+mod common;
+
 use std::sync::Arc;
 use farcooler_daemon::{rpc::RpcFactory,service::Service,watch::Watcher,workflow_runtime::{Runtime,coding_definition}};
 use farcooler_protocol::{capability,workflow_commands::{Action,Mutation},v1::{self as pb,request,result,Scope}};
@@ -64,10 +66,8 @@ async fn workflow_socket_publication_approve_cancel_and_reconnect_receipts() {
     // the answer without ever awaiting it. Reply delivery cannot be a commit ACK.
     let lost=link.send(req(h.workspace,&enqueue),farcooler_transport::CallOptions::default()).unwrap();
     let mut observer=connect(&h).await;
-    for _ in 0..100 {
-        if call(&mut observer,h.workspace,&Action::Get).await.pointer("/state/items/a").is_some() {break;}
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_millis(10), async || call(&mut observer,h.workspace,&Action::Get).await.pointer("/state/items/a").is_some()).await;
     assert!(call(&mut observer,h.workspace,&Action::Get).await.pointer("/state/items/a").is_some());
     drop(lost);drop(link);let mut link=connect(&h).await;
     let accepted=call(&mut link,h.workspace,&enqueue).await;
@@ -78,11 +78,11 @@ async fn workflow_socket_publication_approve_cancel_and_reconnect_receipts() {
     let approval=call(&mut link,h.workspace,&approve).await;assert!(approval.pointer("/receipt/result/Ok").is_some());
     // No informational notice ACK or stage commands; runtime owns all automatic edges.
     let mut done=serde_json::Value::Null;
-    for _ in 0..100 {
-        done=call(&mut link,h.workspace,&Action::Get).await;
-        if done["state"]["items"]["a"]["phase"]=="Done" {break;}
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60),
+        std::time::Duration::from_millis(20), async || {
+            done=call(&mut link,h.workspace,&Action::Get).await;
+            done["state"]["items"]["a"]["phase"]=="Done"
+        }).await;
     assert_eq!(done["state"]["items"]["a"]["phase"],"Done");
     assert_eq!(call(&mut link,h.workspace,&approve).await,approval);
     let revision=done["state"]["revision"].as_u64().unwrap();

@@ -21,9 +21,23 @@ mod coding_review_policy;
 mod service_owner;
 mod coding_execute;
 mod ticket_brief;
+#[cfg(test)]
+macro_rules! wait_until_async {
+    ($deadline:expr, $interval:expr, async || $condition:block) => {{
+        let deadline = $deadline;
+        let interval = $interval;
+        loop {
+            if (async { $condition }).await { break true; }
+            if tokio::time::Instant::now() >= deadline { break false; }
+            tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
+        }
+    }};
+}
 mod coding_native;
 mod native_control;
 mod native_messages;
+
+
 #[cfg(test)]
 mod native_steering_live_tests;
 mod coding_landing;
@@ -1017,15 +1031,6 @@ mod landing_templates_tests;
 #[cfg(test)]
 mod coding_pr_tests;
 #[cfg(test)]
-async fn wait_until(deadline: tokio::time::Instant, interval: std::time::Duration, mut condition: impl FnMut() -> bool) -> bool {
-    loop {
-        if condition() { return true; }
-        if tokio::time::Instant::now() >= deadline { return false; }
-        tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
-    }
-}
-
-#[cfg(test)]
 mod gate_tests;
 #[cfg(test)]
 mod send_back_tests;
@@ -1038,3 +1043,16 @@ mod main_bundle_tests;
 
 #[cfg(test)]
 mod script_hooks_tests;
+
+#[cfg(test)]
+async fn wait_until(deadline: tokio::time::Instant, interval: std::time::Duration, mut condition: impl FnMut() -> bool) -> bool {
+    loop {
+        if condition() {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep_until((tokio::time::Instant::now() + interval).min(deadline)).await;
+    }
+}

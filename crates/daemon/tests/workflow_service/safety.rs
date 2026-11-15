@@ -39,10 +39,8 @@ async fn unaffected(host: &Host, link: &mut Link) {
     let revision = get(link,workspace).await["state"]["revision"].as_u64().unwrap();
     accepted(&call(link,workspace,Action::Publish { reason:None, notifications:None, mutation:mutation("p2",revision,2),expected_pin:Some(state["configuration"]["pin"].as_str().unwrap().into()),definition,adapter:None }).await);
     accepted(&call(link,workspace,Action::Enqueue { mutation:mutation("e2",revision,3),item:"done".into(),pin }).await);
-    for _ in 0..100 {
-        if get(link,workspace).await["state"]["items"]["done"]["phase"] == "Done" { return; }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
+    if common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60), std::time::Duration::from_millis(10),
+        async || get(link,workspace).await["state"]["items"]["done"]["phase"] == "Done").await { return; }
     panic!("unaffected workspace stopped progressing");
 }
 async fn launch_drift(mode: &str) {
@@ -70,11 +68,8 @@ async fn launch_drift(mode: &str) {
         let item = &state["state"]["items"]["drift"];
         accepted(&call(&mut link,host.workspace,Action::Approve { mutation:mutation("approve",1,2),item:"drift".into(),
             run:item["run"].as_str().unwrap().into(),pin:item["pin"].as_str().unwrap().into(),candidate:None }).await);
-        for _ in 0..100 {
-            let state = get(&mut link,host.workspace).await;
-            if state["state"]["items"]["drift"]["phase"] == "Failed" { break; }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        common::wait_until(tokio::time::Instant::now() + std::time::Duration::from_secs(60), std::time::Duration::from_millis(10),
+            async || get(&mut link,host.workspace).await["state"]["items"]["drift"]["phase"] == "Failed").await;
         let state = get(&mut link,host.workspace).await;
         assert_eq!(state["state"]["items"]["drift"]["phase"],"Failed","{mode}: {state}");
         assert_eq!(state["state"]["items"]["drift"]["policy_pin"],pin);

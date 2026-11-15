@@ -108,11 +108,8 @@ async fn cancelled_run_releases_target_only_after_its_writer_ends() {
     let started = dir.path().join("started");
     let during = tree.clone();
     let stop = tokio::spawn(async move {
-        for _ in 0..200 {
-            if started.exists() { break; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(started.exists());
+        assert!(super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_millis(10), || started.exists()).await, "builder never started");
         assert!(during.join("target/built").exists(), "live output stays");
         let state = handle.state("w").await.unwrap().unwrap();
         handle.submit(&controller, Request { id: "cancel".into(), workspace: "w".into(),
