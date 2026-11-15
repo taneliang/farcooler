@@ -382,21 +382,21 @@ impl Definition {
         // a push crosses a CI wait that passed after the branch push, with no new candidate made since. A CI wait
         // before any push has nothing else to look at, so it needs the branch push behind it.
         if in_group {
-            let walk = |gives: &dyn Fn(usize, &str, &[bool]) -> Option<bool>| -> Vec<bool> {
+            let walk = |gives: &dyn Fn(usize, &str) -> Option<bool>| -> Vec<bool> {
                 let mut holds = vec![true; n];
                 holds[0] = false;
                 loop {
                     let mut changed = false;
                     for &(from, label, to) in &edges {
                         let Some(to) = to else { continue };
-                        let out = gives(from, label, &holds).unwrap_or_else(|| !makes_candidate(&self.stages[from].kind) && holds[from]);
+                        let out = gives(from, label).unwrap_or_else(|| !makes_candidate(&self.stages[from].kind) && holds[from]);
                         if holds[to] && !out { holds[to] = false; changed = true; }
                     }
                     if !changed { return holds; }
                 }
             };
-            let branched = walk(&|from, label, _| (self.stages[from].kind == StageKind::PushCandidate).then_some(label == "passed"));
-            let green = walk(&|from, label, _| (self.stages[from].kind == StageKind::AwaitCi).then(|| label == "passed" && branched[from]));
+            let branched = walk(&|from, label| (self.stages[from].kind == StageKind::PushCandidate).then_some(label == "passed"));
+            let green = walk(&|from, label| (self.stages[from].kind == StageKind::AwaitCi).then(|| label == "passed" && branched[from]));
             let branches = self.stages.iter().any(|s| s.kind == StageKind::PushCandidate);
             for (p, stage) in self.stages.iter().enumerate() {
                 let pushed_before = self.stages[..p].iter().any(|s| s.kind == StageKind::Push);
