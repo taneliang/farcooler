@@ -1267,9 +1267,9 @@ def _self_test():
     for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
         expect(f"bundle does not override codegen through {key}", key in bundle.env, False)
     for name in ("canary", "release", "nightly"):
-        text = (ROOT / f".github/workflows/{name}.yml").read_text()
+        shipping_yml = (ROOT / f".github/workflows/{name}.yml").read_text()
         for key in ("CARGO_PROFILE_RELEASE_LTO", "CARGO_PROFILE_RELEASE_OPT_LEVEL"):
-            expect(f"{name}.yml keeps shipping optimization (no {key})", key in text, False)
+            expect(f"{name}.yml keeps shipping optimization (no {key})", key in shipping_yml, False)
     for job in ("swift", "swift-tests"):
         refresh = next(i for i, step in enumerate(plans[job]) if "swift-build-cache.py restore" in step.run)
         native = next(i for i, step in enumerate(plans[job]) if "build-test-native.sh" in step.run or "build-app.sh" in step.run)
