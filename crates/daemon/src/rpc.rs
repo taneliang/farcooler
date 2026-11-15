@@ -1643,6 +1643,11 @@ impl Rpc {
 
             "terminal.stop" => {
                 let id = Self::target(&req)?;
+                let target = svc.store.get_terminal(id)?;
+                if target.role == farcooler_store::models::TerminalRole::Orchestrator {
+                    let caller = crate::caller_seat::caller_seat(svc, self.caller_pid).await;
+                    crate::caller_seat::authorize_orchestrator(caller, id)?;
+                }
                 let worktree = svc.store.get_terminal(id)?.worktree_id;
                 svc.stop_terminal(id).await?;
                 // Stopping kills the pane, so its window's grid just changed.
@@ -1712,6 +1717,11 @@ impl Rpc {
 
             "terminal.remove" => {
                 let id = Self::target(&req)?;
+                let target = svc.store.get_terminal(id)?;
+                if target.role == farcooler_store::models::TerminalRole::Orchestrator {
+                    let caller = crate::caller_seat::caller_seat(svc, self.caller_pid).await;
+                    crate::caller_seat::authorize_orchestrator(caller, id)?;
+                }
                 let worktree = svc.store.get_terminal(id)?.worktree_id;
                 svc.remove_terminal(id).await?;
                 // Removing takes an exited terminal's retained dead pane with
@@ -1742,6 +1752,11 @@ impl Rpc {
 
             "terminal.restart" => {
                 let id = Self::target(&req)?;
+                let target = svc.store.get_terminal(id)?;
+                if target.role == farcooler_store::models::TerminalRole::Orchestrator {
+                    let caller = crate::caller_seat::caller_seat(svc, self.caller_pid).await;
+                    crate::caller_seat::authorize_orchestrator(caller, id)?;
+                }
                 let restarted = crate::lead_change::restart_published(svc, &self.watcher, id).await?; // ov-585: may be a new pane
                 self.terminal_result(restarted.id).await
             }

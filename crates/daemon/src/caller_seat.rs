@@ -75,6 +75,15 @@ pub enum Seat {
     Unreadable,
 }
 
+/// Only a person or the occupant may displace an orchestrator seat.
+pub(crate) fn authorize_orchestrator(caller: Seat, target: Uuid) -> farcooler_core::error::Result<()> {
+    if caller == Seat::Person || caller == Seat::Agent(Some(target)) {
+        Ok(())
+    } else {
+        Err(farcooler_core::error::DomainError::ScopeDenied { needed: "workspace orchestrator" })
+    }
+}
+
 /// One row of the process table: its parent and its terminal.
 #[derive(Debug, Clone)]
 pub struct Proc {

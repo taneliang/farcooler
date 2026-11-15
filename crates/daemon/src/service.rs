@@ -3554,9 +3554,8 @@ impl Service {
             return Err(DomainError::InvalidArgument { what: "orchestrator_taken" });
         }
         if let Some(ref live) = live {
-            if replace && caller != crate::caller_seat::Seat::Person
-                && caller != crate::caller_seat::Seat::Agent(Some(live.id)) {
-                return Err(DomainError::ScopeDenied { needed: "workspace orchestrator" });
+            if replace {
+                crate::caller_seat::authorize_orchestrator(caller, live.id)?;
             }
         }
         // Everything the new start needs that can fail is found before the

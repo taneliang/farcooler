@@ -787,3 +787,64 @@ async fn a_members_own_pane_writes_their_marks_and_hears_their_reads() {
     assert_eq!(refused(&in_bobs, mark).await.as_deref(), Some(NOT_YOURS), "nor marks a board read");
     r.svc.stop_terminal(shell.id).await.expect("stopped");
 }
+
+/// Lifecycle calls derive the caller from the socket process, and protect the
+/// orchestrator even when a caller tries to make its seat vacant first.
+#[tokio::test]
+async fn orchestrator_lifecycle_obeys_caller_seat() {
+    for method in ["terminal.stop", "terminal.restart", "terminal.remove"] {
+        let r = runner().await;
+        let worktree = r.orchestrator.worktree_id;
+        let reviewer = r.svc.create_terminal(worktree, "Reviewer", "claude").await.unwrap();
+        let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+        let other_ws = r.svc.store.create_workspace(repo, "Other", "oth").unwrap().id;
+        let other = r.svc.start_orchestrator(other_ws, "claude", false, None).await.unwrap();
+        let snapshot = r.svc.inventory.refresh().await;
+        let pid = |id| snapshot.claimants(id).into_iter().next().unwrap().stamp.pid as i32;
+        let request = |target| Request { method: method.into(), target_resource_id: Some(id_bytes(target)), ..Default::default() };
+        for (name, pane) in [("builder", r.agent.id), ("reviewer", reviewer.id), ("other orchestrator", other.id)] {
+            let caller = factory(&r.svc, None, Scope::Control).with_caller_pid(Some(pid(pane)));
+            assert_eq!(refused(&caller, request(r.orchestrator.id)).await.as_deref(), Some("scope-denied:"), "{method}: {name}");
+        }
+        let builder = factory(&r.svc, None, Scope::Control).with_caller_pid(Some(pid(r.agent.id)));
+        let replace = Request {
+            method: "workspace.start_orchestrator".into(),
+            target_resource_id: Some(id_bytes(r.workspace)),
+            payload: Some(request::Payload::WorkspaceStartOrchestrator(pb::WorkspaceStartOrchestrator {
+                harness: "claude".into(), replace: true, handoff_task: String::new(),
+            })),
+            ..Default::default()
+        };
+        assert_eq!(refused(&builder, replace).await.as_deref(), Some("scope-denied:"));
+        let own = factory(&r.svc, None, Scope::Control).with_caller_pid(Some(pid(r.orchestrator.id)));
+        if method == "terminal.remove" {
+            // A live pane cannot be removed, even by its occupant. The
+            // ordinary live-pane conflict shows the seat gate let it through.
+            let result = refused(&own, request(r.orchestrator.id)).await;
+            assert!(result.is_some() && result.as_deref() != Some("scope-denied:"), "{result:?}");
+        } else {
+            assert_eq!(refused(&own, request(r.orchestrator.id)).await, None, "own {method}");
+        }
+        // A person may perform each operation on a fresh target.
+        let person_runner = runner().await;
+        let person = factory(&person_runner.svc, None, Scope::Control);
+        if method == "terminal.remove" { person_runner.svc.stop_terminal(person_runner.orchestrator.id).await.unwrap(); }
+        assert_eq!(refused(&person, request(person_runner.orchestrator.id)).await, None, "person {method}");
+    }
+}
+
+#[tokio::test]
+async fn orchestrator_can_manage_other_agent_panes() {
+    for method in ["terminal.stop", "terminal.restart", "terminal.remove"] {
+        let r = runner().await;
+        let snapshot = r.svc.inventory.refresh().await;
+        let pid = snapshot.claimants(r.orchestrator.id).into_iter().next().unwrap().stamp.pid as i32;
+        let caller = factory(&r.svc, None, Scope::Control).with_caller_pid(Some(pid));
+        for name in ["Builder", "Reviewer"] {
+            let pane = r.svc.create_terminal(r.orchestrator.worktree_id, name, "claude").await.unwrap();
+            if method == "terminal.remove" { r.svc.stop_terminal(pane.id).await.unwrap(); }
+            let req = Request { method: method.into(), target_resource_id: Some(id_bytes(pane.id)), ..Default::default() };
+            assert_eq!(refused(&caller, req).await, None, "{method} {name}");
+        }
+    }
+}
