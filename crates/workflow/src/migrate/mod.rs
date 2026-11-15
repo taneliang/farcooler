@@ -60,6 +60,8 @@ pub fn migrate(state: &State, log: &[Input], outbox: &[Dispatch], setup: &Setup)
     m.archive();
     if !m.refused.is_empty() { return Err(m.refused); }
     m.queues();
+    let outbox = &m.outbox;
+    m.suppress.sort_by_key(|e| outbox[e].0);
     Ok(Migrated { pipeline: m.p, quarantined: m.quarantined, suppress: m.suppress })
 }
 

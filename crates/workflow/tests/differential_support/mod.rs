@@ -98,7 +98,7 @@ impl Pins for Fixture {
     fn ci_subject(&self) -> String { "owner/repo".into() }
 }
 #[derive(Clone)]
-pub struct Old { pub state: old::State, pub log: Vec<old::Input>, pub world: World, pub builds: BTreeMap<String, u32>, pub landings: Vec<Vec<String>>,
+pub struct Old { pub state: old::State, pub log: Vec<old::Input>, pub effects: Vec<old::Effect>, pub world: World, pub builds: BTreeMap<String, u32>, pub landings: Vec<Vec<String>>,
     pub tickets: Vec<String>, pub done: BTreeSet<usize>, pub n: u64, pub ci_attempt: u32 }
 impl Old {
     pub fn send(&mut self, command: old::Command, grant: old::Grant) {
@@ -108,6 +108,7 @@ impl Old {
             source_sequence: s.revision + 1, now_ms: 1000, grant, command };
         let t = old::step(&self.state, &input).unwrap_or_else(|e| panic!("old reducer refused {:?}: {e:?}", input.command));
         self.state = t.state;
+        self.effects.extend(t.effects);
         self.log.push(input);
     }
     pub fn fresh(&mut self, what: &str) -> String { self.n += 1; format!("{what}-{}", self.n) }
@@ -387,7 +388,7 @@ pub fn old_start(s: &Scenario) -> Old {
         definition.validate().unwrap();
     }
     let tickets: Vec<String> = s.tickets.iter().map(|t| t.to_string()).collect();
-    let mut o = Old { state: old::State::empty("workspace".into(), 1), log: vec![], world: s.world.clone(), builds: BTreeMap::new(),
+    let mut o = Old { state: old::State::empty("workspace".into(), 1), log: vec![], effects: vec![], world: s.world.clone(), builds: BTreeMap::new(),
         landings: vec![], tickets: tickets.clone(), done: BTreeSet::new(), n: 0, ci_attempt: 0 };
     for t in &tickets {
         o.send(old::Command::Enqueue { item: t.clone(), definition: definition.clone(), policy_pin: "policy".into(),
