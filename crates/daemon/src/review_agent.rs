@@ -153,7 +153,7 @@ mod routing_tests {
     fn light_review_size_reports_security_and_binary_precedence() {
         let r = ReviewRoute { under_lines: 10, report_paths: vec!["reports/**".into()], full_paths: vec!["private/**".into(), "**/auth*".into(), "apps/Security.swift".into()] };
         for (stat, expected) in [("4\t5\tnotes/ui.txt\0", "light"), ("5\t5\tnotes/ui.txt\0", "full"),
-            ("100\t0\treports/findings.md\0", "light"), ("100\t0\treports/a.md\00\t1\tnotes/ui.txt\0", "full"),
+            ("100\t0\treports/findings.md\0", "light"), ("100\t0\treports/a.md\x000\t1\tnotes/ui.txt\0", "full"),
             ("1\t0\tcrates/daemon/src/auth.rs\0", "full"), ("1\t0\tprivate/a\0", "full"),
             ("1\t0\treports/auth.md\0", "full"), ("1\t0\tapps/Security.swift\0", "full"), ("-\t-\treports/image.png\0", "full"), ("", "light")] {
             assert_eq!(r.route(stat), Some(expected), "{stat:?}");
