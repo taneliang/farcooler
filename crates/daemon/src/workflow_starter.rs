@@ -129,7 +129,7 @@ pub async fn settings(svc: &Service, workspace: Uuid) -> Result<CodingConfig, St
             process: CodingCommand { argv: Vec::new(), environment: agent, timeout_ms: MAX_COMMAND_MS } },
         checks: Vec::new(), reviewer: None,
         ci: CodingCi { repository: ci_repository, workflow: CI_WORKFLOW.into(), event: "push".into(),
-            command: CodingCommand { argv: vec!["/bin/sh".into(), "-c".into(), CI_LOOK.into()], environment: look, timeout_ms: 120_000 } } })
+            command: CodingCommand { argv: vec!["/bin/sh".into(), "-c".into(), CI_LOOK.into()], environment: look, timeout_ms: 120_000 }, unrun: None } })
 }
 
 /// Claude's hook settings for the agents the engine starts: they report to the engine's own socket, which publishing
@@ -339,7 +339,7 @@ mod tests {
         CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Native { preset: preset.into(), settings: Some(LaunchFile { path: "/s.json".into(), digest: "wf1:s".into() }),
                 project_hooks: None, codex_hooks: None, plugin_dir: None, prompt: super::PROMPT.into(), process: CodingCommand { argv: vec![], ..cmd() } },
-            checks: vec![], reviewer: None, ci: CodingCi { repository: "o/r".into(), workflow: "CI".into(), event: "push".into(), command: cmd() } }
+            checks: vec![], reviewer: None, ci: CodingCi { repository: "o/r".into(), workflow: "CI".into(), event: "push".into(), command: cmd(), unrun: None } }
     }
     /// ov-1259: a build that writes the engine's hooks differently writes a new file beside the old one, so a file a
     /// published workflow pins keeps the bytes it was pinned with, and re-pinning moves only to this build's file.

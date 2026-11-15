@@ -315,7 +315,7 @@ fn in_full(config: &CodingConfig, live: Option<&CodingConfig>) -> Vec<String> {
         Some(CodingReviewer { identity, command }) => lines.push(format!("The reviewer, as {}, runs {}.", code(identity), exactly(command, "the reviewer"))),
         None => lines.push("No reviewer command.".into()),
     }
-    let CodingCi { repository: ci_repository, workflow, event, command } = ci;
+    let CodingCi { repository: ci_repository, workflow, event, command, .. } = ci;
     lines.push(format!("CI is the {} workflow on {} in {} on GitHub, read by running {}.", code(workflow), code(event), code(ci_repository), exactly(command, "CI")));
     if let Some(CodingPullRequest { repository, base, remote, gh }) = pull_request {
         let to = remote.as_deref().map_or("the landing repository".to_string(), code);
@@ -391,7 +391,7 @@ mod tests {
     fn config() -> CodingConfig {
         CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Command(CodingCommand { argv: vec!["/usr/bin/claude".into()], environment: BTreeMap::new(), timeout_ms: 1000 }),
-            checks: vec![], reviewer: None, ci: farcooler_protocol::workflow_config::CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd("true") } }
+            checks: vec![], reviewer: None, ci: farcooler_protocol::workflow_config::CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd("true"), unrun: None } }
     }
     fn bundle(template: &str, commands: &[&str], extra: &[Extra], batch: Option<u32>) -> Bundle {
         let commands: Vec<String> = commands.iter().map(|c| c.to_string()).collect();
@@ -488,7 +488,7 @@ mod tests {
             landing: Some(CodingLanding { job: "landing-job".into(), repository: "/mirror/bare.git".into(), target: "refs/heads/the-target".into(), config_digest: "config-digest".into() }),
             pull_request: Some(CodingPullRequest { repository: "owner/pr-repo".into(), base: "pr-base".into(), remote: Some("ssh://git@example.com/elsewhere.git".into()), gh: c("gh") }),
             harness, checks: vec![c("check"), cmd("make check")], reviewer: Some(CodingReviewer { identity: "reviewer-identity".into(), command: c("reviewer") }),
-            ci: CodingCi { repository: "owner/ci-repo".into(), workflow: "ci-workflow".into(), event: "ci-event".into(), command: c("ci") } }
+            ci: CodingCi { repository: "owner/ci-repo".into(), workflow: "ci-workflow".into(), event: "ci-event".into(), command: c("ci"), unrun: None } }
     }
     #[test]
     fn the_summary_shows_every_value_the_adapter_runs_or_sends_code_to() {

@@ -56,12 +56,14 @@ pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
         .replace("    assert pathlib.Path('result.txt').read_text().startswith('candidate')", "    assert any(p.read_text().startswith('candidate') for p in pathlib.Path('.').glob('*.txt'))")
         .replace("elif stage == 'review':\n", &format!("{GATE}elif stage == 'review':\n"))
         .replace("conclusion='failure' if mode == 'ci-fail' else 'success',", "conclusion='failure' if mode == 'ci-fail' else ('cancelled' if mode == 'ci-cancel' else 'success'),")
+        // `UNRUN_SUBJECT`: a commit with this subject on the remote gets no CI run, as a push GitHub's path filter skips.
+        .replace("    if mode == 'ci-missing': sys.exit(0)", "    if mode == 'ci-missing': sys.exit(0)\n    if os.environ.get('UNRUN_SUBJECT') and subprocess.run(['/usr/bin/git', '--git-dir', os.environ['REMOTE'], 'log', '-1', '--format=%s', candidate], capture_output=True, text=True).stdout.strip() == os.environ['UNRUN_SUBJECT']: sys.exit(0)")
         // `base-red`: CI failed on the base the remote starts at, and passes on anything pushed after it.
         .replace("conclusion='failure' if mode == 'ci-fail'", "conclusion='failure' if mode == 'ci-fail' or (mode == 'base-red' and candidate == os.environ['RED'])")
         // `base-pending`: CI on that base never finishes.
         .replace("status='in_progress' if mode == 'ci-pending'", "status='in_progress' if mode == 'ci-pending' or (mode == 'base-pending' and candidate == os.environ['RED'])");
     assert!(text.contains("elif stage == 'gate'") && text.contains("name = 'shared.txt'") && text.contains("'cancelled'")
-        && text.contains("mode == 'base-red'") && text.contains("mode == 'base-pending'"));
+        && text.contains("UNRUN_SUBJECT") && text.contains("mode == 'base-red'") && text.contains("mode == 'base-pending'"));
     std::fs::write(&script, text).unwrap();
     let bare = dir.path().join("private-remote.git"); std::fs::create_dir(&bare).unwrap();
     adapters::git(&bare, &["init", "--bare", "--quiet"]).await.unwrap();
@@ -76,6 +78,7 @@ pub(super) async fn lander(mode: &str) -> (tempfile::TempDir, Runtime) {
         target: "refs/heads/main".into(), config_digest: digest(&std::fs::read(bare.join("config")).unwrap()) });
     config.checks[1].argv[2] = "gate".into();
     config.ci.command.environment.insert("RED".into(), config.base.clone());
+    config.ci.command.environment.insert("REMOTE".into(), bare.to_string_lossy().into_owned());
     for (key, value) in [("MARKER", dir.path().join("marker")), ("REMOTE", bare.clone()), ("SCRATCH", dir.path().join("other-lander"))] {
         config.checks[1].environment.insert(key.into(), value.to_string_lossy().into_owned());
     }
@@ -1418,4 +1421,68 @@ async fn a_gate_owner_write_requires_a_readable_start_identity() {
     gate.kill().await.unwrap();
     assert!(result.is_err(), "unreadable identity must fail the post-launch owner write");
     assert!(!path.exists(), "never persist an owner receipt with an empty identity");
+}
+
+/// Rewrite the runtime's pinned configuration, and open it again: the Nov 15 head no CI run was ever started on.
+fn with_unrun(runtime: Runtime, subject: &str, unrun: farcooler_protocol::workflow_config::CiUnrun) -> Runtime {
+    let root = runtime.root.clone();
+    let mut config = runtime.coding.clone().unwrap();
+    config.ci.command.environment.insert("UNRUN_SUBJECT".into(), subject.into());
+    config.ci.unrun = Some(unrun);
+    std::fs::write(root.join("coding.json"), serde_json::to_vec(&config).unwrap()).unwrap();
+    drop(runtime);
+    Runtime::open(&root).unwrap()
+}
+/// The newest settlement of a step's effect.
+fn settled(runtime: &Runtime, kind: StageKind) -> serde_json::Value {
+    let stored = runtime.store.workflow_outbox("w").unwrap().into_iter().rev()
+        .find(|s| s.effect.kind == EffectKind::Execute(kind.clone())).expect("the step ran");
+    serde_json::from_slice(&std::fs::read(runtime.root.join("receipts").join(format!("{}.verb.json", digest(&stored.effect)))).unwrap()).unwrap()
+}
+fn unrun(grace_ms: u64, ignored: &[&str]) -> farcooler_protocol::workflow_config::CiUnrun {
+    farcooler_protocol::workflow_config::CiUnrun { grace_ms, ignored: ignored.iter().map(|p| p.to_string()).collect() }
+}
+
+/// ov-1243, Nov 15: a group folded on main at 05:30:31, a bot pushed a commit CI ignores a minute later, the group's
+/// gate passed at 06:09:24 and its push was refused as `base_moved` four seconds after. The group went back to
+/// its base step, whose head now had no CI run and never would: it polled for its whole patience. Replayed here with
+/// the bot's commit as the other lander the gate moves the remote for (the order is the same: fold, move, gate
+/// passed, refused), and CI ignoring the files it touches. The second base step takes the verdict of the commit
+/// behind the head after the grace, and the group lands.
+#[tokio::test]
+async fn a_bot_commit_ci_ignores_that_lands_under_a_gate_does_not_stall_the_next_base_step() {
+    let (_dir, runtime) = lander("move-base").await;
+    let mut runtime = with_unrun(runtime, "other lander", unrun(50, &["other.txt"]));
+    let first = remote_head(&runtime).await;
+    // Patience far beyond the test: only the grace can end the wait.
+    let definition = batched_push(&runtime, "green", 60_000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    assert_eq!(outbox(&runtime, StageKind::Push), 2, "refused as base_moved, then landed");
+    assert_eq!(outbox(&runtime, StageKind::AwaitBase), 2);
+    assert_eq!(outbox(&runtime, StageKind::Fold), 2, "the gate ran again: reuse is unsafe, see the ticket's report");
+    let fact = settled(&runtime, StageKind::AwaitBase);
+    assert_eq!(fact["label"], "passed", "{fact}");
+    assert_eq!(fact["detail"]["ci_from"], first, "the verdict came from the commit behind the bot's: {fact}");
+    assert_eq!(candidate_of(&state, "one"), Some(remote_head(&runtime).await.as_str()));
+}
+
+/// The same head with no ignored paths configured: CI will never run on it, so the step says so after the grace
+/// instead of polling for its patience, and nothing is folded on top of a base nobody can vouch for.
+#[tokio::test]
+async fn a_head_with_no_ci_run_ends_the_base_step_after_the_grace_with_a_sentence() {
+    for ignored in [&[][..], &["unrelated.txt"][..]] {
+        let (_dir, runtime) = lander("move-base").await;
+        let mut runtime = with_unrun(runtime, "other lander", unrun(50, ignored));
+        let definition = batched_push(&runtime, "green", 60_000);
+        at_join(&mut runtime, "one", &definition).await;
+        command(&runtime, Command::Queue { item: "one".into() });
+        until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
+        let fact = settled(&runtime, StageKind::AwaitBase);
+        assert_eq!(fact["label"], "timeout", "{fact}");
+        let why = fact["detail"]["why"].as_str().expect("it says why");
+        assert!(why.contains("no run") && why.contains("orchestrator"), "{why}");
+        assert_eq!(outbox(&runtime, StageKind::Push), 1, "nothing landed on the unvouched base");
+    }
 }

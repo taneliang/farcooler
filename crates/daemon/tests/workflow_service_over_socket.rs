@@ -72,7 +72,7 @@ elif stage == 'ci':
         checks: vec![command("check"), command("check")],
         reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: command("review") }),
         ci: CodingCi { repository: "offline/repository".into(), workflow: "configured-check".into(),
-            event: "push".into(), command: command("ci") } };
+            event: "push".into(), command: command("ci"), unrun: None } };
     (dir, config)
 }
 type Link = Client<tokio::net::unix::OwnedReadHalf,tokio::net::unix::OwnedWriteHalf>;

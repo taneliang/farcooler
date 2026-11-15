@@ -181,7 +181,7 @@ mod tests {
     fn config() -> CodingConfig {
         CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None, pull_request: None,
             harness: CodingHarness::Command(cmd()), checks: vec![], reviewer: None,
-            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd() } }
+            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd(), unrun: None } }
     }
     fn get(source: Option<&str>) -> serde_json::Value {
         let adapter = serde_json::to_value(AdapterConfiguration::Coding(config())).unwrap();

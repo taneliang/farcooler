@@ -639,7 +639,7 @@ mod ov1179_rollback_tests {
             settings: file("claude-settings"), project_hooks: None, plugin_dir: None, prompt: "build".into(), process: command(), codex_hooks };
         let adapter = |harness: CodingHarness| AdapterConfiguration::Coding(CodingConfig { security_reviews: vec![], repository: "/repo".into(), base: "main".into(),
             landing_ref: "refs/heads/main".into(), landing: None, pull_request: None, harness, checks: vec![command()], reviewer: None,
-            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: command() } });
+            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: command(), unrun: None } });
         // The finding's configuration: Claude launches, and a Codex hooks file running a deploy sits unused beside it.
         let owners = adapter(native("claude", file("codex-hooks-with-deploy")));
         let step = |id: &str, kind: StageKind| Stage { id: id.into(), kind, progression: Progression::Automatic, max_attempts: 1,

@@ -65,6 +65,32 @@ pub struct CodingCi {
     pub workflow: String,
     pub event: String,
     pub command: CodingCommand,
+    /// What the base step does when the target's head has no CI run at all (ov-1243). Left out of the pinned
+    /// bytes when absent, so configurations written before it keep their pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unrun: Option<CiUnrun>,
+}
+
+/// How long a target head may sit without any CI run before the base step stops waiting for one, and which
+/// paths a commit may touch for the step to take the verdict of the nearest ancestor that has one: the paths the
+/// CI workflow ignores on push, so that a commit touching only them never starts a run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CiUnrun {
+    /// Milliseconds with no run on the head before the step acts. Left out, ten minutes.
+    #[serde(default = "CiUnrun::default_grace_ms")]
+    pub grace_ms: u64,
+    /// Exact paths, or a directory written with a trailing `/`, that CI ignores. Empty: no commit is skippable.
+    #[serde(default)]
+    pub ignored: Vec<String>,
+}
+impl CiUnrun {
+    pub const DEFAULT_GRACE_MS: u64 = 600_000;
+    fn default_grace_ms() -> u64 { Self::DEFAULT_GRACE_MS }
+    /// Whether CI ignores `path`.
+    pub fn ignores(&self, path: &str) -> bool {
+        self.ignored.iter().any(|i| if i.ends_with('/') { path.starts_with(i.as_str()) } else { path == i })
+    }
 }
 
 /// Where code lands: an explicit transport identity, never a named remote looked up in a config.

@@ -65,7 +65,7 @@ elif stage == 'ci':
         checks: vec![command("check"), command("check")],
         reviewer: review.then(|| CodingReviewer { identity: "reviewer".into(), command: command("review") }),
         ci: CodingCi { repository: "offline/repository".into(), workflow: "configured-check".into(),
-            event: "push".into(), command: command("ci") } };
+            event: "push".into(), command: command("ci"), unrun: None } };
     let runtime = Runtime::create_configured(&dir.path().join("runtime"), config).await.unwrap();
     (dir, runtime)
 }

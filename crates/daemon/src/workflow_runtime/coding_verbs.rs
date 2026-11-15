@@ -9,6 +9,7 @@
 use super::*;
 use super::coding::{sha, wait_times};
 use farcooler_store::board_ci::CiStatus;
+use farcooler_protocol::workflow_config::CiUnrun;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -229,6 +230,8 @@ impl Exec {
         };
         if pinned.as_ref().is_some_and(|s| !sha(s)) { return Err(Error::Refused("invalid saved base SHA")); }
         let mut last = pinned.clone().unwrap_or_else(|| binding.base.clone());
+        // When this look first found no CI run on the head. A resumed wait starts the grace over, which only waits longer.
+        let mut unrun_since: Option<i64> = None;
         for poll in 0u32.. {
             if *cancel.borrow() { return Ok(Outcome::Interrupted); }
             let head = match &pinned {
@@ -242,10 +245,29 @@ impl Exec {
                 }
                 last = head.clone();
                 let predecessor = self.pending_landing(&head, &binding.effect.resource)?;
-                let ci = if green && predecessor.is_none() { Some(self.ci_poll(binding, &head, poll, &cancel).await?.0) } else { None };
+                let (mut ci, mut verdict_from) = (None, None);
+                if green && predecessor.is_none() {
+                    let (status, _, unrun) = self.ci_poll_seen(binding, &head, poll, &cancel).await?;
+                    ci = Some(status);
+                    if unrun {
+                        let since = *unrun_since.get_or_insert_with(|| self.clock_ms());
+                        let grace = self.coding.as_ref().and_then(|c| c.ci.unrun.as_ref()).map_or(CiUnrun::DEFAULT_GRACE_MS, |u| u.grace_ms);
+                        if self.clock_ms().saturating_sub(since) >= i64::try_from(grace).unwrap_or(i64::MAX) {
+                            match self.verdict_behind(binding, &head, poll, &cancel).await? {
+                                Behind::Verdict(status, from) => { ci = Some(status); verdict_from = Some(from); }
+                                Behind::Waiting => {}
+                                Behind::None(why) => {
+                                    self.write_fact(binding, "timeout", &head, serde_json::json!({ "polls": poll + 1, "why": why }))?;
+                                    return self.reconcile_verb(binding, &StageKind::AwaitBase).await;
+                                }
+                            }
+                        }
+                    } else { unrun_since = None; }
+                }
                 if matches!(ci, None | Some(CiStatus::Passed | CiStatus::Failed)) {
                     let mut detail = serde_json::json!({ "polls": poll + 1, "predecessor": predecessor });
                     if ci == Some(CiStatus::Failed) { detail["red"] = true.into(); }
+                    if let Some(from) = verdict_from { detail["ci_from"] = from.into(); }
                     self.write_fact(binding, "passed", &head, detail)?;
                     return self.reconcile_verb(binding, &StageKind::AwaitBase).await;
                 }
@@ -264,6 +286,41 @@ impl Exec {
             if pause(every, &cancel).await { return Ok(Outcome::Interrupted); }
         }
         unreachable!("the poll count is unbounded")
+    }
+    /// The head has had no CI run for the grace period. Walk back along the target's first-parent history over commits
+    /// that touch only paths CI ignores: the nearest ancestor with a run speaks for the head, since nothing CI reads
+    /// differs between them. Otherwise say plainly why there is no verdict, so a person is asked instead of the step
+    /// polling for its whole patience (ov-1243).
+    async fn verdict_behind(&self, binding: &Binding, head: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Behind> {
+        const WALK: usize = 20;
+        let unrun = self.coding.as_ref().and_then(|c| c.ci.unrun.clone()).unwrap_or(CiUnrun { grace_ms: CiUnrun::DEFAULT_GRACE_MS, ignored: Vec::new() });
+        let none = |why: String| Ok(Behind::None(why));
+        let repo = self.repository();
+        let mut commit = head.to_string();
+        for step in 0..WALK as u32 {
+            let changed = self.git_recorded(binding, &repo, &["-c", "core.quotepath=off", "diff-tree", "--no-commit-id", "--name-only",
+                "-r", "--no-renames", "-z", "-m", "--first-parent", &commit]).await?;
+            let paths: Vec<&str> = changed.split('\0').filter(|p| !p.is_empty()).collect();
+            if paths.is_empty() || !paths.iter().all(|p| unrun.ignores(p)) {
+                let short = &commit[..commit.len().min(10)];
+                return none(if commit == head {
+                    format!("CI has no run on the target's head {short}, and that commit changes files CI does not ignore, so no run is coming. Ask the orchestrator to push a commit CI will run on.")
+                } else {
+                    format!("CI has no run on the target's head, nor on any commit behind it back to {short}, which changes files CI does not ignore. Ask the orchestrator to push a commit CI will run on.")
+                });
+            }
+            let parent = self.git_recorded(binding, &repo, &["rev-parse", "--verify", "--quiet", &format!("{commit}^")]).await.unwrap_or_default();
+            let parent = parent.trim();
+            if !sha(parent) { return none("CI has no run anywhere in the target's history that reaches the head.".into()); }
+            // Each look writes receipts named for its poll, and none may be written twice: an ancestor's gets a number no wait reaches.
+            let numbered = 0x4000_0000u32.saturating_add(poll.saturating_mul(32)).saturating_add(step);
+            let (status, _, absent) = self.ci_poll_seen(binding, parent, numbered, cancel).await?;
+            if !absent {
+                return Ok(match status { CiStatus::Passed | CiStatus::Failed => Behind::Verdict(status, parent.to_string()), _ => Behind::Waiting });
+            }
+            commit = parent.to_string();
+        }
+        none(format!("CI has no run on the target's head, nor on the {WALK} commits behind it that touch only files CI ignores. Ask the orchestrator to push a commit CI will run on."))
     }
     /// Only a push still being judged by its own group can lend its head to the next gate.
     /// Read all boards: the landing resource is shared across workspaces too.
@@ -395,6 +452,12 @@ impl Exec {
     /// Anything red is red; anything still going waits; all green is green. The run facts are the configured
     /// workflow's: that is the run a CI retry reruns.
     async fn ci_poll(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<(CiStatus, Option<CiRun>)> {
+        let (status, run, _) = self.ci_poll_seen(binding, sha, poll, cancel).await?;
+        Ok((status, run))
+    }
+    /// `ci_poll`, and whether the configured workflow has no run on `sha` at all (ov-1243): a hook that answered and
+    /// found nothing, not one that failed to answer.
+    async fn ci_poll_seen(&self, binding: &Binding, sha: &str, poll: u32, cancel: &tokio::sync::watch::Receiver<bool>) -> Result<(CiStatus, Option<CiRun>, bool)> {
         let config = self.coding.as_ref().ok_or(Error::Refused("missing coding config"))?;
         let also = match &binding.effect.kind {
             EffectKind::Execute(StageKind::AwaitCi) => match binding.effect.operation.arguments.get(4) {
@@ -403,12 +466,12 @@ impl Exec {
             },
             _ => Vec::new(),
         };
-        let Some((first, run)) = self.ci_look(binding, sha, poll, &config.ci.workflow, 0, cancel).await? else { return Ok((CiStatus::Unknown, None)) };
+        let Some((first, run)) = self.ci_look(binding, sha, poll, &config.ci.workflow, 0, cancel).await? else { return Ok((CiStatus::Unknown, None, true)) };
         let mut all = vec![first];
         for (index, name) in also.iter().enumerate() {
             if let Some((status, _)) = self.ci_look(binding, sha, poll, name, index + 1, cancel).await? { all.push(status); }
         }
-        Ok((combined(&all), run))
+        Ok((combined(&all), run, false))
     }
     /// One look at one workflow's newest run on `sha`: the configured provider hook runs once, told which workflow in
     /// `FARCOOLER_CI_WORKFLOW`, and writes a receipt. A hook that fails couldn't say (`Unknown`); one that succeeds and
@@ -673,6 +736,16 @@ impl Exec {
         }
         self.reconcile_verb(binding, &StageKind::Push).await
     }
+}
+
+/// What the base step found behind a head CI never ran on (ov-1243).
+enum Behind {
+    /// An ancestor reachable over commits CI ignores has this verdict.
+    Verdict(CiStatus, String),
+    /// That ancestor's run is still going.
+    Waiting,
+    /// No ancestor can speak for the head; the sentence says why.
+    None(String),
 }
 
 /// The sentence a push the remote refused at the ref ends its run with.

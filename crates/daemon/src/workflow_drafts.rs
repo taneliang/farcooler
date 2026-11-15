@@ -426,7 +426,7 @@ mod hidden_tests {
             environment: env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() };
         AdapterConfiguration::Coding(CodingConfig { security_reviews: vec![], repository: "/r".into(), base: "a".repeat(40), landing_ref: "refs/heads/main".into(), landing: None,
             pull_request: None, harness: CodingHarness::Command(cmd(&[])), checks: vec![cmd(&[("TOKEN", value)])], reviewer: None,
-            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd(&[]) } })
+            ci: CodingCi { repository: "o/r".into(), workflow: "ci".into(), event: "push".into(), command: cmd(&[]), unrun: None } })
     }
     #[test]
     fn a_proposal_carrying_the_hidden_marker_is_recognized_and_a_real_value_is_not() {
