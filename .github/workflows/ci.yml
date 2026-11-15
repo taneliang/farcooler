@@ -399,6 +399,10 @@ jobs:
   # Linux runner tests the helper concurrently; no macOS slot is added.
   tunnel-helper:
     name: Tunnel helper (Go)
+    # Capacity only (ov-1256): these short Linux checks use the slots after
+    # Rust/Android, reserving four simultaneous shards plus background work.
+    needs: [rust-tests, android]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -423,7 +427,10 @@ jobs:
     permissions:
       actions: read
       contents: read
-    needs: changes
+    # Capacity only (ov-1256): give the native archive the first Mac slot.
+    # This matrix consumes no archive; !cancelled() still runs its checks if
+    # that independent build fails or is skipped. Both OS check names stay put.
+    needs: [changes, rust-macos-build]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ${{ matrix.os }}
     # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
@@ -835,13 +842,15 @@ jobs:
 
   rust-tests:
     name: Rust tests (${{ matrix.shard }}/4)
-    needs: [changes, rust-build, android]
+    # No Android input: the old Android wait only reserved runner capacity.
+    # Short service/helper jobs now yield those slots to all four shards.
+    needs: [changes, rust-build]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 4
       matrix:
         shard: [1, 2, 3, 4]
     env:
@@ -938,7 +947,8 @@ jobs:
   # Build every Mac test target once, then shard the maintained native set.
   rust-macos-build:
     name: Rust native test archive (macOS)
-    needs: [changes, swift-tests]
+    # Start with Swift/iOS; the platform-check matrix yields this first slot.
+    needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 20
@@ -971,13 +981,16 @@ jobs:
 
   rust-macos-tests:
     name: Rust native tests (macOS ${{ matrix.shard }}/2)
-    needs: [changes, rust-macos-build, swift-tests]
+    # The archive is the only artifact dependency. Waiting for both Swift jobs
+    # reserves two Mac slots together, even if Rust checks/iOS are still busy.
+    # Failure/skipping of Swift must not suppress these independent tests.
+    needs: [changes, rust-macos-build, swift, swift-tests]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-macos-build.result == 'success' }}
     runs-on: macos-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         shard: [1, 2]
     env:
@@ -1673,8 +1686,9 @@ jobs:
 
   relay:
     name: Relay
+    # Capacity only: yield short Linux checks to Rust shards (ov-1256).
     runs-on: ubuntu-latest
-    needs: changes
+    needs: [changes, rust-tests, android]
     if: ${{ !cancelled() && needs.changes.outputs.relay != 'false' }}
     timeout-minutes: 5
     defaults:
@@ -1694,7 +1708,8 @@ jobs:
 
   site:
     name: Site
-    needs: changes
+    # Capacity only: yield short Linux checks to Rust shards (ov-1256).
+    needs: [changes, rust-tests, android]
     if: ${{ !cancelled() && needs.changes.outputs.non_docs != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

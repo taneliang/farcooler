@@ -29,6 +29,28 @@ class ConcurrencyTest(unittest.TestCase):
         self.assertNotEqual(group('refs/heads/feature', 1), group('refs/pull/42/merge', 1))
 
 
+class RustSchedulingTests(unittest.TestCase):
+    def test_archive_first_and_parallel_consumers(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "capacity", pathlib.Path(__file__).resolve().with_name("ci-macos-capacity.py"))
+        capacity = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(capacity)
+        jobs = capacity.proto.workflow_jobs(WORKFLOW.read_text())
+        needs = lambda job: capacity.proto.needs_of(jobs[job].get("needs"))
+        # An Android failure or a long unrelated build cannot hold the Linux
+        # consumers; the native archive must be eligible at the first stage.
+        self.assertEqual(needs("rust-tests"), {"changes", "rust-build"})
+        self.assertEqual(needs("rust-macos-build"), {"changes"})
+        self.assertEqual(capacity.widths(jobs["rust-tests"], {}), (4, 0))
+        self.assertEqual(capacity.widths(jobs["rust-macos-tests"], {}), (2, 2))
+        # Capacity predecessors may fail/skip. Only an absent archive should
+        # prevent its consumers, not the result of Swift or Android checks.
+        for job in ("rust", "rust-macos-tests", "relay", "site", "tunnel-helper"):
+            self.assertIn("!cancelled()", jobs[job]["if"])
+            self.assertNotRegex(jobs[job]["if"], r"needs\.(?:swift|android)[^ ]*\.result")
+
+
 class CapacityAndYieldTests(unittest.TestCase):
     def test_capacity_and_yield(self):
         import subprocess
