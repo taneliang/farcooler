@@ -72,6 +72,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import platform
 import re
 import shutil
 import signal
@@ -512,9 +513,9 @@ def jdk_candidates():
         homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*/libexec/openjdk.jdk/Contents/Home"))
         homes += sorted(str(p) for p in pathlib.Path(prefix).glob("openjdk@*"))
     try:
-        out = subprocess.run(["/usr/libexec/java_home", "-V"], capture_output=True, text=True)
+        out = subprocess.run(["/usr/libexec/java_home", "-V"], capture_output=True, text=True, timeout=1)
         homes += re.findall(r"\s(/\S.*?/Home)\s*$", out.stderr + out.stdout, re.M)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         pass
     homes += sorted(str(p) for p in pathlib.Path("/Library/Java/JavaVirtualMachines").glob("*/Contents/Home"))
     homes += sorted(str(p) for p in pathlib.Path("/usr/lib/jvm").glob("*"))
@@ -537,6 +538,77 @@ def java_home(version, homes=None):
         return found[version]
     newer = sorted(m for m in found if m > version)
     return found[newer[0]] if newer else ""
+
+
+def node_check(path, major, arch, timeout=1):
+    """Check the executable itself, including its architecture and CI version."""
+    if not path:
+        return False
+    try:
+        out = subprocess.run([str(path), "-p", "process.versions.node + ' ' + process.arch"],
+                             capture_output=True, text=True, timeout=timeout)
+        parts = out.stdout.strip().split()
+        return out.returncode == 0 and len(parts) == 2 and parts[0].split(".")[0] == str(major) and parts[1] == arch
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def toolchain_preflight(chosen, repo, env, system=None, machine=None, node_candidates=None, jdk_homes=None):
+    """Resolve only tools used by selected jobs, before any job starts."""
+    system = system or sys.platform
+    machine = machine or platform.machine()
+    result = {}
+    if set(chosen) & {"relay", "site", "web"}:
+        major = (repo / ".nvmrc").read_text().strip().lstrip("v")
+        arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64", "AMD64": "x64"}.get(machine, machine)
+        current = shutil.which("node", path=env.get("PATH", ""))
+        candidates = [current] if current else []
+        if system == "darwin":
+            candidates += (node_candidates if node_candidates is not None else
+                           sorted((str(p) for p in pathlib.Path.home().glob(".nvm/versions/node/v*/bin/node")), reverse=True) +
+                           ["/opt/homebrew/bin/node", "/usr/local/bin/node"])
+        deadline = time.monotonic() + 2
+        node = None
+        for candidate in candidates:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if node_check(candidate, major, arch, min(1, remaining)):
+                node = candidate
+                break
+        if not node:
+            raise ValueError(f"Node {major} for {arch} is required (PATH node: {current or 'missing'}); install a native Node {major} and put its bin directory on PATH (e.g. nvm install {major})")
+        result["PATH"] = str(pathlib.Path(node).parent) + os.pathsep + env.get("PATH", "")
+        print(f"lane-gate: Node {major} ({arch}): {node}", flush=True)
+    if "android" in chosen:
+        current = env.get("JAVA_HOME")
+        if not current:
+            java = shutil.which("java", path=env.get("PATH", ""))
+            current = str(pathlib.Path(java).resolve().parent.parent) if java else ""
+        jdk = current if current and jdk_major(current) >= 17 and (pathlib.Path(current) / "bin/java").is_file() else ""
+        if not jdk and system == "darwin":
+            homes = jdk_candidates() if jdk_homes is None else jdk_homes
+            jdk = java_home(17, [h for h in homes if (pathlib.Path(h) / "bin/java").is_file()])
+        if not jdk:
+            raise ValueError(f"JDK 17 or newer is required (JAVA_HOME/PATH: {current or 'missing'}); install JDK 17 and set JAVA_HOME to its home")
+        result["JAVA_HOME"] = jdk
+        print(f"lane-gate: JDK {jdk_major(jdk)}: {jdk}", flush=True)
+        sdk = env.get("ANDROID_HOME") or env.get("ANDROID_SDK_ROOT")
+        if not sdk and system == "darwin":
+            sdk = str(pathlib.Path.home() / "Library/Android/sdk")
+        if not sdk or not pathlib.Path(sdk).is_dir():
+            raise ValueError(f"Android SDK is missing ({sdk or 'ANDROID_HOME unset'}); install it and set ANDROID_HOME to the SDK directory")
+        ci = (repo / ".github/workflows/ci.yml").read_text()
+        packages = sorted(set(re.findall(r"'((?:ndk|platforms|build-tools);[^']+)'", ci)))
+        if {p.split(";")[0] for p in packages} != {"ndk", "platforms", "build-tools"}:
+            raise ValueError("cannot determine Android SDK packages from CI; check .github/workflows/ci.yml")
+        missing = [p for p in packages if not (pathlib.Path(sdk) / p.replace(";", "/")).is_dir()]
+        if missing:
+            raise ValueError("Android SDK is missing CI packages: " + ", ".join(missing) +
+                             "; install them with sdkmanager " + " ".join(f"'{p}'" for p in missing))
+        result["ANDROID_HOME"] = sdk
+        print(f"lane-gate: Android SDK: {sdk}", flush=True)
+    return result
 
 
 def job_env(job):
@@ -791,6 +863,15 @@ def gate(args):
             raise SystemExit(f"lane-gate: no job {j}; jobs are {', '.join(JOBS)}")
     chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
 
+    if not args.dry_run:
+        try:
+            args.toolchain_env = toolchain_preflight(chosen, repo, os.environ)
+        except ValueError as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            print_summary([("lane-gate", "toolchain preflight", f"FAIL: {e}", "", "")],
+                          repo, args.base, "", True, [], summary_path(repo))
+            return 1
+
     proposal = None
     if args.landing:
         import landing_policy  # optional local policy; plain runners stay self-contained
@@ -903,7 +984,10 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
     if j in HEAVY and not args.no_load_wait:
         wait_for_load()
     env = base_env(repo, tmp, ctx, args.strict_leaks)
-    env.update(job_env(j))
+    selected = getattr(args, "toolchain_env", None)
+    env.update(selected if selected is not None else job_env(j))
+    if selected and "PATH" in selected:
+        env["PATH"] = os.path.expanduser("~/.cargo/bin") + os.pathsep + env["PATH"]
     if getattr(args, "landing", False):
         landing_policy.budget_worker(env, args.workers)
         # Apple/Android also build host Rust binaries in this target. Mixing
@@ -1402,6 +1486,50 @@ def _self_test():
         expect("JDK 17 is picked by its own version", java_home(17, [jdk11, jdk17, jdk21]), jdk17)
         expect("only JDK 11 installed: no JDK 17 (java_home -v 17 said 11)", java_home(17, [jdk11]), "")
         expect("a newer JDK stands in when there is no exact one", java_home(17, [jdk11, jdk21]), jdk21)
+        # Reject each broken PATH tool first, then prove macOS fallback is used.
+        bin11 = pathlib.Path(jdk11) / "bin"
+        bin17 = pathlib.Path(jdk17) / "bin"
+        for directory in (bin11, bin17):
+            directory.mkdir()
+            (directory / "java").write_text("#!/bin/sh\n")
+            (directory / "java").chmod(0o755)
+        badbin, goodbin, sdk = t / "bad-node", t / "good-node", t / "sdk"
+        for directory, arch in ((badbin, "x64"), (goodbin, "arm64")):
+            directory.mkdir()
+            (directory / "node").write_text(f"#!/bin/sh\necho '24.1.0 {arch}'\n")
+            (directory / "node").chmod(0o755)
+        sdk.mkdir()
+        for package in re.findall(r"'((?:ndk|platforms|build-tools);[^']+)'", text):
+            (sdk / package.replace(";", "/")).mkdir(parents=True, exist_ok=True)
+        env = {"PATH": str(badbin), "JAVA_HOME": jdk11, "ANDROID_HOME": str(sdk)}
+        try:
+            toolchain_preflight(["relay"], ROOT, env, "darwin", "arm64", [], [])
+            node_error = ""
+        except ValueError as e:
+            node_error = str(e)
+        expect("Intel node fails first with a fix", "Node 24 for arm64" in node_error and "nvm install" in node_error, True)
+        try:
+            toolchain_preflight(["android"], ROOT, env, "darwin", "arm64", [], [jdk11])
+            java_error = ""
+        except ValueError as e:
+            java_error = str(e)
+        expect("JDK 11 fails first with a fix", "JDK 17" in java_error and "JAVA_HOME" in java_error, True)
+        selected = toolchain_preflight(["relay", "android"], ROOT, env, "darwin", "arm64", [str(goodbin / "node")], [jdk11, jdk17])
+        expect("native node and JDK 17 replace broken PATH tools", (selected["PATH"].split(os.pathsep)[0], selected["JAVA_HOME"], selected["ANDROID_HOME"]), (str(goodbin), jdk17, str(sdk)))
+        try:
+            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(t / "missing")}, "darwin", "arm64", [], [jdk17])
+            sdk_error = ""
+        except ValueError as e:
+            sdk_error = str(e)
+        expect("missing SDK fails with a fix", "ANDROID_HOME" in sdk_error, True)
+        incomplete = t / "incomplete-sdk"
+        incomplete.mkdir()
+        try:
+            toolchain_preflight(["android"], ROOT, {**env, "ANDROID_HOME": str(incomplete)}, "darwin", "arm64", [], [jdk17])
+            package_error = ""
+        except ValueError as e:
+            package_error = str(e)
+        expect("missing SDK versions name the install command", "sdkmanager" in package_error and "platforms;" in package_error, True)
         bindir = t / "bin"
         bindir.mkdir()
         empty = str(t / "empty")
