@@ -1543,20 +1543,39 @@ pub(crate) async fn board_in<L: DispatchLink>(
     status: Option<TaskStatus>,
     stale_after: Option<Duration>,
 ) -> Result<pb::TaskList, Box<dyn std::error::Error>> {
-    let r = link
-        .call(task_list_request(board, status, stale_after))
-        .await
-        .map_err(|e| refused(e, "that board could not be read"))?;
-    let result::Value::TaskList(l) = expect_value(r.value)? else {
-        return Err(crate::daemon_link::UNREADABLE.into());
-    };
-    Ok(l)
+    // A page at a time (ov-1298): a long-lived board no longer fits one frame. A runner too old to page
+    // answers with every task and no next page. A page whose cursor went (its task deleted or moved between
+    // reads) is refused, and the read starts again, once.
+    let mut whole = pb::TaskList::default();
+    let mut after = bytes::Bytes::new();
+    let mut restarted = false;
+    loop {
+        let call = link.call(task_list_request(board, status, stale_after, after.clone())).await;
+        let r = match call {
+            Ok(r) => r,
+            Err(_) if !restarted && !after.is_empty() => {
+                restarted = true;
+                (whole, after) = Default::default();
+                continue;
+            }
+            Err(e) => return Err(refused(e, "that board could not be read")),
+        };
+        let result::Value::TaskList(page) = expect_value(r.value)? else {
+            return Err(crate::daemon_link::UNREADABLE.into());
+        };
+        if whole.reads.is_none() { whole.reads = page.reads; }
+        whole.items.extend(page.items);
+        match page.next_page_after.filter(|next| !next.is_empty() && *next != after) {
+            Some(next) => after = next,
+            None => return Ok(whole),
+        }
+    }
 }
 
 /// `task.list` for `board`. A workspace's board names `workstreams`: a runner
 /// too old to know the field would drop it and answer with the whole
 /// repository, which would read as that workspace's board.
-fn task_list_request(board: &Board, status: Option<TaskStatus>, stale_after: Option<Duration>) -> pb::Request {
+fn task_list_request(board: &Board, status: Option<TaskStatus>, stale_after: Option<Duration>, after: bytes::Bytes) -> pb::Request {
     let workspace = board.workspace.as_ref().map(|w| w.id.clone());
     let asking_a_workspace = workspace.is_some();
     let r = with(
@@ -1566,6 +1585,7 @@ fn task_list_request(board: &Board, status: Option<TaskStatus>, stale_after: Opt
             status: status.map(pb_status).unwrap_or_default(),
             stale_after_millis: stale_after.map(|d| d.as_millis() as u64),
             workspace_id: workspace,
+            page_after: Some(after),
         }),
     );
     if asking_a_workspace { needs_workstreams(r) } else { r }
@@ -3405,6 +3425,9 @@ mod tests {
         repositories: Vec<pb::Repository>,
         workspaces: Vec<pb::Workspace>,
         tasks: Vec<pb::Task>,
+        /// Tasks per `task.list` page when the request pages; 0 answers every task at once, as a runner too old
+        /// to page does.
+        page: usize,
         sent: Vec<pb::Request>,
     }
 
@@ -3422,6 +3445,7 @@ mod tests {
                 pane_reads: Vec::new(),
                 paused: Vec::new(),
                 look_takes: Duration::ZERO,
+                page: 0,
                 repositories: vec![
                     pb::Repository { id: REPO.to_vec().into(), display_name: "repo".into(), ..Default::default() },
                     pb::Repository { id: OTHER_REPO.to_vec().into(), display_name: "other".into(), ..Default::default() },
@@ -3502,7 +3526,22 @@ mod tests {
                         .collect();
                     result::Value::WorkspaceList(pb::WorkspaceList { items })
                 }
-                "task.list" => result::Value::TaskList(pb::TaskList { items: self.tasks.clone(), reads: None }),
+                "task.list" => {
+                    let after = match &self.sent.last().and_then(|r| r.payload.clone()) {
+                        Some(request::Payload::TaskList(l)) => l.page_after.clone(),
+                        _ => None,
+                    };
+                    match after.filter(|_| self.page > 0) {
+                        None => result::Value::TaskList(pb::TaskList { next_page_after: None, items: self.tasks.clone(), reads: None }),
+                        Some(after) => {
+                            let start = self.tasks.iter().position(|t| t.id == after).map_or(0, |i| i + 1);
+                            let items: Vec<_> = self.tasks.iter().skip(start).take(self.page).cloned().collect();
+                            let more = start + items.len() < self.tasks.len();
+                            let next_page_after = more.then(|| items.last().unwrap().id.clone());
+                            result::Value::TaskList(pb::TaskList { next_page_after, items, reads: None })
+                        }
+                    }
+                }
                 "terminal.list" => {
                     let mut items = self.terminals.clone();
                     if self.sent.iter().any(|r| r.method == "terminal.create") {
@@ -3658,6 +3697,25 @@ mod tests {
         let board = board_for(link, repo, workspace, env.map(|u| u.to_string())).await.expect("a board");
         tasks_in(link, &board, None, None).await.expect("read");
         board
+    }
+
+    /// ov-1298: a board read a page at a time comes back whole and in order, one request per page, each naming
+    /// the last page's last task.
+    #[tokio::test]
+    async fn task_list_reads_a_long_board_a_page_at_a_time() {
+        let mut link = FakeLink { page: 2, ..Default::default() };
+        link.tasks = (0..5u8)
+            .map(|n| pb::Task { id: id_bytes(Uuid::from_bytes([n + 1; 16])), title: format!("ticket {n}"), ..Default::default() })
+            .collect();
+        let board = board_for(&mut link, Some("repo"), None, None).await.expect("a board");
+        let tasks = tasks_in(&mut link, &board, None, None).await.expect("read");
+        let titles: Vec<_> = tasks.iter().map(|t| t.title.as_str()).collect();
+        assert_eq!(titles, ["ticket 0", "ticket 1", "ticket 2", "ticket 3", "ticket 4"]);
+        let afters: Vec<_> = link.sent.iter().filter(|r| r.method == "task.list").map(|r| match &r.payload {
+            Some(request::Payload::TaskList(l)) => l.page_after.clone().expect("every read pages"),
+            _ => panic!("payload"),
+        }).collect();
+        assert_eq!(afters, [bytes::Bytes::new(), link.tasks[1].id.clone(), link.tasks[3].id.clone()]);
     }
 
     /// `task list` reads the pane's own workspace's board; with no pane

@@ -3114,6 +3114,7 @@ async fn a_task_created_over_the_wire_comes_back_with_a_key() {
             status: 0,
             stale_after_millis: None,
             workspace_id: None,
+            page_after: None,
         },
     ));
     let result = client.call(list).await.expect("task.list");
@@ -3196,6 +3197,7 @@ async fn a_read_only_device_can_list_tasks_and_cannot_write_one() {
             status: 0,
             stale_after_millis: None,
             workspace_id: None,
+            page_after: None,
         },
     ));
     client.call(list).await.expect("reading is allowed");
@@ -3711,6 +3713,7 @@ async fn a_create_that_is_refused_leaves_no_task_behind_and_burns_no_key() {
                 status: 0,
                 stale_after_millis: None,
                 workspace_id: None,
+                page_after: None,
             },
         ));
         let result = client.call(list).await.expect("task.list");

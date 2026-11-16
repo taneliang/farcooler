@@ -153,7 +153,7 @@ mod tests {
                 "workspace.list" => Value::WorkspaceList(pb::WorkspaceList {
                     items: vec![pb::Workspace { id: id.clone(), repository_id: id.clone(), is_main: true, ..Default::default() }],
                 }),
-                "task.get_by_key" | "task.list" => Value::TaskList(pb::TaskList { items: vec![task], reads: None }),
+                "task.get_by_key" | "task.list" => Value::TaskList(pb::TaskList { next_page_after: None, items: vec![task], reads: None }),
                 other => panic!("{other} isn't a read this fake answers"),
             };
             self.0.push(req);

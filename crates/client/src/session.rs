@@ -1299,12 +1299,33 @@ impl Session {
         workspace: Option<Uuid>,
     ) -> Result<serde_json::Value, SessionError> {
         require(self.capabilities(), farcooler_protocol::capability::TASKS, "task.list")?;
-        let (list, required) = task_list_request(self.capabilities(), repository, workspace);
-        let payload = request::Payload::TaskList(list);
-        match self.value_requiring("task.list", Some(repository), Some(payload), required).await? {
-            result::Value::TaskList(l) => Ok(crate::tasks_json::board_json(&l, now_millis())),
-            other => Err(wrong("task_list", &other)),
+        let (mut list, required) = task_list_request(self.capabilities(), repository, workspace);
+        // A page at a time (ov-1298): a long-lived board no longer fits one frame. A runner too old to page
+        // answers with every task and no next page. A page whose cursor went (its task deleted or moved
+        // between reads) is refused, and the read starts again, once.
+        let mut whole = farcooler_protocol::v1::TaskList::default();
+        let mut restarted = false;
+        loop {
+            list.page_after = Some(whole.next_page_after.take().unwrap_or_default());
+            let payload = request::Payload::TaskList(list.clone());
+            let page = match self.value_requiring("task.list", Some(repository), Some(payload), required.clone()).await {
+                Ok(result::Value::TaskList(page)) => page,
+                Ok(other) => return Err(wrong("task_list", &other)),
+                Err(_) if !restarted && list.page_after.as_ref().is_some_and(|a| !a.is_empty()) => {
+                    restarted = true;
+                    whole = Default::default();
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            if whole.reads.is_none() { whole.reads = page.reads; }
+            whole.items.extend(page.items);
+            match page.next_page_after.filter(|next| !next.is_empty() && Some(next) != list.page_after.as_ref()) {
+                Some(next) => whole.next_page_after = Some(next),
+                None => break,
+            }
         }
+        Ok(crate::tasks_json::board_json(&whole, now_millis()))
     }
 
     /// One task with its whole record, in the shape `farcooler task show
@@ -1638,6 +1659,7 @@ fn task_list_request(
         status: 0,
         stale_after_millis: None,
         workspace_id: workspace.map(|w| bytes::Bytes::copy_from_slice(w.as_bytes())),
+        page_after: None,
     };
     let required = workspace.map(|_| vec![workstreams.to_string()]).unwrap_or_default();
     (list, required)

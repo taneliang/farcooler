@@ -333,7 +333,66 @@ pub fn list(svc: &Service, req: &pb::TaskListRequest, person: &crate::people::Pe
     // A read that names a board brings its read state in the same round trip
     // (ov-113), so every re-read a client already does keeps Unread current.
     let reads = board.map(|id| crate::board_reads_ops::reads_of(svc, id, person)).transpose()?;
-    Ok(pb::TaskList { items, reads })
+    match &req.page_after {
+        Some(after) => page(items, reads, after),
+        None => Ok(fit_unpaged(pb::TaskList { items, reads, next_page_after: None })),
+    }
+}
+
+/// A page's tasks, by encoded size: half the frame cap, so the board's read state and the envelope fit beside
+/// them (ov-1298). A long-lived board's finished tasks alone passed the whole cap on Nov 16.
+const PAGE_BYTES: usize = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES / 2;
+/// What an unpaged reply may take, leaving room for the response envelope around it.
+const UNPAGED_BYTES: usize = farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES - 16 * 1024;
+
+/// One page of `items`, after the task `after` names (the first page when it is empty). The read state comes
+/// with the first page only: it is the board's, not a page's.
+fn page(items: Vec<pb::Task>, reads: Option<pb::BoardReads>, after: &[u8]) -> Result<pb::TaskList> {
+    use prost::Message;
+    let start = if after.is_empty() { 0 } else {
+        items.iter().position(|t| t.id.as_ref() == after).ok_or(DomainError::InvalidArgument { what: "page_after" })? + 1
+    };
+    let mut used = 0;
+    let mut end = start;
+    while end < items.len() {
+        let size = items[end].encoded_len() + 8;
+        if end > start && used + size > PAGE_BYTES { break; }
+        used += size;
+        end += 1;
+    }
+    let next_page_after = (end < items.len()).then(|| items[end - 1].id.clone());
+    let items = items.into_iter().skip(start).take(end - start).collect();
+    Ok(pb::TaskList { items, reads: if after.is_empty() { reads } else { None }, next_page_after })
+}
+
+/// An unpaged reply, as every client before paging asks: whole when it fits a frame. Otherwise finished tasks'
+/// intent, acceptance and constraints are shortened, oldest first, until it does: to an excerpt, and then, if
+/// excerpts are not enough, to nothing, keeping each acceptance line's `met`. An older app still reads its board,
+/// with less of what its oldest done cards said, rather than nothing at all (ov-1298).
+fn fit_unpaged(mut list: pb::TaskList) -> pb::TaskList {
+    use prost::Message;
+    let mut size = list.encoded_len();
+    for (intent, line) in [(200, 80), (0, 0)] {
+        for task in &mut list.items {
+            if size <= UNPAGED_BYTES { return list; }
+            if !matches!(pb::TaskStatus::try_from(task.status), Ok(pb::TaskStatus::Done | pb::TaskStatus::Cancelled)) { continue; }
+            let before = task.encoded_len();
+            shorten(&mut task.intent, intent);
+            for item in &mut task.acceptance { shorten(&mut item.text, line); }
+            for text in &mut task.constraints { shorten(text, line); }
+            size -= before - task.encoded_len();
+        }
+    }
+    list
+}
+
+/// `text` cut to at most `max` bytes at a character boundary, with an ellipsis when cut to something.
+fn shorten(text: &mut String, max: usize) {
+    if text.len() <= max { return; }
+    let mut cut = max;
+    while !text.is_char_boundary(cut) { cut -= 1; }
+    text.truncate(cut);
+    if max > 0 { text.push('…'); }
 }
 
 /// Whether a subagent is running and wrote a line within `window` of `now`.
@@ -383,7 +442,7 @@ pub fn get_by_key(svc: &Service, req: &pb::TaskGetByKeyRequest) -> Result<pb::Ta
         "repository_id",
     )?;
     let tasks = svc.store.tasks_with_key(repository, key)?;
-    Ok(pb::TaskList { items: crate::task_starts::pb_tasks(svc, &tasks)?, reads: None })
+    Ok(pb::TaskList { next_page_after: None, items: crate::task_starts::pb_tasks(svc, &tasks)?, reads: None })
 }
 
 /// `task.search`: every note in a repository whose body carries a phrase.
@@ -780,6 +839,74 @@ pub fn block(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ov-1298: a long-lived board, 1,500 tasks with long bodies and longer notes, passed the 1 MiB frame cap
+    /// (1,315,517 bytes on Nov 16). Paged, every page fits and the pages add up to every task, whole; unpaged, as
+    /// an older client asks, the reply fits by shortening finished tasks only. Notes never ride in a list.
+    #[tokio::test]
+    async fn a_long_board_lists_within_the_frame_cap() {
+        use prost::Message;
+        let (_dir, svc, repository) = crate::test_support::fixture().await;
+        let watcher = Watcher::new(svc.clone());
+        let line = |n: usize, what: &str| format!("{what} {n}: {}", "the long body a real ticket carries ".repeat(4));
+        for n in 0..1500 {
+            let task = create(&svc, &watcher, &pb::TaskCreate {
+                repository_id: repository.as_bytes().to_vec().into(),
+                title: format!("ticket {n}"),
+                intent: line(n, "intent").repeat(4),
+                acceptance: (0..4).map(|a| pb::TaskAcceptanceItem { text: line(a, "acceptance"), ..Default::default() }).collect(),
+                constraints: vec![line(n, "constraint"), line(n, "constraint")],
+                actor: "user".into(),
+                ..Default::default()
+            }).unwrap();
+            let id = required_id(&task.id).unwrap();
+            svc.store.add_note(id, farcooler_store::models::NoteKind::Progress, Actor::User,
+                &"a long progress note ".repeat(200), serde_json::json!({})).unwrap();
+            if n < 1400 { svc.store.set_task_status(id, farcooler_store::models::TaskStatus::Done, Actor::User).unwrap(); }
+        }
+        let ask = |page_after: Option<bytes::Bytes>| pb::TaskListRequest {
+            repository_id: repository.as_bytes().to_vec().into(), page_after, ..Default::default() };
+        let frame = |list: &pb::TaskList| farcooler_protocol::framing::encode(&pb::WireEnvelope {
+            protocol_version: farcooler_protocol::PROTOCOL_VERSION, message_id: farcooler_protocol::ids::new_id(),
+            body: Some(pb::wire_envelope::Body::Response(pb::Response { request_id: farcooler_protocol::ids::new_id(),
+                outcome: Some(pb::response::Outcome::Result(pb::Result { value: Some(pb::result::Value::TaskList(list.clone())) })) })),
+        }).map(|f| f.len());
+        let person = crate::people::Person::Owner;
+
+        let whole: usize = svc.store.list_tasks(TaskScope::Repository(repository), None).unwrap().len();
+        assert_eq!(whole, 1500);
+        let mut seen = Vec::new();
+        let mut after = bytes::Bytes::new();
+        let mut pages = 0;
+        loop {
+            let page = list(&svc, &ask(Some(after.clone())), &person).unwrap();
+            let bytes = frame(&page).expect("a page fits the frame cap");
+            assert!(bytes <= farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES / 2 + 4096, "page of {bytes} bytes");
+            pages += 1;
+            for task in &page.items {
+                assert!(task.intent.ends_with("carries "), "a paged task is whole");
+                assert!(!task.encode_to_vec().windows(20).any(|w| w == b"a long progress note"), "no notes in a list");
+            }
+            seen.extend(page.items.iter().map(|t| t.title.clone()));
+            match page.next_page_after { Some(next) => after = next, None => break }
+        }
+        assert!(pages > 2, "{pages} pages");
+        assert_eq!(seen, (0..1500).map(|n| format!("ticket {n}")).collect::<Vec<_>>(), "every task once, in order");
+        assert!(matches!(list(&svc, &ask(Some(bytes::Bytes::from_static(b"gone"))), &person),
+            Err(DomainError::InvalidArgument { .. })), "a cursor that went is refused, so the client starts again");
+
+        let unpaged = list(&svc, &ask(None), &person).unwrap();
+        let bytes = frame(&unpaged).expect("an unpaged read fits the frame cap");
+        eprintln!("1,500 tasks: {pages} pages; unpaged {bytes} bytes");
+        assert_eq!(unpaged.items.len(), 1500);
+        assert!(unpaged.next_page_after.is_none());
+        let (done, open): (Vec<_>, Vec<_>) = unpaged.items.iter().partition(|t| t.status == pb::TaskStatus::Done as i32);
+        assert!(open.iter().all(|t| t.intent.ends_with("carries ") && t.acceptance.iter().all(|a| a.text.ends_with("carries "))),
+            "open tasks are never shortened");
+        assert!(done.first().unwrap().intent.len() <= 200 + '…'.len_utf8(), "the oldest finished task is shortened first");
+        assert_eq!(done.first().unwrap().acceptance.len(), 4, "its acceptance lines stay, to count");
+        assert!(done.last().unwrap().intent.ends_with('…'), "the newest only to an excerpt");
+    }
 
     /// A key from before the board had a prefix still names its task through
     /// the daemon's own handler, not just in the store: a pane launched
