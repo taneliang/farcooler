@@ -1875,15 +1875,28 @@ def _self_test():
             shutil.copy(ROOT / "scripts" / "gate-flaky.py", fx / "scripts" / "gate-flaky.py")
             for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"], ["add", "-A"], ["commit", "-qm", "x"]):
                 subprocess.run(["git", "-C", str(fx), *cmd], check=True)
-            (t / "state").unlink(missing_ok=True)
-            fstep = Step("rust", "n", "python3 scripts/gate-flaky.py run -- cargo nextest run --profile gate\n", "", {})
-            fenv = {k: v for k, v in env.items() if k != "GATE_FLAKY_LOG"}
-            fenv.update(flaky_env(t / "logs"))
-            before = tracked_state(fx)
-            run_step_safely(fstep, fx, fenv, t / "logs", t)
-            dirty = subprocess.run(["git", "-C", str(fx), "status", "--porcelain"], capture_output=True, text=True).stdout
-            expect(f"fixture repo after a gate step (needs {pass_on} reruns) is clean", (dirty, tracked_change_row(before, fx)), ("", None))
-            expect("the flaky record went to the gate's log directory", (t / "logs" / "flaky-log.tsv").exists(), want_flaky)
+            # run_jobs is the gate's own path: the step gets exactly the env run_one_job builds, and the test adds no
+            # GATE_FLAKY_LOG. Dropping flaky_env there leaves no record in the gate's log directory and goes red below.
+            fstep_env = {"PATH": env["PATH"], "FAKE_STATE": str(t / "state"), "PASS_ON": str(pass_on)}
+            fstep = Step("fx", "n", "python3 scripts/gate-flaky.py run -- cargo nextest run --profile gate\n", "", fstep_env)
+            ns = argparse.Namespace(no_load_wait=True, strict_leaks=False)
+            saved = os.environ.pop("GATE_FLAKY_LOG", None)
+            try:
+                for via in ("run_jobs", "bare"):
+                    (t / "state").unlink(missing_ok=True)
+                    (t / "logs" / "flaky-log.tsv").unlink(missing_ok=True)
+                    before = tracked_state(fx)
+                    if via == "run_jobs":
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            run_jobs(["fx"], {"fx": [fstep]}, [], fx, t, ctx, t / "logs", ns)
+                        expect("the flaky record went to the gate's log directory", (t / "logs" / "flaky-log.tsv").exists(), want_flaky)
+                    else:  # a step with no GATE_FLAKY_LOG at all: the wrapper must still leave the tree alone
+                        run_step_safely(fstep, fx, {k: v for k, v in env.items() if k != "GATE_FLAKY_LOG"}, t / "logs", t)
+                    dirty = subprocess.run(["git", "-C", str(fx), "status", "--porcelain"], capture_output=True, text=True).stdout
+                    expect(f"fixture repo after a gate step via {via} (needs {pass_on} reruns) is clean", (dirty, tracked_change_row(before, fx)), ("", None))
+            finally:
+                if saved is not None:
+                    os.environ["GATE_FLAKY_LOG"] = saved
             del FLAKY_LINES[:]
     with tempfile.TemporaryDirectory() as t:  # a planted change to a tracked file is seen, and named (ov-1295)
         t = pathlib.Path(t)
