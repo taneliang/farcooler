@@ -461,10 +461,8 @@ def rust_impact(repo, inputs):
     Offline metadata resolves all features/targets, never builds or downloads.
     Missing metadata or selector evidence keeps the full Rust suite.
     """
-    if not inputs or any(status not in ("A", "M")
-                         or not re.fullmatch(r"crates/(?!protocol/)[^/]+/(?:src|tests|examples)/.+\.rs", path)
-                         for status, path in inputs):
-        return "full workspace (cross-cutting, deleted or unknown input)"
+    if not inputs:
+        return "full workspace (no changed input)"
     try:
         shadow = load_module("rust_select", repo / "scripts/rust-select.py")
         metadata = subprocess.run(["cargo", "metadata", "--offline", "--locked",
@@ -948,6 +946,9 @@ def gate(args):
             print("lane-gate: Rust coverage: full suite (selection unavailable)")
         elif proposal["full"]:
             print("lane-gate: Rust coverage: full suite (" + "; ".join(proposal["reasons"]) + ")")
+        elif not proposal["packages"]:
+            print(f"lane-gate: Rust coverage: no tests selected ({'; '.join(proposal['reasons'])}); "
+                  f"{len(proposal['skipped_binaries'])} test binaries skipped; CI on main runs the full suite")
         else:
             print(f"lane-gate: Rust coverage: nextest runs only {', '.join(proposal['packages'])}; "
                   f"{len(proposal['skipped_binaries'])} test binaries skipped (rust-selection.json); CI on main runs the full suite (ov-1278)")

@@ -224,6 +224,10 @@ class LandingTests(unittest.TestCase):
         self.assertIn("-E ", step.run)
         self.assertIn("package(=farcooler-vt)", step.run)
         self.assertNotIn("package(=", wf["ci"])  # CI on main keeps the full suite
+        # ov-1293: a docs-only change selects no packages, so the nextest step is skipped, never narrowed to nothing.
+        docs_step = next(s for s in lane.steps_for("rust", wf, ctx) if s.name == "Full Rust workspace (local)")
+        policy.apply_rust("rust", docs_step, {"full": False, "packages": []})
+        self.assertIn("no Rust test input changed", docs_step.skip)
 
 
     def test_full_rust_forces_the_whole_suite_in_both_modes(self):

@@ -95,7 +95,9 @@ def rust_selection(repo, base, load_module):
         changes.extend(("A", p) for p in raw.split("\0") if p)
         metadata = json.loads(shadow.capture(repo, "cargo", "metadata", "--locked", "--offline",
                                              "--format-version", "1", "--all-features", "--no-deps"))
-        packages, reasons, full = shadow.select(repo, metadata, changes)
+        def workflow_texts(path):
+            return shadow.capture(repo, "git", "show", f"{green}:{path}"), (repo / path).read_text()
+        packages, reasons, full = shadow.select(repo, metadata, changes, workflow_texts)
         return with_binaries(shadow, metadata, {"full": full, "packages": packages, "reasons": reasons, "base": green})
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         return {"full": True, "packages": [], "reasons": [f"full: {exc}"], "selected_binaries": [], "skipped_binaries": [],
@@ -172,7 +174,8 @@ def apply_rust(job, step, proposal):
         if not proposal["full"]:
             expression = " or ".join(f"package(={p})" for p in proposal["packages"])
             if not expression:
-                raise ValueError("empty Rust package selection")
+                step.skip = "no Rust test input changed (docs and non-Rust files only); CI on main runs the full suite"
+                return
             lines[-1] = command + " -E " + shlex.quote(expression)
             step.run = "\n".join(lines) + "\n"
 

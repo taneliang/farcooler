@@ -1,0 +1,246 @@
+[
+ {
+  "commit": "31646caf5",
+  "subject": "ov-1269: explicit imports in the candidate files, no globs",
+  "changes": [
+   [
+    "M",
+    "crates/daemon/src/workflow_runtime/coding_candidate.rs"
+   ],
+   [
+    "M",
+    "crates/daemon/src/workflow_runtime/coding_candidate_tests.rs"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "c65f00916",
+  "subject": "ov-1269: the coding adapter runs CI on the candidate before the push too",
+  "changes": [
+   [
+    "M",
+    "crates/workflow/src/adapters/coding.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/src/adapters/coding_templates.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/tests/coding_layouts.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/tests/differential_support/mod.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/tests/migrate_fields.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/tests/migrate_phases.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/tests/migrate_replay.rs"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "42522c5ee",
+  "subject": "ov-1269: a simpler walk closure for clippy",
+  "changes": [
+   [
+    "M",
+    "crates/workflow/src/definition.rs"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "780db62db",
+  "subject": "ov-1269: docs say CI runs on the candidate branch before the push",
+  "changes": [
+   [
+    "M",
+    "docs/ci-reruns.md"
+   ],
+   [
+    "M",
+    "docs/engine-pipeline.md"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "d421b493e",
+  "subject": "ov-1269: CI runs on landing candidates, and main's run of a proven commit runs n",
+  "changes": [
+   [
+    "M",
+    ".github/workflows/ci.yml"
+   ],
+   [
+    "M",
+    "scripts/ci-changes.py"
+   ],
+   [
+    "M",
+    "scripts/ci-job-time-check.py"
+   ],
+   [
+    "M",
+    "scripts/ci-macos-capacity.py"
+   ],
+   [
+    "M",
+    "scripts/ci-yield-to-main.py"
+   ],
+   [
+    "M",
+    "scripts/ios-ui-shard-budget.py"
+   ],
+   [
+    "M",
+    "scripts/landing-gate-test.py"
+   ]
+  ],
+  "ci_jobs_touched": [
+   "",
+   "changes",
+   "ios-ui-plan",
+   "tunnel-helper",
+   "wire"
+  ]
+ },
+ {
+  "commit": "7b49c542c",
+  "subject": "ov-1269: the engine pushes a group's candidate to its own branch for CI and dele",
+  "changes": [
+   [
+    "M",
+    "crates/client/src/testdata/workflow-labels.json"
+   ],
+   [
+    "M",
+    "crates/client/src/workflow_presentation/display.rs"
+   ],
+   [
+    "M",
+    "crates/client/src/workflow_presentation/tests.rs"
+   ],
+   [
+    "M",
+    "crates/daemon/src/workflow_runtime.rs"
+   ],
+   [
+    "M",
+    "crates/daemon/src/workflow_runtime/coding.rs"
+   ],
+   [
+    "A",
+    "crates/daemon/src/workflow_runtime/coding_candidate.rs"
+   ],
+   [
+    "A",
+    "crates/daemon/src/workflow_runtime/coding_candidate_tests.rs"
+   ],
+   [
+    "M",
+    "crates/daemon/src/workflow_runtime/coding_execute.rs"
+   ],
+   [
+    "M",
+    "crates/daemon/src/workflow_runtime/coding_landing.rs"
+   ],
+   [
+    "M",
+    "crates/daemon/src/workflow_runtime/coding_verbs.rs"
+   ],
+   [
+    "M",
+    "crates/daemon/src/workflow_summary.rs"
+   ],
+   [
+    "M",
+    "crates/store/src/workflow_notices.rs"
+   ],
+   [
+    "M",
+    "crates/store/src/workflow_overlay.rs"
+   ],
+   [
+    "M",
+    "crates/store/src/workflow_publication.rs"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "7ef431e6b",
+  "subject": "ov-1269: a landing group can CI its candidate on a branch before the push",
+  "changes": [
+   [
+    "M",
+    "crates/workflow/src/definition.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/src/reducer.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/src/templates.rs"
+   ],
+   [
+    "M",
+    "crates/workflow/tests/templates.rs"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "41d057c43",
+  "subject": "ov-1290: report: state the pair-total limit plainly",
+  "changes": [
+   [
+    "M",
+    "reports/ov-1290/README.md"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "e5bf49fc6",
+  "subject": "ov-1290: the report: counts per layer pair, the generated per-file report, Known",
+  "changes": [
+   [
+    "A",
+    "reports/ov-1290/README.md"
+   ],
+   [
+    "A",
+    "reports/ov-1290/per-file.txt"
+   ]
+  ],
+  "ci_jobs_touched": []
+ },
+ {
+  "commit": "d51f1f221",
+  "subject": "ov-1290: count edges per top-level module so a module's code and tests may split",
+  "changes": [
+   [
+    "M",
+    "scripts/daemon-layers-counts.txt"
+   ],
+   [
+    "M",
+    "scripts/daemon-layers.py"
+   ]
+  ],
+  "ci_jobs_touched": []
+ }
+]
