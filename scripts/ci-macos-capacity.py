@@ -136,11 +136,11 @@ def check(texts):
             if name == "ci.yml":
                 if lock or workflow_lock or called_lock:
                     problems.append("landing CI must not wait on background-macos")
-            elif name == "canary-baseline.yml":
+            elif name in ("canary-baseline.yml", "ci-runner-retry.yml"):
                 # The recorder must never lose a shipped baseline to queue
                 # overflow/replacement. Its separate single job is reserved.
                 if workflow_lock or lock or called_lock or mac[job]:
-                    problems.append("Canary baseline must remain outside the background queue on Linux")
+                    problems.append("CI retry and Canary baseline must remain outside the background queue on Linux")
             elif not workflow_lock:
                 if name == "nightly.yml" and job.startswith("yield-"):
                     # Linux gate that waits for main CI; holds no Mac (ov-1226).

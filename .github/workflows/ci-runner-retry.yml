@@ -1,0 +1,19 @@
+name: Retry CI runner acquisition
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+permissions:
+  actions: write
+  checks: read
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # workflow_run checks out the default branch, never the untrusted run's head.
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ci-runner-retry.py
+        env:
+          GH_TOKEN: ${{ github.token }}
