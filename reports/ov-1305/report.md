@@ -51,4 +51,30 @@ The wrapper tests cover a missing engine FARCOOLER_BASE, an attempted engine bas
 
 The lane self-test copies source contents (filenames from the index, never real HEAD/history) into a temporary repository with synthetic commits and a private green-candidate fixture. All planning, summaries and history-dependent fixtures run there. It clears inherited engine context and avoids network green-history lookups. This prevents the old self-test from touching the caller’s Git summary or depending on the caller’s last commit.
 
-Final command results pending.
+Final results (all commands in the foreground; Cargo build jobs and nextest test concurrency capped at four):
+
+- `./scripts/lane-gate.py --self-test` with CARGO_HOME unset: PASS (`/tmp/ov-1305-self-test-default.log`). Git status was clean before and after.
+- The same command with CARGO_HOME set to a newly created empty directory: PASS (`/tmp/ov-1305-self-test-empty.log`). Git status was clean before and after.
+- `python3 scripts/gate-evidence-test.py`: 18 tests passed. Its fixture now clears inherited FARCOOLER context before creating its own engine binding, so a real engine invoking these tests cannot impose its base on the synthetic repository.
+- `python3 scripts/engine-gate-test.py`: 9 tests passed.
+- All 15 `scripts/*-lint.py` programs: PASS (`/tmp/ov-1305-lints-final.log`).
+- `python3 scripts/file-size-budget.py`: PASS (2,168 files, 27 grandfathered).
+- `python3 scripts/daemon-layers.py`: PASS (648 recorded edges, 55 layer pairs, none new).
+- Complete daemon and workflow nextest run: **4,122 passed, 19 skipped, no failures and no retries**. Both leak guards passed; test-leak-check reported nothing left in TMPDIR or preferences (`/tmp/ov-1305-nextest.log`). Both crates’ doctest targets also passed in the initial Cargo run.
+
+The complete Rust command, after `cargo build -p farcooler-cli --bin farcooler` supplied the native-hook test prerequisite, was:
+
+```sh
+CARGO_BUILD_JOBS=4 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 \
+NEXTEST_TEST_THREADS=4 CI=true FC_LEAK_SHARED=1 \
+GATE_FLAKY_LOG=/tmp/ov-1305-flaky.tsv \
+env -u FARCOOLER_NATIVE_HOOK_SOCKET \
+python3 scripts/test-leak-check.py -- python3 scripts/tmux-leak-check.py -- \
+python3 scripts/gate-flaky.py run -- \
+cargo nextest run --profile gate --no-fail-fast \
+  -p farcooler-daemon -p farcooler-workflow
+```
+
+The initial raw Cargo run found a missing hook CLI prerequisite and two watcher/native readiness failures. After building the CLI and using the repository’s normal gate environment isolation and nextest runner, the entire two-crate run passed on its first attempt. No unrelated Rust code was changed. An initial lane self-test also exposed its old 0.8-second light-job timing assertion; the self-test now observes the lock boundary directly, proving light work never enters the lock without depending on process-startup speed.
+
+No full landing gate, cargo fmt, stash, reset, clean, amend, or blanket staging command was run against the working repository. Tests use synthetic Git history; real history was read only for the requested receipt/landing analysis.

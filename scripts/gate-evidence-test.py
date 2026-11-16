@@ -69,7 +69,9 @@ class EvidenceTest(unittest.TestCase):
         self.inputs.write_text(json.dumps({"schema": 1, "jobs": {
             j: {"tools": ["sh"], "sdk": [], "cache": [], "native": []}
             for j in ("wire", "doc-comments")}}))
-        self.env = {**os.environ, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:" + os.environ.get("PATH", ""),
+        # The fixture owns its engine binding; never inherit the caller's real landing context.
+        runner_env = {k: v for k, v in os.environ.items() if not k.startswith("FARCOOLER_")}
+        self.env = {**runner_env, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:" + os.environ.get("PATH", ""),
                     "PYTHONDONTWRITEBYTECODE": "1"}
         self.pointer = self.repo / ".git/lane-gate-summary.txt"
 
