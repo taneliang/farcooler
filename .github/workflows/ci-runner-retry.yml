@@ -11,9 +11,25 @@ jobs:
   retry:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    concurrency:
+      group: runner-retry-${{ github.event.workflow_run.id }}
+      queue: max
     steps:
       # workflow_run checks out the default branch, never the untrusted run's head.
       - uses: actions/checkout@v4
-      - run: python3 scripts/ci-runner-retry.py
+      - id: select
+        run: python3 scripts/ci-runner-retry.py
         env:
           GH_TOKEN: ${{ github.token }}
+      # Reserve before the POST, so another completion cannot retry the same job.
+      - uses: actions/upload-artifact@v4
+        if: steps.select.outputs.job != ''
+        with:
+          name: ${{ steps.select.outputs.marker }}
+          path: retry-marker.txt
+          retention-days: 90
+      - if: steps.select.outputs.job != ''
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/actions/jobs/$JOB/rerun"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB: ${{ steps.select.outputs.job }}

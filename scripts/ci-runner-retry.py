@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
-"""Retry a main CI job once when GitHub could not acquire a hosted runner (ov-1310)."""
+"""Retry main CI's hosted runner acquisition failures once (ov-1310)."""
+import hashlib
 import json
 import os
 import re
 import subprocess
-import sys
 
 MESSAGE = "The job was not acquired by Runner of type hosted even after multiple attempts"
+MAC_JOB = re.compile(r"Rust \(macos-latest\)|Rust native test archive \(macOS\)|Rust native tests \(macOS [12]/2\)|Swift \(.*\)|iOS|iOS UI \(smoke\)")
+
+
+def marker(run_id, name):
+    digest = hashlib.sha256(name.encode()).hexdigest()
+    return f"runner-retry-{run_id}-{digest}"
 
 
 def retry_job(event, api):
@@ -14,33 +20,25 @@ def retry_job(event, api):
     if (run["head_branch"] != "main" or run["event"] != "push"
             or run["conclusion"] not in ("failure", "cancelled")):
         return None
-    jobs = api(f"actions/runs/{run['id']}/attempts/1/jobs?per_page=100")
-    # A job can be rerun only after the preceding attempt completes. Record
-    # every job present in later attempts, including jobs rerun as dependents.
-    attempted = set()
-    for attempt in range(2, run["run_attempt"] + 1):
-        later = api(f"actions/runs/{run['id']}/attempts/{attempt}/jobs?per_page=100")
-        attempted.update(job["name"] for job in later["jobs"])
-    for job in jobs["jobs"]:
-        if job["name"] in attempted:
-            continue
-        if not re.fullmatch(r"Rust \(macos-latest\)|Rust native test archive \(macOS\)|Rust native tests \(macOS [12]/2\)|Swift \(.*\)|iOS|iOS UI \(smoke\)", job["name"]):
+    # Later attempts contain only rerun jobs. Keep the latest instance of each
+    # job, including siblings left behind by a job-specific rerun.
+    latest = {}
+    for attempt in range(1, run["run_attempt"] + 1):
+        jobs = api(f"actions/runs/{run['id']}/attempts/{attempt}/jobs?per_page=100")
+        latest.update((job["name"], job) for job in jobs["jobs"])
+    for job in latest.values():
+        if not MAC_JOB.fullmatch(job["name"]):
             continue
         if job["conclusion"] != "cancelled" or job["steps"] or job.get("runner_name"):
             continue
         annotations = api(f"check-runs/{job['id']}/annotations?per_page=100")
-        if any(a["message"] == MESSAGE for a in annotations):
-            return job["id"]
+        if not any(a["message"] == MESSAGE for a in annotations):
+            continue
+        name = marker(run["id"], job["name"])
+        artifacts = api(f"actions/artifacts?name={name}&per_page=100")
+        if not any(a["name"] == name and not a["expired"] for a in artifacts["artifacts"]):
+            return job["id"], name
     return None
-
-
-def process(event, api, rerun):
-    job = retry_job(event, api)
-    if job is None:
-        print("No eligible runner acquisition failure")
-        return
-    print(f"Retrying runner acquisition failure in job {job}", flush=True)
-    rerun(job)
 
 
 def main():
@@ -52,13 +50,19 @@ def main():
         pages = json.loads(subprocess.check_output(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/{path}"]))
         if path.startswith("check-runs/"):
             return [item for page in pages for item in page]
-        return {"jobs": [job for page in pages for job in page["jobs"]]}
+        key = "artifacts" if path.startswith("actions/artifacts?") else "jobs"
+        return {key: [item for page in pages for item in page[key]]}
 
-    def rerun(job):
-        subprocess.run(["gh", "api", "--method", "POST", f"repos/{repo}/actions/jobs/{job}/rerun"], check=True)
-
-    process(event, api, rerun)
+    selected = retry_job(event, api)
+    if selected is None:
+        print("No eligible runner acquisition failure")
+        return
+    job, name = selected
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+        print(f"job={job}\nmarker={name}", file=out)
+    with open("retry-marker.txt", "w", encoding="utf-8") as out:
+        print(f"Automatic retry reserved for job {job}", file=out)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
