@@ -1,0 +1,61 @@
+# Today's forbidden daemon layer edges, counted per `source layer -> target layer` (ov-1290).
+# `layer -> unresolved` counts what the scanner refuses to guess at (globs, aliases, macro calls).
+# An edge is a (file, module) pair; moving one between files of a layer leaves the count alone.
+# A count can only go down: the check fails when one is above this line, and when one is below
+# it (lower the line, `./scripts/daemon-layers.py --lower`). Which of ov-1219's steps clears
+# each pair is in reports/ov-1290/README.md.
+access -> agents: 9
+access -> board: 5
+access -> composition: 34
+access -> delivery: 2
+access -> engine: 1
+access -> service: 60
+access -> unresolved: 32
+access -> watch: 13
+agents -> access: 12
+agents -> board: 11
+agents -> composition: 9
+agents -> delivery: 1
+agents -> service: 27
+agents -> unresolved: 32
+agents -> watch: 5
+board -> access: 21
+board -> agents: 16
+board -> composition: 29
+board -> delivery: 2
+board -> engine: 5
+board -> service: 64
+board -> unresolved: 39
+board -> watch: 21
+delivery -> access: 14
+delivery -> board: 15
+delivery -> composition: 9
+delivery -> engine: 5
+delivery -> service: 51
+delivery -> unresolved: 5
+delivery -> watch: 38
+engine -> access: 19
+engine -> agents: 14
+engine -> board: 16
+engine -> composition: 12
+engine -> delivery: 3
+engine -> service: 39
+engine -> unresolved: 62
+engine -> watch: 16
+git -> access: 1
+git -> agents: 3
+git -> board: 6
+git -> composition: 2
+git -> service: 11
+git -> unresolved: 15
+service -> board: 21
+service -> composition: 5
+service -> delivery: 2
+service -> engine: 3
+service -> unresolved: 46
+service -> watch: 5
+watch -> access: 5
+watch -> composition: 11
+watch -> engine: 2
+watch -> service: 34
+watch -> unresolved: 8
