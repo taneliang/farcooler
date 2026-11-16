@@ -1037,6 +1037,13 @@ impl Rpc {
                 let Some(request::Payload::CeremonyAuthority(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
+                // Never from a pane, as `client.revoke` (ov-1288). Any local process may write a preamble naming
+                // a device this runner knows, as `host_admin`, and a keyless one is never asked to step up: an
+                // agent could have the runner attest that device for an offer the agent wrote. That attestation
+                // is half of a teammate reply, and the device's own signature over the reply is the other
+                // (`farcooler_ceremony::signed::verify`), so it grants nothing alone; it's still the runner's
+                // word, and only a person's device asks for it.
+                crate::person_access::refuse_admin_from_pane(svc, self.caller_pid).await?;
                 let device = self.peer.client_id.as_deref().ok_or(DomainError::AuthRequired)?;
                 let fingerprint = crate::enrollment::key_of(svc, device).await.ok_or(DomainError::AuthRequired)?;
                 let offer = farcooler_ceremony::decode_offer(&p.offer)
@@ -1364,6 +1371,11 @@ impl Rpc {
                     .into_iter()
                     .find(|w| w.id == id)
                     .ok_or(DomainError::NotFound)?;
+                // Whose worktree this is to remove (ov-1288), before its
+                // dirtiness is checked, so a pane learns nothing of another
+                // lane's tree by asking.
+                let caller = crate::caller_seat::caller_seat(svc, self.caller_pid).await;
+                crate::caller_seat::authorize_worktree_removal(svc, caller, &ws)?;
                 // Checked HERE rather than in the client, because a client that
                 // skips the dialog must still be refused. Demanded only for a
                 // dirty worktree: everything committed lives in the branch,
@@ -1379,7 +1391,6 @@ impl Rpc {
                 // An adopted orchestrator can be in this worktree: every pane
                 // is checked before any is removed, under the seat locks a
                 // promotion takes, so none becomes one in between (ov-1286).
-                let caller = crate::caller_seat::caller_seat(svc, self.caller_pid).await;
                 svc.remove_worktree_as(id, caller).await?;
                 // Same reasoning as `worktree.create`: this mutation writes
                 // the worktree row itself, so the reconcile pass that

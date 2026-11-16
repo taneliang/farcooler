@@ -92,6 +92,42 @@ pub(crate) fn authorize_terminal(svc: &crate::service::Service, caller: Seat, ta
     Ok(())
 }
 
+/// Who may remove `worktree` (ov-1288). A person, any. An agent pane, the
+/// worktree it runs in or the one its own ticket is linked to; the workspace's
+/// orchestrator, any of its workspace's, or an unclaimed one in its repository.
+/// An agent outside Far Cooler or an unreadable caller can't be placed in a
+/// lane, so it removes none. Removing kills the tree's uncommitted work, and
+/// before this any pane could remove another lane's by typing back its name.
+pub(crate) fn authorize_worktree_removal(
+    svc: &crate::service::Service,
+    caller: Seat,
+    worktree: &farcooler_store::models::Worktree,
+) -> farcooler_core::error::Result<()> {
+    let denied = || farcooler_core::error::DomainError::ScopeDenied { needed: "workspace orchestrator" };
+    let pane = match caller {
+        Seat::Person => return Ok(()),
+        Seat::Agent(Some(pane)) => pane,
+        Seat::Agent(None) | Seat::Unreadable => return Err(denied()),
+    };
+    let term = svc.store.get_terminal(pane).map_err(|_| denied())?;
+    if term.worktree_id == worktree.id {
+        return Ok(());
+    }
+    if let Some(task) = term.task_id
+        && svc.store.get_task(task).is_ok_and(|t| t.worktree_id == Some(worktree.id))
+    {
+        return Ok(());
+    }
+    if term.role == farcooler_store::models::TerminalRole::Orchestrator
+        && let Some(workspace) = term.workspace_id
+        && worktree.workspace_id.is_none_or(|w| w == workspace)
+        && svc.store.get_workspace(workspace).is_ok_and(|w| w.repository_id == worktree.repository_id)
+    {
+        return Ok(());
+    }
+    Err(denied())
+}
+
 /// One row of the process table: its parent and its terminal.
 #[derive(Debug, Clone)]
 pub struct Proc {
