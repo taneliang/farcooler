@@ -1019,6 +1019,7 @@ os.execv('/usr/bin/python3', ['/usr/bin/python3', str(pathlib.Path(__file__).wit
         let binding = admitted(&runtime).await;
         runtime.install_codex_hooks(&binding, &runtime.tree(&binding)).await.unwrap();
         let command = runtime.coding_command(&binding).unwrap();
+        assert!(command.argv.windows(2).any(|args| args == ["/bin/sh", "-c"]), "{command:?}");
         assert!(!command.environment.keys().any(|key| key.starts_with("TEST_LAUNCHED_PROMPT")));
         let window = native_launch(&command);
         assert!(window.len() < 8192, "{} bytes", window.len());
@@ -1036,7 +1037,12 @@ os.execv('/usr/bin/python3', ['/usr/bin/python3', str(pathlib.Path(__file__).wit
         let configs: Vec<_> = received.windows(2).filter(|args| args[0] == "--config").map(|args| args[1].as_str()).collect();
         let hooks = runtime.codex_hook_override(&binding).unwrap().unwrap();
         assert!(configs.contains(&hooks.as_str()), "Codex receives the complete pinned hooks config: {configs:?}");
+        let received_hooks: toml::Value = configs.iter().find(|c| c.starts_with("hooks=")).unwrap().parse().unwrap();
+        let expected_hooks = crate::hook_install::native_codex_hooks(&runtime.root.join("h.sock"));
+        assert_eq!(serde_json::to_value(&received_hooks["hooks"]).unwrap(), expected_hooks["hooks"]);
         assert!(!brief.exists(), "the generated shell consumed the brief file");
+        // Recovery must reconstruct the same command after the shell consumes its input.
+        assert_eq!(runtime.coding_command(&binding).unwrap(), command);
     }
 
     #[tokio::test]
