@@ -1444,7 +1444,7 @@ fn with_unrun(runtime: Runtime, subject: &str, unrun: farcooler_protocol::workfl
     Runtime::open(&root).unwrap()
 }
 /// The newest settlement of a step's effect.
-fn settled(runtime: &Runtime, kind: StageKind) -> serde_json::Value {
+pub(super) fn settled(runtime: &Runtime, kind: StageKind) -> serde_json::Value {
     let stored = runtime.store.workflow_outbox("w").unwrap().into_iter().rev()
         .find(|s| s.effect.kind == EffectKind::Execute(kind.clone())).expect("the step ran");
     serde_json::from_slice(&std::fs::read(runtime.root.join("receipts").join(format!("{}.verb.json", digest(&stored.effect)))).unwrap()).unwrap()

@@ -1,0 +1,29 @@
+{
+  "about": "Nov 16 2026 (times +08:00), from the engine's events and receipts. Group 2924 gated on group 2895's pushed head while 2895's CI ran. That CI came back red, and the push step sent 2924 back to its base step (back edge push:1) instead of pushing. ov-1291 replays it in coding_red_base_tests.rs.",
+  "previous": {
+    "group": "group-00000000000000002895-landing",
+    "members": ["ov-1266", "ov-1210"],
+    "pushed": "19bf27fd920e868b214cb8abf65b26f727b62470",
+    "pushed_at": "02:17:45",
+    "ci_polls": [
+      { "at": "02:17:42", "run": { "id": 43745907131, "name": "CI", "event": "push", "status": "queued", "conclusion": null, "created_at": "2026-11-15T18:17:23Z", "updated_at": "2026-11-15T18:17:41Z" } },
+      { "at": "02:46:30", "run": { "id": 43745907131, "name": "CI", "event": "push", "status": "in_progress", "conclusion": null, "created_at": "2026-11-15T18:17:23Z", "updated_at": "2026-11-15T18:37:05Z" } },
+      { "at": "02:47:52", "run": { "id": 43745907131, "name": "CI", "event": "push", "status": "completed", "conclusion": "failure", "created_at": "2026-11-15T18:17:23Z", "updated_at": "2026-11-15T18:47:06Z" } }
+    ],
+    "ci_step": { "at": "02:47:52", "label": "rejected", "polls": 29 }
+  },
+  "gated": {
+    "group": "group-00000000000000002924-landing",
+    "members": ["ov-1199", "ov-1267", "ov-1277"],
+    "base": "19bf27fd920e868b214cb8abf65b26f727b62470",
+    "candidate": "f587e4dac25c3ee3de8d103ed38c58fb0d738138",
+    "gate": { "at": "02:43:36", "label": "passed" },
+    "push_waiting": { "at": "02:43:36", "target_before": "19bf27fd920e868b214cb8abf65b26f727b62470" }
+  },
+  "old_engine": [
+    { "at": "02:49:41", "step": "push", "label": "base_moved", "why": "Previous landing CI failed", "back_edges": { "push": 1 } },
+    { "at": "03:07:54", "step": "base", "label": "passed", "head": "19bf27fd920e868b214cb8abf65b26f727b62470", "polls": 13, "note": "the same head; run 43745907131 was re-run and passed at 03:04" },
+    { "at": "03:08:04", "step": "fold", "label": "passed", "candidate": "273a07c6bd829187226277fdfcf77aa705562265" },
+    { "at": "03:47:35", "step": "gate", "label": "rejected", "note": "the second gate of the same change ran over its wall-time budget" }
+  ]
+}
