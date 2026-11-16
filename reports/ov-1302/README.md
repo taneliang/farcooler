@@ -41,3 +41,12 @@ Test: `workflow_runtime::process_logs::tests::workflow_get_with_a_long_history_c
 3. task.list paging/trimming with 1,500 tasks: `task_ops::tests::a_long_board_lists_within_the_frame_cap` (1,500 tasks, paged and unpaged),
    inside the whole-crate daemon run above.
 4. Whole-crate runs and the three scripts: recorded above.
+
+## Landing gate retry
+
+The landing gate's Swift shard failed two native tests while the host load peaked at 20.6: `NativeAgentRunnerTests` (a stand-in pane answered `not_running` where `not_an_agent` was expected) and `NativeOfferTests` ("resource not found" from `terminal send`). Neither path is touched by this ticket.
+
+- `./apps/macos/test.sh --filter 'NativeAgentRunnerTests|NativeOfferTests'`: 9 tests in 2 suites passed, 2.8 s of test time (5 min including the Rust build). The run's "below the floor" line is the filter, not a failure.
+- `./scripts/lane-gate.py --self-test`: ran again, OK in 39 s wall.
+
+Treated as a load-sensitive flake: the pane's tmux session had not settled under load. No code change.
