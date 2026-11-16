@@ -286,6 +286,8 @@ async fn workflow_runtime_generated_crash_receipt_and_replay_properties() {
             // exposes no API for supplying an external serialized result or Grant.
             std::fs::remove_file(runtime.journal_path(&binding.effect)).unwrap();
             runtime.write_journal(&Journal { binding, outcome: result }).unwrap();
+            // The runner's word wakes an effect recovery backed off (ov-1301), as a command through the inbox does.
+            runtime.recovery.wake();
             runtime.pump(102).await.unwrap();
         }
         let state = runtime.state(&workspace).unwrap().unwrap();

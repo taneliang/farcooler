@@ -137,6 +137,8 @@ impl Runtime {
             provision.resource_generation.ok_or(Error::Refused("the provision was never admitted"))?, item.iteration, &base);
         if build {
             exec.resolve_build(item_id, &binding).await?;
+            // The settlement just written is read by the next sweep, not after the effect's backoff (ov-1301).
+            self.recovery.wake();
             if let Some(wake) = &self.notice_wake { wake.notify_one(); }
             return Ok(());
         }
@@ -164,6 +166,7 @@ impl Runtime {
         }
         exec.refuse_unstarted(&binding, "Git never finished making the run's worktree, and nothing was made; the orchestrator \
             resolved it. Retry the run.".into())?;
+        self.recovery.wake();
         if let Some(wake) = &self.notice_wake { wake.notify_one(); }
         Ok(())
     }

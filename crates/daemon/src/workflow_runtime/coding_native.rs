@@ -1270,14 +1270,16 @@ else:
                     if dir.path().join("started").exists() { break; }
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
-                assert!(dir.path().join("started").exists());
+                if !dir.path().join("started").exists() { return false; }
                 let id = crate::engine_steering::find(board.id, &task.key).expect("the running step is listed");
                 assert_eq!(id, terminal(&binding));
                 runtime.store.send_manual_message(task.id, Actor::Manager, "Use the new API", Some(id), serde_json::json!({})).unwrap();
                 std::fs::write(dir.path().join("direction-ready"), "").unwrap();
+                true
             };
-            let (outcome, ()) = tokio::join!(runtime.execute_coding(&workspace, &binding, cancel), steer);
-            assert!(matches!(outcome.unwrap(), Outcome::Passed(_)));
+            let (outcome, started) = tokio::join!(runtime.execute_coding(&workspace, &binding, cancel), steer);
+            assert!(started, "{agent} {mode}: the agent never started; the build ended {outcome:?}");
+            assert!(matches!(outcome, Ok(Outcome::Passed(_))), "{agent} {mode}: {outcome:?}");
             assert!(std::fs::read_to_string(dir.path().join("continued")).unwrap().contains("Use the new API"));
             assert!(runtime.store.pending_message_wakes().unwrap().is_empty());
             assert_eq!(runtime.state(&workspace).unwrap().unwrap(), state, "steering changes no workflow state");
