@@ -1,0 +1,10 @@
+✔ Test run with 21 tests in 5 suites passed after 0.995 seconds.
+✔ Test run with 3 tests in 1 suite passed after 0.052 seconds.
+✔ Test run with 1 test in 1 suite passed after 0.001 seconds.
+✔ Test run with 34 tests in 22 suites passed after 5.590 seconds.
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started.
+✔ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" passed after 16.564 seconds.
+✔ Suite TranscriptScrollerTests passed after 99.922 seconds.
+✔ Test run with 1979 tests in 352 suites passed after 140.832 seconds.
+test-leak-check: the run left nothing in TMPDIR or the preferences folder.
+swift-test-guard: 1979 tests ran (floor 1950).

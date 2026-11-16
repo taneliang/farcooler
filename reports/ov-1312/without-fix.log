@@ -1,0 +1,29 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite NativeSelectionTests started.
+◇ Suite TranscriptScrollerTests started.
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started.
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 2).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 3).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 4).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 5).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 6).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 7).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 8).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 9).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 10).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 11).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 12).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 13).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 14).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 15).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 16).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 17).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 18).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 19).
+◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started (repetition 20).
+✔ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" passed after 308.786 seconds.
+✔ Suite TranscriptScrollerTests passed after 308.787 seconds.
+✔ Suite NativeSelectionTests passed after 308.787 seconds.
+✔ Test run with 1 test in 2 suites passed after 308.787 seconds.

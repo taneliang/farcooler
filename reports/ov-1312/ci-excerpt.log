@@ -1,0 +1,5 @@
+2026-11-16T21:52:13.7677790Z ◇ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" started.
+2026-11-16T21:52:13.7678970Z ✘ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" recorded an issue at TranscriptScrollerTests.swift:845:13: Expectation failed: now == top
+2026-11-16T21:52:13.7679770Z ↳ the reader went from real:198 to real:196
+2026-11-16T21:52:13.7681330Z ✘ Test "Resizing the window mid-session keeps the reader on their row and the knob within 2%" failed after 33.290 seconds with 1 issue.
+2026-11-16T21:52:13.7738610Z ✘ Test run with 30 tests in 2 suites failed after 246.884 seconds with 1 issue.
