@@ -97,10 +97,10 @@ pub(crate) fn authorize_terminal(svc: &crate::service::Service, caller: Seat, ta
 /// a ticket names: any pane may relink its ticket (`task.update`). The
 /// workspace's orchestrator, any its workspace has claimed. An unclaimed tree
 /// is no orchestrator's to remove, since any workspace's may claim it
-/// (`authorize_worktree_assign`). A caller in none of this daemon's panes is a
-/// person here (`pane_of_ours`). Removing kills the tree's uncommitted work,
-/// and before this any pane could remove another lane's by typing back its
-/// name.
+/// (`authorize_worktree_assign`). An agent in none of this daemon's panes is a
+/// person here, and an unknown caller is refused (`pane_of_ours`). Removing
+/// kills the tree's uncommitted work, and before this any pane could remove
+/// another lane's by typing back its name.
 pub(crate) fn authorize_worktree_removal(
     svc: &crate::service::Service,
     caller: Seat,
@@ -140,19 +140,26 @@ fn seat_denied() -> farcooler_core::error::DomainError {
 }
 
 /// The pane of this daemon's that an agent `caller` runs in, which the
-/// worktree rules hold to its lane; `None` for any other caller, whose word is
-/// a person's. Only a pane is placed in a lane, so only a pane can be held to
-/// one: a caller this daemon's panes don't hold (a person's terminal, an agent
-/// outside Far Cooler or another runner's, a test run under one, `Agent(None)`;
-/// a chain the walk can't read, `Unreadable`) has no lane to keep to, and
-/// refusing it refused a person's `worktree remove` from a terminal under an
-/// agent, and every landing gate's CLI test against a scratch daemon (ov-1288,
-/// fix round 1). The limit, as the module says: an agent that detaches its
-/// command from its pane (`(cmd &)`, `nohup`) reads as unknown, so is let by.
+/// worktree rules hold to its lane; `None` for a caller whose word is a
+/// person's. Only a pane is placed in a lane, so only a pane can be held to
+/// one: an agent outside this daemon's panes (the owner's claude in Terminal,
+/// another runner's, a test run under one, `Agent(None)`) has no lane to keep
+/// to, and refusing it refused a person's `worktree remove` from a terminal
+/// under an agent (ov-1288, fix round 1).
+///
+/// A chain the walk can't read (`Unreadable`) is refused, as every other seat
+/// check refuses it (ov-1296): it is what an agent pane's command reads as once
+/// detached from the pane (`(cmd &)`, `nohup`, `setsid`, a double fork, a
+/// launchd, at or cron job), and taking it for a person let any pane remove
+/// another lane's dirty tree. A test harness's scratch daemon
+/// (`service::test_stub_agents`) reads such a caller as a person (`stubbed`),
+/// so a gate's CLI test with no terminal still removes. The limit, as the
+/// module says: `script`, `tmux new -d` and `ssh localhost` read as a person.
 fn pane_of_ours(svc: &crate::service::Service, caller: Seat) -> farcooler_core::error::Result<Option<farcooler_store::models::Terminal>> {
     match caller {
         Seat::Agent(Some(pane)) => svc.store.get_terminal(pane).map(Some).map_err(|_| seat_denied()),
-        Seat::Person | Seat::Agent(None) | Seat::Unreadable => Ok(None),
+        Seat::Person | Seat::Agent(None) => Ok(None),
+        Seat::Unreadable => Err(seat_denied()),
     }
 }
 

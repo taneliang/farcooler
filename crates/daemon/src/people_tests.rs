@@ -1160,25 +1160,67 @@ async fn an_agent_never_has_the_runner_attest_a_device() {
     assert_eq!(refused(&person, attest()).await, None, "a person");
 }
 
-/// ov-1288, fix round 1: a caller in none of this daemon's panes has no lane to
-/// keep to, so it removes as a person does: a process under an agent outside
-/// the runner (the owner's claude in Terminal, a landing gate's test run under
-/// another runner's agent) and a command an agent left behind, orphaned to pid
-/// 1. Before, both were refused, and with them every CLI test a landing gate
-/// ran against a scratch daemon. A copy of perl named `claude` stands in.
+/// ov-1288, fix round 1: an agent outside this daemon's panes has no lane to
+/// keep to, so a process under one removes as a person does (the owner's
+/// claude in Terminal, a landing gate's test run under another runner's
+/// agent). A copy of perl named `claude` stands in.
 #[tokio::test]
-async fn a_caller_in_none_of_the_runners_panes_removes_as_a_person() {
+async fn a_caller_under_an_agent_outside_the_runner_removes_as_a_person() {
     let r = runner().await;
     let dir = tempfile::tempdir().unwrap();
     let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
     let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
     let under = crate::test_support::Outside::under(&claude, 6595);
+    let wt = r.svc.create_worktree(repo, "wt-under", "feature/under", "main").await.unwrap();
+    std::fs::write(std::path::Path::new(&wt.worktree_path).join("wip.txt"), "unsaved").unwrap();
+    let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(under.pid));
+    assert_eq!(remove(&caller, &wt).await, None);
+    assert!(r.svc.store.get_worktree(wt.id).is_err(), "removed");
+}
+
+/// ov-1296: a caller the walk can't read (`Unreadable`) is no person's. An
+/// agent pane that detaches its CLI (`(cmd &)`, `nohup`, `setsid`, a double
+/// fork, a launchd or cron job) reaches pid 1 with nothing to vouch for it,
+/// and before this it removed another lane's dirty tree as a person. Both a
+/// command left behind and a socket caller with no pid are refused, and the
+/// tree keeps its work.
+#[tokio::test]
+async fn a_detached_caller_does_not_remove_a_worktree() {
+    let r = runner().await;
+    let dir = tempfile::tempdir().unwrap();
+    let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
     let left = crate::test_support::Outside::left_by(&claude, 6596);
-    for (what, pid) in [("under an agent outside", under.pid), ("left behind", left.pid)] {
-        let wt = r.svc.create_worktree(repo, &format!("wt-{}", pid), &format!("feature/{pid}"), "main").await.unwrap();
-        std::fs::write(std::path::Path::new(&wt.worktree_path).join("wip.txt"), "unsaved").unwrap();
+    let lane = r.svc.create_worktree(repo, "wt-lane", "feature/lane", "main").await.unwrap();
+    r.svc.store.assign_worktree(lane.id, r.workspace).unwrap();
+    std::fs::write(std::path::Path::new(&lane.worktree_path).join("wip.txt"), "unsaved").unwrap();
+    for (what, pid) in [("left behind", left.pid), ("no pid", crate::caller_seat::UNKNOWN_PID)] {
         let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid));
-        assert_eq!(remove(&caller, &wt).await, None, "{what}");
-        assert!(r.svc.store.get_worktree(wt.id).is_err(), "{what}: removed");
+        assert_eq!(remove(&caller, &lane).await.as_deref(), Some("scope-denied:"), "{what}");
+        assert!(std::path::Path::new(&lane.worktree_path).join("wip.txt").exists(), "{what}: its work is left");
     }
+    let person = factory(&r.svc, None, Scope::HostAdmin);
+    assert_eq!(remove(&person, &lane).await, None, "a person still removes it");
+}
+
+/// ov-1296: nor does a detached caller move a tree between workspaces, a
+/// claimed one or a loose one.
+#[tokio::test]
+async fn a_detached_caller_does_not_assign_a_worktree() {
+    let r = runner().await;
+    let dir = tempfile::tempdir().unwrap();
+    let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let billing = r.svc.store.create_workspace(repo, "Billing", "bil").unwrap();
+    let left = crate::test_support::Outside::left_by(&claude, 6597);
+    let lane = r.svc.create_worktree(repo, "wt-lane", "feature/lane", "main").await.unwrap();
+    let loose = r.svc.create_worktree(repo, "wt-loose", "feature/loose", "main").await.unwrap();
+    r.svc.store.assign_worktree(lane.id, r.workspace).unwrap();
+    for (what, pid) in [("left behind", left.pid), ("no pid", crate::caller_seat::UNKNOWN_PID)] {
+        let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid));
+        assert_eq!(assign(&caller, lane.id, billing.id).await.as_deref(), Some("scope-denied:"), "{what}: a claimed tree");
+        assert_eq!(assign(&caller, loose.id, billing.id).await.as_deref(), Some("scope-denied:"), "{what}: a loose tree");
+    }
+    assert_eq!(r.svc.store.get_worktree(lane.id).unwrap().workspace_id, Some(r.workspace));
+    assert_eq!(r.svc.store.get_worktree(loose.id).unwrap().workspace_id, None);
 }

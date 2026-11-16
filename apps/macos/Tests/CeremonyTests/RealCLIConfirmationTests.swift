@@ -33,6 +33,10 @@ struct RealCLIConfirmationTests {
     private func farcooler(_ args: [String], home: String) async -> (ok: Bool, out: String, err: String) {
         var environment = ProcessInfo.processInfo.environment
         ScratchDaemon.isolate(&environment, home: home + "/h")
+        // The scratch daemon takes this test for the person it stands in for,
+        // under an agent's pane or with no terminal (xctest, CI); a real one
+        // reads it as unknown and refuses the removal (ov-1296).
+        environment["FARCOOLER_TEST_STUB_AGENTS"] = "1"
         let ran = await ProcessRunner.run(Self.cli!, args, environment: environment, deadline: 60)
         return (ran.succeeded, String(decoding: ran.stdout, as: UTF8.self), String(decoding: ran.stderr, as: UTF8.self))
     }

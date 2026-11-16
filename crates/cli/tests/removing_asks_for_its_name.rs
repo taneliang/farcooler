@@ -8,6 +8,12 @@
 //! against a real scratch daemon and reads what it really prints.
 //!
 //! Needs tmux, as every daemon test here does (CI installs it).
+//!
+//! The scratch daemon runs with `FARCOOLER_TEST_STUB_AGENTS`, as every
+//! harness's does: its seat walk then takes this test for the person it stands
+//! in for, whether it runs under an agent's pane or with no terminal at all
+//! (CI, a landing gate), which a real daemon reads as unknown and refuses a
+//! removal (ov-1296).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -29,6 +35,7 @@ impl Scratch {
         let out = Command::new(env!("CARGO_BIN_EXE_farcooler"))
             .env("FARCOOLER_HOME", self.home.join("h"))
             .env("FARCOOLER_CONFIG", self.home.join("config.toml"))
+            .env("FARCOOLER_TEST_STUB_AGENTS", "1")
             .args(args)
             .output()
             .expect("run farcooler");
