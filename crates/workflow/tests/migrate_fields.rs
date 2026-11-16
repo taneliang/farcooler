@@ -148,7 +148,8 @@ fn a_running_ticket_carries_its_fields() {
 #[test]
 fn a_live_group_carries_its_fields() {
     let s = find("a listed CI failure reruns once");
-    let mut o = until(old_start(&s), |o| o.state.items.values().any(|g| g.group_of.is_some() && g.pushed.is_some() && g.pending.is_some()
+    // A group pushes before CI only on a definition from before ov-1269, which a live item may still carry.
+    let mut o = until(old_start_on(&s, before_candidates(&s)), |o| o.state.items.values().any(|g| g.group_of.is_some() && g.pushed.is_some() && g.pending.is_some()
         && !g.ci_retry.as_ref().is_some_and(|r| r.pending)));
     let (gid, _) = o.state.items.iter().find(|(_, g)| g.group_of.is_some()).map(|(k, g)| (k.clone(), g.clone())).unwrap();
     o.state.items.get_mut(&gid).unwrap().group_failure = Some(old::GroupFailure { job: "unit".into(), first_line: "boom".into(), split: false });

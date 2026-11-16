@@ -45,11 +45,13 @@ fn each_template_has_the_shape_its_name_promises() {
     let push = layout(&plan(Template::BatchedPush), &config()).unwrap();
     assert_eq!(ids(&push.stations), ["provision", "build", "join"]);
     let join = &push.stations[2];
-    assert_eq!(ids(&join.stations), ["base", "fold", "gate-0", "push", "ci"]);
+    // CI runs on the candidate's branch before the push (ov-1269).
+    assert_eq!(ids(&join.stations), ["base", "fold", "candidate", "gate-0", "ci", "push"]);
+    assert_eq!(join.stations[4].routes.get("red").map(String::as_str), Some("rejected"), "a red CI splits like a gate");
     assert_eq!(join.form.as_ref().map(|f| (f.size, f.free_on_crossing)), Some((None, true)), "no batch is no cap");
     assert_eq!((join.on_reject, join.policy.returns), (OnReject::Bisect, Some(1)));
     assert_eq!(join.routes.get("returned").map(String::as_str), Some("build"));
-    assert_eq!(join.stations[3].routes.get("refused").map(String::as_str), Some("base"), "a refused push refolds");
+    assert_eq!(join.stations[5].routes.get("refused").map(String::as_str), Some("base"), "a refused push refolds");
     // Per ticket is the same layout with a batch of one.
     let single = layout(&plan(Template::TicketPush), &config()).unwrap();
     assert_eq!(single.stations[2].form.as_ref().unwrap().size, Some(1));
@@ -85,20 +87,22 @@ fn broken(edit: impl FnOnce(&mut Layout)) -> Vec<String> {
     edit(&mut l);
     check(&l).expect_err("the edit must be refused")
 }
+/// A station inside the batched-push layout's `join`, by id.
+fn inner<'a>(l: &'a mut Layout, id: &str) -> &'a mut StationDef { l.stations[2].stations.iter_mut().find(|s| s.id == id).unwrap() }
 fn has(problems: &[String], text: &str) -> bool { problems.iter().any(|p| p.contains(text)) }
 
 #[test]
 fn the_order_rules_refuse_what_the_old_validator_refused() {
     // A push with no gate in front of it.
-    let p = broken(|l| { l.stations[2].stations.remove(2); });
+    let p = broken(|l| { l.stations[2].stations.retain(|s| s.id != "gate-0"); });
     assert!(has(&p, "every path into a push passes a gate"), "{p:?}");
     // A gate's failure that goes on toward the push.
-    let p = broken(|l| { l.stations[2].stations[2].routes.insert("red".into(), "push".into()); });
+    let p = broken(|l| { inner(l, "gate-0").routes.insert("red".into(), "push".into()); });
     assert!(has(&p, "failing label red goes on"), "{p:?}");
-    let p = broken(|l| { l.stations[2].stations[2].routes.insert("red".into(), "finish".into()); });
+    let p = broken(|l| { inner(l, "gate-0").routes.insert("red".into(), "finish".into()); });
     assert!(has(&p, "failing label red goes on"), "{p:?}");
     // A fold with no base before it has nothing to fold onto.
-    let p = broken(|l| { l.stations[2].stations.remove(0); l.stations[2].stations[2].routes.insert("refused".into(), "fold".into()); });
+    let p = broken(|l| { l.stations[2].stations.remove(0); inner(l, "push").routes.insert("refused".into(), "fold".into()); });
     assert!(has(&p, "fold: it needs a candidate"), "{p:?}");
     // A landing step outside a batch, and a ticket's step inside one.
     let p = broken(|l| { let base = l.stations[2].stations[0].clone(); l.stations.insert(2, base); });
@@ -106,10 +110,15 @@ fn the_order_rules_refuse_what_the_old_validator_refused() {
     let p = broken(|l| { let build = l.stations[1].clone(); l.stations[2].stations.insert(1, build); });
     assert!(has(&p, "a ticket's own step can't run inside a batch"), "{p:?}");
     // A route after the push that leads back to it: the core's once-rule (5.3).
-    let p = broken(|l| { l.stations[2].stations[4].routes.insert("red".into(), "base".into()); });
+    let p = broken(|l| {
+        let mut after = inner(l, "ci").clone();
+        after.id = "ci-after".into();
+        after.routes.insert("red".into(), "base".into());
+        l.stations[2].stations.push(after);
+    });
     assert!(has(&p, "leads back to boundary coding:target:main"), "{p:?}");
     // A gate that names a check the config doesn't have.
-    let p = broken(|l| { l.stations[2].stations[2].op = Some("coding.gate:7".into()); });
+    let p = broken(|l| { inner(l, "gate-0").op = Some("coding.gate:7".into()); });
     assert!(has(&p, "not in its adapter's catalog"), "{p:?}");
 }
 

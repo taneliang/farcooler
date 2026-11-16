@@ -31,10 +31,10 @@ pub struct CodingV1;
 
 /// The operations, by name. `check:<n>` and `gate:<n>` run one configured check; `check` and `gate` run all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Op { Provision, Build, Check, Review, Route, Base, Fold, Gate, GroupReview, Push, Ci, PushBranch, OpenPr, PrReady, Merged, Land }
+pub enum Op { Provision, Build, Check, Review, Route, Base, Fold, Candidate, Gate, GroupReview, Push, Ci, PushBranch, OpenPr, PrReady, Merged, Land }
 impl Op {
-    const ALL: [(Op, &'static str); 16] = [(Op::Provision, "provision"), (Op::Build, "build"), (Op::Check, "check"),
-        (Op::Review, "review"), (Op::Route, "route"), (Op::Base, "base"), (Op::Fold, "fold"), (Op::Gate, "gate"),
+    const ALL: [(Op, &'static str); 17] = [(Op::Provision, "provision"), (Op::Build, "build"), (Op::Check, "check"),
+        (Op::Review, "review"), (Op::Route, "route"), (Op::Base, "base"), (Op::Fold, "fold"), (Op::Candidate, "candidate"), (Op::Gate, "gate"),
         (Op::GroupReview, "group_review"), (Op::Push, "push"), (Op::Ci, "ci"), (Op::PushBranch, "push_branch"),
         (Op::OpenPr, "open_pr"), (Op::PrReady, "pr_ready"), (Op::Merged, "merged"), (Op::Land, "land")];
     /// An op name and, for `check:<n>` and `gate:<n>`, the check it runs.
@@ -60,7 +60,7 @@ impl Op {
     /// What it answers (definition.rs `emits_unrouted`, in the layout's words: a failed check is `red`).
     fn labels(self, config: &Value) -> Vec<String> {
         let fixed: &[&str] = match self {
-            Op::Provision | Op::Build | Op::PushBranch => &["passed"],
+            Op::Provision | Op::Build | Op::PushBranch | Op::Candidate => &["passed"],
             Op::Check | Op::Gate => &["passed", "red"],
             Op::Review | Op::GroupReview => &["passed", "rejected"],
             Op::Route => return route_labels(config),
@@ -74,7 +74,7 @@ impl Op {
         fixed.iter().map(|l| l.to_string()).collect()
     }
     /// Steps of a landing batch: they act on the batch's folded result, never on one ticket.
-    fn in_batch(self) -> bool { matches!(self, Op::Base | Op::Fold | Op::Gate | Op::GroupReview | Op::Push) }
+    fn in_batch(self) -> bool { matches!(self, Op::Base | Op::Fold | Op::Candidate | Op::Gate | Op::GroupReview | Op::Push) }
     /// Steps of one ticket: they read its own change or its own pull request.
     fn on_ticket(self) -> bool {
         matches!(self, Op::Provision | Op::Build | Op::Route | Op::PushBranch | Op::OpenPr | Op::PrReady | Op::Merged | Op::Land)
@@ -91,7 +91,7 @@ impl Op {
     fn needs(self) -> bool { !matches!(self, Op::Provision | Op::Build | Op::Base) }
     /// It judges the candidate it was given, so its evidence must name that candidate (`evidence_matches`).
     fn judges(self) -> bool {
-        matches!(self, Op::Check | Op::Review | Op::Route | Op::Gate | Op::GroupReview | Op::Push | Op::Ci
+        matches!(self, Op::Check | Op::Review | Op::Route | Op::Candidate | Op::Gate | Op::GroupReview | Op::Push | Op::Ci
             | Op::PushBranch | Op::OpenPr | Op::PrReady | Op::Land)
     }
     /// A gate a push stands behind: a command whose `passed` judges the candidate.

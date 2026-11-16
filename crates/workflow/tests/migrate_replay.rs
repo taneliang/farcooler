@@ -22,7 +22,7 @@ use farcooler_workflow::pipeline::{Command, Kind, Location, Subject};
 /// whose request was in flight is quarantined (its old answer means "the rerun went out", which the pipeline
 /// would read as CI's verdict); released, the CI look starts a new visit, and the station's `again` policy,
 /// counted per visit, allows one rerun again, so a second listed failure reruns and lands.
-const RELEASED: &[(&str, &str)] = &[("a second red after the rerun stops the landed group (groups.rs)", "done")];
+const RELEASED: &[(&str, &str)] = &[("a second red after the rerun returns the member to build (groups.rs)", "done")];
 
 /// Every pending effect of `o`'s state, admitted.
 fn admitted(o: &Old) -> Vec<Dispatch> {

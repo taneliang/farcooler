@@ -150,15 +150,17 @@ fn a_group_mid_gate_keeps_its_effect_its_members_and_the_landing() {
     // The batch passed no gate yet, and its base is unknown past the fold: neither is invented.
     let d = data_of(&b.data).unwrap();
     assert_eq!((d.gated, d.base), (None, None));
-    // Its answer binds: the gate passes and the batch goes on to push, with what it gated.
+    // Its answer binds: the gate passes and the batch goes on toward the push, with what it gated.
     let mut r = support::Run::resume(m.pipeline, linked());
     let evidence = new::Evidence { artifact: d.candidate.clone().unwrap(), manifest: "m".into(), receipt: "r".into(), spec: "s".into() };
     let effect = o.state.items[&g].pending.clone().unwrap();
     r.observe(&new::Subject::Batch(g.clone()), new::Outcome::Labeled { label: "passed".into(), evidence, data: None }).unwrap();
-    assert!(matches!(&r.p.batches[&g].at, Location::Working { station, .. } if station == "join.push"));
+    // With CI, it waits on CI for the candidate before the push (ov-1269); without, it pushes.
+    let next = if s.plan.ci { "join.ci" } else { "join.push" };
+    assert!(matches!(&r.p.batches[&g].at, Location::Working { station, .. } if station == next));
     assert_eq!(data_of(&r.p.batches[&g].data).unwrap().gated, d.candidate, "a push sends what the gate passed");
-    let push = r.effects.last().unwrap();
-    assert_ne!(push.id, effect);
+    let after = r.effects.last().unwrap();
+    assert_ne!(after.id, effect);
     r.assert_replays();
 }
 

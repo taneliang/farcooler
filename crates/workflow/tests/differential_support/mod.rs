@@ -380,8 +380,22 @@ pub fn config(s: &Scenario) -> serde_json::Value {
 }
 pub const POOLS: [(&str, u16); 3] = [("agents", 100), ("work", 100), ("landing", 1)];
 /// The old reducer with the scenario's tickets enqueued on the old template, before anything answers.
-pub fn old_start(s: &Scenario) -> Old {
+pub fn old_start(s: &Scenario) -> Old { old_start_on(s, build(&s.plan, &Fixture).unwrap()) }
+/// The landing a definition built before ov-1269 carries: no candidate branch, and the push before CI. Items
+/// enqueued then keep it, so a migration still meets a group that has pushed and waits on CI.
+pub fn before_candidates(s: &Scenario) -> old::Definition {
     let mut definition = build(&s.plan, &Fixture).unwrap();
+    if let Some(g) = definition.groups.get_mut("landing") {
+        g.steps.retain(|st| st.id != "candidate");
+        if let (Some(ci), Some(push)) = (g.steps.iter().position(|st| st.id == "ci"), g.steps.iter().position(|st| st.id == "push")) {
+            let push = g.steps.remove(push);
+            g.steps.insert(ci, push);
+        }
+    }
+    definition.validate().unwrap();
+    definition
+}
+pub fn old_start_on(s: &Scenario, mut definition: old::Definition) -> Old {
     if s.rerun {
         definition.policies.insert("flaky".into(), old::CiPolicy { point: old::CiPoint::Result, step: "ci".into(), fallback: None,
             rule: old::CiRule { rerun_failed: old::RerunFailed { jobs: vec!["flaky".into()], times: 1 } } });
@@ -474,9 +488,11 @@ pub fn scenarios() -> Vec<Scenario> {
         // groups.rs: the CI rerun policy.
         Scenario { rerun: true, ..sc("a listed CI failure reruns once, then green lands (groups.rs)", plan(BatchedPush, cmd()), &["a"],
             { let mut w = world(); w.ci = VecDeque::from(["red:flaky"]); w }) },
-        Scenario { rerun: true, ..sc("a second red after the rerun stops the landed group (groups.rs)", plan(BatchedPush, cmd()), &["a"],
+        // ov-1269: both run CI on the candidate before the push, so a red sends the member back to build and it lands
+        // on a second build.
+        Scenario { rerun: true, ..sc("a second red after the rerun returns the member to build (groups.rs)", plan(BatchedPush, cmd()), &["a"],
             { let mut w = world(); w.ci = VecDeque::from(["red:flaky", "red:flaky"]); w }) },
-        sc("an unlisted CI failure stops the landed group without a rerun (groups.rs)", plan(BatchedPush, cmd()), &["a"],
+        sc("an unlisted CI failure returns the member without a rerun (groups.rs)", plan(BatchedPush, cmd()), &["a"],
             { let mut w = world(); w.ci = VecDeque::from(["red"]); w }),
         // pr_verbs.rs: a pull request's own answers.
         sc("changes requested on a pull request go back to build (pr_verbs.rs)", plan(TicketPr, cmd()), &["a"],

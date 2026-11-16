@@ -8,8 +8,9 @@
 //!   rehearsal, as the join's limit was);
 //! - a label the old definition sent to `Fail` (a base or CI timeout, a closed pull request) is left unrouted,
 //!   so it holds for the orchestrator instead of failing the run;
-//! - a push batch gives up its landing place once it has pushed (`free_on_crossing`), which is ov-1209's
-//!   "the next group folds and gates while this one waits for CI".
+//! - a push batch gives up its landing place once it has pushed (`free_on_crossing`), which was ov-1209's
+//!   "the next group folds and gates while this one waits for CI"; since ov-1269 CI runs on the candidate's
+//!   branch before the push, a red there splits the batch like a red gate, and the push is the last step.
 use std::collections::BTreeMap;
 use serde_json::Value;
 use crate::pipeline::{AdapterUse, Form, Kind, Layout, OnReject, Policy, Refusal, StationDef};
@@ -81,9 +82,12 @@ pub fn layout(plan: &Plan, config: &Value) -> Result<Layout, Refusal> {
     let size = batch.map(|n| u16::try_from(n).unwrap_or(u16::MAX));
     // reducer.rs: landing infrastructure in a group (base, fold, gates, CI) gets three attempts.
     let infra = |mut s: StationDef| { s.policy.attempts = Some(3); s };
-    let folds = || {
+    // `candidate`: the folded commit goes to the batch's own branch first, so CI runs on it while the gates do,
+    // and the push moves the target only to a commit CI passed (ov-1269, templates.rs).
+    let folds = |candidate: bool| {
         let mut inner = vec![infra(wait("base", "base", plan.base_patience_ms)),
             infra(route(station("fold", Kind::Command, Some("fold"), None), "conflict", "returned"))];
+        if candidate { inner.push(infra(station("candidate", Kind::Command, Some("candidate"), None))); }
         for (n, i) in commands.iter().enumerate() {
             inner.push(infra(route(station(&format!("gate-{n}"), Kind::Command, Some(&format!("gate:{i}")), None), "red", "rejected")));
         }
@@ -98,9 +102,10 @@ pub fn layout(plan: &Plan, config: &Value) -> Result<Layout, Refusal> {
     };
     match t {
         Template::BatchedPush | Template::TicketPush => {
-            let mut inner = folds();
+            let mut inner = folds(plan.ci);
+            // A red CI on the candidate is a failed gate: nothing went out, so the batch splits like one.
+            if plan.ci { inner.push(infra(route(ci(plan, &config), "red", "rejected"))); }
             inner.push(route(station("push", Kind::Command, Some("push"), None), "refused", "base"));
-            if plan.ci { inner.push(infra(ci(plan, &config))); }
             stations.push(batch_station(inner, 1, None, true));
         }
         Template::TicketPr => {
@@ -112,7 +117,7 @@ pub fn layout(plan: &Plan, config: &Value) -> Result<Layout, Refusal> {
         Template::BatchedPr => {
             stations.push(station("branch", Kind::Command, Some("push_branch"), Some("work")));
             stations.push(station("pr", Kind::Command, Some("open_pr"), Some("work")));
-            stations.push(batch_station(folds(), 2, Some("ready"), false));
+            stations.push(batch_station(folds(false), 2, Some("ready"), false));
             stations.push(station("ready", Kind::Command, Some("pr_ready"), Some("work")));
             stations.push(route(wait("merged", "merged", FOURTEEN_DAYS_MS as u64), "changes_requested", "build"));
         }
