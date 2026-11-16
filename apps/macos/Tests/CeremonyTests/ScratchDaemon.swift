@@ -15,6 +15,11 @@ enum ScratchDaemon {
     static func isolate(_ environment: inout [String: String], home: String, config: String? = nil) {
         environment["FARCOOLER_HOME"] = home
         environment["FARCOOLER_CONFIG"] = config ?? home + "/config.toml"
+        // Swift starts the binaries directly, so Cargo's test-shell environment
+        // never reaches these daemons. Keep personal login-shell startup out of
+        // scratch panes. The CLI only preserves this override with stubs on.
+        environment["FARCOOLER_TEST_SHELL"] = "/bin/sh"
+        environment["FARCOOLER_TEST_STUB_AGENTS"] = "1"
     }
 
     /// Stop the daemon `cli` runs under `farcoolerHome`, then its tmux
