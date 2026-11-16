@@ -140,10 +140,9 @@ crates are not seen. New with counts:
 - **Several references to one module from one module are one edge.** A second `crate::service::X`
   line in a file that already imports `service` does not raise a count. A reference to a *new*
   target module does.
-- **A count can fall and another rise in one change.** Counts are per pair: removing an edge from
-  one pair and adding one to another in the same layer is two failures, but removing one from engine -> board
-  while adding another to engine -> board nets to zero and passes. Moving an edge within the pair is the
-  intended case.
+- **A pair's count is a total.** Adding an edge to engine -> board while removing another from it nets
+  to zero and passes, which is the move the rule allows; the gate cannot tell a moved edge from a
+  swapped one in the same pair.
 
 ## Reproduce
 
