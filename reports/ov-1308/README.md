@@ -36,3 +36,38 @@ ran every binary: its library had 3,306 passes and one failure in the existing
 binaries passed. That test passed alone on rerun (3.53 seconds), and then the
 entire crate passed under the repository's gate wrapper as recorded above,
 without requiring its retry path. Both ov-1308 tests passed in that full run.
+
+## Landing-gate return: Swift scratch shells
+
+The reported failure was in `NativeOfferTests.theRealCLINamesTheRunningAgent`:
+`terminal send` returned `resource not found`, before the test could observe its
+fake Claude process. It was not a Rust build failure. The original scratch home
+and daemon log had already been removed by test cleanup. The same create/send
+sequence passed 20 times locally, so the exact transient failure was not reproduced.
+
+Inspection found that Swift's scratch daemons did not receive Cargo's
+`FARCOOLER_TEST_SHELL=/bin/sh`. They started the owner's login shell (fish on
+this Mac), including personal configuration. `ScratchDaemon.isolate` now sets
+the test shell and the stub-agent switch required for the CLI to preserve that
+override. This applies to cleanup's CLI calls too. The real-CLI test still types
+and detects its own fake Claude through the real shell, tmux, CLI and daemon.
+
+Validation, with four build jobs and no formatter:
+
+- `CARGO_BUILD_JOBS=4 apps/macos/build-test-native.sh`: passed.
+- `CARGO_BUILD_JOBS=4 FARCOOLER_MAC_TEST_UNIFIED_RUST=1 scripts/heavy -- apps/macos/test.sh -j 4`:
+  passed, 1,979 tests in the main Mac suite, including the previously failing
+  real-CLI test (4.508 seconds). All other test targets passed too. Temp-file,
+  preferences and tmux leak guards passed. Log: `/tmp/ov-1308-return-swift.log`.
+- `cargo test -p farcooler-daemon -j 4 --config profile.dev.opt-level=1 --config profile.dev.package.farcooler-cli.opt-level=0 --config profile.dev.package.farcooler-daemon.opt-level=0 --lib ov_1308 -- --test-threads=4`:
+  both ticket regressions passed in 3.26 seconds: the 20,000-character ticket
+  starts through real tmux with a bounded command, and a window refusal reaches
+  workflow get with tmux's reason. Log: `/tmp/ov-1308-return-engine.log`.
+- `python3 scripts/daemon-layers.py`: passed, 648 edges in 55 layer pairs.
+- `python3 scripts/file-size-budget.py`: passed, 2,168 files, 27 grandfathered.
+- `HEAVY_LOCK_HELD=1 python3 scripts/lane-gate.py --self-test`: passed.
+- `git diff --check`: passed.
+
+Commands select system Python first in PATH; the inherited Python executable is
+an incompatible Intel binary on this host. Engine implementation is unchanged;
+the full daemon-crate pass recorded above remains applicable.
