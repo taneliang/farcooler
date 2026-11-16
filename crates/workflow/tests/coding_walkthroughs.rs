@@ -173,7 +173,7 @@ fn agentic_tickets_build_review_route_and_land_in_batches() {
     assert_eq!(members(&r, &b2), ["t2", "t3", "t4"]);
     // b1's CI goes red on a listed flaky job: the adapter asks for it again, once, and the look after it names
     // the same run at a newer attempt.
-    let run = |attempt| CiRun { id: 7, attempt, failed_jobs: vec!["flaky".into()] };
+    let run = |attempt| CiRun { id: 7, attempt, failed_jobs: vec!["flaky".into()], failed_steps: vec![] };
     say(&mut r, &b1, "red", Some(Facts { run: Some(run(1)), ..Facts::default() }));
     assert_eq!(station_of(&r, &b1), "land.ci");
     assert_eq!(coding_effect(&r.effect_for(&b1)).ci_retry, Some(run(1)), "the rerun names the run");
@@ -265,7 +265,7 @@ fn a_crossed_batch_settles_before_it_moves_and_a_red_ci_holds_for_the_orchestrat
     assert_eq!(r.p.tokens["t1"].crossings.len(), 1);
     assert_eq!(station_of(&r, &b), "land.ci");
     // Red, not a listed job: no rerun, and the batch holds. It crossed, so nothing sends it back before the push.
-    say(&mut r, &b, "red", Some(Facts { run: Some(CiRun { id: 9, attempt: 1, failed_jobs: vec!["unit".into()] }), ..Facts::default() }));
+    say(&mut r, &b, "red", Some(Facts { run: Some(CiRun { id: 9, attempt: 1, failed_jobs: vec!["unit".into()], failed_steps: vec![] }), ..Facts::default() }));
     assert!(matches!(r.location(&b), Location::Held { station, .. } if station == "land.ci"));
     assert_eq!(r.orch(Command::Release { subject: b.clone(), station: "land.ci".into(), to: Some("build".into()), reason: None }),
         Err(Refusal::Crossed));

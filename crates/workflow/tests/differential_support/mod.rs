@@ -202,7 +202,7 @@ impl Old {
                     self.ci_attempt += 1;
                     let (label, jobs) = match l { "red:flaky" => ("rejected", vec!["flaky"]), "red" => ("rejected", vec!["unit"]), other => (other, vec![]) };
                     old::Outcome::CiResult { label: label.into(), evidence: Self::ev(&cand), failure: None,
-                        run: Some(old::CiRun { id: 1, attempt: self.ci_attempt, failed_jobs: jobs.into_iter().map(String::from).collect() }) }
+                        run: Some(old::CiRun { id: 1, attempt: self.ci_attempt, failed_jobs: jobs.into_iter().map(String::from).collect(), failed_steps: vec![] }) }
                 }
                 (_, l) => old::Outcome::Labeled(l.into(), Self::ev(&cand)),
             }
@@ -332,7 +332,7 @@ impl New {
             (Op::Ci, l) => {
                 self.ci_attempt += 1;
                 let (label, jobs) = match l { "red:flaky" => ("red", vec!["flaky"]), "red" => ("red", vec!["unit"]), other => (other, vec![]) };
-                let run = old::CiRun { id: 1, attempt: self.ci_attempt, failed_jobs: jobs.into_iter().map(String::from).collect() };
+                let run = old::CiRun { id: 1, attempt: self.ci_attempt, failed_jobs: jobs.into_iter().map(String::from).collect(), failed_steps: vec![] };
                 outcome(cand, label, Some(Facts { run: Some(run), ..Facts::default() }))
             }
             (_, l) => outcome(cand, l, None),

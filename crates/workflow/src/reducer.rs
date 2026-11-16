@@ -1094,9 +1094,10 @@ fn valid_state(state: &State) -> bool {
                             .any(|s| &s.id == stage && s.limit >= *taken))
                     } else { item.iteration <= item.definition.max_reworks && item.back_edges.is_empty() }
                 && item.ci_reruns.iter().all(|(step, count)| *count == 1
-                    && item.definition.policies.values().any(|p| &p.step == step))
+                    && (item.definition.policies.values().any(|p| &p.step == step)
+                        || item.definition.stages.iter().any(|s| &s.id == step && s.kind == StageKind::AwaitCi)))
                 && item.ci_retry.as_ref().is_none_or(|r| r.run.valid()
-                    && item.definition.policies.contains_key(&r.policy)
+                    && (item.definition.policies.contains_key(&r.policy) || r.policy == crate::ci::SETUP_RERUN)
                     && item.definition.stages.get(item.stage).is_some_and(|s|
                         s.kind == StageKind::AwaitCi && item.ci_reruns.get(&s.id) == Some(&1)))
                 && item.retries <= item.definition.execution_limits().retries

@@ -744,7 +744,7 @@ fn flaky_definition() -> Definition {
 fn ci_answer(log: &mut Log, group: &str, label: &str, attempt: u32, jobs: &[&str]) -> Transition {
     let evidence = log.evidence(group);
     log.outcome(group, Outcome::CiResult { label: label.into(), evidence,
-        run: Some(CiRun { id: 73, attempt, failed_jobs: jobs.iter().map(|j| (*j).into()).collect() }), failure: None })
+        run: Some(CiRun { id: 73, attempt, failed_jobs: jobs.iter().map(|j| (*j).into()).collect(), failed_steps: vec![] }), failure: None })
 }
 #[test]
 fn a_listed_ci_failure_reruns_once_then_green_lands_or_second_red_routes_rejected() {
@@ -769,7 +769,7 @@ fn a_listed_ci_failure_reruns_once_then_green_lands_or_second_red_routes_rejecte
         // A stale red/green from attempt 1 cannot finish the look at attempt 2.
         let evidence = log.evidence(&group);
         assert_eq!(log.try_outcome(&group, Outcome::CiResult { label: "passed".into(), evidence,
-            run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec![] }), failure: None }), Err(Refusal::Evidence));
+            run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec![], failed_steps: vec![] }), failure: None }), Err(Refusal::Evidence));
         let result = ci_answer(&mut log, &group, if green { "passed" } else { "rejected" }, 2,
             if green { &[] } else { &["iOS UI tests"] });
         assert_eq!(result.state.items[&group].phase, if green { Phase::Done } else { Phase::Failed });
@@ -777,6 +777,52 @@ fn a_listed_ci_failure_reruns_once_then_green_lands_or_second_red_routes_rejecte
         assert_eq!(result.state.items[&group].ci_reruns["ci"], 1);
         assert_eq!(log.replay_digest(), digest(&log.state));
     }
+}
+/// ov-1280: run 43745907131's two failed jobs, as the CI look reports them; `own` puts the iOS failure in the build.
+fn outage(attempt: u32, own: bool) -> CiRun {
+    let step = |job: &str, step: &str, action: &str| FailedStep { job: job.into(), step: step.into(), action: Some(action.into()) };
+    CiRun { id: 73, attempt, failed_jobs: vec!["iOS".into(), "iOS UI (smoke)".into()], failed_steps: vec![
+        step("iOS", "Run ./.github/actions/ios-ui-build", if own { "__self.__run_2" } else { "__self.__dtolnay_rust-toolchain.__run_4" }),
+        step("iOS UI (smoke)", "Run ./.github/actions/ios-ui-shard", "__self.__actions_download-artifact")] }
+}
+fn ci_run(log: &mut Log, group: &str, label: &str, run: CiRun) -> Transition {
+    let evidence = log.evidence(group);
+    log.outcome(group, Outcome::CiResult { label: label.into(), evidence, run: Some(run), failure: None })
+}
+#[test]
+fn a_setup_only_ci_failure_reruns_once_with_no_policy_then_its_verdict_decides() {
+    for green in [true, false] {
+        let mut log = Log::new();
+        let group = verb_group(&mut log, verb_ticket());
+        assert!(log.state.items[&group].definition.policies.is_empty(), "no published rerun rule");
+        walk_to(&mut log, &group, "ci");
+        let first = ci_run(&mut log, &group, "rejected", outage(1, false));
+        assert_eq!(first.effects.iter().map(|e| e.kind.clone()).collect::<Vec<_>>(), [EffectKind::Execute(StageKind::RerunCi)]);
+        let item = &log.state.items[&group];
+        assert_eq!((item.phase.clone(), item.ci_reruns["ci"]), (Phase::Running, 1), "red is not the verdict yet");
+        assert_eq!(item.ci_retry.as_ref().map(|r| (r.policy.as_str(), r.run.id)), Some((SETUP_RERUN, 73)));
+        assert_eq!(serde_json::from_str::<State>(&serde_json::to_string(&log.state).unwrap()).unwrap(), log.state);
+        assert_eq!(log.pass(&group).effects[0].kind, EffectKind::Execute(StageKind::AwaitCi), "the look follows the rerun");
+        let second = if green { ci_run(&mut log, &group, "passed", CiRun { failed_jobs: vec![], failed_steps: vec![], ..outage(2, false) }) }
+            else { ci_run(&mut log, &group, "rejected", outage(2, false)) };
+        assert_eq!(second.state.items[&group].phase, if green { Phase::Done } else { Phase::Failed }, "one rerun, then its verdict");
+        assert!(second.effects.iter().all(|e| e.kind != EffectKind::Execute(StageKind::RerunCi)));
+        assert_eq!(log.replay_digest(), digest(&log.state));
+    }
+}
+#[test]
+fn a_real_failure_beside_a_setup_one_fails_the_landing_without_a_rerun() {
+    let mut log = Log::new();
+    let group = verb_group(&mut log, verb_ticket());
+    walk_to(&mut log, &group, "ci");
+    let result = ci_run(&mut log, &group, "rejected", outage(1, true));
+    assert_eq!(result.state.items[&group].phase, Phase::Failed, "the red goes where red always went");
+    assert!(result.effects.iter().all(|e| e.kind != EffectKind::Execute(StageKind::RerunCi)));
+    assert!(result.state.items[&group].ci_reruns.is_empty());
+    let mut taken = verb_ticket();
+    taken.policies.insert(SETUP_RERUN.into(), CiPolicy { point: CiPoint::Result, step: "ci".into(),
+        rule: CiRule { rerun_failed: RerunFailed { jobs: vec!["iOS".into()], times: 1 } }, fallback: None });
+    assert_eq!(taken.validate(), Err(Refusal::Definition), "no published policy takes the engine's name");
 }
 #[test]
 fn unlisted_empty_or_missing_ci_jobs_route_rejected_without_a_rerun() {
@@ -839,7 +885,7 @@ fn a_ci_receipt_can_resolve_uncertainty_without_firing_a_rerun_policy() {
         let command = Command::Resolve { item: group.clone(), effect: item.pending.clone().unwrap(),
             run: item.run.clone(), fence: item.fence,
             outcome: Outcome::CiResult { label: label.into(), evidence: log.evidence(&group),
-                run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec!["iOS UI tests".into()] }), failure: None } };
+                run: Some(CiRun { id: 73, attempt: 1, failed_jobs: vec!["iOS UI tests".into()], failed_steps: vec![] }), failure: None } };
         let result = log.run(command, Grant::Controller);
         assert_eq!(result.state.items[&group].phase, if label == "passed" { Phase::Done } else { Phase::Failed });
         assert!(result.effects.iter().all(|e| e.kind != EffectKind::Execute(StageKind::RerunCi)));
@@ -1274,7 +1320,7 @@ fn ci_diagnostics_survive_a_failed_rerun() {
     let evidence = log.evidence(&group);
     let result = log.outcome(&group, Outcome::CiResult {
         label: "rejected".into(), evidence,
-        run: Some(CiRun { id: 73, attempt: 2, failed_jobs: vec!["iOS UI tests".into()] }),
+        run: Some(CiRun { id: 73, attempt: 2, failed_jobs: vec!["iOS UI tests".into()], failed_steps: vec![] }),
         failure: Some(GroupFailure { job: "iOS UI tests".into(), first_line: "error: failed".into(), split: false }),
     });
     assert_eq!(result.state.items[&group].group_failure.as_ref().unwrap().first_line, "error: failed");

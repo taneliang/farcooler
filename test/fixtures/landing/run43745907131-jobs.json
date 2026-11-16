@@ -1,0 +1,227 @@
+{
+ "about": "GitHub Actions run 43745907131 attempt 1 (CI on 19bf27fd9, group 2895, Nov 16 2026). Nothing in the change was at fault: the iOS job could not reach static.rust-lang.org (DNS) inside dtolnay/rust-toolchain, and iOS UI (smoke) then found no ios-ui-products artifact. Jobs and steps are from the jobs API; log_failed holds the lines of `gh run view --log-failed` for each failed job that end an action in failure, or say why. ov-1280 classifies it as setup-only.",
+ "run": {
+  "id": 43745907131,
+  "name": "CI",
+  "event": "push",
+  "run_attempt": 1,
+  "head_sha": "19bf27fd920e868b214cb8abf65b26f727b62470",
+  "conclusion": "failure"
+ },
+ "jobs": [
+  {
+   "id": 132909021724,
+   "name": "Changes",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909021989,
+   "name": "Wire compatibility",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909021992,
+   "name": "iOS UI plan",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106028,
+   "name": "Tunnel (Go)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106048,
+   "name": "Rust test archive",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106064,
+   "name": "Android UI tests (rest)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106067,
+   "name": "Rust native test archive (macOS)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106073,
+   "name": "Android UI tests (first)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106076,
+   "name": "Android unit tests",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106080,
+   "name": "Swift (AgentKit + Mac tests)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106092,
+   "name": "Web",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106100,
+   "name": "Android release build",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909106139,
+   "name": "Swift (app build + bundle checks)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132909122270,
+   "name": "iOS",
+   "conclusion": "failure",
+   "steps": [
+    {
+     "number": 1,
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "number": 2,
+     "name": "Run actions/checkout@v4",
+     "conclusion": "success"
+    },
+    {
+     "number": 3,
+     "name": "Run ./.github/actions/ios-ui-build",
+     "conclusion": "failure"
+    },
+    {
+     "number": 4,
+     "name": "Run ./scripts/import-ios-certificate-test.sh",
+     "conclusion": "skipped"
+    },
+    {
+     "number": 5,
+     "name": "Run ./scripts/generator-test.sh",
+     "conclusion": "skipped"
+    },
+    {
+     "number": 9,
+     "name": "Post Run ./.github/actions/ios-ui-build",
+     "conclusion": "success"
+    },
+    {
+     "number": 10,
+     "name": "Post Run actions/checkout@v4",
+     "conclusion": "success"
+    },
+    {
+     "number": 11,
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ],
+   "log_failed": [
+    "iOS\tRun ./.github/actions/ios-ui-build\t2026-11-15T18:18:50.1524320Z error: could not download file from 'https://static.rust-lang.org/dist/channel-rust-stable.toml.sha256' to '/Users/runner/.rustup/tmp/4rmjjrf5ip02mz9q_file': error downloading file: error sending request for url (https://static.rust-lang.org/dist/channel-rust-stable.toml.sha256): client error (Connect): dns error: error resolving DNS: failed to lookup address information: nodename nor servname provided, or not known",
+    "iOS\tRun ./.github/actions/ios-ui-build\t2026-11-15T18:18:50.1705670Z ##[error]Process completed with exit code 1.",
+    "iOS\tRun ./.github/actions/ios-ui-build\t2026-11-15T18:18:50.1725090Z ##[end-action id=__self.__dtolnay_rust-toolchain.__run_4;outcome=failure;conclusion=failure;duration_ms=32106]",
+    "iOS\tRun ./.github/actions/ios-ui-build\t2026-11-15T18:18:50.1802510Z ##[end-action id=__self.__dtolnay_rust-toolchain;outcome=failure;conclusion=failure;duration_ms=32514]"
+   ]
+  },
+  {
+   "id": 132909997834,
+   "name": "iOS UI (smoke)",
+   "conclusion": "failure",
+   "steps": [
+    {
+     "number": 1,
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "number": 2,
+     "name": "Run actions/checkout@v4",
+     "conclusion": "success"
+    },
+    {
+     "number": 3,
+     "name": "Run ./.github/actions/ios-ui-shard",
+     "conclusion": "failure"
+    },
+    {
+     "number": 6,
+     "name": "Post Run actions/checkout@v4",
+     "conclusion": "success"
+    },
+    {
+     "number": 7,
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ],
+   "log_failed": [
+    "iOS UI (smoke)\tRun ./.github/actions/ios-ui-shard\t2026-11-15T18:20:56.5672440Z ##[error]Unable to download artifact(s): Artifact not found for name: ios-ui-products",
+    "iOS UI (smoke)\tRun ./.github/actions/ios-ui-shard\t2026-11-15T18:20:56.5712670Z ##[end-action id=__self.__actions_download-artifact;outcome=failure;conclusion=failure;duration_ms=408]"
+   ]
+  },
+  {
+   "id": 132910496950,
+   "name": "Rust tests (3/4)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132910496973,
+   "name": "Rust tests (4/4)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132910496987,
+   "name": "Rust tests (2/4)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132910497005,
+   "name": "Rust tests (1/4)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132911849780,
+   "name": "Rust (macos-latest)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132911849817,
+   "name": "Rust (ubuntu-24.04)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132914518474,
+   "name": "Android",
+   "conclusion": "success"
+  },
+  {
+   "id": 132914539336,
+   "name": "Tunnel helper (Go)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132914539373,
+   "name": "Site",
+   "conclusion": "success"
+  },
+  {
+   "id": 132914539394,
+   "name": "Relay",
+   "conclusion": "success"
+  },
+  {
+   "id": 132914713078,
+   "name": "Rust native tests (macOS 1/2)",
+   "conclusion": "success"
+  },
+  {
+   "id": 132914713096,
+   "name": "Rust native tests (macOS 2/2)",
+   "conclusion": "success"
+  }
+ ]
+}
