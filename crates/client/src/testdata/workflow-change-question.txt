@@ -19,7 +19,7 @@ Checks that must pass:
 
 How code lands:
 - Each ticket opens a pull request against `main`. A person merges it.
-- It waits for CI to pass on what landed.
+- It waits for CI to pass on what landed. When CI fails only while setting up, fetching a toolchain or checking out, it reruns the failed jobs once first.
 
 Who approves:
 - You approve each ticket before it lands.

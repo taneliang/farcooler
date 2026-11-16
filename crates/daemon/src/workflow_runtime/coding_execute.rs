@@ -97,6 +97,9 @@ pub struct CodingCiReceipt {
     pub run: serde_json::Value,
     #[serde(default)]
     pub failed_jobs: Option<Vec<String>>,
+    /// Where each failed job failed (ov-1280), from the look's jobs and their failed logs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_steps: Option<Vec<farcooler_workflow::FailedStep>>,
     /// A provider may retain the failed job and its first failed-log line beside the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<farcooler_workflow::GroupFailure>,

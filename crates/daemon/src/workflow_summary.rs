@@ -220,7 +220,7 @@ fn lands(definition: &Definition, config: &CodingConfig) -> Vec<String> {
     if kinds(|k| matches!(k, StageKind::Route)) { lines.push("Each ticket takes the route its changed files earn: some go straight to landing, some ask you first.".into()); }
     if kinds(|k| matches!(k, StageKind::PushCandidate)) {
         lines.push(format!("Before each push, CI runs on a branch of its own while the gates run, and {target} only moves to a commit CI passed."));
-    } else if kinds(|k| matches!(k, StageKind::AwaitCi)) { lines.push("It waits for CI to pass on what landed.".into()); }
+    } else if kinds(|k| matches!(k, StageKind::AwaitCi)) { lines.push("It waits for CI to pass on what landed. When CI fails only while setting up, fetching a toolchain or checking out, it reruns the failed jobs once first.".into()); }
     for (name, policy) in &definition.policies {
         let jobs = policy.rule.rerun_failed.jobs.iter().map(|j| code(j)).collect::<Vec<_>>().join(", ");
         lines.push(format!("Rule {} reruns failed CI jobs once at {} only when every failed job is listed: {jobs}. It then waits for CI again; another failure follows the step's published route.", code(name), code(&policy.step)));

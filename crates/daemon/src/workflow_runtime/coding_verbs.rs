@@ -9,6 +9,7 @@
 //! whose CI went red doesn't hold the push back while the target is still at the head the gate ran on (ov-1291).
 use super::*;
 use super::coding::{sha, wait_times};
+use farcooler_workflow::FailedStep;
 use farcooler_store::board_ci::CiStatus;
 use farcooler_protocol::workflow_config::CiUnrun;
 
@@ -511,7 +512,10 @@ impl Exec {
             return Err(Error::Refused("foreign CI run provenance"));
         }
         let facts = provided.run["run_attempt"].as_u64().and_then(|n| u32::try_from(n).ok())
-            .map(|attempt| CiRun { id: run.id, attempt, failed_jobs: provided.failed_jobs.unwrap_or_default() });
+            .map(|attempt| CiRun { id: run.id, attempt, failed_jobs: provided.failed_jobs.unwrap_or_default(),
+                // A step the run's facts can't hold (an overlong name) is dropped: its job then never reads as setup-only.
+                failed_steps: provided.failed_steps.unwrap_or_default().into_iter().take(256)
+                    .filter(FailedStep::valid).collect() });
         if facts.as_ref().is_some_and(|r| !r.valid()) { return Err(Error::Refused("invalid CI run facts")); }
         Ok(Some((crate::ci_watch::summarize(&format!("sha:{sha}"), &[(run, None)]).status, facts)))
     }

@@ -50,7 +50,13 @@ read -r run attempt <<IDS
 $ids
 IDS
 jobs=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "stale") | .name]') || exit 1
-export CI_FAILURE_JOB='' CI_FAILURE_LINE=''
+failing=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure")][:8][] | [(.id | tostring), .name, ([.steps[]? | select(.conclusion == "failure")][0].name // "")] | @tsv') || exit 1
+CI_FAILED_STEPS=$(printf '%s\n' "$failing" | while IFS='	' read -r id name step; do
+  [ -n "$id" ] || continue
+  action=$("$CI_GH" run view "$run" --attempt "$attempt" --repo "$CI_REPOSITORY" --job "$id" --log-failed </dev/null 2>/dev/null | sed -n 's/.*##\[end-action id=\([^;]*\);outcome=failure;.*/\1/p' | head -n 1)
+  printf '%s\t%s\t%s\n' "$name" "$step" "$action"
+done)
+export CI_FAILED_STEPS CI_FAILURE_JOB='' CI_FAILURE_LINE=''
 failed=$("$CI_GH" api --paginate --slurp "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" --jq '[.[].jobs[] | select(.conclusion == "failure")][0] // empty | (.id | tostring) + "|" + .name') || exit 1
 if [ -n "$failed" ]; then
   CI_FAILURE_JOB=${failed#*|}
@@ -61,7 +67,7 @@ if [ -n "$failed" ]; then
     !error && tolower(line) ~ /(^|[^[:alnum:]_])(error|failed|failure|fatal|panicked)([^[:alnum:]_]|$)/ { error=line }
     END { print error ? error : first }')
 fi
-out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt" --jq '{binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at, run_attempt}, failure: (if env.CI_FAILURE_JOB == "" then null else {job: env.CI_FAILURE_JOB, firstLine: env.CI_FAILURE_LINE} end)}') || exit 1
+out=$("$CI_GH" api "repos/$CI_REPOSITORY/actions/runs/$run/attempts/$attempt" --jq '{binding: env.FARCOOLER_OPERATION_BINDING, repository: env.CI_REPOSITORY, run: {id, name, head_sha, status, conclusion, html_url, created_at, display_title, event, updated_at, run_attempt}, failure: (if env.CI_FAILURE_JOB == "" then null else {job: env.CI_FAILURE_JOB, firstLine: env.CI_FAILURE_LINE} end), failed_steps: [env.CI_FAILED_STEPS | split("\n")[] | split("\t") | select(length == 3 and .[0] != "" and .[1] != "") | {job: .[0], step: .[1], action: (if .[2] == "" then null else .[2] end)}]}') || exit 1
 printf '%s,"failed_jobs":%s}\n' "${out%?}" "$jobs" > "$FARCOOLER_RECEIPT""#;
 
 /// `workflow get`'s reply, for a workspace that has never published: the settings this runner suggests for its first
@@ -422,17 +428,27 @@ mod tests {
         std::fs::write(&gh, r#"#!/usr/bin/python3
 import json, os, sys
 args = sys.argv[1:]
+# Run 43745907131's failed jobs, their steps and failed logs, as GitHub reported them (ov-1280).
+failed = [j for j in json.load(open(os.environ['FIXTURE']))['jobs'] if j['conclusion'] == 'failure']
 if args[0] == 'run':
-    print('job\tstep\terror: test failed')
+    job = args[args.index('--job') + 1]
+    lines = next((j['log_failed'] for j in failed if str(j['id']) == job), ['job\tstep\terror: test failed'])
+    print('\n'.join(lines))
     sys.exit(0)
 endpoint = next(a for a in args if a.startswith('repos/'))
 if '/jobs?' in endpoint:
     assert endpoint == 'repos/o/r/actions/runs/73/attempts/2/jobs?per_page=100', args
     assert '--paginate' in args and '--slurp' in args, args
-    print('91|iOS UI tests' if '(.id | tostring)' in args[-1] else json.dumps(['iOS UI tests', 'Other failed job']))
+    if '@tsv' in args[-1]:
+        for j in failed:
+            print('\t'.join([str(j['id']), j['name'], next(s['name'] for s in j['steps'] if s['conclusion'] == 'failure')]))
+    else:
+        print('91|iOS UI tests' if '(.id | tostring)' in args[-1] else json.dumps(['iOS UI tests', 'Other failed job']))
 elif '/attempts/' in endpoint:
     assert endpoint == 'repos/o/r/actions/runs/73/attempts/2', args
-    print(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'], repository='o/r', run=dict(id=73, run_attempt=2))))
+    steps = [dict(zip(['job', 'step', 'action'], l.split('\t'))) for l in os.environ['CI_FAILED_STEPS'].split('\n') if l]
+    print(json.dumps(dict(binding=os.environ['FARCOOLER_OPERATION_BINDING'], repository='o/r', run=dict(id=73, run_attempt=2),
+        failed_steps=[dict(s, action=s['action'] or None) for s in steps])))
 else:
     if os.environ.get('FARCOOLER_CI_RUN'):
         assert endpoint == 'repos/o/r/actions/runs/73', args
@@ -446,12 +462,19 @@ else:
             let output = tokio::process::Command::new("/bin/sh").args(["-c", super::CI_LOOK]).env_clear()
                 .env("CI_GH", &gh).env("CI_REPOSITORY", "o/r").env("CI_WORKFLOW", "CI").env("CI_EVENT", "push")
                 .env("FARCOOLER_CANDIDATE", "a".repeat(40)).env("FARCOOLER_OPERATION_BINDING", "bound")
-                .env("FARCOOLER_CI_RUN", target).env("FARCOOLER_RECEIPT", &receipt).output().await.unwrap();
+                .env("FARCOOLER_CI_RUN", target).env("FARCOOLER_RECEIPT", &receipt)
+                .env("FIXTURE", concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/fixtures/landing/run43745907131-jobs.json"))
+                .output().await.unwrap();
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             let result: crate::workflow_runtime::CodingCiReceipt = serde_json::from_slice(&std::fs::read(&receipt).unwrap()).unwrap();
             assert_eq!(result.binding, "bound");
             assert_eq!(result.run["run_attempt"], 2);
             assert_eq!(result.failed_jobs.unwrap(), ["iOS UI tests", "Other failed job"]);
+            // Each failed job's failed step, and the innermost action its log ends in failure.
+            let step = |job: &str, step: &str, action: &str| farcooler_workflow::FailedStep { job: job.into(), step: step.into(), action: Some(action.into()) };
+            assert_eq!(result.failed_steps.unwrap(), [
+                step("iOS", "Run ./.github/actions/ios-ui-build", "__self.__dtolnay_rust-toolchain.__run_4"),
+                step("iOS UI (smoke)", "Run ./.github/actions/ios-ui-shard", "__self.__actions_download-artifact")]);
         }
     }
     #[test]

@@ -1031,6 +1031,8 @@ mod coding_gate_tests;
 #[cfg(test)]
 mod coding_red_base_tests;
 #[cfg(test)]
+mod coding_setup_rerun_tests;
+#[cfg(test)]
 mod coding_candidate_tests;
 #[cfg(test)]
 mod coding_ci_rerun_tests;

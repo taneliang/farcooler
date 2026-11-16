@@ -39,8 +39,7 @@ impl CiRun {
         self.id > 0 && self.attempt > 0 && self.attempt < u32::MAX && self.failed_jobs.len() <= 256
             && self.failed_jobs.iter().all(|j| valid_job(j))
             && self.failed_steps.len() <= 256
-            && self.failed_steps.iter().all(|f| valid_job(&f.job) && valid_job(&f.step)
-                && f.action.as_deref().is_none_or(valid_job))
+            && self.failed_steps.iter().all(FailedStep::valid)
     }
 }
 /// One failed job and where it failed: the job's step GitHub marks failed, and the innermost action the runner's log
@@ -53,6 +52,9 @@ pub struct FailedStep {
     pub step: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
+}
+impl FailedStep {
+    pub fn valid(&self) -> bool { valid_job(&self.job) && valid_job(&self.step) && self.action.as_deref().is_none_or(valid_job) }
 }
 /// The policy name a setup-only rerun records. No published policy may take it.
 pub const SETUP_RERUN: &str = "engine:setup-failure";
