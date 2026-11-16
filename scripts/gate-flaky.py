@@ -12,8 +12,9 @@ that one test). The command passes if every rerun passes. Each test that needed 
 
     FLAKY: <binary id> <test>: first 1.2s (failed), rerun 1.0s (passed)
 
-which the gate copies into its summary and evidence, and appended to .config/flaky-log.tsv, the tracked log
-the orchestrator files a ticket from. A test that fails its rerun is printed as FAILED AGAIN and the exit
+which the gate copies into its summary and evidence. When GATE_FLAKY_LOG names a file (the lane gate points it
+into its own log directory), the same rows are appended there too. The wrapper never writes inside the tree it
+gates: a gate that edits a tracked file fails the landing (ov-1295). A test that fails its rerun is printed as FAILED AGAIN and the exit
 code is the original one, exactly as it was before this wrapper existed. A run that failed without naming a
 failed test (a build error, a crash, a leak check) is never forgiven.
 """
@@ -27,7 +28,7 @@ import time
 import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-LOG = pathlib.Path(os.environ.get("GATE_FLAKY_LOG") or ROOT / ".config/flaky-log.tsv")  # the env var is for self-tests
+LOG = pathlib.Path(os.environ["GATE_FLAKY_LOG"]) if os.environ.get("GATE_FLAKY_LOG") else None  # the gate's log directory; none outside a gate
 HEADER = "date\tbinary\ttest\tfirst_secs\trerun_secs\tfirst_result\n"
 
 
@@ -51,7 +52,7 @@ def exact(name):
 
 
 def record(rows, log=LOG, today=None):
-    """Append one line per flaky test to the tracked log, writing its header first when the file is new."""
+    """Append one line per flaky test to the gate's own log, writing its header first when the file is new."""
     today = today or dt.datetime.now(dt.timezone.utc).date().isoformat()
     new = not log.exists() or not log.read_text()
     with open(log, "a") as f:
@@ -99,7 +100,7 @@ def run(command, say=print, log=None):
         say(f"FLAKY: {binary} {test}: first {first:.1f}s ({kind}), rerun {secs:.1f}s (passed)")
     for binary, test, first, secs, kind in still:
         say(f"FAILED AGAIN: {binary} {test}: first {first:.1f}s ({kind}), rerun {secs:.1f}s (failed)")
-    if flaky:
+    if flaky and log:
         record(flaky, log)
         say(f"gate-flaky: {len(flaky)} flaky test(s) appended to {log}")
     return rc if still else 0

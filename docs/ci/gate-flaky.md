@@ -8,8 +8,10 @@ The local lane gate and the landing gate run the Rust suite through `scripts/gat
   fails its rerun fails the gate exactly as before.
 - Each test that needed a rerun is printed as `FLAKY: <binary> <test>: first 1.2s (failed), rerun 1.0s (passed)`.
   The line lands in the step log, in the lane-gate summary (a `### FLAKY tests` section), in the v2 gate
-  evidence (the receipt's `flaky` list and the sealed `summary.txt`), and in `.config/flaky-log.tsv`, the
-  tracked log the orchestrator files one ticket per line from.
+  evidence (the receipt's `flaky` list and the sealed `summary.txt`), and in `flaky-log.tsv` in the
+  gate's own log directory (`GATE_FLAKY_LOG`). The orchestrator files one ticket per line from the summary's
+  FLAKY lines or that file. Nothing in the gated tree is written: a gate that changes a tracked file fails
+  (`tracked files unchanged` row, naming the file) (ov-1295).
 - The gate profile stops a hung test after 120 s (60 s period, terminate after 2) instead of 600 s. A test
   known to be slow keeps an explicit `[[profile.gate.overrides]]` in `.config/nextest.toml`; the live tmux
   stress tests in `live_tmux` have one (10 minutes).
