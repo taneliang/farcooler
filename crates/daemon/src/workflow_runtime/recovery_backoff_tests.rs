@@ -1,6 +1,7 @@
 //! An Uncertain effect recovery can't settle is looked at once, then less and less often (ov-1301).
-use super::*;
+use super::Runtime;
 use super::coding_tests::{admitted, configured};
+use farcooler_workflow::Phase;
 use super::tests::enqueue;
 
 /// The Canary daemon re-checked eight such builds every second: 5,000 warnings an hour at 70 percent CPU.
