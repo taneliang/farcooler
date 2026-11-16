@@ -38,6 +38,6 @@ Test: `workflow_runtime::process_logs::tests::workflow_get_with_a_long_history_c
 1. Long-history reply under half the cap, live tails only: test passes (above).
 2. Archived tail readable on request: `an_archived_items_tail_is_read_on_request` (CLI/library path) and
    `an_archived_items_tail_is_read_over_rpc` pass.
-3. task.list paging/trimming with 1,500 tasks: covered by the new tests in `crates/daemon/src/task_ops.rs`,
-   which are inside the whole-crate daemon run above.
+3. task.list paging/trimming with 1,500 tasks: `task_ops::tests::a_long_board_lists_within_the_frame_cap` (1,500 tasks, paged and unpaged),
+   inside the whole-crate daemon run above.
 4. Whole-crate runs and the three scripts: recorded above.
