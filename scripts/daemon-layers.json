@@ -161,6 +161,7 @@
    "orchestrator",
    "people_rulings",
    "plan_glance",
+   "plan_run",
    "plan_stage",
    "pr_actions",
    "pr_nudge",
