@@ -195,3 +195,7 @@ impl Exec {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "coding_resolve_build_tests.rs"]
+mod resolve_build_tests;

@@ -281,3 +281,52 @@ fn external_close_is_controller_only_fenced_and_replayable() {
     assert_eq!(log.state.items["ov-1"].phase, Phase::Done);
     assert_eq!(log.state.items["ov-1"].candidate, Some("a".repeat(40)));
 }
+
+/// What the runner writes when the orchestrator resolves an Uncertain build whose process has ended (ov-1301): the
+/// step fails with the runner's sentence on the item, and a cancel then ends the run with nothing left to stop.
+#[test]
+fn a_resolved_uncertain_build_fails_with_why_and_then_cancels_with_nothing_to_stop() {
+    let why = "The build ended with no result the runner could read, and nothing of it is still running; the orchestrator resolved it.";
+    let mut log = Log::new();
+    log.track("ov-1");
+    log.start("ov-1", coding(), Some(tree()));
+    let lost = log.effects[0].clone();
+    log.observe("ov-1", Outcome::Uncertain);
+    log.try_run(Command::Resolve { item: "ov-1".into(), effect: lost.id.clone(), run: lost.run.clone(), fence: lost.fence,
+        outcome: Outcome::SafeFailureBecause(why.into()) }, Grant::Controller).unwrap();
+    let item = &log.state.items["ov-1"];
+    assert_eq!((&item.phase, item.pending.as_ref(), item.failure.as_deref()), (&Phase::Failed, None, Some(why)));
+    // Resolve is the controller's, never the effect's own grant.
+    let mut other = Log::new();
+    other.track("ov-1");
+    other.start("ov-1", coding(), Some(tree()));
+    let effect = other.effects[0].clone();
+    other.observe("ov-1", Outcome::Uncertain);
+    assert!(other.try_run(Command::Resolve { item: "ov-1".into(), effect: effect.id.clone(), run: effect.run.clone(), fence: effect.fence,
+        outcome: Outcome::SafeFailure }, Grant::Operation { effect: effect.id, run: effect.run, fence: effect.fence }).is_err());
+    log.try_run(Command::Cancel { item: "ov-1".into(), reason: None }, Grant::Controller).unwrap();
+    assert_eq!(log.state.items["ov-1"].phase, Phase::Cancelled);
+    assert!(log.effects.is_empty(), "nothing was in flight, so no Stop");
+}
+
+/// Cancelling an Uncertain build stops its lost effect. A stop that can't prove the build ended is Uncertain while
+/// stopping; the runner's proof that it did (the orchestrator's resolve) ends the run Cancelled (ov-1301).
+#[test]
+fn a_cancelled_uncertain_build_whose_stop_is_settled_ends_cancelled() {
+    let mut log = Log::new();
+    log.track("ov-1");
+    log.start("ov-1", coding(), Some(tree()));
+    let lost = log.effects[0].clone();
+    log.observe("ov-1", Outcome::Uncertain);
+    log.try_run(Command::Cancel { item: "ov-1".into(), reason: None }, Grant::Controller).unwrap();
+    let item = &log.state.items["ov-1"];
+    assert_eq!((&item.phase, item.stopping.as_ref()), (&Phase::Cancelling, Some(&lost.id)));
+    let stop = log.effects[0].clone();
+    assert_eq!(stop.kind, EffectKind::Stop { operation: lost.id.clone() });
+    log.observe("ov-1", Outcome::Uncertain);
+    assert_eq!(log.state.items["ov-1"].phase, Phase::Uncertain, "a stop that can't prove quiescence waits");
+    log.try_run(Command::Resolve { item: "ov-1".into(), effect: stop.id.clone(), run: stop.run.clone(), fence: stop.fence,
+        outcome: Outcome::Stopped { operation: lost.id.clone(), receipt: "coding-quiescent".into() } }, Grant::Controller).unwrap();
+    let item = &log.state.items["ov-1"];
+    assert_eq!((&item.phase, item.pending.as_ref(), item.stopping.as_ref()), (&Phase::Cancelled, None, None));
+}
