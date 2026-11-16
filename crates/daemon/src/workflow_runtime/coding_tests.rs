@@ -543,10 +543,12 @@ async fn workflow_coding_codex_runs_on_the_runners_hooks_file_with_none_in_the_r
     let command = runtime.coding_command(&binding).unwrap();
     assert!(command.argv.last().unwrap().contains("codex") && !command.argv.last().unwrap().contains("--settings"), "{}", command.argv.last().unwrap());
     let hook_override = runtime.codex_hook_override(&binding).unwrap().unwrap();
+    let launch_hooks = runtime.root.join("receipts").join(format!("{}.launch-hooks", digest(&binding.effect)));
+    assert_eq!(std::fs::read_to_string(&launch_hooks).unwrap(), hook_override);
     let parsed: toml::Value = toml::from_str(&hook_override).unwrap();
     let pinned_value: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(serde_json::to_value(&parsed["hooks"]).unwrap(), pinned_value["hooks"]);
-    assert!(command.argv.last().unwrap().contains("--config") && command.argv.last().unwrap().contains("hooks="), "the native launch supplies pinned hooks without relying on project discovery");
+    assert!(command.argv.last().unwrap().contains("--config") && command.argv.last().unwrap().contains("launch-hooks"), "the native launch supplies pinned hooks without relying on project discovery");
     assert!(runtime.tree_changes(&binding, &tree).await.unwrap().is_empty(), "the copy isn't the candidate's change");
     std::fs::write(tree.join(".codex/hooks.json"), "{}").unwrap();
     assert!(runtime.coding_command(&binding).is_err(), "a changed copy doesn't launch");

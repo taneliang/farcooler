@@ -68,6 +68,14 @@ impl TmuxServer {
         worktree: &str,
         command: &str,
     ) -> Result<ManagedWindow> {
+        self.create_terminal_window_diagnostic(worktree_id, terminal_id, title, worktree, command, &mut String::new()).await
+    }
+
+    /// Like `create_terminal_window`, retaining tmux's refusal for a workflow's failure receipt.
+    pub async fn create_terminal_window_diagnostic(
+        &self, worktree_id: Uuid, terminal_id: Uuid, title: &str, worktree: &str,
+        command: &str, diagnostic: &mut String,
+    ) -> Result<ManagedWindow> {
         // The first terminal creates the session. There is no sentinel window,
         // so nothing squats the base index.
         let session_exists = self.is_running().await;
@@ -115,6 +123,7 @@ impl TmuxServer {
         };
 
         if !out.ok() {
+            *diagnostic = out.stderr.trim().to_owned();
             tracing::warn!(stderr = %out.stderr, "failed to create managed window");
             return Err(DomainError::TmuxUnavailable);
         }

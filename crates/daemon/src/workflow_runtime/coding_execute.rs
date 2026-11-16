@@ -139,7 +139,7 @@ impl Exec {
     pub(super) fn process_log(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.output", digest(&binding.effect)))
     }
-    /// A Provision or Build that failed before it started, and why (ov-1058 review 3).
+    /// A Provision, Build or agent review that failed before it started, and why (ov-1058, ov-1308).
     fn unstarted_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
@@ -185,6 +185,14 @@ impl Exec {
         if bytes.len() > 8 * 1024 * 1024 { return Err(Error::Refused("oversized coding receipt")); }
         Ok(bytes)
     }
+    fn launch_file(&self, path: &Path, text: &str) -> Result<()> {
+        match self.bytes(path) {
+            Ok(raw) if raw == text.as_bytes() => Ok(()),
+            Ok(_) => Err(Error::Refused("foreign launch file")),
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => durable(path, text.as_bytes()),
+            Err(error) => Err(error),
+        }
+    }
     pub(super) fn coding_command(&self, binding: &Binding) -> Result<CodingCommand> {
         self.bound_command(binding, true, true)
     }
@@ -219,20 +227,19 @@ impl Exec {
                         None => {}
                     }
                     let mut extras = crate::service::LaunchExtras { settings: settings.as_ref().map(|s| s.path.clone()),
-                        codex_hooks: self.codex_hook_override(binding)?,
+                        codex_hooks: if let Some(text) = self.codex_hook_override(binding)? {
+                            let path = self.root.join("receipts").join(format!("{}.launch-hooks", digest(&binding.effect)));
+                            if launch { self.launch_file(&path, &text)?; }
+                            Some(path)
+                        } else { None },
                         plugin_dir: plugin_dir.clone(), prompt: Some(crate::service::LaunchPrompt::Inline(self.native_prompt(binding)?)),
                         ..Default::default() };
                     let mut launch_command = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
-                    if launch_command.len() > crate::service::MAX_INLINE_LAUNCH_BYTES {
+                    if agent == "codex" || launch_command.len() > crate::service::MAX_INLINE_LAUNCH_BYTES {
                         let path = self.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)));
                         if launch {
                             let text = self.native_prompt(binding)?;
-                            match self.bytes(&path) {
-                                Ok(raw) if raw == text.as_bytes() => {},
-                                Ok(_) => return Err(Error::Refused("foreign launch brief")),
-                                Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => durable(&path, text.as_bytes())?,
-                                Err(error) => return Err(error),
-                            }
+                            self.launch_file(&path, &text)?;
                         }
                         extras.prompt = Some(crate::service::LaunchPrompt::File(path));
                         launch_command = crate::service::preset_command_with_hooks(preset, Some(&Self::native_session(binding)), &extras);
@@ -435,6 +442,7 @@ impl Exec {
         }.await;
         // However the gate ended, its ledger goes with it; only a crash leaves one behind.
         if let Some(looking) = looking { looking.abort(); let _ = looking.await; }
+        if self.unstarted_path(binding).try_exists()? { return Ok(()); }
         // Never let a ledger write error hide an unproved settlement as retryable I/O.
         // Safe failures (including a quiescent timeout) still close the ledger as before.
         let exit = match exit {
@@ -828,7 +836,7 @@ impl Exec {
         if super::coding_verbs::is_verb(kind) { return self.reconcile_verb(binding, kind).await; }
         if matches!(kind, StageKind::Run) { return self.reconcile_run(binding).await; }
         let mut facts = Vec::new();
-        if matches!(kind, StageKind::Provision | StageKind::Build) && self.unstarted_path(binding).try_exists()? {
+        if matches!(kind, StageKind::Provision | StageKind::Build | StageKind::Review(Reviewer::Agent)) && self.unstarted_path(binding).try_exists()? {
             let unstarted: Unstarted = serde_json::from_slice(&self.bytes(&self.unstarted_path(binding))?)?;
             if unstarted.binding != *binding { return Err(Error::Refused("foreign unstarted refusal")); }
             return Ok(Outcome::SafeFailureBecause(unstarted.why));

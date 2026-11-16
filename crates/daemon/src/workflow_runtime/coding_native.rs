@@ -174,6 +174,18 @@ fn gone(pid: i32) -> bool {
         .is_some_and(|state| state == 'Z' || state == 'X')
 }
 
+fn native_launch(command: &CodingCommand) -> String {
+    let mut launch = String::from("env -i");
+    for (key, value) in &command.environment {
+        launch.push(' '); launch.push_str(&crate::service::shell_quote(&format!("{key}={value}")));
+    }
+    for arg in &command.argv { launch.push(' '); launch.push_str(&crate::service::shell_quote(arg)); }
+    // Retained PTY stdin, not null: read gates launch until tags and owner are durable.
+    // tmux automatically continues a stopped pane leader. Keep this waiting shell as the leader,
+    // and pause only its agent child and descendants; the shell runs no work of its own.
+    format!("exec /bin/sh -c {}", crate::service::shell_quote(&format!("read -r workflow_start; {launch}; status=$?; exit \"$status\"")))
+}
+
 impl Exec {
     /// A step that starts a native agent: a build, or an agent's review gate (ov-969).
     pub(super) fn is_native_agent(&self, binding: &Binding) -> bool {
@@ -507,18 +519,25 @@ impl Exec {
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
         let host = Host(server(&self.root, binding));
         let tmux = &host.0;
-        let mut launch = String::from("env -i");
-        for (key, value) in &command.environment {
-            launch.push(' '); launch.push_str(&crate::service::shell_quote(&format!("{key}={value}")));
-        }
-        for arg in &command.argv { launch.push(' '); launch.push_str(&crate::service::shell_quote(arg)); }
-        // Retained PTY stdin, not null: read gates launch until tags and owner are durable.
-        // tmux automatically continues a stopped pane leader. Keep this waiting shell as the leader,
-        // and pause only its agent child and descendants; the shell runs no work of its own.
-        let gated = format!("exec /bin/sh -c {}", crate::service::shell_quote(&format!("read -r workflow_start; {launch}; status=$?; exit \"$status\"")));
+        let gated = native_launch(command);
         let id = terminal(binding);
-        let window = tmux.create_terminal_window(id, id, "workflow coding", &self.tree(binding).to_string_lossy(), &gated).await
-            .map_err(|_| Error::Refused("native managed PTY open uncertain"))?;
+        let mut diagnostic = String::new();
+        let window = match tmux.create_terminal_window_diagnostic(id, id, "workflow coding",
+            &self.tree(binding).to_string_lossy(), &gated, &mut diagnostic).await {
+            Ok(window) => window,
+            Err(error) => {
+                // The launch barrier has never been released; reaping this effect's private server
+                // cannot interrupt an agent. Retain the refusal even when no output stream existed.
+                drop(host);
+                let detail = if diagnostic.is_empty() { error.to_string() } else { diagnostic };
+                let why = format!("native managed PTY could not open: {}", detail.chars().filter(|c| !c.is_control()).take(1000).collect::<String>());
+                self.refuse_unstarted(binding, why.clone())?;
+                std::fs::write(self.process_log(binding), why)?;
+                drop(listener);
+                std::fs::remove_file(socket)?;
+                return Ok(None);
+            }
+        };
         let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native PTY inventory unavailable"))?;
         let pane = panes.iter().find(|p| p.terminal_id == id && p.pane_id == window.pane_id)
             .ok_or(Error::Refused("native PTY tags missing"))?;
@@ -963,6 +982,84 @@ else:
         assert!(startup_refusal(Agent::Claude, line).is_none());
         assert!(startup_refusal(Agent::Codex, &format!("quoted: {line}")).is_none());
         assert!(startup_refusal(Agent::Codex, "Ready. All checks passed.").is_none());
+    }
+
+    #[tokio::test]
+    async fn ov_1308_codex_long_ticket_starts_with_bounded_window_command() {
+        use farcooler_store::models::{Actor, AcceptanceItem, TaskUpdate};
+        let (_dir, mut runtime, _fake) = native_agent("pass", "codex-engine").await;
+        let host = Uuid::now_v7();
+        let root = runtime.store.create_repository_root(host, "/long-ticket", 0).unwrap();
+        let repo = runtime.store.create_repository(host, root.id, "long", "/long-ticket/.git", "").unwrap();
+        let ws = runtime.store.ensure_main_workspace(repo.id).unwrap();
+        let task = runtime.store.create_task(ws.id, "Long ticket", Actor::User).unwrap();
+        let update = TaskUpdate { title: task.title.clone(), intent: "i'\"$`\n".repeat(2000),
+            acceptance: vec![AcceptanceItem { id: Uuid::now_v7(), text: "a'\"$`".repeat(1600), met: false }],
+            constraints: vec![], labels: vec![], worktree_id: None };
+        assert_eq!(update.intent.len() + update.acceptance[0].text.len(), 20_000);
+        runtime.store.update_task(task.id, task.resource_version, &update).unwrap();
+        let definition = runtime.configured_definition().unwrap();
+        enqueue(&mut runtime, "w", &task.key, definition);
+        runtime.pump(2).await.unwrap();
+        let binding = admitted(&runtime).await;
+        runtime.install_codex_hooks(&binding, &runtime.tree(&binding)).await.unwrap();
+        let fake = TEST_ARGV.with(|p| p.borrow_mut().take());
+        let command = runtime.coding_command(&binding).unwrap();
+        let window = native_launch(&command);
+        assert!(window.len() < 8192, "{} bytes", window.len());
+        assert!(window.contains("launch-brief") && window.contains("launch-hooks"));
+        assert!(!window.contains("hooks="));
+        let brief = runtime.root.join("receipts").join(format!("{}.launch-brief", digest(&binding.effect)));
+        let text = std::fs::read_to_string(&brief).unwrap();
+        assert!(text.contains(&update.intent) && text.contains(&update.acceptance[0].text));
+        assert_eq!(runtime.coding_command(&binding).unwrap(), command);
+        TEST_ARGV.with(|p| *p.borrow_mut() = fake);
+        let (_cancel, orders) = tokio::sync::watch::channel(false);
+        let outcome = runtime.execute_coding("w", &binding, orders).await.unwrap();
+        assert!(matches!(outcome, Outcome::Passed(_)), "{outcome:?}");
+    }
+
+    #[tokio::test]
+    async fn ov_1308_window_refusal_fails_with_tmux_reason() {
+        for review in [false, true] {
+            let (dir, mut runtime, _fake) = native_agent("pass", "codex").await;
+            let mut definition = runtime.configured_definition().unwrap();
+            if review {
+                definition = super::super::gate_tests::definition(&runtime);
+                definition.stages.retain(|s| !matches!(s.kind, StageKind::Review(Reviewer::Orchestrator(_) | Reviewer::Person(_))));
+                definition.models.insert("agent-review".into(), vec!["codex".into()]);
+            }
+            enqueue(&mut runtime, "w", "one", definition);
+            if review {
+                let mut ready = false;
+                for time in 2..20 {
+                    runtime.pump(time).await.unwrap();
+                    ready = runtime.store.workflow_outbox("w").unwrap().iter().any(|s|
+                        s.active && s.effect.kind == EffectKind::Execute(StageKind::Review(Reviewer::Agent)));
+                    if ready { break; }
+                }
+                assert!(ready, "build and checks must pass before the review launch fails");
+            }
+            // Real tmux rejects this window before its launch barrier can be released.
+            TEST_ARGV.with(|p| *p.borrow_mut() = Some(vec!["/bin/echo".into(), "x".repeat(40_000)]));
+            let state = finish(&mut runtime, "w").await;
+            let item = &state.items["one"];
+            assert_eq!(item.phase, Phase::Failed);
+            let reason = item.failure.as_ref().unwrap();
+            assert!(reason.contains("native managed PTY could not open") && reason.contains("command too long"), "{reason}");
+            // The workflow.get view serializes this execution state, and restart retains its reason.
+            let state = runtime.execution_state("w").unwrap().unwrap();
+            assert_eq!(state.items["one"].failure.as_ref(), Some(reason));
+            let view = runtime.wire_command("w", "orchestrator", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+            assert_eq!(view["state"]["items"]["one"]["failure"].as_str(), Some(reason.as_str()));
+            let outputs: Vec<_> = std::fs::read_dir(runtime.root.join("receipts")).unwrap()
+                .filter_map(|e| e.ok()).filter(|e| e.path().extension().is_some_and(|x| x == "output")).collect();
+            assert!(outputs.iter().any(|e| std::fs::read_to_string(e.path()).unwrap().contains("command too long")));
+            let reason = reason.clone();
+            drop(runtime);
+            let reopened = Runtime::open(&dir.path().join("runtime")).unwrap();
+            assert_eq!(reopened.state("w").unwrap().unwrap().items["one"].failure.as_ref(), Some(&reason));
+        }
     }
 
     #[tokio::test]

@@ -176,8 +176,8 @@ pub struct LaunchExtras {
     pub shared: Option<crate::shared_logins::Kept>,
     /// A member's pane's `CODEX_HOME`, an empty one of theirs (`shared_logins`).
     pub codex_home: Option<String>,
-    /// Engine-pinned hooks supplied as a per-launch config override, independent of project discovery.
-    pub codex_hooks: Option<String>,
+    /// Private file containing the engine-pinned config override, independent of project discovery.
+    pub codex_hooks: Option<PathBuf>,
 }
 
 /// An agent's first message, and how it reaches the agent's argv.
@@ -437,7 +437,7 @@ pub fn preset_command_with_hooks(
         // load, where an unknown key is ignored).
         "codex" => {
             let orchestrator = orchestrator_flags(crate::orchestrator::Harness::Codex, extras);
-            let hooks = extras.codex_hooks.as_ref().map(|hooks| format!(" --config {}", shell_quote(hooks))).unwrap_or_default();
+            let hooks = extras.codex_hooks.as_ref().map(|hooks| format!(" --config \"$(cat {})\"", shell_quote(&hooks.display().to_string()))).unwrap_or_default();
             format!(
                 "{shell} -ilc {}",
                 shell_quote(&format!(
