@@ -8,6 +8,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 #[cfg(test)]
 thread_local! { pub(super) static TEST_ARGV: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) }; }
+// Runs once quiescence has seen the owner's pane live, before it reads the tty's processes: a test ends the owner
+// there, so its exit lands between the two observations every time (ov-1287).
+#[cfg(test)]
+thread_local! { static AFTER_LIVE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None); }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,6 +77,14 @@ fn startup_refusal(agent: Agent, output: &str) -> Option<String> {
 struct Host(TmuxServer);
 impl Drop for Host {
     fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); }
+}
+/// Close an ended owner's window. A window tmux has already closed is closed.
+async fn close_native(tmux: &TmuxServer, owner: &NativeOwner) -> Result<()> {
+    if tmux.kill_terminal_window(owner.terminal).await.map_err(|_| Error::Refused("native terminal close failed"))?
+        || tmux.pane_life(&owner.pane, owner.terminal).await.is_ok_and(|life| life == farcooler_tmux::PaneLife::Gone) {
+        return Ok(());
+    }
+    Err(Error::Refused("native terminal close unproved"))
 }
 pub(super) fn terminal(binding: &Binding) -> Uuid {
     let pin = digest(&("native-terminal/v1", binding));
@@ -220,30 +232,53 @@ impl Exec {
         }
         Ok(())
     }
+    /// End the owner's process tree and close its window. The owner can end by itself while it is being ended: a
+    /// cancelled reviewer whose Stop hook loses its answer exits (ov-1287). Whichever is seen first, the proof is the
+    /// same, nothing left on the owner's tty, and the answer is the same. A pane tmux still calls live with nothing
+    /// on its tty is an exit tmux hasn't noticed yet, so it is read again until tmux agrees.
     async fn quiesce_native(&self, owner: &NativeOwner) -> Result<()> {
         let tmux = server(&self.root, &owner.binding);
         if owner.terminal != terminal(&owner.binding) {
             return Err(Error::Refused("foreign native terminal"));
         }
-        let life = tmux.pane_life(&owner.pane, owner.terminal).await
-            .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
-        if life != farcooler_tmux::PaneLife::Live {
-            return Err(Error::Refused("native owner exited without observed process quiescence"));
+        let tty = owner.tty.trim_start_matches("/dev/");
+        let mut current = Vec::new();
+        for round in 0..100 {
+            let life = tmux.pane_life(&owner.pane, owner.terminal).await
+                .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
+            if life == farcooler_tmux::PaneLife::Live {
+                let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native owner inventory unavailable"))?;
+                match panes.iter().find(|p| p.pane_id == owner.pane && p.terminal_id == owner.terminal) {
+                    Some(p) if p.daemon_id != owner.terminal || p.worktree_id != owner.terminal || p.tty != owner.tty =>
+                        return Err(Error::Refused("native tty differs from retained owner")),
+                    Some(_) => {}
+                    // Closed since tmux called it live: read its life again.
+                    None => { tokio::time::sleep(Duration::from_millis(10)).await; continue; }
+                }
+                #[cfg(test)]
+                if let Some(hook) = AFTER_LIVE.with(|h| h.borrow_mut().take()) { hook(); }
+            }
+            let table = tokio::task::spawn_blocking(snapshot).await
+                .map_err(|_| Error::Refused("native process read failed"))??;
+            current = table.under_tty(tty);
+            match life {
+                // tmux has let the tty go, so nothing on it now is provably the owner's.
+                farcooler_tmux::PaneLife::Gone if current.is_empty() => return Ok(()),
+                farcooler_tmux::PaneLife::Gone => return Err(Error::Refused("native vanished pane still has processes")),
+                farcooler_tmux::PaneLife::Dead if current.is_empty() => return close_native(&tmux, owner).await,
+                _ if !current.is_empty() => break,
+                _ => {
+                    if round % 10 == 9 { tmux.nudge_reap().await; }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
         }
-        let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native owner inventory unavailable"))?;
-        if !panes.iter().any(|p| p.pane_id == owner.pane && p.terminal_id == owner.terminal
-            && p.daemon_id == owner.terminal && p.worktree_id == owner.terminal && p.tty == owner.tty) {
-            return Err(Error::Refused("native tty differs from retained owner"));
-        }
+        if current.is_empty() { return Err(Error::Refused("native owner exit never observed")); }
         // Stop the tty roots and all descendants before terminating them so an
         // interactive shell's separate job groups cannot escape a leader kill.
         let mut owned = BTreeSet::new();
         let mut stable = false;
         for _ in 0..8 {
-            let table = tokio::task::spawn_blocking(snapshot).await
-                .map_err(|_| Error::Refused("native process read failed"))??;
-            let current = table.under_tty(owner.tty.trim_start_matches("/dev/"));
-            if current.is_empty() && owned.is_empty() { return Err(Error::Refused("native live tty has no process facts")); }
             let old = owned.len();
             for pid in current {
                 if pid <= 1 || pid == std::process::id() as i32 { return Err(Error::Refused("invalid owned native pid")); }
@@ -252,6 +287,9 @@ impl Exec {
                 unsafe { libc::kill(pid, libc::SIGSTOP); }
             }
             if old == owned.len() { stable = true; break; }
+            let table = tokio::task::spawn_blocking(snapshot).await
+                .map_err(|_| Error::Refused("native process read failed"))??;
+            current = table.under_tty(tty);
         }
         if !stable { return Err(Error::Refused("native process tree did not settle")); }
         for &pid in owned.iter().rev() { unsafe { libc::kill(pid, libc::SIGKILL); } }
@@ -260,13 +298,7 @@ impl Exec {
         // pane's process is tmux's child: tmux 3.4 can miss the exit and leave it a zombie.
         // A zombie is dead, and the nudge makes tmux reap it.
         for round in 0..100 {
-            if owned.iter().all(|&pid| gone(pid)) {
-                if !tmux.kill_terminal_window(owner.terminal).await
-                    .map_err(|_| Error::Refused("native terminal close failed"))? {
-                    return Err(Error::Refused("native terminal close unproved"));
-                }
-                return Ok(());
-            }
+            if owned.iter().all(|&pid| gone(pid)) { return close_native(&tmux, owner).await; }
             if round % 10 == 9 { tmux.nudge_reap().await; }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -1492,5 +1524,74 @@ mod recovery_tests {
         assert!(std::fs::read_to_string(log).unwrap().contains("evidence saved before the crash"));
         assert!(!dir.path().join("reviews").exists(), "recovery launched a reviewer");
         assert_ne!(host.0.pane_life(&owner.pane, id).await.ok(), Some(farcooler_tmux::PaneLife::Live), "the reviewer was left running");
+    }
+}
+
+/// ov-1287: a cancelled native owner can end by itself while the runner ends it, as a reviewer whose Stop hook loses
+/// its answer does. Quiescence gives one answer whichever is observed first: the owner's exit or the runner's own stop.
+#[cfg(test)]
+mod quiesce_order_tests {
+    use super::*;
+    use super::super::{coding_tests::{configured, admitted}, tests::enqueue};
+    /// An owner over a pane running `command`, recorded as run_native records one.
+    async fn owned_pane(command: &str) -> (tempfile::TempDir, Runtime, Host, NativeOwner) {
+        let (dir, mut runtime) = configured(false, "pass").await;
+        let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
+        runtime.pump(2).await.unwrap();
+        let binding = admitted(&runtime).await;
+        let host = Host(server(&runtime.root, &binding)); let id = terminal(&binding);
+        let window = host.0.create_terminal_window(id, id, "quiesce fixture", dir.path().to_str().unwrap(), command).await.unwrap();
+        let pane = host.0.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
+        let owner = NativeOwner { binding, terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone() };
+        (dir, runtime, host, owner)
+    }
+    fn on_tty(owner: &NativeOwner) -> Vec<i32> {
+        snapshot().unwrap().under_tty(owner.tty.trim_start_matches("/dev/"))
+    }
+    async fn closed(host: &Host, owner: &NativeOwner) -> bool {
+        host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() == farcooler_tmux::PaneLife::Gone
+    }
+
+    #[tokio::test]
+    async fn the_runner_stopping_a_live_owner_first_ends_and_closes_it() {
+        let (_dir, runtime, host, owner) = owned_pane("/bin/sleep 30").await;
+        let pids = on_tty(&owner);
+        assert!(!pids.is_empty());
+        runtime.quiesce_native(&owner).await.unwrap();
+        assert!(pids.iter().all(|&pid| gone(pid)));
+        assert!(closed(&host, &owner).await);
+    }
+
+    #[tokio::test]
+    async fn an_owner_that_exited_before_quiescence_looked_is_quiescent() {
+        let (_dir, runtime, host, owner) = owned_pane("/usr/bin/true").await;
+        assert!(super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_millis(10),
+            || on_tty(&owner).is_empty()).await);
+        for _ in 0..500 {
+            if host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() != farcooler_tmux::PaneLife::Live { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_ne!(host.0.pane_life(&owner.pane, owner.terminal).await.unwrap(), farcooler_tmux::PaneLife::Live);
+        runtime.quiesce_native(&owner).await.unwrap();
+        assert!(closed(&host, &owner).await);
+    }
+
+    #[tokio::test]
+    async fn an_owner_that_exits_after_its_pane_was_seen_live_is_quiescent() {
+        let (_dir, runtime, host, owner) = owned_pane("/bin/sleep 30").await;
+        let pids = on_tty(&owner);
+        assert!(!pids.is_empty());
+        let tty = owner.clone();
+        AFTER_LIVE.with(|h| *h.borrow_mut() = Some(Box::new(move || {
+            for &pid in &pids { unsafe { libc::kill(pid, libc::SIGKILL); } }
+            for _ in 0..500 {
+                if on_tty(&tty).is_empty() { return; }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("the owner never left its tty");
+        })));
+        runtime.quiesce_native(&owner).await.unwrap();
+        assert!(AFTER_LIVE.with(|h| h.borrow().is_none()), "the exit landed between the two observations");
+        assert!(closed(&host, &owner).await);
     }
 }
