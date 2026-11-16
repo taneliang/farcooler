@@ -531,6 +531,10 @@ pub fn preset_command_with_hooks(
 /// not in `agent_stub::AGENTS` is not refused.
 fn agent_program(name: &str) -> String {
     #[cfg(test)]
+    if let Some(program) = test_agent::STAND_IN.with(|p| p.borrow().clone()) {
+        return format!("{} {name}", shell_quote(&program));
+    }
+    #[cfg(test)]
     if !test_agent::REAL.with(|r| r.get()) {
         return format!("{} {name}", agent_stub::PROGRAM);
     }
@@ -814,6 +818,17 @@ pub(crate) mod test_agent {
 
     thread_local! {
         pub(crate) static REAL: Cell<bool> = const { Cell::new(false) };
+        pub(crate) static STAND_IN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// Replace only the executable, retaining the generated shell and all agent arguments.
+    pub(crate) fn stand_in(program: &std::path::Path) -> StandIn {
+        let previous = STAND_IN.with(|p| p.replace(Some(program.to_str().unwrap().to_owned())));
+        StandIn(previous)
+    }
+    pub(crate) struct StandIn(Option<String>);
+    impl Drop for StandIn {
+        fn drop(&mut self) { STAND_IN.with(|p| p.replace(self.0.take())); }
     }
 
     /// Build real program names on this thread until the guard drops -- for

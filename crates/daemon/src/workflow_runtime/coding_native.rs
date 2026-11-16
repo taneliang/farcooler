@@ -987,7 +987,22 @@ else:
     #[tokio::test]
     async fn ov_1308_codex_long_ticket_starts_with_bounded_window_command() {
         use farcooler_store::models::{Actor, AcceptanceItem, TaskUpdate};
-        let (_dir, mut runtime, _fake) = native_agent("pass", "codex-engine").await;
+        let (dir, mut runtime, _fake) = native_agent("pass", "codex-engine").await;
+        // This executable receives the generated CLI arguments after both file substitutions
+        // have run in the login shell. It never reads TEST_LAUNCHED_PROMPT[_FILE].
+        let stand_in = dir.path().join("codex-stand-in");
+        std::fs::write(&stand_in, r#"#!/usr/bin/python3
+import json, os, pathlib, sys
+assert sys.argv[1] == 'codex', sys.argv
+assert 'TEST_LAUNCHED_PROMPT' not in os.environ
+assert 'TEST_LAUNCHED_PROMPT_FILE' not in os.environ
+pathlib.Path(__file__).with_name('received.json').write_text(json.dumps(sys.argv[2:]))
+os.environ['TEST_LAUNCHED_PROMPT'] = sys.argv[-1]
+os.execv('/usr/bin/python3', ['/usr/bin/python3', str(pathlib.Path(__file__).with_name('interactive.py')), 'pass', 'codex'])
+"#).unwrap();
+        std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _stand_in = crate::service::test_agent::stand_in(&stand_in);
+        TEST_ARGV.with(|p| p.borrow_mut().take());
         let host = Uuid::now_v7();
         let root = runtime.store.create_repository_root(host, "/long-ticket", 0).unwrap();
         let repo = runtime.store.create_repository(host, root.id, "long", "/long-ticket/.git", "").unwrap();
@@ -1003,8 +1018,8 @@ else:
         runtime.pump(2).await.unwrap();
         let binding = admitted(&runtime).await;
         runtime.install_codex_hooks(&binding, &runtime.tree(&binding)).await.unwrap();
-        let fake = TEST_ARGV.with(|p| p.borrow_mut().take());
         let command = runtime.coding_command(&binding).unwrap();
+        assert!(!command.environment.keys().any(|key| key.starts_with("TEST_LAUNCHED_PROMPT")));
         let window = native_launch(&command);
         assert!(window.len() < 8192, "{} bytes", window.len());
         assert!(window.contains("launch-brief") && window.contains("launch-hooks"));
@@ -1013,10 +1028,15 @@ else:
         let text = std::fs::read_to_string(&brief).unwrap();
         assert!(text.contains(&update.intent) && text.contains(&update.acceptance[0].text));
         assert_eq!(runtime.coding_command(&binding).unwrap(), command);
-        TEST_ARGV.with(|p| *p.borrow_mut() = fake);
         let (_cancel, orders) = tokio::sync::watch::channel(false);
         let outcome = runtime.execute_coding("w", &binding, orders).await.unwrap();
         assert!(matches!(outcome, Outcome::Passed(_)), "{outcome:?}");
+        let received: Vec<String> = serde_json::from_slice(&std::fs::read(dir.path().join("received.json")).unwrap()).unwrap();
+        assert_eq!(received.last(), Some(&text), "the complete published ticket reaches Codex as one argument");
+        let configs: Vec<_> = received.windows(2).filter(|args| args[0] == "--config").map(|args| args[1].as_str()).collect();
+        let hooks = runtime.codex_hook_override(&binding).unwrap().unwrap();
+        assert!(configs.contains(&hooks.as_str()), "Codex receives the complete pinned hooks config: {configs:?}");
+        assert!(!brief.exists(), "the generated shell consumed the brief file");
     }
 
     #[tokio::test]
