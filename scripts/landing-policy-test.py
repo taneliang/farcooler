@@ -198,7 +198,7 @@ class LandingTests(unittest.TestCase):
         """ov-1268: the lane gate skips Rust tests a change cannot affect, using this repo's real crate graph."""
         shadow = lane.load_module("rust_select_real", ROOT / "scripts/rust-select.py")
         metadata = json.loads(subprocess.run(
-            ["cargo", "metadata", "--offline", "--locked", "--format-version", "1", "--all-features"],
+            ["cargo", "metadata", "--offline", "--locked", "--format-version", "1", "--all-features", "--no-deps"],
             cwd=ROOT, capture_output=True, text=True, check=True).stdout)
         everything = sorted(p["name"] for p in metadata["packages"] if p["id"] in set(metadata["workspace_members"]))
         leaf, _, full = shadow.select(ROOT, metadata, [("M", "crates/vt/src/lib.rs")])
@@ -253,7 +253,7 @@ class LandingTests(unittest.TestCase):
         """ov-1278: each gate run saves the test binaries it selected and skipped; a red main is traced by reading them."""
         shadow = lane.load_module("rust_select_evidence", ROOT / "scripts/rust-select.py")
         metadata = json.loads(subprocess.run(
-            ["cargo", "metadata", "--offline", "--locked", "--format-version", "1", "--all-features"],
+            ["cargo", "metadata", "--offline", "--locked", "--format-version", "1", "--all-features", "--no-deps"],
             cwd=ROOT, capture_output=True, text=True, check=True).stdout)
         names, reasons, full = shadow.select(ROOT, metadata, [("M", "crates/vt/src/lib.rs")])
         self.assertFalse(full)

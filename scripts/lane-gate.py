@@ -468,7 +468,7 @@ def rust_impact(repo, inputs):
     try:
         shadow = load_module("rust_select", repo / "scripts/rust-select.py")
         metadata = subprocess.run(["cargo", "metadata", "--offline", "--locked",
-                                   "--format-version", "1", "--all-features"],
+                                   "--format-version", "1", "--all-features", "--no-deps"],
                                   cwd=repo, capture_output=True, text=True, check=True)
         import json
         packages, reasons, full = shadow.select(repo, json.loads(metadata.stdout), inputs)

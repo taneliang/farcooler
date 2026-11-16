@@ -31,13 +31,14 @@ def graph(metadata):
     """Union all edges: normal, dev, build, optional and every target predicate.
 
     Do not filter metadata by host. Dependency declarations are used as well
-    as resolve nodes so inactive platform/feature edges cannot disappear.
+    as resolve nodes (absent under `cargo metadata --no-deps`, which needs no
+    registry crates) so inactive platform/feature edges cannot disappear.
     """
     members = set(metadata["workspace_members"])
     packages = {p["id"]: p for p in metadata["packages"] if p["id"] in members}
     by_name = {p["name"]: p["id"] for p in packages.values()}
     reverse = {p: set() for p in packages}
-    for node in metadata["resolve"]["nodes"]:
+    for node in (metadata.get("resolve") or {}).get("nodes", []):
         if node["id"] in members:
             for dep in node["deps"]:
                 if dep["pkg"] in members:

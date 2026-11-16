@@ -94,7 +94,7 @@ def rust_selection(repo, base, load_module):
         raw = shadow.capture(repo, "git", "ls-files", "--others", "--exclude-standard", "-z")
         changes.extend(("A", p) for p in raw.split("\0") if p)
         metadata = json.loads(shadow.capture(repo, "cargo", "metadata", "--locked", "--offline",
-                                             "--format-version", "1", "--all-features"))
+                                             "--format-version", "1", "--all-features", "--no-deps"))
         packages, reasons, full = shadow.select(repo, metadata, changes)
         return with_binaries(shadow, metadata, {"full": full, "packages": packages, "reasons": reasons, "base": green})
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
@@ -121,7 +121,7 @@ def forced_full(repo, load_module, reason):
     try:
         shadow = load_module("landing_rust_select", repo / "scripts/rust-select.py")
         metadata = json.loads(shadow.capture(repo, "cargo", "metadata", "--locked", "--offline",
-                                             "--format-version", "1", "--all-features"))
+                                             "--format-version", "1", "--all-features", "--no-deps"))
         return with_binaries(shadow, metadata, {k: proposal[k] for k in ("full", "packages", "reasons")})
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):
         return proposal
