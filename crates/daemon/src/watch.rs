@@ -41,6 +41,7 @@ use marks::{Watched, anyone_watching, owner_watching, record_watch};
 mod pages;
 mod plan_layer;
 mod holds;
+mod run_moves;
 mod workers;
 mod subagents_wire;
 pub(crate) mod task_notice;

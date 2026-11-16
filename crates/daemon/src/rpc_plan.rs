@@ -356,7 +356,9 @@ pub(crate) async fn read_plan(
         agent.doing_now = doing_now(svc, watcher, view).await;
     }
     crate::plan_stage::annotate(svc, &plan, &mut wire);
-    crate::plan_run::annotate(svc, workspace, &mut wire);
+    if let Ok(Some(state)) = svc.store.workflow_state(&workspace.to_string()) {
+        crate::plan_run::annotate(&state, &mut wire);
+    }
     if control {
         crate::plan_stage::annotate_waits(svc, workspace, &plan, &mut wire);
         crate::pr_suggest::annotate(svc, &plan, &mut wire);
