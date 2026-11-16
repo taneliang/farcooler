@@ -772,7 +772,8 @@ extension NativeSelectionTests {
             // has to scale their heights (text wraps to more lines there).
             await Self.scrollUp(scroll, window, by: 900)
             await Self.park(scroller, at: 0.5, window)
-            await Self.laidOut(scroll, window, held: 10, done: true)
+            let parked = await Self.laidOut(scroll, window, held: 10, done: true)
+            try #require(parked, "the initial jump did not settle")
             // A third of the way down the reader's row, not at its edge.
             let layout = try #require(TranscriptScroller.driving(scroll)?.layout)
             let reading = try #require(layout.reading(scroll))
@@ -783,7 +784,8 @@ extension NativeSelectionTests {
             // Then until the scroller says it's idle and the content holds
             // still: where the reader is and the knob are read from a settled
             // stack, not a half-built one (ov-842).
-            await Self.laidOut(scroll, window, held: 10, done: true)
+            let ready = await Self.laidOut(scroll, window, held: 10, done: true)
+            try #require(ready, "the reader's initial row did not settle")
             let initialTop = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll))
             let top = initialTop.id
             let initialShare: CGFloat? = {
@@ -813,7 +815,12 @@ extension NativeSelectionTests {
                 window.setContentSize(NSSize(width: width, height: 900))
                 window.contentView?.layoutSubtreeIfNeeded()
                 window.displayIfNeeded()
-                await Self.laidOut(scroll, window)
+                // Geometry can hold for three polls while the 15-display-frame
+                // width hold still runs. On a loaded runner it can expire
+                // between steps, capturing another row on the next resize.
+                // Finish this width's restoration before beginning the next.
+                let resized = await Self.laidOut(scroll, window, done: true)
+                try #require(resized, "the resize to \(Int(width)) pt did not settle")
                 if first.isEmpty { first = note("first step, \(Int(width)) pt") }
                 if abs(scroller.doubleValue - start) > worst {
                     worst = abs(scroller.doubleValue - start)
@@ -823,6 +830,7 @@ extension NativeSelectionTests {
             // The knob holds while the width changes, then goes where the
             // reader is: still within 2% of where it started.
             let finalPollCompleted = await Self.laidOut(scroll, window, held: 25, done: true)
+            try #require(finalPollCompleted, "the final resize did not settle")
             if abs(scroller.doubleValue - start) > worst {
                 worst = abs(scroller.doubleValue - start)
                 worstAt = note("the most at the end")
