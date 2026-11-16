@@ -335,7 +335,7 @@ pub fn list(svc: &Service, req: &pb::TaskListRequest, person: &crate::people::Pe
     let reads = board.map(|id| crate::board_reads_ops::reads_of(svc, id, person)).transpose()?;
     match &req.page_after {
         Some(after) => page(items, reads, after),
-        None => Ok(fit_unpaged(pb::TaskList { items, reads, next_page_after: None })),
+        None => Ok(fit_unpaged(pb::TaskList { items, reads, next_after: None })),
     }
 }
 
@@ -360,9 +360,9 @@ fn page(items: Vec<pb::Task>, reads: Option<pb::BoardReads>, after: &[u8]) -> Re
         used += size;
         end += 1;
     }
-    let next_page_after = (end < items.len()).then(|| items[end - 1].id.clone());
+    let next_after = (end < items.len()).then(|| items[end - 1].id.clone());
     let items = items.into_iter().skip(start).take(end - start).collect();
-    Ok(pb::TaskList { items, reads: if after.is_empty() { reads } else { None }, next_page_after })
+    Ok(pb::TaskList { items, reads: if after.is_empty() { reads } else { None }, next_after })
 }
 
 /// An unpaged reply, as every client before paging asks: whole when it fits a frame. Otherwise finished tasks'
@@ -442,7 +442,7 @@ pub fn get_by_key(svc: &Service, req: &pb::TaskGetByKeyRequest) -> Result<pb::Ta
         "repository_id",
     )?;
     let tasks = svc.store.tasks_with_key(repository, key)?;
-    Ok(pb::TaskList { next_page_after: None, items: crate::task_starts::pb_tasks(svc, &tasks)?, reads: None })
+    Ok(pb::TaskList { next_after: None, items: crate::task_starts::pb_tasks(svc, &tasks)?, reads: None })
 }
 
 /// `task.search`: every note in a repository whose body carries a phrase.
@@ -888,7 +888,7 @@ mod tests {
                 assert!(!task.encode_to_vec().windows(20).any(|w| w == b"a long progress note"), "no notes in a list");
             }
             seen.extend(page.items.iter().map(|t| t.title.clone()));
-            match page.next_page_after { Some(next) => after = next, None => break }
+            match page.next_after { Some(next) => after = next, None => break }
         }
         assert!(pages > 2, "{pages} pages");
         assert_eq!(seen, (0..1500).map(|n| format!("ticket {n}")).collect::<Vec<_>>(), "every task once, in order");
@@ -899,7 +899,7 @@ mod tests {
         let bytes = frame(&unpaged).expect("an unpaged read fits the frame cap");
         eprintln!("1,500 tasks: {pages} pages; unpaged {bytes} bytes");
         assert_eq!(unpaged.items.len(), 1500);
-        assert!(unpaged.next_page_after.is_none());
+        assert!(unpaged.next_after.is_none());
         let (done, open): (Vec<_>, Vec<_>) = unpaged.items.iter().partition(|t| t.status == pb::TaskStatus::Done as i32);
         assert!(open.iter().all(|t| t.intent.ends_with("carries ") && t.acceptance.iter().all(|a| a.text.ends_with("carries "))),
             "open tasks are never shortened");

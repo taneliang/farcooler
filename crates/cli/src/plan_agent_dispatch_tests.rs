@@ -91,7 +91,7 @@ impl DispatchLink for Runner {
                 }
                 .to_string(),
             }),
-            ("task.list", _) => result::Value::TaskList(pb::TaskList { next_page_after: None, items: items(), reads: None }),
+            ("task.list", _) => result::Value::TaskList(pb::TaskList { next_after: None, items: items(), reads: None }),
             ("worktree.list", _) => result::Value::WorktreeList(pb::WorktreeList {
                 items: vec![pb::Worktree { id: id_bytes(WORKTREE), repository_id: id_bytes(REPO), task_name: "lane".into(), ..Default::default() }],
             }),
@@ -102,7 +102,7 @@ impl DispatchLink for Runner {
             ("terminal.create", _) => result::Value::Terminal(pane()),
             ("task.get", _) => result::Value::TaskDetail(pb::TaskDetail { task: Some(items()[1].clone()), ..Default::default() }),
             ("task.update" | "task.set_status", _) => result::Value::Task(items()[1].clone()),
-            ("task.get_by_key", _) => result::Value::TaskList(pb::TaskList { next_page_after: None, items: vec![], reads: None }),
+            ("task.get_by_key", _) => result::Value::TaskList(pb::TaskList { next_after: None, items: vec![], reads: None }),
             ("repository.list", _) => result::Value::RepositoryList(pb::RepositoryList {
                 items: vec![pb::Repository { id: id_bytes(REPO), display_name: "overnight".into(), ..Default::default() }],
             }),

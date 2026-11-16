@@ -1565,7 +1565,7 @@ pub(crate) async fn board_in<L: DispatchLink>(
         };
         if whole.reads.is_none() { whole.reads = page.reads; }
         whole.items.extend(page.items);
-        match page.next_page_after.filter(|next| !next.is_empty() && *next != after) {
+        match page.next_after.filter(|next| !next.is_empty() && *next != after) {
             Some(next) => after = next,
             None => return Ok(whole),
         }
@@ -3532,13 +3532,13 @@ mod tests {
                         _ => None,
                     };
                     match after.filter(|_| self.page > 0) {
-                        None => result::Value::TaskList(pb::TaskList { next_page_after: None, items: self.tasks.clone(), reads: None }),
+                        None => result::Value::TaskList(pb::TaskList { next_after: None, items: self.tasks.clone(), reads: None }),
                         Some(after) => {
                             let start = self.tasks.iter().position(|t| t.id == after).map_or(0, |i| i + 1);
                             let items: Vec<_> = self.tasks.iter().skip(start).take(self.page).cloned().collect();
                             let more = start + items.len() < self.tasks.len();
-                            let next_page_after = more.then(|| items.last().unwrap().id.clone());
-                            result::Value::TaskList(pb::TaskList { next_page_after, items, reads: None })
+                            let next_after = more.then(|| items.last().unwrap().id.clone());
+                            result::Value::TaskList(pb::TaskList { next_after, items, reads: None })
                         }
                     }
                 }

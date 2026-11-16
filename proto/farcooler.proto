@@ -3743,7 +3743,7 @@ message TaskList {
   // Set on a paged read (`TaskListRequest.page_after`) when more tasks
   // remain: the id of this page's last task, to send as the next page's
   // `page_after`. Absent on the last page and on an unpaged read.
-  optional bytes next_page_after = 3;
+  optional bytes next_after = 3;
 }
 
 // When a ticket was last opened, on the runner's clock (ov-113).
@@ -3871,11 +3871,11 @@ message TaskListRequest {
   optional bytes workspace_id = 4;
   // Read the list a page at a time (ov-1298): set, the reply holds the tasks
   // after this one, in list order, up to the runner's page budget, and names
-  // the last one in `TaskList.next_page_after` when more remain. Empty asks
+  // the last one in `TaskList.next_after` when more remain. Empty asks
   // for the first page; a task id that is no longer in the list is refused
   // as `invalid-argument`, and the client reads again from the start.
   // A runner too old to know the field drops it and answers with every task
-  // and no `next_page_after`, which a client reads as the whole list.
+  // and no `next_after`, which a client reads as the whole list.
   //
   // Absent, as from every client before it, is one reply with every task;
   // when that would not fit a frame, finished tasks' intent, acceptance and

@@ -130,14 +130,14 @@ mod tests {
     /// `tasks` is untouched, and `reads` is there only when the runner sent it.
     #[test]
     fn a_board_names_its_reads_beside_its_tasks_only_when_it_has_them() {
-        let with = pb::TaskList { next_page_after: None,
+        let with = pb::TaskList { next_after: None,
             items: vec![],
             reads: Some(pb::BoardReads { workspace_id: bytes::Bytes::from_static(&[1; 16]), floor_ms: 3, opened: vec![], member: String::new() }),
         };
         let board = crate::tasks_json::board_json(&with, 0);
         assert_eq!(board["tasks"], json!([]));
         assert_eq!(board["reads"]["floor_ms"], 3);
-        let without = crate::tasks_json::board_json(&pb::TaskList { next_page_after: None, items: vec![], reads: None }, 0);
+        let without = crate::tasks_json::board_json(&pb::TaskList { next_after: None, items: vec![], reads: None }, 0);
         assert!(without.get("reads").is_none(), "{without}");
     }
 }
