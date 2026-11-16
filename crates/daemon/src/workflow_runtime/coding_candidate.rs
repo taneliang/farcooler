@@ -7,7 +7,12 @@
 //! The branch is the engine's alone: its name is a digest of the workspace and the group item, and nothing else
 //! writes it. Pushing it again is safe, so the step is an Ensure verb: a failure of any kind runs it again. Each
 //! branch is written down before its first push and deleted once its group has ended, whatever it ended as.
-use super::*;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use farcooler_workflow::{digest, Outcome, Phase, StageKind};
+use serde::{Deserialize, Serialize};
+use super::{durable, Binding, CodingConfigExt, CodingLanding, Error, Exec, Result};
 use super::coding::sha;
 
 /// One branch this runner put on the landing remote, kept until the branch is gone.
@@ -48,7 +53,7 @@ impl Exec {
         if self.verify_tree(binding).await? != candidate { return Err(Error::Refused("the branch candidate is not the folded tree")); }
         let identity = self.landing()?.clone();
         let url = super::coding::landing_url(&identity).map(str::to_string);
-        if url.is_none() && adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
+        if url.is_none() && super::adapters::git(&identity.repository, &["rev-parse", "--is-bare-repository"]).await? != "true" {
             return Err(Error::Refused("landing transport is not bare"));
         }
         let config = self.git_recorded(binding, &self.repository(), &["config", "--list"]).await?;

@@ -1,6 +1,9 @@
 //! CI on a landing group's candidate branch before the push (ov-1269), against a local bare repository standing in
 //! for the remote. No network push is ever made.
-use super::*;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use farcooler_workflow::{Command, Definition, EffectKind, Phase, StageKind};
+use super::{CodingConfigExt, Runtime};
 use super::coding_verbs_tests::{lander, command, phase_of, until, at_join, remote_head, outbox, candidate_of};
 
 /// The group of `batched_push`, with the candidate put on its branch after the fold and CI waited for before the push.
@@ -42,7 +45,7 @@ fn seen(log: &Path) -> Vec<serde_json::Value> {
 }
 async fn landing_branches(runtime: &Runtime) -> String {
     let landing = runtime.coding.as_ref().unwrap().landing.as_ref().unwrap();
-    adapters::git(&landing.repository, &["for-each-ref", "--format=%(refname)", "refs/heads/landing/"]).await.unwrap()
+    super::adapters::git(&landing.repository, &["for-each-ref", "--format=%(refname)", "refs/heads/landing/"]).await.unwrap()
 }
 /// Pump until every candidate branch has left the remote and its record is gone: the sweep deletes off the loop.
 async fn until_deleted(runtime: &mut Runtime) {
