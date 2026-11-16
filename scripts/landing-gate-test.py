@@ -32,6 +32,14 @@ def selected(paths):
 
 
 class LandingTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        for key in list(os.environ):
+            if key.startswith("FARCOOLER_"):
+                os.environ.pop(key)
+
     def test_ci_families_are_the_minimum_for_every_path_rule(self):
         # Independent mapping: dropping any family-to-job edge must go red.
         jobs = {"rust": {"rust"}, "apple": {"swift", "swift-tests", "ios"},
@@ -111,7 +119,7 @@ class LandingTests(unittest.TestCase):
     def test_mixed_group_unions_families(self):
         self.assertEqual(selected(["apps/android/a.kt", "apps/macos/a.swift", "docs/spike.md"]),
                          {"wire", "doc-comments", "site", "tunnel", "android", "relay", "swift", "swift-tests", "ios"})
-        for path in ["docs/spike.md", ".claude/agent/reports/ov-1189/result.md", "reports/ov-1189/run.txt"]:
+        for path in ["docs/spike.md", "docs/second.md", ".claude/agent/reports/ov-1189/result.md", "reports/ov-1189/run.txt"]:
             self.assertEqual(selected([path]), {"wire", "doc-comments"})
 
     def test_crate_selector_is_used_and_never_filters_ci_rust_steps(self):
@@ -157,6 +165,7 @@ class LandingTests(unittest.TestCase):
             git("commit", "-qm", "base")
             base = git("rev-parse", "HEAD")
             write("docs/spike.md", "findings\n")
+            write("docs/second.md", "second finding\n")
             git("add", ".")
             git("commit", "-qm", "first ticket")
             write(".claude/agent/reports/ov-1189/result.md", "report\n")
@@ -171,16 +180,36 @@ class LandingTests(unittest.TestCase):
             if out.returncode:
                 out.stdout += subprocess.run([sys.executable, str(repo / "scripts/lane-gate.py"), "--worktree", tmp, "--dry-run"], env=env, capture_output=True, text=True).stdout
             self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-            self.assertIn("2 changed file(s) against " + base, out.stdout)
+            self.assertIn("3 changed file(s) against " + base, out.stdout)
             self.assertIn("jobs: wire, doc-comments", out.stdout)
             self.assertIn("no builds selected", out.stdout)
             self.assertIn("landing-gate: PASS", out.stdout)
+            engine = {**env, "FARCOOLER_OPERATION_BINDING": "fixture-engine"}
+            for bad_env, flags, message in (
+                ({k: v for k, v in engine.items() if k != "FARCOOLER_BASE"}, [], "engine requires FARCOOLER_BASE"),
+                (engine, ["--base", "HEAD"], "differs from engine FARCOOLER_BASE"),
+            ):
+                refused = subprocess.run(["bash", str(repo / "scripts/landing-gate"), "--worktree", tmp,
+                                          "--dry-run", *flags], env=bad_env, capture_output=True, text=True)
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn(message, refused.stderr)
+            # A divergent sibling has a merge base, but must never silently widen the diff to it.
+            git("checkout", "-qb", "sibling", base)
+            write("docs/sibling.md", "sibling\n")
+            git("add", "docs/sibling.md")
+            git("commit", "-qm", "sibling")
+            sibling = git("rev-parse", "HEAD")
+            git("checkout", "-q", "-")
+            refused = subprocess.run(["bash", str(repo / "scripts/landing-gate"), "--worktree", tmp, "--dry-run"],
+                                      env={**engine, "FARCOOLER_BASE": sibling}, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("not an ancestor of candidate HEAD", refused.stderr)
             write("apps/android/a.kt", "code\n")
             git("add", ".")
             git("commit", "-qm", "third ticket")
             write("apps/macos/a.swift", "code\n")  # dirty fourth ticket also counts
             self.assertEqual(set(lane.changed_files(repo, base)), {
-                "docs/spike.md", ".claude/agent/reports/ov-1189/result.md",
+                "docs/spike.md", "docs/second.md", ".claude/agent/reports/ov-1189/result.md",
                 "apps/android/a.kt", "apps/macos/a.swift"})
             # --base still overrides the engine default, including in dry runs.
             dry = subprocess.run(["bash", str(repo / "scripts/landing-gate"), "--worktree", tmp,

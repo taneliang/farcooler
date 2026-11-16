@@ -267,7 +267,7 @@ impl Exec {
             StageKind::Ci => config.ci.command.clone(),
             _ => return Err(Error::Refused("not a process operation")),
         };
-        self.pin_context(&mut command, binding, &binding.effect.candidate.clone().unwrap_or_default(), &self.provider_path(binding));
+        self.pin_context(&mut command, binding, &binding.effect.candidate.clone().unwrap_or_default(), &self.provider_path(binding))?;
         if managed_build && matches!(kind, StageKind::Build) {
             // Inherited by the agent's compilers and test runners, including native PTY launches. Niceness is the
             // standing bias; while a landing gate runs the builder is also paused (see `yielding.rs`).
@@ -328,7 +328,7 @@ impl Exec {
         format!("{brief}\n\n{prompt}")
     }
     /// Context wins over command environment and is pinned in the process fact.
-    pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) {
+    pub(super) fn pin_context(&self, command: &mut CodingCommand, binding: &Binding, candidate: &str, receipt: &Path) -> Result<()> {
         let effect = &binding.effect;
         for (key, value) in [
             ("FARCOOLER_OPERATION_BINDING", digest(binding)),
@@ -338,7 +338,7 @@ impl Exec {
             ("FARCOOLER_DEFINITION_PIN", effect.definition_pin.clone()),
             ("FARCOOLER_POLICY_PIN", effect.policy_pin.clone()),
             ("FARCOOLER_CANDIDATE", candidate.to_string()),
-            ("FARCOOLER_BASE", binding.base.clone()),
+            ("FARCOOLER_BASE", self.process_base(binding, candidate)?),
             ("FARCOOLER_ITERATION", binding.iteration.to_string()),
             ("FARCOOLER_RECEIPT", receipt.to_string_lossy().into_owned()),
             // Which card the run is for (ov-962): the published prompt is the same for every ticket on the board.
@@ -356,6 +356,7 @@ impl Exec {
         }
         // The model the run picked at Start (ov-966); a native harness launches it, a command one is told.
         if let Some(model) = self.run_model(binding) { command.environment.insert("FARCOOLER_WORKFLOW_MODEL".into(), model); }
+        Ok(())
     }
     /// A gate that was ended mid-run (a restart, a crash) may have left files in the tree. In a private tree
     /// they are ours and the candidate is a commit, so start the run from exactly the commit. A tree the app

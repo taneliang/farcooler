@@ -43,6 +43,7 @@ def run(args):
     base = os.environ["FARCOOLER_BASE"]
     evidence.require(evidence.git(repo, "rev-parse", "--verify", base + "^{commit}").decode().strip() == base,
                      "engine base must be a resolved commit")
+    lane.validate_base(repo, base)
     root = pathlib.Path(args.evidence_root).resolve()
     evidence.require(not root.is_relative_to(repo), "private evidence root must be outside checkout")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)

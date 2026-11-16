@@ -384,15 +384,33 @@ def steps_for(job, workflows, ctx):
 # ---------------------------------------------------------------- which jobs
 
 
+def validate_base(repo, base):
+    """Engine landings must use their pinned fold base; never a moving remote ref."""
+    engine = os.environ.get("FARCOOLER_OPERATION_BINDING") or os.environ.get("FARCOOLER_WORKFLOW_RUN")
+    if engine:
+        pinned = os.environ.get("FARCOOLER_BASE", "")
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", pinned):
+            raise SystemExit("lane-gate: engine requires FARCOOLER_BASE as a resolved fold commit")
+        if base != pinned:
+            raise SystemExit("lane-gate: --base differs from engine FARCOOLER_BASE (the fold base)")
+    resolved = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", base + "^{commit}"],
+                              capture_output=True, text=True)
+    if resolved.returncode:
+        raise SystemExit(f"lane-gate: missing or invalid base {base}: {resolved.stderr.strip()}")
+    ancestor = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", resolved.stdout.strip(), "HEAD"],
+                              capture_output=True, text=True)
+    if ancestor.returncode:
+        raise SystemExit(f"lane-gate: base {base} is not an ancestor of candidate HEAD; refusing to plan")
+    return resolved.stdout.strip()
+
+
 def changed_inputs(repo, base):
     """The combined branch, index, worktree and untracked diff; retain deletions
     and both sides of renames so moving code into docs cannot hide its impact."""
     def git(*args):
         return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
-    mb = git("merge-base", base, "HEAD")
-    if mb.returncode != 0:
-        raise SystemExit(f"lane-gate: no merge base between {base} and HEAD: {mb.stderr.strip()}")
-    diff = git("diff", "--no-renames", "--name-status", "-z", mb.stdout.strip())
+    resolved = validate_base(repo, base)
+    diff = git("diff", "--no-renames", "--name-status", "-z", resolved)
     untracked = git("ls-files", "--others", "--exclude-standard", "-z")
     for out in (diff, untracked):
         if out.returncode != 0:
@@ -884,6 +902,7 @@ def gate(args):
         import landing_policy
         landing_policy.readonly_git(os.environ)
     repo = pathlib.Path(args.worktree).resolve()
+    validate_base(repo, args.base)
     workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
                  "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC here is caught by main
@@ -1165,6 +1184,9 @@ def print_summary(rows, repo, base, logdir, failed, left_out=(), write_to=None):
 
 
 def self_test():
+    if not os.environ.get("LANE_GATE_TEST_FIXTURE"):
+        fixture = load_module("gate_test_fixture", ROOT / "scripts/gate-test-fixture.py")
+        return fixture.run(ROOT)
     from unittest.mock import patch
 
     if subprocess.call([sys.executable, str(ROOT / "scripts/process_guard_test.py")]):
@@ -1934,6 +1956,8 @@ def _self_test():
     policy_test = subprocess.run([sys.executable, str(ROOT / "scripts/landing-policy-test.py")])
     if policy_test.returncode:
         return policy_test.returncode
+    if subprocess.call([sys.executable, str(ROOT / "scripts/landing-gate-test.py")]):
+        return 1
     benchmark_test = subprocess.run([sys.executable, str(ROOT / "scripts/landing-benchmark-test.py")])
     if benchmark_test.returncode:
         return benchmark_test.returncode

@@ -363,6 +363,51 @@ class LandingTests(unittest.TestCase):
                 self.assertEqual([r["result"] for r in timings], ["pass", "pass"])
                 self.assertTrue(all(r["seconds"] >= 0 for r in timings))
 
+    def test_three_file_fold_plan_uses_group_base_and_only_reached_rust_binaries(self):
+        """ov-1305: execute the planner with a stale remote ref and a pinned group base."""
+        with tempfile.TemporaryDirectory(prefix="three-file-fold-") as temporary:
+            repo = Path(temporary).resolve()
+            for folder in ("scripts", ".github"):
+                shutil.copytree(ROOT / folder, repo / folder)
+            (repo / "Cargo.toml").write_text('[workspace]\nresolver="2"\nmembers=["crates/*"]\n')
+            for folder, name, dependencies in (("android", "leaf", ""), ("consumer", "consumer", '\n[dependencies]\nleaf={path="../android"}\n'),
+                                                ("unrelated", "unrelated", "")):
+                root = repo / "crates" / folder
+                (root / "src").mkdir(parents=True)
+                (root / "Cargo.toml").write_text(f'[package]\nname="{name}"\nversion="0.1.0"\nedition="2021"\n{dependencies}')
+                (root / "src/lib.rs").write_text('#[test] fn contract() {}\n')
+            def git(*args):
+                return subprocess.check_output(["git", "-c", "user.name=Fixture", "-c", "user.email=t@t",
+                                                "-c", "commit.gpgsign=false", *args], cwd=repo, text=True).strip()
+            subprocess.run(["cargo", "generate-lockfile", "--offline"], cwd=repo, check=True, capture_output=True)
+            git("init", "-q")
+            git("add", "scripts", ".github", "Cargo.toml", "Cargo.lock", "crates")
+            git("commit", "-qm", "runner startup")
+            git("update-ref", "refs/remotes/origin/main", "HEAD")
+            (repo / "README.md").write_text("main advanced before folding\n")
+            git("add", "README.md")
+            git("commit", "-qm", "actual group base")
+            base = git("rev-parse", "HEAD")
+            for path in ("crates/android/src/lib.rs", "README.md", "REPORT.md"):
+                with (repo / path).open("a") as stream:
+                    stream.write("// folded member\n")
+            git("add", "crates/android/src/lib.rs", "README.md", "REPORT.md")
+            git("commit", "-qm", "three folded files")
+            candidates = repo / ".git/green.ndjson"
+            candidates.write_text(json.dumps({"head_sha": base}) + "\n")
+            env = {**os.environ, "FARCOOLER_OPERATION_BINDING": "fixture", "FARCOOLER_BASE": base,
+                   "CANDIDATES": str(candidates)}
+            out = subprocess.run(["bash", "scripts/landing-gate", "--dry-run"], cwd=repo, env=env, capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+            self.assertIn(f"3 changed file(s) against {base}; jobs: wire, doc-comments, site, tunnel, rust, android", out.stdout)
+            self.assertIn("Rust coverage: nextest runs only consumer, leaf; 1 test binaries skipped", out.stdout)
+            self.assertNotIn("nextest runs only consumer, leaf, unrelated", out.stdout)
+            with patch.dict(os.environ, env):
+                proposal = policy.rust_selection(repo, base, lambda name, path: lane.load_module(name, ROOT / "scripts" / path.name))
+            self.assertEqual(proposal["packages"], ["consumer", "leaf"])
+            self.assertEqual(proposal["selected_binaries"], ["consumer", "leaf"])
+            self.assertEqual(proposal["skipped_binaries"], ["unrelated"])
+
     def test_real_affected_failure_and_unaffected_ci_failure(self):
         self.real_failure_proof(use_nextest=shutil.which("cargo-nextest") is not None)
 

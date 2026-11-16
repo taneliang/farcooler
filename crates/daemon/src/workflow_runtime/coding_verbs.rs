@@ -73,6 +73,19 @@ impl Exec {
     pub(super) fn fold_index(&self, binding: &Binding, folded: &str) -> PathBuf {
         self.root.join("receipts").join(format!("fold-{}-{folded}.json", digest(&(&binding.workspace, &binding.effect.item))))
     }
+    /// Group process gates compare against the durable fold base, not the runner's startup base.
+    /// Keep Binding unchanged: historical receipts and admission still belong to that binding.
+    pub(super) fn process_base(&self, binding: &Binding, candidate: &str) -> Result<String> {
+        if binding.effect.kind != EffectKind::Execute(StageKind::Run) || binding.effect.members.is_empty() {
+            return Ok(binding.base.clone());
+        }
+        let index: serde_json::Value = serde_json::from_slice(&self.bytes(&self.fold_index(binding, candidate))?)?;
+        if index["folded"] != candidate || index["item"] != binding.effect.item {
+            return Err(Error::Refused("gate fold record is for another candidate or group"));
+        }
+        index["base"].as_str().filter(|base| sha(base)).map(str::to_string)
+            .ok_or(Error::Refused("gate has no valid fold base"))
+    }
     pub(super) fn landing(&self) -> Result<&CodingLanding> {
         self.coding.as_ref().and_then(|c| c.landing.as_ref()).ok_or(Error::Refused("landing verbs need a landing identity"))
     }
@@ -491,7 +504,7 @@ impl Exec {
         let (receipt, log) = (self.root.join("receipts").join(format!("{stem}.provider.json")),
             self.root.join("receipts").join(format!("{stem}.output")));
         let mut command = config.ci.command.clone();
-        self.pin_context(&mut command, binding, sha, &receipt);
+        self.pin_context(&mut command, binding, sha, &receipt)?;
         command.environment.insert("FARCOOLER_CI_WORKFLOW".into(), workflow.into());
         if index != 0 { command.environment.remove("FARCOOLER_CI_RUN"); }
         durable(&log, b"")?;

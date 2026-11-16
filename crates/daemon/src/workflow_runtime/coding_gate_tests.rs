@@ -48,3 +48,37 @@ fn recorded_gate_diagnostics_exclude_the_changed_file_header_and_match_whole_pat
     let brief = super::coding_execute::bounded_gate_brief("check", &"é".repeat(5000));
     assert!(farcooler_workflow::valid_rework_reason(&brief));
 }
+
+/// ov-1305: a refold moves the group base while the runner's original binding stays fixed.
+#[tokio::test]
+async fn group_gate_context_uses_each_fold_base_and_refuses_missing_or_foreign_records() {
+    let (_dir, mut runtime) = lander("move-base").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    at_join(&mut runtime, "one", &definition).await;
+    command(&runtime, Command::Queue { item: "one".into() });
+    until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
+    let gates: Vec<_> = runtime.store.workflow_outbox("w").unwrap().into_iter()
+        .filter(|s| s.effect.kind == EffectKind::Execute(StageKind::Run)).collect();
+    assert_eq!(gates.len(), 2);
+    let mut bases = Vec::new();
+    for stored in gates {
+        let binding = Binding::new("w", &stored.effect, stored.resource_generation.unwrap(), 0,
+            &runtime.item_base("w", &stored.effect).unwrap());
+        let candidate = stored.effect.candidate.as_deref().unwrap();
+        let path = runtime.fold_index(&binding, candidate);
+        let raw = std::fs::read(&path).unwrap();
+        let fold: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        let fact: serde_json::Value = serde_json::from_slice(&std::fs::read(runtime.root.join("receipts")
+            .join(format!("{}.process.json", digest(&stored.effect)))).unwrap()).unwrap();
+        assert_eq!(fact["environment"]["FARCOOLER_BASE"], fold["base"]);
+        assert_eq!(runtime.process_base(&binding, candidate).unwrap(), fold["base"].as_str().unwrap());
+        bases.push(fold["base"].clone());
+        std::fs::remove_file(&path).unwrap();
+        assert!(runtime.process_base(&binding, candidate).is_err(), "no startup-base fallback");
+        let mut foreign = fold.clone(); foreign["item"] = serde_json::json!("another-group");
+        std::fs::write(&path, serde_json::to_vec(&foreign).unwrap()).unwrap();
+        assert!(runtime.process_base(&binding, candidate).is_err());
+        std::fs::write(&path, raw).unwrap();
+    }
+    assert_ne!(bases[0], bases[1], "the refold must change the gate's diff base");
+}
