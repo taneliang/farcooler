@@ -1025,6 +1025,8 @@ mod observe_tests;
 #[cfg(test)]
 mod coding_verbs_tests;
 #[cfg(test)]
+mod coding_fold_skip_tests;
+#[cfg(test)]
 mod coding_gate_tests;
 #[cfg(test)]
 mod coding_candidate_tests;

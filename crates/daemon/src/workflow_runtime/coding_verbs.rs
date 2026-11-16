@@ -580,12 +580,14 @@ impl Exec {
 
     /// Apply one pinned member; an empty pick is already on the base. Abort a conflict before
     /// returning so diagnosis and the next member always start from a settled tree.
-    async fn pick_member(&self, binding: &Binding, tree: &Path, base: &str,
+    pub(super) async fn pick_member(&self, binding: &Binding, tree: &Path, _base: &str,
         member: &farcooler_workflow::Member) -> Result<Option<serde_json::Value>>
     {
-        let range = format!("{base}..{}", member.candidate);
-        let listed = self.git_recorded(binding, tree, &["rev-list", "--reverse", &range]).await?;
-        for commit in listed.lines().filter(|c| !c.is_empty()) {
+        // `git cherry` lists what the member holds that the tree (the base plus every member folded so
+        // far) lacks, oldest first, marking with `-` a commit whose patch is already there under another
+        // sha. A ticket stacked on another's commits, or on copies already on the base, skips those.
+        let listed = self.git_recorded(binding, tree, &["cherry", "HEAD", &member.candidate]).await?;
+        for commit in listed.lines().filter_map(|l| l.strip_prefix("+ ")).filter(|c| !c.is_empty()) {
             let pick = |extra: &'static [&'static str]| -> Vec<&str> {
                 COMMIT_IDENTITY.iter().copied().chain(extra.iter().copied()).collect()
             };
@@ -600,10 +602,30 @@ impl Exec {
             // Only confirmed unmerged paths diagnose a member; infrastructure failures retry the fold.
             if unmerged.trim().is_empty() { return Err(Error::Refused("fold cherry-pick failed without conflicts")); }
             self.git_recorded(binding, tree, &pick(&["cherry-pick", "--abort"])).await?;
+            // A copy of this change on the tree under other context (a later commit of the same ticket
+            // touched the same file) is not a conflict: the change is already there.
+            if self.change_is_in_tree(binding, tree, commit).await? { continue; }
             return Ok(Some(serde_json::json!({ "member": member.item, "commit": commit,
                 "files": unmerged.lines().collect::<Vec<_>>() })));
         }
         Ok(None)
+    }
+
+    /// Whether the tree already holds a commit with exactly this commit's lines changed, whatever its sha
+    /// and context: the commits since the two last met are compared by their zero-context change.
+    async fn change_is_in_tree(&self, binding: &Binding, tree: &Path, commit: &str) -> Result<bool> {
+        let change = |commit: String| async move {
+            let diff = self.git_recorded(binding, tree, &["diff-tree", "-p", "-U0", "--no-commit-id", "-r", &commit]).await?;
+            Ok::<_, Error>(diff.lines().filter(|l| !l.starts_with("index ") && !l.starts_with("@@")).collect::<Vec<_>>().join("\n"))
+        };
+        let wanted = change(commit.to_string()).await?;
+        if wanted.is_empty() { return Ok(false); }
+        let fork = self.git_recorded(binding, tree, &["merge-base", "HEAD", commit]).await?;
+        let range = format!("{fork}..HEAD");
+        for held in self.git_recorded(binding, tree, &["rev-list", &range]).await?.lines().filter(|c| !c.is_empty()) {
+            if change(held.to_string()).await? == wanted { return Ok(true); }
+        }
+        Ok(false)
     }
 
     /// Push the folded commit to the target, once, and only while the target is still at the base the
