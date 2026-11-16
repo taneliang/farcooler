@@ -26,7 +26,7 @@ on:
     # folded commit there as soon as the fold succeeds, so CI runs while its
     # local gate does, and moves main to that same commit only once this run
     # passes. Main's own run of that commit then runs nothing (see `changes`).
-    branches: [main, 'landing/**', ov-1294-ci-mac-chain] # run 3
+    branches: [main, 'landing/**']
     # The canary workflow's own baseline commit touches only this file. Without
     # this, its run supersedes and cancels the CI of the commit it records.
     paths-ignore: ['proto/baseline/canary.proto']
@@ -380,10 +380,7 @@ jobs:
   # bills at ten times the minutes for the same answer.
   tunnel:
     name: Tunnel (Go)
-    # `wire` is capacity only (ov-1294): the total-job budget is full
-    # (scripts/ci-macos-capacity.py), and Android UI's two shards now run
-    # together. This job is under a minute.
-    needs: [changes, wire]
+    needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.non_docs != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -473,13 +470,10 @@ jobs:
     permissions:
       actions: read
       contents: read
-    # Capacity only (ov-1294): the landing run may hold four Macs at once
-    # (scripts/ci-macos-capacity.py). This matrix consumes no archive, so it
-    # waits for the Swift tests, the longest Mac job, to free a slot rather than
-    # for the native archive; the shards below start as soon as that archive
-    # does. !cancelled() still runs its checks if the job it waits for fails or
-    # is skipped. Both OS check names stay put.
-    needs: [changes, swift-tests]
+    # Capacity only (ov-1256): give the native archive the first Mac slot.
+    # This matrix consumes no archive; !cancelled() still runs its checks if
+    # that independent build fails or is skipped. Both OS check names stay put.
+    needs: [changes, rust-macos-build]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
     runs-on: ${{ matrix.os }}
     # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
@@ -1016,12 +1010,10 @@ jobs:
 
   rust-macos-tests:
     name: Rust native tests (macOS ${{ matrix.shard }}/2)
-    # The archive is the only artifact dependency. `ios` is capacity only
-    # (ov-1294): with Swift, Swift tests and these two shards running, a fifth
-    # Mac job would exceed the four the landing run may hold. iOS is the
-    # shortest Mac job, so waiting for it costs about a minute, not the twelve
-    # the Swift jobs took. A failed or skipped `ios` must not suppress these tests.
-    needs: [changes, rust-macos-build, ios]
+    # The archive is the only artifact dependency. Waiting for both Swift jobs
+    # reserves two Mac slots together, even if Rust checks/iOS are still busy.
+    # Failure/skipping of Swift must not suppress these independent tests.
+    needs: [changes, rust-macos-build, swift, swift-tests]
     if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.rust-macos-build.result == 'success' }}
     runs-on: macos-latest
     timeout-minutes: 20
@@ -1557,8 +1549,7 @@ jobs:
   # the download, saying so, rather than skip.
   ios-ui:
     name: iOS UI (smoke)
-    # `swift` is capacity only (ov-1294): see rust-macos-tests.
-    needs: [changes, ios-ui-plan, ios, swift]
+    needs: [changes, ios-ui-plan, ios]
     if: ${{ !cancelled() && needs.changes.outputs.apple != 'false' && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 20
@@ -1642,6 +1633,7 @@ jobs:
     name: Android UI tests (${{ matrix.shard }})
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         shard: [first, rest]
     needs: changes
