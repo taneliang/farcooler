@@ -143,6 +143,8 @@ impl Exec {
     fn unstarted_path(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.provision-unstarted.json", digest(&binding.effect)))
     }
+    pub(super) fn unstarted_recorded(&self, binding: &Binding) -> Result<bool> { Ok(self.unstarted_path(binding).try_exists()?) }
+    pub(super) fn process_fact_recorded(&self, binding: &Binding) -> Result<bool> { Ok(self.fact_path(binding).try_exists()?) }
     pub(super) fn refuse_unstarted(&self, binding: &Binding, why: String) -> Result<Outcome> {
         durable(&self.unstarted_path(binding), &serde_json::to_vec(&Unstarted { binding: binding.clone(), why: why.clone() })?)?;
         Ok(Outcome::SafeFailureBecause(why))
@@ -158,6 +160,14 @@ impl Exec {
         }
         if self.is_native_agent(binding) { self.verify_native_settlement(binding, fact.exit)?; }
         Ok((fact, raw))
+    }
+    /// The fact of a process that has ended, read for nothing but that: its binding is checked, not the command it
+    /// ran, which a re-pin since may have changed.
+    fn ended_process(&self, binding: &Binding) -> Result<Vec<u8>> {
+        let raw = self.bytes(&self.fact_path(binding))?;
+        let fact: ProcessFact = serde_json::from_slice(&raw)?;
+        if fact.binding != *binding { return Err(Error::Refused("foreign process fact")); }
+        Ok(raw)
     }
     pub(super) fn git_settlement(&self, binding: &Binding) -> PathBuf {
         self.root.join("receipts").join(format!("{}.git-settled.json", digest(&binding.effect)))
@@ -496,7 +506,12 @@ impl Exec {
                 // Limit this to process stages: an unknown push/landing acceptance still needs reconciliation.
                 if matches!(original.effect.kind, EffectKind::Execute(StageKind::Build | StageKind::Check
                     | StageKind::Run | StageKind::Review(_) | StageKind::Ci)) {
-                    let (_, raw) = self.settled_process(&original_binding)?;
+                    let raw = match self.settled_process(&original_binding) {
+                        Ok((_, raw)) => raw,
+                        // A fact proves the process ended even when the settings it ran under were re-pinned since,
+                        // which reads as a mismatch: cancelling needs only that it ended (ov-1301).
+                        Err(error) => self.ended_process(&original_binding).map_err(|_| error)?,
+                    };
                     return Ok(Outcome::Stopped { operation: operation.into(),
                         receipt: digest(&("coding-quiescent/v1", binding, &original_binding, digest(&raw))) });
                 }
@@ -508,6 +523,10 @@ impl Exec {
     /// End a native agent whose turn was never settled, and write the process fact its settlement implies.
     async fn settle_interrupted_native(&self, binding: &Binding, completed: Option<bool>) -> Result<()> {
         let completed = self.cancel_interrupted_native(binding, completed).await?;
+        self.write_native_fact(binding, completed)
+    }
+    /// The process fact a native settlement implies, once nothing of the agent runs.
+    fn write_native_fact(&self, binding: &Binding, completed: Option<bool>) -> Result<()> {
         let command = self.bound_command(binding, false, true)?;
         let fact = ProcessFact { binding: binding.clone(), argv: command.argv,
             environment: command.environment, managed_build: true, exit: completed.map(|passed| if passed { 0 } else { 1 }),
@@ -837,6 +856,11 @@ impl Exec {
                 let verdict = self.recorded_verdict(binding);
                 if verdict || self.native_review_without_owner(binding)? {
                     self.settle_interrupted_native(binding, verdict.then_some(true)).await?;
+                } else if matches!(kind, StageKind::Build) && self.settle_ended_native(binding, "The agent's session ended while \
+                    the runner wasn't watching it (the daemon stopped or restarted), so its turn has no result. Its work stays in \
+                    the worktree for the step's next attempt, a retry or a send-back.").await? {
+                    // Decided once, not looked at every sweep (ov-1301): its pane is gone and nothing is on its tty.
+                    self.write_native_fact(binding, Some(false))?;
                 }
             }
             let (fact, raw) = self.settled_process(binding)?;

@@ -121,8 +121,10 @@ impl Runtime {
             EffectKind::Stop { operation } => outbox.iter().find(|s| &s.effect.id == operation).ok_or(Error::Refused("missing stopped effect"))?,
             _ => stored,
         };
-        if provision.effect.kind != EffectKind::Execute(StageKind::Provision) {
-            return Err(refused(format!("Only a step that makes a run's worktree can be resolved this way; {item_id}'s uncertain step doesn't.")));
+        let build = provision.effect.kind == EffectKind::Execute(StageKind::Build);
+        if provision.effect.kind != EffectKind::Execute(StageKind::Provision) && !build {
+            return Err(refused(format!("Only a build, or a step that makes a run's worktree, can be resolved this way; \
+                {item_id}'s uncertain step is neither.")));
         }
         let mut exec = self.exec.clone();
         if self.service_mode {
@@ -133,6 +135,11 @@ impl Runtime {
         let base = exec.item_base(workspace, &provision.effect)?;
         let binding = Binding::new(workspace, &provision.effect,
             provision.resource_generation.ok_or(Error::Refused("the provision was never admitted"))?, item.iteration, &base);
+        if build {
+            exec.resolve_build(item_id, &binding).await?;
+            if let Some(wake) = &self.notice_wake { wake.notify_one(); }
+            return Ok(());
+        }
         if exec.git_settlement(&binding).try_exists()? {
             return Err(refused(format!("{item_id}'s worktree step finished and left its receipt, which settles it; nothing to resolve.")));
         }
@@ -158,6 +165,33 @@ impl Runtime {
         exec.refuse_unstarted(&binding, "Git never finished making the run's worktree, and nothing was made; the orchestrator \
             resolved it. Retry the run.".into())?;
         if let Some(wake) = &self.notice_wake { wake.notify_one(); }
+        Ok(())
+    }
+}
+
+/// The orchestrator settling a build left Uncertain whose process has ended (ov-1301), as it settles a lost
+/// Provision: a daemon that restarted or lost the build's receipt held it there, and only an owner's word cleared it.
+impl Exec {
+    /// Believed only once the runner looks: a process fact (written only after the process ended), or a native
+    /// agent whose pane is gone with nothing on its terminal, or one that was never let out. Then the build is
+    /// recorded as having ended with no result, and the next sweep fails the step with that (it runs again in the
+    /// same worktree if it has attempts left), or ends the cancelled run waiting on it. Nothing is killed.
+    pub(super) async fn resolve_build(&self, item_id: &str, binding: &Binding) -> Result<()> {
+        let refused = |sentence: String| Error::Domain(farcooler_core::DomainError::refused(sentence));
+        if self.unstarted_recorded(binding)? {
+            return Err(refused(format!("{item_id}'s build is already resolved; the next look settles it.")));
+        }
+        let ended = if self.process_fact_recorded(binding)? { None }
+            else if self.is_native_agent(binding) { self.native_ended(binding).await? }
+            // A command build keeps no owner record: only one that never wrote its log provably never ran.
+            else if self.process_log(binding).try_exists()? { Some("its command may still be running, and the runner can't prove it ended") }
+            else { None };
+        if let Some(running) = ended {
+            return Err(refused(format!("{item_id} can't be resolved yet: {running}. Cancel it, or wait for it to end, then resolve again.")));
+        }
+        self.refuse_unstarted(binding, "The build ended with no result the runner could read, and nothing of it is still \
+            running; the orchestrator resolved it. Its work stays in the worktree for the step's next attempt, a retry or \
+            a send-back.".into())?;
         Ok(())
     }
 }

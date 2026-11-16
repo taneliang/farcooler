@@ -72,6 +72,47 @@ fn startup_refusal(agent: Agent, output: &str) -> Option<String> {
     Some(format!("The '{model}' model is not supported when using Codex with a ChatGPT account. Choose another model."))
 }
 
+/// What the item says of a turn the runner stopped reading: a sentence the orchestrator can act on.
+fn turn_ended_reason(error: &Error) -> String {
+    let why = match error { Error::Refused(why) => why.to_string(), other => other.to_string() };
+    format!("The agent's turn ended before it finished: {why}. Its work stays in the worktree for the step's next \
+        attempt, a retry or a send-back.")
+}
+/// How long the runner may fail to read a live agent's pane before it gives the step up (ov-1301). A tmux that
+/// doesn't answer in a second is a busy runner, not a lost session: the Canary ended four builds in a minute on that
+/// misreading, each Failed with no reason. Only a pane tmux answers for as closed or dead ends the turn at once.
+#[cfg(not(test))]
+const UNREADABLE_PANE_FOR: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const UNREADABLE_PANE_FOR: Duration = Duration::from_secs(2);
+#[cfg(test)]
+thread_local! {
+    /// Test hook: how many pane reads to fail as a tmux that didn't answer in time.
+    pub(super) static UNREADABLE_PANE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+/// When the pane reads started failing, and how many in a row were closed: a closed pane is read twice, 250 ms
+/// apart, before the turn is taken as lost.
+#[derive(Default)]
+struct PaneUnread { since: Option<Duration>, closed: u8 }
+enum PaneLook { Live, Unread, Lost(&'static str) }
+/// What one look at the agent's pane says of its turn, at `now` on the step's active clock.
+fn pane_look(life: farcooler_core::Result<farcooler_tmux::PaneLife>, unread: &mut PaneUnread, now: Duration) -> PaneLook {
+    match life {
+        Ok(farcooler_tmux::PaneLife::Live) => { *unread = PaneUnread::default(); PaneLook::Live }
+        Ok(_) => {
+            unread.closed += 1;
+            if unread.closed >= 2 { PaneLook::Lost("the native session was lost without a receipt") } else { PaneLook::Unread }
+        }
+        Err(_) => {
+            unread.closed = 0;
+            let since = *unread.since.get_or_insert(now);
+            if now.saturating_sub(since) >= UNREADABLE_PANE_FOR {
+                PaneLook::Lost("the runner could not read the agent's pane for two minutes")
+            } else { PaneLook::Unread }
+        }
+    }
+}
+
 // Each effect has its own retained server, never the installed daemon's socket.
 // A cancelled future tears down its server but cannot publish quiescence/success.
 struct Host(TmuxServer);
@@ -334,19 +375,28 @@ impl Exec {
         let mut verdict = None;
         let building = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build));
         let mut unfinished: Option<Duration> = None;
+        let mut unread = PaneUnread::default();
         loop {
             let stream = tokio::select! {
                 accepted = listener.accept() => accepted?.0,
                 _ = look.tick() => {
                     let owner: NativeOwner = serde_json::from_slice(&self.bytes(&self.native_path(binding, "owner"))?)?;
-                    let alive = server(&self.root, binding).pane_life(&owner.pane, owner.terminal).await
-                        .is_ok_and(|life| life == farcooler_tmux::PaneLife::Live);
-                    if !alive {
-                        let _ = super::execution::ACTIVITY.try_with(|a| {
-                            a.session.store(false, std::sync::atomic::Ordering::SeqCst);
-                            a.lost.store(true, std::sync::atomic::Ordering::SeqCst);
-                        });
-                        return Err(Error::Refused("the native session was lost without a receipt"));
+                    let life = server(&self.root, binding).pane_life(&owner.pane, owner.terminal).await;
+                    #[cfg(test)]
+                    let life = if UNREADABLE_PANE.with(|n| n.get()) > 0 {
+                        UNREADABLE_PANE.with(|n| n.set(n.get() - 1));
+                        Err(farcooler_core::DomainError::TmuxTimedOut)
+                    } else { life };
+                    match pane_look(life, &mut unread, clock.now()) {
+                        PaneLook::Live => {}
+                        PaneLook::Unread => continue,
+                        PaneLook::Lost(why) => {
+                            let _ = super::execution::ACTIVITY.try_with(|a| {
+                                a.session.store(false, std::sync::atomic::Ordering::SeqCst);
+                                a.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+                            });
+                            return Err(Error::Refused(why));
+                        }
                     }
                     if agent == Agent::Codex && startup_check.elapsed() >= Duration::from_secs(1) {
                         startup_check = tokio::time::Instant::now();
@@ -499,11 +549,16 @@ impl Exec {
         let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &owner.tty, pane.stamp.pid as i32, id,
             &clock, Duration::from_millis(command.timeout_ms), orders, cancel, &mut frozen, _builder.as_ref(), &mut stop_reply);
         let _ = super::execution::ACTIVITY.try_with(|a| a.session.store(true, std::sync::atomic::Ordering::SeqCst));
+        let mut ended_by = None;
         let result = tokio::select! {
             never = stuck => match never {},
             result = controlled => match result {
                 Ok(turn) => turn,
-                Err(error) => { tracing::warn!(effect = %binding.effect.id, %error, "the native turn could not be read"); None }
+                Err(error) => {
+                    tracing::warn!(effect = %binding.effect.id, %error, "the native turn could not be read");
+                    ended_by = Some(error);
+                    None
+                }
             },
         };
         let _ = super::execution::ACTIVITY.try_with(|a| {
@@ -519,6 +574,8 @@ impl Exec {
         }
         let (mut completed, hooks, mut failure) = result.map_or((None, Vec::new(), None),
             |(passed, hooks, failure)| (Some(passed), hooks, failure));
+        // A turn the runner stopped reading fails its step with why, on the item, never silently (ov-1301).
+        if let Some(error) = ended_by { completed = Some(false); failure = Some(turn_ended_reason(&error)); }
         // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
         // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
         if self.recorded_verdict(binding) { completed = Some(true); failure = None; }
@@ -540,12 +597,7 @@ impl Exec {
         } else if self.native_review_without_owner(binding)? {
             // Launch waits for a durable owner before releasing the PTY's stdin (ov-1130). No owner and no
             // panes proves this review never ran. Read every pane, including an untagged, unfinished open.
-            let out = server(&self.root, binding).run(&["list-panes", "-a", "-F", "#{pane_id}"]).await
-                .map_err(|_| Error::Refused("native unstarted inventory unavailable"))?;
-            let absent = out.stderr.contains("no server running") || out.stderr.contains("no current session")
-                || (out.stderr.contains("error connecting") && (out.stderr.contains("No such file or directory")
-                    || out.stderr.contains("Connection refused")));
-            if !(out.ok() && out.stdout.trim().is_empty() || !out.ok() && absent) {
+            if !self.native_server_empty(binding).await? {
                 return Err(Error::Refused("native review without owner still has an unproved PTY"));
             }
             // Verification may have refused before run_coding made the log. Keep any output already saved.
@@ -566,8 +618,13 @@ impl Exec {
                 if !table.under_tty(owner.tty.trim_start_matches("/dev/")).is_empty() {
                     return Err(Error::Refused("native vanished pane still has processes"));
                 }
-                // The pane cannot be captured or closed again. Its saved output and verdict survive the install.
-                self.bytes(&self.process_log(binding))?;
+                // The pane cannot be captured or closed again. Its saved output and verdict survive the install. A
+                // log that is gone (a daemon that died before its first write) is no doubt about the process: nothing
+                // is on its tty, so an empty log stands for it, and a cancel ends instead of staying Uncertain (ov-1301).
+                match self.bytes(&self.process_log(binding)) {
+                    Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => durable(&self.process_log(binding), b"")?,
+                    other => { other?; }
+                }
             } else {
                 self.capture_native_output(binding, &tmux, &owner.pane).await?;
                 self.quiesce_native(&owner).await?;
@@ -643,13 +700,55 @@ impl Exec {
         }
         Ok(failure)
     }
-    /// Only native reviews can recover a missing owner as never launched (ov-1130). A present but unreadable or
-    /// malformed owner is still uncertain; absence alone is not enough until the private server is checked.
+    /// A native review or build can recover a missing owner as never launched (ov-1130; builds since ov-1301): launch
+    /// holds the agent at a read until its owner is durable. A present but unreadable or malformed owner is still
+    /// uncertain; absence alone is not enough until the private server is checked.
     pub(super) fn native_review_without_owner(&self, binding: &Binding) -> Result<bool> {
-        Ok(matches!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent)))
+        Ok(matches!(binding.effect.kind, EffectKind::Execute(StageKind::Review(Reviewer::Agent) | StageKind::Build))
             && !self.native_path(binding, "owner").try_exists()?)
     }
     pub(super) fn native_session(binding: &Binding) -> String { terminal(binding).to_string() }
+    /// Whether this step's private tmux server holds no pane at all, or isn't running.
+    async fn native_server_empty(&self, binding: &Binding) -> Result<bool> {
+        let out = server(&self.root, binding).run(&["list-panes", "-a", "-F", "#{pane_id}"]).await
+            .map_err(|_| Error::Refused("native unstarted inventory unavailable"))?;
+        let absent = out.stderr.contains("no server running") || out.stderr.contains("no current session")
+            || (out.stderr.contains("error connecting") && (out.stderr.contains("No such file or directory")
+                || out.stderr.contains("Connection refused")));
+        Ok(out.ok() && out.stdout.trim().is_empty() || !out.ok() && absent)
+    }
+    /// For the orchestrator's resolve (ov-1301): `None` when nothing of this native agent runs (its pane is gone or
+    /// dead with nothing on its terminal, or it was never let out and its server is empty), else what still runs.
+    pub(super) async fn native_ended(&self, binding: &Binding) -> Result<Option<&'static str>> {
+        let owner: NativeOwner = match self.bytes(&self.native_path(binding, "owner")) {
+            Ok(raw) => serde_json::from_slice(&raw)?,
+            Err(Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound =>
+                return Ok((!self.native_server_empty(binding).await?).then_some("its agent's terminal is still open")),
+            Err(error) => return Err(error),
+        };
+        if owner.binding != *binding || owner.terminal != terminal(binding) || owner.tty.is_empty() {
+            return Err(Error::Refused("foreign interrupted native owner"));
+        }
+        let life = server(&self.root, binding).pane_life(&owner.pane, owner.terminal).await
+            .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
+        if life == farcooler_tmux::PaneLife::Live { return Ok(Some("its agent is still running")); }
+        let table = tokio::task::spawn_blocking(snapshot).await.map_err(|_| Error::Refused("native process read failed"))??;
+        Ok((!table.under_tty(owner.tty.trim_start_matches("/dev/")).is_empty()).then_some("processes are still running on its agent's terminal"))
+    }
+    /// Whether a native agent the runner no longer runs has provably ended (ov-1301): its pane is gone or dead and
+    /// nothing is left on its tty. Then its turn is settled as failed with `why`, for the step to say, and true is
+    /// returned; the caller writes the process fact. False, and nothing written, when it may still run, has no owner
+    /// record, or is already settled. Nothing is killed: only a Stop may end a live agent.
+    pub(super) async fn settle_ended_native(&self, binding: &Binding, why: &str) -> Result<bool> {
+        let settled = self.native_path(binding, "settled");
+        let owner = self.native_path(binding, "owner");
+        if settled.try_exists()? || !owner.try_exists()? || self.native_ended(binding).await?.is_some() { return Ok(false); }
+        let owner: NativeOwner = serde_json::from_slice(&self.bytes(&owner)?)?;
+        if !self.process_log(binding).try_exists()? { durable(&self.process_log(binding), b"")?; }
+        durable(&settled, &serde_json::to_vec(&NativeSettlement::Launched { owner, hooks: Vec::new(), completed: Some(false),
+            failure: Some(why.to_string()) })?)?;
+        Ok(true)
+    }
 }
 
 /// The last thing Cursor said in its latest turn, from the tail of its transcript. A transcript that is missing,
@@ -1242,3 +1341,7 @@ mod recovery_tests;
 #[cfg(test)]
 #[path = "coding_native_quiesce_tests.rs"]
 mod quiesce_order_tests;
+
+#[cfg(test)]
+#[path = "coding_native_unread_tests.rs"]
+mod unread_tests;

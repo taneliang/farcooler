@@ -1,0 +1,84 @@
+//! A runner too busy to read an agent's pane in time neither ends its turn nor fails it without a reason (ov-1301).
+//! On the Canary, a tmux that didn't answer within its one-second deadline read as a lost session: four builds ended
+//! in a minute, each recorded Failed with no reason, and the engine's retry ended the same way.
+use super::*;
+use super::super::{coding_tests::admitted, tests::enqueue};
+use super::tests::native;
+
+#[test]
+fn a_pane_read_that_fails_is_unknown_until_two_minutes_pass_and_a_closed_pane_is_read_twice() {
+    use farcooler_tmux::PaneLife;
+    let mut unread = PaneUnread::default();
+    let timed_out = || Err(farcooler_core::DomainError::TmuxTimedOut);
+    assert!(matches!(pane_look(timed_out(), &mut unread, Duration::ZERO), PaneLook::Unread));
+    assert!(matches!(pane_look(timed_out(), &mut unread, UNREADABLE_PANE_FOR / 2), PaneLook::Unread));
+    assert!(matches!(pane_look(Ok(PaneLife::Live), &mut unread, UNREADABLE_PANE_FOR), PaneLook::Live), "a read that answers resets the wait");
+    assert!(matches!(pane_look(timed_out(), &mut unread, UNREADABLE_PANE_FOR), PaneLook::Unread));
+    assert!(matches!(pane_look(timed_out(), &mut unread, UNREADABLE_PANE_FOR * 2),
+        PaneLook::Lost(why) if why.contains("could not read the agent's pane")));
+    let mut unread = PaneUnread::default();
+    assert!(matches!(pane_look(Ok(PaneLife::Gone), &mut unread, Duration::ZERO), PaneLook::Unread), "one closed read is looked at again");
+    assert!(matches!(pane_look(Ok(PaneLife::Dead), &mut unread, Duration::ZERO), PaneLook::Lost(why) if why.contains("lost without a receipt")));
+}
+
+/// Start the native build and wait until its agent runs, polling the build all the while.
+async fn started<'a>(dir: &tempfile::TempDir, run: &mut std::pin::Pin<&mut (impl std::future::Future<Output = Result<Outcome>> + 'a)>) {
+    let started = dir.path().join("started");
+    tokio::select! {
+        result = run.as_mut() => panic!("the build ended before its agent started: {result:?}"),
+        _ = async { while !started.exists() { tokio::time::sleep(Duration::from_millis(10)).await; } } => {}
+    }
+}
+
+#[tokio::test]
+async fn a_pane_the_runner_cannot_read_for_a_while_leaves_the_build_running_and_a_lost_one_fails_it_with_why() {
+    let (dir, mut runtime, _fake) = native("cancel").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let run = runtime.execute_coding("w", &binding, cancelled);
+    tokio::pin!(run);
+    started(&dir, &mut run).await;
+    // A second of reads that time out, as a busy runner's tmux does: the build goes on.
+    UNREADABLE_PANE.with(|n| n.set(4));
+    tokio::select! {
+        result = run.as_mut() => panic!("a pane that couldn't be read ended the turn: {result:?}"),
+        _ = tokio::time::sleep(Duration::from_millis(1_300)) => {}
+    }
+    assert_eq!(UNREADABLE_PANE.with(|n| n.get()), 0, "every failing read was tried");
+    // The agent really ends: the step fails, and says why.
+    let pid: i32 = std::fs::read_to_string(dir.path().join("started")).unwrap().parse().unwrap();
+    unsafe { libc::kill(pid, libc::SIGKILL); }
+    let outcome = tokio::time::timeout(Duration::from_secs(3), run).await.expect("a lost session ends the turn").unwrap();
+    let Outcome::SafeFailureBecause(why) = outcome else { panic!("a lost session failed without a reason: {outcome:?}") };
+    assert!(why.contains("lost without a receipt"), "{why}");
+    assert!(valid_rework_reason(&why), "the reason can go on the item: {why}");
+}
+
+#[tokio::test]
+async fn a_pane_the_runner_never_reads_again_fails_the_build_with_why_on_the_item() {
+    let (dir, mut runtime, _fake) = native("cancel").await;
+    let definition = runtime.configured_definition().unwrap();
+    enqueue(&mut runtime, "w", "one", definition);
+    runtime.pump(2).await.unwrap();
+    let binding = admitted(&runtime).await;
+    let (_cancel, cancelled) = tokio::sync::watch::channel(false);
+    let run = runtime.execute_coding("w", &binding, cancelled);
+    tokio::pin!(run);
+    started(&dir, &mut run).await;
+    UNREADABLE_PANE.with(|n| n.set(u32::MAX));
+    let outcome = tokio::time::timeout(UNREADABLE_PANE_FOR + Duration::from_secs(2), run).await
+        .expect("the step gives up once the pane has gone unread too long").unwrap();
+    UNREADABLE_PANE.with(|n| n.set(0));
+    let Outcome::SafeFailureBecause(why) = outcome.clone() else { panic!("ended without a reason: {outcome:?}") };
+    assert!(why.contains("could not read the agent's pane"), "{why}");
+    // The reason is what the orchestrator reads on the item.
+    let state = runtime.state("w").unwrap().unwrap();
+    let effect = state.items["one"].pending.clone().unwrap();
+    let effect = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.effect.id == effect).unwrap().effect;
+    assert!(runtime.observe("w", &effect, outcome, false, 10).unwrap());
+    let item = &runtime.state("w").unwrap().unwrap().items["one"];
+    assert!(item.failure.as_deref().is_some_and(|f| f.contains("could not read the agent's pane")), "{item:?}");
+}
