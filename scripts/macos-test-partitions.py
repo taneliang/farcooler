@@ -37,7 +37,12 @@ def discover_runtime():
     def output(command):
         return subprocess.check_output(command, cwd=PACKAGE, text=True).strip()
     swift = Path(output(["xcrun", "--find", "swift"]))
-    platform = Path(output(["xcrun", "--show-sdk-platform-path"])) / "Developer"
+    try:
+        platform = Path(output(["xcrun", "--show-sdk-platform-path"])) / "Developer"
+    except (subprocess.CalledProcessError, OSError):
+        # Some CI runners default to the Command Line Tools, which have no
+        # platform (ov-1304); say what to set, not a bare CalledProcessError.
+        raise SystemExit("xcrun cannot find the Apple platform: set DEVELOPER_DIR to the Xcode to test with")
     return dict(helper=str(swift.parent.parent / "libexec/swift/pm/swiftpm-testing-helper"),
                 bin_dir=output(["swift", "build", "--show-bin-path"]),
                 frameworks=str(platform / "Library/Frameworks"), libraries=str(platform / "usr/lib"))
@@ -188,6 +193,7 @@ def self_test():
         else:
             raise AssertionError("invalid inventory accepted")
     print("ok: intact suites; exact inventory union; invalid or changed inventory refused")
+    self_test_xcrun_failure()
     # Exercise the real child invocations and floors. Merely checking the
     # partition function would miss SwiftPM filtering or summary wiring bugs.
     with tempfile.TemporaryDirectory(prefix="ov1119-partitions-") as scratch:
@@ -243,6 +249,25 @@ def self_test():
             else:
                 raise AssertionError("a truncated discovered inventory was accepted")
     print("ok: loaded passing shards succeed; failed shards and missing tests fail")
+
+
+def self_test_xcrun_failure():
+    """A runner whose xcrun cannot find the platform gets the DEVELOPER_DIR message."""
+    with tempfile.TemporaryDirectory(prefix="ov1304-xcrun-") as scratch:
+        stub = Path(scratch) / "xcrun"
+        stub.write_text('#!/bin/sh\n[ "$1" = "--show-sdk-platform-path" ] && '
+                        '{ echo "xcrun: error: unable to lookup item PlatformPath" >&2; exit 1; }\n'
+                        'echo /usr/bin/swift\n')
+        stub.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{scratch}:{os.environ['PATH']}"}):
+            try:
+                discover_runtime()
+            except SystemExit as error:
+                message = str(error)
+                assert "DEVELOPER_DIR" in message and "\n" not in message, message
+            else:
+                raise AssertionError("a failing xcrun --show-sdk-platform-path was accepted")
+    print("ok: xcrun without a platform fails with a one-line message naming DEVELOPER_DIR")
 
 
 def main():
