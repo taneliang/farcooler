@@ -97,6 +97,16 @@ class Layers:
                 return "delivery"
         return self.of_module(stem)
 
+    def unit(self, segs, rel):
+        """The module a file's edges are counted under: its top-level module, a `_tests` sibling under the
+        module it tests. Splitting a module's code or its tests across files leaves its edges as they were."""
+        name = segs[0] if segs else pathlib.PurePosixPath(rel).parts[0].removesuffix(".rs")
+        if name.endswith("_tests") and name not in self.owner:
+            stem = name.removesuffix("_tests")
+            owners = [n for n in self.owner if stem == n or stem.startswith(n + "_")]
+            return max(owners, key=len) if owners else name
+        return name
+
     def of_segs(self, segs):
         """The layer of a module path from the crate root: a watch module named for delivery is delivery."""
         if segs[0] == "watch" and len(segs) > 1 and segs[1].startswith(DELIVERY_PREFIXES):
@@ -463,15 +473,17 @@ def scan(root, layers):
             theirs = "delivery" if target.startswith("watch/") else layers.of_module(top)
             if theirs is None or theirs == mine or theirs in layers.allowed[mine]:
                 continue
-            violations[f"{SRC}/{rel} -> {target}"] = (mine, theirs)
+            violations[f"{SRC}/{rel} -> {target}"] = (mine, theirs, layers.unit(mod_of[rel], rel), target)
     return violations, unclaimed, refused
 
 
 def tally(violations, refused):
-    """Counts per (source layer, target layer): an edge is a (file, module) pair, a refused construct is
-    one occurrence, counted under the target `unresolved`."""
+    """Counts per (source layer, target layer). An edge is a (source module, target module) pair, where a
+    file counts under its top-level module and a `_tests` sibling under the module it tests (Layers.unit),
+    so code and tests may move between a module's files freely. A refused construct is one occurrence,
+    counted under the target `unresolved`."""
     counts = collections.Counter()
-    for mine, theirs in violations.values():
+    for mine, theirs, _, _ in set(violations.values()):
         counts[(mine, theirs)] += 1
     for mine, lines in refused.values():
         counts[(mine, "unresolved")] += len(lines)
@@ -521,7 +533,7 @@ def check(root):
                 faults.append(f"cannot resolve, so refused: {mine} layer has {have} constructs, {listed} recorded "
                               f"(write a plain crate::/super::/self:: path instead): {what}")
             else:
-                edges = ", ".join(k for k, v in sorted(violations.items()) if v == pair)
+                edges = ", ".join(k for k, v in sorted(violations.items()) if v[:2] == pair)
                 faults.append(f"forbidden edge: {mine} may not use {theirs}: {have} edges, {listed} recorded "
                               f"({edges})")
         elif have < listed:
@@ -567,7 +579,7 @@ def report_files(root):
     """The per-file list behind the counts, for the split's later steps: not a gate."""
     layers = load(root)
     violations, _, refused = scan(root, layers)
-    rows = {**violations, **{k: (m, "unresolved") for k, (m, _) in refused.items()}}
+    rows = {**{k: v[:2] for k, v in violations.items()}, **{k: (m, "unresolved") for k, (m, _) in refused.items()}}
     for mine in sorted({m for m, _ in rows.values()}):
         print(f"## {mine}")
         for key, (_, theirs) in sorted(rows.items()):
@@ -788,6 +800,12 @@ def self_test():
            ["engine layer has 2 constructs, 1 recorded"])
     expect("moving a glob between files of the layer passes",
            {"engine.rs": "fn f() {}", "engine_more.rs": "use crate::git::*;"}, one, 0)
+    expect("a module's tests split into a sibling file keep the module's edge",
+           {"engine.rs": "use crate::tasks::Row;", "engine_more_tests.rs": "use crate::tasks::Row;"}, listed, 0)
+    expect("a module's code split into a sibling that is not tests counts its edge again",
+           {"engine.rs": "use crate::tasks::Row;", "engine_more.rs": "use crate::tasks::Row;"}, listed, 1)
+    expect("a nested file counts under its top-level module",
+           {"engine.rs": "use crate::tasks::Row;", "engine/deep.rs": "use crate::tasks::Row;"}, listed, 0)
     expect("moving an edge to another layer's file is growth there and a drop here",
            {"engine.rs": "fn f() {}", "people.rs": "use crate::tasks::Row;"}, listed, 2,
            ["access may not use board", "engine -> board: 1 recorded, 0 now"])
