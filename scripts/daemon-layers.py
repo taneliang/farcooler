@@ -9,18 +9,24 @@ Nothing here moves code. This records which layer each module belongs to
 (scripts/daemon-layers.json), which layers each may use, and checks that no
 `crate::module` reference leaves that direction.
 
-Today's references that do leave it are listed in scripts/daemon-layers-allow.txt,
-one `file -> module` per line, and the list only shrinks:
+Today's references that do leave it are recorded as COUNTS in scripts/daemon-layers-counts.txt,
+one `source layer -> target layer: N` per pair (ov-1290), and `source layer -> unresolved: N` per
+source layer for the constructs below. An edge is a (file, module) pair. The counts are the gate:
 
-  - a violation not on the list fails (a new forbidden edge);
-  - a listed violation that no longer exists fails (delete the line: the edge is cleared);
-  - `--allowlist-not-grown REF` fails when the list holds a line REF's does not,
-    so a pull request cannot make a new violation pass by writing it down.
+  - a pair whose count is above its recorded one fails (a new forbidden edge, or a new construct);
+  - a pair whose count fell below its recorded one fails (lower the line: a stale higher count
+    would let the next edge in for free; `--lower` does it, and never raises);
+  - an edge may move between files of one layer freely, since the count does not change;
+  - `--counts-not-grown REF` fails when a recorded count is above REF's, so a pull request
+    cannot make a new violation pass by writing it down.
+
+The per-file list the first version gated on is only a generated report now (`--report-files`), for
+the later steps of the split to read.
 
 A module that no layer claims fails too, so a new file must pick its layer.
 The scanner reads text, so it fails closed (ov-1276): a construct it cannot resolve with
-certainty is itself an error, named by file and line, unless listed as `file -> unresolved:
-construct`. These are an alias of the crate root or of a layer module (`use crate as x`,
+certainty is itself an error, named by file and line, unless listed as counted per layer as
+`layer -> unresolved`. These are an alias of the crate root or of a layer module (`use crate as x`,
 `use crate::rpc as y`, `use super as z`, `extern crate self as x`), a glob import of the
 root or of another layer's module, a call of a composition-layer macro_rules macro whose body has a
 `use` or a path into a layer (bodies are not resolved), and macro-built paths (`$crate::`, `$x::`,
@@ -31,10 +37,11 @@ part of its layer, which is the point: a unit test that still needs the whole
 
   ./scripts/daemon-layers.py                          check the tree; exit 1 on drift
   ./scripts/daemon-layers.py --self-test              plant each fault, see it caught
-  ./scripts/daemon-layers.py --allowlist-not-grown origin/main
-  ./scripts/daemon-layers.py --prune                  drop cleared lines (never adds)
-  ./scripts/daemon-layers.py --write-initial          write the list once, when none exists
-  ./scripts/daemon-layers.py --report                 violations per layer, for the report
+  ./scripts/daemon-layers.py --counts-not-grown origin/main
+  ./scripts/daemon-layers.py --lower                  lower recorded counts to today's (never raises)
+  ./scripts/daemon-layers.py --write-initial          write the counts once, when none exist
+  ./scripts/daemon-layers.py --report                 counts per layer pair, for the report
+  ./scripts/daemon-layers.py --report-files           the per-file list behind the counts (not a gate)
 """
 
 import collections
@@ -47,15 +54,16 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CONFIG = "scripts/daemon-layers.json"
-ALLOW = "scripts/daemon-layers-allow.txt"
+COUNTS = "scripts/daemon-layers-counts.txt"
 SRC = "crates/daemon/src"
 
-ALLOW_HEADER = """\
-# Today's forbidden daemon layer edges (ov-1272, ov-1276): `file -> module`, or
-# `file -> unresolved: construct` for what the scanner refuses to guess at.
-# A line here is debt: it can only be deleted, never added. The check fails when a
-# listed edge no longer exists (delete the line) or an unlisted one appears.
-# Which of ov-1219's steps clears each is in .claude/agent/reports/ov-1279/README.md.
+COUNTS_HEADER = """\
+# Today's forbidden daemon layer edges, counted per `source layer -> target layer` (ov-1290).
+# `layer -> unresolved` counts what the scanner refuses to guess at (globs, aliases, macro calls).
+# An edge is a (file, module) pair; moving one between files of a layer leaves the count alone.
+# A count can only go down: the check fails when one is above this line, and when one is below
+# it (lower the line, `./scripts/daemon-layers.py --lower`). Which of ov-1219's steps clears
+# each pair is in reports/ov-1290/README.md.
 """
 
 
@@ -459,8 +467,37 @@ def scan(root, layers):
     return violations, unclaimed, refused
 
 
-def read_allow(text):
-    return [l.strip() for l in text.splitlines() if l.strip() and not l.lstrip().startswith("#")]
+def tally(violations, refused):
+    """Counts per (source layer, target layer): an edge is a (file, module) pair, a refused construct is
+    one occurrence, counted under the target `unresolved`."""
+    counts = collections.Counter()
+    for mine, theirs in violations.values():
+        counts[(mine, theirs)] += 1
+    for mine, lines in refused.values():
+        counts[(mine, "unresolved")] += len(lines)
+    return counts
+
+
+def read_counts(text):
+    """({(source, target): n}, faults) from the counts file."""
+    counts, faults = {}, []
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = re.fullmatch(r"\s*(\w+) -> (\w+): (\d+)\s*", line)
+        if not m:
+            faults.append(f"cannot read this line of {COUNTS}: {line.strip()}")
+            continue
+        pair = (m.group(1), m.group(2))
+        if pair in counts:
+            faults.append(f"listed twice in {COUNTS}: {pair[0]} -> {pair[1]}")
+        counts[pair] = int(m.group(3))
+    return counts, faults
+
+
+def write_counts(counts):
+    rows = "".join(f"{a} -> {b}: {n}\n" for (a, b), n in sorted(counts.items()) if n)
+    return COUNTS_HEADER + rows
 
 
 def check(root):
@@ -468,61 +505,74 @@ def check(root):
     layers = load(root)
     faults = [f"layer table: {p}" for p in layers.problems()]
     violations, unclaimed, refused = scan(root, layers)
-    allow_path = root / ALLOW
-    listed = read_allow(allow_path.read_text()) if allow_path.exists() else []
-    dupes = sorted(k for k, n in collections.Counter(listed).items() if n > 1)
-    faults += [f"listed twice in {ALLOW}: {d}" for d in dupes]
+    path = root / COUNTS
+    recorded, bad = read_counts(path.read_text()) if path.exists() else ({}, [])
+    faults += bad
     faults += [f"no layer claims crates/daemon/src/{f}: add its module to {CONFIG}" for f in unclaimed]
-    for key in sorted(set(violations) - set(listed)):
-        mine, theirs = violations[key]
-        faults.append(f"forbidden edge: {key}  ({mine} may not use {theirs})")
-    for key in sorted(set(refused) - set(listed)):
-        mine, lines = refused[key]
-        file, what = key.split(" -> ", 1)
-        at = ", ".join(f"{file}:{n}" for n in sorted(set(lines)))
-        faults.append(f"cannot resolve, so refused: {what[len('unresolved: '):]} at {at}  ({mine} layer; "
-                      f"write a plain crate::/super::/self:: path instead, or list `{key}`)")
-    for key in sorted(set(listed) - set(violations) - set(refused)):
-        faults.append(f"cleared, delete it from {ALLOW}: {key}")
+    now = tally(violations, refused)
+    for pair in sorted(set(now) | set(recorded)):
+        mine, theirs = pair
+        have, listed = now.get(pair, 0), recorded.get(pair, 0)
+        if have > listed:
+            if theirs == "unresolved":
+                what = "; ".join(f"{k.split(' -> unresolved: ')[1]} at {k.split(' -> ')[0]}:{n}"
+                                 for k, (m, lines) in sorted(refused.items()) if m == mine
+                                 for n in sorted(set(lines)))
+                faults.append(f"cannot resolve, so refused: {mine} layer has {have} constructs, {listed} recorded "
+                              f"(write a plain crate::/super::/self:: path instead): {what}")
+            else:
+                edges = ", ".join(k for k, v in sorted(violations.items()) if v == pair)
+                faults.append(f"forbidden edge: {mine} may not use {theirs}: {have} edges, {listed} recorded "
+                              f"({edges})")
+        elif have < listed:
+            faults.append(f"cleared, lower it in {COUNTS} (--lower): {mine} -> {theirs}: {listed} recorded, {have} now")
     for line in faults:
         print(f"daemon-layers: {line}")
     if not faults:
-        print(f"daemon-layers: ok ({len(violations) + len(refused)} listed edges, none new)")
+        print(f"daemon-layers: ok ({sum(now.values())} recorded edges in {len(now)} layer pairs, none new)")
     return len(faults)
 
 
 def not_grown(root, ref):
-    """The list holds no line that `ref` does not: a new violation cannot be written down."""
-    shown = subprocess.run(["git", "show", f"{ref}:{ALLOW}"], cwd=root, capture_output=True, text=True)
+    """No recorded count is above `ref`'s: a new violation cannot be written down."""
+    shown = subprocess.run(["git", "show", f"{ref}:{COUNTS}"], cwd=root, capture_output=True, text=True)
     if shown.returncode != 0:
-        print(f"daemon-layers: {ref} has no list yet; nothing to hold this one to")
+        print(f"daemon-layers: {ref} has no counts yet; nothing to hold these to")
         return 0
-    before = set(read_allow(shown.stdout))
-    now = set(read_allow((root / ALLOW).read_text()))
-    grown = sorted(now - before)
-    for key in grown:
-        print(f"daemon-layers: {ALLOW} gained a line {ref} does not have: {key}")
+    before, _ = read_counts(shown.stdout)
+    now, _ = read_counts((root / COUNTS).read_text())
+    grown = sorted(p for p, n in now.items() if n > before.get(p, 0))
+    for a, b in grown:
+        print(f"daemon-layers: {COUNTS} records {a} -> {b}: {now[(a, b)]}, {ref} has {before.get((a, b), 0)}")
     if not grown:
-        print(f"daemon-layers: the list did not grow against {ref}")
+        print(f"daemon-layers: no count grew against {ref}")
     return len(grown)
 
 
 # ---- the report ------------------------------------------------------------------------------
 
 def report(root):
+    """The counts per layer pair."""
     layers = load(root)
     violations, _, refused = scan(root, layers)
-    violations = {**violations, **{k: (m, "unresolved") for k, (m, _) in refused.items()}}
-    by_layer = collections.defaultdict(list)
-    for key, (mine, theirs) in violations.items():
-        file, module = key.split(" -> ")
-        by_layer[mine].append((file, module, theirs))
-    for mine in sorted(by_layer):
-        rows = by_layer[mine]
-        edges = collections.Counter((m, t) for _, m, t in rows)
-        print(f"{mine}: {len(rows)} edges in {len({f for f, _, _ in rows})} files")
-        for (module, theirs), n in sorted(edges.items(), key=lambda kv: (kv[0][1], -kv[1], kv[0][0])):
-            print(f"  {theirs:<12} {module:<28} {n}")
+    counts = tally(violations, refused)
+    for mine in sorted({m for m, _ in counts}):
+        row = {t: n for (m, t), n in counts.items() if m == mine}
+        print(f"{mine}: {sum(row.values())}")
+        for theirs, n in sorted(row.items()):
+            print(f"  {theirs:<12} {n}")
+
+
+def report_files(root):
+    """The per-file list behind the counts, for the split's later steps: not a gate."""
+    layers = load(root)
+    violations, _, refused = scan(root, layers)
+    rows = {**violations, **{k: (m, "unresolved") for k, (m, _) in refused.items()}}
+    for mine in sorted({m for m, _ in rows.values()}):
+        print(f"## {mine}")
+        for key, (_, theirs) in sorted(rows.items()):
+            if rows[key][0] == mine:
+                print(f"{key}  [{theirs}]")
 
 
 # ---- self-test -------------------------------------------------------------------------------
@@ -541,7 +591,7 @@ def fixture(files, allow=None):
     (tmp / "scripts").mkdir()
     (tmp / CONFIG).write_text(json.dumps(FIXTURE_CONFIG))
     if allow is not None:
-        (tmp / ALLOW).write_text(allow)
+        (tmp / COUNTS).write_text(allow)
     src = tmp / SRC
     for name, text in {"lib.rs": "", "git.rs": "", "people.rs": "", "engine.rs": "", "tasks.rs": "",
                        "rpc.rs": "", "watch.rs": "", **files}.items():
@@ -617,124 +667,130 @@ def self_test():
            ["engine.rs -> watch/answer_wake", "engine may not use delivery"])
     expect("a group naming watch and delivery is split by owner",
            {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch::{answer_wake, holds};"}, "", 2,
-           ["-> watch/answer_wake", "engine.rs -> watch  "])
+           ["engine.rs -> watch/answer_wake", "engine.rs -> watch)"])
     expect("a crate-root alias reaches the composition layer",
-           {"engine.rs": "use crate as root; use root::rpc::Call;"}, "", 2, ["engine.rs -> rpc", "refused: alias crate as root"])
+           {"engine.rs": "use crate as root; use root::rpc::Call;"}, "", 2, ["engine.rs -> rpc", "alias crate as root"])
     expect("a grouped crate-root alias is read",
-           {"engine.rs": "use crate::{self as root, git}; fn f() { root::rpc::go(); }"}, "", 2, ["engine.rs -> rpc", "refused: alias crate as root"])
+           {"engine.rs": "use crate::{self as root, git}; fn f() { root::rpc::go(); }"}, "", 2, ["engine.rs -> rpc", "alias crate as root"])
     expect("a braced crate-root alias is read", {"engine.rs": "use {crate as r}; use r::{git, tasks};"}, "", 2,
-           ["engine.rs -> tasks", "refused: alias crate as r"])
+           ["engine.rs -> tasks", "alias crate as r"])
     expect("extern crate self as an alias is read", {"engine.rs": "extern crate self as me; use me::rpc::X;"}, "", 2,
-           ["engine.rs -> rpc", "refused: extern crate self as me"])
-    expect("an alias of an alias is followed", {"engine.rs": "use crate as a; use a as b; use b::rpc::X;"}, "", 3,
-           ["engine.rs -> rpc", "refused: alias a as b"])
+           ["engine.rs -> rpc", "extern crate self as me"])
+    expect("an alias of an alias is followed", {"engine.rs": "use crate as a; use a as b; use b::rpc::X;"}, "", 2,
+           ["engine.rs -> rpc", "alias a as b"])
     expect("an allowed import through a crate-root alias is still refused for the alias",
-           {"engine.rs": "use crate as root; use root::git::Repo;"}, "", 1, ["refused: alias crate as root"])
+           {"engine.rs": "use crate as root; use root::git::Repo;"}, "", 1, ["alias crate as root"])
     expect("an alias of a module is followed", {"engine.rs": "use crate::tasks as t; fn f() { t::all(); }"}, "", 2,
-           ["engine.rs -> tasks", "refused: alias crate::tasks as t"])
+           ["engine.rs -> tasks", "alias crate::tasks as t"])
     expect("an alias that leaves the crate is not a reference",
            {"engine.rs": "use std::fmt as root; use root::rpc::X;"}, "", 0)
     expect("an alias into delivery is split by owner",
            {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch as w; use w::answer_wake::A;"}, "", 3,
-           ["engine.rs -> watch/answer_wake", "refused: alias crate::watch as w"])
+           ["engine.rs -> watch/answer_wake", "alias crate::watch as w"])
     expect("a rename inside a group does not hide later leaves",
-           {"engine.rs": "use crate::{git as g, rpc};"}, "", 2, ["engine.rs -> rpc", "refused: alias crate::git as g"])
+           {"engine.rs": "use crate::{git as g, rpc};"}, "", 2, ["engine.rs -> rpc", "alias crate::git as g"])
     # Fail closed: what the scanner cannot resolve with certainty is itself an error.
     expect("scoped aliases that shadow one another are refused (ov-1272 third finding)",
-           {"engine.rs": "mod a { use crate::git as root; } mod b { use crate as root; use root::rpc::Call; }"}, "", 2,
-           ["refused: alias crate as root", "refused: alias crate::git as root"])
+           {"engine.rs": "mod a { use crate::git as root; } mod b { use crate as root; use root::rpc::Call; }"}, "", 1,
+           ["alias crate as root", "alias crate::git as root"])
     expect("an alias of the composition layer is refused", {"engine.rs": "use crate::rpc as y;"}, "", 2,
-           ["refused: alias crate::rpc as y"])
+           ["alias crate::rpc as y"])
     expect("an alias of the crate root with self is refused", {"engine.rs": "use crate::{self as z};"}, "", 1,
-           ["refused: alias crate as z"])
+           ["alias crate as z"])
     expect("super as an alias of the crate root is refused", {"engine.rs": "use super as z;"}, "", 1,
-           ["refused: alias super as z"])
+           ["alias super as z"])
     expect("super as an alias of a layer module is refused", {"engine/deep.rs": "use super::super as z;"}, "", 1,
-           ["refused: alias super::super as z"])
+           ["alias super::super as z"])
     expect("self as an alias of a nested module's own layer root passes", {"engine/deep.rs": "use self as z;"}, "", 0)
     expect("an alias of a deeper item is no hiding place and passes", {"engine.rs": "use crate::git::Repo as R;"}, "", 0)
     expect("an alias in a nested file is refused wherever it sits",
-           {"engine/deep.rs": "fn f() { use crate as root; }"}, "", 1, ["engine/deep.rs -> unresolved: alias crate as root"])
+           {"engine/deep.rs": "fn f() { use crate as root; }"}, "", 1, ["alias crate as root at crates/daemon/src/engine/deep.rs:1"])
     expect("a glob of the crate root is refused", {"engine.rs": "use crate::*;"}, "", 1,
-           ["refused: glob crate::*", "engine.rs:1"])
+           ["glob crate::*", "engine.rs:1"])
     expect("a glob of a layer module is refused, allowed layer or not", {"engine.rs": "use crate::git::*;"}, "", 1,
-           ["refused: glob crate::git::*"])
+           ["glob crate::git::*"])
     expect("a glob of the composition layer is refused", {"engine.rs": "use crate::rpc::*;"}, "", 2,
-           ["refused: glob crate::rpc::*", "engine.rs -> rpc"])
+           ["glob crate::rpc::*", "engine.rs -> rpc"])
     expect("a glob of a layer module inside a group is refused",
-           {"engine.rs": "use crate::{git::*, tasks};"}, "", 2, ["refused: glob crate::git::*"])
+           {"engine.rs": "use crate::{git::*, tasks};"}, "", 2, ["glob crate::git::*"])
     expect("a glob through super is refused where it reaches another layer",
-           {"engine.rs": "mod t { use super::super::*; }"}, "", 1, ["refused: glob super::super::*"])
+           {"engine.rs": "mod t { use super::super::*; }"}, "", 1, ["glob super::super::*"])
     expect("a glob into delivery from outside it is refused",
            {"watch/answer_wake.rs": "", "engine.rs": "use crate::watch::answer_wake::*;"}, "", 2,
-           ["refused: glob crate::watch::answer_wake::*"])
+           ["glob crate::watch::answer_wake::*"])
     expect("a glob of the file's own module in a test module is refused too",
-           {"engine.rs": "mod t { use super::*; }"}, "", 1, ["refused: glob super::*"])
+           {"engine.rs": "mod t { use super::*; }"}, "", 1, ["glob super::*"])
     expect("a relative alias and glob that resolve to a layer module are refused",
-           {"engine/deep.rs": "use super as e; use super::*;"}, "", 2,
-           ["refused: alias super as e", "refused: glob super::*"])
-    expect("a relative alias and glob that resolve to a layer module pass once allowlisted",
-           {"engine/deep.rs": "use super as e; use super::*;"},
-           "crates/daemon/src/engine/deep.rs -> unresolved: alias super as e\ncrates/daemon/src/engine/deep.rs -> unresolved: glob super::*\n", 0)
-    expect("a crate-rooted glob of the own layer's module is refused too",
-           {"engine.rs": "use crate::engine::*;"}, "", 1, ["refused: glob crate::engine::*"])
-    expect("a crate-rooted alias of the own layer's module is refused too",
-           {"engine.rs": "use crate::engine as e; use crate::engine::*;"}, "", 2,
-           ["refused: alias crate::engine as e", "refused: glob crate::engine::*"])
-    expect("a macro in lib.rs that builds a forbidden edge is refused at its call",
-           {"lib.rs": "macro_rules! inject { () => { use crate::rpc::Call; } } mod engine; mod rpc;",
-            "engine.rs": "inject!();"}, "", 1, ["refused: call of inject!", "engine.rs:1"])
-    expect("a composition macro whose body uses a relative layer path is refused at its call",
-           {"rpc.rs": "macro_rules! rel { () => { super::tasks::go() }; }", "engine.rs": "fn f() { rel!(); }"}, "", 1,
-           ["refused: call of rel!", "engine.rs:1"])
-    expect("a composition macro whose body is a bare use is refused at its call",
-           {"rpc.rs": "macro_rules! u { ($p:tt) => { use std::fmt; }; }", "engine.rs": "u!(x);"}, "", 1,
-           ["refused: call of u!"])
-    expect("a call of a composition macro passes once allowlisted",
+           {"engine/deep.rs": "use super as e; use super::*;"}, "", 1,
+           ["alias super as e", "glob super::*"])
+    expect("a relative alias and glob that resolve to a layer module pass once recorded",
+           {"engine/deep.rs": "use super as e; use super::*;"}, "engine -> unresolved: 2\n", 0)
+    expect("a call of a composition macro passes once recorded",
            {"rpc.rs": "macro_rules! rel { () => { self::git::go() }; }", "engine.rs": "fn f() { rel!(); }"},
-           "crates/daemon/src/engine.rs -> unresolved: call of rel!, whose body has a use or a layer path\n", 0)
+           "engine -> unresolved: 1\n", 0)
     expect("a macro defined in a layer module is read by its own text, not refused at its call",
            {"engine.rs": "macro_rules! own { () => { crate::git::go() }; } fn f() { own!(); }"}, "", 0)
     expect("a macro that names no layer module is called freely",
            {"lib.rs": "macro_rules! plain { () => { 1 } }", "engine.rs": "fn f() { plain!(); }"}, "", 0)
     expect("a glob from a delivery file into watch is refused",
-           {"watch/answer_wake/x.rs": "use super::super::*;"}, "", 2, ["refused: glob super::super::*"])
+           {"watch/answer_wake/x.rs": "use super::super::*;"}, "", 2, ["glob super::super::*"])
     expect("a glob of a std or other crate path is not a layer glob", {"engine.rs": "use std::collections::*;"}, "", 0)
     expect("a macro building a path from $crate is refused",
            {"engine.rs": "macro_rules! m { () => { $crate::rpc::go() }; }"}, "", 1,
-           ["refused: macro path $crate::", "engine.rs:1"])
+           ["macro path $crate::", "engine.rs:1"])
     expect("a macro building a path from a fragment is refused",
-           {"engine.rs": "macro_rules! m { ($m:ident) => { $m::go() }; }"}, "", 1, ["refused: macro path $fragment::"])
+           {"engine.rs": "macro_rules! m { ($m:ident) => { $m::go() }; }"}, "", 1, ["macro path $fragment::"])
     expect("a macro taking a path argument is refused",
            {"engine.rs": "macro_rules! m { ($p:path) => { fn f() { let _ = 1; } }; }"}, "", 1,
-           ["refused: macro takes a path argument"])
+           ["macro takes a path argument"])
     expect("a macro importing what its caller passes is refused",
-           {"engine.rs": "macro_rules! m { ($p:tt) => { use $p; }; }"}, "", 1, ["refused: macro use of a $fragment"])
+           {"engine.rs": "macro_rules! m { ($p:tt) => { use $p; }; }"}, "", 1, ["macro use of a $fragment"])
     expect("include! of another file is refused", {"engine.rs": 'include!("other.rs");'}, "", 1,
-           ["refused: include! of another file"])
+           ["include! of another file"])
     expect("a macro naming a path in plain text is read as any other path",
            {"engine.rs": "macro_rules! m { () => { crate::tasks::go() }; }"}, "", 1, ["engine.rs -> tasks"])
     expect("a dollar in a string or a comment is not a macro path",
            {"engine.rs": '// $crate::x\nfn f() { let _ = "$crate::rpc $p:path include!("; }'}, "", 0)
     expect("the composition layer may alias and glob freely",
            {"rpc.rs": "use crate as root; use crate::tasks::*; macro_rules! m { () => { $crate::x }; }"}, "", 0)
-    refused = "crates/daemon/src/engine.rs -> unresolved: alias crate as root\n"
-    expect("a listed refused construct passes along with its edge",
-           {"engine.rs": "use crate as root;"}, refused, 0)
-    expect("a listed refused construct that was removed must be deleted", {"engine.rs": "fn f() {}"}, refused, 1,
-           ["cleared, delete it"])
-    expect("a second refused construct beside a listed one is refused",
-           {"engine.rs": "use crate as root; use crate as other;"}, refused, 1, ["refused: alias crate as other"])
+    one = "engine -> unresolved: 1\n"
+    expect("a recorded construct passes", {"engine.rs": "use crate as root;"}, one, 0)
+    expect("a recorded construct that was removed must be lowered", {"engine.rs": "fn f() {}"}, one, 1,
+           ["cleared, lower it", "engine -> unresolved: 1 recorded, 0 now"])
+    expect("a second construct beside a recorded one is refused",
+           {"engine.rs": "use crate as root; use crate as other;"}, one, 1, ["engine layer has 2 constructs, 1 recorded"])
     expect("the composition layer may use anything", {"rpc.rs": "use crate::tasks::T; use crate::git::G;"}, "", 0)
-    listed = "crates/daemon/src/engine.rs -> tasks\n"
-    expect("a listed violation passes", {"engine.rs": "use crate::tasks::Row;"}, listed, 0)
-    expect("a listed violation that was fixed must be deleted", {"engine.rs": "fn f() {}"}, listed, 1,
-           ["cleared, delete it"])
-    expect("a line for an edge that never existed is refused", {}, listed, 1, ["cleared, delete it"])
-    expect("a listed line twice is refused", {"engine.rs": "use crate::tasks::Row;"}, listed + listed, 1,
+    listed = "engine -> board: 1\n"
+    expect("a recorded edge passes", {"engine.rs": "use crate::tasks::Row;"}, listed, 0)
+    expect("a recorded edge that was fixed must be lowered", {"engine.rs": "fn f() {}"}, listed, 1,
+           ["cleared, lower it", "engine -> board: 1 recorded, 0 now"])
+    expect("a count for an edge that never existed is refused", {}, listed, 1, ["cleared, lower it"])
+    expect("a pair recorded twice is refused", {"engine.rs": "use crate::tasks::Row;"}, listed + listed, 1,
            ["listed twice"])
-    expect("a new edge beside a listed one is refused",
+    expect("a line the counts file cannot read is refused", {}, "engine board 1\n", 1, ["cannot read"])
+    expect("a new edge to another layer beside a recorded one is refused",
            {"engine.rs": "use crate::tasks::Row; use crate::people::K;"}, listed, 1, ["engine.rs -> people"])
+    # ov-1290: counts per layer pair; moving code between files of a layer is not growth.
+    two = {"lib.rs": "", "engine.rs": "use crate::tasks::Row;", "engine_more.rs": ""}
+    expect("moving a forbidden edge to a new file in the same layer passes",
+           {"engine.rs": "fn f() {}", "engine_more.rs": "use crate::tasks::Row;"}, listed, 0)
+    expect("adding a forbidden edge in a new file of the layer fails",
+           {"engine.rs": "use crate::tasks::Row;", "engine_more.rs": "use crate::tasks::Row;"}, listed, 1,
+           ["engine may not use board: 2 edges, 1 recorded", "engine_more.rs -> tasks"])
+    expect("removing an edge without lowering the recorded count fails",
+           {"engine.rs": "use crate::tasks::Row;"}, "engine -> board: 2\n", 1,
+           ["cleared, lower it", "engine -> board: 2 recorded, 1 now"])
+    expect("a new glob in a layer fails",
+           {"engine.rs": "use crate::git::*;", "engine_more.rs": "use crate::git::*;"}, one, 1,
+           ["engine layer has 2 constructs, 1 recorded"])
+    expect("a second glob in a file that has one fails too",
+           {"engine.rs": "use crate::git::*; mod t { use crate::git::*; }"}, one, 1,
+           ["engine layer has 2 constructs, 1 recorded"])
+    expect("moving a glob between files of the layer passes",
+           {"engine.rs": "fn f() {}", "engine_more.rs": "use crate::git::*;"}, one, 0)
+    expect("moving an edge to another layer's file is growth there and a drop here",
+           {"engine.rs": "fn f() {}", "people.rs": "use crate::tasks::Row;"}, listed, 2,
+           ["access may not use board", "engine -> board: 1 recorded, 0 now"])
     cyc = Layers({"allowed": {"a": ["b"], "b": ["a"]}, "modules": {"a": ["x"], "b": ["y"]}, "composition": []})
     ok = any("cycle" in p for p in cyc.problems())
     failed += not ok
@@ -744,21 +800,21 @@ def self_test():
     failed += bool(problems)
     print(f"  {'ok  ' if not problems else 'FAIL'} the shipped layer table is acyclic and complete" + "".join(f"\n    {p}" for p in problems))
     # Not-grown, against a real git history.
-    tmp = fixture({}, ALLOW_HEADER + "a -> b\n")
+    tmp = fixture({}, COUNTS_HEADER + "a -> b: 1\nc -> d: 2\n")
     git = lambda *a: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=tmp, check=True, capture_output=True)
     git("init", "-q")
-    git("add", ALLOW)
+    git("add", COUNTS)
     git("commit", "-qm", "base")
     import contextlib
     import io
     with contextlib.redirect_stdout(io.StringIO()):
         same = not_grown(tmp, "HEAD")
-        (tmp / ALLOW).write_text(ALLOW_HEADER + "a -> b\nc -> d\n")
+        (tmp / COUNTS).write_text(COUNTS_HEADER + "a -> b: 1\nc -> d: 3\n")
         grown = not_grown(tmp, "HEAD")
-        (tmp / ALLOW).write_text(ALLOW_HEADER)
+        (tmp / COUNTS).write_text(COUNTS_HEADER + "a -> b: 1\nc -> d: 1\n")
         shrunk = not_grown(tmp, "HEAD")
-    for name, got, want in [("an unchanged list is not growth", same, 0), ("an added line is growth", grown, 1),
-                            ("a deleted line is not growth", shrunk, 0)]:
+    for name, got, want in [("unchanged counts are not growth", same, 0), ("a raised count is growth", grown, 1),
+                            ("a lowered count is not growth", shrunk, 0)]:
         failed += got != want
         print(f"  {'ok  ' if got == want else 'FAIL'} {name}")
     print(f"daemon-layers self-test: {'ok' if not failed else f'{failed} failed'}")
@@ -770,27 +826,30 @@ def self_test():
 def main(argv):
     if "--self-test" in argv:
         return 1 if self_test() else 0
-    if "--allowlist-not-grown" in argv:
-        return 1 if not_grown(ROOT, argv[argv.index("--allowlist-not-grown") + 1]) else 0
+    if "--counts-not-grown" in argv:
+        return 1 if not_grown(ROOT, argv[argv.index("--counts-not-grown") + 1]) else 0
     if "--report" in argv:
         report(ROOT)
         return 0
+    if "--report-files" in argv:
+        report_files(ROOT)
+        return 0
     if "--write-initial" in argv:
-        if (ROOT / ALLOW).exists():
-            print(f"daemon-layers: {ALLOW} exists; the list only shrinks (--prune)")
+        if (ROOT / COUNTS).exists():
+            print(f"daemon-layers: {COUNTS} exists; counts only go down (--lower)")
             return 1
         violations, _, refused = scan(ROOT, load(ROOT))
-        violations = {**violations, **refused}
-        (ROOT / ALLOW).write_text(ALLOW_HEADER + "".join(f"{k}\n" for k in sorted(violations)))
-        print(f"daemon-layers: wrote {len(violations)} edges to {ALLOW}")
+        counts = tally(violations, refused)
+        (ROOT / COUNTS).write_text(write_counts(counts))
+        print(f"daemon-layers: wrote {len(counts)} layer pairs to {COUNTS}")
         return 0
-    if "--prune" in argv:
+    if "--lower" in argv:
         violations, _, refused = scan(ROOT, load(ROOT))
-        violations = {**violations, **refused}
-        text = (ROOT / ALLOW).read_text()
-        kept = [l for l in text.splitlines() if not l.strip() or l.lstrip().startswith("#") or l.strip() in violations]
-        (ROOT / ALLOW).write_text("\n".join(kept) + "\n")
-        print(f"daemon-layers: dropped {len(read_allow(text)) - len(read_allow(chr(10).join(kept)))} cleared edges")
+        now = tally(violations, refused)
+        recorded, _ = read_counts((ROOT / COUNTS).read_text())
+        lowered = {p: min(n, now.get(p, 0)) for p, n in recorded.items()}
+        (ROOT / COUNTS).write_text(write_counts(lowered))
+        print(f"daemon-layers: lowered {sum(1 for p in recorded if lowered[p] < recorded[p])} counts")
         return 0
     return 1 if check(ROOT) else 0
 
