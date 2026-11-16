@@ -1440,7 +1440,11 @@ def _self_test():
         saved_poll = LOCK_POLL
         globals()["LOCK_POLL"] = 0.05
         orig_lock = machine_lock
-        globals()["machine_lock"] = lambda wt, j, **k: orig_lock(wt, j, path=lock, poll=LOCK_POLL, say=lambda *a, **kw: None, **k)
+        lock_calls = []
+        def fixture_lock(wt, job, **kwargs):
+            lock_calls.append(threading.get_ident())
+            return orig_lock(wt, job, path=lock, poll=LOCK_POLL, say=lambda *a, **kw: None, **kwargs)
+        globals()["machine_lock"] = fixture_lock
         try:
             ns = argparse.Namespace(no_load_wait=True, strict_leaks=False, no_lock=False)
             with contextlib.redirect_stdout(io.StringIO()):
@@ -1449,12 +1453,12 @@ def _self_test():
                 time.sleep(0.2)
                 t2 = threading.Thread(target=run_jobs, args=(["g2h"], plans2, [], t, t, ctx, t, ns))
                 t2.start()
-                t0 = time.time()
                 run_jobs(["light"], plans2, [], t, t, ctx, t, ns)
-                light_secs = time.time() - t0
                 t1.join(10)
                 t2.join(10)
-            expect("a light job does not wait for the lock", light_secs < 0.8, True)
+            # Assert the boundary itself; process startup on a loaded runner is
+            # unrelated to whether a light job queues behind heavy work.
+            expect("a light job never enters the lock", threading.get_ident() in lock_calls, False)
             seq = marks.read_text().split("\n")
             spans, open_ = [], []
             for line in filter(None, seq):
