@@ -969,9 +969,9 @@ def gate(args):
     rows, failed = [], True  # until run_jobs says otherwise: an exception is a failure
     try:
         failed = run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args)
-        changed = changed_tracked(tracked_before, tracked_state(repo))
-        if changed:
-            rows.append(("lane-gate", "tracked files unchanged", "FAIL: the gate changed tracked file(s): " + ", ".join(changed), "", ""))
+        row = tracked_change_row(tracked_before, repo)
+        if row:
+            rows.append(row)
             failed = True
     except BaseException as e:  # an interrupt or a bug still leaves a table of what ran
         full = hl.disk_full(e)  # a full disk is a named row and a red gate, not a traceback
@@ -998,6 +998,19 @@ def tracked_state(repo):
         full = pathlib.Path(repo) / path
         state[path] = subprocess.run(["git", "-C", str(repo), "hash-object", "--", path], capture_output=True, text=True).stdout.strip() if full.exists() else "deleted"
     return state
+
+
+def flaky_env(logdir):
+    """The env that sends flaky records beside the gate's logs, never into the tree being gated (ov-1295)."""
+    return {"GATE_FLAKY_LOG": str(pathlib.Path(logdir) / "flaky-log.tsv")}
+
+
+def tracked_change_row(before, repo):
+    """The FAIL row for the end-of-gate check, or None when no tracked file changed during the run (ov-1295)."""
+    changed = changed_tracked(before, tracked_state(repo))
+    if not changed:
+        return None
+    return ("lane-gate", "tracked files unchanged", "FAIL: the gate changed tracked file(s): " + ", ".join(changed), "", "")
 
 
 def changed_tracked(before, after):
@@ -1071,7 +1084,7 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
         env.update(hl.prepare_lane_build(repo))
     if j == "android" and ctx["steps.jdk21.outputs.path"]:
         env["CAPTURE_JDK"] = ctx["steps.jdk21.outputs.path"]
-    env["GATE_FLAKY_LOG"] = str(pathlib.Path(logdir) / "flaky-log.tsv")  # flaky records go beside the logs, never into the tree (ov-1295)
+    env.update(flaky_env(logdir))
     print(f"\n[{j}]", flush=True)
     for s in plans[j]:
         stop_event = getattr(args, "stop_event", None)
@@ -1853,21 +1866,23 @@ def _self_test():
                    ("FLAKY: pkg::bin a_test: first 1.2s (failed), rerun" in output, "FLAKY x1" in result,
                     "### FLAKY tests" in shown.getvalue(), "- FLAKY: pkg::bin a_test" in shown.getvalue()), (want_flaky,) * 4)
             expect("only a passing rerun is logged as flaky", (t / "flaky.tsv").exists(), want_flaky)
-            # The flaky path leaves a fixture repo's tracked files alone (ov-1295): no log in the tree, clean status.
+            # The flaky path leaves the tree being gated alone (ov-1295). The fixture is that tree: it carries its own
+            # copy of the wrapper and a tracked .config/flaky-log.tsv, and the step gets the env run_one_job builds.
             fx = t / "fx"
-            fx.mkdir()
-            for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
-                subprocess.run(["git", "-C", str(fx), *cmd], check=True)
+            (fx / "scripts").mkdir(parents=True)
             (fx / ".config").mkdir()
             (fx / ".config" / "flaky-log.tsv").write_text("date\n")
-            subprocess.run(["git", "-C", str(fx), "add", "-A"], check=True)
-            subprocess.run(["git", "-C", str(fx), "commit", "-qm", "x"], check=True)
+            shutil.copy(ROOT / "scripts" / "gate-flaky.py", fx / "scripts" / "gate-flaky.py")
+            for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"], ["add", "-A"], ["commit", "-qm", "x"]):
+                subprocess.run(["git", "-C", str(fx), *cmd], check=True)
             (t / "state").unlink(missing_ok=True)
+            fstep = Step("rust", "n", "python3 scripts/gate-flaky.py run -- cargo nextest run --profile gate\n", "", {})
             fenv = {k: v for k, v in env.items() if k != "GATE_FLAKY_LOG"}
-            fenv["GATE_FLAKY_LOG"] = str(t / "logs" / "flaky-log.tsv")
-            run_step_safely(step, fx, fenv, t / "logs", t)
+            fenv.update(flaky_env(t / "logs"))
+            before = tracked_state(fx)
+            run_step_safely(fstep, fx, fenv, t / "logs", t)
             dirty = subprocess.run(["git", "-C", str(fx), "status", "--porcelain"], capture_output=True, text=True).stdout
-            expect(f"fixture repo after a gate step (needs {pass_on} reruns) is clean", dirty, "")
+            expect(f"fixture repo after a gate step (needs {pass_on} reruns) is clean", (dirty, tracked_change_row(before, fx)), ("", None))
             expect("the flaky record went to the gate's log directory", (t / "logs" / "flaky-log.tsv").exists(), want_flaky)
             del FLAKY_LINES[:]
     with tempfile.TemporaryDirectory() as t:  # a planted change to a tracked file is seen, and named (ov-1295)
@@ -1887,6 +1902,9 @@ def _self_test():
         (t / "a.txt").write_text("changed again\n")
         (t / "b.txt").unlink()
         expect("a second edit and a delete are named", changed_tracked(mid, tracked_state(t)), ["a.txt", "b.txt"])
+        row = tracked_change_row(before, t)
+        expect("the end-of-gate check's FAIL row names the file", row and (row[2], row[1]),
+               ("FAIL: the gate changed tracked file(s): a.txt, b.txt", "tracked files unchanged"))
     if subprocess.call([sys.executable, str(ROOT / "scripts/gate-flaky.py"), "--self-test"]):
         failures.append("scripts/gate-flaky.py --self-test failed")
     gap_step = Step("rust", "n", "cargo nextest run --profile ci\n")
