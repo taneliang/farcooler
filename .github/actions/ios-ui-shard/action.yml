@@ -24,8 +24,18 @@ runs:
     - name: Check the runner has Xcode 27
       shell: bash -e {0}
       run: |
+        # Selected explicitly, not left to the runner's default: some xcode-27
+        # runners resolve xcrun to the Command Line Tools SDK (ov-1304).
+        picked=""
+        for dir in "$(xcode-select -p 2>/dev/null)" /Applications/Xcode*.app/Contents/Developer; do
+          if [[ "$(DEVELOPER_DIR="$dir" xcodebuild -version 2>/dev/null | head -1)" == "Xcode 27."* ]]; then
+            picked="$dir"; export DEVELOPER_DIR="$dir"
+            echo "DEVELOPER_DIR=$dir" >> "$GITHUB_ENV"
+            break
+          fi
+        done
+        [[ -n "${picked:-}" ]] || { echo "No Xcode 27 on this runner; set DEVELOPER_DIR."; exit 1; }
         xcodebuild -version
-        xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
     - name: Download the products the iOS job built
       uses: actions/download-artifact@v4
       with:
