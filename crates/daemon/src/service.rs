@@ -460,7 +460,7 @@ pub fn test_stub_agents() -> bool {
     }
     STUB_AGENTS_IN_THIS_PROCESS.load(std::sync::atomic::Ordering::SeqCst)
         || *FROM_ENV.get_or_init(|| {
-            let on = test_stub_switch(std::env::var_os(TEST_STUB_AGENTS).as_deref());
+            let on = test_stub_switch(std::env::var_os(TEST_STUB_AGENTS).as_deref(), crate::caller_seat::own_app().is_some());
             if on {
                 tracing::warn!("agent launches run a stub, and a real agent is refused ({TEST_STUB_AGENTS})");
             }
@@ -471,9 +471,12 @@ pub fn test_stub_agents() -> bool {
 /// What a `FARCOOLER_TEST_STUB_AGENTS` value means: on unless absent or `0`.
 /// Set to anything else — `1`, as the harnesses write it, but also `true` or
 /// an empty value — it is on, since a harness that set it meant "not the real
-/// agent".
-fn test_stub_switch(raw: Option<&std::ffi::OsStr>) -> bool {
-    raw.is_some_and(|v| v != "0")
+/// agent". A daemon the shipped app started (`shipped`, it runs from the
+/// app's bundle) ignores it: a stub runner takes an agent outside its panes
+/// for a person (`caller_seat::stubbed`), and no harness runs the app's own
+/// daemon (ov-1303).
+fn test_stub_switch(raw: Option<&std::ffi::OsStr>, shipped: bool) -> bool {
+    !shipped && raw.is_some_and(|v| v != "0")
 }
 
 /// Why the tmux boundary refuses `command`, or `None` to let it launch: the
@@ -5443,10 +5446,19 @@ mod test_stub_switch_tests {
     /// the real agent", so it is on.
     #[test]
     fn only_absent_or_zero_leaves_the_real_agent() {
-        assert!(!test_stub_switch(None));
-        assert!(!test_stub_switch(Some("0".as_ref())));
+        assert!(!test_stub_switch(None, false));
+        assert!(!test_stub_switch(Some("0".as_ref()), false));
         for raw in ["1", "true", "", "yes"] {
-            assert!(test_stub_switch(Some(raw.as_ref())), "{raw:?}");
+            assert!(test_stub_switch(Some(raw.as_ref()), false), "{raw:?}");
+        }
+    }
+
+    /// A daemon running from the shipped app's bundle never stubs, whatever
+    /// its environment says (ov-1303).
+    #[test]
+    fn the_shipped_app_s_daemon_ignores_it() {
+        for raw in [None, Some("0"), Some("1"), Some("")] {
+            assert!(!test_stub_switch(raw.map(std::ffi::OsStr::new), true), "{raw:?}");
         }
     }
 }

@@ -12,7 +12,11 @@
 //!   by its program or the script node runs, as the watcher recognizes one:
 //!   `running_agent`, `agent_of_process`) makes it an agent's, whatever the
 //!   walk met. So a claude outside Far Cooler, and an agent in a pane the
-//!   inventory hasn't seen yet, are agents (review 1, B5);
+//!   inventory hasn't seen yet, are agents (review 1, B5). An agent outside
+//!   every pane at pid 1 is an agent only with a person shown as below; with
+//!   none it is unknown, since an agent named only by its program is any
+//!   process named `claude`, a tool command that detached under one
+//!   included (ov-1303);
 //! - a pane launched as an agent is an agent's too;
 //! - in any other pane (a shell, an adopted orchestrator), only shells and the
 //!   CLI on the chain make it a person's, typing in their own shell pane
@@ -361,7 +365,7 @@ pub(crate) static ROOT_IN_TESTS: std::sync::Mutex<std::collections::BTreeSet<i32
 /// The `.app` bundle this daemon's executable is in, as the Mac app ships it
 /// (`Far Cooler.app/Contents/Resources/farcoolerd`); `None` for one run from
 /// anywhere else (Linux, a build tree), which no app vouches for.
-fn own_app() -> Option<PathBuf> {
+pub(crate) fn own_app() -> Option<PathBuf> {
     let exe = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;
     app_of(&exe)
 }
@@ -436,10 +440,28 @@ pub fn seat_in(pid: i32, procs: &HashMap<i32, Proc>, runner: &Runner, agent: &dy
         }
         at = row.ppid;
     }
-    // An agent anywhere on the chain, however the walk ended.
+    let tty = procs.get(&pid).map(|row| row.tty.as_str()).unwrap_or("??");
+    // With no agent above it, a person is shown outside the runner by the
+    // caller's own terminal, when it's no pane's, or by a process on the
+    // chain that vouches for one.
+    let shown = || !runner.ttys.contains(tty) && (tty != "??" || chain.iter().any(|&p| vouches(p)));
+    // An agent anywhere on the chain, however the walk ended. With no pane,
+    // at pid 1, it is only the name of a process: an agent's tool command
+    // that detached under one named `claude` (`exec -a claude`, `nohup claude
+    // &`) reads the same, and Agent(None) is a person's to the worktree
+    // checks. So it takes a person shown, a terminal on the chain that's no
+    // pane's with none that is, or a process that vouches (ov-1303). The
+    // owner's claude in Terminal holds its terminal, though its tool
+    // commands, in sessions of their own, have none.
+    let tty_of = |p: &i32| procs.get(p).map_or("??", |row| row.tty.as_str());
+    let agent_shown = || {
+        !chain.iter().any(|p| runner.ttys.contains(tty_of(p)))
+            && (chain.iter().any(|p| tty_of(p) != "??") || chain.iter().any(|&p| vouches(p)))
+    };
     let mut unknown = false;
     for p in &chain {
         match agent(*p) {
+            Some(true) if pane.is_none() && matches!(ended, End::One) && !agent_shown() => return Seat::Unreadable,
             Some(true) => return Seat::Agent(pane.map(|(id, _)| id)),
             Some(false) => {}
             None => unknown = true,
@@ -452,16 +474,8 @@ pub fn seat_in(pid: i32, procs: &HashMap<i32, Proc>, runner: &Runner, agent: &dy
         (None, End::Server | End::Hole) => Seat::Unreadable,
         // Outside the runner, `unknown` isn't asked (sshd is root's), but a
         // person has to be shown (ov-649).
-        (None, End::One) => {
-            let tty = procs.get(&pid).map(|row| row.tty.as_str()).unwrap_or("??");
-            if runner.ttys.contains(tty) {
-                Seat::Unreadable
-            } else if tty != "??" || chain.iter().any(|&p| vouches(p)) {
-                Seat::Person
-            } else {
-                Seat::Unreadable
-            }
-        }
+        (None, End::One) if shown() => Seat::Person,
+        (None, End::One) => Seat::Unreadable,
     }
 }
 

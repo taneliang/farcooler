@@ -5,7 +5,6 @@
 //! tmux server of `tests`. No real agent runs: a copy of `sh` named `claude`
 //! stands in for one.
 
-use std::io::BufRead;
 
 use crate::caller_seat::{Seat, caller_seat};
 use crate::test_support::Outside;
@@ -127,28 +126,20 @@ async fn a_pane_the_inventory_hasnt_seen_is_never_a_person() {
     assert_eq!(caller_seat(&b.svc, Some(pid)).await, Seat::Unreadable);
 }
 
-/// Outside the runner: a claude's child is an agent's (in no pane), and a
-/// process under an `sshd` with no agent above it is a person's.
+/// Outside the runner: a claude's child is an agent's (in no pane) when a
+/// person is shown, as the owner's claude in Terminal holds its terminal; a
+/// process merely named `claude`, with no terminal and nothing vouching, is
+/// unknown (ov-1303); and a process under an `sshd` with no agent above it is
+/// a person's. Not the test's own chain, whose terminal is the runner's.
 #[tokio::test]
 async fn outside_the_runner_an_agent_is_still_an_agent() {
     let b = board().await;
     b.shell_pane().await;
     let claude = fake_claude(&b);
-    let mut agent = std::process::Command::new(&claude)
-        .args(["-e", &runs_a_child(6041)])
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .expect("the fake claude");
-    let mut line = String::new();
-    std::io::BufReader::new(agent.stdout.as_mut().unwrap()).read_line(&mut line).unwrap();
-    let child: i32 = line.trim().parse().expect("its child's pid");
-    let seat = caller_seat(&b.svc, Some(child)).await;
-    // SAFETY: signals to the processes this test started.
-    unsafe {
-        libc::kill(child, libc::SIGTERM);
-    }
-    let _ = agent.wait();
-    assert_eq!(seat, Seat::Agent(None));
+    let tool = Outside::tool_of_one_in_a_terminal(&claude, 6041);
+    assert_eq!(caller_seat(&b.svc, Some(tool.pid)).await, Seat::Agent(None));
+    let detached = Outside::under(&claude, 6044);
+    assert_eq!(caller_seat(&b.svc, Some(detached.pid)).await, Seat::Unreadable);
     let person = a_persons_outside(&b, 6042);
     assert_eq!(caller_seat(&b.svc, Some(person.pid)).await, Seat::Person);
 }

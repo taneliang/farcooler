@@ -90,6 +90,25 @@ fn with_no_terminal_only_a_process_on_the_chain_says_a_person() {
     assert_eq!(walk(52, &session, &pane(false), &[], &[]), Seat::Unreadable, "a launchd job");
 }
 
+/// An agent at pid 1 in no pane is only a process named like one: with no
+/// person shown it is unknown, never Agent(None), which the worktree checks
+/// take for a person's (ov-1303). A tool command an agent pane detached under
+/// one named `claude` (`exec -a claude`, `nohup claude -p &`) has no
+/// terminal, or its pane's. The owner's claude in Terminal holds its own,
+/// though the tool commands it runs in sessions of their own have none.
+#[test]
+fn an_agent_in_no_pane_at_pid_1_needs_a_person_shown() {
+    let detached = [(60, 1, "??"), (61, 60, "??")];
+    assert_eq!(walk(61, &detached, &pane(false), &[60], &[]), Seat::Unreadable, "detached under a 'claude'");
+    let nohup = [(60, 1, "ttys001"), (61, 60, "ttys001")];
+    assert_eq!(walk(61, &nohup, &pane(false), &[60], &[]), Seat::Unreadable, "a 'claude' still on its pane's terminal");
+    let tool = [(60, 1, "ttys001"), (61, 60, "??")];
+    assert_eq!(walk(61, &tool, &pane(false), &[60], &[]), Seat::Unreadable, "its tool command, setsid'd");
+    let owners = [(5, 1, "??"), (6, 5, "ttys009"), (7, 6, "??")];
+    assert_eq!(walk(7, &owners, &pane(false), &[6], &[]), Seat::Agent(None), "the owner's claude in Terminal, its tool command");
+    assert_eq!(vouched(61, &detached, &pane(false), &[60], &[], &[60]), Seat::Agent(None), "a 'claude' something vouches for");
+}
+
 /// A stub-only runner (a test harness's) doesn't count an agent outside its
 /// panes, which is the harness's own; one inside them still counts, and so
 /// does unknown.

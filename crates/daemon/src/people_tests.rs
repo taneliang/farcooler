@@ -1161,21 +1161,49 @@ async fn an_agent_never_has_the_runner_attest_a_device() {
 }
 
 /// ov-1288, fix round 1: an agent outside this daemon's panes has no lane to
-/// keep to, so a process under one removes as a person does (the owner's
-/// claude in Terminal, a landing gate's test run under another runner's
-/// agent). A copy of perl named `claude` stands in.
+/// keep to, so a process under one removes as a person does: the owner's
+/// claude in Terminal, whose tool command runs with no terminal in a session
+/// of its own while the claude holds Terminal's. A copy of perl named
+/// `claude` stands in.
 #[tokio::test]
 async fn a_caller_under_an_agent_outside_the_runner_removes_as_a_person() {
     let r = runner().await;
     let dir = tempfile::tempdir().unwrap();
     let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
     let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
-    let under = crate::test_support::Outside::under(&claude, 6595);
+    let tool = crate::test_support::Outside::tool_of_one_in_a_terminal(&claude, 6595);
     let wt = r.svc.create_worktree(repo, "wt-under", "feature/under", "main").await.unwrap();
     std::fs::write(std::path::Path::new(&wt.worktree_path).join("wip.txt"), "unsaved").unwrap();
-    let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(under.pid));
+    let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(tool.pid));
     assert_eq!(remove(&caller, &wt).await, None);
     assert!(r.svc.store.get_worktree(wt.id).is_err(), "removed");
+}
+
+/// ov-1303: a process merely named `claude` with no terminal above the
+/// caller and nothing vouching is no person: an agent pane's CLI detached
+/// under one (`exec -a claude`, `nohup claude -p &`) reaches pid 1 through
+/// it. Before this it read as an agent outside the runner, a person here,
+/// and removed or moved any lane. The tree keeps its work and its workspace.
+#[tokio::test]
+async fn a_caller_detached_under_a_claude_neither_removes_nor_assigns() {
+    let r = runner().await;
+    let dir = tempfile::tempdir().unwrap();
+    let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let billing = r.svc.store.create_workspace(repo, "Billing", "bil").unwrap();
+    let under = crate::test_support::Outside::under(&claude, 6598);
+    assert_eq!(crate::caller_seat::walk_seat(&r.svc, under.pid), crate::caller_seat::Seat::Unreadable);
+    let lane = r.svc.create_worktree(repo, "wt-lane", "feature/lane", "main").await.unwrap();
+    let loose = r.svc.create_worktree(repo, "wt-loose", "feature/loose", "main").await.unwrap();
+    r.svc.store.assign_worktree(lane.id, r.workspace).unwrap();
+    std::fs::write(std::path::Path::new(&lane.worktree_path).join("wip.txt"), "unsaved").unwrap();
+    let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(under.pid));
+    assert_eq!(remove(&caller, &lane).await.as_deref(), Some("scope-denied:"));
+    assert!(std::path::Path::new(&lane.worktree_path).join("wip.txt").exists(), "its work is left");
+    assert_eq!(assign(&caller, lane.id, billing.id).await.as_deref(), Some("scope-denied:"), "a claimed tree");
+    assert_eq!(assign(&caller, loose.id, billing.id).await.as_deref(), Some("scope-denied:"), "a loose tree");
+    assert_eq!(r.svc.store.get_worktree(lane.id).unwrap().workspace_id, Some(r.workspace));
+    assert_eq!(r.svc.store.get_worktree(loose.id).unwrap().workspace_id, None);
 }
 
 /// ov-1296: a caller the walk can't read (`Unreadable`) is no person's. An
