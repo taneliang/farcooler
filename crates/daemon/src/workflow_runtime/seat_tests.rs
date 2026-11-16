@@ -88,7 +88,8 @@ async fn ov1267_an_agent_never_moves_the_orchestrator_seat_in_an_owner_led_works
 }
 
 /// `worktree.assign` moves a builder's worktree, and its agents with it, into another workspace the owner leads. The
-/// builder arrives as an agent and stays one: it can't take that workspace's seat, and can't publish there.
+/// builder can't move it itself (ov-1288); moved by the owner, it arrives as an agent and stays one: it can't take
+/// that workspace's seat, and can't publish there.
 #[tokio::test]
 async fn ov1267_a_builder_that_moves_its_worktree_takes_no_seat() {
     let (_dir, svc, repo) = crate::test_support::fixture().await;
@@ -104,8 +105,10 @@ async fn ov1267_a_builder_that_moves_its_worktree_takes_no_seat() {
     assign.target_resource_id = Some(bytes::Bytes::copy_from_slice(feature.as_bytes()));
     assign.payload = Some(request::Payload::WorktreeAssign(pb::WorktreeAssign {
         workspace_id: bytes::Bytes::copy_from_slice(other.as_bytes()) }));
-    let reply = rpc.handle(assign).await;
-    assert!(answered(&reply), "the builder moves its worktree: {reply:?}");
+    assert_eq!(refused(&rpc.handle(assign.clone()).await), "scope-denied", "the builder moves its own worktree");
+    let owner = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+    let reply = owner.handle(assign).await;
+    assert!(answered(&reply), "the owner moves the builder's worktree: {reply:?}");
     let moved = svc.store.get_terminal(builder).unwrap();
     assert_eq!((moved.workspace_id, moved.role), (Some(other), TerminalRole::Agent), "it went along as an agent");
 

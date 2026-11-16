@@ -216,6 +216,9 @@ pub struct RpcFactory {
     /// made again. Shared by the clones, which are one connection; new with
     /// a new pid.
     caller_pane: Arc<std::sync::OnceLock<Uuid>>,
+    /// Set once a caller naming a device is known for a person (ov-1288,
+    /// `refuse_a_device_named_from_a_pane`); new with a new pid.
+    device_vouched: Arc<std::sync::OnceLock<()>>,
 }
 
 impl RpcFactory {
@@ -229,6 +232,7 @@ impl RpcFactory {
     pub fn with_caller_pid(mut self, pid: Option<i32>) -> Self {
         self.caller_pid = pid;
         self.caller_pane = Arc::default();
+        self.device_vouched = Arc::default();
         self
     }
 
@@ -270,6 +274,7 @@ impl RpcFactory {
             attachment: Arc::new(std::sync::Mutex::new(None)),
             caller_pid: None,
             caller_pane: Arc::default(),
+            device_vouched: Arc::default(),
         }
     }
 }
@@ -285,6 +290,7 @@ impl Handler for RpcFactory {
         rpc.workflow = self.workflow.clone();
         rpc.caller_pid = self.caller_pid;
         rpc.caller_pane = self.caller_pane.clone();
+        let vouched = self.device_vouched.clone();
         async move {
             // The one request a closed connection could still serve.
             //
@@ -296,6 +302,9 @@ impl Handler for RpcFactory {
             // call served by a device whose access had already been withdrawn.
             if session.is_closed() {
                 return error_response(req.request_id, DomainError::AuthRequired);
+            }
+            if let Err(err) = crate::person_access::refuse_a_device_named_from_a_pane(&rpc.service, &rpc.peer, rpc.caller_pid, &vouched).await {
+                return error_response(req.request_id, err);
             }
             rpc.handle(req).await
         }
@@ -2181,7 +2190,7 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 Ok(result::Value::Worktree(
-                    crate::workspace_ops::assign_worktree(svc, &self.watcher, worktree, &p, scope).await?,
+                    crate::workspace_ops::assign_worktree(svc, &self.watcher, worktree, &p, scope, self.caller_pid).await?,
                 ))
             }
 

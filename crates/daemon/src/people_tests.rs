@@ -1019,45 +1019,113 @@ async fn a_builder_removes_its_own_worktree_and_never_another_lanes() {
     assert!(!std::path::Path::new(&mine.worktree_path).exists());
 }
 
-/// ov-1288: a pane opened for a ticket removes the worktree that ticket is
-/// linked to, wherever the pane itself runs.
+/// ov-1288: a builder that links its own ticket to another lane's worktree
+/// (`task.update` takes any `worktree_id`) still can't remove it: a pane's
+/// tree is the one the daemon placed it in, never one a ticket names.
 #[tokio::test]
-async fn a_builder_removes_the_worktree_its_ticket_owns() {
+async fn a_builder_never_removes_a_lane_its_ticket_is_relinked_to() {
     let r = runner().await;
     let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
     let lane = r.svc.create_worktree(repo, "wt-lane", "feature/lane", "main").await.unwrap();
-    let card = r.svc.store.create_task(r.workspace, "the lane's card", farcooler_store::models::Actor::User).unwrap();
+    let card = r.svc.store.create_task(r.workspace, "the builder's card", farcooler_store::models::Actor::User).unwrap();
+    let main = r.svc.store.get_terminal(r.agent.id).unwrap().worktree_id;
+    let builder = r.svc.create_terminal_with_prompt(main, "Ticket builder", "claude", None, Some(card.id)).await.unwrap();
     let update = farcooler_store::models::TaskUpdate {
         title: card.title.clone(), intent: card.intent.clone(), acceptance: card.acceptance.clone(),
         constraints: card.constraints.clone(), labels: card.labels.clone(), worktree_id: Some(lane.id),
     };
     r.svc.store.update_task(card.id, card.resource_version, &update).unwrap();
-    let main = r.svc.store.get_terminal(r.agent.id).unwrap().worktree_id;
-    let builder = r.svc.create_terminal_with_prompt(main, "Ticket builder", "claude", None, Some(card.id)).await.unwrap();
     let snapshot = r.svc.inventory.refresh().await;
     let pid = snapshot.claimants(builder.id).into_iter().next().unwrap().stamp.pid as i32;
     let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid));
-    assert_eq!(remove(&caller, &lane).await, None);
-    assert!(r.svc.store.get_worktree(lane.id).is_err());
+    assert_eq!(remove(&caller, &lane).await.as_deref(), Some("scope-denied:"));
+    assert!(r.svc.store.get_worktree(lane.id).is_ok());
 }
 
-/// ov-1288: the workspace's orchestrator removes any of its lanes, as the
-/// manager skill's cleanup does once a ticket lands, and a person removes any.
+/// ov-1288: the workspace's orchestrator removes any lane its workspace has
+/// claimed, as the manager skill's cleanup does once a ticket lands, and a
+/// person removes any, claimed or not. An unclaimed tree is no
+/// orchestrator's to remove.
 #[tokio::test]
 async fn the_orchestrator_and_a_person_remove_any_worktree() {
     let r = runner().await;
     let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
     let one = r.svc.create_worktree(repo, "wt-one", "feature/one", "main").await.unwrap();
     let two = r.svc.create_worktree(repo, "wt-two", "feature/two", "main").await.unwrap();
+    r.svc.store.assign_worktree(one.id, r.workspace).unwrap();
     std::fs::write(std::path::Path::new(&two.worktree_path).join("wip.txt"), "unsaved").unwrap();
     let snapshot = r.svc.inventory.refresh().await;
     let pid = snapshot.claimants(r.orchestrator.id).into_iter().next().unwrap().stamp.pid as i32;
     let orchestrator = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid));
+    assert_eq!(remove(&orchestrator, &two).await.as_deref(), Some("scope-denied:"), "unclaimed");
     assert_eq!(remove(&orchestrator, &one).await, None, "the orchestrator");
     assert!(r.svc.store.get_worktree(one.id).is_err());
     let person = factory(&r.svc, None, Scope::HostAdmin);
     assert_eq!(remove(&person, &two).await, None, "a person");
     assert!(r.svc.store.get_worktree(two.id).is_err());
+}
+
+/// `worktree.assign` of `wt` to `to`, asked by `caller`: the refusal, or `None`.
+async fn assign(caller: &RpcFactory, wt: Uuid, to: Uuid) -> Option<String> {
+    let req = Request {
+        method: "worktree.assign".into(),
+        target_resource_id: Some(id_bytes(wt)),
+        payload: Some(request::Payload::WorktreeAssign(pb::WorktreeAssign { workspace_id: id_bytes(to) })),
+        ..Default::default()
+    };
+    refused(caller, req).await
+}
+
+/// ov-1288: another workspace's orchestrator neither removes a lane Main has
+/// claimed nor moves it to its own workspace to remove it then. It may claim
+/// an unclaimed tree for its own workspace, and a person moves any.
+#[tokio::test]
+async fn another_workspaces_orchestrator_never_takes_or_removes_a_lane() {
+    let r = runner().await;
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let billing = r.svc.store.create_workspace(repo, "Billing", "bil").unwrap();
+    let theirs = r.svc.start_orchestrator(billing.id, "claude", false, None).await.expect("Billing's orchestrator");
+    let lane = r.svc.create_worktree(repo, "wt-main", "feature/main", "main").await.unwrap();
+    let loose = r.svc.create_worktree(repo, "wt-loose", "feature/loose", "main").await.unwrap();
+    r.svc.store.assign_worktree(lane.id, r.workspace).unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    let pid = |pane: Uuid| snapshot.claimants(pane).into_iter().next().unwrap().stamp.pid as i32;
+    let other = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid(theirs.id)));
+
+    assert_eq!(remove(&other, &lane).await.as_deref(), Some("scope-denied:"), "remove");
+    assert_eq!(assign(&other, lane.id, billing.id).await.as_deref(), Some("scope-denied:"), "assign");
+    assert_eq!(remove(&other, &lane).await.as_deref(), Some("scope-denied:"), "assign, then remove");
+    assert_eq!(r.svc.store.get_worktree(lane.id).unwrap().workspace_id, Some(r.workspace));
+
+    let builder = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid(r.agent.id)));
+    assert_eq!(assign(&builder, loose.id, r.workspace).await.as_deref(), Some("scope-denied:"), "a builder claims nothing");
+    assert_eq!(assign(&other, loose.id, r.workspace).await.as_deref(), Some("scope-denied:"), "claims only for its own");
+    assert_eq!(assign(&other, loose.id, billing.id).await, None, "claims an unclaimed tree");
+
+    let main = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid(r.orchestrator.id)));
+    assert_eq!(assign(&main, lane.id, billing.id).await, None, "Main's orchestrator splits a lane off");
+    let person = factory(&r.svc, None, Scope::HostAdmin);
+    assert_eq!(assign(&person, lane.id, r.workspace).await, None, "a person");
+}
+
+/// ov-1288: a pane that names a device in its session preamble acts as no
+/// device: `client.rekey` and `client.set_node_key` (and every other call) are
+/// refused before dispatch, so an agent can't move a phone's Key A to a key it
+/// holds. The same preamble from a person, and a pane naming no device, pass.
+#[tokio::test]
+async fn a_pane_naming_a_device_is_refused_before_dispatch() {
+    let r = runner().await;
+    let snapshot = r.svc.inventory.refresh().await;
+    let pid = snapshot.claimants(r.agent.id).into_iter().next().unwrap().stamp.pid as i32;
+    let call = |method: &str| Request { method: method.into(), ..Default::default() };
+    let agent = factory(&r.svc, Some("phone-b"), Scope::HostAdmin).with_caller_pid(Some(pid));
+    let person = factory(&r.svc, Some("phone-b"), Scope::HostAdmin);
+    let plain = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid));
+    for method in ["client.rekey", "client.set_node_key"] {
+        assert_eq!(refused(&agent, call(method)).await.as_deref(), Some("scope-denied:"), "{method}: a pane");
+        assert_ne!(refused(&person, call(method)).await.as_deref(), Some("scope-denied:"), "{method}: a person");
+        assert_ne!(refused(&plain, call(method)).await.as_deref(), Some("scope-denied:"), "{method}: no device named");
+    }
 }
 
 /// ov-1288: having the runner attest a device for a teammate offer is a
@@ -1083,7 +1151,9 @@ async fn an_agent_never_has_the_runner_attest_a_device() {
     let snapshot = r.svc.inventory.refresh().await;
     let pid = |pane: Uuid| snapshot.claimants(pane).into_iter().next().unwrap().stamp.pid as i32;
     for (who, pane) in [("an agent", r.agent.id), ("the orchestrator", r.orchestrator.id)] {
-        let agent = factory(&r.svc, Some("phone-o"), Scope::HostAdmin).with_caller_pid(Some(pid(pane)));
+        let named = factory(&r.svc, Some("phone-o"), Scope::HostAdmin).with_caller_pid(Some(pid(pane)));
+        assert_eq!(refused(&named, attest()).await.as_deref(), Some("scope-denied:"), "{who}, naming the device");
+        let agent = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid(pane)));
         assert_eq!(refused(&agent, attest()).await.as_deref(), Some("resource-conflict:person_only"), "{who}");
     }
     let person = factory(&r.svc, Some("phone-o"), Scope::HostAdmin);

@@ -314,8 +314,12 @@ pub async fn assign_worktree(
     worktree: Uuid,
     req: &pb::WorktreeAssign,
     scope: Scope,
+    caller_pid: Option<i32>,
 ) -> Result<pb::Worktree> {
     let workspace = required_id(&req.workspace_id)?;
+    // Whose it is to give (ov-1288): else an orchestrator moves another workspace's lane to itself, then removes it.
+    let caller = crate::caller_seat::caller_seat(svc, caller_pid).await;
+    crate::caller_seat::authorize_worktree_assign(svc, caller, &svc.store.get_worktree(worktree)?, workspace)?;
     let assigned = svc.store.assign_worktree(worktree, workspace)?;
     watcher.announce_fleet_changed();
     let view = svc.worktree_view(&assigned).await?;

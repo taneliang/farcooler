@@ -531,6 +531,27 @@ pub async fn socket_person_only(svc: &Service, peer: &Peer, caller_pid: Option<i
     refuse_admin_from_pane(svc, caller_pid).await
 }
 
+/// A device named from a pane is no device (ov-1288). Any local process may
+/// write a preamble naming a device this runner knows (`admit_preamble` refuses
+/// only unknown ones), and every device RPC (`client.rekey`,
+/// `client.set_node_key`, `client.set_step_up_key`, `approval.deny`,
+/// `ceremony.authority`) then acts as that device. One check, before dispatch:
+/// a local caller naming a device has to be a person (a phone relayed through
+/// root's `sshd`, the Mac app), by the walk `refuse_admin_from_pane` makes. A
+/// connection with no preamble, the app's and the CLI's own, isn't asked.
+/// `vouched` keeps a person's verdict for the connection, whose pid can't change.
+pub async fn refuse_a_device_named_from_a_pane(svc: &Service, peer: &Peer, caller_pid: Option<i32>, vouched: &std::sync::OnceLock<()>) -> Result<()> {
+    if peer.client_id.is_none() || caller_pid.is_none() || vouched.get().is_some() {
+        return Ok(());
+    }
+    refuse_admin_from_pane(svc, caller_pid).await.map_err(|_| {
+        tracing::info!(device = ?peer.client_id, "refused: a session naming a device, from a caller who isn't a person");
+        DomainError::ScopeDenied { needed: "device" }
+    })?;
+    let _ = vouched.set(());
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "person_access_tests.rs"]
 mod tests;

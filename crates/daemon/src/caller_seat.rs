@@ -93,39 +93,70 @@ pub(crate) fn authorize_terminal(svc: &crate::service::Service, caller: Seat, ta
 }
 
 /// Who may remove `worktree` (ov-1288). A person, any. An agent pane, the
-/// worktree it runs in or the one its own ticket is linked to; the workspace's
-/// orchestrator, any of its workspace's, or an unclaimed one in its repository.
-/// An agent outside Far Cooler or an unreadable caller can't be placed in a
-/// lane, so it removes none. Removing kills the tree's uncommitted work, and
-/// before this any pane could remove another lane's by typing back its name.
+/// worktree it runs in, as the daemon placed it (`term.worktree_id`), never one
+/// a ticket names: any pane may relink its ticket (`task.update`). The
+/// workspace's orchestrator, any its workspace has claimed. An unclaimed tree
+/// is no orchestrator's to remove, since any workspace's may claim it
+/// (`authorize_worktree_assign`). An agent outside Far Cooler or an unreadable
+/// caller can't be placed in a lane, so it removes none. Removing kills the
+/// tree's uncommitted work, and before this any pane could remove another
+/// lane's by typing back its name.
 pub(crate) fn authorize_worktree_removal(
     svc: &crate::service::Service,
     caller: Seat,
     worktree: &farcooler_store::models::Worktree,
 ) -> farcooler_core::error::Result<()> {
-    let denied = || farcooler_core::error::DomainError::ScopeDenied { needed: "workspace orchestrator" };
-    let pane = match caller {
-        Seat::Person => return Ok(()),
-        Seat::Agent(Some(pane)) => pane,
-        Seat::Agent(None) | Seat::Unreadable => return Err(denied()),
-    };
-    let term = svc.store.get_terminal(pane).map_err(|_| denied())?;
-    if term.worktree_id == worktree.id {
+    let Some(term) = agent_pane(svc, caller)? else { return Ok(()) };
+    if term.worktree_id == worktree.id || orchestrator_of(svc, &term, worktree).is_some() {
         return Ok(());
     }
-    if let Some(task) = term.task_id
-        && svc.store.get_task(task).is_ok_and(|t| t.worktree_id == Some(worktree.id))
-    {
-        return Ok(());
+    Err(seat_denied())
+}
+
+/// Who may give `worktree` to `to` (ov-1288). A person, any. An agent pane only
+/// as the orchestrator of the workspace that holds the tree now, to any
+/// workspace (splitting a workstream off, the manager skill); or, for an
+/// unclaimed tree in its repository, any workspace's orchestrator, to its own
+/// (claiming a lane). Otherwise an orchestrator could move another workspace's
+/// lane to itself and then remove it.
+pub(crate) fn authorize_worktree_assign(
+    svc: &crate::service::Service,
+    caller: Seat,
+    worktree: &farcooler_store::models::Worktree,
+    to: uuid::Uuid,
+) -> farcooler_core::error::Result<()> {
+    let Some(term) = agent_pane(svc, caller)? else { return Ok(()) };
+    match (worktree.workspace_id, orchestrator_of(svc, &term, worktree)) {
+        (Some(_), Some(_)) => Ok(()),
+        (None, None) if term.role == farcooler_store::models::TerminalRole::Orchestrator
+            && term.workspace_id == Some(to)
+            && svc.store.get_workspace(to).is_ok_and(|w| w.repository_id == worktree.repository_id) => Ok(()),
+        _ => Err(seat_denied()),
     }
-    if term.role == farcooler_store::models::TerminalRole::Orchestrator
-        && let Some(workspace) = term.workspace_id
-        && worktree.workspace_id.is_none_or(|w| w == workspace)
-        && svc.store.get_workspace(workspace).is_ok_and(|w| w.repository_id == worktree.repository_id)
-    {
-        return Ok(());
+}
+
+fn seat_denied() -> farcooler_core::error::DomainError {
+    farcooler_core::error::DomainError::ScopeDenied { needed: "workspace orchestrator" }
+}
+
+/// The pane an agent `caller` runs in; `None` for a person. An agent outside
+/// Far Cooler, or an unreadable caller, is refused: it can't be placed.
+fn agent_pane(svc: &crate::service::Service, caller: Seat) -> farcooler_core::error::Result<Option<farcooler_store::models::Terminal>> {
+    match caller {
+        Seat::Person => Ok(None),
+        Seat::Agent(Some(pane)) => svc.store.get_terminal(pane).map(Some).map_err(|_| seat_denied()),
+        Seat::Agent(None) | Seat::Unreadable => Err(seat_denied()),
     }
-    Err(denied())
+}
+
+/// `Some(())` when `term` is the orchestrator of the workspace that has
+/// claimed `worktree`. An unclaimed tree is none's.
+fn orchestrator_of(svc: &crate::service::Service, term: &farcooler_store::models::Terminal, worktree: &farcooler_store::models::Worktree) -> Option<()> {
+    let workspace = term.workspace_id?;
+    (term.role == farcooler_store::models::TerminalRole::Orchestrator
+        && worktree.workspace_id == Some(workspace)
+        && svc.store.get_workspace(workspace).is_ok_and(|w| w.repository_id == worktree.repository_id))
+        .then_some(())
 }
 
 /// One row of the process table: its parent and its terminal.

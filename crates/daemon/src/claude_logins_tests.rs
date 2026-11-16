@@ -163,26 +163,24 @@ async fn a_pane_opened_from_a_pane_takes_its_login_from_that_pane() {
 }
 
 /// A process in a pane that names a member's device in its session preamble
-/// (device ids aren't secret) still gets its own pane's login, never the
-/// device's member's (review 1, H1): from the owner's pane, the runner's;
-/// from Alice's rep, which may open nothing, a refusal before any login.
+/// (device ids aren't secret) gets nobody's login: it's refused before
+/// dispatch (ov-1288, `refuse_a_device_named_from_a_pane`), from the owner's
+/// pane, a member's or a rep's. Before, it got its own pane's login (review 1,
+/// H1), and the device's calls besides. The member's own device opens on hers.
 #[tokio::test]
-async fn a_pane_claiming_a_members_device_gets_its_own_login() {
+async fn a_pane_claiming_a_members_device_gets_no_login() {
     let (_dir, svc, main, checkout) = runner().await;
+    let panes = || svc.store.list_terminals_for_worktree(checkout).unwrap().len();
     let owners = create(&factory(&svc, None, None), checkout, "shell").await.expect("the owner's shell");
-    let spoofed = factory(&svc, Some("phone-b"), Some(pid_of(&svc, owners).await));
-    let pane = create(&spoofed, checkout, "claude").await.expect("opened");
-    assert_runners(&launched(&svc, pane).await);
-    assert_eq!(svc.store.terminal_login(pane).unwrap(), None, "not Bob's");
-
-    let bobs_other = create(&factory(&svc, Some("phone-b"), None), checkout, "claude").await.expect("Bob's own pane");
-    let in_bobs = factory(&svc, Some("phone-a"), Some(pid_of(&svc, bobs_other).await));
-    let helper = create(&in_bobs, checkout, "claude").await.expect("opened from Bob's pane");
-    assert_on(&launched(&svc, helper).await, &dir_of(&svc, "bob"));
-
+    let bobs = create(&factory(&svc, Some("phone-b"), None), checkout, "claude").await.expect("Bob's own pane");
+    assert_on(&launched(&svc, bobs).await, &dir_of(&svc, "bob"));
     let rep = svc.start_rep(main, "alice", "").await.expect("Alice's rep").terminal;
-    let from_rep = create(&factory(&svc, Some("phone-b"), Some(pid_of(&svc, rep.id).await)), checkout, "claude").await;
-    assert_eq!(from_rep, Err("resource-conflict:rep_messenger".to_string()), "a rep opens nothing");
+    let before = panes();
+    for (from, device) in [(owners, "phone-b"), (bobs, "phone-a"), (rep.id, "phone-b")] {
+        let spoofed = factory(&svc, Some(device), Some(pid_of(&svc, from).await));
+        assert_eq!(create(&spoofed, checkout, "claude").await, Err("scope-denied:".to_string()), "naming {device}");
+    }
+    assert_eq!(panes(), before, "nothing opened");
 }
 
 /// A command left behind by a member's pane (`(cmd &)` from her agent's tool
