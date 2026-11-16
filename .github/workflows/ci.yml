@@ -1162,6 +1162,7 @@ jobs:
             fi
           done
           [[ -n "${picked:-}" ]] || { echo "No Xcode 27 on this runner; set DEVELOPER_DIR."; exit 1; }
+          { env | grep -iE 'sdk|developer|xcode|toolchains|^PATH'; xcode-select -p; ls -la /Library/Developer/CommandLineTools/SDKs; xcrun -v --show-sdk-path; xcrun -v --sdk macosx --show-sdk-platform-path; } 2>&1 | sed 's/^/DIAG ov-1304 /' || true
           xcodebuild -version
           key="$( { xcodebuild -version; swift --version; xcrun --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)"
           echo "cache-key=$key" >> "$GITHUB_OUTPUT"
@@ -1326,6 +1327,7 @@ jobs:
             fi
           done
           [[ -n "${picked:-}" ]] || { echo "No Xcode 27 on this runner; set DEVELOPER_DIR."; exit 1; }
+          { env | grep -iE 'sdk|developer|xcode|toolchains|^PATH'; xcode-select -p; ls -la /Library/Developer/CommandLineTools/SDKs; xcrun -v --show-sdk-path; xcrun -v --sdk macosx --show-sdk-platform-path; } 2>&1 | sed 's/^/DIAG ov-1304 /' || true
           xcodebuild -version
           key="$( { xcodebuild -version; swift --version; xcrun --show-sdk-version; } | shasum -a 256 | cut -d ' ' -f 1)"
           echo "cache-key=$key" >> "$GITHUB_OUTPUT"
