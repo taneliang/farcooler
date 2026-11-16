@@ -1062,7 +1062,9 @@ else:
     }
     #[tokio::test]
     async fn workflow_coding_native_real_pty_normalized_hooks_and_quiescence() {
+        let _ = tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).try_init();
         for agent in ["claude", "codex", "cursor", "codex-engine"] {
+            eprintln!("native fixture agent: {agent}");
             let (dir, mut runtime, _fake) = native_agent("pass", agent).await;
             let definition = runtime.configured_definition().unwrap();
             enqueue(&mut runtime, "w", "one", definition);
