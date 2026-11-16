@@ -886,6 +886,11 @@ crates/daemon/src/workflow_runtime/review_tests.rs -> watch_view
 crates/daemon/src/workflow_runtime/scheduling.rs -> unresolved: glob super::*
 crates/daemon/src/workflow_runtime/script_hooks.rs -> unresolved: glob super::*
 crates/daemon/src/workflow_runtime/script_hooks_tests.rs -> unresolved: glob super::*
+crates/daemon/src/workflow_runtime/seat_tests.rs -> caller_seat
+crates/daemon/src/workflow_runtime/seat_tests.rs -> rpc
+crates/daemon/src/workflow_runtime/seat_tests.rs -> service
+crates/daemon/src/workflow_runtime/seat_tests.rs -> test_support
+crates/daemon/src/workflow_runtime/seat_tests.rs -> unresolved: glob super::*
 crates/daemon/src/workflow_runtime/send_back_tests.rs -> service
 crates/daemon/src/workflow_runtime/send_back_tests.rs -> unresolved: glob super::*
 crates/daemon/src/workflow_runtime/service_owner.rs -> unresolved: glob super::*

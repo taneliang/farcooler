@@ -55,7 +55,7 @@ is itself an error** (see "Fail closed" below).
   ov-1219's `module-edges.json`, not a compiler-resolved graph. It counts test code,
   because a unit test that needs the aggregate `Service` has to move to the
   integration package before its layer can leave the daemon.
-- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 924 entries (705 module edges, 214 globs, 5 aliases),
+- **The allowlist:** `scripts/daemon-layers-allow.txt` holds today's 929 entries (709 module edges, 215 globs, 5 aliases),
   one `file -> module` or `file -> unresolved: construct` per line. A new edge fails. A listed edge that no longer
   exists also fails, naming the line to delete. In CI, `--allowlist-not-grown
   origin/main` fails when the list holds a line main's does not, so a pull request
@@ -89,15 +89,15 @@ the scoped-alias case from ov-1272's third finding
 which the old check passed with an empty allowlist and which now fails on both aliases.
 Before this change, the scoped-alias and `$crate::` fixtures passed with no fault at all.
 
-Today's tree has 5 aliases and 213 globs of a layer module (nearly all `use super::*` in test
+Today's tree has 5 aliases and 214 globs of a layer module (nearly all `use super::*` in test
 modules), listed in the allowlist; each clears by writing the full path or importing by name, when
 the test moves (steps 40–45) or its layer splits. No call of a composition macro that reaches a layer
 and no macro-built path exists today.
 
 ## Violations per layer
 
-704 module edges (the 218 refused aliases and globs above are counted separately): access 124, agents 65, board 157, delivery 132, engine 115, git 23,
-service 36, watch 52. 330 of them are in `_tests` files: those clear when the
+708 module edges (the 219 refused aliases and globs above are counted separately): access 124, agents 65, board 157, delivery 132, engine 119, git 23,
+service 36, watch 52. 334 of them are in `_tests` files: those clear when the
 test moves (steps 40–45) or no longer needs the aggregate. "Cleared by step" names
 the step in ov-1219's table that removes the edge in production code; steps are
 numbered as in that table. Where a step is past 7, steps 2 to 7 still leave it listed
@@ -200,12 +200,12 @@ How steps 2 to 7 clear things:
 
 ### engine
 
-115 edges in 36 files (40 edges are in test files). May use: git.
+119 edges in 37 files (44 edges are in test files). May use: git.
 
 | Uses | Module | Edges | In tests | Cleared by step |
 | --- | --- | ---: | ---: | --- |
 | access | `people` | 8 | 3 | 2 |
-| access | `caller_seat` | 5 | 2 | 2 |
+| access | `caller_seat` | 6 | 3 | 2 |
 | access | `caller_person` | 2 | 1 | 2 |
 | access | `cutover_delegate` | 1 | 1 | 11–15 |
 | access | `person_access` | 1 | 0 | 11–15 |
@@ -220,14 +220,14 @@ How steps 2 to 7 clear things:
 | board | `task_ops` | 3 | 1 | 21–25 |
 | board | `task_starts` | 2 | 0 | 21–25 |
 | board | `orchestrator` | 1 | 0 | 21–25 |
-| composition | `rpc` | 6 | 3 | 2 |
+| composition | `rpc` | 7 | 4 | 2 |
 | composition | `wire` | 3 | 1 | 2 |
 | composition | `rpc_agent_stop` | 1 | 0 | 2 |
 | composition | `rpc_plan` | 1 | 0 | 2 |
 | delivery | `watch/answer_wake` | 2 | 0 | 32–36 |
 | delivery | `watch/task_notice` | 1 | 0 | 32–36 |
-| service | `service` | 17 | 6 | 3, finished by 26–31 |
-| service | `test_support` | 15 | 10 | 3 |
+| service | `service` | 18 | 7 | 3, finished by 26–31 |
+| service | `test_support` | 16 | 11 | 3 |
 | service | `foreground` | 2 | 0 | 26–31 |
 | service | `proc_table` | 2 | 0 | 3 |
 | service | `runtime` | 1 | 0 | 3 |
