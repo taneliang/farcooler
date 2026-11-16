@@ -78,6 +78,13 @@ fn turn_ended_reason(error: &Error) -> String {
     format!("The agent's turn ended before it finished: {why}. Its work stays in the worktree for the step's next \
         attempt, a retry or a send-back.")
 }
+/// What the item says of a turn its step's time limit ended. Time a landing gate or a hand pause held it is not
+/// counted, so this is the agent's own time.
+fn out_of_time_reason(limit: Duration) -> String {
+    let minutes = limit.as_secs().div_ceil(60);
+    format!("The agent's turn ran past the step's {minutes}-minute time limit, so it was ended. Its work stays in the \
+        worktree for the step's next attempt, a retry or a send-back.")
+}
 /// How long the runner may fail to read a live agent's pane before it gives the step up (ov-1301). A tmux that
 /// doesn't answer in a second is a busy runner, not a lost session: the Canary ended four builds in a minute on that
 /// misreading, each Failed with no reason. Only a pane tmux answers for as closed or dead ends the turn at once.
@@ -542,8 +549,10 @@ impl Exec {
         let _steerable = crate::engine_steering::publish(&binding.workspace, &binding.effect.item, id,
             self.native_agent(binding)?.as_str(), self.run_model(binding), review, self.steering_tickets(binding)?, send);
         let _inbox = super::native_messages::Inbox { store:&self.store, id };
-        let clock = super::native_control::ActiveClock::new();
+        // Its quiet periods, like its time limit, leave out time a landing gate held it stopped (ov-1301).
+        let clock = super::native_control::ActiveClock::held_by(_builder.as_ref());
         let turn = self.native_turn(&listener, binding, &heard_from, &clock);
+        let cancelled = cancel.clone();
         let mut stop_reply = None;
         let mut frozen = None;
         let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &owner.tty, pane.stamp.pid as i32, id,
@@ -572,10 +581,16 @@ impl Exec {
             Ok(result) => result.map_err(|_| Error::Refused("native output capture failed"))??,
             Err(_) => { output.abort(); return Err(Error::Refused("native output did not drain")); }
         }
+        let result_none = result.is_none();
         let (mut completed, hooks, mut failure) = result.map_or((None, Vec::new(), None),
             |(passed, hooks, failure)| (Some(passed), hooks, failure));
         // A turn the runner stopped reading fails its step with why, on the item, never silently (ov-1301).
         if let Some(error) = ended_by { completed = Some(false); failure = Some(turn_ended_reason(&error)); }
+        // So does one that ran out of time: neither a Stop nor a cancel ended it, so its time limit did.
+        else if result_none && stop_reply.is_none() && !*cancelled.borrow() {
+            completed = Some(false);
+            failure = Some(out_of_time_reason(Duration::from_millis(command.timeout_ms)));
+        }
         // A recorded verdict is the review however the turn ended: cut short by a daemon stopping for an install, out
         // of time, or failing after it (ov-1082). Read after the reviewer is ended, so it is the last verdict given.
         if self.recorded_verdict(binding) { completed = Some(true); failure = None; }

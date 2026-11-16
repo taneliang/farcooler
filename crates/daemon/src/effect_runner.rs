@@ -217,6 +217,26 @@ pub(crate) async fn capture(mut reader: tokio::net::UnixStream, log: std::path::
     }
 }
 
+/// `timeout`, except that time a landing gate held `builder` stopped is not counted (ov-1301): a build stopped for
+/// a 40-minute gate is waiting, and failing it for that is a failure with no cause in the build.
+async fn held_timeout<F: std::future::Future>(limit: Duration, work: F, builder: Option<&crate::yielding::BuilderGuard>)
+    -> Result<F::Output, tokio::time::error::Elapsed> {
+    tokio::pin!(work);
+    let mut until = tokio::time::Instant::now() + limit;
+    let mut credited = Duration::ZERO;
+    loop {
+        match tokio::time::timeout_at(until, &mut work).await {
+            Ok(done) => return Ok(done),
+            Err(elapsed) => {
+                let (held, holding) = builder.map_or((Duration::ZERO, false), crate::yielding::BuilderGuard::held);
+                let owed = held.saturating_sub(credited);
+                if owed.is_zero() && !holding { return Err(elapsed); }
+                credited = held;
+                until = tokio::time::Instant::now() + owed.max(Duration::from_secs(1));
+            }
+        }
+    }
+}
 async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duration,
     mut cancel: Option<tokio::sync::watch::Receiver<bool>>, owner: Option<&Path>,
     builder: Option<&crate::yielding::Yielding>) -> Result<Option<i32>, ProcessFailure>
@@ -250,7 +270,7 @@ async fn supervise(mut command: Command, tree: &Path, log: &Path, limit: Duratio
         None => None,
     };
     let result = tokio::select! {
-        result = tokio::time::timeout(limit, exited(pid)) => Some(result),
+        result = held_timeout(limit, exited(pid), paused.as_ref()) => Some(result),
         _ = async {
             if let Some(cancel) = cancel.as_mut() {
                 while !*cancel.borrow_and_update() {
@@ -413,4 +433,18 @@ mod tests {
             assert_eq!(settled.unwrap(), None, "round {round}: a cancel with the whole group gone settles as cancelled");
         }
     }
+
+    /// A configured build's limit leaves out time a landing gate held it stopped (ov-1301).
+    #[tokio::test]
+    async fn a_gate_holding_a_build_past_its_limit_does_not_time_it_out() {
+        let yielding = crate::yielding::Yielding::default();
+        let builder = yielding.builder(crate::yielding::Target::Tty("/dev/ttys-gate-held-none".into()));
+        let work = || tokio::time::sleep(Duration::from_millis(300));
+        assert!(super::held_timeout(Duration::from_millis(200), work(), Some(&builder)).await.is_err(), "no gate: out of time");
+        let gate = yielding.gate();
+        let release = async move { tokio::time::sleep(Duration::from_millis(400)).await; drop(gate); };
+        let (done, ()) = tokio::join!(super::held_timeout(Duration::from_millis(200), work(), Some(&builder)), release);
+        assert!(done.is_ok(), "the gate's hold is not the build's time");
+    }
 }
+

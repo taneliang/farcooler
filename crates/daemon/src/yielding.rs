@@ -22,7 +22,9 @@ pub(crate) enum Target {
 
 /// A builder, and whether the orchestrator has paused it by hand (ov-1205). A builder is stopped while a gate
 /// runs, by hand, or both, and is continued only when neither remains.
-struct Builder { target: Target, manual: bool }
+/// `held_for` and `held_since` count the time a gate has held it stopped and its hand pause has not (ov-1301), so its
+/// step's clocks can leave that time out: a hand pause already stops them itself.
+struct Builder { target: Target, manual: bool, held_for: Duration, held_since: Option<tokio::time::Instant> }
 
 #[derive(Default)]
 struct State {
@@ -58,6 +60,17 @@ impl BuilderGuard {
     pub(crate) fn manual(&self, on: bool) {
         self.0.change(|s| { if let Some(b) = s.builders.get_mut(&self.1) { b.manual = on; if !on && s.gates.is_empty() { signal(&b.target, libc::SIGCONT); } } });
     }
+    /// How long gates have held this builder stopped so far, and whether one holds it now (ov-1301). A step's time
+    /// limit and quiet periods leave this out: a builder stopped for a gate is waiting, not slow.
+    pub(crate) fn held(&self) -> (Duration, bool) { self.0.held(self.1) }
+    /// A handle that reads `held`, for a clock that outlives no builder guard.
+    pub(crate) fn held_clock(&self) -> HeldClock { HeldClock(self.0.clone(), self.1) }
+}
+/// Reads how long gates have held one builder stopped; see [`BuilderGuard::held`].
+#[derive(Clone)]
+pub(crate) struct HeldClock(Yielding, u64);
+impl HeldClock {
+    pub(crate) fn held(&self) -> Duration { self.0.held(self.1).0 }
 }
 
 fn signal(target: &Target, sig: i32) {
@@ -102,16 +115,33 @@ impl Yielding {
     /// A builder started. It stops at once if a gate is running.
     pub(crate) fn builder(&self, target: Target) -> BuilderGuard {
         let mut id = 0;
-        self.change(|s| { s.next += 1; id = s.next; s.builders.insert(id, Builder { target, manual: false }); });
+        self.change(|s| { s.next += 1; id = s.next; s.builders.insert(id, Builder { target, manual: false, held_for: Duration::ZERO, held_since: None }); });
         BuilderGuard(self.clone(), id)
     }
     /// Whether builders are paused now.
     #[cfg(test)]
     pub(crate) fn paused(&self) -> bool { self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).paused }
 
+    fn held(&self, id: u64) -> (Duration, bool) {
+        let state = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.builders.get(&id).map_or((Duration::ZERO, false),
+            |b| (b.held_for + b.held_since.map_or(Duration::ZERO, |at| at.elapsed()), b.held_since.is_some()))
+    }
     fn change(&self, edit: impl FnOnce(&mut State)) {
         let mut state = self.0.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         edit(&mut state);
+        self.stop_or_continue(&mut state);
+        // Whatever was decided, each builder's held time follows it.
+        let paused = state.paused;
+        for b in state.builders.values_mut() {
+            match (paused && !b.manual, b.held_since) {
+                (true, None) => b.held_since = Some(tokio::time::Instant::now()),
+                (false, Some(at)) => { b.held_for += at.elapsed(); b.held_since = None; }
+                _ => {}
+            }
+        }
+    }
+    fn stop_or_continue(&self, state: &mut State) {
         if state.gates.is_empty() {
             if state.paused {
                 for b in state.builders.values().filter(|b| !b.manual) { signal(&b.target, libc::SIGCONT); }
@@ -123,7 +153,7 @@ impl Yielding {
         // The full set that is about to be stopped is on disk, atomically, before any of it stops. If it can't be
         // written, nothing new is stopped and whatever was stopped is continued: a builder never stays stopped with
         // no record that a restarted daemon could resume it from.
-        if let Err(e) = self.write(&state) {
+        if let Err(e) = self.write(state) {
             tracing::warn!(error = %e, "could not record the builders to pause; they keep running during this gate");
             for b in state.builders.values().filter(|b| !b.manual) { signal(&b.target, libc::SIGCONT); }
             state.paused = false;

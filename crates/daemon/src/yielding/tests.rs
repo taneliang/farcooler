@@ -223,3 +223,27 @@ async fn a_builder_paused_by_gate_and_hand_resumes_only_after_both_are_lifted_in
     assert!(running(&child), "both lifted: {:?}", states(&child));
     end(child);
 }
+
+/// A gate's hold is counted per builder, so its step's limit and quiet periods can leave it out (ov-1301); time it
+/// is also paused by hand is not counted twice, since a hand pause stops those clocks itself.
+#[tokio::test]
+async fn a_builder_counts_the_time_a_gate_held_it_and_not_its_hand_pause() {
+    let y = Yielding::default();
+    let child = builder();
+    let guard = y.builder(group(&child));
+    assert_eq!(guard.held(), (Duration::ZERO, false), "no gate yet");
+    let gate = y.gate();
+    std::thread::sleep(Duration::from_millis(300));
+    let (held, holding) = guard.held();
+    assert!(holding && held >= Duration::from_millis(300), "a gate holds it: {held:?}");
+    pause_by_hand(&guard, &child);
+    let (by_gate, holding) = guard.held();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!holding && guard.held().0 == by_gate, "a hand pause's time is the hand's: {:?}", guard.held());
+    guard.manual(false);
+    drop(gate);
+    let (held, holding) = guard.held();
+    assert!(!holding && held >= Duration::from_millis(300) && held < Duration::from_millis(550), "{held:?}");
+    assert_eq!(guard.held_clock().held(), held, "the clock's handle reads the same");
+    end(child);
+}
