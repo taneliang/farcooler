@@ -1159,3 +1159,26 @@ async fn an_agent_never_has_the_runner_attest_a_device() {
     let person = factory(&r.svc, Some("phone-o"), Scope::HostAdmin);
     assert_eq!(refused(&person, attest()).await, None, "a person");
 }
+
+/// ov-1288, fix round 1: a caller in none of this daemon's panes has no lane to
+/// keep to, so it removes as a person does: a process under an agent outside
+/// the runner (the owner's claude in Terminal, a landing gate's test run under
+/// another runner's agent) and a command an agent left behind, orphaned to pid
+/// 1. Before, both were refused, and with them every CLI test a landing gate
+/// ran against a scratch daemon. A copy of perl named `claude` stands in.
+#[tokio::test]
+async fn a_caller_in_none_of_the_runners_panes_removes_as_a_person() {
+    let r = runner().await;
+    let dir = tempfile::tempdir().unwrap();
+    let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let under = crate::test_support::Outside::under(&claude, 6595);
+    let left = crate::test_support::Outside::left_by(&claude, 6596);
+    for (what, pid) in [("under an agent outside", under.pid), ("left behind", left.pid)] {
+        let wt = r.svc.create_worktree(repo, &format!("wt-{}", pid), &format!("feature/{pid}"), "main").await.unwrap();
+        std::fs::write(std::path::Path::new(&wt.worktree_path).join("wip.txt"), "unsaved").unwrap();
+        let caller = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pid));
+        assert_eq!(remove(&caller, &wt).await, None, "{what}");
+        assert!(r.svc.store.get_worktree(wt.id).is_err(), "{what}: removed");
+    }
+}

@@ -303,7 +303,7 @@ impl Handler for RpcFactory {
             if session.is_closed() {
                 return error_response(req.request_id, DomainError::AuthRequired);
             }
-            if let Err(err) = crate::person_access::refuse_a_device_named_from_a_pane(&rpc.service, &rpc.peer, rpc.caller_pid, &vouched).await {
+            if let Err(err) = crate::person_access::refuse_a_device_named_from_a_pane(&rpc.service, &rpc.peer, rpc.caller_pid, &req.method, &vouched).await {
                 return error_response(req.request_id, err);
             }
             rpc.handle(req).await

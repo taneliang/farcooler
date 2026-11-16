@@ -540,8 +540,13 @@ pub async fn socket_person_only(svc: &Service, peer: &Peer, caller_pid: Option<i
 /// root's `sshd`, the Mac app), by the walk `refuse_admin_from_pane` makes. A
 /// connection with no preamble, the app's and the CLI's own, isn't asked.
 /// `vouched` keeps a person's verdict for the connection, whose pid can't change.
-pub async fn refuse_a_device_named_from_a_pane(svc: &Service, peer: &Peer, caller_pid: Option<i32>, vouched: &std::sync::OnceLock<()>) -> Result<()> {
-    if peer.client_id.is_none() || caller_pid.is_none() || vouched.get().is_some() {
+///
+/// A Claude sign-in isn't asked here: `people::may_sign_in` refuses the same
+/// callers, and stricter, in words the apps and the CLI show
+/// (`own_device_only` from a pane, `person_only` from an agent outside one),
+/// which a refusal here would hide behind a bare `scope-denied`.
+pub async fn refuse_a_device_named_from_a_pane(svc: &Service, peer: &Peer, caller_pid: Option<i32>, method: &str, vouched: &std::sync::OnceLock<()>) -> Result<()> {
+    if peer.client_id.is_none() || caller_pid.is_none() || vouched.get().is_some() || signs_in(method) {
         return Ok(());
     }
     refuse_admin_from_pane(svc, caller_pid).await.map_err(|_| {
@@ -550,6 +555,13 @@ pub async fn refuse_a_device_named_from_a_pane(svc: &Service, peer: &Peer, calle
     })?;
     let _ = vouched.set(());
     Ok(())
+}
+
+/// Whether `method` is a Claude sign-in call, each of which refuses a pane or
+/// an agent itself (`people::may_sign_in`).
+fn signs_in(method: &str) -> bool {
+    use farcooler_protocol::method::Method;
+    matches!(Method::parse(method), Some(Method::ClaudeSignIn | Method::ClaudeSignInFinish | Method::ClaudeSignInCancel | Method::ClaudeSignOut))
 }
 
 #[cfg(test)]

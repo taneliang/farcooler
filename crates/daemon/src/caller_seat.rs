@@ -97,16 +97,16 @@ pub(crate) fn authorize_terminal(svc: &crate::service::Service, caller: Seat, ta
 /// a ticket names: any pane may relink its ticket (`task.update`). The
 /// workspace's orchestrator, any its workspace has claimed. An unclaimed tree
 /// is no orchestrator's to remove, since any workspace's may claim it
-/// (`authorize_worktree_assign`). An agent outside Far Cooler or an unreadable
-/// caller can't be placed in a lane, so it removes none. Removing kills the
-/// tree's uncommitted work, and before this any pane could remove another
-/// lane's by typing back its name.
+/// (`authorize_worktree_assign`). A caller in none of this daemon's panes is a
+/// person here (`pane_of_ours`). Removing kills the tree's uncommitted work,
+/// and before this any pane could remove another lane's by typing back its
+/// name.
 pub(crate) fn authorize_worktree_removal(
     svc: &crate::service::Service,
     caller: Seat,
     worktree: &farcooler_store::models::Worktree,
 ) -> farcooler_core::error::Result<()> {
-    let Some(term) = agent_pane(svc, caller)? else { return Ok(()) };
+    let Some(term) = pane_of_ours(svc, caller)? else { return Ok(()) };
     if term.worktree_id == worktree.id || orchestrator_of(svc, &term, worktree).is_some() {
         return Ok(());
     }
@@ -125,7 +125,7 @@ pub(crate) fn authorize_worktree_assign(
     worktree: &farcooler_store::models::Worktree,
     to: uuid::Uuid,
 ) -> farcooler_core::error::Result<()> {
-    let Some(term) = agent_pane(svc, caller)? else { return Ok(()) };
+    let Some(term) = pane_of_ours(svc, caller)? else { return Ok(()) };
     match (worktree.workspace_id, orchestrator_of(svc, &term, worktree)) {
         (Some(_), Some(_)) => Ok(()),
         (None, None) if term.role == farcooler_store::models::TerminalRole::Orchestrator
@@ -139,13 +139,20 @@ fn seat_denied() -> farcooler_core::error::DomainError {
     farcooler_core::error::DomainError::ScopeDenied { needed: "workspace orchestrator" }
 }
 
-/// The pane an agent `caller` runs in; `None` for a person. An agent outside
-/// Far Cooler, or an unreadable caller, is refused: it can't be placed.
-fn agent_pane(svc: &crate::service::Service, caller: Seat) -> farcooler_core::error::Result<Option<farcooler_store::models::Terminal>> {
+/// The pane of this daemon's that an agent `caller` runs in, which the
+/// worktree rules hold to its lane; `None` for any other caller, whose word is
+/// a person's. Only a pane is placed in a lane, so only a pane can be held to
+/// one: a caller this daemon's panes don't hold (a person's terminal, an agent
+/// outside Far Cooler or another runner's, a test run under one, `Agent(None)`;
+/// a chain the walk can't read, `Unreadable`) has no lane to keep to, and
+/// refusing it refused a person's `worktree remove` from a terminal under an
+/// agent, and every landing gate's CLI test against a scratch daemon (ov-1288,
+/// fix round 1). The limit, as the module says: an agent that detaches its
+/// command from its pane (`(cmd &)`, `nohup`) reads as unknown, so is let by.
+fn pane_of_ours(svc: &crate::service::Service, caller: Seat) -> farcooler_core::error::Result<Option<farcooler_store::models::Terminal>> {
     match caller {
-        Seat::Person => Ok(None),
         Seat::Agent(Some(pane)) => svc.store.get_terminal(pane).map(Some).map_err(|_| seat_denied()),
-        Seat::Agent(None) | Seat::Unreadable => Err(seat_denied()),
+        Seat::Person | Seat::Agent(None) | Seat::Unreadable => Ok(None),
     }
 }
 
