@@ -5,7 +5,8 @@
 //! from that fact, so the first run and a recovery after a crash take the same road. What a verb may
 //! do with no fact after a crash depends on its class: a read is read again and a fold is made again
 //! (`SafeFailure` runs the step anew), but an attempted push is never repeated and stays uncertain.
-//! A durable pre-send record lets a push interrupted while waiting for predecessor CI resume safely.
+//! A durable pre-send record lets a push interrupted while waiting for predecessor CI resume safely. A predecessor
+//! whose CI went red doesn't hold the push back while the target is still at the head the gate ran on (ov-1291).
 use super::*;
 use super::coding::{sha, wait_times};
 use farcooler_store::board_ci::CiStatus;
@@ -357,8 +358,9 @@ impl Exec {
         }
         Ok(None) // Older admitted folds did not retain this dependency.
     }
-    /// A speculative gate cannot publish until the group that lent it its base succeeds. Its
-    /// own pinned CI step decides, including every additional workflow and any permitted rerun.
+    /// A speculative gate cannot publish until the group that lent it its base has its answer: `true` when it
+    /// landed green, `false` when it failed or was cancelled after its push. That group's own pinned CI step
+    /// decides, including every additional workflow and any permitted rerun.
     async fn wait_landing(&self, binding: &Binding, predecessor: &(String, String), base: &str,
         cancel: &tokio::sync::watch::Receiver<bool>) -> Result<bool>
     {
@@ -692,14 +694,13 @@ impl Exec {
             self.write_fact(binding, "base_moved", &candidate, serde_json::json!({ "base": base, "target": before, "sent": false }))?;
             return self.reconcile_verb(binding, &StageKind::Push).await;
         }
+        // A previous landing whose CI went red is still the target's head, and the gate ran on top of it: pushing
+        // can't make the target worse, and a fix for it lands now. Starting over would fold and gate on the same
+        // red head again, and the group's own CI decides either way (ov-1291).
+        let mut red_base = false;
         if let Some(predecessor) = predecessor {
             match self.wait_landing(binding, &predecessor, &base, &cancel).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    self.write_fact(binding, "base_moved", &candidate,
-                        serde_json::json!({ "base": base, "sent": false, "why": "Previous landing CI failed" }))?;
-                    return self.reconcile_verb(binding, &StageKind::Push).await;
-                }
+                Ok(passed) => red_base = !passed,
                 Err(error) => {
                     tracing::warn!(%error, "previous landing has not passed; nothing was sent");
                     return Ok(if *cancel.borrow() { Outcome::Interrupted } else { Outcome::SafeFailure });
@@ -745,7 +746,9 @@ impl Exec {
         }
         match classify_push(exit, &porcelain, after.as_deref(), &candidate) {
             PushVerdict::Landed => {
-                self.write_fact(binding, "passed", &candidate, serde_json::json!({ "base": base, "log": digest(&output) }))?;
+                let mut detail = serde_json::json!({ "base": base, "log": digest(&output) });
+                if red_base { detail["red_base"] = true.into(); }
+                self.write_fact(binding, "passed", &candidate, detail)?;
                 // The local copy of the target follows, when it was where this push started. Best effort: the remote is the record.
                 // Only for a landing on this machine: a network landing never writes a ref in the shared repository, whose
                 // main belongs to its owner (ov-1058 review).

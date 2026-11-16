@@ -900,9 +900,10 @@ async fn a_ci_wait_that_names_its_own_workflow_again_or_nothing_sound_is_refused
 }
 
 /// ov-1209: a controlled first CI stays pending until the second gate has run. The remote must
-/// stay at the first push in that interval. A red first CI makes the second group base again.
+/// stay at the first push in that interval. A red first CI still lets the second group push, since it
+/// was gated on top of that red head, and its own CI decides (ov-1291).
 #[tokio::test]
-async fn next_group_gates_during_ci_and_rebases_after_red() {
+async fn next_group_gates_during_ci_and_pushes_over_a_red_one() {
     for red in [true, false] {
         let (dir, mut runtime) = lander("pass").await;
         let script = dir.path().join("adapter.py");
@@ -972,8 +973,10 @@ async fn next_group_gates_during_ci_and_rebases_after_red() {
         assert_eq!(phase_of(&state, "two"), Some(Phase::Done));
         let bases = runtime.store.workflow_outbox("w").unwrap().iter().filter(|s|
             s.effect.item == second && s.effect.kind == EffectKind::Execute(StageKind::AwaitBase)).count();
-        assert_eq!(bases, if red { 2 } else { 1 }, "red previous CI returns the waiting group to base");
-        assert_eq!(outbox(&runtime, StageKind::Push), if red { 4 } else { 3 }, "only the interrupted pre-send effect was retried");
+        assert_eq!(bases, 1, "a red previous CI doesn't send the gated group back to its base step");
+        assert_eq!(outbox(&runtime, StageKind::Push), 3, "only the interrupted pre-send effect was retried");
+        assert_eq!(settled(&runtime, StageKind::Push).pointer("/detail/red_base").is_some(), red, "the push says it went over a red head");
+        assert_eq!(outbox(&runtime, StageKind::Build), 2, "no member was sent back to build");
         let sends = std::fs::read_dir(runtime.root.join("receipts")).unwrap().filter(|e|
             e.as_ref().unwrap().path().to_string_lossy().ends_with(".push-process.json")).count();
         assert_eq!(sends, 2, "exactly one actual push per group, including after recovery");
