@@ -26,7 +26,7 @@ on:
     # folded commit there as soon as the fold succeeds, so CI runs while its
     # local gate does, and moves main to that same commit only once this run
     # passes. Main's own run of that commit then runs nothing (see `changes`).
-    branches: [main, 'landing/**', ov-1304-ci-xcode-select] # TEMP ov-1304
+    branches: [main, 'landing/**', ov-1304-ci-xcode-select] # TEMP ov-1304 (run 2)
     # The canary workflow's own baseline commit touches only this file. Without
     # this, its run supersedes and cancels the CI of the commit it records.
     paths-ignore: ['proto/baseline/canary.proto']
