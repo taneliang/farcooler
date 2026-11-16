@@ -106,6 +106,19 @@ impl CommandHandle {
         if !admission.is_owner() { hide_environment(&mut value); }
         Ok(value)
     }
+    /// `Logs`: one item's retained process tails, read like `read_get`, off the single writer (ov-1298).
+    pub(crate) async fn read_logs(&self, admission:Admission, item:String) -> Result<serde_json::Value> {
+        if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
+        let action = Action::Logs { item: item.clone() };
+        admission.recheck().and_then(|()| admission.permits(&action)).map_err(Error::Domain)?;
+        let reader = self.reader.clone();
+        let workspace = admission.workspace();
+        let value = tokio::task::spawn_blocking(move || reader.item_process_logs(&workspace, &item))
+            .await.map_err(|_| Error::Refused("workflow read worker failed"))??;
+        admission.recheck().and_then(|()| admission.permits(&action)).map_err(Error::Domain)?;
+        if self.is_closed() { return Err(Error::Refused("runtime inbox closed")); }
+        Ok(value)
+    }
     pub(crate) async fn wire_command(&self, admission: Admission, action: Action) -> Result<serde_json::Value> {
         let (send, receive) = oneshot::channel();
         self.send.send(Inbox::Wire(Box::new(admission), Box::new(action), send)).await
@@ -133,13 +146,14 @@ impl Runtime {
         if matches!(action, Action::Get) {
             return self.exec.read_get(workspace);
         }
+        if let Action::Logs { item } = &action { return self.exec.item_process_logs(workspace, item); }
         let mutation = match &action {
             Action::PublicationGrant { mutation, .. } | Action::Rollback { mutation, .. } | Action::Publish { mutation, .. } | Action::Enqueue { mutation, .. }
             | Action::Review { mutation, .. } | Action::Approve { mutation, .. } | Action::Cancel { mutation, .. } | Action::Retry { mutation, .. }
             | Action::ResolveCancellation { mutation, .. } | Action::Queue { mutation, .. } | Action::Leave { mutation, .. } | Action::Settle { mutation, .. } | Action::Resolve { mutation, .. }
             | Action::Track { mutation, .. } | Action::Move { mutation, .. } | Action::Start { mutation, .. }
             | Action::SendBack { mutation, .. } | Action::Close { mutation, .. } | Action::Reopen { mutation, .. } | Action::Landed { mutation, .. } => mutation,
-            Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
+            Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
         };
         if !valid_id(&mutation.id) || mutation.id.len() > 100 { return Err(Error::Refused("invalid command id")); }
         let id = format!("wire:{principal}:{}", mutation.id);
@@ -350,7 +364,7 @@ impl Runtime {
                     let input = input(Command::Reopen { item:item.clone(),definition,policy_pin,resource:Exec::item_resource(workspace, item) },Grant::Controller);
                     self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Apply(&input))?
                 }
-                Action::Get | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
+                Action::Get | Action::Logs { .. } | Action::Propose { .. } | Action::Drafts { .. } => unreachable!(),
             }
         };
         // A board tracks its cards once it has a published workflow, so the cards already on it come under the engine now (ov-962).

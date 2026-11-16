@@ -15,6 +15,10 @@ pub struct Mutation {
 #[serde(tag = "action", deny_unknown_fields)]
 pub enum Action {
     Get,
+    /// Every retained process log of one item, failed or not, in every run, live, archived or removed (ov-1298).
+    /// `Get` carries tails only for live items' last effect per stage, so a long history still loads; this reads the
+    /// rest. A read under `workflow.get`'s authority: an older runner refuses it as an unknown action.
+    Logs { item: String },
     /// Owner in person grants or revokes this workspace orchestrator's publication authority.
     PublicationGrant { mutation: Mutation, enabled: bool },
     /// Restore the last publication's previous immutable bundle. Owner in person only.
@@ -84,7 +88,7 @@ fn is_false(b: &bool) -> bool { !*b }
 impl Action {
     pub fn method(&self) -> &'static str {
         match self {
-            Self::Get => "workflow.get",
+            Self::Get | Self::Logs { .. } => "workflow.get",
             Self::PublicationGrant { .. } | Self::Rollback { .. } | Self::Publish { .. } => "workspace.set_workflow",
             Self::Enqueue { .. } => "workflow.enqueue",
             Self::Approve { .. } => "workflow.approve",

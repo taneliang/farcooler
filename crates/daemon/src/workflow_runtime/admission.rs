@@ -181,7 +181,7 @@ impl Admission {
             // Read now, at consumption too: a role or a lead taken away while a command waits refuses it.
             let store = &self.service.store;
             return match action {
-                Action::Get => Ok(()),
+                Action::Get | Action::Logs { .. } => Ok(()),
                 // A gate decides who decides it: the reducer takes the decision only from the name it waits on,
                 // which `deciders` holds only for whoever it names (ov-1002).
                 Action::Approve { .. } | Action::Review { .. } => Ok(()),

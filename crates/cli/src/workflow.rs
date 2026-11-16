@@ -47,6 +47,9 @@ impl Publication {
 pub enum WorkflowCmd {
     /// Read current state; --full includes definitions and notification history.
     Get { workspace: Uuid, #[arg(long)] full: bool },
+    /// Read one ticket's process logs, from every run, failed or not: the tails `get` leaves out for archived
+    /// and removed tickets and for a live ticket's earlier steps. Each names its whole log file too.
+    Logs { workspace: Uuid, item: String },
     /// Restore the previous workflow bundle, retaining a new audit entry. Owner in person only.
     Rollback { workspace: Uuid, #[arg(long, default_value="Restore previous workflow")] reason:String },
     /// Admit against the exact configuration pin selected from get.
@@ -138,6 +141,7 @@ impl WorkflowCmd {
         Ok(match self {
             Self::Rollback { .. } => return Err("rollback is prepared from current state".into()),
             Self::Get { workspace, .. } => (workspace,Action::Get),
+            Self::Logs { workspace, item } => (workspace,Action::Logs { item }),
             Self::Enqueue { workspace,item,pin,identity } => (workspace,Action::Enqueue { mutation:identity.mutation(),item,pin }),
             Self::Approve { workspace,item,run,pin,candidate,identity } => (workspace,Action::Approve { mutation:identity.mutation(),item,run,pin,candidate }),
             Self::Review { workspace,item,run,pin,evidence,passed,identity } => {
@@ -233,7 +237,7 @@ async fn read_deadline<T>(future:impl std::future::Future<Output=T>) -> Result<T
 pub async fn send(link:&mut crate::Link, workspace:Uuid, action:Action, json:bool) -> Fallible {
     if !link.daemon_capabilities().iter().any(|c| c == capability::WORKFLOW_COMMANDS) { return Err("runner lacks workflow commands".into()); }
     let call = link.call(request(workspace,&action)?);
-    let reply = if matches!(action, Action::Get) { read_deadline(call).await?? } else { call.await? };
+    let reply = if matches!(action, Action::Get | Action::Logs { .. }) { read_deadline(call).await?? } else { call.await? };
     let result::Value::WorkflowReply(reply) = expect_value(reply.value)? else { return Err("unexpected workflow reply".into()) };
     if reply.schema != 1 { return Err("unsupported workflow reply schema".into()); }
     let value:serde_json::Value = serde_json::from_str(&reply.json)?;
@@ -338,6 +342,19 @@ mod tests {
     fn workflow_get_accepts_full() {
         let args = ["farcooler", "workflow", "get", "00000000-0000-0000-0000-000000000000", "--full", "--json"];
         assert!(crate::Cli::try_parse_from(args).is_ok());
+    }
+    #[test]
+    fn workflow_logs_reads_one_items_tails_under_workflow_get() {
+        // ov-1298: `get` carries live tails only; an archived ticket's are read by name.
+        let cli = crate::Cli::try_parse_from(["farcooler", "workflow", "logs", "00000000-0000-0000-0000-000000000000", "ov-9"]).unwrap();
+        let crate::Command::Workflow(cmd) = cli.command else { panic!("not a workflow command") };
+        let (_, action) = cmd.action().unwrap();
+        assert_eq!(action, Action::Logs { item: "ov-9".into() });
+        let r = request(Uuid::nil(), &action).unwrap();
+        assert_eq!(r.method, "workflow.get");
+        let Some(request::Payload::WorkflowCommand(p)) = r.payload else { panic!() };
+        assert_eq!(p.json, r#"{"action":"Logs","item":"ov-9"}"#);
+        assert_eq!(farcooler_protocol::workflow_commands::parse(&p.json).unwrap(), action);
     }
     #[test]
     fn watch_asks_for_the_item_only_and_announces_the_panes_size() {

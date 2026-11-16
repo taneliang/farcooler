@@ -162,6 +162,14 @@ impl Store {
         ).optional()?;
         raw.map(|s| serde_json::from_str(&s)).transpose().map_err(Into::into)
     }
+    /// Test-only: replace a workspace's state as it stands, outside the reducer, for a fixture that needs a
+    /// history the reducer would take thousands of steps to build, such as hundreds of archived runs (ov-1298).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn workflow_state_for_tests(&self, state: &State) -> Result<()> {
+        self.conn().execute("UPDATE workflow_states SET state = ?2 WHERE workspace = ?1",
+            params![state.workspace, serde_json::to_string(state)?])?;
+        Ok(())
+    }
     /// The card a run's item is, if it is one (a standalone item has none).
     pub fn workflow_item_task(&self, workspace: &str, item: &str) -> Result<Option<uuid::Uuid>> {
         let raw: Option<Option<Vec<u8>>> = self.conn().query_row(

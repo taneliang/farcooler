@@ -16,61 +16,85 @@ impl Exec {
 
     /// Read only engine-derived paths, never the path text in a receipt. Old receipts did not name
     /// their log, but used the same names, so their failures can be inspected too.
+    ///
+    /// `workflow.get` carries tails for live items only, and for each live item only its last effect
+    /// per stage: the reply is read on every plan load, and the outbox keeps every finished run (ov-1298).
+    /// An archived or removed item's tails, and a live item's older ones, are `workflow.get`'s `Logs`.
     pub(super) fn failed_process_logs(&self, workspace: &str) -> Result<Vec<serde_json::Value>> {
-        let mut logs = Vec::new();
         let state = self.state(workspace)?;
-        for stored in self.store.workflow_outbox(workspace)? {
-            let effect = &stored.effect;
-            let Some(path) = self.effect_log(effect) else { continue };
-            let journal = self.bytes(&self.journal_path(effect)).ok()
-                .and_then(|raw| serde_json::from_slice::<Journal>(&raw).ok());
-            let fact_path = self.root.join("receipts").join(format!("{}.process.json", digest(effect)));
-            let fact = self.bytes(&fact_path).ok()
-                .and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok());
-            let exit = fact.as_ref().and_then(|f| f["exit"].as_i64());
-            let failed_run = state.as_ref().and_then(|s| s.items.get(&effect.item)).is_some_and(|i|
-                i.run == effect.run && matches!(i.phase, Phase::Failed | Phase::Uncertain));
-            let failed = failed_run || exit.is_some_and(|code| code != 0) || journal.is_some_and(|j|
-                matches!(j.outcome, Outcome::Rejected(_) | Outcome::SafeFailure | Outcome::SafeFailureBecause(_)
-                    | Outcome::Interrupted | Outcome::Uncertain));
-            if !failed { continue; }
-            // Old daemons left unbounded logs. Inspect their tail without reading the entire file.
-            use std::io::{Read, Seek, SeekFrom};
-            let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path)?;
-            let metadata = file.metadata()?;
-            if !metadata.is_file() || metadata.nlink() != 1 { continue; }
-            let offset = metadata.len().saturating_sub(TAIL_BYTES as u64);
-            file.seek(SeekFrom::Start(offset))?;
-            let mut bytes = Vec::new();
-            file.take(TAIL_BYTES as u64).read_to_end(&mut bytes)?;
-            // Seeking may split a UTF-8 character. Skip its continuation bytes rather than
-            // manufacture a replacement character for an otherwise valid log.
-            let mut first = 0;
-            if offset > 0 {
-                while first < bytes.len() && bytes[first] & 0xc0 == 0x80 { first += 1; }
-            }
-            let text = String::from_utf8_lossy(&bytes[first..]);
-            let mut lines = text.lines().rev();
-            let mut tail = lines.by_ref().take(TAIL_LINES).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
-            let mut truncated = offset > 0 || lines.next().is_some();
-            // Lossy decoding can expand invalid input, so enforce the final byte bound too.
-            let mut cut = tail.len().saturating_sub(TAIL_BYTES);
-            while !tail.is_char_boundary(cut) { cut += 1; }
-            if cut > 0 { tail = tail[cut..].to_owned(); truncated = true; }
-            logs.push(serde_json::json!({"item":effect.item, "run":effect.run, "effect":effect.id,
-                "stage":effect.kind, "log_path":path, "exit":exit, "tail":tail, "tail_truncated":truncated}));
+        let Some(live) = state.as_ref().map(|s| &s.items) else { return Ok(Vec::new()) };
+        let outbox = self.store.workflow_outbox(workspace)?;
+        // The outbox is ordered by revision, then id, so a later effect of the same stage replaces an earlier one.
+        let mut last = std::collections::BTreeMap::new();
+        for (n, stored) in outbox.iter().enumerate() {
+            if live.contains_key(&stored.effect.item) { last.insert((stored.effect.item.as_str(), stage_key(&stored.effect.kind)), n); }
         }
-        let mut budget = 0;
-        for log in &logs { budget += serde_json::to_vec(&log["tail"])?.len(); }
-        // The outbox is ordered by revision, then id: omit oldest tails first, keeping
-        // every path available for inspecting the complete retained process output.
-        for log in &mut logs {
-            if budget <= REPLY_TAIL_BYTES { break; }
-            budget -= serde_json::to_vec(&log["tail"])?.len() - 2; // empty JSON string still costs two bytes
-            log["tail"] = "".into();
-            log["tail_truncated"] = true.into();
+        let mut chosen: Vec<_> = last.into_values().collect();
+        chosen.sort_unstable();
+        let mut logs = Vec::new();
+        for n in chosen {
+            if let Some(log) = self.process_log_entry(state.as_ref(), &outbox[n].effect, false)? { logs.push(log); }
         }
+        budget_tails(&mut logs)?;
         Ok(logs)
+    }
+
+    /// Every retained process log of one item, in every run, failed or not, live, archived or removed:
+    /// what `workflow.get`'s reply leaves out, read on request (ov-1298). Budgeted like the reply.
+    pub(super) fn item_process_logs(&self, workspace: &str, item: &str) -> Result<serde_json::Value> {
+        let state = self.state(workspace)?;
+        let mut logs = Vec::new();
+        for stored in self.store.workflow_outbox(workspace)?.iter().filter(|s| s.effect.item == item) {
+            if let Some(log) = self.process_log_entry(state.as_ref(), &stored.effect, true)? { logs.push(log); }
+        }
+        budget_tails(&mut logs)?;
+        let live = state.as_ref().is_some_and(|s| s.items.contains_key(item));
+        let archived = state.as_ref().is_some_and(|s| s.archive.contains_key(item));
+        Ok(serde_json::json!({"schema":1, "item":item, "live":live, "archived":archived, "process_logs":logs}))
+    }
+
+    /// One effect's log entry: `None` without a log, or, unless `all`, when the effect did not fail.
+    fn process_log_entry(&self, state: Option<&State>, effect: &Effect, all: bool) -> Result<Option<serde_json::Value>> {
+        let Some(path) = self.effect_log(effect) else { return Ok(None) };
+        let journal = self.bytes(&self.journal_path(effect)).ok()
+            .and_then(|raw| serde_json::from_slice::<Journal>(&raw).ok());
+        let fact_path = self.root.join("receipts").join(format!("{}.process.json", digest(effect)));
+        let fact = self.bytes(&fact_path).ok()
+            .and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok());
+        let exit = fact.as_ref().and_then(|f| f["exit"].as_i64());
+        let failed_run = state.and_then(|s| s.items.get(&effect.item)).is_some_and(|i|
+            i.run == effect.run && matches!(i.phase, Phase::Failed | Phase::Uncertain));
+        let failed = failed_run || exit.is_some_and(|code| code != 0) || journal.is_some_and(|j|
+            matches!(j.outcome, Outcome::Rejected(_) | Outcome::SafeFailure | Outcome::SafeFailureBecause(_)
+                | Outcome::Interrupted | Outcome::Uncertain));
+        if !failed && !all { return Ok(None); }
+        // Old daemons left unbounded logs. Inspect their tail without reading the entire file.
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.nlink() != 1 { return Ok(None); }
+        let offset = metadata.len().saturating_sub(TAIL_BYTES as u64);
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = Vec::new();
+        file.take(TAIL_BYTES as u64).read_to_end(&mut bytes)?;
+        // Seeking may split a UTF-8 character. Skip its continuation bytes rather than
+        // manufacture a replacement character for an otherwise valid log.
+        let mut first = 0;
+        if offset > 0 {
+            while first < bytes.len() && bytes[first] & 0xc0 == 0x80 { first += 1; }
+        }
+        let text = String::from_utf8_lossy(&bytes[first..]);
+        let mut lines = text.lines().rev();
+        let mut tail = lines.by_ref().take(TAIL_LINES).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        let mut truncated = offset > 0 || lines.next().is_some();
+        // Lossy decoding can expand invalid input, so enforce the final byte bound too.
+        let mut cut = tail.len().saturating_sub(TAIL_BYTES);
+        while !tail.is_char_boundary(cut) { cut += 1; }
+        if cut > 0 { tail = tail[cut..].to_owned(); truncated = true; }
+        let mut log = serde_json::json!({"item":effect.item, "run":effect.run, "effect":effect.id,
+            "stage":effect.kind, "log_path":path, "exit":exit, "tail":tail, "tail_truncated":truncated});
+        if all { log["failed"] = failed.into(); }
+        Ok(Some(log))
     }
 
     /// Logs have exactly the retention of their process/journal receipts. Never age out evidence
@@ -103,31 +127,145 @@ impl Exec {
     }
 }
 
+/// Which stage an effect is, for keeping only the last of each: a decision's input differs every time.
+fn stage_key(kind: &EffectKind) -> String {
+    match kind {
+        EffectKind::Decide { policy, .. } => format!("decide:{}", serde_json::to_string(policy).unwrap_or_default()),
+        EffectKind::Execute(stage) => format!("execute:{stage:?}"),
+        EffectKind::Stop { operation } => format!("stop:{operation}"),
+    }
+}
+
+/// The outbox is ordered by revision, then id: omit oldest tails first, keeping every path
+/// available for inspecting the complete retained process output.
+fn budget_tails(logs: &mut [serde_json::Value]) -> Result<()> {
+    let mut budget = 0;
+    for log in logs.iter() { budget += serde_json::to_vec(&log["tail"])?.len(); }
+    for log in logs.iter_mut() {
+        if budget <= REPLY_TAIL_BYTES { break; }
+        budget -= serde_json::to_vec(&log["tail"])?.len() - 2; // empty JSON string still costs two bytes
+        log["tail"] = "".into();
+        log["tail_truncated"] = true.into();
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use super::super::tests::{enqueue, finish};
 
     async fn failed_logs(count: usize, output: &str) -> (tempfile::TempDir, Runtime) {
+        failed_logs_in("w", count, output).await
+    }
+
+    async fn failed_logs_in(workspace: &str, count: usize, output: &str) -> (tempfile::TempDir, Runtime) {
         let dir = tempfile::tempdir().unwrap();
         let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
         let controller = runtime.controller();
         for n in 0..count {
             let receipt = runtime.submit(&controller, Request {
-                id: format!("enqueue-{n}"), workspace: "w".into(), expected_revision: n as u64,
+                id: format!("enqueue-{n}"), workspace: workspace.into(), expected_revision: n as u64,
                 sequence: n as u64 + 1,
                 command: Command::Enqueue { item: format!("item-{n:03}"), definition: coding_definition(false),
-                    policy_pin: "policy/v1".into(), resource: Exec::item_resource("w", &format!("item-{n:03}")),
+                    policy_pin: "policy/v1".into(), resource: Exec::item_resource(workspace, &format!("item-{n:03}")),
                     dependencies: BTreeSet::new(), initial_candidate: None },
             }, 1).unwrap();
             assert!(receipt.result.is_ok(), "{:?}", receipt.result);
         }
-        for stored in runtime.store.workflow_outbox("w").unwrap() {
+        for stored in runtime.store.workflow_outbox(workspace).unwrap() {
             let key = digest(&stored.effect);
             std::fs::write(runtime.root.join("receipts").join(format!("{key}.output")), output).unwrap();
             std::fs::write(runtime.root.join("receipts").join(format!("{key}.process.json")), br#"{"exit":1}"#).unwrap();
         }
         (dir, runtime)
+    }
+
+    /// Move the first `count` items to the archive, as the reducer does once a finished item has been seen.
+    fn archive_first(runtime: &Runtime, workspace: &str, count: usize) {
+        let mut state = runtime.state(workspace).unwrap().unwrap();
+        for n in 0..count {
+            let id = format!("item-{n:03}");
+            let item = state.items.remove(&id).unwrap();
+            state.archive.insert(id, farcooler_workflow::Archived { closed: None, phase: Phase::Cancelled, candidate: item.candidate, group: None });
+        }
+        runtime.store.workflow_state_for_tests(&state).unwrap();
+        assert_eq!(runtime.state(workspace).unwrap().unwrap().archive.len(), count);
+    }
+
+    fn frame_len(reply: &serde_json::Value) -> usize {
+        use farcooler_protocol::v1 as pb;
+        let envelope = pb::WireEnvelope {
+            protocol_version: farcooler_protocol::PROTOCOL_VERSION,
+            message_id: farcooler_protocol::ids::new_id(),
+            body: Some(pb::wire_envelope::Body::Response(pb::Response {
+                request_id: farcooler_protocol::ids::new_id(),
+                outcome: Some(pb::response::Outcome::Result(pb::Result {
+                    value: Some(pb::result::Value::WorkflowReply(pb::WorkflowReply { schema: 1, json: reply.to_string() })),
+                })),
+            })),
+        };
+        farcooler_protocol::framing::encode(&envelope).expect("the reply must fit the protocol cap").len()
+    }
+
+    #[tokio::test]
+    async fn workflow_get_with_a_long_history_carries_live_tails_only() {
+        // Nov 16: 351 entries, mostly finished runs, put the plan's reply past the 1 MiB frame cap (ov-1298).
+        let output = (0..400).map(|n| format!("failure evidence line {n} {}\n", "x".repeat(200))).collect::<String>();
+        let (_dir, runtime) = failed_logs(420, &output).await;
+        archive_first(&runtime, "w", 400);
+        let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+        let bytes = frame_len(&reply);
+        eprintln!("workflow get with 400 archived and 20 live runs: {bytes} wire bytes");
+        assert!(bytes < farcooler_protocol::MAX_CONTROL_ENVELOPE_BYTES / 2, "{bytes} bytes is not under half the frame cap");
+        let logs = reply["process_logs"].as_array().unwrap();
+        let items: BTreeSet<_> = logs.iter().map(|log| log["item"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(items, (400..420).map(|n| format!("item-{n:03}")).collect::<BTreeSet<_>>(), "live items only");
+        for log in logs {
+            let tail = log["tail"].as_str().unwrap();
+            assert!(tail.lines().last().unwrap().starts_with("failure evidence line 399 "), "the newest line stays");
+            assert!(tail.len() > 7 * 1024, "a live tail is whole, {} bytes", tail.len());
+        }
+    }
+
+    #[tokio::test]
+    async fn an_archived_items_tail_is_read_on_request() {
+        let (_dir, runtime) = failed_logs(3, "first\nwhy it failed\n").await;
+        archive_first(&runtime, "w", 2);
+        let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+        assert!(reply["process_logs"].as_array().unwrap().iter().all(|log| log["item"] == "item-002"));
+        let logs = runtime.wire_command("w", "owner",
+            farcooler_protocol::workflow_commands::Action::Logs { item: "item-000".into() }).unwrap();
+        assert_eq!(logs["item"], "item-000");
+        assert_eq!(logs["archived"], true);
+        assert_eq!(logs["live"], false);
+        let log = &logs["process_logs"][0];
+        assert_eq!(log["tail"], "first\nwhy it failed");
+        assert_eq!(log["failed"], true);
+        assert_eq!(log["exit"], 1);
+        assert!(Path::new(log["log_path"].as_str().unwrap()).is_file());
+        // A name the board never held reads as no logs, not a refusal.
+        let none = runtime.wire_command("w", "owner",
+            farcooler_protocol::workflow_commands::Action::Logs { item: "never".into() }).unwrap();
+        assert_eq!(none["process_logs"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn an_archived_items_tail_is_read_over_rpc() {
+        use super::super::admission_tests::{factory, request, receipt};
+        use farcooler_transport::{Handler, Peer};
+        use farcooler_protocol::{v1::Scope, workflow_commands::Action};
+        let (_svc_dir, svc, repo) = crate::test_support::fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id;
+        let ws = workspace.to_string();
+        let (_dir, runtime) = failed_logs_in(&ws, 2, "why it failed\n").await;
+        archive_first(&runtime, &ws, 1);
+        let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+        let reply = receipt(&rpc.handle(request(workspace, &Action::Logs { item: "item-000".into() })).await);
+        assert_eq!(reply["archived"], true);
+        assert_eq!(reply["process_logs"][0]["tail"], "why it failed");
+        let get = receipt(&rpc.handle(request(workspace, &Action::Get)).await);
+        assert!(get["process_logs"].as_array().unwrap().iter().all(|log| log["item"] == "item-001"));
     }
 
     fn get_with_bounded_logs(runtime: &Runtime, count: usize) -> serde_json::Value {

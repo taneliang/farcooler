@@ -814,6 +814,11 @@ impl Rpc {
                 // Unmarked requests from shipped apps retain their original full schema.
                 let summary = req.accepts.iter().any(|v| v == "workflow_summary_v1");
                 let full = req.accepts.iter().any(|v| v == "workflow_full_v1");
+                if let Action::Logs { item } = action {
+                    let value = handle.read_logs(admission, item).await
+                        .map_err(|e| match e { crate::workflow_runtime::Error::Domain(said) => said, _ => DomainError::NotFound })?;
+                    return Ok(result::Value::WorkflowReply(farcooler_protocol::v1::WorkflowReply { schema:1, json:value.to_string() }));
+                }
                 let value = if matches!(action, Action::Get) {
                     handle.read_get(admission, full || !summary).await
                 } else { handle.wire_command(admission, action).await }
