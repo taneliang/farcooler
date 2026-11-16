@@ -408,16 +408,21 @@ jobs:
       - name: Check the runner has Xcode 27
         run: |
           # Selected explicitly, not left to the runner's default: some xcode-27
-          # runners resolve xcrun to the Command Line Tools SDK (ov-1304).
+          # runners resolve xcrun to the Command Line Tools SDK (ov-1304). An Xcode is
+          # taken only when its own xcrun finds the platform, newest declared path first.
           picked=""
-          for dir in "$(xcode-select -p 2>/dev/null)" /Applications/Xcode*.app/Contents/Developer; do
-            if [[ "$(DEVELOPER_DIR="$dir" xcodebuild -version 2>/dev/null | head -1)" == "Xcode 27."* ]]; then
-              picked="$dir"; export DEVELOPER_DIR="$dir"
+          xcrun --kill-cache || true
+          for dir in "${XCODE_27_DEVELOPER_DIR:-}" "$(xcode-select -p 2>/dev/null)" /Applications/Xcode*.app/Contents/Developer; do
+            [[ -d "$dir" ]] || continue
+            [[ "$(DEVELOPER_DIR="$dir" xcodebuild -version 2>/dev/null | head -1)" == "Xcode 27."* ]] || continue
+            if env -u SDKROOT DEVELOPER_DIR="$dir" xcrun --show-sdk-platform-path >/dev/null; then
+              picked="$dir"; unset SDKROOT; export DEVELOPER_DIR="$dir"
               echo "DEVELOPER_DIR=$dir" >> "$GITHUB_ENV"
               break
             fi
+            echo "Skipping $dir: its xcrun finds no Apple platform"
           done
-          [[ -n "${picked:-}" ]] || { echo "No Xcode 27 on this runner; set DEVELOPER_DIR."; exit 1; }
+          [[ -n "${picked:-}" ]] || { echo "No usable Xcode 27 on this runner; set DEVELOPER_DIR."; env | grep -iE 'sdk|developer|xcode'; xcrun -v --show-sdk-platform-path; exit 1; }
           xcodebuild -version
       - uses: actions/checkout@v4
       # The last of the setup that must pass: it is skipped when the Xcode
