@@ -57,6 +57,9 @@ use places::{Placed, Places, Pool};
 mod build_cleanup;
 #[cfg(test)]
 mod build_cleanup_tests;
+mod recovery_backoff;
+#[cfg(test)]
+mod recovery_backoff_tests;
 pub use coding::{AGENT_REVIEWER, CodingConfigExt,CodingConfig, CodingCommand, CodingHarness, CodingReviewer, CodingCi, CodingLanding, CodingPullRequest, LaunchFile, MAX_COMMAND_MS};
 pub use coding_execute::{CodingReviewReceipt, CodingCiReceipt, write_agent_verdict};
 mod wire_commands;
@@ -275,6 +278,8 @@ pub struct Runtime {
     /// Runs on a deleted board whose cancel the engine refused, so the sweep asks once and not on every pass: each
     /// refusal is a permanent receipt (ov-1047 review).
     cancel_refused: std::collections::BTreeSet<(String, String)>,
+    /// Uncertain effects the sweep couldn't recover, looked at less and less often (ov-1301).
+    recovery: recovery_backoff::RecoveryBackoff,
     scheduling: std::sync::Mutex<scheduling::Scheduler>,
     inbox: mpsc::Receiver<Inbox>,
     send: mpsc::Sender<Inbox>,
@@ -396,7 +401,7 @@ impl Runtime {
             #[cfg(test)] sweeps: 0, #[cfg(test)] fail_observe: Default::default(), #[cfg(test)] drained: 0,
             exec: Exec { yielding: crate::yielding::Yielding::at(&root), activities: Default::default(), places: Default::default(), root, store: std::sync::Arc::new(store), service_mode: false, resource, base, coding, launched: None, host: None,
                 seeding: Default::default(), active_trees: Default::default(), #[cfg(test)] user_home: None, #[cfg(test)] build_free_bytes: Some(u64::MAX) },
-            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), scheduling: Default::default(),
+            notice_wake: None, configuration_locks: Default::default(), shutdown: None, instance: Uuid::now_v7(), last_occupancy: None, trees_recovered: false, cancel_refused: Default::default(), recovery: Default::default(), scheduling: Default::default(),
             _writer: writer, _repository_writer: repository_writer, _landing_writer: landing_writer };
         runtime.validate_native_host()?;
         Ok(runtime)
@@ -686,11 +691,17 @@ impl Runtime {
         let started = std::time::Instant::now();
         let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
         for workspace in workspaces {
+            let mut uncertain = BTreeSet::new();
             for stored in self.store.workflow_outbox(workspace)? {
                 if self.shutdown.as_ref().is_some_and(|s| *s.borrow()) { return Ok(()); }
                 if !stored.active { continue; }
                 let effect = stored.effect;
                 if running.iter().any(|j| j.effect.id == effect.id && &j.workspace == workspace) { continue; }
+                // An Uncertain effect that recovery couldn't settle waits before it is looked at again (ov-1301).
+                if stored.dispatch_state == "uncertain" {
+                    uncertain.insert(effect.id.clone());
+                    if self.recovery.waiting(workspace, &effect.id, now_ms) { continue; }
+                }
                 let state = self.state(workspace)?.ok_or(Error::Refused("missing state"))?;
                 // A finished item has left live state and has nothing left to run.
                 let Some(item) = state.items.get(&effect.item) else { continue };
@@ -698,12 +709,15 @@ impl Runtime {
                 let selected = self.select_item_configuration(workspace, &effect.item, item);
                 if matches!(stored.dispatch_state.as_str(), "admitted" | "uncertain") {
                     if let Err(error) = selected {
-                        tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
-                        if stored.dispatch_state != "uncertain" && self.observe(workspace, &effect, Outcome::Uncertain, false, clock())? {
-                            *count += 1;
+                        if stored.dispatch_state != "uncertain" {
+                            tracing::warn!(effect = %effect.id, %error, "retained configuration unavailable; ownership remains uncertain");
+                            if self.observe(workspace, &effect, Outcome::Uncertain, false, clock())? { *count += 1; }
+                        } else {
+                            self.recovery.unsettled(workspace, &effect.id, Some(format!("retained configuration unavailable: {error}")), now_ms);
                         }
                         continue;
                     }
+                    self.recovery.looking();
                     let recovered = async {
                         let binding = Binding::new(workspace, &effect, stored.resource_generation
                             .ok_or(Error::Refused("admitted effect lacks generation"))?, item.iteration, &self.item_base(workspace, &effect)?);
@@ -715,13 +729,14 @@ impl Runtime {
                             self.read_journal(&binding).map(|journal| journal.map(|j| j.outcome))
                         }
                     }.await;
-                    let outcome = match recovered {
-                        Ok(outcome) => outcome.unwrap_or(Outcome::Uncertain),
-                        Err(error) => {
-                            tracing::warn!(effect = %effect.id, %error, "invalid recovery receipt");
-                            Outcome::Uncertain
-                        }
+                    let (outcome, why) = match recovered {
+                        Ok(outcome) => (outcome.unwrap_or(Outcome::Uncertain), None),
+                        Err(error) => (Outcome::Uncertain, Some(error.to_string())),
                     };
+                    // Decided once: an effect recovery can't settle stays Uncertain, for the orchestrator, and is
+                    // looked at again less and less often, its reason said once (ov-1301).
+                    if outcome == Outcome::Uncertain { self.recovery.unsettled(workspace, &effect.id, why, now_ms); }
+                    else { self.recovery.settled(workspace, &effect.id); }
                     if stored.dispatch_state == "uncertain" && outcome == Outcome::Uncertain { continue; }
                     if self.observe(workspace, &effect, outcome, stored.dispatch_state == "uncertain", clock())? { *count += 1; }
                     continue;
@@ -801,6 +816,7 @@ impl Runtime {
                 }))));
                 running.push(Running { workspace: workspace.clone(), effect, binding, cancel, pool });
             }
+            self.recovery.keep_only(workspace, &uncertain);
         }
         Ok(())
     }
@@ -844,6 +860,10 @@ impl Runtime {
         Ok(self.internal(workspace, command, grant, now_ms)?.result.map(|_| ()))
     }
     async fn receive(&self, message: Inbox) {
+        // The orchestrator's word may have written the receipt an Uncertain effect waits on: look at once (ov-1301).
+        let read = matches!(&message, Inbox::State(..))
+            || matches!(&message, Inbox::Wire(_, action, _) if matches!(**action, farcooler_protocol::workflow_commands::Action::Get));
+        if !read { self.recovery.wake(); }
         match message {
             Inbox::Apply(authority, request, time, reply) => {
                 let request = *request;
