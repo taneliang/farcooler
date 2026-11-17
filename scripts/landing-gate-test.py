@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent.parent
@@ -25,6 +26,81 @@ def load(name):
 
 lane = load("lane-gate")
 changes = load("ci-changes")
+cache = load("gate_sccache")
+
+
+class CompilerCacheTests(unittest.TestCase):
+    def test_every_step_environment_off_and_on(self):
+        workflows = {"ci": (ROOT / ".github/workflows/ci.yml").read_text(),
+                     "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for name in ("tools", "cache", "tmp"):
+                (root / name).mkdir(mode=0o700)
+            (root / "tools/bin").mkdir()
+            binary = root / "tools/bin/sccache"
+            binary.write_text("unused")
+            binary.chmod(0o700)
+            ctx = lane.make_ctx(ROOT, root, "HEAD")
+            steps = [s for job in lane.JOBS for s in lane.steps_for(job, workflows, ctx) if not s.skip]
+            self.assertGreater(len(steps), 50)
+            # Also cover policy-extracted rust-lints and nested Cargo builders:
+            # they all use run_step, regardless of their family/job name.
+            steps.append(lane.Step("rust-lints", "lint", "cargo clippy --workspace\n"))
+            inherited = {"PATH": "/bin", "RUSTC_WRAPPER": "caller-wrapper", "CARGO_INCREMENTAL": "1",
+                         "SCCACHE_DIR": "/caller-cache", "SCCACHE_START_SERVER": "1"}
+            with patch.dict(os.environ, {}, clear=True), patch.object(cache, "ROOT", root), \
+                    patch.dict(sys.modules, {"gate_sccache": cache}):
+                for switch in (None, "0", "off", "1"):
+                    if switch is None:
+                        os.environ.pop(cache.SWITCH, None)
+                    else:
+                        os.environ[cache.SWITCH] = switch
+                    for step in steps:
+                        with self.subTest(switch=switch, job=step.job, step=step.name):
+                            # A hostile step-level setting must lose to gate policy.
+                            override = {**step.env, "RUSTC_WRAPPER": "step-wrapper", "CARGO_INCREMENTAL": "1",
+                                        "SCCACHE_CACHE_SIZE": "100G"}
+                            specimen = lane.Step(step.job, step.name, step.run, step.cwd, override)
+                            with patch.object(lane.process_guard, "run", return_value=SimpleNamespace(returncode=0)) as run:
+                                lane.run_step(specimen, ROOT, dict(inherited), root, root)
+                            actual = run.call_args.kwargs["env"]
+                            expected = {**inherited, **override,
+                                        "GITHUB_ENV": str(root / "github_env"),
+                                        "GITHUB_PATH": str(root / "github_path"),
+                                        "GITHUB_OUTPUT": str(root / "github_output")}
+                            if switch == "1":
+                                expected = {k: v for k, v in expected.items() if not k.startswith("SCCACHE_")}
+                                expected.update(cache.environment())
+                                self.assertEqual(actual["RUSTC_WRAPPER"], str(binary))
+                                self.assertEqual(actual["SCCACHE_DIR"], str(root / "cache"))
+                                self.assertEqual(actual["SCCACHE_CACHE_SIZE"], "20G")
+                                self.assertEqual(actual["CARGO_INCREMENTAL"], "0")
+                                self.assertNotIn("SCCACHE_START_SERVER", actual)
+                            self.assertEqual(actual, expected)
+                            self.assertEqual(run.call_args.args[0], ["bash", "-e", "-c", step.run])
+                            self.assertNotIn("CARGO_TARGET_DIR", actual)
+
+    def test_private_cache_refuses_symlinks_or_shared_permissions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            shared = root / "shared"
+            shared.mkdir(mode=0o755)
+            with self.assertRaisesRegex(ValueError, "0700"):
+                cache.private(shared)
+            link = root / "link"
+            link.symlink_to(root, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                cache.private(link)
+
+    def test_off_never_probes_gate_state_or_starts_server(self):
+        for value in ("", "0", "off"):
+            with patch.dict(os.environ, {cache.SWITCH: value}), \
+                    patch.object(cache, "private", side_effect=AssertionError("probed")), \
+                    patch.object(cache.subprocess, "Popen", side_effect=AssertionError("started")):
+                self.assertEqual(cache.environment(), {})
+                with cache.session(ROOT):
+                    pass
 
 
 def selected(paths):

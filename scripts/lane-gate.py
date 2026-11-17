@@ -7,6 +7,11 @@ the test binaries run and skipped. CI on main runs the full suite on every push,
 verified green ancestor, release bundle proof left to CI, and warm target kept.
 CI on main remains full proof. Each selection/fallback is saved with step logs.
 
+FARCOOLER_GATE_SCCACHE=1 opts into the gate-owned compiler cache (ov-1333).
+Provision it with `python3 scripts/gate_sccache.py --install` from the trusted
+gate context. The cache is capped at 20 GiB, disables incremental compilation,
+and leaves target/ per landing. Unset (the default) preserves the old environment.
+
 A lane that says "gated alone" has to have run every full suite CI will run for
 the paths it touched, under the same wrappers (test-leak-check, tmux-leak-check,
 swift-test-guard, nextest --profile ci). That used to be recalled by hand from
@@ -692,6 +697,12 @@ def run_step(step, repo, env, logdir, tmp, fail_fast=False):
     gh_path.write_text("")
     gh_output.write_text("")
     e = {**env, **step.env, "GITHUB_ENV": str(gh_env), "GITHUB_PATH": str(gh_path), "GITHUB_OUTPUT": str(gh_output)}
+    if os.environ.get("FARCOOLER_GATE_SCCACHE") == "1":
+        import gate_sccache
+        # Apply last: CI step env and previous GITHUB_ENV writes cannot bypass
+        # the gate cache or re-enable incremental compilation (ov-1333).
+        e = {k: v for k, v in e.items() if not k.startswith("SCCACHE_")}
+        e.update(gate_sccache.environment())
     cwd = repo / step.cwd if step.cwd else repo
     log = logdir / f"{step.job}-{abs(hash(step.run)) % 10**8}.log"
     started = time.time()
@@ -1080,6 +1091,14 @@ def clean_target_after_pass(repo, say=print):
 
 
 def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
+    if os.environ.get("FARCOOLER_GATE_SCCACHE") == "1":
+        import gate_sccache
+        with gate_sccache.session(logdir):
+            return run_jobs_inner(chosen, plans, rows, repo, tmp, ctx, logdir, args)
+    return run_jobs_inner(chosen, plans, rows, repo, tmp, ctx, logdir, args)
+
+
+def run_jobs_inner(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
     failed = False
     heavy = [j for j in chosen if j in HEAVY] and hl.lock_wanted(getattr(args, "no_lock", False))

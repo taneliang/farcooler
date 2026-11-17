@@ -131,6 +131,7 @@ SCRIPT_USERS = {
     'scripts/gate-summary-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/gate-test-fixture.py': None,  # Full: gate self-test repository construction; retain orchestration coverage.
     'scripts/gate_disk.py': None,  # Full: imported by lane-gate.py and landing-gate at admission.
+    'scripts/gate_sccache.py': None,  # Full: optional compiler wrapper applied to every gate family.
     'scripts/gate_evidence.py': None,  # Full: canonical evidence planner and execution attest every family.
     'scripts/gen-wire-types.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/generator-test.sh': {'ios'},  # ci.yml ios invokes this regression test; no other gate family calls it.
