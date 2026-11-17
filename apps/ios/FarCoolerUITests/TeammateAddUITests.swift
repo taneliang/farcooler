@@ -111,6 +111,21 @@ final class TeammateAddUITests: XCTestCase {
         XCTAssertEqual(element(app, "teammate-sealed").value as? String, "none")
     }
 
+    func testSignedTeammateBrowserReplyOpensForTheScannedOffer() {
+        let app = launch(["-teammate-add-browser", "-teammate-add-authority"])
+        _ = confirmation(app)
+        element(app, "teammate-runner-build-box").tap()
+        element(app, "teammate-add").tap()
+        let status = element(app, "sealed-reply-status")
+        XCTAssertTrue(status.waitForExistence(timeout: 30))
+        XCTAssertTrue(status.label.hasPrefix("Sent to"), status.label)
+        let result = element(app, "teammate-sealed")
+        XCTAssertEqual(result.value as? String, "1 post for scanned ceremony and user_bob; opened build-box for alice@example.com")
+        let code = element(app, "sealed-reply-code").label
+        XCTAssertEqual(code.count, 6)
+        XCTAssertEqual(element(app, "teammate-opened-code").value as? String, code)
+    }
+
     func testViewerIsWhatIsSentWhenViewerIsChosen() {
         let app = launch()
         _ = confirmation(app)

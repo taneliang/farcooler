@@ -86,6 +86,12 @@ final class SealedReply: ObservableObject {
         return await account.directoryClient.postCeremonyReply(ceremony: $0, account: $1, sealed: $2)
     }
 
+    var signingKey: () -> String? = { Identity.privateKey() }
+    var runnerAuthority: (String, String) async -> [String: Any]? = { runner, offer in
+        guard let id = UUID(uuidString: runner), let connection = Connection.live(for: id) else { return nil }
+        return await connection.ceremonyAuthority(offer: offer)
+    }
+
     /// The post started by the last reply, for a test to wait on.
     private(set) var sending: Task<Void, Never>?
 
@@ -116,7 +122,7 @@ final class SealedReply: ObservableObject {
         sending = Task {
             let answer: CeremonyCore.Answer
             if teammate {
-                answer = await Self.signed(offer: offer, reply: reply, heldFor: heldFor, started: started)
+                answer = await signed(offer: offer, reply: reply, heldFor: heldFor, started: started)
             } else {
                 answer = CeremonyCore.seal(offer: offer, reply: reply, heldFor: heldFor)
             }
@@ -145,15 +151,14 @@ final class SealedReply: ObservableObject {
     /// admin/Face ID gate. A disconnected or older runner cannot be vouched for,
     /// so the core sends it as not enrolled; a pending runner isn't asked at
     /// all. Either way the runners that did attest still get a reply (ov-1149).
-    private static func signed(offer: Data, reply: Data, heldFor: TimeInterval, started: Date) async -> CeremonyCore.Answer {
+    private func signed(offer: Data, reply: Data, heldFor: TimeInterval, started: Date) async -> CeremonyCore.Answer {
         guard let manifest = try? JSONDecoder().decode(CeremonyManifest.self, from: reply),
-            let privateKey = Identity.privateKey(), let offerText = String(data: offer, encoding: .utf8),
+            let privateKey = signingKey(), let offerText = String(data: offer, encoding: .utf8),
             let replyText = String(data: reply, encoding: .utf8)
         else { return .refused(.unknown) }
         var authorities: [String: Any] = [:]
         for runner in manifest.runners where !runner.pending {
-            guard let id = UUID(uuidString: runner.id), let connection = Connection.live(for: id),
-                let authority = await connection.ceremonyAuthority(offer: offerText)
+            guard let authority = await runnerAuthority(runner.id, offerText)
             else { continue }
             authorities[runner.id] = authority
         }
