@@ -91,6 +91,80 @@ class LandingTests(unittest.TestCase):
             self.assertIn("TaskList tag 3 was renamed from next_page_after to next_after",
                           refused.stderr)
 
+    def test_canary_recovery_survives_fold_and_fresh_clone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, fresh = Path(tmp) / "repo", Path(tmp) / "fresh"
+            repo.mkdir()
+
+            def git(root, *args, check=True):
+                return subprocess.run(
+                    ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t",
+                     "-c", "commit.gpgsign=false", *args], check=check,
+                    capture_output=True, text=True)
+
+            def commit(message, *paths):
+                git(repo, "add", *paths)
+                git(repo, "commit", "--quiet", "-m", message)
+                return git(repo, "rev-parse", "HEAD").stdout.strip()
+
+            git(repo, "init", "--quiet", "-b", "main")
+            for name in ["scripts/proto-lint.py", "crates/protocol/src/lib.rs",
+                         "crates/daemon/src/rpc.rs"]:
+                dest = repo / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text((ROOT / name).read_text())
+            proto = repo / "proto/farcooler.proto"
+            proto.parent.mkdir()
+            original = "message TaskList { optional bytes next_page_after = 3; }\n"
+            proto.write_text(original)
+            shipped = commit("last shipped wire", "scripts", "crates", "proto")
+            baseline = repo / "proto/baseline/canary.proto"
+            baseline.parent.mkdir()
+
+            def snapshot(anchor):
+                return f"// Shipped by Canary at {anchor}.\n" + original
+
+            baseline.write_text(snapshot(shipped))
+            proto.write_text(original.replace("next_page_after", "next_after"))
+            main_tip = commit("unshipped rename", "proto")
+            git(repo, "checkout", "--quiet", "-b", "candidate")
+            proto.write_text(original)
+            repair = commit("restore field name", "proto/farcooler.proto")
+            # The snapshot requires the restored name, but its history anchor
+            # is already on main. Candidate IDs do not survive fold's -x picks.
+            baseline.write_text(snapshot(main_tip))
+            recovery = commit("recover baseline", "proto/baseline/canary.proto")
+            git(repo, "checkout", "--quiet", "main")
+            git(repo, "cherry-pick", "-x", repair, recovery)
+            self.assertNotEqual(git(repo, "rev-parse", "HEAD").stdout.strip(), recovery)
+            # Clone only main over file://: neither alternates nor the candidate
+            # ref may hide a dependency on its otherwise unreachable objects.
+            git(repo, "clone", "--quiet", "--single-branch", "--branch", "main",
+                repo.as_uri(), str(fresh))
+            for candidate in (repair, recovery):
+                self.assertNotEqual(git(fresh, "cat-file", "-e", candidate, check=False).returncode, 0)
+
+            def lint():
+                return subprocess.run(
+                    [sys.executable, str(fresh / "scripts/proto-lint.py"),
+                     "--channel", "canary", "--since-baseline"],
+                    cwd=fresh, capture_output=True, text=True)
+
+            out = lint()
+            self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+            fresh_baseline = fresh / "proto/baseline/canary.proto"
+            fresh_baseline.write_text(snapshot(repair))
+            refused = lint()  # Reproduce the returned build's candidate-only anchor.
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("which is not in this history", refused.stderr)
+            fresh_baseline.write_text(snapshot(main_tip))
+            (fresh / "proto/farcooler.proto").write_text(
+                original.replace("next_page_after", "next_after"))
+            refused = lint()
+            self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+            self.assertIn("TaskList tag 3 was renamed from next_page_after to next_after",
+                          refused.stderr)
+
     def test_ci_families_are_the_minimum_for_every_path_rule(self):
         # Independent mapping: dropping any family-to-job edge must go red.
         jobs = {"rust": {"rust"}, "apple": {"swift", "swift-tests", "ios"},

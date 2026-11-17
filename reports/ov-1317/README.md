@@ -34,12 +34,27 @@ types and all other page-named fields in task/plan payloads.
 
 The ticket establishes that no Canary build after 8628aecc0 exists, so the
 `next_after` spelling never shipped. History includes both spellings, meaning
-restoring the name alone would then fail against 0009b4798. Following the
-manual recovery procedure in docs/releasing.md, the Canary snapshot and its
-history anchor now name a8481042643e693926dd6a93a162330a0e03b194, the committed
-restoration. This is a manual recovery anchor, not evidence of a shipped build;
-the snapshot carries a comment recording that exception. Compatibility with
-the previous shipped snapshot was checked before advancing it.
+restoring the name alone would then fail against 0009b4798. The original
+recovery anchored at candidate restoration commit
+`a8481042643e693926dd6a93a162330a0e03b194`. Review caught that the landing fold
+cherry-picks with `-x`: fresh checkouts contain the rewritten commits, so that
+candidate-only anchor blocks the lint again.
+
+Fix round 1 anchors at the existing main tip before this repair,
+`63374831f3903403f60dcc35c6f1f1b04a1e383a`. The repaired snapshot is unchanged;
+it requires `next_page_after` and is compatible with the last shipped baseline.
+Only the known unshipped interval is excluded from history. Landing preserves
+this existing main ancestor, and every subsequent proto remains checked. The
+baseline comment and docs/releasing.md record this manual recovery exception;
+the header is a recovery anchor, not evidence of a shipped build.
+
+The new landing-gate regression makes a shipped wire, an unshipped rename,
+and candidate restoration/recovery commits. It folds both candidates with
+`cherry-pick -x` and clones only main over `file://`. Both candidate objects
+are confirmed absent. The actual lint passes with the existing-main anchor,
+fails with the former candidate-only anchor's missing-history diagnostic,
+and refuses a new rename of tag 3. This test runs in per-push CI and the
+landing gate through the existing landing-gate-test.py step.
 
 ## Validation
 
@@ -70,3 +85,12 @@ which permits their process supervisor to inspect its child processes.
 No full gate, cargo fmt, or swift-format was run. Build and test concurrency
 was limited to four. Local validation uses system Python because the first
 python3 on PATH is an incompatible executable; compiler temp files use /tmp.
+
+## Fix round 1 validation
+
+- Canary lint with history: passes; 107 proto lint self-tests pass.
+- Repaired snapshot versus the last shipped baseline (4a0fee927): compatible.
+- Landing-gate unit suite: 8 passed, including fold/fresh-clone regression.
+  Used system Python first on PATH and ran outside the sandbox because the
+  fixture supervisor needs `ps` to inspect its own child processes.
+- Canary baseline recorder regression suite: 41 passed.

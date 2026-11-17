@@ -540,16 +540,23 @@ used again. A changed meaning takes a new number.
 **In canary, on main is as good as shipped.** The baseline is recorded when a
 Canary run ends, so both per-push CI and Canary's `wire` jobs run
 `--since-baseline` (with full checkout history). The landing gate reads CI's
-wire steps and runs the same check. The candidate is checked against every version of the proto on main since the
-recorded commit. That includes commits no build ever carried, such as a run
-cancelled mid-build or the middle commits of a push of several, so a field
-added in one commit and renamed in the next is red on its first push. The way
+wire steps and runs the same check. The candidate is checked against every
+version of the proto on main since the recorded commit. That includes commits
+no build ever carried, such as a run cancelled mid-build or the middle commits
+of a push of several, so a field added in one commit and renamed in the next
+is red on its first push. The way
 out is the same as for a shipped field: reserve the old number. If it certainly
 never shipped, a hand commit on main may instead move the first line of
 `proto/baseline/canary.proto` to a commit at or after the fix; Canary ignores a
-push to `proto/baseline/`, so that ships nothing. The lint refuses a baseline
-whose first line names no commit, or one main no longer has, rather than check
-the baseline alone.
+push to `proto/baseline/`, so that ships nothing. When landing a repair by
+cherry-pick, a candidate commit ID will be rewritten and must not be the anchor.
+For a spelling that certainly never shipped, the recovery may instead anchor at
+the existing main tip immediately before the repair, with the repaired proto as
+the snapshot. Check that snapshot against the last shipped baseline and record
+the exception in a comment. This excludes the known unshipped interval while
+still checking the snapshot and every subsequent proto. The lint refuses a
+baseline whose first line names no commit, or one main no longer has, rather
+than check the baseline alone.
 
 ## CI
 

@@ -1,6 +1,7 @@
-// Shipped by Canary at a8481042643e693926dd6a93a162330a0e03b194. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 63374831f3903403f60dcc35c6f1f1b04a1e383a. Written by canary-baseline.yml; see scripts/proto-lint.py.
 // Manual recovery (ov-1317), per docs/releasing.md: the next_after rename
-// never shipped. Resume history checks from the commit restoring next_page_after.
+// never shipped. Anchor at the existing main tip before the repair so cherry-pick
+// landing preserves it; the snapshot below requires the restored next_page_after.
 syntax = "proto3";
 
 package farcooler.v1;
