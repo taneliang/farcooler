@@ -23,7 +23,9 @@
 //! `SIGTERM` first and waits a second, so an agent can end what it started itself (as their parent it can do so
 //! without a race), then kills the group. It answers `ended`, and removes its socket, only once nothing descended
 //! from it is alive. A descendant that outlives the group is waited for, and if it is still working the hold answers
-//! `unsettled` and keeps its socket, so the daemon refuses to settle. See reports/ov-1330/design.md.
+//! `unsettled` and keeps its socket, so the daemon refuses to settle. On macOS a descendant is known by the kernel's
+//! record of who is responsible for it (the hold, which a relay starts that way), so the hold need not have seen its
+//! parents; on Linux the hold is a child subreaper. See reports/ov-1330/design.md.
 //!
 //! Requests are answered one at a time, in the order their clients connected, so a `stop` asked before a `cont` is
 //! done before it even when its words arrive later (a landing gate tells and does not wait).
@@ -82,8 +84,26 @@ fn signal_group(held: &Held, signal: i32) -> bool {
 static HANGUP: AtomicBool = AtomicBool::new(false);
 extern "C" fn on_hangup(_: libc::c_int) { HANGUP.store(true, Ordering::SeqCst); }
 
+/// Set in the environment of a hold that a relay started (macOS), and removed before the agent starts.
+#[cfg(target_os = "macos")]
+const RELAYED: &str = "FARCOOLER_NATIVE_HOLD_RELAYED";
+/// Debug builds only: the hold learns no lineage, so the tests can show that responsibility alone finds a process
+/// whose parent the hold never saw (macOS). Release builds never read it.
+const BLIND: &str = "FARCOOLER_NATIVE_HOLD_BLIND_FOR_TEST";
+
 /// Run the hold: listen on `socket`, start `argv` in its own group, and answer until the group has ended.
 pub fn serve(socket: &Path, argv: &[String]) -> i32 {
+    // macOS: the hold must be the process the kernel holds responsible for everything the agent starts (see
+    // `responsibility`). tmux started this process, so it is not; it starts the real hold as a disclaimed child and
+    // relays to it. A relayed hold that still is not responsible for itself cannot prove its agent ended: refuse.
+    #[cfg(target_os = "macos")]
+    if !responsibility::is_own() {
+        if std::env::var_os(RELAYED).is_some() {
+            eprintln!("{FLAG}: macOS did not make the hold responsible for its agent; it could not prove the agent ended");
+            return 125;
+        }
+        return relay();
+    }
     // Owner-only from the moment it exists; restored before the agent inherits the mask.
     let mask = unsafe { libc::umask(0o177) };
     let listener = UnixListener::bind(socket);
@@ -138,6 +158,99 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
             learned = Instant::now();
         }
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The pane's process on macOS: start this same hold again as a child that disclaims responsibility, so the kernel
+/// records that child as responsible for itself and everything it starts, then wait for it and exit with its status.
+/// A hangup from tmux is passed on to it, and that is the relay's only signal: its target is the pid `posix_spawn`
+/// returned, which the relay has not reaped, so it is still that child.
+#[cfg(target_os = "macos")]
+fn relay() -> i32 {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let Some(disclaim) = responsibility::disclaim() else {
+        eprintln!("{FLAG}: this macOS cannot make the hold responsible for its agent");
+        return 125;
+    };
+    let Ok(exe) = std::env::current_exe() else { eprintln!("{FLAG}: cannot find this program"); return 125; };
+    let cstr = |bytes: &[u8]| CString::new(bytes).ok();
+    let Some(path) = cstr(exe.as_os_str().as_bytes()) else { return 125 };
+    let Some(args) = std::env::args_os().map(|a| cstr(a.as_bytes())).collect::<Option<Vec<_>>>() else { return 125 };
+    let Some(mut env) = std::env::vars_os().filter(|(k, _)| k != RELAYED)
+        .map(|(k, v)| cstr(&[k.as_bytes(), b"=", v.as_bytes()].concat())).collect::<Option<Vec<_>>>() else { return 125 };
+    env.extend(cstr(format!("{RELAYED}=1").as_bytes()));
+    let argv: Vec<*mut libc::c_char> = args.iter().map(|a| a.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect();
+    let envp: Vec<*mut libc::c_char> = env.iter().map(|e| e.as_ptr().cast_mut()).chain([std::ptr::null_mut()]).collect();
+    for signal in [libc::SIGHUP, libc::SIGTERM] {
+        // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+        unsafe { libc::signal(signal, on_hangup as *const () as libc::sighandler_t); }
+    }
+    let mut hold: libc::pid_t = 0;
+    // SAFETY: `attr` is initialised before use and destroyed after; every pointer outlives the call.
+    let spawned = unsafe {
+        let mut attr: libc::posix_spawnattr_t = std::ptr::null_mut();
+        if libc::posix_spawnattr_init(&mut attr) != 0 { return 125; }
+        let set = disclaim(&mut attr, 1);
+        let spawned = if set == 0 { libc::posix_spawn(&mut hold, path.as_ptr(), std::ptr::null(), &attr, argv.as_ptr(), envp.as_ptr()) } else { set };
+        libc::posix_spawnattr_destroy(&mut attr);
+        spawned
+    };
+    if spawned != 0 { eprintln!("{FLAG}: cannot start the hold: {}", std::io::Error::from_raw_os_error(spawned)); return 125; }
+    loop {
+        let mut status = 0;
+        // SAFETY: `status` is a valid int.
+        if unsafe { libc::waitpid(hold, &mut status, libc::WNOHANG) } == hold {
+            return if libc::WIFEXITED(status) { libc::WEXITSTATUS(status) } else { 128 + libc::WTERMSIG(status) };
+        }
+        if HANGUP.swap(false, Ordering::SeqCst) {
+            // SAFETY: `kill` takes no pointers. `hold` is our unreaped child (above), so the pid is still it.
+            unsafe { libc::kill(hold, libc::SIGHUP); }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// macOS responsibility (private API in libSystem, looked up at run time). Every process has a *responsible* process,
+/// which its children inherit at `fork`, and keep through `exec`, `setsid`, `setpgid` and being reparented to launchd
+/// once their parent exits. A process started with responsibility disclaimed is responsible for itself. So once the
+/// hold is responsible for itself, everything the agent starts names the hold as responsible, however it leaves the
+/// group and whether or not the hold ever saw its parent; only a process that itself disclaims, through this same
+/// private API, stops naming it. The kernel answers the hold's own pid only while the hold is alive, and the hold is
+/// alive whenever it asks, so a pid in the answer is the hold's and no one else's.
+#[cfg(target_os = "macos")]
+mod responsibility {
+    type Disclaim = unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
+    type Responsible = unsafe extern "C" fn(libc::pid_t) -> libc::pid_t;
+    /// `RTLD_DEFAULT` in `<dlfcn.h>` on Apple platforms.
+    const DEFAULT: *mut libc::c_void = -2isize as *mut libc::c_void;
+
+    fn symbol(name: &std::ffi::CStr) -> Option<*mut libc::c_void> {
+        // SAFETY: `name` is NUL-terminated; `dlsym` only reads it.
+        let found = unsafe { libc::dlsym(DEFAULT, name.as_ptr()) };
+        (!found.is_null()).then_some(found)
+    }
+    pub(super) fn disclaim() -> Option<Disclaim> {
+        // SAFETY: the symbol has this signature in every macOS that exports it.
+        symbol(c"responsibility_spawnattrs_setdisclaim").map(|f| unsafe { std::mem::transmute::<*mut libc::c_void, Disclaim>(f) })
+    }
+    fn responsible() -> Option<Responsible> {
+        static FOUND: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+        let found = (*FOUND.get_or_init(|| symbol(c"responsibility_get_pid_responsible_for_pid").map(|f| f as usize)))?;
+        // SAFETY: as above.
+        Some(unsafe { std::mem::transmute::<usize, Responsible>(found) })
+    }
+    /// The process responsible for `pid`, or `None` when it can't be read (no such process, another user's, or a
+    /// macOS without the API).
+    pub(super) fn of(pid: i32) -> Option<i32> {
+        // SAFETY: takes and returns plain integers.
+        let answer = unsafe { responsible()?(pid) };
+        (answer > 0).then_some(answer)
+    }
+    /// Whether this process is responsible for itself.
+    pub(super) fn is_own() -> bool {
+        let me = std::process::id() as i32;
+        of(me) == Some(me)
     }
 }
 
@@ -198,6 +311,9 @@ fn spawn(argv: &[String]) -> std::io::Result<i32> {
     use std::os::unix::process::CommandExt;
     let mut command = std::process::Command::new(&argv[0]);
     command.args(&argv[1..]);
+    #[cfg(target_os = "macos")]
+    command.env_remove(RELAYED);
+    command.env_remove(BLIND);
     // SAFETY: only async-signal-safe calls between fork and exec.
     unsafe {
         command.pre_exec(|| {
@@ -309,10 +425,16 @@ fn end(held: &mut Held, wait: Duration) -> Ended {
 /// since exited is still recognised. Linux has no such id, but there the hold is a child subreaper: an orphaned
 /// descendant is reparented to the hold, never to init, so every live descendant has a chain of live parents back to
 /// the hold, and each look starts afresh from the hold's pid (a pid is no identity across looks there).
-struct Lineage { me: u64, known: HashSet<u64> }
+///
+/// On macOS a process whose parent exited before the hold ever saw it alive has a parent id the hold never learned,
+/// so lineage alone would miss it. There `responsible` covers it: a live process that names the hold as responsible
+/// for it (see `responsibility`) is the agent's, whatever the hold saw of its parents. Lineage still counts what
+/// disclaimed responsibility, if the hold saw its parent.
+struct Lineage { me: u64, known: HashSet<u64>, blind: bool }
 
-/// A live process: its pid, group, identity and its parent's identity (unique ids on macOS, pids on Linux).
-struct Row { pid: i32, pgid: i32, id: u64, parent: u64 }
+/// A live process: its pid, group, identity and its parent's identity (unique ids on macOS, pids on Linux), and
+/// whether it names the hold as responsible for it (macOS; always false on Linux).
+struct Row { pid: i32, pgid: i32, id: u64, parent: u64, responsible: bool }
 
 /// What one look found alive: members of the agent's group (the leader among them), and descendants outside it.
 struct Look { group: usize, strays: usize }
@@ -323,7 +445,9 @@ impl Lineage {
     /// `None` when the hold can't learn its own identity: it could then follow nothing.
     fn new() -> Option<Self> {
         let me = own_id()?;
-        Some(Self { me, known: HashSet::from([me]) })
+        // Only macOS learns, so only there is there anything to be blind to.
+        let blind = Self::LEARNS && cfg!(debug_assertions) && std::env::var_os(BLIND).is_some();
+        Some(Self { me, known: HashSet::from([me]), blind })
     }
 
     /// Look once, or `None` when the table can't be read whole. A look that misses a process can only see less of
@@ -331,7 +455,7 @@ impl Lineage {
     fn look(&mut self, leader: i32) -> Option<Look> {
         let rows = rows()?;
         if !Self::LEARNS { self.known = HashSet::from([self.me]); }
-        loop {
+        while !self.blind {
             let before = self.known.len();
             for row in &rows { if self.known.contains(&row.parent) { self.known.insert(row.id); } }
             if self.known.len() == before { break; }
@@ -339,7 +463,7 @@ impl Lineage {
         let me = std::process::id() as i32;
         let mut look = Look { group: 0, strays: 0 };
         for row in rows.iter().filter(|row| row.pid != me) {
-            if row.pgid == leader { look.group += 1; } else if self.known.contains(&row.id) { look.strays += 1; }
+            if row.pgid == leader { look.group += 1; } else if row.responsible || self.known.contains(&row.id) { look.strays += 1; }
         }
         Some(look)
     }
@@ -389,7 +513,8 @@ fn rows() -> Option<Vec<Row>> {
         if info.pbi_status == libc::SZOMB { continue; }
         let Some(ids) = unique_ids(pid) else { continue };
         complete |= pid == me;
-        rows.push(Row { pid, pgid: info.pbi_pgid as i32, id: ids.id, parent: ids.parent });
+        let responsible = pid != me && responsibility::of(pid) == Some(me);
+        rows.push(Row { pid, pgid: info.pbi_pgid as i32, id: ids.id, parent: ids.parent, responsible });
     }
     complete.then_some(rows)
 }
@@ -407,7 +532,7 @@ fn rows() -> Option<Vec<Row>> {
             (fields.next(), fields.next().map(str::parse::<u32>), fields.next().map(str::parse::<i32>)) else { continue };
         if matches!(state, "Z" | "X" | "x") { continue; }
         complete |= pid == me;
-        rows.push(Row { pid, pgid, id: u64::from(pid as u32), parent: u64::from(ppid) });
+        rows.push(Row { pid, pgid, id: u64::from(pid as u32), parent: u64::from(ppid), responsible: false });
     }
     complete.then_some(rows)
 }

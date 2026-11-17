@@ -100,8 +100,7 @@ async fn a_tty_reused_by_a_foreign_session_is_never_signalled() {
     assert!(!victims.is_empty());
     owner.tty = pane.tty.clone();
     runtime.quiesce_native(&owner).await.unwrap();
-    // A hold that was killed leaves its socket behind and answers nothing: the runner observes, and refuses, because
-    // the (foreign) tty is busy. It still signals nothing.
+    // A hold that was killed leaves its socket behind and answers nothing: the runner refuses. It still signals nothing.
     let stale = std::os::unix::net::UnixListener::bind(runtime.native_hold_socket(&owner.binding)).unwrap();
     drop(stale);
     assert!(runtime.quiesce_native(&owner).await.is_err());
@@ -109,4 +108,30 @@ async fn a_tty_reused_by_a_foreign_session_is_never_signalled() {
     assert!(victims.iter().all(|&pid| alive(pid)), "the foreign session was signalled");
     assert_eq!(foreign.pane_life(&pane.pane_id, other).await.unwrap(), farcooler_tmux::PaneLife::Live);
     farcooler_tmux::reap_server(foreign.socket());
+}
+
+/// ov-1330 review (fix round 2): a hold killed while its agent's command, in a session of its own, keeps writing. The
+/// pane is gone and the command holds no tty, so nothing the runner can observe shows it working; only the hold could
+/// have proved it ended, and it cannot answer. Settlement is refused while the command writes.
+#[tokio::test]
+async fn a_killed_hold_refuses_settlement_while_a_detached_command_writes() {
+    let (dir, runtime, host, owner) = owned_pane(
+        "echo $PPID > hold; echo $$ > agent; perl -MPOSIX -e 'setsid; open(STDIN, q(</dev/null)); open(STDOUT, q(>/dev/null)); \
+         open(STDERR, q(>/dev/null)); while (1) { open(F, q(>>work)); print F 1; close F; select(undef, undef, undef, 0.02) }' & \
+         echo $! > writer; exec /bin/sleep 30", true).await;
+    let (held, writer) = (written_pid(&dir, "hold").await, written_pid(&dir, "writer").await);
+    struct Reap(i32);
+    impl Drop for Reap { fn drop(&mut self) { unsafe { libc::kill(self.0, libc::SIGKILL); } } }
+    let (_writer, _agent) = (Reap(writer), Reap(written_pid(&dir, "agent").await));
+    // The test kills the hold (a pid its own agent reported); the runner never does.
+    unsafe { libc::kill(held, libc::SIGKILL); }
+    for _ in 0..500 { if !alive(held) { break; } tokio::time::sleep(Duration::from_millis(10)).await; }
+    let size = || std::fs::metadata(dir.path().join("work")).map_or(0, |m| m.len());
+    let at = size();
+    assert!(runtime.quiesce_native(&owner).await.is_err(), "a hold that cannot answer proves nothing ended");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(size() > at, "and the detached command was still writing");
+    assert!(runtime.native_hold_socket(&owner.binding).exists(), "the killed hold's socket is still there");
+    assert!(alive(writer), "the runner signalled nothing");
+    farcooler_tmux::reap_server(host.0.socket());
 }

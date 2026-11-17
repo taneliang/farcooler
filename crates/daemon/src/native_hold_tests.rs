@@ -2,12 +2,13 @@ use super::*;
 
 /// A hold run as `farcoolerd` runs it in a pane, here without a terminal.
 struct Hold { child: std::process::Child, socket: PathBuf, dir: tempfile::TempDir }
-fn hold(script: &str) -> Hold {
+fn hold(script: &str) -> Hold { hold_with(script, &[]) }
+fn hold_with(script: &str, env: &[(&str, &str)]) -> Hold {
     let dir = tempfile::Builder::new().prefix("h").tempdir_in("/tmp").unwrap();
     let socket = dir.path().join("t.hold.sock");
     let mut child = std::process::Command::new(crate::runtime::fanout_binary().expect("build farcoolerd before this test"))
         .args([FLAG, socket.to_str().unwrap(), "--", "/bin/sh", "-c", script])
-        .current_dir(dir.path()).stdin(std::process::Stdio::null()).spawn().unwrap();
+        .envs(env.iter().copied()).current_dir(dir.path()).stdin(std::process::Stdio::null()).spawn().unwrap();
     for _ in 0..500 {
         if ask_blocking(&socket, "ready", Duration::from_secs(1)) == Answer::Said("ready".into()) { return Hold { child, socket, dir }; }
         std::thread::sleep(Duration::from_millis(10));
@@ -134,6 +135,30 @@ fn a_stray_whose_parent_exited_first_is_still_accounted_for() {
     refuses_until_the_stray_is_gone(h);
 }
 
+/// ov-1330 review (fix round 2): the stray's parent exits at once, so the hold may never have seen it, and here it
+/// certainly has not: the hold is started blind (it learns no lineage; debug builds only). On macOS only
+/// responsibility can then find the stray, on Linux the subreaper; either way `end` must not say `ended` while it
+/// writes.
+#[test]
+fn a_stray_whose_parent_the_hold_never_saw_keeps_end_from_succeeding() {
+    refuses_until_the_stray_is_gone(hold_with(&format!("( {STRAY} & echo $! > stray ); while :; do sleep 1; done"), &[(BLIND, "1")]));
+}
+
+/// macOS: the pane's process is a relay; the hold it starts is responsible for itself, and so for everything the
+/// agent starts, while the relay is not.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_hold_is_responsible_for_its_agent_and_the_relay_is_not() {
+    let mut h = hold("echo $PPID > hold; echo $$ > agent; while :; do sleep 1; done");
+    let (relay, held, agent) = (h.child.id() as i32, pid_in(h.dir.path(), "hold"), pid_in(h.dir.path(), "agent"));
+    assert_ne!(relay, held, "tmux's process relays to a hold of its own");
+    assert_eq!(responsibility::of(held), Some(held));
+    assert_eq!(responsibility::of(agent), Some(held));
+    assert_ne!(responsibility::of(relay), Some(held));
+    assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
+    assert_eq!(h.child.wait().unwrap().code(), Some(128 + libc::SIGTERM), "the relay exits with the hold's status");
+}
+
 /// An agent that ends what it started outside its group on SIGTERM (as Codex does) ends cleanly.
 #[test]
 fn an_agent_that_ends_its_own_stray_ends() {
@@ -183,11 +208,18 @@ fn violations(text: &str, rule: Rule) -> Vec<String> {
         Rule::NoSignals => found(&SIGNALS),
         Rule::NoProcessListing => found(&LISTINGS),
         Rule::OnlySignalGroup => {
-            // Exactly one signal call, and it is the one inside `signal_group`.
+            // The group signal inside `signal_group`, and on macOS the relay passing a hangup to the hold it spawned
+            // and has not reaped; nothing else.
             let calls = found(&SIGNALS);
-            let body = shipped.split("fn signal_group(").nth(1).and_then(|rest| rest.split("\n}\n").next()).unwrap_or("");
-            let inside = body.lines().filter(|l| l.contains("libc::killpg(held.leader.0,")).count();
-            if calls.len() == 1 && inside == 1 && shipped.matches("fn signal_group(").count() == 1 { Vec::new() } else { calls }
+            let body = |name: &str| shipped.split(name).nth(1).and_then(|rest| rest.split("\n}\n").next()).unwrap_or("");
+            let only = |name: &str| shipped.matches(name).count() == 1;
+            let group = body("fn signal_group(").lines().filter(|l| l.contains("libc::killpg(held.leader.0,")).count();
+            let relay = body("fn relay(");
+            let relayed = relay.lines().filter(|l| l.contains("libc::kill(hold,")).count();
+            let spawned = relay.matches("libc::posix_spawn(&mut hold,").count() == 1 && relay.matches("hold =").count() == 0;
+            let fine = only("fn signal_group(") && group == 1 && (calls.len() == 1
+                || (calls.len() == 2 && only("fn relay(") && relayed == 1 && spawned));
+            if fine { Vec::new() } else { calls }
         }
     }
 }
@@ -216,6 +248,12 @@ fn the_signal_check_catches_what_it_forbids() {
     assert!(!violations(&second, Rule::OnlySignalGroup).is_empty(), "a second signal call");
     let elsewhere = "fn signal_group(held: &Held, signal: i32) -> bool {\n    unsafe { libc::killpg(found_pid, signal) == 0 }\n}\n";
     assert!(!violations(elsewhere, Rule::OnlySignalGroup).is_empty(), "a target other than the forked leader");
+    let relay = "fn relay() -> i32 {\n    let mut hold: i32 = 0;\n    libc::posix_spawn(&mut hold, p, a, e);\n    unsafe { libc::kill(hold, libc::SIGHUP); }\n}\n";
+    assert!(violations(&format!("{hold}{relay}"), Rule::OnlySignalGroup).is_empty(), "the relay's hangup to its own child");
+    let found = relay.replace("let mut hold: i32 = 0;", "let mut hold: i32 = 0;\n    hold = found_pid;");
+    assert!(!violations(&format!("{hold}{found}"), Rule::OnlySignalGroup).is_empty(), "the relay signalling a pid it did not spawn");
+    let unspawned = relay.replace("libc::posix_spawn(&mut hold, p, a, e);", "");
+    assert!(!violations(&format!("{hold}{unspawned}"), Rule::OnlySignalGroup).is_empty(), "a relay that spawned nothing");
     // Test modules may assert with `kill(pid, 0)`.
     assert!(violations("fn f() {}\n#[cfg(test)]\nmod tests { fn g() { unsafe { libc::kill(1, 0); } } }\n", Rule::NoSignals).is_empty());
 }

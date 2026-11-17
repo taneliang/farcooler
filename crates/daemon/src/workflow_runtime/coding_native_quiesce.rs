@@ -27,7 +27,7 @@ impl Exec {
     /// only once the group is empty and nothing descended from the hold is alive. A hold that is gone removed its socket after its group was empty, so that is the
     /// same answer. The owner can end by itself while it is being ended (ov-1287); the hold gives one answer either way.
     ///
-    /// A hold that was killed, or an owner an earlier engine launched without one, can only be observed: its pane
+    /// An owner an earlier engine launched without a hold can only be observed: its pane
     /// dead or gone with nothing on its tty. Nothing is signalled on that path.
     pub(super) async fn quiesce_native(&self, owner: &NativeOwner) -> Result<()> {
         let tmux = server(&self.root, &owner.binding);
@@ -50,7 +50,7 @@ impl Exec {
                 Answer::Said(word) if word == "ended" => return close_native(&tmux, owner).await,
                 Answer::Said(word) if word == "unsettled" => return Err(Error::Refused("native agent left a process running outside its group")),
                 Answer::Said(_) => return Err(Error::Refused("native hold did not end its agent")),
-                Answer::Silent => tracing::warn!(effect = %owner.binding.effect.id, "the native hold is not answering; observing its pane instead"),
+                Answer::Silent => return Err(Error::Refused("native hold is not answering")),
             }
         }
         for round in 0..100 {
