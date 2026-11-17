@@ -31,3 +31,24 @@ Final checks: gate self-test **PASS** (including 21 landing-policy tests),
 landing gate tests **13 PASS**, every scripts lint plus its self-test
 **16 entry points / 32 commands PASS**, `bash -n scripts/landing-gate` **PASS**,
 and `git diff --check` **PASS**. Raw validation logs are temporary and uncommitted.
+
+## Landing-gate return repair
+
+The real preflight on this host refused with **49.21 GB free; 70.00 GB needed**
+before heavy work. That is the required short-disk behavior; the budget remains
+unchanged and no full gate was run or stale output/log folders removed.
+
+The deletion audit had masked Python's temporary-directory discovery by setting
+`tempfile.tempdir` in the test. Without that bypass, the test reproduced an
+`os.remove` before disk admission: `gettempdir()` creates and unlinks a probe
+file. Planning now uses an inert path placeholder and allocates real scratch
+only after successful admission, rebuilding the steps with that scratch path.
+The unmodified temporary-directory discovery remains active in the regression
+test, which failed before the fix and passes afterward (under one second).
+
+Fresh validation: gate self-test **PASS** (including **21 policy tests**),
+landing gate tests **13 PASS**, all scripts lints and their self-tests
+**16 entry points / 32 commands PASS**, wrapper syntax and diff whitespace
+checks **PASS**. Native Python 3.14 is first on PATH; this host's
+`/usr/local/bin/python3` is incompatible with its CPU. Gate self-tests require
+process inspection/local sockets outside the restricted sandbox.

@@ -914,9 +914,9 @@ def gate(args):
         args.base = landing_policy.fold_base(repo, args.base)
     workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
                  "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
-    # Plan without creating scratch: a disk refusal must delete nothing.
-    import uuid
-    tmp = pathlib.Path(tempfile.gettempdir()) / ("lane-gate-" + uuid.uuid4().hex)
+    # Use a placeholder while selecting families. Even gettempdir() probes
+    # capacity by creating and unlinking a file; defer it until after admission.
+    tmp = repo / ".lane-gate-plan"
     ctx = make_ctx(repo, tmp, args.base)
     changes = load_module("ci_changes", repo / "scripts" / "ci-changes.py")
     ios_plan = load_module("ios_ui_plan", repo / "scripts" / "ios-ui-plan.py")
@@ -945,7 +945,10 @@ def gate(args):
             return 1
     if args.disk_preflight:
         return 0
-    tmp.mkdir(mode=0o700)  # ENOSPC here is caught by main
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC is caught by main
+    ctx = make_ctx(repo, tmp, args.base)
+    plans = {j: steps_for(j, workflows, ctx) for j in JOBS}
+    landing_policy.workflow_checks(plans, files, Step)
 
     if not args.dry_run:
         try:

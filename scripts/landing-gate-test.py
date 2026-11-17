@@ -55,8 +55,7 @@ class DiskTests(unittest.TestCase):
             (repo / "scripts/changed.py").write_text("# changed\n")
             # Inject capacity in each real CLI process; any removal is a failure.
             (repo / "sitecustomize.py").write_text("""
-import os, shutil, sys, tempfile
-tempfile.tempdir = '/tmp'
+import os, shutil, sys
 shutil.disk_usage = lambda _: type('Usage', (), {'free': 21 * 1024 ** 3})()
 def audit(event, args):
     if event in ('os.remove', 'os.rmdir', 'shutil.rmtree'):
