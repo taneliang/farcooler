@@ -13,7 +13,7 @@
 
 /// Which price table an estimate was made from: the date its rates were
 /// read. Bump it whenever a rate changes or a model is added.
-pub const PRICE_TABLE: &str = "2026-11-12";
+pub const PRICE_TABLE: &str = "2026-11-18";
 
 /// One turn's tokens for one model, in the store's four buckets.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -149,7 +149,7 @@ const TABLE: &[(&str, Rates)] = &[
 ];
 
 /// OpenAI's API list prices for the models Codex runs, from
-/// developers.openai.com/api/docs/pricing (read 2026-11-09), Standard tier,
+/// developers.openai.com/api/docs/pricing (read 2026-11-18), Standard tier,
 /// short context (up to 272,000 input tokens). Rates are per million tokens:
 /// input, cached input, output. OpenAI has no cache-write charge.
 ///
