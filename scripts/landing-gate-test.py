@@ -200,7 +200,7 @@ class LandingTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("      non_docs: ${{ steps.changes.outputs.non_docs }}", workflow.splitlines())
         for path in ["apps/android/a.kt", "apps/macos/a.swift", "services/site/a.ts",
-                     "services/common/a.ts", "services/relay/a.ts", "scripts/site-proof.py",
+                     "services/common/a.ts", "services/relay/a.ts", "scripts/unreviewed.py",
                      "crates/android/src/lib.rs", "Cargo.lock", "docs/spike.md",
                      "reports/result.txt", ".claude/agent/reports/result.md"]:
             flags = changes.families([path])
@@ -248,6 +248,10 @@ class LandingTests(unittest.TestCase):
                     required.add(job)
             with self.subTest(path=path):
                 self.assertLessEqual(required, selected([path]))
+
+    def test_reviewed_script_users_override_the_ci_non_docs_floor(self):
+        # ov-1326: the wire self-test consumes the generator; site/tunnel do not.
+        self.assertEqual(selected(["scripts/site-proof.py"]), {"wire", "doc-comments"})
 
     def test_cross_cutting_paths_select_every_suite(self):
         for path in ["Cargo.lock", "Cargo.toml", "crates/protocol/src/lib.rs",

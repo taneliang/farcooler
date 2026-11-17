@@ -172,4 +172,35 @@ Each commit is replayed independently with `git diff --no-renames --name-only <s
 
 ## Validation
 
-Pending final checks.
+All required checks passed. The final sequential lint/regression batch passed 42/42 commands.
+
+| Check | Result |
+| --- | --- |
+| `python3 scripts/lane-gate.py --self-test` | PASS, including process, landing policy, wrapper and benchmark suites |
+| `python3 scripts/landing-policy-test.py` | PASS, 24 tests; 16 named selection cases plus unknown/addition coverage |
+| Every `scripts/*-lint.py --self-test` and default scan | PASS, 15 self-tests and 15 scans |
+| Proto lint: preview, stable, canary `--since-baseline` | PASS |
+| `bash scripts/actionlint.sh --self-test` and default lint | PASS |
+| `python3 scripts/test-leak-check.py --lint` | PASS |
+| `python3 scripts/quarantine.py --lint` | PASS (no quarantine inventory) |
+| `python3 scripts/ios-ui-shards.py --check` | PASS |
+| `python3 scripts/file-size-budget.py` | PASS |
+| `python3 scripts/gate-evidence-test.py` | PASS, 18 tests |
+| `python3 scripts/gate-evidence-mutation-test.py` | PASS, four planted mutations detected |
+| `python3 scripts/engine-gate-test.py` | PASS, 9 tests |
+| `git diff --check` | PASS |
+
+The gate's two old site-proof assertions expected the generic non-doc CI floor.
+They now assert the reviewed wire consumer; the CI-floor regression still checks
+an unreviewed script and all its platform/source samples. Sampling the map
+confirmed the leaf lint commands in wire, the capacity helper's import and
+self-test through ci-concurrency-test, saved tally/timing fixtures through their
+wire tests, the web dependency checker in web, and Swift cache commands in the
+two Swift jobs. Full entries deliberately retain unresolved consumers.
+
+Tests used Python 3.14 through a temporary PATH entry because the host's default
+python3 is an incompatible binary. Fixture runs dropped inherited FARCOOLER_*
+engine context; Cargo jobs and nextest threads were capped at four. The sandbox
+blocks ps, which existing process_guard cleanup needs, so the process tests
+were rerun with process access and passed. All commands ran in the foreground;
+no full gate, cargo fmt, or platform build was run.

@@ -1556,7 +1556,7 @@ def _self_test():
     always = {"wire", "doc-comments"}
     non_docs = always | {"site", "tunnel"}
     expect("docs only: the lints alone", reaches("docs/releasing.md", "README.md"), always)
-    expect("site-proof retains non-doc CI jobs", reaches("scripts/site-proof.py"), non_docs)
+    expect("reviewed site-proof feeds only wire", reaches("scripts/site-proof.py"), always)
     expect("an unknown script: full fallback", reaches("scripts/nonexistent-lane-script.sh"), set(JOBS))
     expect("a script a job names reaches that job", "swift-tests" in reaches("scripts/swift-test-guard.sh"), True)
     expect("scripts retain CI coverage", "android" in reaches("scripts/swift-test-guard.sh"), True)
