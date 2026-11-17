@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Retry main CI's hosted runner acquisition failures once (ov-1310)."""
+"""Retry main CI failures and hosted runner acquisition failures once."""
 import hashlib
+import html
 import json
 import os
 import re
@@ -13,6 +14,37 @@ MAC_JOB = re.compile(r"Rust \(macos-latest\)|Rust native test archive \(macOS\)|
 def marker(run_id, name):
     digest = hashlib.sha256(name.encode()).hexdigest()
     return f"runner-retry-{run_id}-{digest}"
+
+
+def failed_tests(log):
+    # nextest emits ANSI-colored summary lines; libtest emits "test ... FAILED".
+    log = re.sub(r"\x1b\[[0-9;]*m", "", log)
+    names = set()
+    for line in log.splitlines():
+        match = re.search(r"\bFAIL\s+\[\s*[^]]+\]\s+\(\d+/\d+\)\s+(\S+)\s+(\S+)", line)
+        if match:
+            names.add(f"{match[1]} {match[2]}")
+        else:
+            match = re.search(r"\btest (\S+) \.\.\. FAILED\b", line)
+            if match:
+                names.add(match[1])
+    return sorted(names)
+
+
+def failed_retry(event, api):
+    run = event["workflow_run"]
+    if (run["head_branch"] != "main" or run["event"] != "push"
+            or run["conclusion"] != "failure" or run["run_attempt"] != 1):
+        return None
+    jobs = api(f"actions/runs/{run['id']}/attempts/1/jobs?per_page=100")["jobs"]
+    failed = [job for job in jobs if job["conclusion"] == "failure"]
+    if not failed:
+        return None
+    name = f"failed-retry-{run['id']}"
+    artifacts = api(f"actions/artifacts?name={name}&per_page=100")
+    if any(a["name"] == name and not a["expired"] for a in artifacts["artifacts"]):
+        return None
+    return failed, name
 
 
 def retry_job(event, api):
@@ -53,6 +85,37 @@ def main():
         key = "artifacts" if path.startswith("actions/artifacts?") else "jobs"
         return {key: [item for page in pages for item in page[key]]}
 
+    failure = failed_retry(event, api)
+    if failure:
+        jobs, name = failure
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            print("## Automatic retry of failed CI jobs\n", file=summary)
+            for job in jobs:
+                print(f"- **{html.escape(job['name'])}**", file=summary)
+                try:
+                    log = subprocess.check_output(
+                        ["gh", "api", f"repos/{repo}/actions/jobs/{job['id']}/logs"],
+                        stderr=subprocess.DEVNULL, text=True)
+                    tests = failed_tests(log)
+                except subprocess.CalledProcessError:
+                    tests = []
+                if not tests:
+                    print("  - No failed test name found in log (or log unavailable).", file=summary)
+                for test in tests:
+                    print(f"  - {html.escape(test)}", file=summary)
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+            print(f"failed_run={event['workflow_run']['id']}\nmarker={name}", file=out)
+        with open("retry-marker.txt", "w", encoding="utf-8") as out:
+            print("Automatic failed-jobs retry reserved", file=out)
+        return
+
+    # Do not fall through to cancelled siblings when a failure is present.
+    run = event["workflow_run"]
+    if run["conclusion"] == "failure":
+        jobs = api(f"actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs?per_page=100")
+        if any(job["conclusion"] == "failure" for job in jobs["jobs"]):
+            print("Failed jobs already reserved or past first attempt")
+            return
     selected = retry_job(event, api)
     if selected is None:
         print("No eligible runner acquisition failure")

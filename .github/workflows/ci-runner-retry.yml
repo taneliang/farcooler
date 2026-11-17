@@ -1,4 +1,4 @@
-name: Retry CI runner acquisition
+name: Retry CI failures and runner acquisition
 on:
   workflow_run:
     workflows: [CI]
@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
       # Reserve before the POST, so another completion cannot retry the same job.
       - uses: actions/upload-artifact@v4
-        if: steps.select.outputs.job != ''
+        if: steps.select.outputs.job != '' || steps.select.outputs.failed_run != ''
         with:
           name: ${{ steps.select.outputs.marker }}
           path: retry-marker.txt
@@ -33,3 +33,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB: ${{ steps.select.outputs.job }}
+      - if: steps.select.outputs.failed_run != ''
+        run: gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/rerun-failed-jobs"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ steps.select.outputs.failed_run }}
