@@ -1,186 +1,186 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.25s
 ────────────
- Nextest run ID 586c2443-db09-4494-be01-269af0e3af7c with nextest profile: default
-    Starting 3 tests across 1 binary (3340 tests skipped)
+ Nextest run ID b0db323a-393c-40c4-b762-4bece83c50dc with nextest profile: default
+    Starting 3 tests across 79 binaries (3902 tests skipped)
 ────────────
  Stress test iteration 1/30 (00:00:00 elapsed so far, 30 iterations remaining)
-        PASS [   2.615s] [ 1/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  10.797s] [ 1/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  26.711s] [ 1/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  26.720s] iteration 1/30: 3 tests run: 3 passed, 3340 skipped
+        PASS [   2.093s] [ 1/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.752s] [ 1/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.804s] [ 1/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.809s] iteration 1/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 2/30 (00:00:26 elapsed so far, 29 iterations remaining)
-        PASS [   4.450s] [ 2/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  14.027s] [ 2/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  26.356s] [ 2/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  26.362s] iteration 2/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 2/30 (00:00:08 elapsed so far, 29 iterations remaining)
+        PASS [   2.005s] [ 2/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.761s] [ 2/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.669s] [ 2/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.674s] iteration 2/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 3/30 (00:00:53 elapsed so far, 28 iterations remaining)
-        PASS [   3.053s] [ 3/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  11.696s] [ 3/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  21.626s] [ 3/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  21.635s] iteration 3/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 3/30 (00:00:17 elapsed so far, 28 iterations remaining)
+        PASS [   2.046s] [ 3/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.588s] [ 3/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.387s] [ 3/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.391s] iteration 3/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 4/30 (00:01:14 elapsed so far, 27 iterations remaining)
-        PASS [   3.563s] [ 4/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  12.396s] [ 4/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  22.720s] [ 4/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  22.729s] iteration 4/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 4/30 (00:00:25 elapsed so far, 27 iterations remaining)
+        PASS [   1.957s] [ 4/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.466s] [ 4/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.834s] [ 4/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.839s] iteration 4/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 5/30 (00:01:37 elapsed so far, 26 iterations remaining)
-        PASS [   2.906s] [ 5/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.887s] [ 5/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  15.962s] [ 5/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  15.966s] iteration 5/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 5/30 (00:00:34 elapsed so far, 26 iterations remaining)
+        PASS [   2.001s] [ 5/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.604s] [ 5/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.694s] [ 5/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.698s] iteration 5/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 6/30 (00:01:53 elapsed so far, 25 iterations remaining)
-        PASS [   2.711s] [ 6/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.242s] [ 6/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  18.228s] [ 6/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  18.274s] iteration 6/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 6/30 (00:00:43 elapsed so far, 25 iterations remaining)
+        PASS [   1.989s] [ 6/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.707s] [ 6/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.516s] [ 6/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.520s] iteration 6/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 7/30 (00:02:11 elapsed so far, 24 iterations remaining)
-        PASS [   3.546s] [ 7/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  12.941s] [ 7/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  25.352s] [ 7/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  25.360s] iteration 7/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 7/30 (00:00:51 elapsed so far, 24 iterations remaining)
+        PASS [   2.050s] [ 7/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.597s] [ 7/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.460s] [ 7/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.464s] iteration 7/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 8/30 (00:02:37 elapsed so far, 23 iterations remaining)
-        PASS [   6.262s] [ 8/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  14.723s] [ 8/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  22.766s] [ 8/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  22.775s] iteration 8/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 8/30 (00:01:00 elapsed so far, 23 iterations remaining)
+        PASS [   1.969s] [ 8/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.406s] [ 8/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.366s] [ 8/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.371s] iteration 8/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 9/30 (00:02:59 elapsed so far, 22 iterations remaining)
-        PASS [   2.684s] [ 9/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   7.348s] [ 9/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  13.145s] [ 9/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  13.160s] iteration 9/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 9/30 (00:01:08 elapsed so far, 22 iterations remaining)
+        PASS [   2.020s] [ 9/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.554s] [ 9/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.402s] [ 9/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.406s] iteration 9/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 10/30 (00:03:12 elapsed so far, 21 iterations remaining)
-        PASS [   2.459s] [10/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   7.947s] [10/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  13.947s] [10/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  13.955s] iteration 10/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 10/30 (00:01:17 elapsed so far, 21 iterations remaining)
+        PASS [   2.004s] [10/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.448s] [10/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.344s] [10/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.349s] iteration 10/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 11/30 (00:03:26 elapsed so far, 20 iterations remaining)
-        PASS [   2.803s] [11/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.222s] [11/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  14.722s] [11/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  14.728s] iteration 11/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 11/30 (00:01:25 elapsed so far, 20 iterations remaining)
+        PASS [   1.957s] [11/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.460s] [11/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.410s] [11/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.420s] iteration 11/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 12/30 (00:03:41 elapsed so far, 19 iterations remaining)
-        PASS [   3.764s] [12/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.993s] [12/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  16.800s] [12/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  16.805s] iteration 12/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 12/30 (00:01:33 elapsed so far, 19 iterations remaining)
+        PASS [   2.023s] [12/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.476s] [12/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.432s] [12/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.436s] iteration 12/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 13/30 (00:03:58 elapsed so far, 18 iterations remaining)
-        PASS [   2.875s] [13/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.144s] [13/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  15.310s] [13/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  15.320s] iteration 13/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 13/30 (00:01:42 elapsed so far, 18 iterations remaining)
+        PASS [   1.995s] [13/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.511s] [13/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.388s] [13/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.393s] iteration 13/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 14/30 (00:04:13 elapsed so far, 17 iterations remaining)
-        PASS [   3.002s] [14/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   9.246s] [14/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  17.113s] [14/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  17.120s] iteration 14/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 14/30 (00:01:50 elapsed so far, 17 iterations remaining)
+        PASS [   1.938s] [14/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.443s] [14/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.421s] [14/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.425s] iteration 14/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 15/30 (00:04:30 elapsed so far, 16 iterations remaining)
-        PASS [   2.802s] [15/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.282s] [15/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  16.825s] [15/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  16.834s] iteration 15/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 15/30 (00:01:59 elapsed so far, 16 iterations remaining)
+        PASS [   1.948s] [15/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.451s] [15/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.379s] [15/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.384s] iteration 15/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 16/30 (00:04:47 elapsed so far, 15 iterations remaining)
-        PASS [   3.072s] [16/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   9.152s] [16/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  17.372s] [16/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  17.379s] iteration 16/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 16/30 (00:02:07 elapsed so far, 15 iterations remaining)
+        PASS [   1.934s] [16/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.394s] [16/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.250s] [16/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.254s] iteration 16/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 17/30 (00:05:05 elapsed so far, 14 iterations remaining)
-        PASS [   3.151s] [17/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   9.382s] [17/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  17.613s] [17/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  17.618s] iteration 17/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 17/30 (00:02:15 elapsed so far, 14 iterations remaining)
+        PASS [   1.998s] [17/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.525s] [17/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.631s] [17/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.636s] iteration 17/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 18/30 (00:05:22 elapsed so far, 13 iterations remaining)
-        PASS [   3.005s] [18/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   7.509s] [18/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  13.931s] [18/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  13.938s] iteration 18/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 18/30 (00:02:24 elapsed so far, 13 iterations remaining)
+        PASS [   2.047s] [18/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.671s] [18/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.655s] [18/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.659s] iteration 18/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 19/30 (00:05:36 elapsed so far, 12 iterations remaining)
-        PASS [   2.822s] [19/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.671s] [19/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  16.351s] [19/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  16.359s] iteration 19/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 19/30 (00:02:33 elapsed so far, 12 iterations remaining)
+        PASS [   2.004s] [19/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.648s] [19/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.565s] [19/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.570s] iteration 19/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 20/30 (00:05:53 elapsed so far, 11 iterations remaining)
-        PASS [   2.975s] [20/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   9.757s] [20/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  19.321s] [20/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  19.330s] iteration 20/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 20/30 (00:02:41 elapsed so far, 11 iterations remaining)
+        PASS [   1.999s] [20/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.553s] [20/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.423s] [20/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.427s] iteration 20/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 21/30 (00:06:12 elapsed so far, 10 iterations remaining)
-        PASS [   3.293s] [21/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   9.167s] [21/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  15.094s] [21/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  15.103s] iteration 21/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 21/30 (00:02:50 elapsed so far, 10 iterations remaining)
+        PASS [   1.997s] [21/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.465s] [21/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.413s] [21/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.417s] iteration 21/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 22/30 (00:06:27 elapsed so far, 9 iterations remaining)
-        PASS [   2.452s] [22/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   6.953s] [22/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  13.962s] [22/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  13.969s] iteration 22/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 22/30 (00:02:58 elapsed so far, 9 iterations remaining)
+        PASS [   1.960s] [22/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.465s] [22/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.342s] [22/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.347s] iteration 22/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 23/30 (00:06:41 elapsed so far, 8 iterations remaining)
-        PASS [   2.784s] [23/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   7.855s] [23/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  14.676s] [23/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  14.683s] iteration 23/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 23/30 (00:03:06 elapsed so far, 8 iterations remaining)
+        PASS [   1.968s] [23/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.563s] [23/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.403s] [23/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.408s] iteration 23/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 24/30 (00:06:56 elapsed so far, 7 iterations remaining)
-        PASS [   2.789s] [24/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.304s] [24/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  14.734s] [24/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  14.745s] iteration 24/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 24/30 (00:03:15 elapsed so far, 7 iterations remaining)
+        PASS [   1.968s] [24/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.574s] [24/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.426s] [24/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.430s] iteration 24/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 25/30 (00:07:10 elapsed so far, 6 iterations remaining)
-        PASS [   2.784s] [25/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   7.660s] [25/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  15.314s] [25/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  15.321s] iteration 25/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 25/30 (00:03:23 elapsed so far, 6 iterations remaining)
+        PASS [   2.050s] [25/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.564s] [25/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.439s] [25/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.444s] iteration 25/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 26/30 (00:07:26 elapsed so far, 5 iterations remaining)
-        PASS [   2.754s] [26/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.528s] [26/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  16.780s] [26/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  16.789s] iteration 26/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 26/30 (00:03:32 elapsed so far, 5 iterations remaining)
+        PASS [   1.982s] [26/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.564s] [26/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.387s] [26/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.392s] iteration 26/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 27/30 (00:07:42 elapsed so far, 4 iterations remaining)
-        PASS [   2.899s] [27/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   8.201s] [27/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  16.394s] [27/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  16.403s] iteration 27/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 27/30 (00:03:40 elapsed so far, 4 iterations remaining)
+        PASS [   1.978s] [27/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.597s] [27/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.497s] [27/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.501s] iteration 27/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 28/30 (00:07:59 elapsed so far, 3 iterations remaining)
-        PASS [   3.253s] [28/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [   9.450s] [28/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  17.366s] [28/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  17.371s] iteration 28/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 28/30 (00:03:49 elapsed so far, 3 iterations remaining)
+        PASS [   1.996s] [28/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.548s] [28/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.507s] [28/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.511s] iteration 28/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 29/30 (00:08:16 elapsed so far, 2 iterations remaining)
-        PASS [   3.139s] [29/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  10.046s] [29/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  18.364s] [29/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  18.376s] iteration 29/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 29/30 (00:03:57 elapsed so far, 2 iterations remaining)
+        PASS [   2.054s] [29/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.503s] [29/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.413s] [29/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.418s] iteration 29/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
- Stress test iteration 30/30 (00:08:35 elapsed so far, 1 iteration remaining)
-        PASS [   3.120s] [30/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
-        PASS [  12.167s] [30/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
-        PASS [  20.429s] [30/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
- Stress test [  20.438s] iteration 30/30: 3 tests run: 3 passed, 3340 skipped
+ Stress test iteration 30/30 (00:04:05 elapsed so far, 1 iteration remaining)
+        PASS [   2.030s] [30/30] (1/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_startup_model_refusal_fails_promptly_with_reason
+        PASS [   4.726s] [30/30] (2/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_native_steering_continues_the_same_codex_and_claude_session_before_settlement
+        PASS [   8.665s] [30/30] (3/3) farcooler-daemon workflow_runtime::coding_native::tests::workflow_coding_native_real_pty_normalized_hooks_and_quiescence
+ Stress test [   8.670s] iteration 30/30: 3 tests run: 3 passed, 3902 skipped
 ────────────
-     Summary [ 535.561s] 30/30 stress run iterations: 30 passed
+     Summary [ 254.660s] 30/30 stress run iterations: 30 passed

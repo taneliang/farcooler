@@ -123,21 +123,33 @@ queue by at most the five-second read timeout; only the runner's own user can co
 * Owner records gain `hold: true` (absent, so false, in records an earlier engine wrote). An earlier engine
   cannot read a record with the new field: rolling back with a native step in flight leaves that step Uncertain.
 
-## Verification
+## Verification (fix round 1, after both review findings were fixed; macOS)
 
 All foreground, at most four build jobs and four test threads, no gate, no formatter.
 
 * The three ov-1319 tests, `--stress-count 30 --test-threads 4 --retries 0`: **30/30 iterations, 90 passes,
-  0 failures** in 535.6 s (`stress.txt`).
+  0 failures** in 254.7 s (`stress.txt`). (A first attempt failed only because `farcooler-cli`, which the steering
+  test needs, was not built in this worktree's target; it was built and the whole stress rerun.)
 * The daemon crate, `cargo nextest run -p farcooler-daemon --test-threads 4 --retries 0 --no-fail-fast`, run as
-  two partitions to stay in the foreground: **1,963 + 1,919 = 3,882 passed, 0 failed** (`daemon-1.txt`,
+  two partitions to stay in the foreground: **1,965 + 1,921 = 3,886 passed, 0 failed** (`daemon-1.txt`,
   `daemon-2.txt`). No test failed, so there is no flake to record.
 * `cargo clippy -p farcooler-daemon --all-targets -- -D warnings`, `file-size-budget.py`,
   `macos-rust-tests.py --self-test --check`, `doc-comment-check.py`, `swallow-lint.py`, `test-window-lint.py`
   and `copy-lint.py` pass.
+* The new regressions fail without their fixes. Restoring a thread per connection, and counting no strays in a
+  look, turned all three red (`a_stop_asked_first_is_done_first_even_when_its_words_arrive_last`,
+  `a_process_that_left_the_group_keeps_end_from_succeeding`,
+  `a_stray_whose_parent_exited_first_is_still_accounted_for`) before the change was reverted.
+
+Not run here: Linux. The Linux paths (`PR_SET_CHILD_SUBREAPER`, the `/proc` walk) are exercised by the same tests in
+CI's Linux job.
 
 New tests: `native_hold::tests` (stop, continue and end a group with a background job; an agent that exits takes
 its group with it and the hold exits with its status; a reaped leader is never signalled even when its number
-is a live process; the source check and its self-test) and `quiesce_order_tests` (a live owner's whole group is
-ended; an owner that exited first, or exits while being ended, is quiescent; an agent ignoring SIGTERM is killed
-after the grace; a tty a foreign session holds is never signalled, whether the hold answers or was killed).
+is a live process; the source check and its self-test; fix round 1: a stop asked first is done first though its
+words arrive after a later continue's; a `setsid` command that ignores SIGTERM and keeps writing makes `end` answer
+`unsettled`, keeps the socket and stays alive, never signalled, and `end` answers `ended` once it is gone; the
+same for such a command whose parent exited before `end`; an agent that kills its own stray on SIGTERM ends
+cleanly) and `quiesce_order_tests` (a live owner's whole group is ended; an owner that exited first, or exits while
+being ended, is quiescent; an agent ignoring SIGTERM is killed after the grace; a tty a foreign session holds is
+never signalled, whether the hold answers or was killed).
