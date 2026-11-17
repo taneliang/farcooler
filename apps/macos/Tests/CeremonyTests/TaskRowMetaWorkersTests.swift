@@ -117,7 +117,7 @@ struct TaskRowMetaWorkersTests {
         let row = Self.row(workers: [Self.worker(doing: "", model: "opus")])
         #expect(TaskWorkers.lines(of: row, at: Self.now) == ["Claude subagent working, 12 min · opus"])
         #expect(Self.text(row) == "Claude subagent working, 12 min")
-        for (raw, shown) in [("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6.1-terra", "GPT-6.1 Terra"),
+        for (raw, shown) in [("gpt-6.2-sol", "GPT-6.2 Sol"), ("gpt-6.1-sol", "GPT-6.1 Sol"), ("gpt-6.1-terra", "GPT-6.1 Terra"),
                              ("gpt-6-luna", "GPT-6 Luna"), ("gpt-6.1-sol-20261101", "gpt-6.1-sol-20261101")] {
             let worker = Self.worker(doing: "", model: raw)
             #expect(TaskWorkers.lines(of: Self.row(workers: [worker]), at: Self.now) == ["Claude subagent working, 12 min · \(shown)"])

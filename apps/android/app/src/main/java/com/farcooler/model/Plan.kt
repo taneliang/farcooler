@@ -580,6 +580,7 @@ object PlanWords {
 
     /** Exact presentation names only; unknown IDs and variants stay literal. */
     fun model(raw: String): String = when (raw) {
+        "gpt-6.2-sol" -> "GPT-6.2 Sol" // casing ok: verified model brand
         "gpt-6.1-sol" -> "GPT-6.1 Sol" // casing ok: verified model brand
         "gpt-6.1-terra" -> "GPT-6.1 Terra" // casing ok: verified model brand
         "gpt-6-luna" -> "GPT-6 Luna" // casing ok: verified model brand

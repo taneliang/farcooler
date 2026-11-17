@@ -428,7 +428,7 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     let (dir, mut runtime) = configured(false, "pass").await;
     let published = runtime.coding.clone().unwrap();
     let mut definition = published.definition().unwrap();
-    definition.models.insert("build".into(), vec!["claude:opus".into(), "codex:gpt-5.5".into()]);
+    definition.models.insert("build".into(), vec!["claude:opus".into(), "codex:gpt-6.2-sol".into()]);
     let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
     let wire = |runtime: &Runtime, principal, action| runtime.wire_command("w", principal, action).unwrap();
     let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
@@ -444,10 +444,10 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     };
     let refused = start(&runtime, "ov-7", &[("build", "codex:gpt-4")], 2);
     assert_eq!(refused.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Invalid"), "a model the step doesn't list: {refused}");
-    ok(&start(&runtime, "ov-7", &[("build", "codex:gpt-5.5")], 3));
+    ok(&start(&runtime, "ov-7", &[("build", "codex:gpt-6.2-sol")], 3));
     ok(&start(&runtime, "ov-8", &[], 4));
     let state = runtime.state("w").unwrap().unwrap();
-    assert_eq!(state.items["ov-7"].models["build"], "codex:gpt-5.5");
+    assert_eq!(state.items["ov-7"].models["build"], "codex:gpt-6.2-sol");
     assert_eq!(state.items["ov-8"].models["build"], "claude:opus", "no pick, the step's default");
     runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
     let mut builds = std::collections::BTreeMap::new();
@@ -462,8 +462,8 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
         builds.insert(stored.effect.item.clone(), Binding::new("w", &stored.effect, claim.resource_generation, 0, &base));
     }
     assert_eq!(builds.len(), 2, "both builds are ready");
-    assert_eq!(builds["ov-7"].effect.model.as_deref(), Some("codex:gpt-5.5"));
-    assert_eq!(runtime.coding_command(&builds["ov-7"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "codex:gpt-5.5");
+    assert_eq!(builds["ov-7"].effect.model.as_deref(), Some("codex:gpt-6.2-sol"));
+    assert_eq!(runtime.coding_command(&builds["ov-7"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "codex:gpt-6.2-sol");
     assert_eq!(runtime.coding_command(&builds["ov-8"]).unwrap().environment["FARCOOLER_WORKFLOW_MODEL"], "claude:opus");
     // A native harness with Claude's settings and Codex's project hooks both pinned runs either. (A native
     // publication needs live hooks; the launch is built from the same effect, so the harness is swapped after Start.)
@@ -480,7 +480,7 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     runtime.coding = Some(native);
     let codex = runtime.coding_command(&builds["ov-7"]).unwrap().argv.last().unwrap().clone();
     let claude = runtime.coding_command(&builds["ov-8"]).unwrap().argv.last().unwrap().clone();
-    assert!(codex.contains("codex") && codex.contains("--model gpt-5.5") && !codex.contains("sonnet"), "{codex}");
+    assert!(codex.contains("codex") && codex.contains("--model gpt-6.2-sol") && !codex.contains("sonnet"), "{codex}");
     assert!(claude.contains("claude") && claude.contains("--model opus") && !claude.contains("sonnet"), "{claude}");
     assert_eq!(runtime.native_agent(&builds["ov-7"]).unwrap(), farcooler_agent_hooks::Agent::Codex, "its turn is read from Codex's hooks");
 }

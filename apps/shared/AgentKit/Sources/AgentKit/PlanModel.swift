@@ -540,6 +540,7 @@ public enum PlanWords {
     /// This is presentation only, never a launch or pricing key.
     public static func model(_ raw: String) -> String {
         switch raw {
+        case "gpt-6.2-sol": "GPT-6.2 Sol"
         case "gpt-6.1-sol": "GPT-6.1 Sol"
         case "gpt-6.1-terra": "GPT-6.1 Terra"
         case "gpt-6-luna": "GPT-6 Luna"

@@ -393,3 +393,14 @@ fn the_shared_words_are_pinned() {
     let bad: Value = serde_json::from_str(&json(r#"{"schema":2,"words":{"style":"apple"}}"#)).unwrap();
     assert_eq!(bad["error"], "invalid");
 }
+
+#[test]
+fn sol_62_model_words_for_all_plan_styles() {
+    for style in ["apple", "material"] {
+        let plan = json!({ "now_ms": 1_800_000_000_000i64, "lines": [], "landings": [],
+            "agents": [{ "id": "pane:1", "role": "builder", "model": "gpt-6.2-sol", "working": true, "tickets": [] }] });
+        let view = view_of(json!({ "schema": SCHEMA, "plan": plan, "context": { "style": style } }));
+        let rendered = serde_json::to_string(&view).unwrap();
+        assert!(rendered.contains("GPT-6.2 Sol"), "{style}: {rendered}");
+    }
+}

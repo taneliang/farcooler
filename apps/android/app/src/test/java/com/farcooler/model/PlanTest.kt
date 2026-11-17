@@ -156,6 +156,7 @@ class PlanTest {
     @Test
     fun `a work record says its role, the agent's model and how long it ran`() {
         val work = PlanWork("a", WorkRole.BUILD, 0, 3 * hour)
+        assertEquals("GPT-6.2 Sol", PlanWords.model("gpt-6.2-sol"))
         assertEquals("GPT-6.1 Sol", PlanWords.model("gpt-6.1-sol"))
         assertEquals("GPT-6.1 Terra", PlanWords.model("gpt-6.1-terra"))
         assertEquals("GPT-6 Luna", PlanWords.model("gpt-6-luna"))

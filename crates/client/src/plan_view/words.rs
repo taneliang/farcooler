@@ -126,6 +126,7 @@ pub fn ago(at: i64, now: i64) -> String {
 /// Presentation only, never a launch or pricing key.
 pub fn model(raw: &str) -> &str {
     match raw {
+        "gpt-6.2-sol" => "GPT-6.2 Sol",
         "gpt-6.1-sol" => "GPT-6.1 Sol",
         "gpt-6.1-terra" => "GPT-6.1 Terra",
         "gpt-6-luna" => "GPT-6 Luna",

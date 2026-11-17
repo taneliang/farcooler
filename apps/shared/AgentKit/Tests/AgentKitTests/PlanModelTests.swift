@@ -365,6 +365,7 @@ struct PlanModelTests {
         #expect(PlanWords.work(fix, agent: nil, now: plan.nowMs) == "Fixer, 2 h", "no agent left: no model said")
         fix.role = .land
         #expect(PlanWords.work(fix, agent: plan.agent(fix.agent), now: plan.nowMs).hasPrefix("Lander "))
+        #expect(PlanWords.model("gpt-6.2-sol") == "GPT-6.2 Sol")
         #expect(PlanWords.model("gpt-6.1-sol") == "GPT-6.1 Sol")
         #expect(PlanWords.model("gpt-6.1-terra") == "GPT-6.1 Terra")
         #expect(PlanWords.model("gemini-2.5-pro") == "Gemini 2.5 Pro")

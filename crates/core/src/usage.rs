@@ -167,6 +167,7 @@ const TABLE: &[(&str, Rates)] = &[
 /// that the row will need the page's new rate. `scripts/openai-prices.py` compares
 /// these rows with the page daily (openai-prices.yml); `--write` rewrites them.
 const OPENAI: &[(&str, Rates)] = &[
+    ("gpt-6.2-sol", openai(2.0, 0.1, 10.0)),
     ("gpt-6.1-sol", openai(2.0, 0.1, 10.0)),
     ("gpt-6.1-terra", openai(1.0, 0.05, 5.0)),
     ("gpt-6-sol", openai(2.0, 0.2, 10.0)),
@@ -365,6 +366,7 @@ mod tests {
         let tokens = TokenCounts { input: 10_000, cache_read: 90_000, output: 2_000, ..Default::default() };
         assert_eq!(estimate(Some("gpt-6-luna"), &tokens), Some(2_900));
         let sol = TokenCounts { input: 1_000_000, cache_read: 1_000_000, output: 1_000_000, ..Default::default() };
+        assert_eq!(estimate(Some("gpt-6.2-sol"), &sol), Some(12_100_000));
         assert_eq!(estimate(Some("gpt-6.1-sol"), &sol), Some(12_100_000));
         assert_eq!(estimate(Some("gpt-6.1-terra"), &sol), Some(6_050_000));
         assert_eq!(estimate(Some("gpt-5.6-sol"), &sol), Some(24_400_000));
