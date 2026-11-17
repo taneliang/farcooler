@@ -522,3 +522,13 @@ func needsYouAggregateAdapterGolden() throws {
     #expect(items[0].runner == "z")
     #expect(items[0].itemID == "ask")
 }
+
+@Test func macRejectedDuplicateNeedsYouRemainsVisible() {
+    let item = NeedsYouItem(id: "duplicate", kind: .ask, rank: 1, since: nil, question: "?")
+    #expect(NeedsYou.merge(["host": [item, item]]).map(\.itemID) == ["duplicate"])
+}
+
+@Test func iosRejectedDuplicateNeedsYouRemainsVisible() {
+    let item = NeedsYouItem(id: "duplicate", kind: .ask, rank: 1, since: nil, question: "?")
+    #expect(NeedsYou.merge(["host": [item, item]]).countedTotal == 1)
+}

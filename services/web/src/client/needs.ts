@@ -109,7 +109,7 @@ export function parseList(json: string): Item[] {
 
 /// Whether an item adds to the count. A quiet notice (a member kept a ruling)
 /// is read and never acted on, so it is a row and nothing more.
-export const isCounted = (item: Item): boolean => aggregate([item]).view.rows[0].counted
+export const isCounted = (item: Item): boolean => aggregate([item]).view.rows[0]?.counted ?? false
 
 export const countOf = (items: Item[]): number => aggregate(items).view.counted_total
 

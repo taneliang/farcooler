@@ -8,6 +8,16 @@ import org.junit.Test
 class NeedsYouPresenterTest {
     @After fun reset() { NeedsYouPresenter.reset() }
 
+    @Test fun `duplicate ids leave the usable row visible`() {
+        NeedsYouPresenter.bridge = { request ->
+            if (request.windowed("\"id\":\"ask\"".length).count { it == "\"id\":\"ask\"" } > 1)
+                """{"schema":1,"error":"duplicate_item"}"""
+            else """{"schema":1,"needs_you":{"schema":1,"rows":[],"yours":[],"others":[],"split":false,"counted_total":0,"runner_counts":[],"workspace_counts":[],"unclaimed_counts":[]}}"""
+        }
+        val data = Json.parseToJsonElement("""{"items":[{"id":"ask","kind":"ask","rank":1},{"id":"ask","kind":"ask","rank":1}]}""")
+        assertEquals(1, NeedsYouPresenter.read(data, "host")?.items?.size)
+    }
+
     @Test fun `unavailable core leaves composition safe and has no reading`() {
         NeedsYouPresenter.bridge = { null }
         assertNull(NeedsYouPresenter.read(Json.parseToJsonElement("{\"items\":[]}"), "host"))

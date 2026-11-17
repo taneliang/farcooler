@@ -302,3 +302,11 @@ describe('the words', () => {
 it.each([undefined, -1, 4294967296, 1.5])('rejects invalid rank %s instead of inventing urgency', rank => {
   expect(() => parseList(JSON.stringify({ items: [{ id: 'a', kind: 'ask', rank, question: 'q' }] }))).toThrow('needs_you_rank')
 })
+
+it('keeps a duplicate-id reading usable when the presenter rejects it', () => {
+  const items = parseList(JSON.stringify({ items: [
+    { id: 'duplicate', kind: 'ask', rank: 1, question: '?' },
+    { id: 'duplicate', kind: 'ask', rank: 1, question: '?' },
+  ] }))
+  expect(countOf(items)).toBe(1)
+})

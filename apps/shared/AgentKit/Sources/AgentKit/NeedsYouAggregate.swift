@@ -14,11 +14,24 @@ extension NeedsYou {
             }]
         }
         struct Answer: Decodable { var needs_you: WireNeedsYouAggregateView }
-        let request = try! JSONSerialization.data(withJSONObject: ["schema": 1, "needs_you": input])
-        guard let answer = PlanViewPresenter.ask(String(decoding: request, as: UTF8.self)),
-            let decoded = try? JSONDecoder().decode(Answer.self, from: Data(answer.utf8))
-        else { preconditionFailure("needs_you_bridge") }
-        return decoded.needs_you
+        func present(_ input: [[String: Any]]) -> WireNeedsYouAggregateView? {
+            guard let request = try? JSONSerialization.data(withJSONObject: ["schema": 1, "needs_you": input]),
+                let answer = PlanViewPresenter.ask(String(decoding: request, as: UTF8.self)),
+                let decoded = try? JSONDecoder().decode(Answer.self, from: Data(answer.utf8))
+            else { return nil }
+            return decoded.needs_you
+        }
+        if let view = present(input) { return view }
+        NSLog("Needs You presenter rejected the list; retrying without duplicate item IDs")
+        let unique = runners.mapValues { items in
+            var seen = Set<String>()
+            return items.filter { seen.insert($0.itemID).inserted }
+        }
+        if unique.values.reduce(0, { $0 + $1.count }) < runners.values.reduce(0, { $0 + $1.count }) {
+            return aggregate(unique)
+        }
+        return WireNeedsYouAggregateView(schema: 1, rows: [], yours: [], others: [], split: false,
+            counted_total: 0, runner_counts: [], workspace_counts: [], unclaimed_counts: [])
     }
 
     static func aggregate(_ items: [NeedsYouItem]) -> WireNeedsYouAggregateView {

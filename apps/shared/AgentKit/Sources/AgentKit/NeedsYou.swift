@@ -162,7 +162,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     /// Whether it adds to a count or breaks the all-clear. An FYI (a member
     /// kept a ruling, ov-756) is read and never acted on, so it is a row in
     /// the list and nothing more.
-    public var isCounted: Bool { NeedsYou.aggregate([runner: [self]]).rows[0].counted }
+    public var isCounted: Bool { NeedsYou.aggregate([runner: [self]]).rows.first?.counted ?? false }
     /// Where it sorts: smaller first. `Terminal.rank`'s scale, a tier per kind
     /// and then the oldest first, and a duration rather than a clock reading,
     /// which is what lets two runners' items be compared at all.
@@ -211,7 +211,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     public var isDerived: Bool
 
     /// This item's identity across every runner.
-    public var key: String { String(decoding: try! JSONEncoder().encode([runner, itemID]), as: UTF8.self) }
+    public var key: String { String(decoding: (try? JSONEncoder().encode([runner, itemID])) ?? Data(), as: UTF8.self) }
     public var id: String { key }
 
     public init(
@@ -310,8 +310,8 @@ public enum NeedsYou {
     /// So it appears once, from the runner that has waited longest (the lowest
     /// rank), and the other runner's copy is dropped (ov-315).
     public static func merge(_ runners: [String: [NeedsYouItem]]) -> [NeedsYouItem] {
-        aggregate(runners).rows.map { row in
-            var item = runners[row.key.runner_id]!.first { $0.itemID == row.key.item_id }!
+        aggregate(runners).rows.compactMap { row in
+            guard var item = runners[row.key.runner_id]?.first(where: { $0.itemID == row.key.item_id }) else { return nil }
             item.runner = row.key.runner_id
             return item
         }
@@ -378,7 +378,7 @@ public struct NeedsYouConcern: Hashable, Sendable, Codable {
 
 extension NeedsYouItem {
     /// Whether it is someone else's: filed under Everyone Else.
-    public var isOthers: Bool { NeedsYou.aggregate([runner: [self]]).rows[0].group == "others" }
+    public var isOthers: Bool { NeedsYou.aggregate([runner: [self]]).rows.first?.group == "others" }
 
     /// Whose an Everyone Else row says it is: a member's name, else "Owner" for the
     /// runner's owner. Nil for the reader's own and nobody's, which say nothing.

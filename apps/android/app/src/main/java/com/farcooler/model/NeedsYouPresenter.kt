@@ -17,7 +17,13 @@ object NeedsYouPresenter {
     // This is an unavailable view, never a second implementation of aggregation.
     private val unavailable = NeedsYouAggregateView(1u, emptyList(), emptyList(), emptyList(), false, 0u, emptyList(), emptyList(), emptyList())
 
-    fun view(runners: Map<String, List<NeedsYouItem>>): NeedsYouAggregateView = tryView(runners) ?: unavailable
+    fun view(runners: Map<String, List<NeedsYouItem>>): NeedsYouAggregateView {
+        tryView(runners)?.let { return it }
+        System.err.println("Needs You presenter rejected the list")
+        val unique = runners.mapValues { (_, items) -> items.distinctBy { it.id } }
+        if (unique != runners) return tryView(unique) ?: unavailable
+        return unavailable
+    }
 
     /** Null on an unavailable core or invalid input, just like the other native view-model boundaries. */
     fun tryView(runners: Map<String, List<NeedsYouItem>>): NeedsYouAggregateView? = runCatching {
@@ -40,8 +46,11 @@ object NeedsYouPresenter {
     /** Validate with Rust before a read replaces the last good list. */
     fun read(data: JsonElement, runnerId: String): NeedsYouList? = runCatching {
         val list = json.decodeFromJsonElement<NeedsYouList>(data)
-        if (tryView(mapOf(runnerId to list.items)) == null) return null
-        list
+        if (tryView(mapOf(runnerId to list.items)) != null) return list
+        System.err.println("Needs You presenter rejected the list for $runnerId")
+        val unique = list.items.distinctBy { it.id }
+        if (unique.size == list.items.size || tryView(mapOf(runnerId to unique)) == null) return null
+        list.copy(items = unique)
     }.getOrNull()
 
     fun view(items: List<RunnerNeedsYouItem>): NeedsYouAggregateView =
