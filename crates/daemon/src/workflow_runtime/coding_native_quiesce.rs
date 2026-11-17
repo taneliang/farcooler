@@ -24,11 +24,12 @@ impl NativeOwner {
 impl Exec {
     /// End the owner's agent and close its window. The runner never signals the agent itself (ov-1330): it asks the
     /// agent's hold, which signals only the process group it created and has not reaped, and which answers `ended`
-    /// only once the group is empty and nothing descended from the hold is alive. A hold that is gone removed its socket after its group was empty, so that is the
-    /// same answer. The owner can end by itself while it is being ended (ov-1287); the hold gives one answer either way.
+    /// only once that group is empty and nothing descended from the hold is alive; a hold that is gone removed its
+    /// socket only after that, so that is the same answer. The owner can end by itself while it is being ended (ov-1287).
     ///
-    /// An owner an earlier engine launched without a hold can only be observed: its pane
-    /// dead or gone with nothing on its tty. Nothing is signalled on that path.
+    /// A hold that is there but does not answer was killed before it could prove its agent ended. Its pane and tty prove
+    /// nothing (a command that left the agent's session holds neither), so that is a refusal. An owner an earlier engine
+    /// launched without a hold can only be observed: pane dead or gone, nothing on its tty. Nothing is ever signalled.
     pub(super) async fn quiesce_native(&self, owner: &NativeOwner) -> Result<()> {
         let tmux = server(&self.root, &owner.binding);
         if owner.terminal != terminal(&owner.binding) {
@@ -48,9 +49,14 @@ impl Exec {
             match native_hold::ask(&self.native_hold_socket(&owner.binding), "end", END_WAIT).await {
                 Answer::Gone => return close_native(&tmux, owner).await,
                 Answer::Said(word) if word == "ended" => return close_native(&tmux, owner).await,
+                // Its group is empty, but a process the agent started outside it is still alive: never settle over
+                // work that may still be writing.
                 Answer::Said(word) if word == "unsettled" => return Err(Error::Refused("native agent left a process running outside its group")),
                 Answer::Said(_) => return Err(Error::Refused("native hold did not end its agent")),
-                Answer::Silent => return Err(Error::Refused("native hold is not answering")),
+                Answer::Silent => {
+                    tracing::warn!(effect = %owner.binding.effect.id, "the native hold is not answering; refusing to settle");
+                    return Err(Error::Refused("native hold is not answering, so its agent cannot be proved ended"));
+                }
             }
         }
         for round in 0..100 {
