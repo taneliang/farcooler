@@ -1,0 +1,109 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite NativeOfferTests started.
+◇ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" started.
+✘ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" recorded an issue at NativeOfferTests.swift:254:13: Expectation failed: pane.runningAgent == "claude"
+↳ the runner never said claude runs here in 30 s; last said ""; last list: the CLI exited 0; stderr: (empty); stdout: {"branch_prefix":"feat/","live_panes":2,"runtime_healthy":true,"workspaces":[{"base":null,"budget_lines":null,"charter":"/tmp/fco-985ED4/h/workspaces/01a1e8d0-dc84-72d0-af12-e42dbd0abeaf/charter.md","direct_refused":null,"home":"/tmp/fco-985ED4/h/workspaces/01a1e8d0-dc84-72d0-af12-e42dbd0abeaf","id":"01a1e8d0-dc84-72d0-af12-e42dbd0abeaf","is_main":true,"landing":null,"lead":"","lead_name":"","name":"Main","orchestrator":null,"orchestrator_not_restarted":null,"ordinal":0,"pr_cost_line":false,"pr_; last screen: the CLI exited 0; stderr: 2026-11-17T09:23:30.731710Z  WARN panes start this shell, not the login shell (FARCOOLER_TEST_SHELL) shell=/bin/sh; stdout: {"columns":120,"rows":40,"screen":"fco-ready-12BA1B77-E240-47A7-BCED-5D15E0F6618E> /tmp/fco-985ED4/bin/claude 600\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"}
+↳ pane.runningAgent == "claude" → false
+↳   pane.runningAgent → ""
+↳     some → ""
+↳     some → "claude"
+✘ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" recorded an issue at NativeOfferTests.swift:258:13: Expectation failed: Self.agents().offers(pane, target: "")
+↳ Self.agents().offers(pane, target: "") → false
+↳   Self.agents() → Far_Cooler.NativeAgents
+↳     _links → Published<Dictionary<String, Link>>(storage: Combine.Published<Swift.Dictionary<Swift.String, Far_Cooler.NativeAgents.Link>>.Storage.value(["": Far_Cooler.NativeAgents.Link(core: Optional(Far_Cooler.RunnerCore), workflowHost: nil, offered: Set(["agent_compose", "agent_rows"]), rowsServed: true)]))
+↳       storage → value(["": Far_Cooler.NativeAgents.Link(core: Optional(Far_Cooler.RunnerCore), workflowHost: nil, offered: Set(["agent_compose", "agent_rows"]), rowsServed: true)])
+↳         value → ["": Far_Cooler.NativeAgents.Link(core: Optional(Far_Cooler.RunnerCore), workflowHost: nil, offered: Set(["agent_compose", "agent_rows"]), rowsServed: true)]
+↳     $__lazy_storage_$_workflows → nil
+↳     _remotes → Published<Set<String>>(storage: Combine.Published<Swift.Set<Swift.String>>.Storage.value(Set([])))
+↳       storage → value(Set([]))
+↳         value → []
+↳     panes → [:]
+↳     paneTargets → [:]
+↳     defaults → <NSUserDefaults: 0x79595002a0>
+↳     connecting → [:]
+↳     retrying → [:]
+↳     failures → [:]
+↳     keepThroughFailures → 4
+↳     retryDelay → 2.0 seconds
+↳       _low → 2000000000000000000
+↳       _high → 0
+↳     pairing → Far_Cooler.RemotePairing
+↳       _states → Published<Dictionary<String, State>>(storage: Combine.Published<Swift.Dictionary<Swift.String, Far_Cooler.RemotePairing.State>>.Storage.value([:]))
+↳         storage → value([:])
+↳           value → [:]
+↳       _pairing → Published<Set<String>>(storage: Combine.Published<Swift.Set<Swift.String>>.Storage.value(Set([])))
+↳         storage → value(Set([]))
+↳           value → []
+↳       pairingRuns → [:]
+↳       key → Far_Cooler.ConversationKey
+↳         vault → Far_Cooler.MemoryConversationKeyVault
+↳           lock → <NSLock: 0x7958c3df20>{name = nil}
+↳           stored → nil
+↳           writes → 0
+↳           failing → false
+↳         lock → <NSLock: 0x7958c3df80>{name = nil}
+↳       defaults → <NSUserDefaults: 0x79595002a0>
+↳       pins → [:]
+↳       generations → [:]
+↳       consented → []
+↳   pane → Terminal(id: "01a1e8d0-e1e2-7572-8b96-cf461f7d591d", short: "1f7d591d", title: "shell", preset: "sh", program: Optional("shell"), runningAgent: Optional(""), claudeLogin: nil, state: "running", activity: Optional("none"), activitySince: Optional(1794907366601.0), exitCode: nil, exitSignal: nil, turnStartedAt: nil, blockedQuestion: nil, draftHold: nil, feed: Optional([]), said: nil, line: Optional("sh · running · 43s"), subagents: Optional([]), subagentsRunning: Optional(0), subagentIds: Optional([]), turnFailed: Optional(false), epoch: 0, paneMode: Optional("terminal"), webUrl: nil, agentSessionId: nil, taskId: nil, noticeTaskId: nil, workspace: nil, role: Optional("shell"), rank: Optional(299999956), ports: Optional([]))
+↳     id → "01a1e8d0-e1e2-7572-8b96-cf461f7d591d"
+↳     short → "1f7d591d"
+↳     title → "shell"
+↳     preset → "sh"
+↳     program → "shell"
+↳       some → "shell"
+↳     runningAgent → ""
+↳       some → ""
+↳     claudeLogin → nil
+↳     state → "running"
+↳     activity → "none"
+↳       some → "none"
+↳     activitySince → 1794907366601.0
+↳       some → 1794907366601.0
+↳     exitCode → nil
+↳     exitSignal → nil
+↳     turnStartedAt → nil
+↳     blockedQuestion → nil
+↳     draftHold → nil
+↳     feed → []
+↳       some → []
+↳     said → nil
+↳     line → "sh · running · 43s"
+↳       some → "sh · running · 43s"
+↳     subagents → []
+↳       some → []
+↳     subagentsRunning → 0
+↳       some → 0
+↳     subagentIds → []
+↳       some → []
+↳     turnFailed → false
+↳       some → false
+↳     epoch → 0
+↳     paneMode → "terminal"
+↳       some → "terminal"
+↳     webUrl → nil
+↳     agentSessionId → nil
+↳     taskId → nil
+↳     noticeTaskId → nil
+↳     workspace → nil
+↳     role → "shell"
+↳       some → "shell"
+↳     rank → 299999956
+↳       some → 299999956
+↳     ports → []
+↳       some → []
+✘ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" failed after 48.310 seconds with 2 issues.
+↳ /// The real CLI's bytes through the Mac's decoder: a program named
+↳ /// `claude` (a link to `sleep`, never the real one) typed into a shell
+↳ /// pane is listed as running claude, and offered the view.
+✘ Suite NativeOfferTests failed after 48.310 seconds with 2 issues.
+↳ /// Which panes are offered the conversation view, and the reason a pane
+↳ /// isn't (ov-443). The owner's orchestrator was a claude typed into a shell,
+↳ /// launched as `shell` and labeled with its session's title, so it was never
+↳ /// offered the view and nothing said why.
+✘ Test run with 1 test in 1 suite failed after 48.311 seconds with 2 issues.
+Note: Some test targets reported failures:
+  - CeremonyTests (Swift Testing)

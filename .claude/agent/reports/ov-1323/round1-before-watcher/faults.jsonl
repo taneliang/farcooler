@@ -1,0 +1,3 @@
+{"kind": "send-keys", "pid": 57757, "time": 1794907366.720288, "args": ["-L", "farcooler-01a1e8d0db6b73f39e9c88365805323f", "-f", "/tmp/fco-985ED4/h/tmux.conf", "send-keys", "-t", "%1", "-l", "/tmp/fco-985ED4/bin/claude 600\r"]}
+{"kind": "watcher-held", "pid": 57943, "time": 1794907367.6143801, "args": ["-nP", "-a", "-p", "57412,57562,57775", "-iTCP", "-sTCP:LISTEN", "-Fpn"], "foreground": ["57775 57562 57775 ttys019  SN+  /tmp/fco-985ED4/bin/claude 600"]}
+{"kind": "watcher-released", "pid": 57943, "time": 1794907412.61741}

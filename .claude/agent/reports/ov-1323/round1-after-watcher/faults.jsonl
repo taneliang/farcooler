@@ -1,0 +1,3 @@
+{"kind": "send-keys", "pid": 13066, "time": 1794907508.7240572, "args": ["-L", "farcooler-01a1e8d306c07ca2868a4eadbea32845", "-f", "/tmp/fco-030BB3/h/tmux.conf", "send-keys", "-t", "%1", "-l", "/tmp/fco-030BB3/bin/claude 600\r"]}
+{"kind": "watcher-held", "pid": 13424, "time": 1794907509.8907142, "args": ["-nP", "-a", "-p", "12507,12787,13090", "-iTCP", "-sTCP:LISTEN", "-Fpn"], "foreground": ["13090 12787 13090 ttys018  SN+  /tmp/fco-030BB3/bin/claude 600"]}
+{"kind": "watcher-released", "pid": 13424, "time": 1794907554.906967}

@@ -1,0 +1,45 @@
+warning: 'macos': found 4 file(s) which are unhandled; explicitly declare them as resources or exclude from the target
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1323-claude-offer-test/apps/macos/Tests/CeremonyTests/Fixtures/composer-large.heic
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1323-claude-offer-test/apps/macos/Tests/CeremonyTests/Fixtures/composer-large.md
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1323-claude-offer-test/apps/macos/Tests/CeremonyTests/Fixtures/traffic-lights-dark-2x.png
+    /Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1323-claude-offer-test/apps/macos/Tests/CeremonyTests/Fixtures/traffic-lights-unfocused-light-2x.png
+Building for debugging...
+[Computing dependencies]
+[1 / 38]
+[10 / 20] RenderBenchTests-product
+[11 / 18] GlanceTests-product
+[11 / 17] CeremonyTests-product
+[13 / 19] CeremonyTests-product
+/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1323-claude-offer-test/apps/macos/Tests/CeremonyTests/NotifierRepliesTests.swift:65:53: warning: 'unsafeBitCast' from 'NSObject' to 'UNUserNotificationCenter' can be replaced with 'unsafeDowncast'
+63 |     /// A stand-in for the center, which needs an app bundle the test process
+64 |     /// is not; the delegate never messages it.
+65 |     nonisolated(unsafe) private static let center = unsafeBitCast(NSObject(), to: UNUserNotificationCenter.self)
+   |                                                     `- warning: 'unsafeBitCast' from 'NSObject' to 'UNUserNotificationCenter' can be replaced with 'unsafeDowncast'
+66 |
+67 |     /// A response to a notification on `thread`. Neither type has a public
+[17 / 20] CeremonyTests-product
+[18 / 20] CeremonyTests-product
+[20 / 20] CeremonyTests-product
+Build complete! (13.68 sec)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite NativeOfferTests started.
+◇ Test "A claude typed into a shell, or named after its session, is offered the view" started.
+✔ Test "A claude typed into a shell, or named after its session, is offered the view" passed after 0.014 seconds.
+◇ Test "A pane that isn't offered the view says why" started.
+✔ Test "A pane that isn't offered the view says why" passed after 0.013 seconds.
+◇ Test "A Claude pane whose runner can't serve the view shows a dimmed switch; a shell shows none" started.
+✔ Test "A Claude pane whose runner can't serve the view shows a dimmed switch; a shell shows none" passed after 1.028 seconds.
+◇ Test "The menu item says why it's dimmed, on a line of its own, and nothing when it acts" started.
+✔ Test "The menu item says why it's dimmed, on a line of its own, and nothing when it acts" passed after 0.005 seconds.
+◇ Test "An orchestrator adopted from a claude typed into a shell is offered the view" started.
+✔ Test "An orchestrator adopted from a claude typed into a shell is offered the view" passed after 0.001 seconds.
+◇ Test "An orchestrator the runner launched is still offered the view" started.
+✔ Test "An orchestrator the runner launched is still offered the view" passed after 0.002 seconds.
+◇ Test "The orchestrator menu's dimmed item carries its reason as a line" started.
+✔ Test "The orchestrator menu's dimmed item carries its reason as a line" passed after 0.001 seconds.
+◇ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" started.
+✔ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" passed after 2.287 seconds.
+✔ Suite NativeOfferTests passed after 3.355 seconds.
+✔ Test run with 8 tests in 1 suite passed after 3.355 seconds.

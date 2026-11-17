@@ -1,0 +1,22 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite NativeOfferTests started.
+◇ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" started.
+✘ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" recorded an issue at NativeOfferTests.swift:175:6: Caught error: terminal send: the CLI exited 1; stderr: 2026-11-17T09:22:19.836586Z  WARN panes start this shell, not the login shell (FARCOOLER_TEST_SHELL) shell=/bin/sh
+2026-11-17T09:22:20.838812Z  WARN tmux did not answer in time command=["list-panes", "-a", "-F", "#{pane_id}\t#{window_id}\t#{pane_width}\t#{pane_height}\t#{@farcooler_daemon_id}\t#{@farcooler_workspace_id}\t#{@farcooler_terminal_id}\t#{@farcooler_schema_version}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_current_command}\t#{pane_left}\t#{pane_top}\t#{window_active}\t#{pane_active}\t#{window_zoomed_flag}\t#{pane_tty}\t#{pane_dead_signal}\t#{window_activity}\t#{history_size}\t#{cursor_x}\t#{cursor_y}\t#{pane_pid}\t#{session_name}\t#{m:*##farcooler-opening:*,#{pane_start_command}}\t#{pane_title}"] deadline=1s
+2026-11-17T09:22:21.993519Z  WARN tmux did not answer in time command=["list-panes", "-a", "-F", "#{pane_id}\t#{window_id}\t#{pane_width}\t#{pane_height}\t#{@farcooler_daemon_id}\t#{@farcooler_workspace_id}\t#{@farcooler_terminal_id}\t#{@farcooler_schema_version}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_current_command}\t#{pane_left}\t#{pane_top}\t#{window_active}\t#{pane_active}\t#{window_zoomed_flag}\t#{pane_tty}\t#{pane_dead_signal}\t#{window_activity}\t#{history_size}\t#{cursor_x}\t#{cursor_y}\t#{pane_pid}\t#{session_name}\t#{m:*##farcooler-opening:*,#{pane_start_command}}\t#{pane_title}"] deadline=1s
+2026-11-17T09:22:21.993540Z  WARN tmux inventory unavailable after a retry, deriving everything unknown error=tmux did not answer in time
+error: resource not found; stdout: (empty)
+✘ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" failed after 5.710 seconds with 1 issue.
+↳ /// The real CLI's bytes through the Mac's decoder: a program named
+↳ /// `claude` (a link to `sleep`, never the real one) typed into a shell
+↳ /// pane is listed as running claude, and offered the view.
+✘ Suite NativeOfferTests failed after 5.710 seconds with 1 issue.
+↳ /// Which panes are offered the conversation view, and the reason a pane
+↳ /// isn't (ov-443). The owner's orchestrator was a claude typed into a shell,
+↳ /// launched as `shell` and labeled with its session's title, so it was never
+↳ /// offered the view and nothing said why.
+✘ Test run with 1 test in 1 suite failed after 5.710 seconds with 1 issue.
+Note: Some test targets reported failures:
+  - CeremonyTests (Swift Testing)

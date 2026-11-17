@@ -1,0 +1,8 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite NativeOfferTests started.
+◇ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" started.
+✔ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" passed after 2.739 seconds.
+✔ Suite NativeOfferTests passed after 2.739 seconds.
+✔ Test run with 1 test in 1 suite passed after 2.739 seconds.

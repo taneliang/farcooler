@@ -25,3 +25,5 @@ finally:
         if p.poll() is None: os.kill(p.pid, signal.SIGTERM)
     for p in workers: p.wait()
     (out / 'load-stopped.json').write_text(json.dumps([dict(pid=p.pid, exit=p.returncode) for p in workers], indent=2))
+if len(results) != 20 or not all(r['verified'] and r['exit'] == 0 and r['load_workers'] == 16 for r in results):
+    sys.exit(1)
