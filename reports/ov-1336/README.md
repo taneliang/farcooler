@@ -206,3 +206,9 @@ Round 2 validation, foreground only, at most four jobs; no full gate or formatte
 - Browser: reran `needs-capture.mjs` using the real wasm/glue built in round 1 and local Chrome. All **four** desktop/phone, light/dark captures passed the badge, refusal-notice and page-error checks; every title was `(6) Far Cooler`.
 - Shared-core lint, its self-test and baseline-not-grown against the ticket base passed. No baseline change or exemption was needed in this round.
 - `git diff --check` passed.
+
+### ov-1339 fix round 1
+
+The four Needs You rejection messages are developer diagnostics, not displayed feature copy. Each now has a reviewed `platform copy` exemption on its logging line; the baseline records two Android exemptions and one each for AgentKit and web, without raising any feature-copy ratchet.
+
+Validation: `python3 scripts/shared-core-lint.py`, `python3 scripts/shared-core-lint.py --self-test`, `python3 scripts/shared-core-lint.py --baseline-not-grown origin/main`, and `git diff --check` all passed. The reviewer also reported 56 passing targeted web needs/fleet/scope tests on the recovery commit. This round changes comments and lint accounting only; runtime behavior is unchanged.

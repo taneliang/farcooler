@@ -19,7 +19,7 @@ object NeedsYouPresenter {
 
     fun view(runners: Map<String, List<NeedsYouItem>>): NeedsYouAggregateView {
         tryView(runners)?.let { return it }
-        System.err.println("Needs You presenter rejected the list")
+        System.err.println("Needs You presenter rejected the list") // platform copy: developer diagnostic, not UI copy
         val unique = runners.mapValues { (_, items) -> items.distinctBy { it.id } }
         if (unique != runners) return tryView(unique) ?: unavailable
         return unavailable
@@ -47,7 +47,7 @@ object NeedsYouPresenter {
     fun read(data: JsonElement, runnerId: String): NeedsYouList? = runCatching {
         val list = json.decodeFromJsonElement<NeedsYouList>(data)
         if (tryView(mapOf(runnerId to list.items)) != null) return list
-        System.err.println("Needs You presenter rejected the list for $runnerId")
+        System.err.println("Needs You presenter rejected the list for $runnerId") // platform copy: developer diagnostic, not UI copy
         val unique = list.items.distinctBy { it.id }
         if (unique.size == list.items.size || tryView(mapOf(runnerId to unique)) == null) return null
         list.copy(items = unique)

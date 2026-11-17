@@ -22,7 +22,7 @@ extension NeedsYou {
             return decoded.needs_you
         }
         if let view = present(input) { return view }
-        NSLog("Needs You presenter rejected the list; retrying without duplicate item IDs")
+        NSLog("Needs You presenter rejected the list; retrying without duplicate item IDs") // platform copy: developer diagnostic, not UI copy
         let unique = runners.mapValues { items in
             var seen = Set<String>()
             return items.filter { seen.insert($0.itemID).inserted }

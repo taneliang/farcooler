@@ -24,7 +24,7 @@ export function aggregate(items: Item[]): { view: NeedsYouAggregateView; items: 
     if (!answer.needs_you) throw new Error(`needs_you_invalid:${answer.error}`)
     view = answer.needs_you
   } catch (error) {
-    console.error('Needs You presenter rejected the list', error)
+    console.error('Needs You presenter rejected the list', error) // platform copy: developer diagnostic, not UI copy
     const seen = new Set<string>()
     const unique = items.filter(item => {
       const key = JSON.stringify([item.runner ?? '', item.rawItemId ?? item.id])
