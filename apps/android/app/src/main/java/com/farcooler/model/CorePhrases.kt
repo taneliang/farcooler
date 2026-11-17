@@ -41,6 +41,8 @@ object CorePhrases {
 
     private fun word(key: String): String? = words()?.get(key)?.jsonPrimitive?.content
 
+    val gpt62Sol: String? get() = word("gpt_6_2_sol")
+
     /** The Agents card's title when nothing is running. */
     val agentsNone: String? get() = word("agents_none")
 

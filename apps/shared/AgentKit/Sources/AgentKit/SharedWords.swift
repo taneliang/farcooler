@@ -8,6 +8,7 @@ import Foundation
 public enum SharedWords {
     private struct Answer: Decodable {
         struct Words: Decodable {
+            var gpt62Sol: String?
             var agentsNone: String
             var needsYou: String
             var blockedDoing: String
@@ -15,6 +16,7 @@ public enum SharedWords {
             var confirmBrowserAccess: String
 
             enum CodingKeys: String, CodingKey {
+                case gpt62Sol = "gpt_6_2_sol"
                 case agentsNone = "agents_none"
                 case needsYou = "needs_you"
                 case blockedDoing = "blocked_doing"
@@ -46,6 +48,8 @@ public enum SharedWords {
         asked = found
         return found
     }
+
+    public static var gpt62Sol: String? { words?.gpt62Sol }
 
     /// The Agents card's title when nothing is running.
     public static var agentsNone: String { words?.agentsNone ?? "" }

@@ -176,11 +176,14 @@ pub struct Words {
     /// What a phone's step-up prompt says before it signs for a browser's
     /// teammate reply (ov-1020): `{runner}` is the runner's name, which the app fills.
     pub confirm_browser_access: String,
+    /// Display name supplied by the shared model words.
+    pub gpt_6_2_sol: String,
 }
 
 impl Words {
     pub fn new(style: Style) -> Self {
         Self {
+            gpt_6_2_sol: model("gpt-6.2-sol").to_string(),
             agents_none: style.label("no agents running"),
             needs_you: super::column::PipeStage::Stuck.title().into(),
             waiting_on_you: style.label("waiting on you"),
