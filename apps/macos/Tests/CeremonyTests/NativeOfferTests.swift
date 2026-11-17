@@ -182,6 +182,11 @@ struct NativeOfferTests {
         let bin = home + "/bin"
         try FileManager.default.createDirectory(atPath: demo, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
+        // The isolated /bin/sh reads ENV before its first interactive prompt.
+        // A unique prompt distinguishes input readiness from startup output.
+        let shellPrompt = "fco-ready-\(UUID().uuidString)>"
+        let shellEnvironment = home + "/shell-env"
+        try "PS1='\(shellPrompt) '\n".write(toFile: shellEnvironment, atomically: true, encoding: .utf8)
         // A link, not a copy: a copied system binary is killed for its signature.
         try FileManager.default.createSymbolicLink(atPath: bin + "/claude", withDestinationPath: "/bin/sleep")
         for args in [["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"]] {
@@ -191,6 +196,7 @@ struct NativeOfferTests {
         func farcooler(_ args: [String]) async -> ProcessRunner.Result {
             var environment = ProcessInfo.processInfo.environment
             ScratchDaemon.isolate(&environment, home: home + "/h")
+            environment["ENV"] = shellEnvironment
             return await ProcessRunner.run(cli, args, environment: environment, deadline: 60)
         }
         func tearDown() async { await ScratchDaemon.stop(cli: cli, farcoolerHome: home + "/h") }
@@ -205,6 +211,26 @@ struct NativeOfferTests {
             let worktree = try #require(try made.jsonObject("worktree create")["short"] as? String)
             let created = await farcooler(["--json", "terminal", "create", worktree])
             let terminal = try #require(try created.jsonObject("terminal create")["id"] as? String)
+            // Creation confirms the window, not that its shell can read keys.
+            // Like the daemon tests' shell_ready, wait for the isolated shell
+            // to draw its prompt through the live runtime before typing. A
+            // successful send only acknowledges tmux's write; polling the
+            // agent afterward cannot recover input sent during startup.
+            let readyDeadline = ContinuousClock.now + .seconds(60)
+            var shellReady = false
+            var lastScreen = "no screen yet"
+            repeat {
+                let screen = await farcooler(["--json", "terminal", "screen", terminal])
+                lastScreen = screen.account
+                if let text = (try? screen.jsonObject("terminal screen"))?["screen"] as? String,
+                    text.contains(shellPrompt)
+                {
+                    shellReady = true
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(100))
+            } while ContinuousClock.now < readyDeadline
+            try #require(shellReady, "the shell never drew its prompt in 60 s; last screen: \(lastScreen)")
             try await farcooler(["terminal", "send", terminal, "\(bin)/claude 600\r"]).mustSucceed("terminal send")
             // Until it says claude, not until it says anything: the runner
             // says "" for the shell the pane starts as, and on a slow host
@@ -222,9 +248,12 @@ struct NativeOfferTests {
                 try await Task.sleep(for: .milliseconds(500))
             }
             let pane = try #require(listed)
+            if pane.runningAgent != "claude" {
+                lastScreen = await farcooler(["--json", "terminal", "screen", terminal]).account
+            }
             #expect(
                 pane.runningAgent == "claude",
-                "the runner never said claude runs here in 30 s; last said \(pane.runningAgent.map { "\"\($0)\"" } ?? "nothing"); last list: \(lastList)")
+                "the runner never said claude runs here in 30 s; last said \(pane.runningAgent.map { "\"\($0)\"" } ?? "nothing"); last list: \(lastList); last screen: \(lastScreen)")
             #expect(pane.program == "shell")
             #expect(Self.agents().offers(pane, target: ""))
         } catch {
