@@ -384,10 +384,10 @@ def steps_for(job, workflows, ctx):
 # ---------------------------------------------------------------- which jobs
 
 
-def validate_base(repo, base):
+def validate_base(repo, base, *, enforce_engine=True):
     """Engine landings must use their pinned fold base; never a moving remote ref."""
     engine = os.environ.get("FARCOOLER_OPERATION_BINDING") or os.environ.get("FARCOOLER_WORKFLOW_RUN")
-    if engine:
+    if engine and enforce_engine:
         pinned = os.environ.get("FARCOOLER_BASE", "")
         if not re.fullmatch(r"[0-9a-fA-F]{40}", pinned):
             raise SystemExit("lane-gate: engine requires FARCOOLER_BASE as a resolved fold commit")
@@ -404,12 +404,12 @@ def validate_base(repo, base):
     return resolved.stdout.strip()
 
 
-def changed_inputs(repo, base):
+def changed_inputs(repo, base, *, enforce_engine=True):
     """The combined branch, index, worktree and untracked diff; retain deletions
     and both sides of renames so moving code into docs cannot hide its impact."""
     def git(*args):
         return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
-    resolved = validate_base(repo, base)
+    resolved = validate_base(repo, base, enforce_engine=enforce_engine)
     diff = git("diff", "--no-renames", "--name-status", "-z", resolved)
     untracked = git("ls-files", "--others", "--exclude-standard", "-z")
     for out in (diff, untracked):
@@ -903,13 +903,16 @@ def gate(args):
         landing_policy.readonly_git(os.environ)
     repo = pathlib.Path(args.worktree).resolve()
     validate_base(repo, args.base)
+    if args.landing:
+        args.base = landing_policy.fold_base(repo, args.base)
     workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
                  "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC here is caught by main
     ctx = make_ctx(repo, tmp, args.base)
     changes = load_module("ci_changes", repo / "scripts" / "ci-changes.py")
     ios_plan = load_module("ios_ui_plan", repo / "scripts" / "ios-ui-plan.py")
-    inputs = changed_inputs(repo, args.base)
+    # Admission checked the supplied engine base before consulting fold evidence.
+    inputs = changed_inputs(repo, args.base, enforce_engine=False)
     files = sorted({f for _, f in inputs})
 
     plans = {j: steps_for(j, workflows, ctx) for j in JOBS}

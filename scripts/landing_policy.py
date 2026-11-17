@@ -5,12 +5,54 @@ and run serially. Cargo arbitrates its shared target directory with its own
 lock; do not give each worker a cold target. Admission still uses scripts/heavy.
 """
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import os
+from pathlib import Path
+import re
 import shlex
 import subprocess
 import threading
 import time
+
+
+def fold_base(repo, given):
+    """Read the same exact workspace/item/candidate index as daemon process_base.
+
+    Only durable evidence can narrow an old runner base. Remote refs, commit
+    subjects and HEAD's parent cannot prove where a multi-commit fold began.
+    Keep the given base on missing, foreign, malformed or non-ancestral evidence.
+    """
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+
+    try:
+        workspace, item, candidate, receipt = (os.environ.get(key, "") for key in
+            ("FARCOOLER_WORKSPACE", "FARCOOLER_WORKFLOW_ITEM", "FARCOOLER_CANDIDATE", "FARCOOLER_RECEIPT"))
+        if not all((workspace, item, candidate, receipt)):
+            raise ValueError("missing fold context")
+        head = git("rev-parse", "HEAD")
+        if head.returncode or candidate != head.stdout.strip():
+            raise ValueError("candidate differs from HEAD")
+        # farcooler_workflow::digest serializes this tuple as compact UTF-8 JSON.
+        identity = json.dumps([workspace, item], ensure_ascii=False, separators=(",", ":")).encode()
+        name = f"fold-wf1:{hashlib.sha256(identity).hexdigest()}-{candidate}.json"
+        record = json.loads((Path(receipt).parent / name).read_text())
+        if not isinstance(record, dict) or record.get("item") != item or record.get("folded") != candidate:
+            raise ValueError("foreign fold record")
+        base = record.get("base")
+        if not isinstance(base, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", base):
+            raise ValueError("invalid fold base")
+        for older, newer in ((given, base), (base, candidate)):
+            if git("merge-base", "--is-ancestor", older, newer).returncode:
+                raise ValueError("fold base does not advance the given base within candidate history")
+    except (OSError, ValueError) as error:
+        print(f"lane-gate: fold base unavailable ({error}); falling back to given base {given}")
+        return given
+    if base.lower() == given.lower():
+        return given
+    print(f"lane-gate: using fold base {base} instead of stale given base {given}")
+    return base
 
 
 def readonly_git(env):

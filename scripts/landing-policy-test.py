@@ -432,9 +432,10 @@ class LandingTests(unittest.TestCase):
             self.assertEqual(correct.returncode, 0, correct.stdout + correct.stderr)
             self.assertIn(f"3 changed file(s) against {base}; jobs:", correct.stdout)
             self.assertNotIn("using fold base", correct.stdout)
+            sibling = git("commit-tree", "HEAD^{tree}", "-p", stale, "-m", "unrelated sibling")
             for invalid in (None, "{bad json", {**fact, "item": "another-group"},
                             {**fact, "folded": stale}, {**fact, "base": "HEAD"},
-                            {**fact, "base": "f" * 40}):
+                            {**fact, "base": "f" * 40}, {**fact, "base": sibling}):
                 if invalid is None:
                     record.unlink()
                 else:

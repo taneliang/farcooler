@@ -9,9 +9,9 @@
 # scripts/lane-gate.py reads the job list out of ci.yml, narrows it by path
 # (scripts/ci-changes.py's allowlist: a docs or website-only change runs just the
 # cheap checks, wire and doc-comments) and runs each step with CI's env. Under
-# the engine the default base is FARCOOLER_BASE: all folded tickets count even
-# if origin/main moves. The ov-1116 crate impact is reported without skipping
-# CI's full Rust coverage. This adds
+# the engine the default base is FARCOOLER_BASE. A matching durable fold record
+# corrects stale daemon values: all folded tickets count even if origin/main moves.
+# The ov-1116 crate impact is reported without skipping CI's full Rust coverage. This adds
 # the engine's contract: exit 0 only if every step passed, non-zero otherwise, and a
 # run whose plan has a heavy job (Rust, Swift, Android, iOS, tunnel, web) goes
 # through scripts/heavy, so it waits for the load and the machine-wide lock like any
