@@ -10,10 +10,10 @@ impl NativeOwner {
         let processes = table.under_tty_in_session(tty, session);
         // A session keeps its ID while any member survives. If the PID was
         // recycled as a new session leader, its start identity has changed.
-        if !processes.is_empty() && !gone(session) {
+        if !processes.is_empty() && !crate::effect_runner::Owner::gone(supervisor.pid)? {
             match crate::effect_runner::Owner::started_at(supervisor.pid) {
                 Ok(started) if started != supervisor.started => return Ok(Vec::new()),
-                Err(error) if !gone(session) => return Err(Error::Io(error)),
+                Err(error) if !crate::effect_runner::Owner::gone(supervisor.pid)? => return Err(Error::Io(error)),
                 _ => {}
             }
         }
@@ -22,85 +22,52 @@ impl NativeOwner {
 }
 
 impl Exec {
-    /// End the owner's process tree and close its window. The owner can end by itself while it is being ended: a
-    /// cancelled reviewer whose Stop hook loses its answer exits (ov-1287). Whichever is seen first, the proof is the
-    /// same, nothing left on the owner's tty, and the answer is the same. A pane tmux still calls live with nothing
-    /// on its tty is an exit tmux hasn't noticed yet, so it is read again until tmux agrees.
+    /// End the owner's agent and close its window. The runner never signals the agent itself (ov-1330): it asks the
+    /// agent's hold, which signals only the process group it created and has not reaped, and which answers `ended`
+    /// only once that group is empty. A hold that is gone removed its socket after its group was empty, so that is the
+    /// same answer. The owner can end by itself while it is being ended (ov-1287); the hold gives one answer either way.
+    ///
+    /// A hold that was killed, or an owner an earlier engine launched without one, can only be observed: its pane
+    /// dead or gone with nothing on its tty. Nothing is signalled on that path.
     pub(super) async fn quiesce_native(&self, owner: &NativeOwner) -> Result<()> {
         let tmux = server(&self.root, &owner.binding);
         if owner.terminal != terminal(&owner.binding) {
             return Err(Error::Refused("foreign native terminal"));
         }
-        let mut owned_sample = None;
+        // A live pane must still be the retained owner's before its hold is told anything.
+        let life = tmux.pane_life(&owner.pane, owner.terminal).await
+            .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
+        if life == farcooler_tmux::PaneLife::Live {
+            let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native owner inventory unavailable"))?;
+            if panes.iter().any(|p| p.pane_id == owner.pane && p.terminal_id == owner.terminal
+                && (p.daemon_id != owner.terminal || p.worktree_id != owner.terminal || p.tty != owner.tty)) {
+                return Err(Error::Refused("native tty differs from retained owner"));
+            }
+        }
+        if owner.hold {
+            match native_hold::ask(&self.native_hold_socket(&owner.binding), "end", END_WAIT).await {
+                Answer::Gone => return close_native(&tmux, owner).await,
+                Answer::Said(word) if word == "ended" => return close_native(&tmux, owner).await,
+                Answer::Said(_) => return Err(Error::Refused("native hold did not end its agent")),
+                Answer::Silent => tracing::warn!(effect = %owner.binding.effect.id, "the native hold is not answering; observing its pane instead"),
+            }
+        }
         for round in 0..100 {
             let life = tmux.pane_life(&owner.pane, owner.terminal).await
                 .map_err(|_| Error::Refused("native pane ownership unavailable"))?;
-            let supervisor = if life == farcooler_tmux::PaneLife::Live {
-                let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native owner inventory unavailable"))?;
-                let Some(pane) = panes.iter().find(|p| !p.dead && p.pane_id == owner.pane && p.terminal_id == owner.terminal) else {
-                    // Closed since tmux called it live: read its life again.
-                    tokio::time::sleep(Duration::from_millis(10)).await; continue;
-                };
-                if pane.daemon_id != owner.terminal || pane.worktree_id != owner.terminal || pane.tty != owner.tty {
-                    return Err(Error::Refused("native tty differs from retained owner"));
-                }
-                if owner.supervisor.as_ref().is_some_and(|record| record.pid != pane.stamp.pid) {
-                    return Err(Error::Refused("native supervisor differs from retained owner"));
-                }
-                #[cfg(test)]
-                if let Some(hook) = AFTER_LIVE.with(|h| h.borrow_mut().take()) { hook(); }
-                Some(pane.stamp.pid as i32)
-            } else { None };
             let table = tokio::task::spawn_blocking(snapshot).await
                 .map_err(|_| Error::Refused("native process read failed"))??;
-            let current = owner.processes(&table)?;
+            let busy = !owner.processes(&table)?.is_empty();
             match life {
-                // A retained dead pane can still name a tty the kernel has handed to another pane.
-                farcooler_tmux::PaneLife::Gone if current.is_empty() => return Ok(()),
+                farcooler_tmux::PaneLife::Gone if !busy => return Ok(()),
                 farcooler_tmux::PaneLife::Gone => return Err(Error::Refused("native vanished pane still has processes")),
-                farcooler_tmux::PaneLife::Dead if current.is_empty() => return close_native(&tmux, owner).await,
-                farcooler_tmux::PaneLife::Dead if owner.supervisor.is_some() => {
-                    owned_sample = Some((None, current));
-                    break;
+                farcooler_tmux::PaneLife::Dead if !busy => return close_native(&tmux, owner).await,
+                _ => {
+                    if round % 10 == 9 { tmux.nudge_reap().await; }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
-                farcooler_tmux::PaneLife::Dead => return Err(Error::Refused("native dead pane still has processes")),
-                farcooler_tmux::PaneLife::Live => {}
             }
-            if let Some(pid) = supervisor.filter(|pid| current.contains(pid)) { owned_sample = Some((Some(pid), current)); break; }
-            if round % 10 == 9 { tmux.nudge_reap().await; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let Some((supervisor, mut current)) = owned_sample else { return Err(Error::Refused("native owner exit never observed")) };
-        // Stop the tty roots and all descendants before terminating them so an
-        // interactive shell's separate job groups cannot escape a leader kill.
-        let mut owned = BTreeSet::new();
-        let mut stable = false;
-        for _ in 0..8 {
-            let old = owned.len();
-            for pid in current {
-                if pid <= 1 || pid == std::process::id() as i32 { return Err(Error::Refused("invalid owned native pid")); }
-                owned.insert(pid);
-                // Only current live descendants of this exact tagged PTY.
-                unsafe { libc::kill(pid, libc::SIGSTOP); }
-            }
-            if old == owned.len() { stable = true; break; }
-            let table = tokio::task::spawn_blocking(snapshot).await
-                .map_err(|_| Error::Refused("native process read failed"))??;
-            current = owner.processes(&table)?;
-            // A legacy owner has no session pin. Stop collecting processes if its supervisor exits.
-            if owner.supervisor.is_none() && supervisor.is_some_and(|pid| !current.contains(&pid)) { stable = true; break; }
-        }
-        if !stable { return Err(Error::Refused("native process tree did not settle")); }
-        for &pid in owned.iter().rev() { unsafe { libc::kill(pid, libc::SIGKILL); } }
-        // tmux is the wait/reap owner of the PTY child, not the workflow daemon.
-        // A killed process stays findable by `kill(pid, 0)` until its parent reaps it, and a
-        // pane's process is tmux's child: tmux 3.4 can miss the exit and leave it a zombie.
-        // A zombie is dead, and the nudge makes tmux reap it.
-        for round in 0..100 {
-            if owned.iter().all(|&pid| gone(pid)) { return close_native(&tmux, owner).await; }
-            if round % 10 == 9 { tmux.nudge_reap().await; }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        Err(Error::Refused("native descendants not quiescent"))
+        Err(Error::Refused("native owner has no hold to end it"))
     }
 }

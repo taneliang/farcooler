@@ -438,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn a_gate_holding_a_build_past_its_limit_does_not_time_it_out() {
         let yielding = crate::yielding::Yielding::default();
-        let builder = yielding.builder(crate::yielding::Target::Tty("/dev/ttys-gate-held-none".into()));
+        let builder = yielding.builder(crate::yielding::Target::Hold("/nonexistent/gate-held.hold.sock".into()));
         let work = || tokio::time::sleep(Duration::from_millis(300));
         assert!(super::held_timeout(Duration::from_millis(200), work(), Some(&builder)).await.is_err(), "no gate: out of time");
         let gate = yielding.gate();

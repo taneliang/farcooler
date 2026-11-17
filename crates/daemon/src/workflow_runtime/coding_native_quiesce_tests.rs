@@ -1,94 +1,112 @@
-//! ov-1287: a cancelled native owner can end by itself while the runner ends it, as a reviewer whose Stop hook loses
-//! its answer does. Quiescence gives one answer whichever is observed first: the owner's exit or the runner's own stop.
+//! ov-1287, ov-1330: a native owner is ended through its hold, whichever of its own exit and the runner's end comes
+//! first, and nothing the runner finds by tty is ever signalled.
 use super::*;
 use super::super::{coding_tests::{configured, admitted}, tests::enqueue};
-/// An owner over a pane running `command`, recorded as run_native records one.
-async fn owned_pane(command: &str) -> (tempfile::TempDir, Runtime, Host, NativeOwner) {
+/// An owner over a pane running `script` under its hold, recorded as run_native records one.
+async fn owned_pane(script: &str, ready: bool) -> (tempfile::TempDir, Runtime, Host, NativeOwner) {
     let (dir, mut runtime) = configured(false, "pass").await;
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     runtime.pump(2).await.unwrap();
     let binding = admitted(&runtime).await;
     let host = Host(server(&runtime.root, &binding)); let id = terminal(&binding);
-    let window = host.0.create_terminal_window(id, id, "quiesce fixture", dir.path().to_str().unwrap(), command).await.unwrap();
+    let held = runtime.held(&binding, script).unwrap();
+    let window = host.0.create_terminal_window(id, id, "quiesce fixture", dir.path().to_str().unwrap(), &held).await.unwrap();
+    if ready { assert!(runtime.hold_ready(&binding).await); }
     let pane = host.0.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let pid = pane.stamp.pid;
-    let supervisor = crate::effect_runner::Owner { pid, started: crate::effect_runner::Owner::started_at(pid).unwrap() };
-    let owner = NativeOwner { binding, terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), supervisor: Some(supervisor) };
+    let owner = NativeOwner { binding, terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), hold: true, supervisor: None };
     (dir, runtime, host, owner)
 }
-fn on_tty(owner: &NativeOwner) -> Vec<i32> {
-    owner.processes(&snapshot().unwrap()).unwrap()
+fn on_tty(tty: &str) -> Vec<i32> {
+    snapshot().unwrap().under_tty(tty.trim_start_matches("/dev/"))
 }
+fn alive(pid: i32) -> bool { unsafe { libc::kill(pid, 0) == 0 } }
 async fn closed(host: &Host, owner: &NativeOwner) -> bool {
     host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() == farcooler_tmux::PaneLife::Gone
 }
+async fn wait_not_live(host: &Host, owner: &NativeOwner) {
+    for _ in 0..500 {
+        if host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() != farcooler_tmux::PaneLife::Live { return; }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the owner's pane stayed live");
+}
+/// A pid of the agent's own, written by the script into `name` under the fixture dir.
+async fn written_pid(dir: &tempfile::TempDir, name: &str) -> i32 {
+    let path = dir.path().join(name);
+    for _ in 0..500 {
+        if let Ok(text) = std::fs::read_to_string(&path) && let Ok(pid) = text.trim().parse() { return pid; }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the fixture never wrote {name}");
+}
 
 #[tokio::test]
-async fn the_runner_stopping_a_live_owner_first_ends_and_closes_it() {
-    let (_dir, runtime, host, owner) = owned_pane("/bin/sleep 30").await;
-    let pids = on_tty(&owner);
-    assert!(!pids.is_empty());
+async fn the_runner_stopping_a_live_owner_first_ends_its_whole_group_and_closes_it() {
+    // A background job in the agent's group, and the agent itself; the barrier holds both until released.
+    let (dir, runtime, host, owner) = owned_pane("read -r go; /bin/sleep 30 & echo $! > job; exec /bin/sleep 30", true).await;
+    host.0.send_keys(&owner.pane, "\n").await.unwrap();
+    let job = written_pid(&dir, "job").await;
+    assert!(alive(job));
     runtime.quiesce_native(&owner).await.unwrap();
-    assert!(pids.iter().all(|&pid| gone(pid)));
+    assert!(!alive(job), "the agent's background job ended with it");
+    assert!(!runtime.native_hold_socket(&owner.binding).exists(), "the hold removes its socket once its group is empty");
     assert!(closed(&host, &owner).await);
 }
 
 #[tokio::test]
 async fn an_owner_that_exited_before_quiescence_looked_is_quiescent() {
-    let (_dir, runtime, host, owner) = owned_pane("/bin/sleep 30").await;
-    unsafe { libc::kill(owner.supervisor.as_ref().unwrap().pid as i32, libc::SIGKILL); }
-    assert!(super::super::wait_until(tokio::time::Instant::now() + Duration::from_secs(10), Duration::from_millis(10),
-        || on_tty(&owner).is_empty()).await);
-    for _ in 0..500 {
-        if host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() != farcooler_tmux::PaneLife::Live { break; }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    let (_dir, runtime, host, owner) = owned_pane("exec /usr/bin/true", false).await;
+    wait_not_live(&host, &owner).await;
+    runtime.quiesce_native(&owner).await.unwrap();
+    assert!(closed(&host, &owner).await);
+}
+
+#[tokio::test]
+async fn an_owner_that_exits_while_the_runner_ends_it_is_quiescent() {
+    for delay in [0, 50, 150] {
+        let (_dir, runtime, host, owner) = owned_pane("exec /bin/sleep 0.1", true).await;
+        tokio::time::sleep(Duration::from_millis(delay)).await;
+        runtime.quiesce_native(&owner).await.unwrap();
+        assert!(closed(&host, &owner).await, "after {delay} ms");
     }
-    assert_ne!(host.0.pane_life(&owner.pane, owner.terminal).await.unwrap(), farcooler_tmux::PaneLife::Live);
+}
+
+/// `end` gives the agent a second to end its own work, then kills what ignores it.
+#[tokio::test]
+async fn an_agent_that_ignores_sigterm_is_killed_after_its_grace() {
+    let (dir, runtime, host, owner) = owned_pane("trap '' TERM; /bin/sleep 30 & echo $! > job; wait", true).await;
+    let job = written_pid(&dir, "job").await;
+    let started = std::time::Instant::now();
     runtime.quiesce_native(&owner).await.unwrap();
+    assert!(started.elapsed() >= Duration::from_secs(1), "SIGTERM was ignored, so only the kill after the grace ends it");
+    assert!(!alive(job));
     assert!(closed(&host, &owner).await);
 }
 
+/// The six findings of ov-1319 and ov-1325 were all one shape: the owner's tty (or a pid on it) came to belong to
+/// someone else, and the runner signalled whatever it found there. Here the retained owner names a tty a foreign
+/// session holds, after the owner itself has ended. Quiescence neither signals the foreign process nor mistakes it
+/// for the owner.
 #[tokio::test]
-async fn a_dead_panes_reassigned_tty_cannot_end_another_native_pane() {
-    let (_owner_dir, runtime, host, mut owner) = owned_pane("/bin/sleep 30").await;
-    let pids = on_tty(&owner);
-    assert!(!pids.is_empty());
-    for pid in pids { unsafe { libc::kill(pid, libc::SIGKILL); } }
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while host.0.pane_life(&owner.pane, owner.terminal).await.unwrap() != farcooler_tmux::PaneLife::Dead {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }).await.unwrap();
-
-    let (_other_dir, _other_runtime, other_host, other) = owned_pane("/bin/sleep 30").await;
-    // Model the tty number being handed out again regardless of which PTY
-    // numbers concurrent tests have open when the kernel allocates ours.
-    owner.tty.clone_from(&other.tty);
-    let original = owner.supervisor.take();
-    let result = runtime.quiesce_native(&owner).await;
-    assert!(result.is_err(), "a legacy owner cannot prove quiescence on its busy former tty");
-    owner.supervisor = original;
+async fn a_tty_reused_by_a_foreign_session_is_never_signalled() {
+    let (_dir, runtime, host, mut owner) = owned_pane("exec /usr/bin/true", false).await;
+    wait_not_live(&host, &owner).await;
+    let foreign = TmuxServer::in_dir("ov-1330-foreign", Uuid::now_v7(), &farcooler_core::scratch::dir("ov-1330-foreign"));
+    let other = Uuid::now_v7();
+    let window = foreign.create_terminal_window(other, other, "foreign", "/", "exec /bin/sleep 30").await.unwrap();
+    let pane = foreign.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
+    let mut victims = Vec::new();
+    for _ in 0..500 { victims = on_tty(&pane.tty); if !victims.is_empty() { break; } tokio::time::sleep(Duration::from_millis(10)).await; }
+    assert!(!victims.is_empty());
+    owner.tty = pane.tty.clone();
     runtime.quiesce_native(&owner).await.unwrap();
-    assert!(closed(&host, &owner).await);
-    assert_eq!(other_host.0.pane_life(&other.pane, other.terminal).await.unwrap(),
-        farcooler_tmux::PaneLife::Live, "quiescing a dead owner must leave the other pane running");
-}
-
-#[tokio::test]
-async fn an_owner_that_exits_after_its_pane_was_seen_live_is_quiescent() {
-    let (_dir, runtime, host, owner) = owned_pane("/bin/sleep 30").await;
-    let pids = on_tty(&owner);
-    assert!(!pids.is_empty());
-    let tty = owner.clone();
-    AFTER_LIVE.with(|h| *h.borrow_mut() = Some(Box::new(move || {
-        for &pid in &pids { unsafe { libc::kill(pid, libc::SIGKILL); } }
-        for _ in 0..500 {
-            if on_tty(&tty).is_empty() { return; }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        panic!("the owner never left its tty");
-    })));
-    runtime.quiesce_native(&owner).await.unwrap();
-    assert!(AFTER_LIVE.with(|h| h.borrow().is_none()), "the exit landed between the two observations");
-    assert!(closed(&host, &owner).await);
+    // A hold that was killed leaves its socket behind and answers nothing: the runner observes, and refuses, because
+    // the (foreign) tty is busy. It still signals nothing.
+    let stale = std::os::unix::net::UnixListener::bind(runtime.native_hold_socket(&owner.binding)).unwrap();
+    drop(stale);
+    assert!(runtime.quiesce_native(&owner).await.is_err());
+    std::fs::remove_file(runtime.native_hold_socket(&owner.binding)).unwrap();
+    assert!(victims.iter().all(|&pid| alive(pid)), "the foreign session was signalled");
+    assert_eq!(foreign.pane_life(&pane.pane_id, other).await.unwrap(), farcooler_tmux::PaneLife::Live);
+    farcooler_tmux::reap_server(foreign.socket());
 }

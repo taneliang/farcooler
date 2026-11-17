@@ -2,7 +2,7 @@
 //!
 //! A gate that shares ten cores with four builders and their compilers ran 40 minutes at load 40. Niceness can't
 //! be taken back without privilege, so a builder is paused with SIGSTOP and resumed with SIGCONT instead. The
-//! engine records each builder's process group (or its native PTY's tty) while it runs, and each landing gate
+//! engine records each builder's process group (or its native agent's hold) while it runs, and each landing gate
 //! while it runs. Builders yield during a gate once they have no ticket in the machine-wide heavy queue.
 //! When the last gate ends every automatically paused builder is continued. A pause is written to disk, so
 //! a daemon that died mid-gate continues what it had stopped when it starts again.
@@ -19,11 +19,11 @@ use std::time::Duration;
 pub(crate) enum Target {
     /// A process group the engine created, led by `pid`, which started at `started` (so a recycled pid is never ours).
     Group { pid: u32, started: String },
-    /// Legacy pause records, read on restart to continue builders stopped by older engines.
+    // Read pre-hold records without sending signals to their tty or PID.
     Tty(String),
-    /// A native PTY's waiting shell pins its identity, but must stay running: tmux continues a stopped pane leader's
-    /// whole group. Only the agent and its descendants yield, as with a native hand pause (ov-1357).
     Native { tty: String, supervisor: u32, started: String },
+    /// The socket of the hold that alone signals the native agent's group.
+    Hold(PathBuf),
 }
 
 /// A builder, and whether the orchestrator has paused it by hand (ov-1205). A builder may be stopped by a gate,
@@ -126,60 +126,10 @@ fn signal(target: &Target, sig: i32) -> bool {
                 }
             }
         }
-        Target::Tty(tty) => {
-            let Some(raw) = crate::proc_table::snapshot() else { return false };
-            let pids = crate::foreground::parse(&raw).under_tty(tty.trim_start_matches("/dev/"));
-            for &pid in &pids {
-                if pid > 1 && pid != std::process::id() as i32 { unsafe { libc::kill(pid, sig); } }
-            }
-            if sig == libc::SIGSTOP { return pids.into_iter().all(crate::proc_table::stopped_or_gone); }
-        }
-        Target::Native { tty, supervisor, started } => {
-            match crate::effect_runner::Owner::started_at(*supervisor) {
-                Ok(actual) if actual != *started => return true,
-                Ok(_) => {},
-                Err(_) => return false,
-            }
-            let Some(raw) = crate::proc_table::snapshot() else { return false };
-            return signal_native(&crate::foreground::parse(&raw), tty, *supervisor as i32, sig, |pid, sig| {
-                unsafe { libc::kill(pid, sig); }
-            });
-        }
+        Target::Hold(hold) => crate::native_hold::tell(hold, if sig == libc::SIGSTOP { "stop" } else { "cont" }),
+        Target::Tty(_) | Target::Native { .. } => {}
     }
     true
-}
-
-fn signal_native(table: &crate::foreground::Foreground, tty: &str, supervisor: i32, sig: i32, mut send: impl FnMut(i32, i32)) -> bool {
-    let mut pids = table.under_tty(tty.trim_start_matches("/dev/"));
-    // A recycled tty belongs to another run. Never signal it, even if the old shell still exists elsewhere.
-    if !pids.contains(&supervisor) { return true; }
-    pids.retain(|&pid| pid > 1 && pid != supervisor && pid != std::process::id() as i32);
-    let ordered = table.parent_first(&pids);
-    if sig == libc::SIGCONT {
-        // An interactive login shell can see a stopped foreground job and exit
-        // successfully. Resume its children before letting it handle SIGCHLD.
-        for (pid, _) in ordered.into_iter().rev() { send(pid, sig); }
-        return true;
-    }
-    // If we sent a stop, check a fresh process table before admitting the gate.
-    // A parent may have forked after this snapshot but before it stopped.
-    // The supervisor alone may still be releasing the native launch barrier.
-    let mut settled = !ordered.is_empty();
-    let mut stopped = std::collections::HashSet::new();
-    for (pid, parent) in ordered {
-        if parent.is_some_and(|parent| !stopped.contains(&parent)) {
-            settled = false;
-            continue;
-        }
-        if crate::proc_table::stopped_or_gone(pid) {
-            stopped.insert(pid);
-        } else {
-            send(pid, sig);
-            settled = false;
-            if crate::proc_table::stopped_or_gone(pid) { stopped.insert(pid); }
-        }
-    }
-    settled
 }
 
 fn stop_builders(state: &mut State, queue: &Path) -> bool {

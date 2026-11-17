@@ -45,6 +45,7 @@ pub mod agent_panes;
 mod by_hand;
 pub mod layout;
 pub mod lead_change;
+pub mod native_hold;
 pub mod log_join;
 pub mod log_watch;
 pub mod member_removal;

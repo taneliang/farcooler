@@ -34,6 +34,8 @@ use farcooler_transport::{HandshakeConfig, Peer, UnixListenerServer};
 
 #[tokio::main]
 async fn main() {
+    // The native agent's hold (ov-1330) runs in a pane, before anything a daemon sets up: no log, no runtime root.
+    if let Some(code) = farcooler_daemon::native_hold::from_args() { std::process::exit(code); }
     let selected = match paths::selection() {
         Ok(selected) => selected,
         Err(e) => { eprintln!("invalid runtime root: {e}"); std::process::exit(1); }

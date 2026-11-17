@@ -11,10 +11,7 @@ mod quiesce;
 
 #[cfg(test)]
 thread_local! { pub(super) static TEST_ARGV: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) }; }
-// Runs once quiescence has seen the owner's pane live, before it reads the tty's processes: a test ends the owner
-// there, so its exit lands between the two observations every time (ov-1287).
-#[cfg(test)]
-thread_local! { static AFTER_LIVE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None); }
+use crate::native_hold::{self, Answer};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,7 +20,9 @@ struct NativeOwner {
     terminal: Uuid,
     pane: String,
     tty: String,
-    // The forkpty supervisor is the PTY session leader, even after its shell exits.
+    /// The agent runs under its hold (ov-1330), which is what ends it. False for an owner an earlier engine launched.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    hold: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     supervisor: Option<crate::effect_runner::Owner>,
 }
@@ -171,25 +170,19 @@ fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> {
 #[cfg(not(target_os = "macos"))]
 fn peer_uid(stream: &tokio::net::UnixStream) -> Option<u32> { stream.peer_cred().ok().map(|cred| cred.uid()) }
 
-/// No such process, or one that has exited and is only waiting to be reaped.
-fn gone(pid: i32) -> bool {
-    if unsafe { libc::kill(pid, 0) } != 0 { return true; }
-    // `/proc/<pid>/stat` is `pid (comm) S ...`; comm may hold parentheses, so read after the last one.
-    std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
-        .and_then(|stat| stat.rsplit_once(')').and_then(|(_, rest)| rest.trim_start().chars().next()))
-        .is_some_and(|state| state == 'Z' || state == 'X')
-}
+/// How long the hold may take to end an agent: its grace, then however long the kernel takes to kill the group.
+const END_WAIT: Duration = Duration::from_secs(30);
 
+/// The script the hold runs for `command` (ov-1330): `pane_command` puts it under the hold.
 fn native_launch(command: &CodingCommand) -> String {
     let mut launch = String::from("env -i");
     for (key, value) in &command.environment {
         launch.push(' '); launch.push_str(&farcooler_core::shell::shell_quote(&format!("{key}={value}")));
     }
     for arg in &command.argv { launch.push(' '); launch.push_str(&farcooler_core::shell::shell_quote(arg)); }
-    // Retained PTY stdin, not null: read gates launch until tags and owner are durable.
-    // tmux automatically continues a stopped pane leader. Keep this waiting shell as the leader,
-    // and pause only its agent child and descendants; the shell runs no work of its own.
-    format!("exec /bin/sh -c {}", farcooler_core::shell::shell_quote(&format!("read -r workflow_start; {launch}; status=$?; exit \"$status\"")))
+    // Retained PTY stdin, not null: read gates launch until tags and owner are durable. The hold is the pane's
+    // leader (tmux continues a stopped leader); this shell leads the agent's own group and becomes the agent.
+    format!("read -r workflow_start; exec {launch}")
 }
 
 impl Exec {
@@ -202,6 +195,24 @@ impl Exec {
     /// hooks file still names `h.sock`; the build's pane tells the hook CLI where to report instead.
     pub(super) fn native_socket(&self, binding: &Binding) -> PathBuf {
         self.root.join(format!("n-{}.sock", &terminal(binding).simple().to_string()[..12]))
+    }
+    /// Where the build's hold listens (ov-1330). Beside its hook socket, in the runner's private root.
+    pub(super) fn native_hold_socket(&self, binding: &Binding) -> PathBuf {
+        self.root.join(format!("n-{}.hold.sock", &terminal(binding).simple().to_string()[..12]))
+    }
+    /// The pane command that runs `script` under this binding's hold.
+    pub(super) fn held(&self, binding: &Binding, script: &str) -> Result<String> {
+        let hold = crate::runtime::fanout_binary().ok_or(Error::Refused("this runner's farcoolerd can't be found to hold the agent"))?;
+        Ok(native_hold::pane_command(&hold, &self.native_hold_socket(binding), script))
+    }
+    /// Whether the binding's hold answers. Until it does nothing it runs has been let out of the launch barrier.
+    pub(super) async fn hold_ready(&self, binding: &Binding) -> bool {
+        let socket = self.native_hold_socket(binding);
+        for _ in 0..100 {
+            if native_hold::ask(&socket, "ready", Duration::from_secs(1)).await == Answer::Said("ready".into()) { return true; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
     }
     fn native_path(&self, binding: &Binding, suffix: &str) -> PathBuf {
         self.root.join("receipts").join(format!("{}.native-{suffix}.json", digest(&binding.effect)))
@@ -453,17 +464,31 @@ impl Exec {
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
         let host = Host(server(&self.root, binding));
         let tmux = &host.0;
-        let gated = native_launch(command);
         let id = terminal(binding);
+        // A hold socket already here is a surviving owner's, evidence like the hook socket above.
+        if self.native_hold_socket(binding).try_exists()? {
+            drop(listener);
+            std::fs::remove_file(socket)?;
+            return Err(Error::Refused("a native hold for this step is still listening"));
+        }
         let mut diagnostic = String::new();
-        let window = match tmux.create_terminal_window_diagnostic(id, id, "workflow coding",
-            &self.tree(binding).to_string_lossy(), &gated, &mut diagnostic).await {
+        let opened = match self.held(binding, &native_launch(command)) {
+            Err(error) => Err(error.to_string()),
+            Ok(gated) => match tmux.create_terminal_window_diagnostic(id, id, "workflow coding",
+                &self.tree(binding).to_string_lossy(), &gated, &mut diagnostic).await {
+                // Nothing is let out of the barrier, and no owner is written, until the hold answers (ov-1330).
+                Ok(window) if self.hold_ready(binding).await => Ok(window),
+                Ok(_) => Err("the agent's hold did not start".to_owned()),
+                Err(error) => Err(if diagnostic.is_empty() { error.to_string() } else { diagnostic }),
+            },
+        };
+        let window = match opened {
             Ok(window) => window,
-            Err(error) => {
+            Err(detail) => {
                 // The launch barrier has never been released; reaping this effect's private server
-                // cannot interrupt an agent. Retain the refusal even when no output stream existed.
+                // cannot interrupt an agent (a hold that started ends its waiting group on the hangup).
+                // Retain the refusal even when no output stream existed.
                 drop(host);
-                let detail = if diagnostic.is_empty() { error.to_string() } else { diagnostic };
                 let why = format!("native managed PTY could not open: {}", detail.chars().filter(|c| !c.is_control()).take(1000).collect::<String>());
                 self.refuse_unstarted(binding, why.clone())?;
                 std::fs::write(self.process_log(binding), why)?;
@@ -475,9 +500,7 @@ impl Exec {
         let panes = tmux.list_tagged_panes().await.map_err(|_| Error::Refused("native PTY inventory unavailable"))?;
         let pane = panes.iter().find(|p| p.terminal_id == id && p.pane_id == window.pane_id)
             .ok_or(Error::Refused("native PTY tags missing"))?;
-        let started = crate::effect_runner::Owner::started_at(pane.stamp.pid)?;
-        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(),
-            supervisor: Some(crate::effect_runner::Owner { pid: pane.stamp.pid, started: started.clone() }) };
+        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), hold: true, supervisor: None };
         durable(&self.native_path(binding, "owner"), &serde_json::to_vec(&owner)?)?;
         // Subscribe before releasing the launch barrier. Share the watcher's fanout, so watching
         // cannot replace our pipe and screen clears cannot erase the process's earlier output.
@@ -487,10 +510,8 @@ impl Exec {
             .map_err(|_| Error::Refused("native output stream unavailable"))?;
         let mut output = tokio::spawn(crate::effect_runner::capture(stream, self.process_log(binding)));
         // A native builder pauses while a landing gate runs; a review never does (ov-1214).
-        let _builder = if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build)) {
-            Some(self.yielding.builder(crate::yielding::Target::Native { tty: pane.tty.clone(), supervisor: pane.stamp.pid,
-                started }))
-        } else { None };
+        let _builder = matches!(binding.effect.kind, EffectKind::Execute(StageKind::Build))
+            .then(|| self.yielding.builder(crate::yielding::Target::Hold(self.native_hold_socket(binding))));
         // Every ticket this run owns can watch and message it (ov-1171). Declared after `host`, so
         // all tickets are unlisted before the server is reaped, on success, failure or cancellation.
         let _watchable = crate::watch_view::publish_effect(&binding.workspace, &binding.effect, tmux.clone(), pane.clone());
@@ -512,7 +533,8 @@ impl Exec {
         let cancelled = cancel.clone();
         let mut stop_reply = None;
         let mut frozen = None;
-        let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &owner.tty, pane.stamp.pid as i32, id,
+        let hold = self.native_hold_socket(binding);
+        let controlled = super::native_control::controlled(turn, tmux, &window.pane_id, &hold, id,
             &clock, Duration::from_millis(command.timeout_ms), orders, cancel, &mut frozen, _builder.as_ref(), &mut stop_reply);
         let _ = super::execution::ACTIVITY.try_with(|a| a.session.store(true, std::sync::atomic::Ordering::SeqCst));
         let mut ended_by = None;

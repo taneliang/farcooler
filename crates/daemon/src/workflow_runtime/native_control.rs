@@ -4,35 +4,25 @@ use crate::engine_steering::{self, Control, Order};
 use farcooler_tmux::TmuxServer;
 use std::sync::Mutex;
 
-/// Resumed on every exit path, including a cancelled future, before the host reaps the server.
+/// Resumed on every exit path, including a cancelled future, before the host reaps the server. Only the agent's hold
+/// signals it (ov-1330): this names the hold, never a process.
 #[derive(Default)]
-pub(super) struct Frozen(Vec<i32>);
-impl Frozen { pub(super) fn quiescent(mut self) { self.0.clear(); } }
+pub(super) struct Frozen(Option<PathBuf>);
+impl Frozen { pub(super) fn quiescent(mut self) { self.0 = None; } }
 impl Drop for Frozen {
-    fn drop(&mut self) { for &pid in &self.0 { unsafe { libc::kill(pid, libc::SIGCONT); } } }
+    fn drop(&mut self) { if let Some(hold) = self.0.take() { crate::native_hold::tell(&hold, "cont"); } }
 }
-async fn freeze(tty: &str, supervisor: i32) -> Result<Frozen> {
-    let mut frozen = Frozen::default();
-    // Stopping parents first closes the fork race; repeat until no new descendants appear.
-    for _ in 0..100 {
-        let table = super::coding_native::snapshot()?;
-        let mut current = table.under_tty(tty.trim_start_matches("/dev/"));
-        if !current.contains(&supervisor) { return Err(Error::Refused("native supervisor no longer owns its tty")); }
-        current.retain(|pid| *pid != supervisor);
-        if current.is_empty() { return Err(Error::Refused("native pause has no process facts")); }
-        let old = frozen.0.len();
-        for &pid in &current {
-            if pid <= 1 || pid == std::process::id() as i32 { return Err(Error::Refused("invalid native pid")); }
-            if unsafe { libc::kill(pid, libc::SIGSTOP) } != 0 {
-                if std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) { continue; }
-                return Err(Error::Refused("native pause failed"));
-            }
-            if !frozen.0.contains(&pid) { frozen.0.push(pid); }
+/// Ask the hold to stop the agent's group. It answers once the kernel has stopped every member.
+async fn freeze(hold: &Path) -> Result<Frozen> {
+    match crate::native_hold::ask(hold, "stop", Duration::from_secs(5)).await {
+        crate::native_hold::Answer::Said(word) if word == "stopped" => Ok(Frozen(Some(hold.to_path_buf()))),
+        crate::native_hold::Answer::Said(word) if word == "unsettled" => {
+            // Not left half-stopped: whatever did stop is continued.
+            drop(Frozen(Some(hold.to_path_buf())));
+            Err(Error::Refused("native pause did not settle"))
         }
-        if frozen.0.len() == old && current.iter().all(|&pid| crate::proc_table::stopped_or_gone(pid)) { return Ok(frozen); }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        _ => Err(Error::Refused("native pause has no hold to ask")),
     }
-    Err(Error::Refused("native pause did not settle"))
 }
 
 /// Quiet-period accounting excludes time the orchestrator paused the step, and time a landing gate held its builder
@@ -68,7 +58,7 @@ impl ActiveClock {
 /// reason, whose limit ran out while a 40-minute gate held them.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result<T>>, tmux: &TmuxServer,
-    pane: &str, tty: &str, supervisor: i32, id: Uuid, clock: &ActiveClock, timeout: Duration, mut orders: mpsc::Receiver<Order>,
+    pane: &str, hold: &Path, id: Uuid, clock: &ActiveClock, timeout: Duration, mut orders: mpsc::Receiver<Order>,
     mut cancel: tokio::sync::watch::Receiver<bool>, frozen: &mut Option<Frozen>, yielded: Option<&crate::yielding::BuilderGuard>, stop_reply: &mut Option<oneshot::Sender<farcooler_core::Result<()>>>) -> Result<Option<T>> {
     tokio::pin!(turn);
     let deadline = tokio::time::sleep(timeout);
@@ -96,32 +86,18 @@ pub(super) async fn controlled<T>(turn: impl std::future::Future<Output = Result
                         // Validate the tagged pane again; never signal a tty from a stale capability.
                         match tmux.pane_life(pane, id).await {
                             Ok(farcooler_tmux::PaneLife::Live) => {
-                                match crate::yielding::manual_pause_latch(yielded, tty, supervisor) {
-                                    Ok(mut enter) => {
-                                        // Keep the latch through freeze. Record the hand pause first so the end of a
-                                        // gate cannot continue the processes while we are stopping them ourselves.
-                                        if let Some(y) = yielded { y.manual(true); }
-                                        let checked = freeze(tty, supervisor).await.and_then(|stopped| {
-                                            // Drop the freeze on error so a late legacy wrapper can release its ticket.
-                                            enter.check(tty, supervisor)?;
-                                            Ok(stopped)
-                                        });
-                                        match checked {
-                                            Ok(stopped) => {
-                                                remaining = remaining.saturating_sub(active_since.elapsed());
-                                                *frozen = Some(stopped); clock.pause(); engine_steering::paused(id, true); Ok(())
-                                            },
-                                            Err(error) => {
-                                                tracing::warn!(%error, "native pause refused");
-                                                if let Some(y) = yielded { y.manual(false); }
-                                                Err(farcooler_core::DomainError::OperationFailed)
-                                            },
-                                        }
-                                    },
-                                    Err(error) => {
-                                        tracing::warn!(%error, "native pause deferred by the heavy-job queue");
-                                        Err(farcooler_core::DomainError::OperationFailed)
-                                    },
+                                // Recorded first, so a gate that ends meanwhile cannot continue what is about to stop.
+                                if let Some(y) = yielded { y.manual(true); }
+                                match freeze(hold).await {
+                                Ok(stopped) => {
+                                    remaining = remaining.saturating_sub(active_since.elapsed());
+                                    *frozen = Some(stopped); clock.pause(); engine_steering::paused(id, true); Ok(())
+                                },
+                                Err(error) => {
+                                    tracing::warn!(%error, "native pause refused");
+                                    if let Some(y) = yielded { y.manual(false); }
+                                    Err(farcooler_core::DomainError::OperationFailed)
+                                },
                                 }
                             },
                             _ => Err(farcooler_core::DomainError::NotFound),
@@ -158,8 +134,10 @@ mod tests {
         struct Reap<'a>(&'a TmuxServer);
         impl Drop for Reap<'_> { fn drop(&mut self) { farcooler_tmux::reap_server(self.0.socket()); } }
         let _reap = Reap(&tmux);
-        let program = "exec /bin/sh -c 'sh -c \"while :; do echo tick >> ticks; sleep 0.02; done\"; status=$?; exit \"$status\"'";
-        let window = tmux.create_terminal_window(id, id, "pause", dir.to_str().unwrap(), program).await.unwrap();
+        let hold = dir.join("p.hold.sock");
+        let program = crate::native_hold::pane_command(&crate::runtime::fanout_binary().unwrap(), &hold,
+            "sh -c 'while :; do echo tick >> ticks; sleep 0.02; done'");
+        let window = tmux.create_terminal_window(id, id, "pause", dir.to_str().unwrap(), &program).await.unwrap();
         let pane = tmux.list_tagged_panes().await.unwrap().into_iter().find(|p| p.pane_id == window.pane_id).unwrap();
         let ticks = dir.join("ticks");
         for _ in 0..200 { if ticks.exists() { break; } tokio::time::sleep(Duration::from_millis(10)).await; }
@@ -169,7 +147,7 @@ mod tests {
         let clock = ActiveClock::new();
         let mut stop_reply = None;
         let mut frozen = None;
-        let turn = controlled(std::future::pending::<Result<()>>(), &tmux, &pane.pane_id, &pane.tty, pane.stamp.pid as i32, id,
+        let turn = controlled(std::future::pending::<Result<()>>(), &tmux, &pane.pane_id, &hold, id,
             &clock, Duration::from_millis(250), orders, cancel, &mut frozen, None, &mut stop_reply);
         let steer = async {
             let order = |op| { let (reply, answer) = oneshot::channel(); let send = send.clone(); async move {
@@ -196,9 +174,9 @@ mod tests {
     #[tokio::test]
     async fn a_gate_holding_a_builder_past_its_limit_does_not_time_it_out() {
         let tmux = TmuxServer::in_dir("gate-held", Uuid::now_v7(), &farcooler_core::scratch::dir("gate-held"));
-        // Nothing runs on this tty, so stopping and continuing it signals nothing.
         let yielding = crate::yielding::Yielding::default();
-        let builder = yielding.builder(crate::yielding::Target::Tty("/dev/ttys-gate-held-none".into()));
+        // No hold listens here, so stopping and continuing it signals nothing.
+        let builder = yielding.builder(crate::yielding::Target::Hold("/nonexistent/gate-held.hold.sock".into()));
         let run = |held: bool| {
             let (tmux, builder, yielding) = (&tmux, &builder, &yielding);
             async move {
@@ -211,7 +189,7 @@ mod tests {
                 let turn = async { tokio::time::sleep(Duration::from_millis(300)).await; Ok(()) };
                 let release = async move { tokio::time::sleep(Duration::from_millis(400)).await; drop(gate); };
                 let quiet = clock.clone();
-                let (outcome, ()) = tokio::join!(controlled(turn, tmux, "%0", "", 0, Uuid::now_v7(), &clock,
+                let (outcome, ()) = tokio::join!(controlled(turn, tmux, "%0", Path::new("/nonexistent/gate-held.hold.sock"), Uuid::now_v7(), &clock,
                     Duration::from_millis(200), orders, cancel, &mut frozen, Some(builder), &mut stop_reply), release);
                 (outcome.unwrap(), quiet.now())
             }

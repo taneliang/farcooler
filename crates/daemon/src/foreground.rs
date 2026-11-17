@@ -140,21 +140,6 @@ impl Foreground {
         found
     }
 
-    /// The selected processes in parent-first order, with their parent when
-    /// it is also selected. A snapshot's tty rows have no parent ordering.
-    pub(crate) fn parent_first(&self, pids: &[i32]) -> Vec<(i32, Option<i32>)> {
-        let selected: std::collections::HashSet<_> = pids.iter().copied().collect();
-        let children = |pid| self.children.get(&pid).into_iter().flatten().copied().filter(|child| selected.contains(child));
-        let has_parent: std::collections::HashSet<_> = pids.iter().copied().flat_map(children).collect();
-        let mut ordered: Vec<_> = pids.iter().copied().filter(|pid| !has_parent.contains(pid))
-            .map(|pid| (pid, None)).collect();
-        let mut index = 0;
-        while let Some(&(pid, _)) = ordered.get(index) {
-            ordered.extend(children(pid).map(|child| (child, Some(pid))));
-            index += 1;
-        }
-        ordered
-    }
 }
 
 /// Read every tty's foreground command, and every process's group.

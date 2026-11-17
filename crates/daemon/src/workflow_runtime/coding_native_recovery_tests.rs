@@ -1,23 +1,6 @@
 //! A native owner is found again after a restart: its pane, its recorded verdict, or why it cannot be reopened.
 use super::*;
 use super::super::{coding_tests::{configured, admitted}, tests::{enqueue, finish}};
-#[cfg(target_os = "linux")]
-#[test]
-fn a_killed_process_nobody_has_reaped_yet_is_gone() {
-    let mut child = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
-    let pid = child.id() as i32;
-    assert!(!gone(pid), "a running process is not gone");
-    unsafe { libc::kill(pid, libc::SIGKILL); }
-    // Unreaped: `kill(pid, 0)` still succeeds, as it does for a pane tmux has not reaped.
-    for _ in 0..500 {
-        if std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|s| s.contains(") Z")) { break; }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "the zombie is still findable");
-    assert!(gone(pid));
-    child.wait().unwrap();
-    assert!(gone(pid));
-}
 #[tokio::test]
 async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch() {
     let (dir, mut runtime) = configured(false, "pass").await;
@@ -33,10 +16,12 @@ async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch()
     let definition = runtime.configured_definition().unwrap(); enqueue(&mut runtime, "w", "one", definition);
     runtime.pump(2).await.unwrap(); let binding = admitted(&runtime).await;
     let host = Host(server(&root, &binding)); let id = terminal(&binding);
-    let window = host.0.create_terminal_window(id, id, "crash fixture", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
+    let held = runtime.held(&binding, "/bin/sleep 30").unwrap();
+    let window = host.0.create_terminal_window(id, id, "crash fixture", runtime.tree(&binding).to_str().unwrap(), &held).await.unwrap();
+    assert!(runtime.hold_ready(&binding).await);
     let panes = host.0.list_tagged_panes().await.unwrap();
     let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), supervisor: None };
+    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), hold: true, supervisor: None };
     durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
     // Surviving private PTY plus bound owner, but no launch/process settlement.
     // Drop/reopen only the workflow owner, as after daemon death.
@@ -93,9 +78,11 @@ async fn workflow_service_native_stop_ignores_launch_drift_with_original_owner()
         let binding = Binding::new(&workspace,&stored.effect,claim.resource_generation,0,&runtime.item_base(&workspace,&stored.effect).unwrap());
         let root = runtime.root.clone();
         let host = Host(server(&root,&binding)); let id = terminal(&binding);
-        let window = host.0.create_terminal_window(id,id,"crash fixture",runtime.tree(&binding).to_str().unwrap(),"/bin/sleep 30").await.unwrap();
+        let held = runtime.held(&binding,"/bin/sleep 30").unwrap();
+        let window = host.0.create_terminal_window(id,id,"crash fixture",runtime.tree(&binding).to_str().unwrap(),&held).await.unwrap();
+        assert!(runtime.hold_ready(&binding).await);
         let panes = host.0.list_tagged_panes().await.unwrap(); let pane = panes.iter().find(|p| p.pane_id==window.pane_id).unwrap();
-        let owner = NativeOwner { binding:binding.clone(),terminal:id,pane:pane.pane_id.clone(),tty:pane.tty.clone(), supervisor: None };
+        let owner = NativeOwner { binding:binding.clone(),terminal:id,pane:pane.pane_id.clone(),tty:pane.tty.clone(),hold:true, supervisor: None };
         durable(&runtime.native_path(&binding,"owner"),&serde_json::to_vec(&owner).unwrap()).unwrap();
         drop(runtime);
         match drift {
@@ -425,7 +412,7 @@ async fn workflow_native_review_vanished_server_keeps_output_and_recorded_verdic
         assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, name.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
         let (_master, _slave) = unsafe { (std::fs::File::from_raw_fd(master), std::fs::File::from_raw_fd(slave)) };
         let tty = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_str().unwrap().to_owned();
-        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty, supervisor: None };
+        let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty, hold: false, supervisor: None };
         durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
         let command = runtime.coding_command(&binding).unwrap();
         let finding = "The candidate still drops the caller's deadline.";
@@ -507,7 +494,7 @@ async fn workflow_native_review_vanished_pane_refuses_a_busy_tty() {
     let window = host.0.create_terminal_window(id, id, "busy tty", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
     let panes = host.0.list_tagged_panes().await.unwrap();
     let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: "%999999".into(), tty: pane.tty.clone(), supervisor: None };
+    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: "%999999".into(), tty: pane.tty.clone(), hold: false, supervisor: None };
     durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
     std::fs::write(runtime.process_log(&binding), b"saved output").unwrap();
     assert!(runtime.cancel_interrupted_native(&binding, Some(true)).await.is_err());
@@ -529,10 +516,12 @@ async fn workflow_native_review_recovers_from_its_recorded_verdict_after_a_crash
     let binding = admitted(&runtime).await;
     let root = runtime.root.clone();
     let host = Host(server(&root, &binding)); let id = terminal(&binding);
-    let window = host.0.create_terminal_window(id, id, "crash fixture", runtime.tree(&binding).to_str().unwrap(), "/bin/sleep 30").await.unwrap();
+    let held = runtime.held(&binding, "/bin/sleep 30").unwrap();
+    let window = host.0.create_terminal_window(id, id, "crash fixture", runtime.tree(&binding).to_str().unwrap(), &held).await.unwrap();
+    assert!(runtime.hold_ready(&binding).await);
     let panes = host.0.list_tagged_panes().await.unwrap();
     let pane = panes.iter().find(|p| p.pane_id == window.pane_id).unwrap();
-    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), supervisor: None };
+    let owner = NativeOwner { binding: binding.clone(), terminal: id, pane: pane.pane_id.clone(), tty: pane.tty.clone(), hold: true, supervisor: None };
     durable(&runtime.native_path(&binding, "owner"), &serde_json::to_vec(&owner).unwrap()).unwrap();
     let command = runtime.coding_command(&binding).unwrap();
     super::super::write_agent_verdict(|key| command.environment.get(key).cloned(), true).unwrap();
