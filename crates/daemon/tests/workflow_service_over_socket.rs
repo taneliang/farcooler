@@ -354,7 +354,13 @@ async fn workflow_service_admitted_ci_recovers_original_bundle_after_reconfigura
     let snapshot=tokio::time::timeout(std::time::Duration::from_secs(20),async {
         loop {
             let snapshot=get(&mut link,workspace).await;
-            if snapshot["state"]["items"]["recover"]["phase"]=="Uncertain" {break snapshot;}
+            let item=&snapshot["state"]["items"]["recover"];
+            // Earlier effects can briefly be Uncertain before a candidate exists.
+            // Wait for the admitted CI effect itself to become uncertain.
+            let effects=host.service.store.workflow_outbox(&workspace.to_string()).unwrap();
+            if item["phase"]=="Uncertain" && item["candidate"].as_str().is_some() && effects.iter().any(|e|
+                e.dispatch_state=="uncertain" && item["pending"].as_str()==Some(e.effect.id.as_str()) &&
+                matches!(e.effect.kind,farcooler_workflow::EffectKind::Execute(farcooler_workflow::StageKind::Ci))) {break snapshot;}
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
     }).await.unwrap();
