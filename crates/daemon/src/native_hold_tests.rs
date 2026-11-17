@@ -5,13 +5,15 @@ struct Hold { child: std::process::Child, socket: PathBuf, dir: tempfile::TempDi
 fn hold(script: &str) -> Hold {
     let dir = tempfile::Builder::new().prefix("h").tempdir_in("/tmp").unwrap();
     let socket = dir.path().join("t.hold.sock");
-    let child = std::process::Command::new(crate::runtime::fanout_binary().expect("build farcoolerd before this test"))
+    let mut child = std::process::Command::new(crate::runtime::fanout_binary().expect("build farcoolerd before this test"))
         .args([FLAG, socket.to_str().unwrap(), "--", "/bin/sh", "-c", script])
         .current_dir(dir.path()).stdin(std::process::Stdio::null()).spawn().unwrap();
     for _ in 0..500 {
         if ask_blocking(&socket, "ready", Duration::from_secs(1)) == Answer::Said("ready".into()) { return Hold { child, socket, dir }; }
         std::thread::sleep(Duration::from_millis(10));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     panic!("the hold never answered");
 }
 fn alive(pid: i32) -> bool { unsafe { libc::kill(pid, 0) == 0 } }

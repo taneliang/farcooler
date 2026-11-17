@@ -78,5 +78,31 @@ start. It is recorded here rather than papered over.
 * `quiesce_native` asks the hold to end; the tty and descendant walk is gone from it.
 * The orchestrator's pause (`native_control::freeze`) and a landing gate's pause (`yielding::Target::Hold`,
   replacing `Target::Tty`) also go through the hold.
-* A source test fails the build if `coding_native.rs`, `native_control.rs`, `native_hold.rs` or `yielding.rs`
-  signal anything other than through `native_hold::signal_group`, or if a tty walk returns to `yielding.rs`.
+* `native_hold::tests::the_native_engine_signals_only_its_own_group` reads the shipped (non-test) source:
+  `coding_native.rs` and `native_control.rs` may make no signal call at all; `native_hold.rs` may make exactly
+  one, `libc::killpg(held.leader.0, …)` inside `signal_group`; `yielding.rs` may not read the process table or
+  walk a tty (its `Target::Group` signalling of engine-created command groups is outside this ticket).
+  `the_signal_check_catches_what_it_forbids` shows each rule failing, and planting
+  `for pid in snapshot()?.under_tty(..) { libc::kill(pid, SIGSTOP) }` in `native_control.rs` turned the real
+  check red before it was removed.
+* Owner records gain `hold: true` (absent, so false, in records an earlier engine wrote). An earlier engine
+  cannot read a record with the new field: rolling back with a native step in flight leaves that step Uncertain.
+
+## Verification
+
+All foreground, at most four build jobs and four test threads, no gate, no formatter.
+
+* The three ov-1319 tests, `--stress-count 30 --test-threads 4 --retries 0`: **30/30 iterations, 90 passes,
+  0 failures** in 535.6 s (`stress.txt`).
+* The daemon crate, `cargo nextest run -p farcooler-daemon --test-threads 4 --retries 0 --no-fail-fast`, run as
+  two partitions to stay in the foreground: **1,963 + 1,919 = 3,882 passed, 0 failed** (`daemon-1.txt`,
+  `daemon-2.txt`). No test failed, so there is no flake to record.
+* `cargo clippy -p farcooler-daemon --all-targets -- -D warnings`, `file-size-budget.py`,
+  `macos-rust-tests.py --self-test --check`, `doc-comment-check.py`, `swallow-lint.py`, `test-window-lint.py`
+  and `copy-lint.py` pass.
+
+New tests: `native_hold::tests` (stop, continue and end a group with a background job; an agent that exits takes
+its group with it and the hold exits with its status; a reaped leader is never signalled even when its number
+is a live process; the source check and its self-test) and `quiesce_order_tests` (a live owner's whole group is
+ended; an owner that exited first, or exits while being ended, is quiescent; an agent ignoring SIGTERM is killed
+after the grace; a tty a foreign session holds is never signalled, whether the hold answers or was killed).
