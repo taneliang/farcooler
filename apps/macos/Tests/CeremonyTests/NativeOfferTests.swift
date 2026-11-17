@@ -211,11 +211,8 @@ struct NativeOfferTests {
             let worktree = try #require(try made.jsonObject("worktree create")["short"] as? String)
             let created = await farcooler(["--json", "terminal", "create", worktree])
             let terminal = try #require(try created.jsonObject("terminal create")["id"] as? String)
-            // Creation confirms the window, not that its shell can read keys.
-            // Like the daemon tests' shell_ready, wait for the isolated shell
-            // to draw its prompt through the live runtime before typing. A
-            // successful send only acknowledges tmux's write; polling the
-            // agent afterward cannot recover input sent during startup.
+            // Prove shell readiness independently of creation and detection.
+            // This read can also lose the live-inventory lookup under load.
             let readyDeadline = ContinuousClock.now + .seconds(60)
             var shellReady = false
             var lastScreen = "no screen yet"
@@ -231,14 +228,30 @@ struct NativeOfferTests {
                 try await Task.sleep(for: .milliseconds(100))
             } while ContinuousClock.now < readyDeadline
             try #require(shellReady, "the shell never drew its prompt in 60 s; last screen: \(lastScreen)")
-            try await farcooler(["terminal", "send", terminal, "\(bin)/claude 600\r"]).mustSucceed("terminal send")
-            // Until it says claude, not until it says anything: the runner
-            // says "" for the shell the pane starts as, and on a slow host
-            // (CI's VM) the first sample lands before the shell has read the
-            // typed line. Stopping on that "" read a shell, not the detection.
+            // Each CLI opens its OWN live inventory. Two one-second tmux read
+            // deadlines can expire even after the prompt was read successfully.
+            // NotFound is raised during resolution, BEFORE send_input writes:
+            // only that failure is safe to retry. A write timeout is ambiguous.
+            let sendDeadline = ContinuousClock.now + .seconds(60)
+            var sent = await farcooler(["terminal", "send", terminal, "\(bin)/claude 600\r"])
+            while !sent.succeeded && ContinuousClock.now < sendDeadline {
+                let missing = sent.status == 1 && sent.launchFailure == nil
+                    && !sent.timedOut && !sent.cancelled && sent.stdout.isEmpty
+                    && String(decoding: sent.stderr, as: UTF8.self)
+                        .split(whereSeparator: \.isNewline).last == "error: resource not found"
+                guard missing else { break }
+                try await Task.sleep(for: .milliseconds(100))
+                sent = await farcooler(["terminal", "send", terminal, "\(bin)/claude 600\r"])
+            }
+            try sent.mustSucceed("terminal send")
+            // List serves the watcher's LAST observation. Its sample awaits
+            // host process/socket reads, independently of send and list RPCs.
+            // Wait for the actual agent, with a monotonic deadline rather
+            // than assuming sixty reads mean the watcher had time to sample.
+            let agentDeadline = ContinuousClock.now + .seconds(60)
             var listed: Terminal?
             var lastList = "no list yet"
-            for _ in 0..<60 {
+            repeat {
                 let list = await farcooler(["--json", "worktree", "list"])
                 lastList = list.account
                 if let fleet = try? list.decoded(Fleet.self, "worktree list") {
@@ -246,14 +259,14 @@ struct NativeOfferTests {
                 }
                 if listed?.runningAgent == "claude" { break }
                 try await Task.sleep(for: .milliseconds(500))
-            }
+            } while ContinuousClock.now < agentDeadline
             let pane = try #require(listed)
             if pane.runningAgent != "claude" {
                 lastScreen = await farcooler(["--json", "terminal", "screen", terminal]).account
             }
             #expect(
                 pane.runningAgent == "claude",
-                "the runner never said claude runs here in 30 s; last said \(pane.runningAgent.map { "\"\($0)\"" } ?? "nothing"); last list: \(lastList); last screen: \(lastScreen)")
+                "the runner never said claude runs here in 60 s; last said \(pane.runningAgent.map { "\"\($0)\"" } ?? "nothing"); last list: \(lastList); last screen: \(lastScreen)")
             #expect(pane.program == "shell")
             #expect(Self.agents().offers(pane, target: ""))
         } catch {
