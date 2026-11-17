@@ -554,8 +554,8 @@ Use an existing main commit at or after the unshipped rename whose proto
 matches the recovered snapshot. Check that snapshot against the last shipped
 baseline and record the exception in a comment. This excludes the known
 unshipped interval while still checking the snapshot and every subsequent proto.
-The lint refuses a baseline whose first line names no commit, or one main no longer has, rather
-than check the baseline alone.
+The lint refuses a baseline whose first line names no commit, or one main no
+longer has, rather than check the baseline alone.
 
 ## CI
 

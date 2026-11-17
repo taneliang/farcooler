@@ -1,0 +1,45 @@
+$ /usr/bin/python3 scripts/capture-window-lint.py
+capture-window-lint: ok (115 sites in 39 files)
+
+$ /usr/bin/python3 scripts/charter-intercept-lint.py
+charter-intercept-lint: ok, 0 call(s) outside the start and the screens
+
+$ /usr/bin/python3 scripts/copy-lint.py
+copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles, no mis-cased Rust labels, one path glyph, no train metaphors
+
+$ /usr/bin/python3 scripts/fresh-script-lint.py
+fresh-script-lint: ok (608 test files scanned)
+
+$ /usr/bin/python3 scripts/ios-agentkit-subset-lint.py
+ios-agentkit-subset-lint: every iOS target's AgentKit references resolve
+
+$ /usr/bin/python3 scripts/migration-lint.py
+migration-lint: ok.
+
+$ /usr/bin/python3 scripts/page-layer-lint.py
+page-layer-lint: ok
+
+$ /usr/bin/python3 scripts/pixel-scale-lint.py
+pixel-scale-lint: ok (608 test files scanned)
+
+$ /usr/bin/python3 scripts/plan-layer-lint.py
+plan-layer-lint: ok
+
+$ /usr/bin/python3 scripts/proto-lint.py --channel canary --since-baseline
+proto is compatible with the canary baseline, and with the 0 other version(s) of the wire on main since it
+
+$ /usr/bin/python3 scripts/runloop-spin-lint.py
+runloop-spin-lint: ok (608 test files scanned)
+
+$ /usr/bin/python3 scripts/shared-core-lint.py
+shared-core-lint: nothing new (5 baseline entries can shrink: --update-baseline); 4 `platform copy:` exemptions
+
+$ /usr/bin/python3 scripts/swallow-lint.py
+swallow-lint: no new swallowed calls (54 allowlisted)
+
+$ /usr/bin/python3 scripts/test-window-lint.py
+test-window-lint: ok (608 test files scanned)
+
+$ /usr/bin/python3 scripts/visual-tokens-lint.py
+visual-tokens-lint: no sites (972 scanned)
+

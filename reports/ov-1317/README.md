@@ -27,7 +27,9 @@ The recovered snapshot uses `next_after`, anchored at existing main commit
 63374831f3903403f60dcc35c6f1f1b04a1e383a, after ov-1302's rename. This follows
 the documented recovery procedure and needs no protocol exception. The header
 records a recovery anchor, not a shipped build. Its snapshot is checked against
-the last shipped baseline.
+the last shipped baseline. The abandoned restoration commit was removed by
+rebase so branch history also keeps `next_after`; the pre-rebase tip is retained
+as `ov-1317-original-correction`.
 
 The recovery regression now models that exact sequence: a shipped wire without
 tag 3, an unshipped addition and rename, and baseline recovery alone. It folds
@@ -39,3 +41,31 @@ a subsequent rename of `next_after` to `next_cursor`.
 
 Current validation logs use the `round2` suffix. Earlier logs describe the
 superseded restoration and are retained only as historical evidence.
+
+- All 15 `scripts/*-lint.py` checks pass, including
+  `proto-lint.py --channel canary --since-baseline` (lints-round2.log).
+- Proto lint self-tests: 107 passed (proto-self-round2.log).
+- Page-layer lint self-test: passes.
+- Landing-gate unit suite: 8 passed (landing-round2.log), including the rename
+  and fresh-clone recovery regressions. Its fixture supervisor needs permission
+  to inspect child processes, so this ran outside the sandbox.
+- Negative check: removing CI's history flag makes the rename regression fail
+  (rename-red-round2.log); restoring it makes the test pass.
+- Affected Rust selection: 253 passed, 0 failed, 12.899 s test time
+  (rust-round2.log). Includes all protocol tests, CLI/client TaskList reads,
+  daemon task/start/workspace operations, and ov-1302 long-list paging coverage.
+- Recovered snapshot wire exactly matches the existing main anchor and is
+  additive against the last shipped baseline.
+
+Affected Rust command (foreground, four build/test jobs):
+
+```sh
+TMPDIR=/tmp SDKROOT=$(xcrun --show-sdk-path) CARGO_BUILD_JOBS=4 NEXTEST_TEST_THREADS=4 \
+  cargo nextest run --build-jobs 4 --jobs 4 \
+  -p farcooler-protocol -p farcooler-cli -p farcooler-daemon -p farcooler-client \
+  -E 'package(farcooler-protocol) or test(task_ops::tests) or test(task_starts::tests) or test(workspace_ops::tests) or test(tasks::) or test(board_reads) or test(plan_tests) or test(plan_agent_dispatch_tests) or test(page_tests) or test(rep_pane) or test(workflow_runtime::process_logs::tests)'
+```
+
+The sandboxed Rust attempt was stopped by fixture permissions (Git repository
+initialization and local sockets); the same selection was rerun outside it.
+No full gate, cargo fmt, or swift-format was run.
