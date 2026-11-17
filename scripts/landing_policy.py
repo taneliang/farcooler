@@ -185,6 +185,7 @@ SCRIPT_USERS = {
     'scripts/ov-1324-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/ov-1326-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/ov-1328-report.md': None,  # Full: ticket evidence; retain conservative fallback.
+    'scripts/ov-1333-report.md': None,  # Full: compiler-cache trial evidence; retain conservative fallback.
     'scripts/page-layer-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/pixel-scale-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/plan-layer-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.

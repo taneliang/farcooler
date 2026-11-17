@@ -1091,21 +1091,21 @@ def clean_target_after_pass(repo, say=print):
 
 
 def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
-    if os.environ.get("FARCOOLER_GATE_SCCACHE") == "1":
-        import gate_sccache
-        with gate_sccache.session(logdir):
-            return run_jobs_inner(chosen, plans, rows, repo, tmp, ctx, logdir, args)
-    return run_jobs_inner(chosen, plans, rows, repo, tmp, ctx, logdir, args)
-
-
-def run_jobs_inner(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     """Run every chosen job's steps, appending a row per step to `rows`. True if any failed."""
     failed = False
     heavy = [j for j in chosen if j in HEAVY] and hl.lock_wanted(getattr(args, "no_lock", False))
     between = getattr(args, "release_between_jobs", False)
+    cache_session = contextlib.nullcontext()
+    if os.environ.get("FARCOOLER_GATE_SCCACHE") == "1":
+        import gate_sccache
+        if between:
+            raise ValueError("sccache requires holding the heavy lock across jobs")
+        cache_session = gate_sccache.session(logdir)
     # By default one place in line covers all of this gate's heavy jobs, so gates finish one after
     # another, oldest first; releasing between jobs made nine gates each take nine times as long (ov-836).
-    with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()):
+    # Always acquire heavy before cache: landing-gate's outer scripts/heavy
+    # already holds heavy. Reversing that order here can deadlock two gates.
+    with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()), cache_session:
         if getattr(args, "landing", False):
             import landing_policy
             import gate_disk

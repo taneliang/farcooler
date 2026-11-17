@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
+from contextlib import contextmanager
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,6 +31,25 @@ cache = load("gate_sccache")
 
 
 class CompilerCacheTests(unittest.TestCase):
+    def test_machine_lock_precedes_cache_lock(self):
+        events = []
+        @contextmanager
+        def lock(name):
+            events.append("enter " + name)
+            yield
+            events.append("exit " + name)
+        args = SimpleNamespace(no_load_wait=True, strict_leaks=False)
+        with patch.dict(os.environ, {cache.SWITCH: "1"}, clear=True), \
+                patch.dict(sys.modules, {"gate_sccache": cache}), \
+                patch.object(cache, "session", side_effect=lambda _: lock("cache")), \
+                patch.object(lane, "machine_lock", side_effect=lambda *a: lock("heavy")), \
+                patch.object(lane, "run_one_job", return_value=False):
+            self.assertFalse(lane.run_jobs(["rust"], {}, [], ROOT, ROOT, {}, ROOT, args))
+            self.assertEqual(events, ["enter heavy", "enter cache", "exit cache", "exit heavy"])
+            args.release_between_jobs = True
+            with self.assertRaisesRegex(ValueError, "across jobs"):
+                lane.run_jobs(["rust"], {}, [], ROOT, ROOT, {}, ROOT, args)
+
     def test_every_step_environment_off_and_on(self):
         workflows = {"ci": (ROOT / ".github/workflows/ci.yml").read_text(),
                      "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
