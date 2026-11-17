@@ -1,0 +1,12 @@
+Command: PATH=/usr/bin:... TMPDIR=/tmp CARGO_BUILD_JOBS=4 apps/macos/test.sh --jobs 4
+Exit: 0
+✔ Test run with 21 tests in 5 suites passed after 1.005 seconds.
+✔ Test run with 3 tests in 1 suite passed after 0.087 seconds.
+✔ Test run with 1 test in 1 suite passed after 0.001 seconds.
+✔ Test run with 34 tests in 22 suites passed after 5.887 seconds.
+✔ Test "A claude typed into a shell is offered the view, through the real CLI and daemon" passed after 4.661 seconds.
+✔ Suite NativeOfferTests passed after 44.997 seconds.
+✔ Test run with 1979 tests in 352 suites passed after 157.636 seconds.
+test-leak-check: note: ignored 10 entries as a build tool's scratch: TemporaryDirectory.GlDzmf, TemporaryDirectory.V1Hj1T, TemporaryDirectory.bbZGOp, TemporaryDirectory.cuMQuw, TemporaryDirectory.nlJ3Pa, _Users_e-liang_.swiftpm.lock, _Users_e-liang_Library_Application Support_com.farcooler.FarCoolerCanary_worktrees_overnight_ov-1323-claude-offer-test_apps_macos_.build.lock, _Users_e-liang_Library_Application Support_com.farcooler.FarCoolerCanary_worktrees_overnight_ov-1323-claude-offer-test_apps_macos_.build_Package.resolved.lock, _Users_e-liang_Library_Application Support_com.farcooler.FarCoolerCanary_worktrees_overnight_ov-1323-claude-offer-test_apps_macos_.build_workspace-state.json.lock, _Users_e-liang_Library_Caches_org.swift.swiftpm_manifests_manifest.db.lock
+test-leak-check: the run left nothing in TMPDIR or the preferences folder.
+swift-test-guard: 1979 tests ran (floor 1950).
