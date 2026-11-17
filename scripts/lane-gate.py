@@ -936,7 +936,7 @@ def gate(args):
             raise SystemExit(f"lane-gate: no job {j}; jobs are {', '.join(JOBS)}")
     chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
 
-    if args.landing and not args.dry_run and any(j in HEAVY for j in chosen):
+    if args.landing and not args.dry_run:
         import gate_disk
         try:
             gate_disk.admit(repo, chosen)
@@ -1090,8 +1090,7 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
         if getattr(args, "landing", False):
             import landing_policy
             import gate_disk
-            if any(j in HEAVY for j in chosen):
-                gate_disk.admit(repo, chosen)
+            gate_disk.admit(repo, chosen)
             if between:
                 raise ValueError("--landing cannot release the gate lock between parallel jobs")
             if any(j in HEAVY for j in chosen) and not args.no_load_wait:

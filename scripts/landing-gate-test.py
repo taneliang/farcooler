@@ -64,7 +64,8 @@ sys.addaudithook(audit)
 """)
             env = {k: v for k, v in os.environ.items() if not k.startswith("FARCOOLER_")}
             env.update(PYTHONPATH=str(repo), PYTHONDONTWRITEBYTECODE="1")
-            for job, free, needed, budget in (("rust", 60, 61, 36), ("web", 32, 33, 8)):
+            for job, free, needed, budget in (("rust", 60, 61, 36), ("web", 32, 33, 8),
+                                              ("wire,doc-comments", 32, 33, 8)):
                 with self.subTest(job=job):
                     env["TEST_FREE_GB"] = str(free)
                     done = subprocess.run(["bash", str(repo / "scripts/landing-gate"),
@@ -78,7 +79,8 @@ sys.addaudithook(audit)
 
     def test_admission_boundary(self):
         import gate_disk as disk
-        for chosen, needed, budget in ((["web", "rust"], 61, 36), (["web"], 33, 8)):
+        for chosen, needed, budget in ((["web", "rust"], 61, 36), (["web"], 33, 8),
+                                       (["wire", "doc-comments"], 33, 8)):
             for free in (needed * disk.GIB - 1, needed * disk.GIB, needed * disk.GIB + 1):
                 with self.subTest(chosen=chosen, free=free), patch.object(disk.shutil, "disk_usage") as usage:
                     usage.return_value.free = free

@@ -39,3 +39,24 @@ restricted wrapper-suite run hit the sandbox's `ps` denial; all final checks
 ran with process inspection/local fixture sockets available and passed.
 Temporary validation logs are outside the checkout and uncommitted. No
 `cargo fmt`, stash, reset, clean, or platform/full-gate build was run.
+
+## Fix round 1
+
+The review found that both disk admission call sites were guarded by `HEAVY`,
+so cheap-only landing selections skipped the 33 GB threshold. Admission now
+applies to every landing selection, both before temporary-file creation and
+before running the selected jobs.
+
+The real-wrapper regression retains Rust and web coverage and adds
+`wire,doc-comments` at 32 GB free: it must refuse within 60 seconds, name
+32 GB free, 33 GB needed and the 8 GB budget, and trigger no deletion audit
+event. The new case failed before the fix by reaching a temporary-file
+deletion without admission, then passed with the fix. Boundary tests also
+cover the cheap-only selection below, at and above 33 GB.
+
+Fresh validation on the existing origin/main base `10618439e` passed all
+41 commands listed above, including the gate self-test, all script lint
+self-tests/scans, 14 landing gate tests and 24 landing policy tests. Logs
+are `/private/tmp/ov-1328-round1-check-00.log` through `-40.log`. Checks ran
+sequentially in the foreground with Cargo/nextest fixture limits of four.
+The doctest tail remains unmeasured; no full gate was run.
