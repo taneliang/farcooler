@@ -1,0 +1,1174 @@
+{
+  "rust_job_span_seconds": 1394.7196041670395,
+  "main_test_count": 7417,
+  "main_inventory_sha256": "cf74972801b730e8dcae7e76e53e37dceca9647a69d85a3e390eeedb3142e71c",
+  "main_test_summaries": [
+    "    thread 'every_key_type_is_fingerprinted_as_ssh_keygen_does' (169810191) panicked at crates/fence/tests/inventory.rs:60:14:",
+    "    called `Result::unwrap()` on an `Err` value: Os { code: 86, kind: Uncategorized, message: \"Bad CPU type in executable\" }",
+    "     Summary [ 541.549s] 7417 tests run: 7416 passed, 1 failed, 38 skipped",
+    "    thread 'every_key_type_is_fingerprinted_as_ssh_keygen_does' (169824670) panicked at crates/fence/tests/inventory.rs:60:14:",
+    "    called `Result::unwrap()` on an `Err` value: Os { code: 86, kind: Uncategorized, message: \"Bad CPU type in executable\" }",
+    "     Summary [   0.253s] 1 test run: 0 passed, 1 failed, 11 skipped",
+    "FAILED AGAIN: farcooler-fence::inventory every_key_type_is_fingerprinted_as_ssh_keygen_does: first 0.1s (failed), rerun 0.3s (failed)"
+  ],
+  "steps": [
+    {
+      "job": "android",
+      "command": "echo \"y\" | \"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager\" \\ ...",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "android",
+      "command": "./scripts/build-android-libs.sh",
+      "result": "pass",
+      "seconds": 139.24157549999654
+    },
+    {
+      "job": "android",
+      "command": "cargo build -p farcooler-jni",
+      "result": "pass",
+      "seconds": 139.233900540974
+    },
+    {
+      "job": "android",
+      "command": "./gradlew testInstrumentedUnitTest \"-Pfarcooler.nativeLibDir=$GITHUB_WORKSPACE/target/debug\" --configuration-cache",
+      "result": "pass",
+      "seconds": 41.17617624998093
+    },
+    {
+      "job": "android",
+      "command": "./gradlew assembleDebug assembleAndroidTest --configuration-cache",
+      "result": "pass",
+      "seconds": 18.676932374946773
+    },
+    {
+      "job": "android",
+      "command": "./gradlew assembleRelease --configuration-cache",
+      "result": "pass",
+      "seconds": 42.29678024997702
+    },
+    {
+      "job": "android",
+      "command": "echo \"y\" | \"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager\" \\ ...",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "android",
+      "command": "cargo build -p farcooler-jni",
+      "result": "pass",
+      "seconds": 80.18166195903905
+    },
+    {
+      "job": "android",
+      "command": "./gradlew testInstrumentedUnitTest \\ ...",
+      "result": "pass",
+      "seconds": 40.79833562497515
+    },
+    {
+      "job": "android",
+      "command": "python3 - <<'PY' ...",
+      "result": "pass",
+      "seconds": 0.23313266597688198
+    },
+    {
+      "job": "android",
+      "command": "echo \"y\" | \"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager\" \\ ...",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "android",
+      "command": "cargo build -p farcooler-jni",
+      "result": "pass",
+      "seconds": 20.150027916999534
+    },
+    {
+      "job": "android",
+      "command": "./gradlew testInstrumentedUnitTest \\ ...",
+      "result": "pass",
+      "seconds": 288.40699008404044
+    },
+    {
+      "job": "android",
+      "command": "python3 - <<'PY' ...",
+      "result": "pass",
+      "seconds": 0.45424070896115154
+    },
+    {
+      "job": "android",
+      "command": "if [[ \"$BUILD_RESULT\" == success && \"$UI_RESULT\" == success ]] || \\ ...",
+      "result": "pass",
+      "seconds": 0.37227770796744153
+    },
+    {
+      "job": "doc-comments",
+      "command": "./scripts/doc-comment-check.py --self-test",
+      "result": "pass",
+      "seconds": 0.32661670801462606
+    },
+    {
+      "job": "doc-comments",
+      "command": "./scripts/doc-comment-check.py --base aa1be1f49fccce49cc5db03341807e32b9311504 --head HEAD",
+      "result": "pass",
+      "seconds": 0.2914486250374466
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/ios-ui-shards.py --check",
+      "result": "pass",
+      "seconds": 0.21531791699817404
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/ios-ui-shards.py --self-test",
+      "result": "pass",
+      "seconds": 0.6188674159930088
+    },
+    {
+      "job": "ios",
+      "command": "python3 scripts/ci-macos-capacity.py --self-test",
+      "result": "skipped: decides what CI runs, or builds the iOS archive; see scripts/ios-ui-tests.sh",
+      "seconds": 0.0
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/ios-ui-pick-simulator.py --self-test",
+      "result": "pass",
+      "seconds": 0.21574837499065325
+    },
+    {
+      "job": "ios",
+      "command": "if gh api \"repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100\" \\ ...",
+      "result": "skipped: decides what CI runs, or builds the iOS archive; see scripts/ios-ui-tests.sh",
+      "seconds": 0.0
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/ios-ui-plan.py",
+      "result": "skipped: decides what CI runs, or builds the iOS archive; see scripts/ios-ui-tests.sh",
+      "seconds": 0.0
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/ios-ui-plan.py --self-test",
+      "result": "pass",
+      "seconds": 0.9642089590197429
+    },
+    {
+      "job": "ios",
+      "command": "picked=\"\" ...",
+      "result": "skipped: checks the runner, installs the watchOS platform or packages products for CI's UI shards",
+      "seconds": 0.0
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/build-ios-frameworks.sh",
+      "result": "pass",
+      "seconds": 125.1743060000008
+    },
+    {
+      "job": "ios",
+      "command": "apps/ios/generate-project.py",
+      "result": "pass",
+      "seconds": 3.4865377499954775
+    },
+    {
+      "job": "ios",
+      "command": "xcodebuild -downloadPlatform watchOS",
+      "result": "skipped: checks the runner, installs the watchOS platform or packages products for CI's UI shards",
+      "seconds": 0.0
+    },
+    {
+      "job": "ios",
+      "command": "xcodebuild -project apps/ios/FarCooler.xcodeproj \\ ...",
+      "result": "pass",
+      "seconds": 82.4944925000309
+    },
+    {
+      "job": "ios",
+      "command": "runs=(\"$RUNNER_TEMP\"/ios-dd/Build/Products/*.xctestrun) ...",
+      "result": "skipped: checks the runner, installs the watchOS platform or packages products for CI's UI shards",
+      "seconds": 0.0
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/import-ios-certificate-test.sh",
+      "result": "pass",
+      "seconds": 0.2111420829896815
+    },
+    {
+      "job": "ios",
+      "command": "./scripts/generator-test.sh",
+      "result": "pass",
+      "seconds": 3.321584083023481
+    },
+    {
+      "job": "relay",
+      "command": "npm ci",
+      "result": "pass",
+      "seconds": 8.072030459006783
+    },
+    {
+      "job": "relay",
+      "command": "npx tsc --noEmit",
+      "result": "pass",
+      "seconds": 2.090723416011315
+    },
+    {
+      "job": "relay",
+      "command": "npm test",
+      "result": "pass",
+      "seconds": 24.008519499970134
+    },
+    {
+      "job": "relay",
+      "command": "npx wrangler deploy --dry-run --outdir /tmp/relay-build",
+      "result": "pass",
+      "seconds": 1.9393821250414476
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 161.57982266601175
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy -p farcooler-tailcat --features helper --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 135.2716674580006
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy -p farcooler-tailcat --features linked --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 10.578477041970473
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy -p farcooler-daemon --features tailcat-helper --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 36.32493250002153
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy -p farcooler-daemon --features tailcat --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 110.62494595802855
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy -p farcooler-client --features tailcat --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 44.30933366599493
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy -p farcooler-cli --features tailcat --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 22.271673958050087
+    },
+    {
+      "job": "rust-lints",
+      "command": "cargo clippy -p farcooler-jni --features tailcat --all-targets -- -D warnings",
+      "result": "pass",
+      "seconds": 10.352837374957744
+    },
+    {
+      "job": "rust",
+      "command": "./scripts/ci-install-tmux.sh",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "rust",
+      "command": "if command -v git-lfs >/dev/null 2>&1; then ...",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "rust",
+      "command": "if ! command -v fish >/dev/null 2>&1; then ...",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "rust",
+      "command": "if [ ! -x /usr/sbin/sshd ]; then ...",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "rust",
+      "command": "cargo check -p farcooler-tailcat --features linked",
+      "result": "pass",
+      "seconds": 14.773804249998648
+    },
+    {
+      "job": "rust",
+      "command": "cargo check -p farcooler-tailcat --features linked --target aarch64-unknown-linux-musl",
+      "result": "pass",
+      "seconds": 148.92317670799093
+    },
+    {
+      "job": "rust",
+      "command": "cargo nextest run --profile ci -p farcooler-tailcat --features helper",
+      "result": "pass",
+      "seconds": 144.22602958395146
+    },
+    {
+      "job": "rust",
+      "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test an_empty_allowlist_starts_no_tunnel",
+      "result": "pass",
+      "seconds": 70.42118958401261
+    },
+    {
+      "job": "rust",
+      "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test revocation_closes_what_it_revoked",
+      "result": "pass",
+      "seconds": 84.16516808298184
+    },
+    {
+      "job": "rust",
+      "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_pairing_gives_the_runner_a_tunnel",
+      "result": "pass",
+      "seconds": 37.29794474999653
+    },
+    {
+      "job": "rust",
+      "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_sweep_rebuilds_the_tunnel_once",
+      "result": "pass",
+      "seconds": 23.165379292040598
+    },
+    {
+      "job": "rust",
+      "command": "cargo nextest run --profile ci -p farcooler-daemon --features tailcat-helper --test a_configured_derp_map_reaches_the_tunnel",
+      "result": "pass",
+      "seconds": 9.470934166980442
+    },
+    {
+      "job": "rust",
+      "command": "cargo check -p farcooler-daemon --features tailcat --all-targets",
+      "result": "pass",
+      "seconds": 45.51157254097052
+    },
+    {
+      "job": "rust",
+      "command": "cargo build --workspace --bins ...",
+      "result": "pass",
+      "seconds": 37.50715550000314
+    },
+    {
+      "job": "rust",
+      "command": "./scripts/tmux-leak-check.py --self-test",
+      "result": "pass",
+      "seconds": 27.053884082997683
+    },
+    {
+      "job": "rust",
+      "command": "./scripts/tmux-stale-sockets.py --self-test",
+      "result": "pass",
+      "seconds": 0.5845392919727601
+    },
+    {
+      "job": "rust",
+      "command": "./scripts/test-leak-check.py --self-test",
+      "result": "pass",
+      "seconds": 13.256313249992672
+    },
+    {
+      "job": "rust",
+      "command": "python3 scripts/quarantine-test.py",
+      "result": "pass",
+      "seconds": 31.349235582980327
+    },
+    {
+      "job": "rust",
+      "command": "./scripts/rust-archive.sh target/rust-tests.tar.zst",
+      "result": "pass",
+      "seconds": 154.39194841700373
+    },
+    {
+      "job": "rust",
+      "command": "for name in farcooler-local farcooler-preview farcooler-canary; do ...",
+      "result": "FAIL (exit 100)",
+      "seconds": 552.6162171670003
+    },
+    {
+      "job": "site",
+      "command": "npm ci",
+      "result": "pass",
+      "seconds": 2.9088716660044156
+    },
+    {
+      "job": "site",
+      "command": "npx tsc --noEmit",
+      "result": "pass",
+      "seconds": 1.0688902090187185
+    },
+    {
+      "job": "site",
+      "command": "npm test",
+      "result": "pass",
+      "seconds": 4.536668832995929
+    },
+    {
+      "job": "site",
+      "command": "npx wrangler deploy --dry-run --outdir /tmp/site-build",
+      "result": "pass",
+      "seconds": 0.7773463749908842
+    },
+    {
+      "job": "site",
+      "command": "npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary",
+      "result": "pass",
+      "seconds": 0.7642007920076139
+    },
+    {
+      "job": "site",
+      "command": "npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview",
+      "result": "pass",
+      "seconds": 0.909149749961216
+    },
+    {
+      "job": "swift-tests",
+      "command": "picked=\"\" ...",
+      "result": "pass",
+      "seconds": 5.306925500044599
+    },
+    {
+      "job": "swift-tests",
+      "command": "python3 scripts/swift-build-cache.py self-test ...",
+      "result": "pass",
+      "seconds": 0.39749979198677465
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/macos-test-wrapper-test.sh",
+      "result": "pass",
+      "seconds": 18.01440254203044
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/wait-for-unlock-test.sh",
+      "result": "pass",
+      "seconds": 4.860003042034805
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/swift-test-guard-test.sh",
+      "result": "pass",
+      "seconds": 41.230038915993646
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/macos-test-partitions.py --self-test",
+      "result": "pass",
+      "seconds": 16.156078250030987
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/test-leak-check.py --self-test",
+      "result": "pass",
+      "seconds": 13.70058866700856
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/mac-capture-stop-test.sh",
+      "result": "pass",
+      "seconds": 1.4715648340061307
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/capture-duplicates-test.sh",
+      "result": "pass",
+      "seconds": 2.540683458035346
+    },
+    {
+      "job": "swift-tests",
+      "command": "./apps/macos/build-test-native.sh",
+      "result": "pass",
+      "seconds": 141.7551633749972
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit",
+      "result": "pass",
+      "seconds": 78.50541295896983
+    },
+    {
+      "job": "swift-tests",
+      "command": "./scripts/ci-install-tmux.sh",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "swift-tests",
+      "command": "./apps/macos/test.sh",
+      "result": "pass",
+      "seconds": 289.417377249978
+    },
+    {
+      "job": "swift-tests",
+      "command": "python3 scripts/swift-build-cache.py save",
+      "result": "pass",
+      "seconds": 0.47370220901211724
+    },
+    {
+      "job": "swift",
+      "command": "picked=\"\" ...",
+      "result": "pass",
+      "seconds": 3.549362499965355
+    },
+    {
+      "job": "swift",
+      "command": "python3 scripts/swift-build-cache.py self-test ...",
+      "result": "pass",
+      "seconds": 0.4637264169869013
+    },
+    {
+      "job": "swift",
+      "command": "name=\"$(scripts/version.sh app-name)\" ...",
+      "result": "skipped: local landing: release bundle and its consumers run in CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "swift",
+      "command": "python3 scripts/macos-bundle-native-test.py",
+      "result": "pass",
+      "seconds": 7.443614874966443
+    },
+    {
+      "job": "swift",
+      "command": "apps/macos/build-app.sh",
+      "result": "skipped: local landing: release bundle and its consumers run in CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "swift",
+      "command": "scripts/tunnel-smoke.sh \"apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd\"",
+      "result": "skipped: local landing: release bundle and its consumers run in CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "swift",
+      "command": "out=\"$(\"apps/macos/build/$APP_NAME.app/Contents/Resources/farcooler\" runner mint-node-key)\" ...",
+      "result": "skipped: local landing: release bundle and its consumers run in CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "swift",
+      "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+      "result": "skipped: local landing: release bundle and its consumers run in CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "swift",
+      "command": "app=\"apps/macos/build/$APP_NAME.app\" ...",
+      "result": "skipped: local landing: release bundle and its consumers run in CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "swift",
+      "command": "./scripts/icon-test.sh",
+      "result": "pass",
+      "seconds": 3.2278805420501158
+    },
+    {
+      "job": "swift",
+      "command": "./scripts/sparkle-key-test.sh",
+      "result": "pass",
+      "seconds": 1.4561520419665612
+    },
+    {
+      "job": "swift",
+      "command": "./scripts/gh-download-test.sh",
+      "result": "pass",
+      "seconds": 3.5047475829487666
+    },
+    {
+      "job": "swift",
+      "command": "./scripts/macos-entitlements-test.sh",
+      "result": "pass",
+      "seconds": 0.22206904197810218
+    },
+    {
+      "job": "swift",
+      "command": "python3 scripts/swift-build-cache.py save",
+      "result": "pass",
+      "seconds": 0.2056769589544274
+    },
+    {
+      "job": "tunnel",
+      "command": "unformatted=\"$(gofmt -l .)\" ...",
+      "result": "pass",
+      "seconds": 0.23990966595010832
+    },
+    {
+      "job": "tunnel",
+      "command": "CGO_ENABLED=1 go vet ./... ...",
+      "result": "pass",
+      "seconds": 16.448009165993426
+    },
+    {
+      "job": "tunnel",
+      "command": "CGO_ENABLED=0 go vet ./... ...",
+      "result": "pass",
+      "seconds": 15.785281290998682
+    },
+    {
+      "job": "web",
+      "command": "mkdir -p wasm-tools ...",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "echo \"WASM_BINDGEN=$RUNNER_TEMP/wasm-tools/wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl/wasm-bindgen\" >> \"$GITHUB_ENV\" ...",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "cargo check --locked -p farcooler-client --no-default-features --features web --target wasm32-unknown-unknown",
+      "result": "pass",
+      "seconds": 28.21115866699256
+    },
+    {
+      "job": "web",
+      "command": "./scripts/web-client-tree-check.py --self-test",
+      "result": "pass",
+      "seconds": 0.2069937500054948
+    },
+    {
+      "job": "web",
+      "command": "./scripts/web-client-tree-check.py",
+      "result": "pass",
+      "seconds": 0.4233456669608131
+    },
+    {
+      "job": "web",
+      "command": "npm ci",
+      "result": "pass",
+      "seconds": 2.1453056249883957
+    },
+    {
+      "job": "web",
+      "command": "npx tsc --noEmit -p tsconfig.json",
+      "result": "pass",
+      "seconds": 0.5291360000264831
+    },
+    {
+      "job": "web",
+      "command": "npm test",
+      "result": "pass",
+      "seconds": 2.0243639170075767
+    },
+    {
+      "job": "web",
+      "command": "npm run test:workflow",
+      "result": "pass",
+      "seconds": 0.30604220798704773
+    },
+    {
+      "job": "web",
+      "command": "if [ ! -x /usr/sbin/sshd ]; then ...",
+      "result": "skipped: installs a toolchain on a CI runner",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "cargo test --locked --manifest-path ../../crates/web/Cargo.toml",
+      "result": "pass",
+      "seconds": 39.486688792007044
+    },
+    {
+      "job": "web",
+      "command": "GOOS=js GOARCH=wasm go test -exec \"$(go env GOROOT)/lib/wasm/go_js_wasm_exec\" .",
+      "result": "pass",
+      "seconds": 7.956609375018161
+    },
+    {
+      "job": "web",
+      "command": "node scripts/size-gate.mjs --self-test",
+      "result": "pass",
+      "seconds": 0.2333519589737989
+    },
+    {
+      "job": "web",
+      "command": "../../crates/web/build.sh --channel stable --out \"$RUNNER_TEMP/wasm-stable\"",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "npx tsc --noEmit -p tsconfig.client.json",
+      "result": "pass",
+      "seconds": 1.2256036670296453
+    },
+    {
+      "job": "web",
+      "command": "WEB_WASM_DIR=\"$RUNNER_TEMP/wasm-stable\" ./build.sh --channel stable --build \"$GITHUB_SHA\"",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "node scripts/size-gate.mjs dist",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "npx wrangler deploy --dry-run --outdir /tmp/web-build",
+      "result": "skipped: stable web asset build skipped (needs the Linux x86 wasm toolchain CI downloads; left to CI); dry-run left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "../../crates/web/build.sh --channel canary --out \"$RUNNER_TEMP/wasm-canary\"",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "WEB_WASM_DIR=\"$RUNNER_TEMP/wasm-canary\" ./build.sh --channel canary --build \"$GITHUB_SHA\"",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "node scripts/size-gate.mjs dist",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "npx wrangler deploy --dry-run --env canary --outdir /tmp/web-build-canary",
+      "result": "skipped: canary web asset build skipped (needs the Linux x86 wasm toolchain CI downloads; left to CI); dry-run left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "cargo build --locked --manifest-path ../../crates/web/Cargo.toml --example fake_daemon",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "npx playwright-core install --with-deps --only-shell chromium",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "node test/browser/plan-render-check.mjs",
+      "result": "pass",
+      "seconds": 1.2177805000101216
+    },
+    {
+      "job": "web",
+      "command": "node test/browser/csp-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --tunnel-delay 100",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "web",
+      "command": "node test/browser/sleep-check.mjs --fake-daemon ../../crates/web/target/debug/examples/fake_daemon --engines chromium",
+      "result": "skipped: needs the Linux x86 wasm toolchain CI downloads; left to CI",
+      "seconds": 0.0
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/proto-lint.py --self-test",
+      "result": "pass",
+      "seconds": 1.2730441250023432
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/proto-lint.py --channel preview",
+      "result": "pass",
+      "seconds": 0.23633487499319017
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/proto-lint.py --channel stable",
+      "result": "pass",
+      "seconds": 0.3216613340191543
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/proto-lint.py --channel canary --since-baseline",
+      "result": "pass",
+      "seconds": 0.47374008398037404
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/canary-baseline-test.sh",
+      "result": "pass",
+      "seconds": 12.116920625034254
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/canary-shipped.py --self-test",
+      "result": "pass",
+      "seconds": 0.3566090000094846
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/canary-plan.py --self-test",
+      "result": "pass",
+      "seconds": 2.237232584040612
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/device-keys-readiness.py --self-test",
+      "result": "pass",
+      "seconds": 0.2698961250134744
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/site-proof.py --self-test",
+      "result": "pass",
+      "seconds": 0.475559999991674
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/landing-timing.py --self-test",
+      "result": "pass",
+      "seconds": 0.2590943750110455
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/ci-changes.py --self-test",
+      "result": "pass",
+      "seconds": 1.3098153750179335
+    },
+    {
+      "job": "wire",
+      "command": "python3 ./scripts/ci-concurrency-test.py",
+      "result": "pass",
+      "seconds": 0.7869729999802075
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/ci-runner-retry-test.py",
+      "result": "pass",
+      "seconds": 0.35854937497060746
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/quarantine.py --lint",
+      "result": "pass",
+      "seconds": 0.2303338329656981
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/rust-select-test.py",
+      "result": "pass",
+      "seconds": 5.804681040986907
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/rust-shards.py --self-test",
+      "result": "pass",
+      "seconds": 0.32548258296446875
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/macos-rust-tests.py --self-test --check",
+      "result": "pass",
+      "seconds": 0.47647208301350474
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/landing-gate-test.py",
+      "result": "pass",
+      "seconds": 5.424676666036248
+    },
+    {
+      "job": "wire",
+      "command": "HEAVY_LOCK_HELD=1 ./scripts/lane-gate.py --self-test",
+      "result": "pass",
+      "seconds": 67.01194616698194
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/gate-evidence-test.py",
+      "result": "pass",
+      "seconds": 96.40554299997166
+    },
+    {
+      "job": "wire",
+      "command": "python3 scripts/engine-gate-test.py",
+      "result": "pass",
+      "seconds": 106.10724304197356
+    },
+    {
+      "job": "wire",
+      "command": "HEAVY_LOCK_HELD=1 ./scripts/heavy_lock.py --self-test",
+      "result": "pass",
+      "seconds": 16.282098457973916
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/notarytool-retry.sh --self-test",
+      "result": "pass",
+      "seconds": 0.6907558329985477
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/version-test.sh",
+      "result": "pass",
+      "seconds": 4.002367416978814
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/workos-test.sh",
+      "result": "pass",
+      "seconds": 0.9033200410194695
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/appcast-test.sh",
+      "result": "pass",
+      "seconds": 0.4897648329497315
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/ci-flake-tally-test.sh",
+      "result": "pass",
+      "seconds": 1.1236153750214726
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/ios-ui-retry-test.sh",
+      "result": "pass",
+      "seconds": 77.73374670895282
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/ios-ui-lease-test.sh",
+      "result": "pass",
+      "seconds": 64.55804545799037
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/copy-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.20728979201521724
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/test-leak-check.py --lint",
+      "result": "pass",
+      "seconds": 0.748563541972544
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/copy-lint.py",
+      "result": "pass",
+      "seconds": 1.060310417029541
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/shared-core-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.20277808298124
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/shared-core-lint.py",
+      "result": "pass",
+      "seconds": 0.7422130420454778
+    },
+    {
+      "job": "wire",
+      "command": "git fetch --no-tags origin main ...",
+      "result": "pass",
+      "seconds": 3.339728999999352
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/daemon-layers.py --self-test ...",
+      "result": "pass",
+      "seconds": 5.543979500012938
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/capability-names.py --self-test ...",
+      "result": "pass",
+      "seconds": 0.2158204999868758
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/claude-prices.py --self-test",
+      "result": "pass",
+      "seconds": 0.20670112501829863
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/openai-prices.py --self-test",
+      "result": "pass",
+      "seconds": 0.22307287500007078
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/derp-hosts-check.py --self-test",
+      "result": "pass",
+      "seconds": 0.2202793339965865
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/file-size-budget.py --self-test ...",
+      "result": "pass",
+      "seconds": 0.31534154200926423
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/plan-layer-lint.py --self-test ...",
+      "result": "pass",
+      "seconds": 0.3206139170215465
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/page-layer-lint.py --self-test ...",
+      "result": "pass",
+      "seconds": 3.3440207499661483
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/swallow-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.21998791705118492
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/swallow-lint.py",
+      "result": "pass",
+      "seconds": 0.3312429999932647
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/visual-tokens-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.22929958399618044
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/visual-tokens-lint.py",
+      "result": "pass",
+      "seconds": 0.9739878750406206
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/pixel-scale-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.20434633299009874
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/pixel-scale-lint.py",
+      "result": "pass",
+      "seconds": 0.20083112502470613
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/test-window-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.20180958398850635
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/test-window-lint.py",
+      "result": "pass",
+      "seconds": 0.20438216597540304
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/runloop-spin-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.19909166597062722
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/runloop-spin-lint.py",
+      "result": "pass",
+      "seconds": 0.20034195797052234
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/capture-window-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.20283500000368804
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/capture-window-lint.py",
+      "result": "pass",
+      "seconds": 0.1989087089896202
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/fresh-script-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.21084183303173631
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/fresh-script-lint.py",
+      "result": "pass",
+      "seconds": 0.3185400409856811
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/charter-intercept-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.20157637499505654
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/charter-intercept-lint.py",
+      "result": "pass",
+      "seconds": 0.2219449589611031
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/ios-agentkit-subset-lint.py --self-test",
+      "result": "pass",
+      "seconds": 0.21717983402777463
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/ios-agentkit-subset-lint.py",
+      "result": "pass",
+      "seconds": 1.3986401669681072
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/migration-lint.py --self-test",
+      "result": "pass",
+      "seconds": 1.421069583040662
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/migration-lint.py",
+      "result": "pass",
+      "seconds": 0.34098550002090633
+    },
+    {
+      "job": "wire",
+      "command": "if [ \"$(typeshare --version 2>/dev/null)\" != \"typeshare 1.13.4\" ]; then ...",
+      "result": "pass",
+      "seconds": 0.2243935419828631
+    },
+    {
+      "job": "wire",
+      "command": "./scripts/gen-wire-types.sh ...",
+      "result": "pass",
+      "seconds": 0.35309120803140104
+    }
+  ]
+}

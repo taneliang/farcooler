@@ -1,0 +1,300 @@
+[
+  {
+    "command": [
+      "python3",
+      "scripts/capture-window-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/capture-window-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/charter-intercept-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/charter-intercept-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/copy-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/copy-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/fresh-script-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/fresh-script-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/ios-agentkit-subset-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/ios-agentkit-subset-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/migration-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/migration-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/page-layer-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/page-layer-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/pixel-scale-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/pixel-scale-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/plan-layer-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/plan-layer-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/proto-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/proto-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/runloop-spin-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/runloop-spin-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/shared-core-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/shared-core-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/swallow-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/swallow-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test-window-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test-window-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/visual-tokens-lint.py",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/visual-tokens-lint.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/proto-lint.py",
+      "--channel",
+      "stable"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/proto-lint.py",
+      "--channel",
+      "canary"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/proto-lint.py",
+      "--channel",
+      "canary",
+      "--since-baseline"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "bash",
+      "scripts/actionlint.sh",
+      "--self-test"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "bash",
+      "scripts/actionlint.sh"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/test-leak-check.py",
+      "--lint"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/quarantine.py",
+      "--lint"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/landing-policy-test.py"
+    ],
+    "exit": 0
+  },
+  {
+    "command": [
+      "python3",
+      "scripts/landing-gate-test.py"
+    ],
+    "exit": 0
+  }
+]

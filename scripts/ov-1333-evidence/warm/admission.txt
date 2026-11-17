@@ -1,0 +1,5 @@
+Filesystem   1024-blocks      Used Available Capacity iused     ifree %iused  Mounted on
+/dev/disk3s5   971298980 847443940  84786632    91% 9540865 847866320    1%   /System/Volumes/Data
+/dev/disk3s5   971298980 847443940  84786632    91% 9540865 847866320    1%   /System/Volumes/Data
+
+heavy tickets before admission: []
