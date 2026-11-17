@@ -12,3 +12,11 @@ The test now waits for the same snapshot to have a candidate and an uncertain pe
 - The first daemon suite run had 3,317 passes, 16 ignored, and three native test failures; two required a `farcooler` CLI binary. After `cargo build --locked -j 4 -p farcooler-cli --bin farcooler`, all 39 native tests passed on rerun.
 - A full suite retry with the CLI built had 3,317 passes, 16 ignored, and three failures: the native startup reason assertion and native steering (both passed in the 39-test rerun), and a gate test reporting `process start identity unavailable`. The suite did not reach integration targets because Cargo stopped after the failed library binary.
 - All daemon integration test targets passed in a separate `--no-fail-fast` run with four test threads, including the 18 active socket service tests. The gate test that failed under full-suite load also passed independently. These focused passes do not make the full library suite green.
+
+## Fix round 1 verification
+
+On macOS, after `cargo build --locked -j 4 -p farcooler-cli --bin farcooler`, the foreground command `cargo test --locked -j 4 -p farcooler-daemon -- --test-threads=4` completed successfully (exit 0). The library target reported 3,320 passed, 0 failed, 16 ignored; all integration targets and doc tests passed, including the socket target (18 passed, 1 ignored). The full output is `/private/tmp/ov-1315-daemon-round1-retry.log`.
+
+The first attempt at that command reported 3,317 passed, 3 failed, 16 ignored in the library target: native delivery reported an unavailable output stream, native startup reported an unexpected failure reason, and writer join found the database still locked immediately after dropping the service. All three passed in the complete retry; the first output is `/private/tmp/ov-1315-daemon-round1.log`. These intermittent failures are not evidence of a consistently green suite.
+
+The targeted test passed 50 consecutive foreground executions using `cargo test --locked -j 4 -p farcooler-daemon --test workflow_service_over_socket workflow_service_admitted_ci_recovers_original_bundle_after_reconfiguration -- --exact --test-threads=4`. [The numbered, complete output](targeted-50-round1.log) records all 50 executions and their results; the loop stopped on any failure.
