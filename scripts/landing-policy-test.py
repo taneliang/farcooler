@@ -35,6 +35,58 @@ class LandingTests(unittest.TestCase):
         commands.update(extra_commands or {})
         return set(lane.jobs_for(paths, changes.SITE, lambda _: True, commands, changes.families))
 
+    def assert_script_map_complete(self, repo):
+        # Include untracked additions and dotfiles, but not ignored build output.
+        paths = subprocess.check_output(
+            ["git", "-C", str(repo), "ls-files", "--cached", "--others",
+             "--exclude-standard", "-z", "--", "scripts/", ".github/workflows/"], text=True)
+        missing = set(paths.rstrip("\0").split("\0")) - policy.SCRIPT_USERS.keys()
+        self.assertFalse(missing, f"unreviewed scripts (runtime defaults to full): {sorted(missing)}")
+
+    def test_every_script_and_workflow_has_reviewed_users_or_explicit_full(self):
+        self.assert_script_map_complete(ROOT)
+        for path, users in policy.SCRIPT_USERS.items():
+            with self.subTest(path=path):
+                self.assertTrue(users is None or (isinstance(users, set) and users and users <= set(lane.JOBS)))
+
+    def test_new_script_or_workflow_fails_coverage_and_defaults_full(self):
+        for path in ("scripts/new-unknown.py", ".github/workflows/new-unknown.yml"):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                subprocess.run(["git", "init", "-q", str(repo)], check=True)
+                target = repo / path
+                target.parent.mkdir(parents=True)
+                target.write_text("# new input\n")
+                with self.assertRaisesRegex(AssertionError, "unreviewed scripts"):
+                    self.assert_script_map_complete(repo)
+                self.assertEqual(self.script_reach([path]), set(lane.JOBS))
+
+    def test_reviewed_script_selections(self):
+        always = {"wire", "doc-comments"}
+        expected = {
+            "scripts/copy-lint.py": always,
+            "scripts/page-layer-lint.py": always,
+            "scripts/proto-lint.py": always,
+            "scripts/fresh-script-lint.py": always,
+            "scripts/shared-core-baseline.json": always,
+            "scripts/ci-macos-capacity.py": always,
+            "scripts/ci-flake-tally.py": always,
+            "scripts/fixtures/ci-flake-tally/manifest.tsv": always,
+            "scripts/landing-timing.py": always,
+            "scripts/doc-comment-check.py": always,
+            "scripts/web-client-tree-check.py": always | {"web"},
+            "scripts/swift-build-cache.py": always | {"swift", "swift-tests"},
+            "scripts/generator-test.sh": always | {"ios"},
+            "scripts/quarantine-test.py": always | {"rust"},
+            "scripts/lane-gate.py": set(lane.JOBS),
+            "scripts/landing_policy.py": set(lane.JOBS),
+        }
+        for path, jobs in expected.items():
+            with self.subTest(path=path):
+                self.assertEqual(self.script_reach([path]), jobs)
+        # doc-comments is an unconditional floor; the lint itself feeds only wire.
+        self.assertEqual(policy.script_users("scripts/copy-lint.py", {}), {"wire"})
+
     def test_retry_diff_runs_only_script_checks(self):
         paths = [".github/workflows/ci-runner-retry.yml", "scripts/ci-runner-retry.py",
                  "scripts/ci-runner-retry-test.py"]

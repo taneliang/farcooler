@@ -16,17 +16,230 @@ import threading
 import time
 
 
-# Reviewed transitive consumers, not an inference from missing command text.
-# The retry helper is imported by ci-runner-retry-test.py; that test reads the
-# workflow and runs in wire. The workflow itself only operates the GitHub API.
-# No platform build/test consumes these three inputs (ov-1324). All other
-# scripts/workflows keep CI's full fallback until their users are reviewed.
+# Reviewed gate job users (ov-1326). None explicitly means full/uncertain.
+# Reasons describe execution/import edges, not the source language being linted.
+# Meta-tests that copy a tree do not make every copied file an executed input.
+# Missing paths stay full at runtime and fail the coverage test until reviewed.
 SCRIPT_USERS = {
-    "scripts/ci-runner-retry.py": {"wire"},
-    "scripts/ci-runner-retry-test.py": {"wire"},
-    ".github/workflows/ci-runner-retry.yml": {"wire"},
+    '.github/workflows/canary-baseline.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/canary.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/ci-runner-retry.yml': {'wire'},  # wire retry-test reads and executes retry commands; no platform consumer (ov-1324).
+    '.github/workflows/ci.yml': None,  # Full: steps_for derives every gate command from this workflow.
+    '.github/workflows/claude-prices.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/derp-hosts.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/doc-comments.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/linux-binaries.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/nightly.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/openai-prices.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/ov1186-cache.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/promote.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/relay.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/release.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/site-analytics.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/site.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/tunnel-e2e.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    '.github/workflows/web.yml': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/actionlint.sh': {'wire'},  # workflow_checks adds actionlint to wire for workflow edits; actionlint.sh builds with queue.patch.
+    'scripts/actionlint/queue.patch': {'wire'},  # workflow_checks adds actionlint to wire for workflow edits; actionlint.sh builds with queue.patch.
+    'scripts/android-ndk.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/appcast-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
+    'scripts/appcast.py': {'wire'},  # wire appcast-test.sh executes feed generation; shipping feed generation is outside gate families.
+    'scripts/build-android-libs.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/build-derper.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/build-ios-frameworks.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/build-linux.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/build-tailcat.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/build-tunnel-helper.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/canary-baseline-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
+    'scripts/canary-baseline.sh': {'wire'},  # wire canary-baseline-test.sh invokes it, loading proto-lint; live stamping is release automation.
+    'scripts/canary-plan.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/canary-shipped.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/capability-names.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/capture-contrast-check.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/capture-duplicates-allow.txt': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/capture-duplicates-test.sh': {'swift-tests'},  # ci.yml swift-tests invokes this test; wrapper subprocesses use stand-in tools.
+    'scripts/capture-duplicates.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/capture-window-allow.txt': {'wire'},  # wire capture-window-lint reads its allowed capture counts.
+    'scripts/capture-window-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/charter-intercept-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/ci-changes.py': None,  # Full: family classifier is imported by gate planning and canary-plan.
+    'scripts/ci-concurrency-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
+    'scripts/ci-flake-tally-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
+    'scripts/ci-flake-tally.py': {'wire'},  # wire ci-flake-tally-test.sh calls shell wrapper then Python parser on saved log fixtures.
+    'scripts/ci-flake-tally.sh': {'wire'},  # wire ci-flake-tally-test.sh calls shell wrapper then Python parser on saved log fixtures.
+    'scripts/ci-install-tmux.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ci-job-time-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ci-macos-capacity.py': {'wire'},  # wire ci-concurrency-test imports capacity and runs both self-tests; live scheduling is CI-only.
+    'scripts/ci-runner-retry-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
+    'scripts/ci-runner-retry.py': {'wire'},  # ci.yml wire runs retry-test, which imports the helper; API-only workflow (ov-1324).
+    'scripts/ci-yield-to-main.py': {'wire'},  # wire ci-concurrency-test imports capacity and runs both self-tests; live scheduling is CI-only.
+    'scripts/claude-prices.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/claude-rewake-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/com.farcooler.site-proof.plist': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/copy-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/daemon-layers-counts.txt': {'wire'},  # wire daemon-layers reads dependency counts and checks them against main.
+    'scripts/daemon-layers.json': {'wire'},  # wire daemon-layers reads layer membership and allowed dependencies.
+    'scripts/daemon-layers.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/demo-host.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/derp-hosts-check.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/device-keys-readiness.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/doc-comment-check.py': {'doc-comments', 'wire'},  # doc-comments executes checker; wire landing-gate-test exercises it against scratch commits.
+    'scripts/engine-gate-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
+    'scripts/engine-gate.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/engine-old-reader.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/file-size-budget.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/file-size-budget.txt': {'wire'},  # wire file-size-budget reads grandfathered size ceilings.
+    'scripts/fixtures/ci-flake-tally/annotation-not-acquired.txt': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/dns-crates-io.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/leaked-farcoolerd.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/manifest.tsv': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/nextest-answer-wake.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/nextest-route-tests.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/swift-testing-flick.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/swift-testing-row-budget.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/synthetic-gradle.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/ci-flake-tally/synthetic-xctest.log': {'wire'},  # wire ci-flake-tally-test.sh passes saved fixtures through the tally parser.
+    'scripts/fixtures/landing-timing/mtimes.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:12129828fe20f3749bab5dcf9fd21112d003b42aa0303768aea5e3ad7e1b1805.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:123d809b122ec0e5a2196e3beb38ac53153c060927df13196698aa3651151f73.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:2aec8132ec7c1b45dcb7024b985643a693030dd24522f0408e6fc711b1ecfcbe.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:2aec8132ec7c1b45dcb7024b985643a693030dd24522f0408e6fc711b1ecfcbe.output': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:2fdadf1c8c8c0409d14004157703c9f43f17aba660e1f9906663033f0daa93cc.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:388d8d36baaf256c0ad937653e9b7c7641cd622bf56431256da0e059bcc47aab.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:4c9483465574fd121a9cfdff79a1c5bdd6a42de7eafc8dc1d736a25ceb53b269.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:5007e45d13e14b650eec491ae84cbf1e0e29dbd543ef9b0246a380b118720c7e.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:50d0a0216383dc873f24690edcd520b479cae45f1439e90e0f43f384194ce4ff.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:5cccb8c77ef7ec018c17fedf81260b992c7c28632d0116eabeae0cd1e36ea6bb.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:61229bdbd4ca8d230d51fd3d140c3c81878b0891e3f143e484ebf2af0679978a.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:65d1a61d5b1cd58cff02c91524f7470de70aa6f041fed88a39aee73d603f8b98.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:6cbb04f073c51b274d21f701c927c0085a97d26d6bd4353f7add6a11ee5cd4b8.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:6d57e92b38c297a19980cc3cab666e107b0b7ae5d5a65e3915a13fea0b3acfc4.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:7138f663d249494925d8bf782d67eb3eb685996a5a2bfca91693c402d7591c1c.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:71b0e3c2bf149055e31f85735aa79f40a0bca133d1a7b738e6eae246545bad49.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:7806241308cf89860fec478ed36816bf9de457f47be1099d09a2e455442b7253.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:830fa9c63bdcc0d437c9664e2e4a72720917059fb984b17f20f5238203f475ad.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:a19ea1be532292f6f53a19633eb215e249ab0590d918e0bddd54a91ad43212a5.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:b48e62734df2549b4a5d3e3f2230d3334e515cc16cbe529880f5899670841960.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:c3f9304db0c32a4244f48d51772c486cbcaa68258272d5c6f2fc2fe502e7899a.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:da5ef33f0ea6f20f2983bfae97122951721e1ef23c029cad2e6d415543fc18e0.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fixtures/landing-timing/wf1:e285fca49b073c72050695692118c53bd67d5d5238ed67bbea17e61bcb7085ba.json': {'wire'},  # wire landing-timing --self-test reads this receipt/mtime/output fixture.
+    'scripts/fold-check.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/fresh-script-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/gate-evidence-mutation-test.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/gate-evidence-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
+    'scripts/gate-flaky.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/gate-summary-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/gate-test-fixture.py': None,  # Full: gate self-test repository construction; retain orchestration coverage.
+    'scripts/gate_evidence.py': None,  # Full: canonical evidence planner and execution attest every family.
+    'scripts/gen-wire-types.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/generator-test.sh': {'ios'},  # ci.yml ios invokes this regression test; no other gate family calls it.
+    'scripts/gh-api-retry.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/gh-download-test.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/gh-download.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/git-hooks/commit-msg': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/heavy': None,  # Full: landing-gate and platform wrappers enter shared machine admission.
+    'scripts/heavy_lock.py': None,  # Full: admission and process locks shared by every gate job.
+    'scripts/icon-label.swift': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/icon-test.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/import-ios-certificate-test.sh': {'ios'},  # ci.yml ios invokes this regression test; no other gate family calls it.
+    'scripts/import-ios-certificate.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/install-git-hooks.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ios-agentkit-subset-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/ios-ui-lease-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
+    'scripts/ios-ui-pick-simulator.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ios-ui-plan.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ios-ui-retry-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
+    'scripts/ios-ui-shard-budget.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ios-ui-shards.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ios-ui-tests.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/landing-benchmark-test.py': {'wire'},  # wire lane-gate --self-test runs this regression suite in its scratch repository.
+    'scripts/landing-benchmark.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/landing-gate': None,  # Full: entry wrapper chooses and admits the entire gate.
+    'scripts/landing-gate-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
+    'scripts/landing-policy-test.py': {'wire'},  # wire lane-gate --self-test runs this regression suite in its scratch repository.
+    'scripts/landing-timing.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/landing_policy.py': None,  # Full: selection, command rewrites and worker scheduling affect every family.
+    'scripts/lane-gate.py': None,  # Full: orchestrates and selects every gate job, including preflight and evidence.
+    'scripts/mac-capture-stop-test.sh': {'swift-tests'},  # ci.yml swift-tests invokes this test; wrapper subprocesses use stand-in tools.
+    'scripts/mac-capture.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/macos-bundle-native-test.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/macos-entitlements-test.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/macos-rust-tests.json': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/macos-rust-tests.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/macos-test-partitions.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/macos-test-wrapper-test.sh': {'swift-tests'},  # ci.yml swift-tests invokes this test; wrapper subprocesses use stand-in tools.
+    'scripts/manager-skill-pressure/fake-farcooler.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/manager-skill-pressure/fake-gh.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/manager-skill-pressure/new-scratch-repo.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/manager-skill-pressure/render-skill.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/manager-skill-pressure/run-claude.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/manager-skill-pressure/scenarios.md': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/manager-skill-pressure/score.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/migration-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/nightly-dispatch-test.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/nightly-report.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/notarytool-retry.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/openai-prices.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/ov-1324-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ov-1326-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/page-layer-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/pixel-scale-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/plan-layer-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/portal-app-groups.rb': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/process_guard.py': None,  # Full: lane-gate imports process control for every step.
+    'scripts/process_guard_test.py': {'wire'},  # wire lane-gate --self-test runs this regression suite in its scratch repository.
+    'scripts/proto-lint.py': {'wire'},  # wire runs lint; canary-shipped and canary-baseline-test also load it within wire.
+    'scripts/quarantine-test.py': {'rust'},  # ci.yml rust runs regression suite; it imports quarantine and tests a scratch Cargo workspace.
+    'scripts/quarantine.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/reap-orphan-daemons.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/reap-stale-tmux.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/release.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/runloop-spin-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/runner-upgrade-e2e.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/rust-archive.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/rust-select-landings.json': {'wire'},  # wire rust-select-test reads this historical selection fixture.
+    'scripts/rust-select-test.py': {'wire'},  # ci.yml wire invokes this regression suite; its gate/build subprocesses use scratch fixtures.
+    'scripts/rust-select.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/rust-shards.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/shared-core-baseline.json': {'wire'},  # wire shared-core-lint reads its baseline and checks it against main.
+    'scripts/shared-core-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/site-proof-fixtures/commits.txt': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
+    'scripts/site-proof-fixtures/expected.html': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
+    'scripts/site-proof-fixtures/milestones.json': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
+    'scripts/site-proof-fixtures/page.html': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
+    'scripts/site-proof-fixtures/plan.json': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
+    'scripts/site-proof-fixtures/tasks.json': {'wire'},  # wire site-proof --self-test reads this proof-page fixture.
+    'scripts/site-proof-milestones.json': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/site-proof-refresh.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/site-proof-tokens.json': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/site-proof.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
+    'scripts/sparkle-key-test.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/sparkle-public-key.swift': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/stage-demo-transcript.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/stage-demo.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/swallow-lint-allow.txt': {'wire'},  # wire swallow-lint reads its exception list.
+    'scripts/swallow-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/swift-build-cache.py': {'swift', 'swift-tests'},  # ci.yml swift and swift-tests run self-test/restore/save; cache helper has no other gate caller.
+    'scripts/swift-test-guard-test.sh': {'swift-tests'},  # ci.yml swift-tests invokes this test; wrapper subprocesses use stand-in tools.
+    'scripts/swift-test-guard.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/test-floor-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/test-leak-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/test-window-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/tmux-leak-check.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/tmux-stale-sockets.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/tunnel-e2e.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/tunnel-smoke.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/version-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
+    'scripts/version.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/visual-tokens-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
+    'scripts/wait-for-unlock': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/wait-for-unlock-test.sh': {'swift-tests'},  # ci.yml swift-tests invokes this test; wrapper subprocesses use stand-in tools.
+    'scripts/web-client-tree-check.py': {'web'},  # ci.yml web runs self-test and dependency check; no other gate caller.
+    'scripts/workflow-review-timing-test.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/workflow-review-timing.py': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/workos-client-id.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/workos-test.sh': {'wire'},  # ci.yml wire invokes this shell test; subprocesses exercise temporary repositories or fake tools.
 }
-
 
 def script_users(path, commands):
     """Reviewed consumers plus any newly named gate users; None means unknown.
@@ -34,7 +247,7 @@ def script_users(path, commands):
     Command text alone cannot prove absence of transitive consumers. Never
     narrow an unreviewed path just because a job does not name it directly.
     """
-    if path not in SCRIPT_USERS:
+    if SCRIPT_USERS.get(path) is None:
         return None
     users = set(SCRIPT_USERS[path])
     for job, command in commands.items():
