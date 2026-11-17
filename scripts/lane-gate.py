@@ -939,7 +939,7 @@ def gate(args):
     if args.landing and not args.dry_run and any(j in HEAVY for j in chosen):
         import gate_disk
         try:
-            gate_disk.admit(repo)
+            gate_disk.admit(repo, chosen)
         except ValueError as e:
             print(f"lane-gate: FAIL: {e}", flush=True)
             return 1
@@ -1091,7 +1091,7 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
             import landing_policy
             import gate_disk
             if any(j in HEAVY for j in chosen):
-                gate_disk.admit(repo)
+                gate_disk.admit(repo, chosen)
             if between:
                 raise ValueError("--landing cannot release the gate lock between parallel jobs")
             if any(j in HEAVY for j in chosen) and not args.no_load_wait:

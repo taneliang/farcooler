@@ -5,20 +5,21 @@ import subprocess
 
 GIB = 1024 ** 3
 DAEMON_RESERVE = 25 * GIB
-# ov-1322's initial sampled peak: 38.335506 GiB (tree + scratch + logs).
-# 45 GiB leaves 6.66 GiB margin; the doctest tail was unmeasured.
-# Source: 0f39e9e38:reports/ov-1322/report.md; see reports/ov-1327/report.md.
-GATE_BUDGET = 45 * GIB
-NEEDED = GATE_BUDGET + DAEMON_RESERVE
+# Nov 17 full gates used about 35 GB: 57 -> 21 GB and 62 -> 27 GB free.
+# The doctest tail is unmeasured; these are admission budgets, not reservations.
+RUST_GATE_BUDGET = 36 * GIB
+OTHER_GATE_BUDGET = 8 * GIB
 
 
-def admit(repo, say=print):
+def admit(repo, chosen, say=print):
     """Read capacity once; never delete anything or wait for a build lock."""
+    budget = RUST_GATE_BUDGET if "rust" in chosen else OTHER_GATE_BUDGET
+    needed = budget + DAEMON_RESERVE
     free = shutil.disk_usage(repo).free
-    message = (f"free {free / GIB:.2f} GB; needed {NEEDED / GIB:.2f} GB "
-               f"({GATE_BUDGET / GIB:.0f} GB full gate + {DAEMON_RESERVE / GIB:.0f} GB daemon reserve)")
+    message = (f"free {free / GIB:.2f} GB; needed {needed / GIB:.2f} GB "
+               f"({budget / GIB:.0f} GB gate budget + {DAEMON_RESERVE / GIB:.0f} GB daemon reserve)")
     say(f"lane-gate: disk admission: {message}", flush=True)
-    if free < NEEDED:
+    if free < needed:
         raise ValueError(f"insufficient disk: {message}; free space manually or retry later")
 
 

@@ -56,7 +56,7 @@ class DiskTests(unittest.TestCase):
             # Inject capacity in each real CLI process; any removal is a failure.
             (repo / "sitecustomize.py").write_text("""
 import os, shutil, sys
-shutil.disk_usage = lambda _: type('Usage', (), {'free': 21 * 1024 ** 3})()
+shutil.disk_usage = lambda _: type('Usage', (), {'free': int(os.environ['TEST_FREE_GB']) * 1024 ** 3})()
 def audit(event, args):
     if event in ('os.remove', 'os.rmdir', 'shutil.rmtree'):
         raise AssertionError('UNEXPECTED DELETION: ' + event)
@@ -64,24 +64,33 @@ sys.addaudithook(audit)
 """)
             env = {k: v for k, v in os.environ.items() if not k.startswith("FARCOOLER_")}
             env.update(PYTHONPATH=str(repo), PYTHONDONTWRITEBYTECODE="1")
-            done = subprocess.run(["bash", str(repo / "scripts/landing-gate"),
-                                   "--worktree", str(repo), "--base", "HEAD", "--only", "rust"],
-                                  cwd=repo, env=env, capture_output=True, text=True, timeout=60)
-            self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
-            self.assertIn("free 21.00 GB; needed 70.00 GB", done.stdout, done.stderr)
-            self.assertNotIn("UNEXPECTED", done.stdout + done.stderr)
-            self.assertEqual(sentinel.read_text(), "keep")
+            for job, free, needed, budget in (("rust", 60, 61, 36), ("web", 32, 33, 8)):
+                with self.subTest(job=job):
+                    env["TEST_FREE_GB"] = str(free)
+                    done = subprocess.run(["bash", str(repo / "scripts/landing-gate"),
+                                           "--worktree", str(repo), "--base", "HEAD", "--only", job],
+                                          cwd=repo, env=env, capture_output=True, text=True, timeout=60)
+                    self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+                    self.assertIn(f"free {free:.2f} GB; needed {needed:.2f} GB", done.stdout, done.stderr)
+                    self.assertIn(f"{budget} GB gate budget + 25 GB daemon reserve", done.stdout)
+                    self.assertNotIn("UNEXPECTED", done.stdout + done.stderr)
+                    self.assertEqual(sentinel.read_text(), "keep")
 
     def test_admission_boundary(self):
         import gate_disk as disk
-        for free in (disk.NEEDED - 1, disk.NEEDED, disk.NEEDED + 1):
-            with self.subTest(free=free), patch.object(disk.shutil, "disk_usage") as usage:
-                usage.return_value.free = free
-                if free < disk.NEEDED:
-                    with self.assertRaises(ValueError):
-                        disk.admit(ROOT, say=lambda *a, **k: None)
-                else:
-                    disk.admit(ROOT, say=lambda *a, **k: None)
+        for chosen, needed, budget in ((["web", "rust"], 61, 36), (["web"], 33, 8)):
+            for free in (needed * disk.GIB - 1, needed * disk.GIB, needed * disk.GIB + 1):
+                with self.subTest(chosen=chosen, free=free), patch.object(disk.shutil, "disk_usage") as usage:
+                    usage.return_value.free = free
+                    messages = []
+                    say = lambda message, **kwargs: messages.append(message)
+                    if free < needed * disk.GIB:
+                        with self.assertRaises(ValueError):
+                            disk.admit(ROOT, chosen, say=say)
+                    else:
+                        disk.admit(ROOT, chosen, say=say)
+                    self.assertIn(f"needed {needed:.2f} GB", messages[0])
+                    self.assertIn(f"{budget} GB gate budget", messages[0])
 
     def test_failed_extraction_keeps_archive_and_unrelated_files(self):
         import gate_disk as disk
