@@ -189,3 +189,20 @@ Fix round 1 validation supersedes the initial red/skipped client evidence above.
 - `npm run test:needs`: **55 passed**; `npx tsc -p tsconfig.client.json` passed.
 - Built the real browser module with `cargo build --manifest-path crates/web/Cargo.toml --target wasm32-unknown-unknown -j 2` (LLVM archiver for ring), then generated web glue using matching wasm-bindgen **0.2.129**. `WEB_WASM_DIR=<generated directory> CHROME_PATH=<local Chrome> node test/browser/needs-capture.mjs <output directory>` passed all **four** desktop/phone, light/dark captures. Each title was `(6) Far Cooler`; badge and scope-refusal assertions passed with no page errors. The phone capture was visually checked.
 - Shared-core lint, its self-test, baseline-not-grown against the ticket base, and `git diff --check`: passed. The existing aggregation guard and empty aggregation baseline remain applicable; no new baseline exemption was added.
+
+### ov-1337 fix round 2
+
+Read the ticket history again: its latest finding is the Android boundary, browser capture bridge and unfiltered client-test finding addressed in `d8804b8e4`; no additional reviewer finding is recorded. Retained that production fix and added `NeedsYouPresenterTest`'s “bridge failures reject a populated reading and leave composition safe.” Unlike the earlier empty-list unavailable-core case, it uses a populated list and tests an unavailable bridge, a thrown native linkage error, Rust's typed invalid-input response, malformed JSON and an incomplete view. Each case must reject the read and safely serve the composition-facing rows, groups, count and item flags. It uses the real Rust bridge to establish the valid rows before injecting failures. No existing test expectations or valid-item behavior changed.
+
+The earlier explicit AgentKit filter omitted `aClaudeLoginLineIsAKindOfItsOwn`. This round includes it along with every other test from `NeedsYouTests.swift`, `NeedsYouWhoseTests.swift` and `NeedsYouRunnerCountTests.swift`; the test itself is unchanged.
+
+Round 2 validation, foreground only, at most four jobs; no full gate or formatters:
+
+- Rebuilt the local daemon, CLI, JNI library and client archive with `TMPDIR=/private/tmp cargo build -p farcooler-daemon -p farcooler-cli -p farcooler-jni -p farcooler-client -j 2`. The explicit temporary directory avoids the sandbox's restriction on the default macOS temporary directory. Swift tests link the debug archive through an untracked release-path symlink, as in round 1.
+- Client: `env -u FARCOOLER_NATIVE_HOOK_SOCKET TMPDIR=/private/tmp cargo test -p farcooler-client -j 2 -- --test-threads=2`: **459 passed**, zero failures, one existing ignored test, zero filtered tests. All four permission-hook cases passed. The command ran with local daemon/socket access outside the sandbox.
+- AgentKit: `swift test --package-path apps/shared/AgentKit --jobs 2 --filter <all test function names in NeedsYouTests.swift and NeedsYouWhoseTests.swift, plus NeedsYouRunnerCountTests>`: **28 passed**, including Claude sign-in.
+- Android: Java 17 and the installed Android SDK, `./gradlew testInstrumentedUnitTest --no-daemon --max-workers=1 -Pfarcooler.nativeLibDir=<worktree>/target/debug --tests 'com.farcooler.model.NeedsYou*'`: **42 passed**, zero failures, errors or skips across six classes.
+- Web: `TMPDIR=/private/tmp npm run test:needs`: **55 passed** through the real Rust presenter; `npx tsc -p tsconfig.client.json` passed.
+- Browser: reran `needs-capture.mjs` using the real wasm/glue built in round 1 and local Chrome. All **four** desktop/phone, light/dark captures passed the badge, refusal-notice and page-error checks; every title was `(6) Far Cooler`.
+- Shared-core lint, its self-test and baseline-not-grown against the ticket base passed. No baseline change or exemption was needed in this round.
+- `git diff --check` passed.

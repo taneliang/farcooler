@@ -32,4 +32,29 @@ class NeedsYouPresenterTest {
         }
         assertNotNull(NeedsYouPresenter.read(Json.parseToJsonElement("{\"items\":[{\"id\":\"ask\",\"kind\":\"ask\",\"rank\":1}]}"), "host"))
     }
+
+    @Test fun `bridge failures reject a populated reading and leave composition safe`() {
+        val failures: List<(String) -> String?> = listOf(
+            { null },
+            { throw UnsatisfiedLinkError("native core unavailable") },
+            { "{\"schema\":1,\"error\":\"invalid\"}" },
+            { "not json" },
+            { "{\"schema\":1,\"needs_you\":{}}" },
+        )
+        val data = Json.parseToJsonElement("{\"items\":[{\"id\":\"ask\",\"kind\":\"ask\",\"rank\":1}]}")
+        val item = NeedsYouItem("ask", kind = "ask", rank = 1)
+        val runners = listOf(NeedsYouRunner("host", "Runner", RunnerNeedsYou(listOf(item))))
+        val rows = NeedsYou.rows(runners)
+        assertEquals(1, rows.size)
+        for (failure in failures) {
+            NeedsYouPresenter.bridge = failure
+            assertNull(NeedsYouPresenter.read(data, "host"))
+            assertNull(NeedsYouPresenter.tryView(mapOf("host" to listOf(item))))
+            assertTrue(NeedsYou.rows(runners).isEmpty())
+            assertEquals(emptyList<NeedsYouRow>() to emptyList<NeedsYouRow>(), NeedsYou.grouped(rows))
+            assertEquals(0, NeedsYouPresenter.total(listOf(RunnerNeedsYouItem("host", item))))
+            assertFalse(item.isCounted)
+            assertFalse(item.isOthers)
+        }
+    }
 }
