@@ -70,8 +70,8 @@ landing gate through the existing landing-gate-test.py step.
 Rust command (foreground, four build/test jobs):
 
 ```sh
-TMPDIR=/tmp SDKROOT=$(xcrun --show-sdk-path) NEXTEST_TEST_THREADS=4 \
-  cargo nextest run --jobs 4 \
+TMPDIR=/tmp SDKROOT=$(xcrun --show-sdk-path) CARGO_BUILD_JOBS=4 NEXTEST_TEST_THREADS=4 \
+  cargo nextest run --build-jobs 4 --jobs 4 \
   -p farcooler-protocol -p farcooler-cli -p farcooler-daemon -p farcooler-client \
   -E 'package(farcooler-protocol) or test(task_ops::tests) or test(task_starts::tests) or test(workspace_ops::tests) or test(tasks::) or test(board_reads) or test(plan_tests) or test(plan_agent_dispatch_tests) or test(page_tests) or test(rep_pane) or test(workflow_runtime::process_logs::tests)'
 ```
@@ -94,3 +94,9 @@ python3 on PATH is an incompatible executable; compiler temp files use /tmp.
   Used system Python first on PATH and ran outside the sandbox because the
   fixture supervisor needs `ps` to inspect its own child processes.
 - Canary baseline recorder regression suite: 41 passed.
+- Affected Rust selection rerun: **253 passed**, 0 failed, 12.992 s test
+  time (rust-round1.log), including long-list paging and ov-1302 coverage.
+  The sandboxed attempt failed on fixture permissions. During that attempt,
+  `--jobs 4` was found to limit nextest workers only; the successful rerun
+  explicitly used `--build-jobs 4`, `CARGO_BUILD_JOBS=4`, and `--jobs 4`
+  outside the sandbox. No Rust behavior changed in this fix round.
