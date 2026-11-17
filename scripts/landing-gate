@@ -24,9 +24,12 @@ for a in "$@"; do
   case "$a" in --dry-run|--self-test|-h|--help) exec python3 "${gate[@]}" "$@" ;; esac
 done
 
+# Refuse before screen/load waits or the heavy queue.
+python3 "${gate[@]}" --disk-preflight "$@" || exit $?
+
 # Every landing keeps target/ warm. The engine hands the fold tree's target/
 # to the next group's fold (ov-1084), rebuilding only what changed.
-# The existing 20 GB ceiling still holds.
+# Admission budgets a cold full gate without reclaiming existing files.
 
 plan="$(python3 "${gate[@]}" --dry-run "$@")" || { printf '%s\n' "$plan"; echo "landing-gate: could not plan the change" >&2; exit 2; }
 jobs_line="$(printf '%s\n' "$plan" | sed -n 's/^lane-gate: .* jobs: //p' | head -1)"

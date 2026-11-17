@@ -135,6 +135,7 @@ class LandingTests(unittest.TestCase):
                 'import json, os, sys\n'
                 'with open(os.environ["EVENTS"], "a") as f: '
                 'f.write(json.dumps(sys.argv[1:]) + "\\n")\n'
+                'if "--disk-preflight" in sys.argv: sys.exit(0)\n'
                 'if "--dry-run" in sys.argv: print("lane-gate: 1 changed file(s); jobs: rust, swift-tests")\n'
                 'else: sys.exit(int(os.environ["GATE_EXIT"]))\n')
             for name, body in (
@@ -151,10 +152,11 @@ class LandingTests(unittest.TestCase):
                                       capture_output=True, text=True)
                 self.assertEqual(done.returncode, code, done.stdout + done.stderr)
                 calls = events.read_text().splitlines()
-                self.assertEqual(calls[1:3], ["unlock", "heavy"])
+                self.assertEqual(calls[2:4], ["unlock", "heavy"])
                 args = ["--fail-fast", "--landing", "--keep-target", "--base", "main", "--log-dir", "logs"]
-                self.assertEqual(json.loads(calls[0]), ["--fail-fast", "--landing", "--keep-target", "--dry-run", *args[3:]])
-                self.assertEqual(json.loads(calls[3]), args)
+                self.assertEqual(json.loads(calls[0]), [*args[:3], "--disk-preflight", *args[3:]])
+                self.assertEqual(json.loads(calls[1]), [*args[:3], "--dry-run", *args[3:]])
+                self.assertEqual(json.loads(calls[4]), args)
                 self.assertIn("landing-gate: PASS" if code == 0 else "landing-gate: FAIL", done.stdout)
 
     def test_fixture_hooks_do_not_inherit_the_agents_private_route(self):
@@ -411,7 +413,8 @@ class LandingTests(unittest.TestCase):
 
     def test_landing_fail_fast_stops_queued_families_and_apple_jobs(self):
         jobs = ["swift-tests", "swift", "ios", "wire"]
-        with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()):
+        with tempfile.TemporaryDirectory() as t, contextlib.redirect_stdout(io.StringIO()), \
+                patch("gate_disk.admit"):  # scheduler fixtures do not consume a gate disk budget
             t = Path(t)
             marker = t / "later"
             plans = {j: [lane.Step(j, "later", f'echo {j} >> "{marker}"\n')] for j in jobs}

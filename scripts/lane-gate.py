@@ -887,6 +887,7 @@ def main(argv):
     ap.add_argument("--strict-leaks", action="store_true", help="a new system temp entry or plist fails the run, even though sibling lanes share this Mac")
     ap.add_argument("--keep-target", action="store_true", help="keep the worktree's target/ after a fully green gate (by default a lane worktree's is removed then)")
     ap.add_argument("--fail-fast", action="store_true", help="stop at the first failed step (for landing gates)")
+    ap.add_argument("--disk-preflight", action="store_true", help="landing disk admission only; no builds or lock wait")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args(argv)
     if args.self_test:
@@ -913,7 +914,9 @@ def gate(args):
         args.base = landing_policy.fold_base(repo, args.base)
     workflows = {"ci": (repo / ".github/workflows/ci.yml").read_text(),
                  "ios-ui-build": (repo / ".github/actions/ios-ui-build/action.yml").read_text()}
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="lane-gate-"))  # ENOSPC here is caught by main
+    # Plan without creating scratch: a disk refusal must delete nothing.
+    import uuid
+    tmp = pathlib.Path(tempfile.gettempdir()) / ("lane-gate-" + uuid.uuid4().hex)
     ctx = make_ctx(repo, tmp, args.base)
     changes = load_module("ci_changes", repo / "scripts" / "ci-changes.py")
     ios_plan = load_module("ios_ui_plan", repo / "scripts" / "ios-ui-plan.py")
@@ -932,6 +935,17 @@ def gate(args):
         if j not in JOBS:
             raise SystemExit(f"lane-gate: no job {j}; jobs are {', '.join(JOBS)}")
     chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
+
+    if args.landing and not args.dry_run and any(j in HEAVY for j in chosen):
+        import gate_disk
+        try:
+            gate_disk.admit(repo)
+        except ValueError as e:
+            print(f"lane-gate: FAIL: {e}", flush=True)
+            return 1
+    if args.disk_preflight:
+        return 0
+    tmp.mkdir(mode=0o700)  # ENOSPC here is caught by main
 
     if not args.dry_run:
         try:
@@ -1072,6 +1086,9 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
     with (machine_lock(repo, "gate: " + ", ".join(j for j in chosen if j in HEAVY)) if heavy and not between else contextlib.nullcontext()):
         if getattr(args, "landing", False):
             import landing_policy
+            import gate_disk
+            if any(j in HEAVY for j in chosen):
+                gate_disk.admit(repo)
             if between:
                 raise ValueError("--landing cannot release the gate lock between parallel jobs")
             if any(j in HEAVY for j in chosen) and not args.no_load_wait:
@@ -1081,8 +1098,6 @@ def run_jobs(chosen, plans, rows, repo, tmp, ctx, logdir, args):
             import copy
             admitted = copy.copy(args)
             admitted.no_load_wait = True
-            if "rust" in chosen:
-                hl.prepare_lane_build(repo)  # trim once, before any worker builds
             return landing_policy.run(chosen, plans, rows, repo, tmp, ctx, logdir, admitted, run_one_job)
         for j in chosen:
             locked = bool(heavy) and between and j in HEAVY
@@ -1107,6 +1122,7 @@ def run_one_job(j, plans, rows, repo, tmp, ctx, logdir, args):
     if selected and "PATH" in selected:
         env["PATH"] = os.path.expanduser("~/.cargo/bin") + os.pathsep + env["PATH"]
     if getattr(args, "landing", False):
+        env["GATE_DISK_REPO"] = str(repo)
         landing_policy.budget_worker(env, args.workers)
         # Apple/Android also build host Rust binaries in this target. Mixing
         # debug-info levels replaces shared outputs and defeats the handoff.

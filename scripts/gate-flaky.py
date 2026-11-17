@@ -63,6 +63,14 @@ def record(rows, log=LOG, today=None):
 
 
 def run(command, say=print, log=None):
+    repo = os.environ.get("GATE_DISK_REPO")
+    if repo and "--archive-file" in command:
+        import gate_disk
+        command = gate_disk.extract_archive(repo, command, say)
+    return run_extracted(command, say, log)
+
+
+def run_extracted(command, say=print, log=None):
     log = log or LOG
     with tempfile.TemporaryDirectory(prefix="gate-flaky-") as tmp:
         report = pathlib.Path(tmp, "junit.xml")

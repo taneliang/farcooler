@@ -31,6 +31,134 @@ def selected(paths):
     return set(lane.jobs_for(paths, changes.SITE, lambda _: False, {}, changes.families))
 
 
+class DiskTests(unittest.TestCase):
+    def test_low_disk_wrapper_refuses_within_a_minute_without_deleting(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            for name in ("landing-gate", "lane-gate.py", "landing_policy.py", "gate_disk.py",
+                         "ci-changes.py", "ios-ui-plan.py", "heavy_lock.py", "process_guard.py",
+                         "gate_evidence.py"):
+                target = repo / "scripts" / name
+                target.parent.mkdir(exist_ok=True)
+                shutil.copyfile(ROOT / "scripts" / name, target)
+            for name in (".github/workflows/ci.yml", ".github/actions/ios-ui-build/action.yml"):
+                target = repo / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / name, target)
+            for args in (("init", "-q"), ("add", "scripts", ".github"),
+                         ("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                          "commit", "-qm", "fixture")):
+                subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+            sentinel = repo / "target/unrelated"
+            sentinel.parent.mkdir()
+            sentinel.write_text("keep")
+            (repo / "scripts/changed.py").write_text("# changed\n")
+            # Inject capacity in each real CLI process; any removal is a failure.
+            (repo / "sitecustomize.py").write_text("""
+import os, shutil, sys, tempfile
+tempfile.tempdir = '/tmp'
+shutil.disk_usage = lambda _: type('Usage', (), {'free': 21 * 1024 ** 3})()
+def audit(event, args):
+    if event in ('os.remove', 'os.rmdir', 'shutil.rmtree'):
+        raise AssertionError('UNEXPECTED DELETION: ' + event)
+sys.addaudithook(audit)
+""")
+            env = {k: v for k, v in os.environ.items() if not k.startswith("FARCOOLER_")}
+            env.update(PYTHONPATH=str(repo), PYTHONDONTWRITEBYTECODE="1")
+            done = subprocess.run(["bash", str(repo / "scripts/landing-gate"),
+                                   "--worktree", str(repo), "--base", "HEAD", "--only", "rust"],
+                                  cwd=repo, env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+            self.assertIn("free 21.00 GB; needed 70.00 GB", done.stdout, done.stderr)
+            self.assertNotIn("UNEXPECTED", done.stdout + done.stderr)
+            self.assertEqual(sentinel.read_text(), "keep")
+
+    def test_admission_boundary(self):
+        import gate_disk as disk
+        for free in (disk.NEEDED - 1, disk.NEEDED, disk.NEEDED + 1):
+            with self.subTest(free=free), patch.object(disk.shutil, "disk_usage") as usage:
+                usage.return_value.free = free
+                if free < disk.NEEDED:
+                    with self.assertRaises(ValueError):
+                        disk.admit(ROOT, say=lambda *a, **k: None)
+                else:
+                    disk.admit(ROOT, say=lambda *a, **k: None)
+
+    def test_failed_extraction_keeps_archive_and_unrelated_files(self):
+        import gate_disk as disk
+        for failure in (subprocess.CalledProcessError(1, "extract"), None):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                repo = Path(temporary).resolve()
+                archive = repo / "target/rust-tests.tar.zst"
+                archive.parent.mkdir()
+                archive.write_text("compressed")
+                keep = archive.parent / "keep"
+                keep.write_text("unrelated")
+                with patch.object(disk.subprocess, "run", side_effect=failure):
+                    with self.assertRaises((subprocess.CalledProcessError, ValueError)):
+                        disk.extract_archive(repo, ["cargo", "nextest", "run", "--archive-file", str(archive)])
+                self.assertEqual(archive.read_text(), "compressed")
+                self.assertEqual(keep.read_text(), "unrelated")
+
+    def test_archive_removal_refuses_other_names_and_symlink_escapes(self):
+        import gate_disk as disk
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            target = repo / "target"
+            target.mkdir()
+            keep = target / "unrelated.tar.zst"
+            keep.write_text("keep")
+            archive = target / "rust-tests.tar.zst"
+            archive.symlink_to(keep)
+            with patch.object(disk.subprocess, "run") as extract:
+                for path in (keep, archive):
+                    with self.assertRaises(ValueError):
+                        disk.extract_archive(repo, ["cargo", "nextest", "run", "--archive-file", str(path)])
+                extract.assert_not_called()
+            self.assertEqual(keep.read_text(), "keep")
+            self.assertTrue(archive.is_symlink())
+
+    def test_archive_deleted_after_extraction_and_reruns_use_metadata(self):
+        import gate_disk as disk
+        flaky = load('gate-flaky')
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            archive = repo / 'target/rust-tests.tar.zst'
+            archive.parent.mkdir()
+            archive.write_text('compressed')
+            unrelated = archive.parent / 'unrelated.txt'
+            unrelated.write_text('keep')
+            destination = repo
+            def extract(command, **kwargs):
+                self.assertIn('--extract-to', command)
+                self.assertTrue(archive.exists())
+                metadata = destination / 'target/nextest'
+                metadata.mkdir(parents=True)
+                for name in ('cargo-metadata.json', 'binaries-metadata.json'):
+                    (metadata / name).write_text('{}')
+            def run(command, *a):
+                self.assertFalse(archive.exists())
+                self.assertTrue(destination.exists())
+                self.assertNotIn('--archive-file', command)
+                self.assertIn('--binaries-metadata', command)
+                self.assertNotIn('--extract-to', command)
+                self.assertNotIn('--extract-overwrite', command)
+                self.assertEqual(command.count('--workspace-remap'), 1)
+                self.assertEqual(command[-2:], ['-E', 'package(=test)'])
+                return 7
+            actual = disk.subprocess.run
+            def subprocess_run(command, **kwargs):
+                return extract(command, **kwargs) if command[:3] == ['cargo', 'nextest', 'list'] else actual(command, **kwargs)
+            with patch.dict(os.environ, {'GATE_DISK_REPO': str(repo)}), \
+                    patch.object(disk.subprocess, 'run', side_effect=subprocess_run), \
+                    patch.object(flaky, 'run_extracted', side_effect=run):
+                self.assertEqual(flaky.run(['cargo', 'nextest', 'run', '--archive-file', str(archive),
+                                            '--extract-to', '.', '--extract-overwrite', '--workspace-remap', str(repo),
+                                            '-E', 'package(=test)'], say=lambda *a, **k: None), 7)
+            self.assertTrue((destination / 'target/nextest/binaries-metadata.json').exists())
+            self.assertEqual(unrelated.read_text(), 'keep')
+
+
 class LandingTests(unittest.TestCase):
     def setUp(self):
         environment = patch.dict(os.environ)
@@ -291,7 +419,7 @@ class LandingTests(unittest.TestCase):
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(text)
             git("init", "-q")
-            for name in ["landing-gate", "lane-gate.py", "ci-changes.py", "ios-ui-plan.py", "heavy_lock.py", "process_guard.py", "landing_policy.py", "gate_evidence.py"]:
+            for name in ["landing-gate", "lane-gate.py", "ci-changes.py", "ios-ui-plan.py", "heavy_lock.py", "process_guard.py", "landing_policy.py", "gate_evidence.py", "gate_disk.py"]:
                 target = repo / "scripts" / name
                 target.parent.mkdir(exist_ok=True)
                 shutil.copyfile(ROOT / "scripts" / name, target)
