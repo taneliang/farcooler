@@ -2,6 +2,7 @@
 """ov-1185: exercise local scheduling and real Cargo failure propagation offline."""
 import argparse
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -385,7 +386,9 @@ class LandingTests(unittest.TestCase):
             git("commit", "-qm", "runner startup")
             git("update-ref", "refs/remotes/origin/main", "HEAD")
             (repo / "README.md").write_text("main advanced before folding\n")
-            git("add", "README.md")
+            with (repo / "Cargo.toml").open("a") as stream:
+                stream.write("# historical shared input, outside this fold\n")
+            git("add", "README.md", "Cargo.toml")
             git("commit", "-qm", "actual group base")
             base = git("rev-parse", "HEAD")
             for path in ("crates/android/src/lib.rs", "README.md", "REPORT.md"):
@@ -402,6 +405,45 @@ class LandingTests(unittest.TestCase):
             self.assertIn(f"3 changed file(s) against {base}; jobs: wire, doc-comments, site, tunnel, rust, android", out.stdout)
             self.assertIn("Rust coverage: nextest runs only consumer, leaf; 1 test binaries skipped", out.stdout)
             self.assertNotIn("nextest runs only consumer, leaf, unrelated", out.stdout)
+            # ov-1318: the installed daemon still supplies its startup base.
+            # Use the daemon's exact fold-index encoding, including workspace/item.
+            env.update(FARCOOLER_WORKSPACE="fixture-workspace", FARCOOLER_WORKFLOW_ITEM="group-1",
+                       FARCOOLER_CANDIDATE=git("rev-parse", "HEAD"))
+            receipts = repo / ".git/receipts"
+            receipts.mkdir()
+            env["FARCOOLER_RECEIPT"] = str(receipts / "gate.process.json")
+            identity = json.dumps([env["FARCOOLER_WORKSPACE"], env["FARCOOLER_WORKFLOW_ITEM"]],
+                                  separators=(",", ":")).encode()
+            record = receipts / ("fold-wf1:" + hashlib.sha256(identity).hexdigest()
+                                 + "-" + env["FARCOOLER_CANDIDATE"] + ".json")
+            fact = {"item": env["FARCOOLER_WORKFLOW_ITEM"], "base": base,
+                    "folded": env["FARCOOLER_CANDIDATE"]}
+            record.write_text(json.dumps(fact))
+            stale = git("rev-parse", "origin/main")
+            def plan(given):
+                return subprocess.run(["bash", "scripts/landing-gate", "--dry-run"], cwd=repo,
+                                      env={**env, "FARCOOLER_BASE": given}, capture_output=True, text=True)
+            corrected = plan(stale)
+            self.assertEqual(corrected.returncode, 0, corrected.stdout + corrected.stderr)
+            self.assertIn(f"3 changed file(s) against {base}; jobs: wire, doc-comments, site, tunnel, rust, android",
+                          corrected.stdout)
+            self.assertIn("using fold base", corrected.stdout)
+            correct = plan(base)
+            self.assertEqual(correct.returncode, 0, correct.stdout + correct.stderr)
+            self.assertIn(f"3 changed file(s) against {base}; jobs:", correct.stdout)
+            self.assertNotIn("using fold base", correct.stdout)
+            for invalid in (None, "{bad json", {**fact, "item": "another-group"},
+                            {**fact, "folded": stale}, {**fact, "base": "HEAD"},
+                            {**fact, "base": "f" * 40}):
+                if invalid is None:
+                    record.unlink()
+                else:
+                    record.write_text(invalid if isinstance(invalid, str) else json.dumps(invalid))
+                fallback = plan(stale)
+                self.assertEqual(fallback.returncode, 0, fallback.stdout + fallback.stderr)
+                self.assertIn(f"against {stale}; jobs:", fallback.stdout)
+                self.assertIn("fold base unavailable", fallback.stdout)
+                self.assertIn("jobs: " + ", ".join(lane.JOBS), fallback.stdout)
             with patch.dict(os.environ, env):
                 proposal = policy.rust_selection(repo, base, lambda name, path: lane.load_module(name, ROOT / "scripts" / path.name))
             self.assertEqual(proposal["packages"], ["consumer", "leaf"])
