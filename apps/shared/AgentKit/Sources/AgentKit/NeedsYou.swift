@@ -410,10 +410,9 @@ extension NeedsYou {
     /// else's, in the order it came.
     public static func grouped(_ merged: [NeedsYouItem]) -> Groups {
         let view = aggregate(merged)
-        func resolve(_ keys: [WireNeedsYouRowKey]) -> [NeedsYouItem] {
-            keys.compactMap { key in merged.first { $0.runner == key.runner_id && $0.itemID == key.item_id } }
-        }
-        return Groups(yours: resolve(view.yours), others: resolve(view.others), isSplit: view.split)
+        let yours = view.yours.compactMap { key in merged.first { $0.runner == key.runner_id && $0.itemID == key.item_id } }
+        let others = view.others.compactMap { key in merged.first { $0.runner == key.runner_id && $0.itemID == key.item_id } }
+        return Groups(yours: yours, others: others, isSplit: view.split)
     }
 }
 
