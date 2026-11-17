@@ -36,6 +36,16 @@ extension CeremonyCore {
         }
     }
 
+    static func conflictCopy(device: String, alreadyPosted: Bool) -> String {
+        let answer = device.withCString { name in
+            answer { farcooler_client_ceremony_conflict_copy(name, $0, $1) }
+        }
+        guard case .payload(let data) = answer,
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+        else { return "" }
+        return object[alreadyPosted ? "already_posted" : "slots_full"] ?? ""
+    }
+
     /// Take a sealed reply with the reply key's secret half: the new device's
     /// side, which a phone never is today. The UI suite opens what the phone
     /// posted with it (`SealedReplyHarness`).
@@ -238,9 +248,7 @@ struct SealedReplySection: View {
                         .font(.footnote)
                     }
                 } else if reply.state == .alreadyPosted || reply.state == .slotsFull {
-                    Text(reply.state == .alreadyPosted
-                        ? "A reply was already sent to \(deviceName), but its code is unavailable. Start again on that device."
-                        : "Too many teammates have replied to \(deviceName). Ask them to start again.")
+                    Text(CeremonyCore.conflictCopy(device: deviceName, alreadyPosted: reply.state == .alreadyPosted))
                         .font(.footnote)
                         .foregroundStyle(.orange)
                         .multilineTextAlignment(.center)

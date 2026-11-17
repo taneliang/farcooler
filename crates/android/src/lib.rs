@@ -1373,3 +1373,16 @@ fn clamp_u16(value: jint) -> u16 {
 }
 
 mod workflow;
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeCeremonyConflictCopy(
+    mut env: JNIEnv, _class: JClass, device: JString,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let name = c_string(&mut env, &device);
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_ceremony_conflict_copy(
+                name.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()), out, capacity)
+        })
+    })
+}

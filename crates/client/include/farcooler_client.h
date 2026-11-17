@@ -882,6 +882,9 @@ size_t farcooler_client_workflow_presentation(const char *request, uint8_t *out,
  */
 size_t farcooler_client_plan_view(const char *request, uint8_t *out, size_t capacity);
 
+/* Shared wording for the two relay conflict cases. */
+size_t farcooler_client_ceremony_conflict_copy(const char *device, uint8_t *out, size_t capacity);
+
 #ifdef __cplusplus
 }
 #endif

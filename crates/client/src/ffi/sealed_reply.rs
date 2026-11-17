@@ -147,3 +147,17 @@ pub unsafe extern "C" fn farcooler_client_ceremony_seal_teammate(
         spill(&answer.unwrap_or_else(|e| refusal(&e)), out, capacity)
     })
 }
+
+/// Shared phone wording for relay conflicts.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_ceremony_conflict_copy(
+    device: *const c_char, out: *mut u8, capacity: usize,
+) -> usize {
+    guarded(0, || {
+        let name = unsafe { read_str(device) }.unwrap_or_default();
+        spill(&json!({
+            "already_posted": format!("A reply was already sent to {name}, but its code is unavailable. Start again on that device."),
+            "slots_full": format!("Too many teammates have replied to {name}. Ask them to start again.")
+        }).to_string(), out, capacity)
+    })
+}

@@ -79,6 +79,7 @@ struct TeammateAddHarness: View {
                     postResult) // platform copy: a DEBUG test harness readout, never shipped
         }
         .overlay(alignment: .leading) {
+            // style-exempt: an invisible accessibility test probe
             Color.clear.frame(width: 1, height: 1).accessibilityElement()
                 .accessibilityIdentifier("teammate-opened-code").accessibilityValue(openedCode)
         }
@@ -89,7 +90,7 @@ struct TeammateAddHarness: View {
         let offerer = Self.has("-teammate-add-stranger") ? "user_carol" : "user_bob"
         let device =
             Self.has("-teammate-add-long")
-            ? "Bartholomew’s Work iPhone (the one with the cracked screen)"
+            ? "Bartholomew’s Work iPhone (the one with the cracked screen)" // platform copy: DEBUG harness device name fixture
             : Self.has("-teammate-add-browser") ? "Chrome on Mac" : "Bob’s iPhone" // platform copy: a DEBUG test harness fixture, never shipped
         guard
             case .payload(let made) = CeremonyCore.offer(name: device, account: offerer, keyA: Self.key, nodeKey: nil),
@@ -104,7 +105,7 @@ struct TeammateAddHarness: View {
             let expected = String(decoding: offer, as: UTF8.self)
             let scanned = try? JSONDecoder().decode(CeremonyOffer.self, from: offer)
             if ceremony != scanned?.ceremony || account != scanned?.account {
-                postResult = "posted for another offer"
+                postResult = "posted for another offer" // platform copy: DEBUG harness test readout
             } else if case .payload(let data) = CeremonyCore.takeSealed(sealed, secret: SealedReplyHarness.replySecret, expecting: expected),
                 let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let manifest = result["manifest"] as? [String: Any],
@@ -113,8 +114,8 @@ struct TeammateAddHarness: View {
                 runners[0]["pending"] as? Bool == false,
                 let grant = manifest["granted_by"] as? String, let code = result["code"] as? String {
                 openedCode = code
-                postResult = "\(sealedPosts.count) post for scanned ceremony and \(account); opened build-box for \(grant)"
-            } else { postResult = "posted body did not open to the grant" }
+                postResult = "\(sealedPosts.count) post for scanned ceremony and \(account); opened build-box for \(grant)" // platform copy: DEBUG harness test readout
+            } else { postResult = "posted body did not open to the grant" // platform copy: DEBUG harness test readout }
             return .posted
         }
         store.teamDirectory = { Self.has("-teammate-add-offline") ? nil : Self.directory }

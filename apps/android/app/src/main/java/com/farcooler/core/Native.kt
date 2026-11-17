@@ -264,6 +264,8 @@ internal object NativeClient {
         offerJson: String, manifestJson: String, privateKey: String, authoritiesJson: String, heldMs: Long,
     ): String?
 
+    external fun nativeCeremonyConflictCopy(device: String): String
+
     /**
      * The reply sealed to a browser's reply key, and the comparison code, as
      * `{"sealed","code"}` or a refusal (ov-770). The seal and the code are

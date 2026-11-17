@@ -10,7 +10,7 @@ use std::ffi::CString;
 
 use farcooler_client::ceremony::{Offer, ReplyKey, decode_offer, encode_offer, offer};
 use farcooler_client::ffi::{
-    farcooler_client_ceremony_reply, farcooler_client_ceremony_scan, farcooler_client_ceremony_seal,
+    farcooler_client_ceremony_conflict_copy, farcooler_client_ceremony_reply, farcooler_client_ceremony_scan, farcooler_client_ceremony_seal,
     farcooler_client_ceremony_take_sealed,
 };
 use serde_json::Value;
@@ -246,4 +246,14 @@ fn an_offline_runner_does_not_stop_a_teammate_reply() {
     assert_eq!(states, [("offline", true, Some("not_connected")), ("online", false, None), ("declined", true, Some("failed"))]);
     assert_eq!(manifest.runners[1].id, runner_fp);
     signed::verify(&manifest, &o, &signed::Trust { devices: vec![phone_fp], runners: vec![runner_fp] }).unwrap();
+}
+
+#[test]
+fn conflict_copy_distinguishes_a_previous_reply_from_full_slots() {
+    let name = CString::new("Chrome on Mac").unwrap();
+    let copy = json(|out, capacity| unsafe {
+        farcooler_client_ceremony_conflict_copy(name.as_ptr(), out, capacity)
+    });
+    assert_eq!(copy["already_posted"], "A reply was already sent to Chrome on Mac, but its code is unavailable. Start again on that device.");
+    assert_eq!(copy["slots_full"], "Too many teammates have replied to Chrome on Mac. Ask them to start again.");
 }

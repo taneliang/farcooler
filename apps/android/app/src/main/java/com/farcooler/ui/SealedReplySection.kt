@@ -19,6 +19,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.ceremony.SealedReply
+import com.farcooler.core.NativeClient
+import org.json.JSONObject
 
 /**
  * The code, under the reply's QR code, while a reply sealed for a browser is
@@ -44,9 +46,8 @@ fun SealedReplySection(reply: SealedReply, deviceName: String) {
             textAlign = TextAlign.Center,
         )
         state == SealedReply.State.ALREADY_POSTED || state == SealedReply.State.SLOTS_FULL -> Text(
-            if (state == SealedReply.State.ALREADY_POSTED)
-                "A reply was already sent to $name, but its code is unavailable. Start again on that device."
-            else "Too many teammates have replied to $name. Ask them to start again.",
+            JSONObject(NativeClient.nativeCeremonyConflictCopy(name)).getString(
+                if (state == SealedReply.State.ALREADY_POSTED) "already_posted" else "slots_full"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.tertiary,
             textAlign = TextAlign.Center,
