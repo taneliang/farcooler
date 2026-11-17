@@ -476,6 +476,9 @@ pub fn view(plan: &input::Plan, context: &input::Context, workflow: Option<&Pres
 /// The JSON bridge every platform calls: a request in, `{schema, view}` or
 /// `{schema, error: "invalid"}` out.
 pub fn json(request: &str) -> String {
+    if serde_json::from_str::<serde_json::Value>(request).ok().is_some_and(|v| v.get("needs_you").is_some()) {
+        return crate::needs_you_view::json(request);
+    }
     if let Ok(asked) = serde_json::from_str::<ConversationRequest>(request) {
         let words = (asked.schema == SCHEMA).then(|| crate::conversation_words::words(asked.conversation.style, &asked.conversation.agent));
         let error = words.is_none().then_some("invalid");

@@ -733,6 +733,68 @@ public struct WireLandingGroupView: Codable, Equatable, Sendable {
 	}
 }
 
+public struct WireNeedsYouRowKey: Codable, Equatable, Sendable {
+	public var runner_id: String
+	public var item_id: String
+
+	public init(runner_id: String, item_id: String) {
+		self.runner_id = runner_id
+		self.item_id = item_id
+	}
+}
+
+public struct WireNeedsYouAggregateRow: Codable, Equatable, Sendable {
+	public var key: WireNeedsYouRowKey
+	/// The input payload, including unknown fields and action IDs, unchanged.
+	public var item_json: String
+	public var group: String
+	public var counted: Bool
+
+	public init(key: WireNeedsYouRowKey, item_json: String, group: String, counted: Bool) {
+		self.key = key
+		self.item_json = item_json
+		self.group = group
+		self.counted = counted
+	}
+}
+
+public struct WireNeedsYouBucket: Codable, Equatable, Sendable {
+	public var runner_id: String
+	/// Empty for runner totals; workspace or repository ID otherwise.
+	public var id: String
+	public var count: UInt32
+
+	public init(runner_id: String, id: String, count: UInt32) {
+		self.runner_id = runner_id
+		self.id = id
+		self.count = count
+	}
+}
+
+public struct WireNeedsYouAggregateView: Codable, Equatable, Sendable {
+	public var schema: UInt32
+	public var rows: [WireNeedsYouAggregateRow]
+	public var yours: [WireNeedsYouRowKey]
+	public var others: [WireNeedsYouRowKey]
+	public var split: Bool
+	public var counted_total: UInt32
+	public var runner_counts: [WireNeedsYouBucket]
+	public var workspace_counts: [WireNeedsYouBucket]
+	public var unclaimed_counts: [WireNeedsYouBucket]
+
+	public init(schema: UInt32, rows: [WireNeedsYouAggregateRow], yours: [WireNeedsYouRowKey], others: [WireNeedsYouRowKey], split: Bool, counted_total: UInt32, runner_counts: [WireNeedsYouBucket], workspace_counts: [WireNeedsYouBucket], unclaimed_counts: [WireNeedsYouBucket]) {
+		self.schema = schema
+		self.rows = rows
+		self.yours = yours
+		self.others = others
+		self.split = split
+		self.counted_total = counted_total
+		self.runner_counts = runner_counts
+		self.workspace_counts = workspace_counts
+		self.unclaimed_counts = unclaimed_counts
+	}
+}
+
 public enum WireSectionKind: String, Codable, Equatable, Sendable {
 	case needsYou = "needs_you"
 	case landing

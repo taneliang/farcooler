@@ -24,6 +24,7 @@ pub mod ffi;
 pub mod files_json;
 pub mod members_json;
 pub mod needs_you_json;
+pub mod needs_you_view;
 pub mod page_json;
 #[cfg(all(target_os = "macos", feature = "native"))]
 pub mod pipe;

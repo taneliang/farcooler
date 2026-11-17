@@ -579,6 +579,42 @@ data class LandingGroupView (
 )
 
 @Serializable
+data class NeedsYouRowKey (
+	val runner_id: String,
+	val item_id: String
+)
+
+@Serializable
+data class NeedsYouAggregateRow (
+	val key: NeedsYouRowKey,
+	/// The input payload, including unknown fields and action IDs, unchanged.
+	val item_json: String,
+	val group: String,
+	val counted: Boolean
+)
+
+@Serializable
+data class NeedsYouBucket (
+	val runner_id: String,
+	/// Empty for runner totals; workspace or repository ID otherwise.
+	val id: String,
+	val count: UInt
+)
+
+@Serializable
+data class NeedsYouAggregateView (
+	val schema: UInt,
+	val rows: List<NeedsYouAggregateRow>,
+	val yours: List<NeedsYouRowKey>,
+	val others: List<NeedsYouRowKey>,
+	val split: Boolean,
+	val counted_total: UInt,
+	val runner_counts: List<NeedsYouBucket>,
+	val workspace_counts: List<NeedsYouBucket>,
+	val unclaimed_counts: List<NeedsYouBucket>
+)
+
+@Serializable
 enum class SectionKind(val string: String) {
 	@SerialName("needs_you")
 	NeedsYou("needs_you"),

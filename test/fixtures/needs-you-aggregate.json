@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "needs_you": [
+    {"runner_id": "z", "items": [
+      {"id": "pr", "kind": "pr_review", "rank": 30, "question": "PR", "actions": [{"id": "open", "title": "Open", "primary": false, "destructive": false}]},
+      {"id": "ask", "kind": "ask", "rank": 10, "question": "Allow?", "workspace_id": "w", "repository_id": "r", "also": ["decision"], "actions": [{"id": "allow/raw", "title": "Allow", "primary": true, "destructive": false}]}
+    ]},
+    {"runner_id": "a", "items": [
+      {"id": "pr", "kind": "pr_review", "rank": 20, "question": "PR", "repository_id": "r"},
+      {"id": "fyi", "kind": "fyi", "rank": 40, "question": "Kept", "concern": {"handle": "bob", "name": "Bob", "yours": false}},
+      {"id": "future", "kind": "future_kind", "rank": 0, "question": "Future"}
+    ]},
+    {"runner_id": "empty", "items": []}
+  ]
+}

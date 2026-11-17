@@ -17,3 +17,18 @@ pub fn plan_view(request: &str) -> String {
 pub fn recovery_view(count: usize, current: bool) -> String {
     farcooler_client::recovery_view::view(count, current).to_string()
 }
+
+/// Needs You's pure cross-runner presenter, shared with the native view-model bridge.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen::prelude::wasm_bindgen(js_name = needsYouView))]
+pub fn needs_you_view(request: &str) -> String {
+    farcooler_client::needs_you_view::json(request)
+}
+
+#[cfg(test)]
+mod needs_you_tests {
+    #[test]
+    fn wasm_entry_matches_native_view_model_envelope() {
+        let request = include_str!("../../../test/fixtures/needs-you-aggregate.json");
+        assert_eq!(super::needs_you_view(request), farcooler_client::plan_view::json(request));
+    }
+}

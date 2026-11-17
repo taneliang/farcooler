@@ -489,6 +489,38 @@ export interface LandingGroupView {
 	lines: string[];
 }
 
+export interface NeedsYouRowKey {
+	runner_id: string;
+	item_id: string;
+}
+
+export interface NeedsYouAggregateRow {
+	key: NeedsYouRowKey;
+	/** The input payload, including unknown fields and action IDs, unchanged. */
+	item_json: string;
+	group: string;
+	counted: boolean;
+}
+
+export interface NeedsYouBucket {
+	runner_id: string;
+	/** Empty for runner totals; workspace or repository ID otherwise. */
+	id: string;
+	count: number;
+}
+
+export interface NeedsYouAggregateView {
+	schema: number;
+	rows: NeedsYouAggregateRow[];
+	yours: NeedsYouRowKey[];
+	others: NeedsYouRowKey[];
+	split: boolean;
+	counted_total: number;
+	runner_counts: NeedsYouBucket[];
+	workspace_counts: NeedsYouBucket[];
+	unclaimed_counts: NeedsYouBucket[];
+}
+
 export enum SectionKind {
 	NeedsYou = "needs_you",
 	Landing = "landing",
