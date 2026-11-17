@@ -538,8 +538,9 @@ like): the lint accepts that, as protobuf does, and refuses a reserved number
 used again. A changed meaning takes a new number.
 
 **In canary, on main is as good as shipped.** The baseline is recorded when a
-Canary run ends, so Canary's own `wire` job also runs `--since-baseline`: the
-candidate is checked against every version of the proto on main since the
+Canary run ends, so both per-push CI and Canary's `wire` jobs run
+`--since-baseline` (with full checkout history). The landing gate reads CI's
+wire steps and runs the same check. The candidate is checked against every version of the proto on main since the
 recorded commit. That includes commits no build ever carried, such as a run
 cancelled mid-build or the middle commits of a push of several, so a field
 added in one commit and renamed in the next is red on its first push. The way

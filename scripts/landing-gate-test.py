@@ -40,6 +40,57 @@ class LandingTests(unittest.TestCase):
             if key.startswith("FARCOOLER_"):
                 os.environ.pop(key)
 
+    def test_wire_step_refuses_a_field_renamed_since_the_recorded_baseline(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        block = lane.job_block(workflow, "wire")
+        self.assertIn("          fetch-depth: 0", block)
+        commands = [run.strip() for _, run, _, _ in lane.parse_steps(block)]
+        command = "./scripts/proto-lint.py --channel canary --since-baseline"
+        self.assertIn(command, commands)
+        # The landing gate consumes these same CI run steps. Reproduce the gap:
+        # the baseline predates tag 3, but a later main commit already named it.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+
+            def git(*args):
+                return subprocess.run(["git", "-C", str(repo), "-c", "user.name=t",
+                                       "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args],
+                                      check=True, capture_output=True, text=True).stdout.strip()
+
+            for name in ["scripts/proto-lint.py", "crates/protocol/src/lib.rs",
+                         "crates/daemon/src/rpc.rs"]:
+                dest = repo / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text((ROOT / name).read_text())
+            proto = repo / "proto/farcooler.proto"
+            proto.parent.mkdir()
+            original = "message TaskList { optional bytes next_page_after = 3; }\n"
+            proto.write_text("message TaskList {}\n")
+            git("init", "--quiet")
+            git("add", "proto/farcooler.proto")
+            git("commit", "--quiet", "-m", "baseline before paging")
+            recorded = git("rev-parse", "HEAD")
+            baseline = repo / "proto/baseline/canary.proto"
+            baseline.parent.mkdir()
+            baseline.write_text(f"// Shipped by Canary at {recorded}.\n" + proto.read_text())
+            proto.write_text(original)
+            git("add", "proto/farcooler.proto")
+            git("commit", "--quiet", "-m", "add paging cursor")
+            git("commit", "--quiet", "--allow-empty", "-m", "candidate")
+
+            def run(strict):
+                args = [sys.executable, str(repo / "scripts/proto-lint.py"), "--channel", "canary"]
+                return subprocess.run(args + (["--since-baseline"] if strict else []),
+                                      cwd=repo, capture_output=True, text=True)
+
+            self.assertEqual(run(True).returncode, 0)
+            proto.write_text(original.replace("next_page_after", "next_after"))
+            self.assertEqual(run(False).returncode, 0)  # The old CI check missed it.
+            refused = run(True)
+            self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+            self.assertIn("TaskList tag 3 was renamed from next_page_after to next_after",
+                          refused.stderr)
+
     def test_ci_families_are_the_minimum_for_every_path_rule(self):
         # Independent mapping: dropping any family-to-job edge must go red.
         jobs = {"rust": {"rust"}, "apple": {"swift", "swift-tests", "ios"},

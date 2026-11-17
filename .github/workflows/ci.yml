@@ -130,8 +130,8 @@ jobs:
   # field older than the machine it is talking to — and it decodes by tag
   # number, with no way to learn that a meaning changed.
   #
-  # Needs no toolchain and no checkout depth: the baseline is a committed file
-  # rather than something discovered from git history. See the script for why.
+  # Needs no toolchain. Full history lets the Canary check cover fields
+  # added since the recorded baseline, just as the shipping workflow does.
   wire:
     name: Wire compatibility
     # Runs whatever `changes` says, bar a commit CI already passed (ov-1269).
@@ -141,6 +141,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       # The lint's own tests first. Before the first release there is no
       # baseline to compare against, so without these every check in it would
       # sit unexercised until exactly the moment it mattered.
@@ -154,7 +156,7 @@ jobs:
       # And canary, which canary-baseline.yml records when a Canary run ends —
       # the channel on the owner's phones within the hour, where a renumbered
       # field would otherwise reach a phone and a newer daemon unchecked.
-      - run: ./scripts/proto-lint.py --channel canary
+      - run: ./scripts/proto-lint.py --channel canary --since-baseline
       # The script that writes that baseline, against a scratch remote: a
       # mistake in it records nothing, and the lint above then passes saying
       # nothing shipped.

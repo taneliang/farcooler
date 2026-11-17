@@ -1,0 +1,4 @@
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+proto is compatible with the canary baseline, and with the 0 other version(s) of the wire on main since it
+python3: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+107 passed, 0 failed
