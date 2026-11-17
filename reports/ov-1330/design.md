@@ -10,6 +10,9 @@ The native agent no longer runs as a child of a shell that the daemon finds late
    in the child before `exec`), and makes that group the terminal's foreground group.
 3. It never reaps the child until the group is proved empty.
 
+On macOS the pane's process first relays to a second copy of the hold, started with responsibility disclaimed, so
+that the kernel records the hold as responsible for everything the agent starts (see "macOS: responsibility" below).
+
 The ownership handle is the pair (hold socket, unreaped child). The daemon holds the socket path from the
 moment it opens the pane: it waits for the hold's `ready` before it writes the owner record or releases the
 launch barrier. The hold holds the child from `fork`.
@@ -54,9 +57,11 @@ So for a hold-launched owner, quiescence is proved by the hold's `ended` answer,
 because the hold unlinks it only after the group is empty and no descendant is alive. The daemon never reads the tty
 for that proof, so a tty that a later pane reuses can neither be signalled nor make a finished owner look busy.
 
-If the socket is there but nobody answers (the hold was killed), the daemon falls back to the observation it
-already had for a vanished owner: the pane is dead or gone and nothing is on its tty. It signals nothing. An
-owner launched by an earlier engine (no hold) gets the same observation-only treatment.
+If the socket is there but nobody answers, the hold was killed before it could prove anything. The pane and the tty
+prove nothing then (a command in a session of its own holds neither), so for a hold-launched owner that is a
+**refusal** ("native hold is not answering, so its agent cannot be proved ended"), never quiescence (fix round 2).
+Only an owner launched by an earlier engine (no hold) is still settled by observation: pane dead or gone, nothing on
+its tty. Neither path signals anything.
 
 ## What leaves the group: followed, never signalled (fix round 1)
 
@@ -88,12 +93,27 @@ exits, the hold answers `ended` and exits. The same holds when the agent exits b
 the hold does not remove its socket or exit while a descendant lives, so a missing socket still means "nothing of
 this agent's is running".
 
-**The residual, on macOS only.** The hold learns a unique id only by seeing the process alive. A descendant B that
-forks C and exits within one 100 ms learning interval, before the hold ever saw B, leaves C with a parent id the hold
-never learned (C reparented to launchd). Such a C is invisible, as it is to every unprivileged observer on macOS
-(the complete trackers, coalitions and Endpoint Security, need privilege). Linux has no residual: the subreaper sees
-C whatever B did. This is narrower than round 0 (which ignored every process outside the group) and is recorded
-rather than claimed away.
+**macOS: responsibility, not observation (fix round 2).** Unique ids alone left a timing gap: a descendant B that
+forks C and exits before the hold ever sees B leaves C with a parent id the hold never learned. The hold no longer
+depends on having seen anything. macOS records for every process a *responsible process*, which a child inherits at
+`fork` and keeps through `exec`, `setsid`, `setpgid` and reparenting to launchd; a process started with responsibility
+disclaimed (`responsibility_spawnattrs_setdisclaim`) is responsible for itself. So:
+
+* The pane's process is a **relay**: it starts the hold again with `posix_spawn`, responsibility disclaimed, waits for
+  it, passes tmux's hangup on to it (`kill` on the pid `posix_spawn` returned, unreaped, so still that child; the only
+  other signal call in the module, allowed by name in the source check) and exits with its status.
+* The hold refuses to run (exit 125, so the agent never starts) unless the kernel names it responsible for itself. A
+  macOS without the API therefore fails at launch, not silently at settlement.
+* Every look asks, for each live process, who is responsible for it
+  (`responsibility_get_pid_responsible_for_pid`). One that names the hold is a stray, whatever the hold saw of its
+  parents. The kernel names the hold's pid only while the hold is alive, and the hold is alive whenever it asks, so
+  that pid is the hold's and no one else's. Measured on this Mac: a `setsid` grandchild whose parent had exited still
+  named the disclaimed process; once that process exited, the answer fell back to the grandchild itself, which is why
+  the responsible process is the hold, which outlives everything it waits for.
+
+What still escapes, by deliberate act rather than timing: a descendant that itself calls the private disclaim API
+(and whose parent the hold never saw), or one that becomes another user through a set-uid program (the API answers
+nothing about another user's processes). Neither is a race the hold can lose by being slow.
 
 `stop` (a landing gate's pause, the orchestrator's freeze) still stops only the group: a descendant outside it keeps
 running during a pause. That costs CPU during a gate, not correctness.
@@ -123,33 +143,26 @@ queue by at most the five-second read timeout; only the runner's own user can co
 * Owner records gain `hold: true` (absent, so false, in records an earlier engine wrote). An earlier engine
   cannot read a record with the new field: rolling back with a native step in flight leaves that step Uncertain.
 
-## Verification (fix round 1, after both review findings were fixed; macOS)
+## Verification (fix round 2, after both review findings were fixed; macOS)
 
 All foreground, at most four build jobs and four test threads, no gate, no formatter.
 
 * The three ov-1319 tests, `--stress-count 30 --test-threads 4 --retries 0`: **30/30 iterations, 90 passes,
-  0 failures** in 254.7 s (`stress.txt`). (A first attempt failed only because `farcooler-cli`, which the steering
-  test needs, was not built in this worktree's target; it was built and the whole stress rerun.)
+  0 failures** in 263.9 s (`stress.txt`).
 * The daemon crate, `cargo nextest run -p farcooler-daemon --test-threads 4 --retries 0 --no-fail-fast`, run as
-  two partitions to stay in the foreground: **1,965 + 1,921 = 3,886 passed, 0 failed** (`daemon-1.txt`,
+  two partitions to stay in the foreground: **1,966 + 1,923 = 3,889 passed, 0 failed** (`daemon-1.txt`,
   `daemon-2.txt`). No test failed, so there is no flake to record.
-* `cargo clippy -p farcooler-daemon --all-targets -- -D warnings`, `file-size-budget.py`,
-  `macos-rust-tests.py --self-test --check`, `doc-comment-check.py`, `swallow-lint.py`, `test-window-lint.py`
-  and `copy-lint.py` pass.
-* The new regressions fail without their fixes. Restoring a thread per connection, and counting no strays in a
-  look, turned all three red (`a_stop_asked_first_is_done_first_even_when_its_words_arrive_last`,
-  `a_process_that_left_the_group_keeps_end_from_succeeding`,
-  `a_stray_whose_parent_exited_first_is_still_accounted_for`) before the change was reverted.
+* `cargo clippy -p farcooler-daemon --all-targets -- -D warnings`, `file-size-budget.py`, `doc-comment-check.py`,
+  `swallow-lint.py`, `test-window-lint.py`, `copy-lint.py` and `macos-rust-tests.py --self-test --check` pass.
+* The new regressions fail without their fixes:
+  `a_stray_whose_parent_the_hold_never_saw_keeps_end_from_succeeding` (the hold is started blind, learning no
+  lineage, through a debug-build-only environment switch, so its stray's parent is never observed) went red with the
+  responsibility check replaced by `false`; `a_killed_hold_refuses_settlement_while_a_detached_command_writes` went
+  red with the old pane-and-tty fallback restored. Both changes were reverted.
+* New: `the_hold_is_responsible_for_its_agent_and_the_relay_is_not`, and the source check's self-test now shows a
+  relay signalling a pid it did not spawn, or one that spawned nothing, failing.
 
-Not run here: Linux. The Linux paths (`PR_SET_CHILD_SUBREAPER`, the `/proc` walk) are exercised by the same tests in
-CI's Linux job.
+Not run here: Linux. Its paths (`PR_SET_CHILD_SUBREAPER`, the `/proc` walk; no relay, and blind is a no-op there) are
+exercised by the same tests in CI's Linux job.
 
-New tests: `native_hold::tests` (stop, continue and end a group with a background job; an agent that exits takes
-its group with it and the hold exits with its status; a reaped leader is never signalled even when its number
-is a live process; the source check and its self-test; fix round 1: a stop asked first is done first though its
-words arrive after a later continue's; a `setsid` command that ignores SIGTERM and keeps writing makes `end` answer
-`unsettled`, keeps the socket and stays alive, never signalled, and `end` answers `ended` once it is gone; the
-same for such a command whose parent exited before `end`; an agent that kills its own stray on SIGTERM ends
-cleanly) and `quiesce_order_tests` (a live owner's whole group is ended; an owner that exited first, or exits while
-being ended, is quiescent; an agent ignoring SIGTERM is killed after the grace; a tty a foreign session holds is
-never signalled, whether the hold answers or was killed).
+Earlier rounds: round 0's and round 1's results are in this branch's history; every test they added still passes above.

@@ -1,2 +1,3 @@
- Nextest run ID 3e49e2fa-5c8b-426f-86ab-745cf191c940 with nextest profile: default
-     Summary [ 348.782s] 1921 tests run: 1921 passed, 1984 skipped
+cargo nextest run -p farcooler-daemon --test-threads 4 --retries 0 --no-fail-fast --partition count:2/2 (fix round 2)
+    Starting 1923 tests across 79 binaries (1985 tests skipped)
+     Summary [ 346.746s] 1923 tests run: 1923 passed, 1985 skipped
