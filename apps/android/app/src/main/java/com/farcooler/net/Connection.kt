@@ -17,7 +17,7 @@ import com.farcooler.data.Runner
 import com.farcooler.data.Theme
 import com.farcooler.model.BoardNotice
 import com.farcooler.model.NeedsYou
-import com.farcooler.model.NeedsYouList
+import com.farcooler.model.NeedsYouPresenter
 import com.farcooler.model.RunnerNeedsYou
 import com.farcooler.model.BranchListReply
 import com.farcooler.model.BranchRef
@@ -662,7 +662,7 @@ class Connection(
             return
         }
         val data = attempt { core.call("needs_you") }.getOrNull()
-        val list = data?.let { runCatching { json.decodeFromJsonElement(NeedsYouList.serializer(), it) }.getOrNull() }
+        val list = data?.let { NeedsYouPresenter.read(it, host.id) }
         if (list == null) {
             needsYouOwed = true
             return

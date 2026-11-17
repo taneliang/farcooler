@@ -35,9 +35,7 @@ class NeedsYouItemsTest {
             json.decodeFromString(NeedsYouList.serializer(), """{"items":[{"id":"a","kind":"ask"}]}""")
         }
         for (rank in listOf(-1L, 4_294_967_296L)) {
-            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
-                NeedsYouPresenter.view(mapOf("a" to listOf(NeedsYouItem(id = "a", kind = "ask", rank = rank))))
-            }
+            assertNull(NeedsYouPresenter.tryView(mapOf("a" to listOf(NeedsYouItem(id = "a", kind = "ask", rank = rank)))))
         }
     }
 

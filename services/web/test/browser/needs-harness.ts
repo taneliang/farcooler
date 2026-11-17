@@ -2,9 +2,16 @@
 // markup, stylesheet and view code, over the fixture's studio list instead of a
 // tunnel. The tab switch and the counts mirror app.ts's drawNeeds and showTab.
 
+import init, { needsYouView } from 'fc-web'
+import { useNeedsYouPresenter } from '../../src/client/needs-present'
+
 import fixture from '../../../../test/fixtures/needs-you.json'
 import { Board, type BoardView, countLabel, countOf, pageTitle } from '../../src/client/needs'
 import { renderNeeds } from '../../src/client/needs-view'
+
+declare const __NEEDS_WASM__: string
+await init({ module_or_path: __NEEDS_WASM__ })
+useNeedsYouPresenter(needsYouView)
 
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const NOW = 1_790_000_000_000

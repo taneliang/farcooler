@@ -9,7 +9,18 @@ import kotlinx.serialization.json.*
 object NeedsYouPresenter {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    fun view(runners: Map<String, List<NeedsYouItem>>): NeedsYouAggregateView {
+    private val core: (String) -> String? = { request -> if (coreIsAvailable) NativeClient.nativePlanView(request) else null }
+    internal var bridge: (String) -> String? = core
+    internal fun reset() { bridge = core }
+
+    // No native library means no reading; let the existing diagnostics remain reachable.
+    // This is an unavailable view, never a second implementation of aggregation.
+    private val unavailable = NeedsYouAggregateView(1u, emptyList(), emptyList(), emptyList(), false, 0u, emptyList(), emptyList(), emptyList())
+
+    fun view(runners: Map<String, List<NeedsYouItem>>): NeedsYouAggregateView = tryView(runners) ?: unavailable
+
+    /** Null on an unavailable core or invalid input, just like the other native view-model boundaries. */
+    fun tryView(runners: Map<String, List<NeedsYouItem>>): NeedsYouAggregateView? = runCatching {
         val request = buildJsonObject {
             put("schema", 1)
             putJsonArray("needs_you") {
@@ -21,11 +32,17 @@ object NeedsYouPresenter {
                 }
             }
         }
-        check(coreIsAvailable)
-        val answer = requireNotNull(NativeClient.nativePlanView(request.toString()))
-        val result = requireNotNull(Json.parseToJsonElement(answer).jsonObject["needs_you"]) { "needs_you_invalid" }
-        return json.decodeFromJsonElement(result)
-    }
+        val answer = bridge(request.toString()) ?: return null
+        val result = Json.parseToJsonElement(answer).jsonObject["needs_you"] ?: return null
+        json.decodeFromJsonElement<NeedsYouAggregateView>(result)
+    }.getOrNull()
+
+    /** Validate with Rust before a read replaces the last good list. */
+    fun read(data: JsonElement, runnerId: String): NeedsYouList? = runCatching {
+        val list = json.decodeFromJsonElement<NeedsYouList>(data)
+        if (tryView(mapOf(runnerId to list.items)) == null) return null
+        list
+    }.getOrNull()
 
     fun view(items: List<RunnerNeedsYouItem>): NeedsYouAggregateView =
         view(items.groupBy { it.hostId }.mapValues { (_, rows) -> rows.map { it.item } })

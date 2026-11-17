@@ -153,12 +153,12 @@ data class NeedsYouItem(
     val kindValue: NeedsYouKind get() = NeedsYouKind.parse(kind)
 
     /** Whether it adds to a count or breaks the all-clear: an FYI is read, not acted on (ov-756). */
-    val isCounted: Boolean get() = NeedsYouPresenter.view(mapOf("" to listOf(this))).rows.first().counted
+    val isCounted: Boolean get() = NeedsYouPresenter.view(mapOf("" to listOf(this))).rows.firstOrNull()?.counted == true
 
     val alsoValues: List<NeedsYouKind> get() = also.map(NeedsYouKind::parse)
 
     /** Someone else's: filed under Everyone Else (ov-633). */
-    val isOthers: Boolean get() = NeedsYouPresenter.view(mapOf("" to listOf(this))).rows.first().group == "others"
+    val isOthers: Boolean get() = NeedsYouPresenter.view(mapOf("" to listOf(this))).rows.firstOrNull()?.group == "others"
 
     /** Whose an Everyone Else row says it is: a member's name, else "Owner". Null for yours and nobody's. */
     val othersName: String?
