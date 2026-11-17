@@ -16,6 +16,42 @@ import threading
 import time
 
 
+# Reviewed transitive consumers, not an inference from missing command text.
+# The retry helper is imported by ci-runner-retry-test.py; that test reads the
+# workflow and runs in wire. The workflow itself only operates the GitHub API.
+# No platform build/test consumes these three inputs (ov-1324). All other
+# scripts/workflows keep CI's full fallback until their users are reviewed.
+SCRIPT_USERS = {
+    "scripts/ci-runner-retry.py": {"wire"},
+    "scripts/ci-runner-retry-test.py": {"wire"},
+    ".github/workflows/ci-runner-retry.yml": {"wire"},
+}
+
+
+def script_users(path, commands):
+    """Reviewed consumers plus any newly named gate users; None means unknown.
+
+    Command text alone cannot prove absence of transitive consumers. Never
+    narrow an unreviewed path just because a job does not name it directly.
+    """
+    if path not in SCRIPT_USERS:
+        return None
+    users = set(SCRIPT_USERS[path])
+    for job, command in commands.items():
+        if path in command:
+            users.add(job)
+    return users
+
+
+def workflow_checks(plans, files, step_type):
+    """Keep workflow validation without selecting a platform build for it."""
+    if any(path.startswith(".github/workflows/") for path in files):
+        plans["wire"].extend([
+            step_type("wire", "Workflow lint", "./scripts/actionlint.sh\n"),
+            step_type("wire", "Workflow shard check", "./scripts/ios-ui-shards.py --check\n"),
+        ])
+
+
 def fold_base(repo, given):
     """Read the same exact workspace/item/candidate index as daemon process_base.
 

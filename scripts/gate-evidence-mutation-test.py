@@ -26,7 +26,7 @@ def main():
             root = pathlib.Path(temporary)
             scripts = root / "scripts"
             scripts.mkdir()
-            for name in ("gate_evidence.py", "gate-evidence-test.py", "lane-gate.py", "process_guard.py", "heavy_lock.py",
+            for name in ("gate_evidence.py", "gate-evidence-test.py", "lane-gate.py", "landing_policy.py", "process_guard.py", "heavy_lock.py",
                          "ci-changes.py", "ios-ui-plan.py", "gate-summary-check.py", "android-ndk.sh"):
                 shutil.copyfile(ROOT / "scripts" / name, scripts / name)
             workflow = root / ".github/workflows/ci.yml"

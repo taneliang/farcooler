@@ -432,7 +432,7 @@ FAMILY_JOBS = {"rust": {"rust"}, "apple": {"swift", "swift-tests", "ios"},
 
 
 def jobs_for(files, site, ios_relevant, commands, families):
-    """{job: [paths]}. CI families are a floor, never overridden by local rules.
+    """{job: [paths]}. CI families are the floor except reviewed script users.
 
     Keep the site/ios inputs in this public API for gate_evidence's canonical
     planner. Unknown scripts and workflows take CI's full fallback too.
@@ -445,7 +445,13 @@ def jobs_for(files, site, ios_relevant, commands, families):
             if f not in reach[j]:
                 reach[j].append(f)
 
+    from landing_policy import script_users
+
     for f in files:
+        users = script_users(f, commands)
+        if users is not None:
+            add(users, f)
+            continue
         flags = families([f])
         for family, jobs in FAMILY_JOBS.items():
             if flags[family]:
@@ -916,6 +922,8 @@ def gate(args):
     files = sorted({f for _, f in inputs})
 
     plans = {j: steps_for(j, workflows, ctx) for j in JOBS}
+    import landing_policy
+    landing_policy.workflow_checks(plans, files, Step)
     commands = {j: "\n".join(s.run for s in plans[j] if not s.skip) for j in JOBS}
     reach = jobs_for(files, changes.SITE, lambda f: bool(ios_plan.RELEVANT.match(f)), commands, changes.families)
     only = {j for j in args.only.split(",") if j}

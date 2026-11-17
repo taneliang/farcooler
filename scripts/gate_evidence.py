@@ -244,9 +244,12 @@ def scope_for(lane, repo, base, inputs_path, strict_leaks=False):
     require(all(j in lane.CI_JOB_ALIASES or j in lane.CI_JOBS_NOT_RUN for j in lane.job_ids(workflows["ci"])),
             "CI has jobs the canonical runner does not cover")
     plans = {j: lane.steps_for(j, workflows, ctx) for j in lane.JOBS}
+    files = lane.changed_files(repo, base_sha)
+    policy = lane.load_module("v2_landing_policy", repo / "scripts/landing_policy.py")
+    policy.workflow_checks(plans, files, lane.Step)
     changes = lane.load_module("v2_changes", repo / "scripts/ci-changes.py")
     ios = lane.load_module("v2_ios", repo / "scripts/ios-ui-plan.py")
-    reach = lane.jobs_for(lane.changed_files(repo, base_sha), changes.SITE,
+    reach = lane.jobs_for(files, changes.SITE,
                          lambda f: bool(ios.RELEVANT.match(f)),
                          {j: "\n".join(s.run for s in steps if not s.skip) for j, steps in plans.items()},
                          changes.families)
@@ -266,7 +269,7 @@ def scope_for(lane, repo, base, inputs_path, strict_leaks=False):
             env = android_environment(env, plans)
         environments[job] = env
     implementations = {}
-    for name in ("gate_evidence.py", "lane-gate.py", "heavy_lock.py"):
+    for name in ("gate_evidence.py", "lane-gate.py", "landing_policy.py", "heavy_lock.py"):
         path = pathlib.Path(__file__).with_name(name)
         require(path.read_bytes() == (repo / "scripts" / name).read_bytes(),
                 f"runner differs from checkout: {name}")

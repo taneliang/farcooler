@@ -47,6 +47,18 @@ class LandingTests(unittest.TestCase):
             proposal = lane.rust_proposal(ROOT, argparse.Namespace(full_rust=False), chosen, policy)
         self.assertEqual(proposal["reasons"], ["Rust not reached"])
 
+    def test_reviewed_scripts_keep_new_direct_consumers(self):
+        self.assertIn("rust", self.script_reach(["scripts/ci-runner-retry.py"],
+                                               {"rust": "python3 scripts/ci-runner-retry.py"}))
+
+    def test_workflow_changes_keep_lightweight_validation(self):
+        plans = {"wire": []}
+        policy.workflow_checks(plans, ["scripts/ci-runner-retry.py"], lane.Step)
+        self.assertEqual(plans["wire"], [])
+        policy.workflow_checks(plans, [".github/workflows/ci-runner-retry.yml"], lane.Step)
+        self.assertEqual([s.run.strip() for s in plans["wire"]],
+                         ["./scripts/actionlint.sh", "./scripts/ios-ui-shards.py --check"])
+
     def test_gate_script_consumers_and_unknowns_stay_covered(self):
         for path, required in (("scripts/lane-gate.py", set(lane.JOBS)),
                                ("apps/macos/test.sh", {"swift-tests"}),
