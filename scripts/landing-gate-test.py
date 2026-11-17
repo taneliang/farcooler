@@ -5,6 +5,7 @@ import os
 import re
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,23 @@ cache = load("gate_sccache")
 
 
 class CompilerCacheTests(unittest.TestCase):
+    def test_socket_cleanup_preserves_live_servers_and_unexpected_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary).resolve() / "server.sock"
+            with socket.socket(socket.AF_UNIX) as server:
+                server.bind(str(path))
+                server.listen()
+                with self.assertRaisesRegex(ValueError, "existing server"):
+                    cache.clear_stale_socket(path)
+                self.assertTrue(path.exists())
+            cache.clear_stale_socket(path)
+            self.assertFalse(path.exists())
+            cache.clear_stale_socket(path)
+            path.write_text("preserve")
+            with self.assertRaisesRegex(ValueError, "unexpected"):
+                cache.clear_stale_socket(path)
+            self.assertEqual(path.read_text(), "preserve")
+
     def test_machine_lock_precedes_cache_lock(self):
         events = []
         @contextmanager

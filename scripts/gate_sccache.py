@@ -11,6 +11,7 @@ import contextlib
 import fcntl
 import os
 from pathlib import Path
+import socket
 import stat
 import subprocess
 import time
@@ -18,6 +19,22 @@ import time
 SWITCH = "FARCOOLER_GATE_SCCACHE"
 ROOT = Path.home() / ".cache/farcooler-gate-sccache"
 VERSION = "0.19.0"
+
+
+def clear_stale_socket(path):
+    """Under session.lock, remove only a socket with no listening server."""
+    if not path.exists():
+        return
+    if not stat.S_ISSOCK(path.lstat().st_mode):
+        raise ValueError(f"sccache: unexpected server socket path: {path}")
+    with socket.socket(socket.AF_UNIX) as probe:
+        probe.settimeout(1)
+        try:
+            probe.connect(str(path))
+        except ConnectionRefusedError:
+            path.unlink()
+            return
+    raise ValueError(f"sccache: existing server socket; inspect before retrying: {path}")
 
 
 def private(path):
@@ -64,8 +81,7 @@ def session(logdir):
         fcntl.flock(lock, fcntl.LOCK_EX)
         (ROOT / "config").write_text("")
         socket = ROOT / "server.sock"
-        if socket.exists():
-            raise ValueError(f"sccache: existing server socket; inspect before retrying: {socket}")
+        clear_stale_socket(socket)
         with open(logdir / "sccache-server.log", "w") as output:
             server = subprocess.Popen([binary], env={**env, "SCCACHE_START_SERVER": "1"},
                                       stdout=output, stderr=subprocess.STDOUT)
@@ -94,6 +110,7 @@ def session(logdir):
                     except subprocess.TimeoutExpired:
                         server.kill()
                         server.wait()
+                    clear_stale_socket(socket)
                     with open(logdir / "sccache-disk.txt", "w") as disk:
                         subprocess.run(["du", "-sk", str(ROOT / "cache")], check=True, stdout=disk)
 
