@@ -6,7 +6,7 @@ import Foundation
 // and the client core renders it as JSON once (`crates/client/src/
 // needs_you_json.rs`), shared by `farcooler needs-you --json`, which the Mac
 // reads, and the FFI's `needs_you`, which the phones read. What is left for an
-// app is here: decode that one shape, merge the runners by rank, and count. See
+// app is here: decode that shape and draw Rust's needs_you_view result. See
 // spec §2 of `docs/superpowers/specs/2026-09-28-workspace-ui-design.md`.
 //
 // Nothing here decides what an item IS. That is the daemon's, because only the
@@ -154,13 +154,15 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     /// so a list of several runners' items is keyed by `key`, not this.
     public var itemID: String
     public var kind: NeedsYouKind
+    /// Preserve a newer runner's unknown kind through the aggregation bridge.
+    public var rawKind: String
     /// The subject's other, less urgent signals. Informational: an item with
     /// `also` is still one item, and counts once.
     public var also: [NeedsYouKind]
     /// Whether it adds to a count or breaks the all-clear. An FYI (a member
     /// kept a ruling, ov-756) is read and never acted on, so it is a row in
     /// the list and nothing more.
-    public var isCounted: Bool { kind != .fyi }
+    public var isCounted: Bool { NeedsYou.aggregate([runner: [self]]).rows[0].counted }
     /// Where it sorts: smaller first. `Terminal.rank`'s scale, a tier per kind
     /// and then the oldest first, and a duration rather than a clock reading,
     /// which is what lets two runners' items be compared at all.
@@ -209,7 +211,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     public var isDerived: Bool
 
     /// This item's identity across every runner.
-    public var key: String { "\(runner)\u{1F}\(itemID)" }
+    public var key: String { String(decoding: try! JSONEncoder().encode([runner, itemID]), as: UTF8.self) }
     public var id: String { key }
 
     public init(
@@ -222,6 +224,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     ) {
         self.itemID = id
         self.kind = kind
+        self.rawKind = kind.rawValue
         self.also = also
         self.rank = rank
         self.since = since
@@ -254,6 +257,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         itemID = try c.decode(String.self, forKey: .itemID)
         kind = try c.decode(NeedsYouKind.self, forKey: .kind)
+        rawKind = try c.decode(String.self, forKey: .kind)
         also = try c.decodeIfPresent([NeedsYouKind].self, forKey: .also) ?? []
         rank = try c.decode(UInt32.self, forKey: .rank)
         // Unix milliseconds on the wire.
@@ -306,23 +310,11 @@ public enum NeedsYou {
     /// So it appears once, from the runner that has waited longest (the lowest
     /// rank), and the other runner's copy is dropped (ov-315).
     public static func merge(_ runners: [String: [NeedsYouItem]]) -> [NeedsYouItem] {
-        var seenRequests = Set<String>()
-        return runners
-            .flatMap { runner, items in
-                items.map { item in
-                    var item = item
-                    item.runner = runner
-                    return item
-                }
-            }
-            .sorted { a, b in
-                let ua = a.kind == .unknown, ub = b.kind == .unknown
-                if ua != ub { return ub }
-                if a.rank != b.rank { return a.rank < b.rank }
-                if a.runner != b.runner { return a.runner < b.runner }
-                return a.itemID < b.itemID
-            }
-            .filter { item in item.kind != .prReview || seenRequests.insert(item.itemID).inserted }
+        aggregate(runners).rows.map { row in
+            var item = runners[row.key.runner_id]!.first { $0.itemID == row.key.item_id }!
+            item.runner = row.key.runner_id
+            return item
+        }
     }
 
     /// What an older runner's section says in place of what it can't send.
@@ -341,18 +333,18 @@ extension Collection where Element == NeedsYouItem {
     /// A workspace id is a runner's uuid, so this needs no runner to tell two
     /// workspaces apart.
     public func count(in workspaceID: String) -> Int {
-        filter { $0.workspaceID == workspaceID && $0.isCounted }.count
+        Int(NeedsYou.aggregate(Array(self)).workspace_counts.filter { $0.id == workspaceID }.reduce(0) { $0 + $1.count })
     }
 
     /// How many items with no workspace belong to `repositoryID`: its
     /// Unclaimed group's count.
     public func unclaimedCount(inRepository repositoryID: String) -> Int {
-        filter { $0.workspaceID == nil && $0.repositoryID == repositoryID && $0.isCounted }.count
+        Int(NeedsYou.aggregate(Array(self)).unclaimed_counts.filter { $0.id == repositoryID }.reduce(0) { $0 + $1.count })
     }
 
     /// How many items count toward a total, a badge or the all-clear: every
     /// one but an FYI, which is read and never acted on (ov-756).
-    public var countedTotal: Int { filter(\.isCounted).count }
+    public var countedTotal: Int { Int(NeedsYou.aggregate(Array(self)).counted_total) }
 }
 
 // MARK: - Whose an item is
@@ -386,7 +378,7 @@ public struct NeedsYouConcern: Hashable, Sendable, Codable {
 
 extension NeedsYouItem {
     /// Whether it is someone else's: filed under Everyone Else.
-    public var isOthers: Bool { concern.map { !$0.yours } ?? false }
+    public var isOthers: Bool { NeedsYou.aggregate([runner: [self]]).rows[0].group == "others" }
 
     /// Whose an Everyone Else row says it is: a member's name, else "Owner" for the
     /// runner's owner. Nil for the reader's own and nobody's, which say nothing.
@@ -407,7 +399,7 @@ extension NeedsYou {
 
         /// Whether the list shows two groups: only when something is someone
         /// else's. Otherwise it's one list with no headers, as before.
-        public var isSplit: Bool { !others.isEmpty }
+        public var isSplit: Bool
     }
 
     /// The headers a split list shows.
@@ -417,7 +409,11 @@ extension NeedsYou {
     /// `merged` split into the reader's own (and nobody's) and everyone
     /// else's, in the order it came.
     public static func grouped(_ merged: [NeedsYouItem]) -> Groups {
-        Groups(yours: merged.filter { !$0.isOthers }, others: merged.filter(\.isOthers))
+        let view = aggregate(merged)
+        func resolve(_ keys: [WireNeedsYouRowKey]) -> [NeedsYouItem] {
+            keys.compactMap { key in merged.first { $0.runner == key.runner_id && $0.itemID == key.item_id } }
+        }
+        return Groups(yours: resolve(view.yours), others: resolve(view.others), isSplit: view.split)
     }
 }
 

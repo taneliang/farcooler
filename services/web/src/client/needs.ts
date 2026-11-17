@@ -4,13 +4,15 @@
 ///
 /// The list is the runner's own, in the shape every device reads
 /// (`needs_you_json`, pinned by test/fixtures/needs-you.json): the daemon
-/// decides what an item is and how it ranks, and this keeps its order. What is
-/// here is only what a page does with it: read it, count it, offer the buttons
+/// decides what an item is and how it ranks. Rust's needs_you_view aggregates
+/// the rows and counts. Here the page reads it, offers the buttons
 /// the runner offered, send the one chosen, and say in words why a refusal
 /// was one.
 ///
-/// Nothing here touches the page or wasm, so a test runs it with a runner it
-/// plays by hand. The DOM is needs-view.ts.
+/// The DOM is needs-view.ts. The presenter bridge is injected so tests can
+/// call the same Rust entry point with a runner they play by hand.
+
+import { aggregate } from './needs-present'
 
 import { answerRefusal, needsYouFailure } from './copy'
 
@@ -30,6 +32,11 @@ export interface Action {
 export interface Item {
   id: string
   kind: Kind
+  rawKind: string
+  rank: number
+  repositoryId: string | null
+  rawItemId?: string
+  wire?: Record<string, unknown>
   /// Unix milliseconds by the runner's clock, or null: shows no age.
   since: number | null
   workspace: string
@@ -72,7 +79,9 @@ export function parseList(json: string): Item[] {
   const items: Item[] = []
   for (const r of raw.items) {
     if (!r || typeof r.id !== 'string' || typeof r.question !== 'string') continue
+    if (!Number.isInteger(r.rank) || r.rank < 0 || r.rank > 0xffffffff) throw new Error('needs_you_rank')
     items.push({
+      rawKind: text(r.kind), rank: r.rank, repositoryId: orNull(r.repository_id), wire: r,
       id: r.id,
       kind: KINDS.has(r.kind) ? r.kind : 'unknown',
       since: typeof r.since === 'number' ? r.since : null,
@@ -100,9 +109,9 @@ export function parseList(json: string): Item[] {
 
 /// Whether an item adds to the count. A quiet notice (a member kept a ruling)
 /// is read and never acted on, so it is a row and nothing more.
-export const isCounted = (item: Item): boolean => item.kind !== 'fyi'
+export const isCounted = (item: Item): boolean => aggregate([item]).view.rows[0].counted
 
-export const countOf = (items: Item[]): number => items.filter(isCounted).length
+export const countOf = (items: Item[]): number => aggregate(items).view.counted_total
 
 /// The tab's title: the count in front when something needs the person.
 export function pageTitle(count: number): string {
@@ -153,8 +162,8 @@ export function age(since: number | null, now: number): string {
 /// The reader's own items and nobody's, then everyone else's. A list with
 /// nothing of anyone else's isn't split, as on a phone.
 export function groups(items: Item[]): { yours: Item[]; others: Item[]; split: boolean } {
-  const others = items.filter(i => i.concern !== null && !i.concern.yours)
-  return { yours: items.filter(i => !(i.concern !== null && !i.concern.yours)), others, split: others.length > 0 }
+  const result = aggregate(items)
+  return { yours: result.yours, others: result.others, split: result.view.split }
 }
 
 /// A pull request's or review thread's link, if it is github.com's: https, a
@@ -264,7 +273,7 @@ export class Board {
   }
 
   /// Read the list now. The runner's answer replaces what is shown, in the
-  /// runner's order.
+  /// shared urgency order.
   refresh(): Promise<void> {
     if (this.dead) return Promise.resolve()
     this.reading ??= this.read().finally(() => {
@@ -275,7 +284,7 @@ export class Board {
 
   private async read(): Promise<void> {
     try {
-      this.items = parseList(await this.deps.list())
+      this.items = aggregate(parseList(await this.deps.list())).items
       this.state = 'ready'
       this.banner = ''
       // A notice for an item the runner no longer lists was about an answer

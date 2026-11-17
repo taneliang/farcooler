@@ -4,8 +4,8 @@
 /// row naming its runner. The page does the same: one `Board` per runner, each
 /// reading its own runner's list over a connection of its own, merged here.
 ///
-/// - **Rows keep each runner's order**, the runners in the order they were
-///   enrolled. A row names its runner once there is more than one.
+/// - **Rows use the shared Rust urgency order** and deduplicate PR reviews.
+///   A row names its runner once there is more than one.
 /// - **An answer goes to the runner the item is on.** The merged item's id is
 ///   namespaced by runner, so two runners that number their items alike never
 ///   share a busy flag or a refusal, and `press` strips it again and hands the
@@ -13,7 +13,9 @@
 /// - **A runner that can't be reached is a line of its own.** It never hides
 ///   the others: their items stay, and the line says which runner and why.
 ///
-/// Nothing here touches the page or wasm, so a test plays the runners by hand.
+/// The view-model bridge is injected; a test plays the runners by hand.
+
+import { aggregate } from './needs-present'
 
 import { Board, type BoardDeps, type BoardView, type Item, type Press, type RunnerNote } from './needs'
 
@@ -114,7 +116,7 @@ export class Fleet {
   async press(item: Item, press: Press): Promise<void> {
     const m = item.runner ? this.members.get(item.runner) : undefined
     if (!m?.board) return
-    await m.board.press({ ...item, id: item.id.slice(m.id.length + 1) }, press)
+    await m.board.press({ ...item, id: item.rawItemId! }, press)
   }
 
   stop(): void {
@@ -132,11 +134,11 @@ export class Fleet {
     let ready = false
     let waiting = false
     for (const m of this.members.values()) {
-      const key = (id: string) => `${m.id}|${id}`
+      const key = (id: string) => JSON.stringify([m.id, id])
       const view = m.view
       if (view) {
         if (view.state === 'ready') ready = true
-        for (const i of view.items) items.push({ ...i, id: key(i.id), runner: m.id, ...(many ? { runnerName: m.label } : {}) })
+        for (const i of view.items) items.push({ ...i, id: key(i.id), rawItemId: i.id, runner: m.id, ...(many ? { runnerName: m.label } : {}) })
         for (const id of view.busy) busy.add(key(id))
         for (const [id, text] of view.notices) notices.set(key(id), text)
       }
@@ -145,7 +147,7 @@ export class Fleet {
       else if (view?.banner) runners.push({ runner: m.id, text: view.banner })
       if (!view && !m.down) waiting = true
     }
-    this.show({ state: ready ? 'ready' : waiting ? 'loading' : 'unreadable', items, busy, notices, banner: '', runners })
+    this.show({ state: ready ? 'ready' : waiting ? 'loading' : 'unreadable', items: aggregate(items).items, busy, notices, banner: '', runners })
   }
 
   /// Whether a merged item's Open can go to a terminal this page lists.

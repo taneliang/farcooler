@@ -55,6 +55,7 @@ declare module 'fc-web' {
   /// error}). Pure; no I/O.
   export function recoveryView(count: number, current: boolean): string
   export function planView(request: string): string
+  export function needsYouView(request: string): string
   export class WebRunner {
     workflow_call(method: string, args: string): Promise<string>
     terminals(): Promise<string>

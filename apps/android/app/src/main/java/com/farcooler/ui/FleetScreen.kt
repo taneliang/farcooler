@@ -135,7 +135,7 @@ fun FleetDrawer(
                     ListItem(
                         headlineContent = { Text("Needs you") },
                         trailingContent = {
-                            val counted = rows.count { it.entry.item.isCounted }
+                            val counted = com.farcooler.model.NeedsYouPresenter.total(rows.map { it.entry })
                             if (counted > 0) {
                                 Text(
                                     "$counted",

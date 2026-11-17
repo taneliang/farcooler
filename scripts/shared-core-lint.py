@@ -4,7 +4,7 @@ model (ruling R-112, ov-1015). This keeps it there.
 
 A native app owns layout, gestures, platform services, text input and local view state. It does
 not own a string about runner data, a mapping from a wire word to copy, or a second copy of a
-screen's logic. Four rules, each run against the user-facing sources of the Mac and iPhone
+screen's logic. Five rules, each run against the user-facing sources of the Mac and iPhone
 (apps/shared/AgentKit, apps/macos, apps/ios), Android (apps/android/.../main) and the web page
 (services/web/src/client):
 
@@ -22,6 +22,9 @@ screen's logic. Four rules, each run against the user-facing sources of the Mac 
   4. ratchet      The count of user-facing strings in any native file, views included (SwiftUI,
                   Android ui/, macos, ios, the web client), may fall but not rise. A new file
                   starts at zero.
+
+  5. needs-aggregate  The retired Needs You merge/group reducers cannot return in their old
+                  adapters; their ordering, deduplication and grouping belong in Rust (ov-1337).
 
 Today's violations are recorded in scripts/shared-core-baseline.json, so only new ones fail.
 The baseline may shrink: run `--update-baseline` after removing duplication, and review the
@@ -216,6 +219,24 @@ def rule_twin(native: dict[str, str]) -> set[str]:
     return out
 
 
+def rule_needs_aggregate(native: dict[str, str]) -> set[str]:
+    """ov-1337: the retired merge/group reducers must stay in Rust.
+
+    Match the bounded presenter functions only: old-runner derivation and
+    native workspace layout/action policy deliberately remain native.
+    """
+    targets = {
+        "apps/shared/AgentKit/Sources/AgentKit/NeedsYou.swift": r"(?:func merge|func grouped)[^\n]*[\s\S]*?\n    }",
+        "apps/android/app/src/main/java/com/farcooler/model/NeedsYouItems.kt": r"fun merge[\s\S]*?(?=\n    /\*\*|\Z)",
+        "apps/android/app/src/main/java/com/farcooler/model/NeedsYou.kt": r"fun grouped[\s\S]*?(?=\n    /\*\*|\Z)",
+        "services/web/src/client/needs.ts": r"export function groups[\s\S]*?\n}",
+        "services/web/src/client/fleet.ts": r"private publish[\s\S]*?\n  }",
+    }
+    reducer = re.compile(r"\.sorted|\.sort\(|\.distinctBy|\.partition|seenRequests|items\.filter|merged\.filter")
+    return {path for path, pattern in targets.items()
+            if any(reducer.search(m.group()) for m in re.finditer(pattern, native.get(path, "")))}
+
+
 def counts(native: dict[str, str]) -> tuple[dict[str, int], dict[str, int]]:
     """User-facing strings per file, views included, and the `platform copy: <reason>` lines per file."""
     strings, exempt = {}, {}
@@ -271,6 +292,7 @@ def measure(rust: dict[str, str], native: dict[str, str], labels: str = "{}") ->
         "rust-copy": sorted(rule_rust_copy(lits, native)),
         "wire-word": sorted(rule_wire_word(wset, native)),
         "twin": sorted(rule_twin(native)),
+        "needs-aggregate": sorted(rule_needs_aggregate(native)),
         "ratchet": dict(sorted(strings.items())),
         "exempt": dict(sorted(exempt.items())),
     }
@@ -279,8 +301,8 @@ def measure(rust: dict[str, str], native: dict[str, str], labels: str = "{}") ->
 def compare(now: dict, baseline: dict, with_exempt: bool = True) -> list[str]:
     """Each way `now` is worse than the baseline."""
     out = []
-    for rule in ("rust-copy", "wire-word", "twin"):
-        for item in sorted(set(now[rule]) - set(baseline.get(rule, []))):
+    for rule in ("rust-copy", "wire-word", "twin", "needs-aggregate"):
+        for item in sorted(set(now.get(rule, [])) - set(baseline.get(rule, []))):
             out.append(f"{rule}: {item}")
     for path, n in now["ratchet"].items():
         was = baseline.get("ratchet", {}).get(path, 0)
@@ -295,6 +317,7 @@ def compare(now: dict, baseline: dict, with_exempt: bool = True) -> list[str]:
 
 
 HELP = {
+    "needs-aggregate": "Needs You merge and grouping belong in crates/client/src/needs_you_view.rs (ov-1337).",
     "rust-copy": "this string is also written in Rust. Show what the shared client sends instead of writing it again.",
     "wire-word": "this switches on a word a Rust `*_word` function returns. Let Rust send the copy or the decision.",
     "twin": "this is a new native copy of a logic file. Put the logic in crates/client and render its view model.",
@@ -462,6 +485,14 @@ def self_test() -> int:
     single = dict(clean); single["apps/ios/Farcooler/One.swift"] = 'import SwiftUI\nlet t = Button("Approve") {}\n'
     if any(h.startswith("rust-copy:") for h in compare(m(rust, single), base_state)):
         print("self-test: a one-word label was caught")
+        failed += 1
+    # The retired Needs You reducers are forbidden even though the old files are baselined.
+    needs_path = "apps/shared/AgentKit/Sources/AgentKit/NeedsYou.swift"
+    if rule_needs_aggregate({needs_path: "public static func merge(_ runners: Any) {\n        items.sorted {}\n    }"}) != {needs_path}:
+        print("self-test: native Needs You merge escaped the aggregation guard")
+        failed += 1
+    if rule_needs_aggregate({needs_path: "public static func merge(_ runners: Any) {\n        aggregate(runners).rows.map {}\n    }"}):
+        print("self-test: a Rust Needs You adapter was rejected")
         failed += 1
     # A baseline that records more than the base branch's is refused, an exemption alone is not.
     older = m(rust, clean)

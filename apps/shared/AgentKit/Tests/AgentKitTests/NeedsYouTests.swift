@@ -500,3 +500,25 @@ func aListSplitsOnlyWhenSomethingIsSomeoneElses() {
     #expect(!solo.isSplit)
     #expect(solo.yours.map(\.itemID) == ["a", "b"])
 }
+
+@Test("ov-1337 aggregate adapter golden uses the Rust bridge")
+func needsYouAggregateAdapterGolden() throws {
+    struct Input: Decodable {
+        struct Runner: Decodable { var runner_id: String; var items: [NeedsYouItem] }
+        var needs_you: [Runner]
+    }
+    var root = URL(fileURLWithPath: #filePath)
+    for _ in 0..<6 { root.deleteLastPathComponent() }
+    let input = try JSONDecoder().decode(Input.self, from: Data(contentsOf: root.appendingPathComponent("test/fixtures/needs-you-aggregate.json")))
+    let runners = Dictionary(uniqueKeysWithValues: input.needs_you.map { ($0.runner_id, $0.items) })
+    let view = NeedsYou.aggregate(runners)
+    #expect(view.rows.map { "\($0.key.runner_id):\($0.key.item_id)" } == ["z:ask", "a:pr", "a:fyi", "a:future"])
+    #expect(view.counted_total == 3)
+    #expect(view.others.map(\.item_id) == ["fyi"])
+    #expect(view.split)
+    #expect(view.runner_counts.map(\.count) == [2, 0, 1])
+    let items = NeedsYou.merge(runners)
+    #expect(items[0].actions[0].id == "allow/raw")
+    #expect(items[0].runner == "z")
+    #expect(items[0].itemID == "ask")
+}

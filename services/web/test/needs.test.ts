@@ -38,7 +38,7 @@ describe('the list', () => {
   })
 
   it('leaves out an item with no id or question, and reads a kind it doesn’t know as one that still counts', () => {
-    const items = parseList(JSON.stringify({ items: [{ id: 'x' }, { id: 'a', kind: 'from_the_future', question: 'Hm?' }, null, 'no'] }))
+    const items = parseList(JSON.stringify({ items: [{ id: 'x' }, { id: 'a', kind: 'from_the_future', rank: 1, question: 'Hm?' }, null, 'no'] }))
     expect(items.map(i => [i.id, i.kind])).toEqual([['a', 'unknown']])
     expect(countOf(items)).toBe(1)
     expect(parseList('not json')).toEqual([])
@@ -46,7 +46,7 @@ describe('the list', () => {
   })
 
   it('counts every item but a quiet note', () => {
-    const items = parseList(JSON.stringify({ items: [{ id: 'a', kind: 'ask', question: 'q' }, { id: 'b', kind: 'fyi', question: 'Bob kept a ruling' }] }))
+    const items = parseList(JSON.stringify({ items: [{ id: 'a', kind: 'ask', rank: 1, question: 'q' }, { id: 'b', kind: 'fyi', rank: 1, question: 'Bob kept a ruling' }] }))
     expect(items).toHaveLength(2)
     expect(countOf(items)).toBe(1)
     expect(countOf(studio())).toBe(6)
@@ -123,7 +123,7 @@ describe('the buttons', () => {
   })
 
   it('has no button for a Claude sign-in, which a browser can’t run', () => {
-    const login = parseList(JSON.stringify({ items: [{ id: 'l', kind: 'claude_login', question: 'Sign in', terminal: null, actions: [{ id: 'sign_in', title: 'Sign In', destructive: false, primary: true }] }] }))[0]
+    const login = parseList(JSON.stringify({ items: [{ id: 'l', kind: 'claude_login', rank: 1, question: 'Sign in', terminal: null, actions: [{ id: 'sign_in', title: 'Sign In', destructive: false, primary: true }] }] }))[0]
     expect(buttonsFor(login)).toEqual([])
   })
 })
@@ -297,4 +297,8 @@ describe('the words', () => {
     expect(needsYouFailure('closed', 'studio')).toContain('reconnecting')
     expect(needsYouFailure('protocol', 'studio')).toBe('Far Cooler couldn’t read what needs you on studio. It tries again in a few seconds.')
   })
+})
+
+it.each([undefined, -1, 4294967296, 1.5])('rejects invalid rank %s instead of inventing urgency', rank => {
+  expect(() => parseList(JSON.stringify({ items: [{ id: 'a', kind: 'ask', rank, question: 'q' }] }))).toThrow('needs_you_rank')
 })

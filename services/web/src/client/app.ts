@@ -23,7 +23,7 @@
 
 import { openWorkflow, installWorkflowPort } from './workflow-view'
 import { WorkflowSessionPort } from './workflow-session'
-import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
+import init, { connect, fingerprint, freshnessMs, makeOffer, newReplySecret, offerIsStale, needsYouView, openReply, passkeyKeyLine, planView, recoveryView, registrationData, registrationProof, rpId, type WebRunner } from 'fc-web'
 
 import { compareWords, connectFailure, joinDetail, joinTitle, linkNotice, MISMATCH, needsYouFailure, registerFailure, restoreFailure, runnerStopped, saveFailure, sealedRefusal, unreachable } from './copy'
 import { askForCopy, assertWith, canUsePasskeys, userHandle, type Device, forgetDevice, type Granted, loadDevice, makePasskey, type Passkey, saveDevice, type Signed } from './device'
@@ -40,6 +40,7 @@ import { ChatView } from './chat'
 import { DetailBoard, type Subject } from './detail'
 import { type Answer, DetailSheet } from './detail-view'
 import { corePhrases } from './core-phrases'
+import { useNeedsYouPresenter } from './needs-present'
 import { useConversationWords } from './chat-copy'
 import { askToUsePasskey } from './passkey-prompt'
 import { drawCode } from './qr'
@@ -1155,6 +1156,7 @@ async function start(watch: StartWatch): Promise<void> {
   // are the longest wait, and neither depends on who is signed in.
   const loading = Promise.all([loadWeb(), loadTailcat(__WASM__.tailcat)])
   loading.catch(() => {})
+  useNeedsYouPresenter(needsYouView)
   useConversationWords(planView)
 
   // Which account is signed in decides which device this browser may use, so

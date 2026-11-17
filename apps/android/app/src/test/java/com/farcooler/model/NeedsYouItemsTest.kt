@@ -30,6 +30,38 @@ class NeedsYouItemsTest {
     }
 
     @Test
+    fun `missing and invalid ranks are refused instead of inventing urgency`() {
+        org.junit.Assert.assertThrows(kotlinx.serialization.MissingFieldException::class.java) {
+            json.decodeFromString(NeedsYouList.serializer(), """{"items":[{"id":"a","kind":"ask"}]}""")
+        }
+        for (rank in listOf(-1L, 4_294_967_296L)) {
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                NeedsYouPresenter.view(mapOf("a" to listOf(NeedsYouItem(id = "a", kind = "ask", rank = rank))))
+            }
+        }
+    }
+
+    @Test
+    fun `ov-1337 aggregate adapter golden calls Rust`() {
+        val input = json.parseToJsonElement(repositoryFile("test/fixtures/needs-you-aggregate.json")).jsonObject
+        val runners = input.getValue("needs_you").jsonArray.associate { runner ->
+            val r = runner.jsonObject
+            r.getValue("runner_id").jsonPrimitive.content to
+                json.decodeFromJsonElement(NeedsYouList.serializer(), kotlinx.serialization.json.buildJsonObject { put("items", r.getValue("items")) }).items
+        }
+        val view = NeedsYouPresenter.view(runners)
+        assertEquals(listOf("z:ask", "a:pr", "a:fyi", "a:future"), view.rows.map { "${it.key.runner_id}:${it.key.item_id}" })
+        assertEquals(3u, view.counted_total)
+        assertEquals(listOf("fyi"), view.others.map { it.item_id })
+        assertEquals(true, view.split)
+        assertEquals(listOf(2u, 0u, 1u), view.runner_counts.map { it.count })
+        val first = NeedsYouItems.merge(runners).first()
+        assertEquals("allow/raw", first.item.actions.first().id)
+        assertEquals("z", first.hostId)
+        assertEquals("ask", first.item.id)
+    }
+
+    @Test
     fun `the shared fixture decodes to the values it holds`() {
         val runners = fixture()
         assertEquals(listOf("studio", "build-box"), runners.keys.toList())
@@ -210,21 +242,21 @@ class NeedsYouItemsTest {
         // its tier is review. Within a tier, the older item goes first.
         assertEquals(
             listOf(
-                "studio/ask:hook-ask-01000000-0000-7000-8000-000000000029",
-                "build-box/ask:hook-ask-01000000-0000-7000-8000-00000000002a",
-                "studio/blocked:01000000-0000-7000-8000-00000000000a",
-                "studio/decision:01000000-0000-7000-8000-00000000000c",
-                "studio/pr-thread:01000000-0000-7000-8000-00000000000e",
-                "studio/pr-review:0123456789abcdef",
-                "build-box/review:01000000-0000-7000-8000-00000000001e",
-                "studio/review:01000000-0000-7000-8000-00000000000d",
+                "[\"studio\",\"ask:hook-ask-01000000-0000-7000-8000-000000000029\"]",
+                "[\"build-box\",\"ask:hook-ask-01000000-0000-7000-8000-00000000002a\"]",
+                "[\"studio\",\"blocked:01000000-0000-7000-8000-00000000000a\"]",
+                "[\"studio\",\"decision:01000000-0000-7000-8000-00000000000c\"]",
+                "[\"studio\",\"pr-thread:01000000-0000-7000-8000-00000000000e\"]",
+                "[\"studio\",\"pr-review:0123456789abcdef\"]",
+                "[\"build-box\",\"review:01000000-0000-7000-8000-00000000001e\"]",
+                "[\"studio\",\"review:01000000-0000-7000-8000-00000000000d\"]",
             ),
             merged.map { it.key },
         )
         // The clock disagrees: sorting by `since` would put the build box's
         // review first. This is what makes the case above a test of rank.
         assertEquals(
-            "build-box/review:01000000-0000-7000-8000-00000000001e",
+            "[\"build-box\",\"review:01000000-0000-7000-8000-00000000001e\"]",
             merged.minByOrNull { it.item.since ?: Long.MAX_VALUE }?.key,
         )
     }
@@ -283,7 +315,7 @@ class NeedsYouItemsTest {
                 "build-box" to listOf(request("pr-review:aaaa", 400_000_000)),
             ),
         )
-        assertEquals(listOf("build-box/pr-review:aaaa", "studio/pr-review:bbbb").sorted(), merged.map { it.key }.sorted())
+        assertEquals(listOf("[\"build-box\",\"pr-review:aaaa\"]", "[\"studio\",\"pr-review:bbbb\"]").sorted(), merged.map { it.key }.sorted())
         assertEquals(listOf("pr-review:bbbb", "pr-review:aaaa"), merged.map { it.item.id })
         // Only a request is: the same id elsewhere is two items.
         val ask = NeedsYouItem(id = "ask:x", kind = "ask", rank = 5)
@@ -371,7 +403,7 @@ class NeedsYouItemsTest {
         val a1 = NeedsYouItem(id = "blocked:1", kind = "blocked", rank = 150_000_000)
         val a2 = NeedsYouItem(id = "blocked:2", kind = "blocked", rank = 150_000_000)
         val b1 = NeedsYouItem(id = "blocked:1", kind = "blocked", rank = 150_000_000)
-        val expected = listOf("alpha/blocked:1", "alpha/blocked:2", "beta/blocked:1")
+        val expected = listOf("[\"alpha\",\"blocked:1\"]", "[\"alpha\",\"blocked:2\"]", "[\"beta\",\"blocked:1\"]")
         // Whatever order the runners and their items arrive in.
         assertEquals(expected, NeedsYouItems.merge(mapOf("beta" to listOf(b1), "alpha" to listOf(a2, a1))).map { it.key })
         assertEquals(expected, NeedsYouItems.merge(mapOf("alpha" to listOf(a1, a2), "beta" to listOf(b1))).map { it.key })

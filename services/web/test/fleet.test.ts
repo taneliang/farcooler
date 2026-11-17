@@ -51,7 +51,7 @@ describe('a runner’s cards', () => {
 })
 
 describe('two runners', () => {
-  it('lists both runners’ items, each row naming its runner, in the order they were enrolled', async () => {
+  it('lists both runners’ items, each row naming its runner, in shared urgency order', async () => {
     const f = fleet()
     f.set.add('r1', 'studio', runner(list('studio')).deps)
     f.set.add('r2', 'build-box', runner(list('build-box')).deps)
@@ -62,7 +62,8 @@ describe('two runners', () => {
     expect(view.state).toBe('ready')
     const names = view.items.map(i => i.runnerName)
     expect(new Set(names)).toEqual(new Set(['studio', 'build-box']))
-    expect(names.indexOf('build-box')).toBeGreaterThan(names.lastIndexOf('studio'))
+    expect(view.items[0].runnerName).toBe('studio')
+    expect(names.indexOf('build-box')).toBeLessThan(names.lastIndexOf('studio'))
     expect(countOf(view.items)).toBeGreaterThan(countOf(view.items.filter(x => x.runner === 'r1')))
     expect(view.items.length).toBe(JSON.parse(list('studio')).items.length + JSON.parse(list('build-box')).items.length)
   })
@@ -76,7 +77,7 @@ describe('two runners', () => {
   })
 
   it('sends an answer to the runner the item is on, even when both number an item alike', async () => {
-    const same = JSON.stringify({ items: [{ id: 'ask:1', kind: 'ask', question: 'Run it?', ask_id: 'a1', terminal: { id: 't1', label: 'x' }, actions: [{ id: 'allow', title: 'Allow' }] }] })
+    const same = JSON.stringify({ items: [{ id: 'ask:1', kind: 'ask', rank: 1, question: 'Run it?', ask_id: 'a1', terminal: { id: 't1', label: 'x' }, actions: [{ id: 'allow', title: 'Allow' }] }] })
     const a = runner(same)
     const b = runner(same)
     const f = fleet()
@@ -94,7 +95,7 @@ describe('two runners', () => {
   })
 
   it('marks only the item answered as busy, not the other runner’s item with the same id', async () => {
-    const same = JSON.stringify({ items: [{ id: 'ask:1', kind: 'ask', question: 'Run it?', ask_id: 'a1', terminal: { id: 't1', label: 'x' }, actions: [{ id: 'allow', title: 'Allow' }] }] })
+    const same = JSON.stringify({ items: [{ id: 'ask:1', kind: 'ask', rank: 1, question: 'Run it?', ask_id: 'a1', terminal: { id: 't1', label: 'x' }, actions: [{ id: 'allow', title: 'Allow' }] }] })
     let release = () => {}
     const slow: RunnerDeps = { ...runner(same).deps, ask: () => new Promise(done => (release = done)) }
     const f = fleet()
@@ -190,4 +191,36 @@ describe('two runners', () => {
     await f.set.press(item, { kind: 'open', terminal: item.terminal!.id })
     expect(f.opened).toEqual([`r1:${item.terminal!.id}`])
   })
+})
+
+// The shared adapter fixture: duplicates are removed before every count and group.
+import aggregateFixture from '../../../test/fixtures/needs-you-aggregate.json'
+import { aggregate } from '../src/client/needs-present'
+import { groups } from '../src/client/needs'
+
+it('ov-1337 draws the shared aggregate golden and dispatches raw IDs', async () => {
+  const f = fleet()
+  const sources = aggregateFixture.needs_you.map(r => ({ ...r, source: runner(JSON.stringify({ items: r.items })) }))
+  for (const r of sources) { f.set.add(r.runner_id, r.runner_id, r.source.deps); f.set.up(r.runner_id) }
+  await settle()
+  const items = f.last().items
+  expect(items.map(i => `${i.runner}:${i.rawItemId}`)).toEqual(['z:ask', 'a:pr', 'a:fyi', 'a:future'])
+  expect(countOf(items)).toBe(3)
+  expect(groups(items).others.map(i => i.rawItemId)).toEqual(['fyi'])
+  expect(groups(items).split).toBe(true)
+  expect(aggregate(items).view.workspace_counts).toEqual([{ runner_id: 'z', id: 'w', count: 1 }])
+  const ask = items[0]
+  // Add dispatch targets only for this action test; aggregation preserves the originals.
+  await f.set.press(ask, { kind: 'ask', terminal: 't', ask: 'raw-ask', option: ask.actions[0].id })
+  expect(sources.find(r => r.runner_id === 'z')!.source.asked).toEqual(['ask t raw-ask allow/raw'])
+})
+
+it('uses structured keys when runner and item IDs contain separators', async () => {
+  const f = fleet()
+  for (const [id, item] of [['a|b', 'c'], ['a', 'b|c']]) {
+    f.set.add(id, id, runner(JSON.stringify({ items: [{ id: item, kind: 'ask', rank: 1, question: 'q' }] })).deps)
+    f.set.up(id)
+  }
+  await settle()
+  expect(new Set(f.last().items.map(i => i.id)).size).toBe(2)
 })

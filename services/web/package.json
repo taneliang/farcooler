@@ -5,7 +5,9 @@
   "scripts": {
     "build": "./build.sh",
     "dev": "wrangler dev",
-    "test": "vitest run",
+    "test": "vitest run && npm run test:needs",
+    "pretest:needs": "cargo build --manifest-path ../../Cargo.toml -p farcooler-client --example plan_view_bin -j 2",
+    "test:needs": "vitest run --config vitest.needs.config.ts",
     "test:workflow": "node scripts/workflow-test.mjs",
     "size-gate": "node scripts/size-gate.mjs dist"
   },

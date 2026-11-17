@@ -12,9 +12,8 @@ import kotlinx.serialization.Transient
  * its own items — held asks, blocked agents, tasks in Needs Decision, tasks In
  * Review — and `Session::needs_you` hands them here as the JSON
  * `crates/client/src/needs_you_json.rs` writes. What this file does is decode
- * that shape, merge runners by rank, and derive what little an older runner
- * can say. AgentKit's `NeedsYou.swift` does the same for the Apple apps, and
- * both are pinned by `test/fixtures/needs-you.json`.
+ * that shape, adapt Rust's needs_you_view result, and derive what little an
+ * older runner can say. The wire shape is pinned by `test/fixtures/needs-you.json`.
  *
  * Keys are snake_case, as the projection writes them. An unset optional
  * arrives as a present key holding null, and an empty id is null rather than
@@ -119,7 +118,7 @@ data class NeedsYouItem(
      * duration and never a clock reading, so two runners' items merge by it
      * without comparing clocks.
      */
-    val rank: Long = Long.MAX_VALUE,
+    @kotlinx.serialization.Required val rank: Long = 4_294_967_295L,
     /** Unix milliseconds the item began, on the runner's clock. Shown, never sorted by. */
     val since: Long? = null,
     @SerialName("workspace_id") val workspaceId: String? = null,
@@ -154,12 +153,12 @@ data class NeedsYouItem(
     val kindValue: NeedsYouKind get() = NeedsYouKind.parse(kind)
 
     /** Whether it adds to a count or breaks the all-clear: an FYI is read, not acted on (ov-756). */
-    val isCounted: Boolean get() = kindValue != NeedsYouKind.FYI
+    val isCounted: Boolean get() = NeedsYouPresenter.view(mapOf("" to listOf(this))).rows.first().counted
 
     val alsoValues: List<NeedsYouKind> get() = also.map(NeedsYouKind::parse)
 
     /** Someone else's: filed under Everyone Else (ov-633). */
-    val isOthers: Boolean get() = concern?.let { !it.yours } ?: false
+    val isOthers: Boolean get() = NeedsYouPresenter.view(mapOf("" to listOf(this))).rows.first().group == "others"
 
     /** Whose an Everyone Else row says it is: a member's name, else "Owner". Null for yours and nobody's. */
     val othersName: String?
@@ -190,7 +189,7 @@ data class NeedsYouItem(
 /** An item and the runner it came from, which is half its identity: ids are minted per daemon. */
 data class RunnerNeedsYouItem(val hostId: String, val item: NeedsYouItem) {
     /** What a `LazyColumn` keys a row on. */
-    val key: String get() = "$hostId/${item.id}"
+    val key: String get() = kotlinx.serialization.json.buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive(hostId)); add(kotlinx.serialization.json.JsonPrimitive(item.id)) }.toString()
 }
 
 object NeedsYouItems {
@@ -215,23 +214,16 @@ object NeedsYouItems {
      * thing to do. It shows once, from the runner with the lowest rank (ov-315).
      */
     fun merge(runners: Map<String, List<NeedsYouItem>>): List<RunnerNeedsYouItem> =
-        runners.flatMap { (host, items) -> items.map { RunnerNeedsYouItem(host, it) } }
-            .sortedWith(
-                compareBy<RunnerNeedsYouItem>(
-                    { it.item.kindValue == NeedsYouKind.UNKNOWN },
-                    { it.item.rank },
-                    { it.hostId },
-                    { it.item.id },
-                )
-            )
-            .distinctBy { if (it.item.kindValue == NeedsYouKind.PR_REVIEW) it.item.id else it.key }
+        NeedsYouPresenter.view(runners).rows.map { row ->
+            RunnerNeedsYouItem(row.key.runner_id, runners.getValue(row.key.runner_id).first { it.id == row.key.item_id })
+        }
 
     /**
      * A workspace's count: its items, not its signals. An ask with a decision
      * in [NeedsYouItem.also] is one thing to do, and counts once.
      */
     fun count(items: List<RunnerNeedsYouItem>, hostId: String, workspaceId: String?): Int =
-        items.count { it.hostId == hostId && it.item.workspaceId == workspaceId && it.item.isCounted }
+        NeedsYouPresenter.total(items.filter { it.hostId == hostId && it.item.workspaceId == workspaceId })
 
     /**
      * What a runner without `needs_you` still says (spec §2.6): its blocked

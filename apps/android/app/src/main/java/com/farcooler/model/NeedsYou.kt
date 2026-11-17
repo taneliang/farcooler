@@ -112,7 +112,12 @@ object NeedsYou {
      * no members reads as it always did. AgentKit's `NeedsYou.grouped`.
      */
     fun grouped(rows: List<NeedsYouRow>): Pair<List<NeedsYouRow>, List<NeedsYouRow>> =
-        rows.partition { !it.item.isOthers }
+        NeedsYouPresenter.view(rows.map { it.entry }).let { view ->
+            fun resolve(keys: List<com.farcooler.core.wire.NeedsYouRowKey>) = keys.map { key ->
+                rows.first { it.entry.hostId == key.runner_id && it.item.id == key.item_id }
+            }
+            resolve(view.yours) to resolve(view.others)
+        }
 
     /**
      * Every runner's items, most urgent first, each labeled by workspace
@@ -128,7 +133,7 @@ object NeedsYou {
         val merged = NeedsYouItems.merge(runners.associate { it.hostId to shown(it) })
         // A runner with a member puts a concern on each item that has an owner; one without puts none on any.
         val teams = merged.filter { it.item.concern != null }.map { it.hostId }.toSet()
-        val split = merged.any { it.item.isOthers }
+        val split = NeedsYouPresenter.view(merged).split
         return merged.map { entry ->
             val runner = byHost.getValue(entry.hostId)
             NeedsYouRow(entry, place(entry.item, runner), if (namesRunners) runner.label else null, entry.hostId in teams, split)
@@ -173,7 +178,7 @@ object NeedsYou {
      * checking instead. With no runners at all, there's nothing to check.
      */
     fun nothingNeedsYou(runners: List<NeedsYouRunner>, rows: List<NeedsYouRow>): Boolean =
-        rows.none { it.entry.item.isCounted } && (runners.isEmpty() || runners.any { it.reading != null })
+        NeedsYouPresenter.total(rows.map { it.entry }) == 0 && (runners.isEmpty() || runners.any { it.reading != null })
 
     /**
      * The runners whose items may not all be here, by name: no list read
@@ -222,7 +227,7 @@ object NeedsYou {
      */
     fun workspaces(runner: NeedsYouRunner, items: List<RunnerNeedsYouItem>): List<RepositoryWorkspaces> {
         val fleet = runner.fleet
-        val mine = items.filter { it.hostId == runner.hostId && it.item.isCounted }.map { it.item }
+        val mine = items.filter { it.hostId == runner.hostId }
         val groups = WorkspaceGrouping.groups(fleet).toMutableList()
         // A repository the runner has registered and nothing lives in yet
         // still has its board, and so its row.
@@ -236,7 +241,7 @@ object NeedsYou {
         return groups.filter { it.repository.isNotEmpty() || it.workspaces.isNotEmpty() }.map { group ->
             val repository = group.repository
             val listed = group.workspaces.map { it.id }.toSet()
-            val inRepository = mine.filter { it.repositoryId == repository }
+            val inRepository = mine.filter { it.item.repositoryId == repository }
             RepositoryWorkspaces(
                 hostId = runner.hostId,
                 repository = repository,
@@ -249,13 +254,13 @@ object NeedsYou {
                         name = if (summary.isImplicit) repositoryName(repository, runner) ?: summary.name
                         else summary.name,
                         orchestrator = workspace.orchestrator?.let(terminals::get),
-                        count = if (summary.isImplicit) inRepository.size
-                        else inRepository.count { it.workspaceId == summary.id },
+                        count = NeedsYouPresenter.total(if (summary.isImplicit) inRepository
+                        else inRepository.filter { it.item.workspaceId == summary.id }),
                     )
                 },
                 unclaimed = group.unclaimed.filter { it !in hiddenIds },
                 unclaimedCount = if (group.workspaces.any { it.workspace.isImplicit }) 0
-                else inRepository.count { it.workspaceId == null || it.workspaceId !in listed },
+                else NeedsYouPresenter.total(inRepository.filter { it.item.workspaceId == null || it.item.workspaceId !in listed }),
                 hidden = fleet.worktrees.filter { it.isHidden && it.repository == repository }.map { it.id },
             )
         }
