@@ -43,6 +43,14 @@ fun SealedReplySection(reply: SealedReply, deviceName: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        state == SealedReply.State.ALREADY_POSTED || state == SealedReply.State.SLOTS_FULL -> Text(
+            if (state == SealedReply.State.ALREADY_POSTED)
+                "A reply was already sent to $name, but its code is unavailable. Start again on that device."
+            else "Too many teammates have replied to $name. Ask them to start again.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.tertiary,
+            textAlign = TextAlign.Center,
+        )
         state == SealedReply.State.NOT_SENT || shown == null -> Text(
             "Couldn’t send this to $name. If it has a camera, scan the code above with it.",
             style = MaterialTheme.typography.bodySmall,

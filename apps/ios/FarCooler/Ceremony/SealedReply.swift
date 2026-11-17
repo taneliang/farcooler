@@ -64,6 +64,8 @@ final class SealedReply: ObservableObject {
         case sent
         /// It couldn't be sealed or posted. The QR code is still on screen.
         case notSent
+        case alreadyPosted
+        case slotsFull
     }
 
     @Published private(set) var state: State = .none
@@ -93,6 +95,7 @@ final class SealedReply: ObservableObject {
     /// first (409). The browser holds the first, so its code is the one to
     /// show, never "couldn't send" (ov-778 review L1).
     private var delivered: [String: String] = [:]
+    private var activeCeremony: String?
 
     /// Seal and post `reply`, when `offer` asked for that.
     ///
@@ -101,10 +104,12 @@ final class SealedReply: ObservableObject {
     /// Every refusal posts nothing: the core is the only judge of the key, the
     /// freshness window and whether the reply answers this offer.
     func send(offer: Data, reply: Data, heldFor: TimeInterval, teammate: Bool = false) {
-        reset()
         guard let asked = try? JSONDecoder().decode(CeremonyOffer.self, from: offer),
             asked.reply_key != nil
-        else { return }
+        else { reset(); return }
+        if state == .sending && activeCeremony == asked.ceremony { return }
+        reset()
+        activeCeremony = asked.ceremony
         state = .sending
         let started = Date()
         let post = self.post
@@ -129,7 +134,10 @@ final class SealedReply: ObservableObject {
             guard !Task.isCancelled else { return }
             let first = outcome == .alreadyPosted ? delivered[asked.ceremony] : nil
             code = outcome.showsCode ? sealed.code : first
-            state = outcome == .posted || first != nil ? .sent : .notSent
+            if outcome == .posted || first != nil { state = .sent }
+            else if outcome == .alreadyPosted { state = .alreadyPosted }
+            else if outcome == .slotsFull { state = .slotsFull }
+            else { state = .notSent }
         }
     }
 
@@ -169,6 +177,7 @@ final class SealedReply: ObservableObject {
     func reset() {
         sending?.cancel()
         sending = nil
+        activeCeremony = nil
         state = .none
         code = nil
         hostKeys = []
@@ -223,6 +232,14 @@ struct SealedReplySection: View {
                         }
                         .font(.footnote)
                     }
+                } else if reply.state == .alreadyPosted || reply.state == .slotsFull {
+                    Text(reply.state == .alreadyPosted
+                        ? "A reply was already sent to \(deviceName), but its code is unavailable. Start again on that device."
+                        : "Too many teammates have replied to \(deviceName). Ask them to start again.")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("sealed-reply-status")
                 } else {
                     Text("Couldn’t send this to \(deviceName). If it has a camera, scan the code above with it.")
                         .font(.footnote)

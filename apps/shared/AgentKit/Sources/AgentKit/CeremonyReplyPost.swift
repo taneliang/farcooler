@@ -7,6 +7,8 @@ public enum CeremonyReplyPost: Equatable, Sendable {
     /// This device posted for this ceremony already, and the relay kept that
     /// one (409).
     case alreadyPosted
+    /// The teammate reply slots are full.
+    case slotsFull
     /// The relay won't take a reply from this account for that one (403): not
     /// the account, and not a teammate it vouches for.
     case refused
@@ -41,7 +43,12 @@ extension DirectoryClient {
         case .success(let reply):
             switch reply.status {
             case 200: return .posted
-            case 409: return .alreadyPosted
+            case 409:
+                switch reply.body["error"] as? String {
+                case "already_posted": return .alreadyPosted
+                case "slots_full": return .slotsFull
+                default: return .failed
+                }
             case 403: return .refused
             default: return .failed
             }

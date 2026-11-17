@@ -4,6 +4,7 @@ import com.farcooler.account.RelayAnswer
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -169,7 +170,9 @@ class SealedReplyTest {
     @Test
     fun eachRelayAnswerHasItsOutcome() = runTest {
         val cases = listOf(
-            RelayAnswer.Refused(409, null) to SealedReplyPost.Outcome.ALREADY_POSTED,
+            RelayAnswer.Refused(409, buildJsonObject { put("error", JsonPrimitive("already_posted")) }) to SealedReplyPost.Outcome.ALREADY_POSTED,
+            RelayAnswer.Refused(409, buildJsonObject { put("error", JsonPrimitive("slots_full")) }) to SealedReplyPost.Outcome.SLOTS_FULL,
+            RelayAnswer.Refused(409, null) to SealedReplyPost.Outcome.FAILED,
             RelayAnswer.Refused(403, null) to SealedReplyPost.Outcome.REFUSED,
             RelayAnswer.Refused(500, null) to SealedReplyPost.Outcome.FAILED,
             RelayAnswer.Unreachable("signed out") to SealedReplyPost.Outcome.NOT_SIGNED_IN,

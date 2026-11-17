@@ -592,5 +592,5 @@ pub fn open_own_reply(offer: &farcooler_ceremony::Offer, manifest: &farcooler_ce
     offer.reply_key = Some(key.public().into());
     let (sealed, _) = farcooler_ceremony::seal_reply(&offer, manifest).unwrap();
     let answer = serde_json::json!({"replies": [{"posted_by": offer.account, "sealed": sealed}]}).to_string();
-    farcooler_web::enroll::open_earliest(&answer, &offer, &key.secret(), false, 0.0, 0.0).unwrap().taken.runners
+    farcooler_web::enroll::open_all(&answer, &offer, &key.secret(), false, 0.0, 0.0).unwrap().remove(0).taken.runners
 }

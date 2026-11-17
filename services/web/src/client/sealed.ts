@@ -7,7 +7,7 @@
 /// 1. **The owner's reply is opened first.** Anyone who saw the offer and may
 ///    post can post a reply that opens, so the browser never picks among them:
 ///    the reply posted by the offer's own account wins, and only with none does
-///    the earliest teammate's open (crates/web `enroll::earliest` decides).
+///    each verified teammate reply is offered in posting order (crates/web `enroll::open_all` decides).
 /// 2. **The code is this browser's own**, from its own open of that reply. A
 ///    same-account reply still relies on this comparison. A teammate's reply
 ///    also needs its device signature and directory-pinned runner attestations.

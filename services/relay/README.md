@@ -205,7 +205,8 @@ It never sees a runner, a host key or a token.
   The poster must be signed in as `account`, or be its teammate: both `admin`
   or `member` of a team that isn't personal, the rule `teammate.rs` uses for
   granting (`TEAMMATE_RULE`). Anyone else gets 403. Each poster gets one reply
-  per ceremony (a second gets 409). The account's own post always gets in, and
+  per ceremony (a second gets 409 `already_posted`; a teammate with no slot gets
+  409 `slots_full`). The account's own post always gets in, and
   its teammates share three more slots, so neither a stranger's post nor four
   teammates' can block the account's own phone. A body that looks like an
   unsealed reply gets 400.

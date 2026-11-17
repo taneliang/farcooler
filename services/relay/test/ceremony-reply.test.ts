@@ -210,6 +210,7 @@ describe('the sealed ceremony reply', () => {
     for (const [i, mate] of mates.slice(0, 4).entries()) {
       const answer = await post(mate, { ceremony: CEREMONY, account: ALICE, sealed: junk(i + 1) })
       expect(answer.status, mate).toBe(i < 3 ? 200 : 409)
+      if (i >= 3) expect(answer.body).toEqual({ error: 'slots_full' })
     }
     expect((await post(ALICE)).status).toBe(200)
     // And a fifth teammate, after the owner, is still refused.
@@ -229,6 +230,7 @@ describe('the sealed ceremony reply', () => {
     for (const [i, mate] of mates.entries()) {
       const answer = await post(mate, { ceremony: CEREMONY, account: ALICE, sealed: junk(i + 1) })
       expect(answer.status, mate).toBe(i < 3 ? 200 : 409)
+      if (i >= 3) expect(answer.body).toEqual({ error: 'slots_full' })
     }
     expect((await take(ALICE)).body.replies).toHaveLength(4)
   })
@@ -258,7 +260,7 @@ describe('the sealed ceremony reply', () => {
 
   it('keeps a poster’s first reply to a ceremony and refuses its second', async () => {
     expect((await post(ALICE)).status).toBe(200)
-    expect((await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed: junk(7) })).status).toBe(409)
+    expect(await post(ALICE, { ceremony: CEREMONY, account: ALICE, sealed: junk(7) })).toMatchObject({ status: 409, body: { error: 'already_posted' } })
     expect((await take(ALICE)).body).toEqual(one(fixture.sealed, ALICE))
   })
 

@@ -17,8 +17,8 @@
 ///   nobody's junk post can take the slot from the account's own phone.
 /// - `GET /v1/ceremony/reply/<ceremony>`. Only the offer's account may read,
 ///   and it gets every reply for it, each with who posted it (`posted_by`, and
-///   `posted_by_email`, the verified one,, or null), and the read
-///   deletes them all. After `REPLY_TTL_MS` a reply is gone. Every refusal is
+///   `posted_by_email`, the verified one or null, and directory authority),
+///   and the read deletes them all. After `REPLY_TTL_MS` a reply is gone. Every refusal is
 ///   the same 404, so a reader learns nothing about a ceremony that isn't
 ///   theirs. The five-minute cron deletes what nobody read.
 ///
@@ -124,7 +124,12 @@ async function postReply(request: Request, env: Env): Promise<Response> {
   )
     .bind(ceremony, account, poster, sealed, now, cutoff, REPLIES_MAX)
     .run()
-  if (!written.meta.changes) return json({ error: 'taken' }, 409)
+  if (!written.meta.changes) {
+    const existing = await env.DB.prepare(`SELECT 1 FROM ceremony_replies
+      WHERE ceremony = ? AND account_id = ? AND posted_by = ? AND created_at >= ?`)
+      .bind(ceremony, account, poster, cutoff).first()
+    return json({ error: existing ? 'already_posted' : 'slots_full' }, 409)
+  }
   return json({ ok: true })
 }
 

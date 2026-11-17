@@ -97,8 +97,16 @@ struct SealedReplyHarness: View {
         }
         store.sealedReply.post = { ceremony, account, sealed in
             posts.append((ceremony, account, sealed))
-            if arguments.contains("-sealed-reply-refused") { return .alreadyPosted }
-            return posts.count > 1 && arguments.contains("-sealed-reply-again") ? .alreadyPosted : .posted
+            if arguments.contains("-sealed-reply-refused") { return .refused }
+            if arguments.contains("-sealed-reply-already") { return .alreadyPosted }
+            if arguments.contains("-sealed-reply-full") { return .slotsFull }
+            if arguments.contains("-sealed-reply-inflight") && posts.count == 1 {
+                await withCheckedContinuation { continuation in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { continuation.resume() }
+                }
+                return .posted
+            }
+            return posts.count > 1 && (arguments.contains("-sealed-reply-again") || arguments.contains("-sealed-reply-inflight")) ? .alreadyPosted : .posted
         }
         store.read(offer, runners: [Self.cosmo], grantingFrom: Self.cosmo)
         if case .confirming = store.phase {
@@ -109,6 +117,10 @@ struct SealedReplyHarness: View {
             } else {
                 await store.confirm()
             }
+        }
+        if arguments.contains("-sealed-reply-inflight") {
+            while posts.isEmpty { await Task.yield() }
+            store.sealedReply.send(offer: Data(offer.utf8), reply: Data(store.code.utf8), heldFor: 0)
         }
         await store.sealedReply.sending?.value
         if arguments.contains("-sealed-reply-again") {

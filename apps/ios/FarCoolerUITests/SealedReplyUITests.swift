@@ -44,6 +44,18 @@ final class SealedReplyUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["sealed-reply-code"].exists)
     }
 
+    func testConflictCasesHaveDistinctWordsAndNoCode() {
+        let already = launch(["-sealed-reply-already"])
+        _ = label(already, "sealed-posts")
+        XCTAssertTrue(label(already, "sealed-reply-status").contains("already sent"))
+        XCTAssertFalse(already.descendants(matching: .any)["sealed-reply-code"].exists)
+        already.terminate()
+        let full = launch(["-sealed-reply-full"])
+        _ = label(full, "sealed-posts")
+        XCTAssertTrue(label(full, "sealed-reply-status").contains("Too many teammates"))
+        XCTAssertFalse(full.descendants(matching: .any)["sealed-reply-code"].exists)
+    }
+
     /// Confirm tapped twice while Face ID is up builds and posts one reply
     /// (ov-778 review L1).
     func testADoubleTapOnConfirmPostsOnce() {
@@ -62,6 +74,13 @@ final class SealedReplyUITests: XCTestCase {
         let opened = label(app, "sealed-opened-code")
         XCTAssertEqual(opened.count, 6, opened)
         XCTAssertEqual(label(app, "sealed-reply-code"), opened, "the code shown is the one the browser holds")
+    }
+
+    func testASecondSendWhileTheFirstPostIsInFlightShowsTheStoredCode() {
+        let app = launch(["-sealed-reply-inflight"])
+        _ = label(app, "sealed-posts")
+        XCTAssertEqual(label(app, "sealed-reply-status"), "Sent to Chrome on Mac. Check that it shows this code:")
+        XCTAssertEqual(label(app, "sealed-reply-code"), label(app, "sealed-opened-code"))
     }
 
     func testAnOfferWithoutAReplyKeyIsTheQrOnlyCeremony() {

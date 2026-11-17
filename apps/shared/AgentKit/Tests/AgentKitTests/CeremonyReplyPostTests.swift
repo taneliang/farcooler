@@ -38,14 +38,16 @@ struct CeremonyReplyPostTests {
 
     @Test("The comparison code is shown only after the relay stored the reply")
     func theCodeWaitsForThePost() {
-        let outcomes: [CeremonyReplyPost] = [.posted, .alreadyPosted, .refused, .notSignedIn, .failed]
+        let outcomes: [CeremonyReplyPost] = [.posted, .alreadyPosted, .slotsFull, .refused, .notSignedIn, .failed]
         #expect(outcomes.filter(\.showsCode) == [.posted])
     }
 
     @Test("Each of the relay's answers maps to its own outcome")
     func mapsTheRelaysAnswers() async {
         let cases: [(Result<DirectoryReply, AccountError>, CeremonyReplyPost)] = [
-            (.success(DirectoryReply(status: 409, body: ["error": "taken"])), .alreadyPosted),
+            (.success(DirectoryReply(status: 409, body: ["error": "already_posted"])), .alreadyPosted),
+            (.success(DirectoryReply(status: 409, body: ["error": "slots_full"])), .slotsFull),
+            (.success(DirectoryReply(status: 409, body: [:])), .failed),
             (.success(DirectoryReply(status: 403, body: ["error": "forbidden"])), .refused),
             (.success(DirectoryReply(status: 413, body: [:])), .failed),
             (.success(DirectoryReply(status: 500, body: [:])), .failed),

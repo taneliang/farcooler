@@ -41,6 +41,8 @@ class SealedReply {
 
         /** It couldn't be sealed or posted. The QR code is still on screen. */
         NOT_SENT,
+        ALREADY_POSTED,
+        SLOTS_FULL,
     }
 
     /**
@@ -109,7 +111,12 @@ class SealedReply {
         if (posted) delivered[asked.ceremony] = sealed.second
         val first = if (outcome == SealedReplyPost.Outcome.ALREADY_POSTED) delivered[asked.ceremony] else null
         _code.value = if (posted) sealed.second else first
-        _state.value = if (posted || first != null) State.SENT else State.NOT_SENT
+        _state.value = when {
+            posted || first != null -> State.SENT
+            outcome == SealedReplyPost.Outcome.ALREADY_POSTED -> State.ALREADY_POSTED
+            outcome == SealedReplyPost.Outcome.SLOTS_FULL -> State.SLOTS_FULL
+            else -> State.NOT_SENT
+        }
     }
 
     /**
@@ -137,7 +144,7 @@ class SealedReply {
 
 /** Posting a sealed reply to the relay's `POST /v1/ceremony/reply` (ov-770). */
 object SealedReplyPost {
-    enum class Outcome { POSTED, ALREADY_POSTED, REFUSED, NOT_SIGNED_IN, FAILED }
+    enum class Outcome { POSTED, ALREADY_POSTED, SLOTS_FULL, REFUSED, NOT_SIGNED_IN, FAILED }
 
     const val PATH = "/v1/ceremony/reply"
 
@@ -163,7 +170,11 @@ object SealedReplyPost {
             is RelayAnswer.Unreachable ->
                 if (answer.reason == "signed out") Outcome.NOT_SIGNED_IN else Outcome.FAILED
             is RelayAnswer.Refused -> when (answer.status) {
-                409 -> Outcome.ALREADY_POSTED
+                409 -> when (answer.body?.get("error")?.jsonPrimitive?.contentOrNull) {
+                    "already_posted" -> Outcome.ALREADY_POSTED
+                    "slots_full" -> Outcome.SLOTS_FULL
+                    else -> Outcome.FAILED
+                }
                 403 -> Outcome.REFUSED
                 else -> Outcome.FAILED
             }

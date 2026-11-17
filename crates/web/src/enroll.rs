@@ -94,7 +94,8 @@ pub struct Opened {
 /// posted by an account with no email on file, is refused as `wrong_account`.
 ///
 /// Too late and already taken refuse at once: they hold for every reply.
-pub fn open_earliest(
+#[cfg(test)]
+fn open_earliest(
     relay_answer: &str,
     offer: &Offer,
     reply_secret: &str,
