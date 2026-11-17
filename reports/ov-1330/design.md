@@ -46,31 +46,66 @@ misses the child still sees the parent.
 ## Proof of quiescence
 
 `end` is: `SIGCONT` and `SIGTERM` to the group (an agent can then end the work it alone holds, see below),
-up to one second for it to empty, then `SIGKILL` until it is empty; then reap the leader, unlink the socket,
-answer `ended`, and exit with the agent's status. The hold does the same when the agent exits by itself, and
-on `SIGHUP`/`SIGTERM` (tmux closing the pane).
+up to one second for it to empty, then `SIGKILL` until it is empty; then wait for every **descendant** of the hold
+to be gone (next section); then reap the leader, unlink the socket, answer `ended`, and exit with the agent's
+status. The hold does the same when the agent exits by itself, and on `SIGHUP`/`SIGTERM` (tmux closing the pane).
 
 So for a hold-launched owner, quiescence is proved by the hold's `ended` answer, or by its socket being gone,
-because the hold unlinks it only after the group is empty. The daemon never reads the tty for that proof, so
-a tty that a later pane reuses can neither be signalled nor make a finished owner look busy.
+because the hold unlinks it only after the group is empty and no descendant is alive. The daemon never reads the tty
+for that proof, so a tty that a later pane reuses can neither be signalled nor make a finished owner look busy.
 
 If the socket is there but nobody answers (the hold was killed), the daemon falls back to the observation it
 already had for a vanished owner: the pane is dead or gone and nothing is on its tty. It signals nothing. An
 owner launched by an earlier engine (no hold) gets the same observation-only treatment.
 
-## What the group does not cover
+## What leaves the group: followed, never signalled (fix round 1)
 
-A process that leaves the agent's process group (`setsid`, or `setpgid` into a group of its own) is outside
-the hold's authority. Codex runs its commands that way. The previous design reached them by parent pid, which
-is exactly the kind of proof six reviews broke. Now:
+A process that leaves the agent's process group (`setsid`, or `setpgid` into a group of its own) is outside the
+hold's authority, and the hold never signals it: that would be signalling a pid found by looking. Codex runs its
+commands that way. Round 0 let such a process run on after `ended`; the review rightly called that settling over
+work that may still be writing the worktree. Now the hold **follows** every descendant, in the group or not, and
+refuses to say `ended` while one is alive:
 
-* the hold's `SIGTERM` stage gives the agent a second to end them itself; the agent is their parent, so its
-  own `kill` of them is race-free;
-* Codex sets `PR_SET_PDEATHSIG` on Linux, so they end when it does;
-* on macOS, a command Codex started and did not end runs to completion.
+* **Linux: the hold is a child subreaper** (`prctl(PR_SET_CHILD_SUBREAPER)` before it forks). An orphaned
+  descendant is reparented to the hold, never to init, so every live descendant has a chain of live parents back to
+  the hold's pid, which is alive. One read of `/proc` finds them all; nothing has to be remembered.
+* **macOS: the kernel's unique ids.** XNU gives every process a 64-bit `p_uniqueid` that is never reused, and
+  records the unique id of the process that forked it (`p_puniqueid`, `PROC_PIDUNIQIDENTIFIERINFO`). That record is
+  **kept when the process is reparented to launchd**: measured on this Mac, a grandchild that called `setsid` after
+  its parent exited showed `ppid=1` and still `puniqueid` = its dead parent's unique id. The hold learns the unique
+  ids of its descendants (seeded with its own) every 100 ms while the agent runs and on every look during `end`; an id
+  once learned is ours for good, because it is never reused.
 
-That is a narrower stop than before, and it is the price of never signalling a process the engine did not
-start. It is recorded here rather than papered over.
+A look only waits. Nothing it finds is signalled, and a look that misses a process can only see less of the
+lineage, never take someone else's process for ours: an identity is learned only from its parent's.
+
+Then `end`, once the group is empty, waits up to five seconds for the descendants outside it. If the agent ended
+them (Codex kills its commands on `SIGTERM`; it is their parent, so that is race-free, and on Linux they also have
+`PR_SET_PDEATHSIG`), the hold answers `ended`. If one is still alive, the hold answers **`unsettled`**, keeps its
+socket and its unreaped leader, and stays; the daemon maps `unsettled` to a refusal ("native agent left a process
+running outside its group"), so the step is not settled. A later `end` looks again; when the last descendant
+exits, the hold answers `ended` and exits. The same holds when the agent exits by itself or tmux hangs the pane up:
+the hold does not remove its socket or exit while a descendant lives, so a missing socket still means "nothing of
+this agent's is running".
+
+**The residual, on macOS only.** The hold learns a unique id only by seeing the process alive. A descendant B that
+forks C and exits within one 100 ms learning interval, before the hold ever saw B, leaves C with a parent id the hold
+never learned (C reparented to launchd). Such a C is invisible, as it is to every unprivileged observer on macOS
+(the complete trackers, coalitions and Endpoint Security, need privilege). Linux has no residual: the subreaper sees
+C whatever B did. This is narrower than round 0 (which ignored every process outside the group) and is recorded
+rather than claimed away.
+
+`stop` (a landing gate's pause, the orchestrator's freeze) still stops only the group: a descendant outside it keeps
+running during a pause. That costs CPU during a gate, not correctness.
+
+## Ordering of control requests (fix round 1)
+
+Round 0 answered each connection on its own thread. A landing gate *tells* `stop` and later `cont` without waiting,
+so a slow `stop` thread could take the lock after the `cont` and leave the builder stopped with no gate left to
+continue it. The hold now answers on its accept thread, one request at a time, in the order clients connected
+(the kernel queues a listening Unix socket's connections first in, first out on both systems). The daemon tells
+under its pause lock, so connection order is decision order. A client that connects and never writes delays the
+queue by at most the five-second read timeout; only the runner's own user can connect.
 
 ## What changed
 

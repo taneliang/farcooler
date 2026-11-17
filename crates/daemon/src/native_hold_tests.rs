@@ -57,13 +57,102 @@ fn an_agent_that_exits_takes_its_group_with_it() {
     assert!(!h.socket.exists());
 }
 
+/// One reply line from a raw client.
+fn reply(stream: &UnixStream) -> String {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line).unwrap();
+    line.trim().to_owned()
+}
+
+/// ov-1330 review: a landing gate tells the hold `stop` and then `cont` without waiting for either answer. If the
+/// stop's words arrive after the continue's, the stop must still be done first, or the builder stays stopped with no
+/// gate left to continue it.
+#[test]
+fn a_stop_asked_first_is_done_first_even_when_its_words_arrive_last() {
+    let mut h = hold("/bin/sh -c 'while :; do echo t >> ticks; sleep 0.02; done' & wait");
+    std::thread::sleep(Duration::from_millis(100));
+    let mut stop = UnixStream::connect(&h.socket).unwrap();
+    let mut cont = UnixStream::connect(&h.socket).unwrap();
+    cont.write_all(b"cont\n").unwrap();
+    // The continue has arrived; the stop, asked first, has not.
+    std::thread::sleep(Duration::from_millis(300));
+    stop.write_all(b"stop\n").unwrap();
+    assert_eq!(reply(&stop), "stopped");
+    assert_eq!(reply(&cont), "continued");
+    let at = ticks(h.dir.path());
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(ticks(h.dir.path()) > at, "the later continue was done last, so the group runs");
+    assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
+    h.child.wait().unwrap();
+}
+
+/// A command that leaves the agent's group (a new session) and ignores the agent's termination, appending to `work`
+/// until it is killed.
+const STRAY: &str = "perl -MPOSIX -e 'setsid; $SIG{TERM} = q(IGNORE); $SIG{HUP} = q(IGNORE); \
+    while (1) { open(F, q(>>work)); print F 1; close F; select(undef, undef, undef, 0.02) }'";
+
+/// The test's own stray, killed when the test ends however it ends. Only the test signals it: the hold never does.
+struct Stray(i32);
+impl Drop for Stray { fn drop(&mut self) { unsafe { libc::kill(self.0, libc::SIGKILL); } } }
+fn work(dir: &Path) -> usize { std::fs::read(dir.join("work")).map_or(0, |w| w.len()) }
+fn working(dir: &Path) -> bool {
+    let at = work(dir);
+    std::thread::sleep(Duration::from_millis(200));
+    work(dir) > at
+}
+
+/// What the hold must say about a stray that is still working: `unsettled`, its socket kept, and `ended` only once the
+/// stray is gone.
+fn refuses_until_the_stray_is_gone(mut h: Hold) {
+    let stray = Stray(pid_in(h.dir.path(), "stray"));
+    for _ in 0..100 { if work(h.dir.path()) > 0 { break; } std::thread::sleep(Duration::from_millis(10)); }
+    assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("unsettled".into()));
+    assert!(h.socket.exists(), "a hold that cannot prove its work ended keeps its socket");
+    assert!(working(h.dir.path()), "the stray is still working, and nothing said the agent had ended");
+    assert!(h.child.try_wait().unwrap().is_none(), "the hold stays to account for it");
+    assert!(alive(stray.0), "the hold never signals what left its group");
+    drop(stray);
+    assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
+    assert!(!h.socket.exists());
+    h.child.wait().unwrap();
+}
+
+/// ov-1330 review: the group being empty is not quiescence while something the agent started outside it still works.
+#[test]
+fn a_process_that_left_the_group_keeps_end_from_succeeding() {
+    refuses_until_the_stray_is_gone(hold(&format!("{STRAY} & echo $! > stray; while :; do sleep 1; done")));
+}
+
+/// The same when the stray's parent exited long before `end`: on Linux it was reparented to the hold, on macOS to
+/// launchd, where the kernel still names the parent it was forked by.
+#[test]
+fn a_stray_whose_parent_exited_first_is_still_accounted_for() {
+    let h = hold(&format!("( {STRAY} & echo $! > stray; sleep 0.5 ); echo > orphaned; while :; do sleep 1; done"));
+    pid_in(h.dir.path(), "stray");
+    for _ in 0..500 { if h.dir.path().join("orphaned").exists() { break; } std::thread::sleep(Duration::from_millis(10)); }
+    refuses_until_the_stray_is_gone(h);
+}
+
+/// An agent that ends what it started outside its group on SIGTERM (as Codex does) ends cleanly.
+#[test]
+fn an_agent_that_ends_its_own_stray_ends() {
+    let mut h = hold(&format!("{STRAY} & S=$!; echo $S > stray; trap 'kill -9 $S; exit 0' TERM; while :; do sleep 0.05; done"));
+    let stray = Stray(pid_in(h.dir.path(), "stray"));
+    for _ in 0..100 { if work(h.dir.path()) > 0 { break; } std::thread::sleep(Duration::from_millis(10)); }
+    assert_eq!(ask_blocking(&h.socket, "end", Duration::from_secs(30)), Answer::Said("ended".into()));
+    assert_eq!(h.child.wait().unwrap().code(), Some(0));
+    assert!(!working(h.dir.path()), "the stray is gone");
+    drop(stray);
+}
+
 /// A pid stops being the agent's the moment the hold reaps it, so the hold signals nothing after that, even when the
 /// number is (as here) a live process.
 #[test]
 fn a_reaped_leader_is_never_signalled() {
     let mut other = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
     let pid = other.id() as i32;
-    let held = Held { leader: Leader(pid), reaped: Some(0) };
+    let held = Held { leader: Leader(pid), reaped: Some(0), lineage: Lineage::new().unwrap() };
     assert!(!signal_group(&held, libc::SIGKILL));
     std::thread::sleep(Duration::from_millis(50));
     assert!(alive(pid));

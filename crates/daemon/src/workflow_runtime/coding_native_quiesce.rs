@@ -24,7 +24,7 @@ impl NativeOwner {
 impl Exec {
     /// End the owner's agent and close its window. The runner never signals the agent itself (ov-1330): it asks the
     /// agent's hold, which signals only the process group it created and has not reaped, and which answers `ended`
-    /// only once that group is empty. A hold that is gone removed its socket after its group was empty, so that is the
+    /// only once the group is empty and nothing descended from the hold is alive. A hold that is gone removed its socket after its group was empty, so that is the
     /// same answer. The owner can end by itself while it is being ended (ov-1287); the hold gives one answer either way.
     ///
     /// A hold that was killed, or an owner an earlier engine launched without one, can only be observed: its pane
@@ -48,6 +48,7 @@ impl Exec {
             match native_hold::ask(&self.native_hold_socket(&owner.binding), "end", END_WAIT).await {
                 Answer::Gone => return close_native(&tmux, owner).await,
                 Answer::Said(word) if word == "ended" => return close_native(&tmux, owner).await,
+                Answer::Said(word) if word == "unsettled" => return Err(Error::Refused("native agent left a process running outside its group")),
                 Answer::Said(_) => return Err(Error::Refused("native hold did not end its agent")),
                 Answer::Silent => tracing::warn!(effect = %owner.binding.effect.id, "the native hold is not answering; observing its pane instead"),
             }

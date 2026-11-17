@@ -18,10 +18,17 @@
 //! socket and exits with the agent's status. The socket is removed only after the group is empty, so a socket that
 //! is gone is a hold that finished its work.
 //!
-//! Out of reach: a process that leaves the group (`setsid`, `setpgid`). `end` sends `SIGTERM` first and waits a
-//! second, so an agent can end what it started itself (as their parent it can do so without a race), then kills.
-//! See reports/ov-1330/design.md.
+//! A process that leaves the group (`setsid`, `setpgid`) is out of the hold's reach, and the hold never signals it.
+//! It is not out of sight: [`Lineage`] follows every descendant of the hold, in the group or not. `end` sends
+//! `SIGTERM` first and waits a second, so an agent can end what it started itself (as their parent it can do so
+//! without a race), then kills the group. It answers `ended`, and removes its socket, only once nothing descended
+//! from it is alive. A descendant that outlives the group is waited for, and if it is still working the hold answers
+//! `unsettled` and keeps its socket, so the daemon refuses to settle. See reports/ov-1330/design.md.
+//!
+//! Requests are answered one at a time, in the order their clients connected, so a `stop` asked before a `cont` is
+//! done before it even when its words arrive later (a landing gate tells and does not wait).
 
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -34,6 +41,10 @@ pub const FLAG: &str = "--native-hold";
 
 /// How long `end` lets the agent end its own work after `SIGTERM` before the group is killed.
 const GRACE: Duration = Duration::from_secs(1);
+/// How long `end` waits, once the group is empty, for descendants that left it before it answers `unsettled`.
+const STRAY_WAIT: Duration = Duration::from_secs(5);
+/// How often the hold learns its lineage while the agent runs. Only macOS learns: see [`Lineage`].
+const LEARN_EVERY: Duration = Duration::from_millis(100);
 
 /// `farcoolerd --native-hold <socket> -- <program> [args…]`, if that is how this process was started: run the hold
 /// and return the exit status for `main`.
@@ -58,7 +69,7 @@ pub fn pane_command(hold: &Path, socket: &Path, script: &str) -> String {
 /// the same lock as every signal, so while a `Leader` is reachable through an unreaped [`Held`] its pid and group id
 /// are this agent's.
 struct Leader(i32);
-struct Held { leader: Leader, reaped: Option<i32> }
+struct Held { leader: Leader, reaped: Option<i32>, lineage: Lineage }
 
 /// The only signal call in the native engine (ov-1330, enforced by `the_native_engine_signals_only_its_own_group`).
 /// Nothing once the leader is reaped: its number may belong to someone else from then on.
@@ -81,10 +92,19 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
         Ok(listener) => listener,
         Err(error) => { eprintln!("{FLAG}: cannot listen on {}: {error}", socket.display()); return 125; }
     };
+    // An orphaned descendant is reparented to the hold, not to init, so it stays in sight (`Lineage`).
+    #[cfg(target_os = "linux")]
+    // SAFETY: `prctl` with integer arguments only.
+    unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); }
     for signal in [libc::SIGHUP, libc::SIGTERM] {
         // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
         unsafe { libc::signal(signal, on_hangup as *const () as libc::sighandler_t); }
     }
+    let Some(mut lineage) = Lineage::new() else {
+        eprintln!("{FLAG}: cannot read this process's own identity");
+        let _ = std::fs::remove_file(socket);
+        return 125;
+    };
     let leader = match spawn(argv) {
         Ok(pid) => pid,
         Err(error) => {
@@ -93,22 +113,29 @@ pub fn serve(socket: &Path, argv: &[String]) -> i32 {
             return 127;
         }
     };
-    let held = Arc::new(Mutex::new(Held { leader: Leader(leader), reaped: None }));
+    lineage.look(leader);
+    let held = Arc::new(Mutex::new(Held { leader: Leader(leader), reaped: None, lineage }));
     let socket: PathBuf = socket.to_path_buf();
     {
         let (held, socket) = (held.clone(), socket.clone());
+        // One request at a time, on this thread, in the order the clients connected: a client that connected first
+        // is answered first even if its words arrive after a later client's.
         std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                let (held, socket) = (held.clone(), socket.clone());
-                std::thread::spawn(move || answer(stream, &held, &socket));
-            }
+            for stream in listener.incoming().flatten() { answer(stream, &held, &socket); }
         });
     }
+    let mut learned = Instant::now();
     loop {
         if HANGUP.load(Ordering::SeqCst) || exited(leader) {
-            let mut held = lock(&held);
-            let code = end(&mut held);
-            finish(&socket, code);
+            if let Ended::Settled(code) = end(&mut lock(&held), Duration::ZERO) { finish(&socket, code); }
+            // Something that left the group is still alive. Keep the socket, so nobody takes its absence for an
+            // ended agent, and look again.
+            std::thread::sleep(Duration::from_millis(250));
+            continue;
+        }
+        if Lineage::LEARNS && learned.elapsed() >= LEARN_EVERY {
+            lock(&held).lineage.look(leader);
+            learned = Instant::now();
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -134,13 +161,15 @@ fn answer(stream: UnixStream, held: &Mutex<Held>, socket: &Path) {
         "stopped" if held.reaped.is_none() => if group_stopped(&held) { "stopped" } else { "unsettled" },
         "stop" if held.reaped.is_none() => if stop(&held) { "stopped" } else { "unsettled" },
         "cont" if held.reaped.is_none() => { signal_group(&held, libc::SIGCONT); "continued" }
-        "end" => {
-            let code = end(&mut held);
-            // Gone before the answer, so whoever reads `ended` also finds the socket gone.
-            let _ = std::fs::remove_file(socket);
-            let _ = (&stream).write_all(b"ended\n");
-            finish(socket, code);
-        }
+        "end" => match end(&mut held, STRAY_WAIT) {
+            Ended::Settled(code) => {
+                // Gone before the answer, so whoever reads `ended` also finds the socket gone.
+                let _ = std::fs::remove_file(socket);
+                let _ = (&stream).write_all(b"ended\n");
+                finish(socket, code);
+            }
+            Ended::Unsettled => "unsettled",
+        },
         "ready" | "stop" | "stopped" | "cont" => "ended",
         _ => "unknown",
     };
@@ -228,18 +257,39 @@ fn stop(held: &Held) -> bool {
     false
 }
 
-/// End the group and reap the leader: SIGTERM, a grace for the agent to end its own work, then SIGKILL until two
-/// reads of the table in a row find no member left. Returns the agent's exit status, as a shell reports it.
-fn end(held: &mut Held) -> i32 {
-    if let Some(code) = held.reaped { return code; }
+/// What `end` proved.
+enum Ended {
+    /// The group is empty and nothing descended from the hold is alive; the leader is reaped. The agent's exit status,
+    /// as a shell reports it.
+    Settled(i32),
+    /// The group is empty, but a descendant that left it was still alive `wait` later. The leader stays unreaped.
+    Unsettled,
+}
+
+/// End the group, then wait for everything descended from the hold: SIGTERM, a grace for the agent to end its own
+/// work, then SIGKILL until two looks in a row find no member of the group and no descendant alive. Only the group is
+/// signalled. A descendant that left it is waited for, up to `wait` once the group is empty; if it is still alive then
+/// the answer is `Unsettled`, and a later `end` looks again.
+fn end(held: &mut Held, wait: Duration) -> Ended {
+    if let Some(code) = held.reaped { return Ended::Settled(code); }
     let leader = held.leader.0;
     signal_group(held, libc::SIGCONT);
     signal_group(held, libc::SIGTERM);
     let started = Instant::now();
-    let mut empty = 0;
-    while empty < 2 {
+    let mut emptied: Option<Instant> = None;
+    let mut clear = 0;
+    while clear < 2 {
         if started.elapsed() >= GRACE { signal_group(held, libc::SIGKILL); }
-        empty = match members(leader) { Some(rest) if rest.is_empty() && exited(leader) => empty + 1, _ => 0 };
+        let look = held.lineage.look(leader);
+        let group_gone = look.as_ref().is_some_and(|l| l.group == 0) && exited(leader);
+        match look {
+            Some(l) if group_gone && l.strays == 0 => clear += 1,
+            Some(_) if group_gone => {
+                clear = 0;
+                if emptied.get_or_insert_with(Instant::now).elapsed() >= wait { return Ended::Unsettled; }
+            }
+            _ => clear = 0,
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
     let mut status = 0;
@@ -247,7 +297,119 @@ fn end(held: &mut Held) -> i32 {
     unsafe { libc::waitpid(leader, &mut status, 0); }
     let code = if libc::WIFEXITED(status) { libc::WEXITSTATUS(status) } else { 128 + libc::WTERMSIG(status) };
     held.reaped = Some(code);
-    code
+    Ended::Settled(code)
+}
+
+/// Everything descended from the hold, in the agent's group or not. Found by looking, so only ever waited for:
+/// nothing a look finds is signalled.
+///
+/// macOS records, for every process, the kernel's unique id of the process that forked it (`p_puniqueid`), and keeps
+/// it when the process is reparented to launchd. Unique ids are 64-bit and never reused, so an id once learned to be
+/// ours stays ours, and `known` only grows; the hold learns while the agent runs, so a descendant whose parent has
+/// since exited is still recognised. Linux has no such id, but there the hold is a child subreaper: an orphaned
+/// descendant is reparented to the hold, never to init, so every live descendant has a chain of live parents back to
+/// the hold, and each look starts afresh from the hold's pid (a pid is no identity across looks there).
+struct Lineage { me: u64, known: HashSet<u64> }
+
+/// A live process: its pid, group, identity and its parent's identity (unique ids on macOS, pids on Linux).
+struct Row { pid: i32, pgid: i32, id: u64, parent: u64 }
+
+/// What one look found alive: members of the agent's group (the leader among them), and descendants outside it.
+struct Look { group: usize, strays: usize }
+
+impl Lineage {
+    const LEARNS: bool = cfg!(target_os = "macos");
+
+    /// `None` when the hold can't learn its own identity: it could then follow nothing.
+    fn new() -> Option<Self> {
+        let me = own_id()?;
+        Some(Self { me, known: HashSet::from([me]) })
+    }
+
+    /// Look once, or `None` when the table can't be read whole. A look that misses a process can only see less of
+    /// the lineage, never someone else's process as ours: an identity is learned only from its parent's.
+    fn look(&mut self, leader: i32) -> Option<Look> {
+        let rows = rows()?;
+        if !Self::LEARNS { self.known = HashSet::from([self.me]); }
+        loop {
+            let before = self.known.len();
+            for row in &rows { if self.known.contains(&row.parent) { self.known.insert(row.id); } }
+            if self.known.len() == before { break; }
+        }
+        let me = std::process::id() as i32;
+        let mut look = Look { group: 0, strays: 0 };
+        for row in rows.iter().filter(|row| row.pid != me) {
+            if row.pgid == leader { look.group += 1; } else if self.known.contains(&row.id) { look.strays += 1; }
+        }
+        Some(look)
+    }
+}
+
+/// `struct proc_uniqidentifierinfo` and its flavor (`<sys/proc_info.h>`, private headers; not in `libc`).
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct UniqueIds { uuid: [u8; 16], id: u64, parent: u64, version: i32, original_parent_version: i32, reserved: [u64; 2] }
+#[cfg(target_os = "macos")]
+const PROC_PIDUNIQIDENTIFIERINFO: i32 = 17;
+
+#[cfg(target_os = "macos")]
+fn unique_ids(pid: i32) -> Option<UniqueIds> {
+    let mut ids: UniqueIds = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<UniqueIds>() as i32;
+    // SAFETY: `ids` is `size` bytes, and the kernel writes at most that.
+    let got = unsafe { libc::proc_pidinfo(pid, PROC_PIDUNIQIDENTIFIERINFO, 0, (&raw mut ids).cast(), size) };
+    (got == size).then_some(ids)
+}
+
+#[cfg(target_os = "macos")]
+fn own_id() -> Option<u64> { unique_ids(std::process::id() as i32).map(|ids| ids.id).filter(|&id| id != 0) }
+#[cfg(not(target_os = "macos"))]
+fn own_id() -> Option<u64> { Some(u64::from(std::process::id())) }
+
+/// Every live (not zombie) process, or `None` unless the read found the hold itself.
+#[cfg(target_os = "macos")]
+fn rows() -> Option<Vec<Row>> {
+    let mut pids = vec![0i32; 4096];
+    let count = loop {
+        let bytes = (pids.len() * std::mem::size_of::<i32>()) as i32;
+        // SAFETY: `pids` holds `bytes` bytes.
+        let count = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
+        if count <= 0 { return None; }
+        if (count as usize) < pids.len() { break count as usize; }
+        pids.resize(pids.len() * 2, 0);
+    };
+    let me = std::process::id() as i32;
+    let mut complete = false;
+    let mut rows = Vec::with_capacity(count);
+    for &pid in pids[..count].iter().filter(|&&pid| pid > 0) {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of_val(&info) as i32;
+        // SAFETY: `info` is `size` bytes.
+        if unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) } != size { continue; }
+        if info.pbi_status == libc::SZOMB { continue; }
+        let Some(ids) = unique_ids(pid) else { continue };
+        complete |= pid == me;
+        rows.push(Row { pid, pgid: info.pbi_pgid as i32, id: ids.id, parent: ids.parent });
+    }
+    complete.then_some(rows)
+}
+#[cfg(not(target_os = "macos"))]
+fn rows() -> Option<Vec<Row>> {
+    let me = std::process::id() as i32;
+    let mut complete = false;
+    let mut rows = Vec::new();
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<i32>().ok()) else { continue };
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else { continue };
+        let Some((_, rest)) = stat.rsplit_once(')') else { continue };
+        let mut fields = rest.split_whitespace();
+        let (Some(state), Some(Ok(ppid)), Some(Ok(pgid))) =
+            (fields.next(), fields.next().map(str::parse::<u32>), fields.next().map(str::parse::<i32>)) else { continue };
+        if matches!(state, "Z" | "X" | "x") { continue; }
+        complete |= pid == me;
+        rows.push(Row { pid, pgid, id: u64::from(pid as u32), parent: u64::from(ppid) });
+    }
+    complete.then_some(rows)
 }
 
 // A successful signal only requests a stop. Confirm the kernel observed it. Observation only: what this reads is
