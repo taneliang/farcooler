@@ -183,6 +183,7 @@ SCRIPT_USERS = {
     'scripts/openai-prices.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
     'scripts/ov-1324-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/ov-1326-report.md': None,  # Full: transitive gate users not established; retain conservative fallback.
+    'scripts/ov-1328-report.md': None,  # Full: ticket evidence; retain conservative fallback.
     'scripts/page-layer-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/pixel-scale-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
     'scripts/plan-layer-lint.py': {'wire'},  # ci.yml wire runs self-test and scan; leaf checker, no platform imports or subprocess callers.
