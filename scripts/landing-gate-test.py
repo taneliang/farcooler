@@ -138,12 +138,12 @@ class LandingTests(unittest.TestCase):
             wire = load("proto-lint")
             self.assertEqual(wire.compare(wire.parse(original), wire.parse(proto.read_text())), [])
             self.assertTrue(wire.compare(wire.parse(original), wire.parse(renamed)))
+            repair = commit("restore original field name", "proto/farcooler.proto")
             # With the original history window, only the unshipped renamed
             # version objects to restoration; the original addition accepts it.
             historical, _ = wire.since_baseline_problems(repo, baseline.read_text(), original)
             self.assertTrue(historical)
             self.assertTrue(all("renamed from next_after to next_page_after" in p for p in historical), historical)
-            repair = commit("restore original field name", "proto/farcooler.proto")
             # The snapshot enforces the original name. Only the history anchor
             # skips the unshipped rename, using an existing main commit whose ID
             # survives fold's -x picks.

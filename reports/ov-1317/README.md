@@ -51,12 +51,18 @@ rejects a candidate-only anchor and a subsequent rename of the restored field.
 
 - Canary history-aware proto lint: passes.
 - Proto lint self-tests: 107 passed.
-- Page-layer lint self-test: passes.
-- Landing-gate unit suite: 8 passed; strengthened history assertions will be
-  rerun after the Rust selection finishes.
+- Page-layer lint and self-test: pass. The new cursor case was seen red
+  before the exact declaration allowance; negative cases still reject a wrong
+  message, wrong tag, BoardPage type, and an extra page field on the same line.
+- Landing-gate unit suite: 8 passed, including strengthened history assertions
+  and fresh-clone fold recovery (landing-round3.log).
+- Negative CI mutation: dropping --since-baseline makes the rename regression
+  fail; the restored workflow passes (rename-red-round3.log).
 - Original-history comparisons: corrected schema is additive against both
   60ddb56c71 and 4a0fee927; reverting to next_after reports the rename error.
-- Affected Rust selection: running (four build and test jobs).
+- Affected Rust selection: 254 passed, 0 failed, 12.260 s test time
+  (rust-round3.log), including ov-1302 long-board paging, CLI/client reads, and
+  the new original-name/tag/bytes protocol test. Four build and test jobs.
 
 Affected Rust command:
 

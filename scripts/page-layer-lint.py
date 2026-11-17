@@ -210,6 +210,10 @@ def scan(root: pathlib.Path):
             continue
         for n, line in enumerate(body.splitlines(), 1):
             code = line.split("//")[0]
+            if name == "TaskList":
+                # A task-results cursor, not a BoardPage reference. Preserve its
+                # original field name and tag without allowing other page fields.
+                code = re.sub(r"\boptional\s+bytes\s+next_page_after\s*=\s*3\s*;", "", code)
             if PROTO_FORBIDDEN.search(code):
                 hits.append((f"{PROTO}: message {name}", n, line.strip()))
     return hits
@@ -352,6 +356,20 @@ def self_test() -> int:
         (root / "crates/store/src/pages.rs").unlink()
         if not any("missing" in h[2] for h in scan(root)):
             failures.append("an allowed file that moved was not flagged")
+        # Task pagination is not a dependency on orchestrator board pages.
+        # Only the original TaskList cursor declaration is allowed (ov-1317).
+        for name, declaration, refused in [
+            ("TaskList", "optional bytes next_page_after = 3;", False),
+            ("TaskList", "optional bytes next_page_after = 4;", True),
+            ("Task", "optional bytes next_page_after = 3;", True),
+            ("TaskList", "optional BoardPage next_page_after = 3;", True),
+            ("TaskList", "optional bytes next_page_after = 3; BoardPage page = 4;", True),
+        ]:
+            clean_tree()
+            put(PROTO, clean_proto.replace(f"message {name} {{", f"message {name} {{\n  {declaration}"))
+            flagged = any(f"message {name}" in h[0] for h in scan(root))
+            if flagged != refused:
+                failures.append(f"pagination allowance on {name}: {declaration!r}: expected refused={refused}")
         # The messages.
         clean_tree()
         put(PROTO, clean_proto.replace("message TaskNote", "message TaskNoteRenamed"))
