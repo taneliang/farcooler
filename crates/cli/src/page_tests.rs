@@ -158,7 +158,7 @@ impl DispatchLink for Runner {
                     }],
                 }),
                 ("plan.get", _) => result::Value::Plan(the_plan()),
-                ("task.list", _) => result::Value::TaskList(pb::TaskList { next_after: None,
+                ("task.list", _) => result::Value::TaskList(pb::TaskList { next_page_after: None,
                     items: vec![
                         task(274, "ov-274", pb::TaskStatus::NeedsDecision),
                         task(199, "ov-199", pb::TaskStatus::InReview),

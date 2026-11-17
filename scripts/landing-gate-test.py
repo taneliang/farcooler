@@ -117,34 +117,46 @@ class LandingTests(unittest.TestCase):
             proto.parent.mkdir()
             shipped_proto = "message TaskList {}\n"
             original = "message TaskList { optional bytes next_page_after = 3; }\n"
-            repaired = original.replace("next_page_after", "next_after")
+            renamed = original.replace("next_page_after", "next_after")
             proto.write_text(shipped_proto)
             shipped = commit("last shipped wire", "scripts", "crates", "proto")
             baseline = repo / "proto/baseline/canary.proto"
             baseline.parent.mkdir()
 
-            def snapshot(anchor, wire=repaired):
+            def snapshot(anchor, wire=original):
                 return f"// Shipped by Canary at {anchor}.\n" + wire
 
             baseline.write_text(snapshot(shipped, shipped_proto))
             proto.write_text(original)
             commit("unshipped paging cursor", "proto")
-            proto.write_text(repaired)
+            proto.write_text(renamed)
             main_tip = commit("unshipped rename", "proto")
             git(repo, "checkout", "--quiet", "-b", "candidate")
-            # Only the baseline changes: neither spelling of tag 3 shipped.
-            # Its anchor is already on main, after the rename. Candidate IDs
-            # do not survive fold's -x picks.
+            proto.write_text(original)
+            # Verify restoration against the original addition before recovering
+            # history. Merely keeping the renamed schema is not a repair.
+            wire = load("proto-lint")
+            self.assertEqual(wire.compare(wire.parse(original), wire.parse(proto.read_text())), [])
+            self.assertTrue(wire.compare(wire.parse(original), wire.parse(renamed)))
+            # With the original history window, only the unshipped renamed
+            # version objects to restoration; the original addition accepts it.
+            historical, _ = wire.since_baseline_problems(repo, baseline.read_text(), original)
+            self.assertTrue(historical)
+            self.assertTrue(all("renamed from next_after to next_page_after" in p for p in historical), historical)
+            repair = commit("restore original field name", "proto/farcooler.proto")
+            # The snapshot enforces the original name. Only the history anchor
+            # skips the unshipped rename, using an existing main commit whose ID
+            # survives fold's -x picks.
             baseline.write_text(snapshot(main_tip))
             recovery = commit("recover baseline", "proto/baseline/canary.proto")
             git(repo, "checkout", "--quiet", "main")
-            git(repo, "cherry-pick", "-x", recovery)
+            git(repo, "cherry-pick", "-x", repair, recovery)
             self.assertNotEqual(git(repo, "rev-parse", "HEAD").stdout.strip(), recovery)
             # Clone only main over file://: neither alternates nor the candidate
             # ref may hide a dependency on its otherwise unreachable objects.
             git(repo, "clone", "--quiet", "--single-branch", "--branch", "main",
                 repo.as_uri(), str(fresh))
-            for candidate in (recovery,):
+            for candidate in (repair, recovery):
                 self.assertNotEqual(git(fresh, "cat-file", "-e", candidate, check=False).returncode, 0)
 
             def lint():
@@ -156,16 +168,16 @@ class LandingTests(unittest.TestCase):
             out = lint()
             self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
             fresh_baseline = fresh / "proto/baseline/canary.proto"
-            fresh_baseline.write_text(snapshot(recovery))
+            fresh_baseline.write_text(snapshot(repair))
             refused = lint()  # Reproduce the returned build's candidate-only anchor.
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("which is not in this history", refused.stderr)
             fresh_baseline.write_text(snapshot(main_tip))
             (fresh / "proto/farcooler.proto").write_text(
-                repaired.replace("next_after", "next_cursor"))
+                original.replace("next_page_after", "next_cursor"))
             refused = lint()
             self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
-            self.assertIn("TaskList tag 3 was renamed from next_after to next_cursor",
+            self.assertIn("TaskList tag 3 was renamed from next_page_after to next_cursor",
                           refused.stderr)
 
     def test_ci_families_are_the_minimum_for_every_path_rule(self):

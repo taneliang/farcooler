@@ -23,6 +23,15 @@ fn number(m: &str, f: &str) -> i32 {
         .number()
 }
 
+/// Keep the original task pagination field name as well as its binary tag.
+#[test]
+fn task_list_keeps_its_original_pagination_field() {
+    assert_eq!(number("TaskList", "next_page_after"), 3);
+    let list = v1::TaskList { next_page_after: Some(bytes::Bytes::from_static(b"cursor")), ..Default::default() };
+    assert_eq!(list.encode_to_vec(), b"\x1a\x06cursor");
+    assert_eq!(v1::TaskList::decode(&b"\x1a\x06cursor"[..]).unwrap(), list);
+}
+
 const PAGE_METHODS: [&str; 5] = ["page.list", "page.get", "page.set", "page.remove", "page.stats"];
 
 /// The tags pages take, pinned. Requests 170-179 and results 170-179 are
@@ -67,8 +76,11 @@ fn no_task_or_plan_message_carries_a_page() {
     ] {
         let message = file.message_type.iter().find(|m| m.name() == name).unwrap_or_else(|| panic!("no {name}"));
         for field in &message.field {
+            // This cursor pages task results; it does not refer to a BoardPage.
+            // Its original wire name is frozen (ov-1317).
+            let pagination = name == "TaskList" && field.name() == "next_page_after" && field.number() == 3;
             assert!(
-                !field.name().contains("page") && !field.type_name().contains("Page"),
+                (pagination || !field.name().contains("page")) && !field.type_name().contains("Page"),
                 "{name}.{} names pages",
                 field.name()
             );

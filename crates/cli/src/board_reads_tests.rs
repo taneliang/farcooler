@@ -47,7 +47,7 @@ impl DispatchLink for Runner {
         Ok(pb::Result {
             value: Some(match method.as_str() {
                 "workspace.mark_read" => result::Value::BoardReads(state()),
-                "task.list" => result::Value::TaskList(pb::TaskList { next_after: None, items: vec![], reads: Some(state()) }),
+                "task.list" => result::Value::TaskList(pb::TaskList { next_page_after: None, items: vec![], reads: Some(state()) }),
                 other => panic!("sent {other}"),
             }),
         })

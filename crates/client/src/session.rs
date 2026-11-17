@@ -1306,7 +1306,7 @@ impl Session {
         let mut whole = farcooler_protocol::v1::TaskList::default();
         let mut restarted = false;
         loop {
-            list.page_after = Some(whole.next_after.take().unwrap_or_default());
+            list.page_after = Some(whole.next_page_after.take().unwrap_or_default());
             let payload = request::Payload::TaskList(list.clone());
             let page = match self.value_requiring("task.list", Some(repository), Some(payload), required.clone()).await {
                 Ok(result::Value::TaskList(page)) => page,
@@ -1320,8 +1320,8 @@ impl Session {
             };
             if whole.reads.is_none() { whole.reads = page.reads; }
             whole.items.extend(page.items);
-            match page.next_after.filter(|next| !next.is_empty() && Some(next) != list.page_after.as_ref()) {
-                Some(next) => whole.next_after = Some(next),
+            match page.next_page_after.filter(|next| !next.is_empty() && Some(next) != list.page_after.as_ref()) {
+                Some(next) => whole.next_page_after = Some(next),
                 None => break,
             }
         }

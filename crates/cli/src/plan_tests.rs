@@ -339,7 +339,7 @@ impl DispatchLink for Runner {
         Ok(pb::Result {
             value: Some(match (method.as_str(), payload) {
                 ("plan.get", _) => result::Value::Plan(plan),
-                ("task.list", _) => result::Value::TaskList(pb::TaskList { next_after: None, items: items(), reads: None }),
+                ("task.list", _) => result::Value::TaskList(pb::TaskList { next_page_after: None, items: items(), reads: None }),
                 ("plan.events", _) => result::Value::PlanEventList(pb::PlanEventList { events: self.events.clone() }),
                 ("line.order", Some(request::Payload::LineOrder(p))) => {
                     let mut plan = plan;
@@ -414,7 +414,7 @@ impl DispatchLink for Runner {
                     open.iter_mut().for_each(|r| r.state = pb::BoardRulingState::Confirmed as i32);
                     result::Value::RulingsKept(pb::RulingsKept { rulings: open })
                 }
-                ("task.get_by_key", Some(request::Payload::TaskGetByKey(p))) => result::Value::TaskList(pb::TaskList { next_after: None,
+                ("task.get_by_key", Some(request::Payload::TaskGetByKey(p))) => result::Value::TaskList(pb::TaskList { next_page_after: None,
                     items: items().into_iter().chain([task(40, "ov-40", pb::TaskStatus::Backlog, OTHER_BOARD)]).filter(|t| t.key == p.key).collect(),
                     reads: None,
                 }),
@@ -1285,7 +1285,7 @@ async fn theme_card_writes_on_a_large_board() {
     let envelope = pb::WireEnvelope {
         body: Some(pb::wire_envelope::Body::Response(pb::Response {
             outcome: Some(pb::response::Outcome::Result(pb::Result {
-                value: Some(result::Value::TaskList(pb::TaskList { next_after: None, items: cards, reads: None })),
+                value: Some(result::Value::TaskList(pb::TaskList { next_page_after: None, items: cards, reads: None })),
             })),
             ..Default::default()
         })),
