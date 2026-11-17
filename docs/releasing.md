@@ -550,12 +550,11 @@ never shipped, a hand commit on main may instead move the first line of
 `proto/baseline/canary.proto` to a commit at or after the fix; Canary ignores a
 push to `proto/baseline/`, so that ships nothing. When landing a repair by
 cherry-pick, a candidate commit ID will be rewritten and must not be the anchor.
-For a spelling that certainly never shipped, the recovery may instead anchor at
-the existing main tip immediately before the repair, with the repaired proto as
-the snapshot. Check that snapshot against the last shipped baseline and record
-the exception in a comment. This excludes the known unshipped interval while
-still checking the snapshot and every subsequent proto. The lint refuses a
-baseline whose first line names no commit, or one main no longer has, rather
+Use an existing main commit at or after the unshipped rename whose proto
+matches the recovered snapshot. Check that snapshot against the last shipped
+baseline and record the exception in a comment. This excludes the known
+unshipped interval while still checking the snapshot and every subsequent proto.
+The lint refuses a baseline whose first line names no commit, or one main no longer has, rather
 than check the baseline alone.
 
 ## CI

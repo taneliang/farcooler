@@ -115,33 +115,36 @@ class LandingTests(unittest.TestCase):
                 dest.write_text((ROOT / name).read_text())
             proto = repo / "proto/farcooler.proto"
             proto.parent.mkdir()
+            shipped_proto = "message TaskList {}\n"
             original = "message TaskList { optional bytes next_page_after = 3; }\n"
-            proto.write_text(original)
+            repaired = original.replace("next_page_after", "next_after")
+            proto.write_text(shipped_proto)
             shipped = commit("last shipped wire", "scripts", "crates", "proto")
             baseline = repo / "proto/baseline/canary.proto"
             baseline.parent.mkdir()
 
-            def snapshot(anchor):
-                return f"// Shipped by Canary at {anchor}.\n" + original
+            def snapshot(anchor, wire=repaired):
+                return f"// Shipped by Canary at {anchor}.\n" + wire
 
-            baseline.write_text(snapshot(shipped))
-            proto.write_text(original.replace("next_page_after", "next_after"))
+            baseline.write_text(snapshot(shipped, shipped_proto))
+            proto.write_text(original)
+            commit("unshipped paging cursor", "proto")
+            proto.write_text(repaired)
             main_tip = commit("unshipped rename", "proto")
             git(repo, "checkout", "--quiet", "-b", "candidate")
-            proto.write_text(original)
-            repair = commit("restore field name", "proto/farcooler.proto")
-            # The snapshot requires the restored name, but its history anchor
-            # is already on main. Candidate IDs do not survive fold's -x picks.
+            # Only the baseline changes: neither spelling of tag 3 shipped.
+            # Its anchor is already on main, after the rename. Candidate IDs
+            # do not survive fold's -x picks.
             baseline.write_text(snapshot(main_tip))
             recovery = commit("recover baseline", "proto/baseline/canary.proto")
             git(repo, "checkout", "--quiet", "main")
-            git(repo, "cherry-pick", "-x", repair, recovery)
+            git(repo, "cherry-pick", "-x", recovery)
             self.assertNotEqual(git(repo, "rev-parse", "HEAD").stdout.strip(), recovery)
             # Clone only main over file://: neither alternates nor the candidate
             # ref may hide a dependency on its otherwise unreachable objects.
             git(repo, "clone", "--quiet", "--single-branch", "--branch", "main",
                 repo.as_uri(), str(fresh))
-            for candidate in (repair, recovery):
+            for candidate in (recovery,):
                 self.assertNotEqual(git(fresh, "cat-file", "-e", candidate, check=False).returncode, 0)
 
             def lint():
@@ -153,16 +156,16 @@ class LandingTests(unittest.TestCase):
             out = lint()
             self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
             fresh_baseline = fresh / "proto/baseline/canary.proto"
-            fresh_baseline.write_text(snapshot(repair))
+            fresh_baseline.write_text(snapshot(recovery))
             refused = lint()  # Reproduce the returned build's candidate-only anchor.
             self.assertNotEqual(refused.returncode, 0)
             self.assertIn("which is not in this history", refused.stderr)
             fresh_baseline.write_text(snapshot(main_tip))
             (fresh / "proto/farcooler.proto").write_text(
-                original.replace("next_page_after", "next_after"))
+                repaired.replace("next_after", "next_cursor"))
             refused = lint()
             self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
-            self.assertIn("TaskList tag 3 was renamed from next_page_after to next_after",
+            self.assertIn("TaskList tag 3 was renamed from next_after to next_cursor",
                           refused.stderr)
 
     def test_ci_families_are_the_minimum_for_every_path_rule(self):
