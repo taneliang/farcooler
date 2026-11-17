@@ -1,10 +1,12 @@
-**Recommendation: keep the current conservative selector and decline widening its full-suite fallbacks.** Against a full main run, budget **0–0.5 minutes saved for a typical daemon-only change**, **0 minutes for protocol**, and **0–0.05 minutes for core** (weighted estimates: 0.50, 0, and 0.045 minutes). These small savings are already available when selection applies; incremental savings from leaving today's policy unchanged are zero. This is not a credible route from a 25-minute gate to a substantially shorter gate.
+**Recommendation: keep the current conservative selector and decline widening its full-suite fallbacks.** Against a full main run, the duration-weighted model estimates **about 0.50 minutes saved for a typical daemon-only change**, **0 minutes for protocol**, and **0.045 minutes for core**. These are planning estimates, not measured wall-time savings: the retained paired daemon run showed no saving. Selection already offers these modeled savings when eligible; accepting this recommendation changes no policy and saves zero additional minutes. The evidence does not support a multi-minute reduction of the 25-minute gate.
 
 # ov-1334 — changed-crate selection cost
 
 ## Snapshot and current rules
 
 Read-only analysis at `65b87d65b` (2026-11-18, +08:00). Main history means `origin/main` at that SHA; local `main` is stale at `3f78754f9` (October 1). No fetch, gate, Cargo invocation, build, or test was run. All source citations below refer to this snapshot.
+
+Fix-round audit: the task's complete text and JSON history contain status transitions but no reviewer finding or comment. This revision independently checks the earlier report's numbers, adds omitted gate catches and executable reproduction instructions, and corrects date and uncertainty wording.
 
 - Enabled by default in both plain lane and landing gates, when Rust is reached; `--full-rust` overrides it (`scripts/lane-gate.py:471–477,977–988`). Older opt-in/shadow descriptions in `reports/ov-1268/README.md` are superseded by ov-1278.
 - Base must be a verified successful main-push CI ancestor, from `CANDIDATES` or GitHub's last 100 successful runs. Selection unions changes since that green base and the requested merge base, including staged/dirty and untracked inputs. No green ancestor, unavailable GitHub/network, invalid metadata or other caught selection error means full (`scripts/landing_policy.py:360–399`). A clean single-commit replay is therefore a lower coverage bound, not a reconstruction of an actual multi-ticket gate.
@@ -21,6 +23,8 @@ Timing source T: `/tmp/lane-gate-logs-j3pvafx3/rust-7988707.log`, November 18, n
 For each binary b, sum the elapsed seconds of its first-run PASS records to obtain S(b); these are test process durations, **not serial binary wall times**. Sum is 3,133.370 s. For selected packages P: binaries = count of listed IDs owned by P; tests = count of PASS records owned by P; **estimated main-run seconds = 533.608 × Σ S(selected binaries) / 3133.370**. Rounded to 0.1 s. Reproduce by parsing `PASS [ <seconds>s] (<ordinal>/7417) <binary> <test>` in T and grouping binary IDs before `::`. No proportional test-count extrapolation is used.
 
 This is a fixed-throughput planning proxy, not measured selected-run wall time. Nextest overlaps binaries and has serial/exclusive groups (`.config/nextest.toml:18–136`); duration, load, scheduling and retries can change after filtering. It excludes extraction, wrappers, builds, feature tests, lints and doctests. Do not add skipped binaries' elapsed durations as wall-time savings. Actual paired daemon/CLI evidence saved nothing: 11m26s selected vs 11m09s full under load (`reports/ov-1268/README.md:18–27`).
+
+Sensitivity check using the same formula on the first-run PASS/FAIL records of the three logs named in the ov-1329 failure row below: full wall times 536.442 / 552.586 / 547.939 s; daemon modeled savings 31.501 / 30.194 / 30.202 s, core 2.817 / 2.827 / 2.842 s. Together with T this gives daemon 29.7–31.5 s and core 2.7–2.9 s. This checks sensitivity to the source log, not model validity or a confidence interval; none is a measured selected run.
 
 Counts include six binary IDs with no executed tests (JNI, core/live_agents, and four daemon tunnel targets); 38 skipped tests are excluded from 7,417. Inventory below permits auditing package sums; S is summed test seconds from T.
 
@@ -49,7 +53,7 @@ The daemon closure is CLI/client/daemon/JNI: **107 binaries, 5,034 tests, 503.9 
 
 ## Every Rust-touching commit since November 15
 
-Window: `git log origin/main --since='2026-11-15T00:00:00+08:00'`, using **committer** dates (landed/cherry-picked commits often have older author dates). 215 distinct commits: 207 touch `crates/` or root Cargo inputs; eight additional commits touch only shared Rust schema/test inputs. Scope includes `crates/**` (also non-workspace web), `proto/**`, `.cargo/**`, any `.rs`, root Cargo/toolchain files and `.config/{nextest.toml,quarantine.txt,flaky-log.tsv}`; script/workflow-only changes are not Rust source landings.
+Window: `git log 65b87d65b --since='2026-11-15T00:00:00+08:00'`, using **committer** dates (landed/cherry-picked commits often have older author dates). Dates below are normalized to Singapore time, including `f9afc6472` (Nov 14 21:31:54 UTC = Nov 15 05:31:54 SGT). 215 distinct commits: 207 touch `crates/` or root Cargo inputs; eight additional commits touch only shared Rust schema/test inputs. Scope includes `crates/**` (also non-workspace web), `proto/**`, `.cargo/**`, any `.rs`, root Cargo/toolchain files and `.config/{nextest.toml,quarantine.txt,flaky-log.tsv}`; script/workflow-only changes are not Rust source landings.
 
 All 215 are enumerated below, grouped only when date, changed crate set and results match (up to five hashes per row). Crate names are package suffixes; JNI lives in `crates/android`. `shared` means no workspace crate changed. Raw = graph closure of changed workspace crates **alone**; shared schema/config inputs and non-workspace web have no raw graph estimate (—). Policy = current selector replay of **every changed path** from that commit's parent, including non-Rust paths. `F` is 159 binaries / 7,417 tests / 533.6 s; `=` means the raw result. Protocol, shared or mixed-path fallbacks explain why Policy can be F despite a small raw closure. No green-base/network fallback is injected into these optimistic clean-parent replays.
 
@@ -134,7 +138,7 @@ All 215 are enumerated below, grouped only when date, changed crate set and resu
 | 15 | `f977e3fc7`, `e5265d99c`, `1fe14084d` | shared | — | F |
 | 15 | `bd9826d7d` | cli, daemon, protocol | 124 / 6920 / 531.5 | F |
 | 15 | `88b248a19`, `f4c18e9ef` | cli, daemon | 107 / 5034 / 503.9 | F |
-| 14 | `f9afc6472` | shared | — | F |
+| 15 | `f9afc6472` | shared | — | F |
 | 15 | `d7e780074` | cli, client, daemon | 107 / 5034 / 503.9 | F |
 | 15 | `79e384a37` | daemon, transport | 113 / 5088 / 504.5 | = |
 | 15 | `0025bde68` | ceremony, client | 108 / 5138 / 504.1 | F |
@@ -142,6 +146,71 @@ All 215 are enumerated below, grouped only when date, changed crate set and resu
 | 15 | `eec4d7757` | ceremony, client, daemon, jni, protocol | 124 / 6920 / 531.5 | F |
 
 Audit each row with `git diff-tree --root --no-commit-id --name-status -r --no-renames <hash>`. Replay `select()` using those statuses and workflow text from `<hash>^` / `<hash>`, with the graph/inventory pinned above. For example `7b49c542c` is full because of `crates/client/src/testdata/workflow-labels.json`; `6bdf5161c` includes gate scripts; `ef9ba0fdf` touches protocol. Parent-only replays cannot establish the packages actually run in a landing: verified-green history, dirty inputs, mixed groups and flags can only broaden these results. Across the 215 replays, 54 are full and 161 partial; median estimated main time is 504.5 s, and mean modeled saving versus full is 15.9 s. These are commit-weighted, not landing-group-weighted statistics.
+
+## Reproduce the commit table without Cargo
+
+Run this read-only Python 3.11+ block from this report's branch (source is unchanged from `65b87d65b`). It rebuilds the all-table manifest graph, calls the real selector, verifies every table row and the log digest, and prints each commit's raw and policy counts/times plus full reasons. No metadata/build/test command runs; `sys.dont_write_bytecode` prevents import output. T and the retained binary inventory above are its only timing/count inputs.
+
+```python
+import sys
+sys.dont_write_bytecode = True
+import hashlib, importlib.util, json, re, subprocess, tomllib
+from pathlib import Path
+root = Path.cwd()
+def git(*args):
+    return subprocess.check_output(['git', *args], text=True)
+workspace = tomllib.loads((root / 'Cargo.toml').read_text())['workspace']
+packages = []
+for member in workspace['members']:
+    path = root / member
+    manifest = tomllib.loads((path / 'Cargo.toml').read_text())
+    deps = []
+    def walk(table):
+        for key, value in table.items():
+            if key in ('dependencies', 'dev-dependencies', 'build-dependencies'):
+                for alias, dep in value.items():
+                    if not isinstance(dep, dict): continue
+                    if dep.get('workspace'): dep = workspace['dependencies'][alias]
+                    if 'path' in dep: deps.append(dict(name=dep.get('package', alias), path=dep['path']))
+            elif isinstance(value, dict): walk(value)
+    walk(manifest)
+    build = manifest['package'].get('build', 'build.rs')
+    targets = [dict(kind=['custom-build'], src_path=str(path / build))] if build and (path / build).exists() else []
+    name = manifest['package']['name']
+    packages.append(dict(id=name, name=name, manifest_path=str(path / 'Cargo.toml'), dependencies=deps, targets=targets))
+meta = dict(workspace_members=[p['id'] for p in packages], packages=packages)
+spec = importlib.util.spec_from_file_location('selector', root / 'scripts/rust-select.py')
+selector = importlib.util.module_from_spec(spec); spec.loader.exec_module(selector)
+_, reverse = selector.graph(meta)
+roots = {p["id"]: str(Path(p["manifest_path"]).parent.relative_to(root)) + "/" for p in packages}
+consumers = selector.includes(root, roots)
+selector.includes = lambda *args: consumers
+bins = json.loads((root / 'reports/ov-1333/ov-1333-evidence/warm/rust-selection.json').read_text())['selected_binaries']
+log = Path('/tmp/lane-gate-logs-j3pvafx3/rust-7988707.log').read_bytes()
+assert hashlib.sha256(log).hexdigest() == '981dff427c13053e51bca43ab6e807ad32da49b1f7a42be25d7b7b6516390fae'
+rows = re.findall(r'PASS \[\s*([\d.]+)s\] \(\s*\d+/7417\) (\S+) (.+)', log.decode())
+total = sum(float(t) for t, b, n in rows)
+assert len(bins) == 159 and len(rows) == 7417 and round(total, 3) == 3133.370
+def stats(names):
+    return (sum(b.split('::')[0] in names for b in bins), sum(b.split('::')[0] in names for t,b,n in rows), round(533.608 * sum(float(t) for t,b,n in rows if b.split('::')[0] in names) / total, 1))
+report = (root / 'reports/ov-1334/README.md').read_text()
+table = {h: line.split('|')[4:6] for line in report.splitlines() if re.match(r'\| \d+ \|', line) for h in re.findall(r'`([a-f0-9]{9})`', line)}
+seen, full_count = set(), 0
+for sha in git('log', '65b87d65b', '--since=2026-11-15T00:00:00+08:00', '--format=%H').splitlines():
+    changes = [tuple(s.split('\t', 1)) for s in git('diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '--no-renames', sha).splitlines()]
+    paths = [p for status,p in changes]
+    if not any(p.startswith(('crates/', 'proto/', '.cargo/')) or p.endswith('.rs') or p in ('Cargo.toml','Cargo.lock','rust-toolchain','rust-toolchain.toml','.config/nextest.toml','.config/quarantine.txt','.config/flaky-log.tsv') for p in paths): continue
+    reached = {p['name'] for p in packages if any(f.startswith(str(Path(p['manifest_path']).parent.relative_to(root)) + '/') for f in paths)}
+    while (broader := reached | set().union(*(reverse[p] for p in reached))) != reached: reached = broader
+    selected, reasons, full = selector.select(root, meta, changes, lambda p: (git('show', sha+'^:'+p), git('show', sha+':'+p)))
+    raw, policy = stats(reached), stats(selected)
+    expected, flag = table[sha[:9]]
+    assert expected.strip() == '—' or raw == tuple(float(v) for v in expected.split('/'))
+    assert policy == ((159,7417,533.6) if flag.strip() == 'F' else raw)
+    seen.add(sha[:9]); full_count += full
+    print(sha[:9], raw, policy, '; '.join(reasons) if full else '')
+assert seen == set(table) and len(seen) == 215 and full_count == 54
+```
 
 ## Real failures and the coverage cost
 
@@ -157,9 +226,11 @@ The tracked `.config/flaky-log.tsv` is absent now. `git log -p origin/main -- .c
 | ov-1329 landing runs: daemon unit `workflow_runtime::native_control::tests::a_native_pause_freezes_processes_and_the_steps_deadline_then_resumes_the_same_pane`, and daemon integration `a_cutover_survives_every_crash::a_person_takes_a_real_runner_from_prepare_to_ordinary_service`. `reports/ov-1329/README.md:34–38`; `/tmp/lane-gate-logs-{mwr8k8gf,cqalrde0,abft9e9e}/rust-{99889518,92315277,33783785}.log` respectively. | **Yes**, all three recorded selections were full; both tests are also retained by daemon, core and protocol closures. One/two/two first-run failures passed isolated retries. This is a gate catch, not a final red gate. |
 | ov-1333 cold full gate: fence integration `inventory::every_key_type_is_fingerprinted_as_ssh_keygen_does` failed twice because PATH chose Intel OpenSSL. `reports/ov-1333/ov-1333-report.md:78–88`. | **Yes for the actual cache-script change**, which forces full. **MISSED by a daemon-only or core-only closure** (fence is outside both). The raw protocol closure includes fence, and current protocol policy is full. This is a concrete lost environment-regression probe, not evidence of a daemon dependency bug. |
 | Swift resize test: CI `43756701004` attempt 1 and Nov 16 `43962297903`, head `91c9c5bb5`, `TranscriptScrollerTests` reader/resize assertion. `reports/ov-1270/README.md:36`; `reports/ov-1312/README.md:3`, `ci-excerpt.log`. | **Unaffected**: Swift tests are outside the filtered Rust main run. The latter head changed only a report, illustrating environmental failures on unrelated changes. |
+| ov-1302 landing gate's Swift shard: `NativeAgentRunnerTests` returned `not_running` instead of `not_an_agent`; `NativeOfferTests` reported `resource not found` from `terminal send`. `reports/ov-1302/README.md:45–52`; report landed Nov 16 with `c3d51caf2`. | **Unaffected**: both are Swift tests, outside the filtered nextest command. The focused retry passed all nine tests; this is a retained first-attempt gate catch. |
+| Nov 15 train gate at `f47b682e1`: Go/Wasm `farcooler/tailcat` could not start because argv plus environment exceeded its limit. `reports/ov-1247/README.md:3–9`, `orchestrator-gate-full.out:216–221,404`. | **Unaffected**: Rust package filtering cannot prevent this web-job failure. The clean-environment web-only retry passed; the report does not retain an individual Go test name because execution failed before one ran. |
 | CI `43751761408`: native bundle fixture `opt-level=3` assertion and lane-gate self-test rejected new release overrides (`reports/ov-1270/README.md:9–16`). ov-1184 gate: `ios-ui-shards.py --check` rejected Android shard matrix (`reports/ov-1242/README.md:54–63`). ov-1254 partial gate: `macos-rust-tests.py` lacked Python `tomllib` (`reports/ov-1254/README.md:48–53`). | **Unaffected**: bundle/wire/script checks are not package-filtered. No nextest binary is involved. |
 
-Reports also retain catches without enough detail to classify a test: `reports/ov-1294/README.md:56` says CI `43812224858` failed Swift tests but gives no name; `reports/ov-1291/README.md:12–27` records main CI red, a 40-minute gate timeout and a gate modifying a tracked file. These remain outside package filtering; do not count them as proved Rust selection misses. Reports of native failures in standalone suites (ov-1299, ov-1307, ov-1315), intentional mutation reds (ov-1284/ov-1317), and older ov-1137/ov-1200 investigations do not establish additional since-Nov-15 landing catches.
+Reports also retain catches without enough detail to classify a test: `reports/ov-1294/README.md:56` says CI `43812224858` failed Swift tests but gives no name (unaffected); `reports/ov-1291/README.md:12–27` records main CI red, a 40-minute gate timeout and a gate modifying a tracked file. The tracked-file problem is unaffected; **the unnamed CI failure and timeout are unclassifiable**, not proved retained or missed. Reports of native failures in standalone suites (ov-1299, ov-1307, ov-1315), intentional mutation reds (ov-1284/ov-1317), and older ov-1137/ov-1200 investigations do not establish additional since-Nov-15 landing catches. The compose-held CI flake in `reports/ov-1182/README.md:117–122` predates the window (`symbols-run2-jobs.json` dates run `43575477705` to Nov 14 UTC/SGT).
 
 No attributable daemon/core/protocol **product regression** in this retained sample would be omitted by its offending change's current selection. That is bounded evidence, not proof of completeness: missing original green-base ranges and failure logs prevent an exhaustive miss rate. Unselected tests would lose opportunistic checks of host tools, unrelated crates and cross-crate runtime contracts absent from Cargo/includes/manual edges. The fence example proves that cost can be real even without a source dependency.
 
