@@ -24,6 +24,12 @@ the precise rename diagnostic. It also pins the CI command and checkout depth.
 Removing `--since-baseline` from CI was tested: the new test fails; restoring
 it makes the test pass.
 
+The protocol's board-document isolation test previously treated any occurrence
+of "page" in a field name as a board-document dependency. It rejected the
+restored pagination cursor. Its narrow exception now verifies that this exact
+TaskList field stays bytes at tag 3, while still rejecting board-page message
+types and all other page-named fields in task/plan payloads.
+
 ## Baseline recovery
 
 The ticket establishes that no Canary build after 8628aecc0 exists, so the
@@ -41,6 +47,25 @@ the previous shipped snapshot was checked before advancing it.
 - Proto lint self-tests: 107 passed (wire.log).
 - Landing-gate unit tests: 7 passed, including the rename regression.
 - Negative check: dropping the history flag makes the regression test fail.
+- Affected Rust selection: **253 passed**, 0 failed, 19.666 s test time
+  (rust.log). Includes all protocol tests; CLI TaskList fixtures and paging;
+  client board reads; daemon task operations, starts, workspace operations;
+  and ov-1302's long-history, archived-tail and 1,500-task frame/paging tests.
+
+Rust command (foreground, four build/test jobs):
+
+```sh
+TMPDIR=/tmp SDKROOT=$(xcrun --show-sdk-path) NEXTEST_TEST_THREADS=4 \
+  cargo nextest run --jobs 4 \
+  -p farcooler-protocol -p farcooler-cli -p farcooler-daemon -p farcooler-client \
+  -E 'package(farcooler-protocol) or test(task_ops::tests) or test(task_starts::tests) or test(workspace_ops::tests) or test(tasks::) or test(board_reads) or test(plan_tests) or test(plan_agent_dispatch_tests) or test(page_tests) or test(rep_pane) or test(workflow_runtime::process_logs::tests)'
+```
+
+The first Rust run inside the sandbox could not initialize daemon git fixtures
+or bind test sockets; it also exposed the board-document test issue described
+above. After correcting that assertion, the selection passed outside the
+sandbox. The landing-gate unit tests likewise passed outside the sandbox,
+which permits their process supervisor to inspect its child processes.
 
 No full gate, cargo fmt, or swift-format was run. Build and test concurrency
 was limited to four. Local validation uses system Python because the first

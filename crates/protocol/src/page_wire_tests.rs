@@ -67,8 +67,15 @@ fn no_task_or_plan_message_carries_a_page() {
     ] {
         let message = file.message_type.iter().find(|m| m.name() == name).unwrap_or_else(|| panic!("no {name}"));
         for field in &message.field {
+            // The pagination cursor has a frozen wire name (ov-1317).
+            // A bytes cursor does not couple tasks to board pages.
+            let cursor = name == "TaskList" && field.name() == "next_page_after";
+            if cursor {
+                assert_eq!(field.number(), 3);
+                assert_eq!(field.r#type(), prost_types::field_descriptor_proto::Type::Bytes);
+            }
             assert!(
-                !field.name().contains("page") && !field.type_name().contains("Page"),
+                (cursor || !field.name().contains("page")) && !field.type_name().contains("Page"),
                 "{name}.{} names pages",
                 field.name()
             );

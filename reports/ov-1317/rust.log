@@ -1,0 +1,269 @@
+   Compiling farcooler-protocol v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/protocol)
+   Compiling farcooler-core v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/core)
+   Compiling farcooler-ceremony v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/ceremony)
+   Compiling farcooler-fence v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/fence)
+   Compiling farcooler-transport v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/transport)
+   Compiling farcooler-tmux v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/tmux)
+   Compiling farcooler-store v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/store)
+   Compiling farcooler-client v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/client)
+   Compiling farcooler-daemon v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/daemon)
+   Compiling farcooler-cli v0.1.0 (/Users/e-liang/Library/Application Support/com.farcooler.FarCoolerCanary/worktrees/overnight/ov-1317-wire-tasklist-name/crates/cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 41.21s
+────────────
+ Nextest run ID 0c7bdd89-acf6-4972-922c-a8de0c9367d0 with nextest profile: default
+    Starting 253 tests across 107 binaries (4878 tests skipped)
+        PASS [   0.017s] (  1/253) farcooler-cli::bin/farcooler board_reads::tests::marks_are_an_id_and_a_time_and_nothing_else
+        PASS [   0.019s] (  2/253) farcooler-cli::bin/farcooler board_reads::tests::a_runner_without_shared_read_state_is_refused_before_the_wire
+        PASS [   0.019s] (  3/253) farcooler-cli::bin/farcooler board_reads::tests::a_mark_is_sent_as_the_runner_clock_time_it_was_given
+        PASS [   0.026s] (  4/253) farcooler-cli::bin/farcooler board_reads::tests::a_boards_list_prints_its_reads_beside_its_tasks
+        PASS [   0.010s] (  5/253) farcooler-cli::bin/farcooler board_reads::tests::the_events_stream_carries_the_state_as_reads
+        PASS [   0.010s] (  6/253) farcooler-cli::bin/farcooler rep_pane::tests::a_reps_pane_cannot_route_to_another_runner
+        PASS [   0.018s] (  7/253) farcooler-cli::bin/farcooler rep_pane::tests::task_show_and_list_call_only_what_a_rep_may
+        PASS [   0.026s] (  8/253) farcooler-cli::bin/farcooler board_reads::tests::the_mac_s_argv_parses
+        PASS [   0.015s] (  9/253) farcooler-cli::bin/farcooler rep_pane::tests::the_gate_allows_with_json_and_refuses_with_a_blocking_exit
+        PASS [   0.026s] ( 10/253) farcooler-cli::bin/farcooler tasks::starts::tests::a_block_names_its_key_and_whether_it_finished
+        PASS [   0.040s] ( 11/253) farcooler-cli::bin/farcooler tasks::skill_tests::the_actor_rule_covers_exactly_the_commands_that_take_it
+        PASS [   0.043s] ( 12/253) farcooler-cli::bin/farcooler tasks::skill_tests::every_command_the_manager_skill_names_parses
+        PASS [   0.011s] ( 13/253) farcooler-cli::bin/farcooler tasks::starts::tests::a_blocker_not_found_is_not_called_finished
+        PASS [   0.014s] ( 14/253) farcooler-cli::bin/farcooler tasks::starts::tests::a_worker_with_no_session_is_recorded_unobserved_and_says_so
+        PASS [   0.016s] ( 15/253) farcooler-cli::bin/farcooler tasks::starts::tests::a_worker_is_filled_in_from_the_session_it_runs_in
+        PASS [   0.014s] ( 16/253) farcooler-cli::bin/farcooler tasks::starts::tests::an_old_runner_is_told_before_anything_is_sent
+        PASS [   0.071s] ( 17/253) farcooler-cli::bin/farcooler rep_pane::tests::the_gate_reads_its_members_connectors_and_fails_closed
+        PASS [   0.010s] ( 18/253) farcooler-cli::bin/farcooler tasks::starts::tests::every_refusal_these_routes_send_has_a_sentence
+        PASS [   0.013s] ( 19/253) farcooler-cli::bin/farcooler tasks::starts::tests::each_start_reads_as_a_few_words
+        PASS [   0.013s] ( 20/253) farcooler-cli::bin/farcooler tasks::starts::tests::done_needs_no_subagent_id
+        PASS [   0.011s] ( 21/253) farcooler-cli::bin/farcooler tasks::starts::tests::show_says_when_it_starts_and_who_works_it
+        PASS [   0.009s] ( 22/253) farcooler-cli::bin/farcooler tasks::tests::a_block_with_no_reason_prints_no_trailing_gap
+        PASS [   0.011s] ( 23/253) farcooler-cli::bin/farcooler tasks::starts::tests::task_wait_reads_each_flag
+        PASS [   0.011s] ( 24/253) farcooler-cli::bin/farcooler tasks::starts::tests::the_list_says_when_each_starts
+        PASS [   0.012s] ( 25/253) farcooler-cli::bin/farcooler tasks::starts::tests::the_flags_that_cannot_go_together_are_refused
+        PASS [   0.011s] ( 26/253) farcooler-cli::bin/farcooler tasks::tests::a_board_that_moved_halfway_says_which_half
+        PASS [   0.010s] ( 27/253) farcooler-cli::bin/farcooler tasks::tests::a_gap_is_never_negative
+        PASS [   0.014s] ( 28/253) farcooler-cli::bin/farcooler tasks::tests::a_board_that_did_not_move_names_the_pane_that_is_working
+        PASS [   0.011s] ( 29/253) farcooler-cli::bin/farcooler tasks::tests::a_broken_socket_is_a_sentence_and_never_an_os_error
+        PASS [   0.010s] ( 30/253) farcooler-cli::bin/farcooler tasks::tests::a_length_of_time_reads_the_way_a_person_writes_it
+        PASS [   0.012s] ( 31/253) farcooler-cli::bin/farcooler tasks::tests::a_move_names_every_task_and_the_board_they_go_to
+        PASS [   0.015s] ( 32/253) farcooler-cli::bin/farcooler tasks::tests::a_lane_in_another_repository_is_refused_even_for_a_prefixless_key
+        PASS [   0.023s] ( 33/253) farcooler-cli::bin/farcooler tasks::tests::a_key_that_starts_with_a_dash_is_a_key_not_a_flag
+        PASS [   0.010s] ( 34/253) farcooler-cli::bin/farcooler tasks::tests::a_named_argument_answers_instead_of_the_call_sites_guess
+        PASS [   0.012s] ( 35/253) farcooler-cli::bin/farcooler tasks::tests::a_move_that_finds_nothing_names_the_workspace_too
+        PASS [   0.010s] ( 36/253) farcooler-cli::bin/farcooler tasks::tests::a_new_lane_on_a_branch_that_exists_says_so_readably
+        PASS [   0.011s] ( 37/253) farcooler-cli::bin/farcooler tasks::tests::a_new_lane_is_fork_only_where_the_runner_can_do_it
+        PASS [   0.013s] ( 38/253) farcooler-cli::bin/farcooler tasks::tests::a_new_lane_refusal_keeps_its_what
+        PASS [   0.010s] ( 39/253) farcooler-cli::bin/farcooler tasks::tests::a_pane_refused_as_not_found_says_the_worktree_is_gone
+        PASS [   0.011s] ( 40/253) farcooler-cli::bin/farcooler tasks::tests::a_pane_refused_after_a_new_worktree_names_what_was_made
+        PASS [   0.024s] ( 41/253) farcooler-cli::bin/farcooler tasks::tests::a_pane_never_seen_is_still_dispatched_and_said_to_be_unconfirmed
+        PASS [   0.011s] ( 42/253) farcooler-cli::bin/farcooler tasks::tests::a_pane_seen_at_once_is_confirmed_without_waiting
+        PASS [   0.016s] ( 43/253) farcooler-cli::bin/farcooler tasks::tests::a_pane_that_is_already_dead_is_said_as_a_finding_without_waiting
+        PASS [   0.012s] ( 44/253) farcooler-cli::bin/farcooler tasks::tests::a_preset_the_runner_refuses_leaves_the_board_as_it_was
+        PASS [   0.020s] ( 45/253) farcooler-cli::bin/farcooler tasks::tests::a_pane_seen_on_a_second_look_is_confirmed
+        PASS [   0.016s] ( 46/253) farcooler-cli::bin/farcooler tasks::tests::a_preset_that_isnt_told_the_task_is_refused_before_anything_is_sent
+        PASS [   0.018s] ( 47/253) farcooler-cli::bin/farcooler tasks::tests::a_refused_dispatch_keeps_the_runners_code_under_json
+        PASS [   0.015s] ( 48/253) farcooler-cli::bin/farcooler tasks::tests::a_refused_terminal_leaves_the_board_as_it_was
+        PASS [   0.020s] ( 49/253) farcooler-cli::bin/farcooler tasks::tests::a_runner_without_terminal_task_is_refused_before_anything_is_made
+        PASS [   0.019s] ( 50/253) farcooler-cli::bin/farcooler tasks::tests::a_stale_pane_workspace_does_not_stop_a_search
+        PASS [   0.011s] ( 51/253) farcooler-cli::bin/farcooler tasks::tests::a_task_argument_defaults_to_the_panes_own_task
+        PASS [   0.015s] ( 52/253) farcooler-cli::bin/farcooler tasks::tests::a_task_whose_agent_is_running_is_not_dispatched_again_by_accident
+        PASS [   0.011s] ( 53/253) farcooler-cli::bin/farcooler tasks::tests::a_whole_repository_board_names_each_rows_workspace
+        PASS [   0.012s] ( 54/253) farcooler-cli::bin/farcooler tasks::tests::a_workspace_refusal_on_the_board_is_said_for_the_word
+        PASS [   0.010s] ( 55/253) farcooler-cli::bin/farcooler tasks::tests::an_argument_this_cli_has_never_heard_of_keeps_the_old_sentence
+        PASS [   0.015s] ( 56/253) farcooler-cli::bin/farcooler tasks::tests::a_worktree_claim_asks_the_runner_only_when_asked_and_a_pane_never_fails_it
+        PASS [   0.011s] ( 57/253) farcooler-cli::bin/farcooler tasks::tests::an_entry_is_superseded_by_one_of_its_own_kind
+        PASS [   0.013s] ( 58/253) farcooler-cli::bin/farcooler tasks::tests::a_write_names_who_made_it_and_a_typo_is_refused
+        PASS [   0.014s] ( 59/253) farcooler-cli::bin/farcooler tasks::tests::an_unknown_section_is_refused_rather_than_printed_as_emptiness
+        PASS [   0.013s] ( 60/253) farcooler-cli::bin/farcooler tasks::tests::asking_a_person_and_a_parser_the_same_question_is_refused
+        PASS [   0.013s] ( 61/253) farcooler-cli::bin/farcooler tasks::tests::asking_for_one_kind_of_note_is_asking_for_the_history
+        PASS [   0.013s] ( 62/253) farcooler-cli::bin/farcooler tasks::tests::decisions_can_be_read_without_the_progress_chatter
+        PASS [   0.013s] ( 63/253) farcooler-cli::bin/farcooler tasks::tests::dispatch_into_a_busy_lane_warns_and_still_dispatches
+        PASS [   0.014s] ( 64/253) farcooler-cli::bin/farcooler tasks::tests::dispatch_into_a_new_worktree_claims_it_for_the_tasks_workspace
+        PASS [   0.013s] ( 65/253) farcooler-cli::bin/farcooler tasks::tests::dispatch_moves_the_task_onto_the_lane_and_into_progress
+        PASS [   0.015s] ( 66/253) farcooler-cli::bin/farcooler tasks::tests::dispatch_needs_a_lane_and_a_new_one_needs_a_branch
+        PASS [   0.011s] ( 67/253) farcooler-cli::bin/farcooler tasks::tests::dispatch_warns_of_another_workspace_in_the_worktree
+        PASS [   0.011s] ( 68/253) farcooler-cli::bin/farcooler tasks::tests::dispatching_a_finished_task_warns
+        PASS [   0.015s] ( 69/253) farcooler-cli::bin/farcooler tasks::tests::dispatch_opens_a_pane_that_names_the_task
+        PASS [   0.014s] ( 70/253) farcooler-cli::bin/farcooler tasks::tests::dispatching_a_blocked_task_warns_only_about_unfinished_blockers
+        PASS [   0.011s] ( 71/253) farcooler-cli::bin/farcooler tasks::tests::every_runner_sentence_has_one_in_this_clis_style
+        PASS [   0.012s] ( 72/253) farcooler-cli::bin/farcooler tasks::tests::every_status_and_kind_survives_the_round_trip
+        PASS [   0.012s] ( 73/253) farcooler-cli::bin/farcooler tasks::tests::json_output_is_a_stable_shape_and_not_a_rendered_table
+        PASS [   0.018s] ( 74/253) farcooler-cli::bin/farcooler tasks::tests::every_command_the_opening_prompt_names_parses
+        PASS [   0.011s] ( 75/253) farcooler-cli::bin/farcooler tasks::tests::pane_state_words_are_a_stable_list
+        PASS [   0.014s] ( 76/253) farcooler-cli::bin/farcooler tasks::tests::nothing_here_can_edit_or_delete_an_entry_in_the_record
+        PASS [   0.013s] ( 77/253) farcooler-cli::bin/farcooler tasks::tests::show_returns_only_the_fields_that_were_asked_for
+        PASS [   0.013s] ( 78/253) farcooler-cli::bin/farcooler tasks::tests::task_create_files_onto_the_panes_workspace
+        PASS [   0.010s] ( 79/253) farcooler-cli::bin/farcooler tasks::tests::task_list_reads_a_long_board_a_page_at_a_time
+        PASS [   0.009s] ( 80/253) farcooler-cli::bin/farcooler tasks::tests::task_move_says_which_tasks_moved
+        PASS [   0.011s] ( 81/253) farcooler-cli::bin/farcooler tasks::tests::task_list_defaults_to_the_panes_workspace
+        PASS [   0.008s] ( 82/253) farcooler-cli::bin/farcooler tasks::tests::the_cli_dispatches_to_exactly_the_daemons_list
+        PASS [   0.010s] ( 83/253) farcooler-client ffi::board_reads_args::tests::the_arguments_an_app_passes_become_the_write
+        PASS [   0.010s] ( 84/253) farcooler-cli::bin/farcooler tasks::tests::the_walk_goes_all_the_way_down
+        PASS [   0.011s] ( 85/253) farcooler-client ffi::board_reads_args::tests::a_mark_with_no_time_is_refused_and_never_means_now
+        PASS [   0.012s] ( 86/253) farcooler-cli::bin/farcooler tasks::tests::the_recheck_ends_by_its_budget_even_when_looks_are_slow
+        PASS [   0.010s] ( 87/253) farcooler-client ffi::identity_tests::a_board_reads_workspace_is_optional_but_never_guessed
+        PASS [   0.011s] ( 88/253) farcooler-client ffi::board_reads_args::tests::the_event_line_is_the_state
+        PASS [   0.011s] ( 89/253) farcooler-client session::board_reads::tests::a_boards_reads_are_json_with_uuid_strings
+        PASS [   0.013s] ( 90/253) farcooler-client session::board_reads::tests::a_board_names_its_reads_beside_its_tasks_only_when_it_has_them
+        PASS [   0.009s] ( 91/253) farcooler-client session::board_reads::tests::an_older_runner_is_refused_before_the_wire
+        PASS [   0.012s] ( 92/253) farcooler-client session::board_reads::tests::the_event_carries_the_boards_state
+        PASS [   0.204s] ( 93/253) farcooler-client ffi::board_reads_phone_tests::a_read_scoped_phone_cannot_mark_a_board_read
+        PASS [   0.273s] ( 94/253) farcooler-client ffi::board_reads_phone_tests::a_phone_s_open_is_on_the_next_boards_reads
+        PASS [   0.341s] ( 95/253) farcooler-daemon people::plan_tests::a_member_moves_no_ticket_that_reached_landing
+        PASS [   0.360s] ( 96/253) farcooler-daemon people::plan_tests::a_member_changes_the_plan_under_their_name
+        PASS [   0.293s] ( 97/253) farcooler-daemon people::plan_tests::a_member_moving_a_ticket_to_review_wakes_nobody
+        PASS [   0.010s] ( 98/253) farcooler-daemon people::plan_tests::a_plan_write_under_a_new_name_is_caught
+        PASS [   0.321s] ( 99/253) farcooler-daemon people::plan_tests::a_member_posts_nothing_as_the_owner
+        PASS [   0.017s] (100/253) farcooler-daemon people::plan_tests::every_plan_write_is_covered
+        PASS [   0.014s] (101/253) farcooler-daemon people::rep_plan_tests::a_rep_empties_no_ranking
+        PASS [   0.009s] (102/253) farcooler-daemon people::rep_plan_tests::a_rep_ends_no_agent
+        PASS [   0.012s] (103/253) farcooler-daemon people::rep_plan_tests::a_rep_keeps_no_ruling
+        PASS [   0.012s] (104/253) farcooler-daemon people::rep_plan_tests::a_rep_keeps_no_ruling_with_a_commit
+        PASS [   0.009s] (105/253) farcooler-daemon people::rep_plan_tests::a_rep_keeps_no_rulings_at_once
+        PASS [   0.016s] (106/253) farcooler-daemon people::rep_plan_tests::a_rep_lands_no_ticket
+        PASS [   0.015s] (107/253) farcooler-daemon people::rep_plan_tests::a_rep_makes_the_plan_changes_its_gate_reaches
+        PASS [   0.011s] (108/253) farcooler-daemon people::rep_plan_tests::a_rep_marks_no_reversal_done
+        PASS [   0.011s] (109/253) farcooler-daemon people::rep_plan_tests::a_rep_marks_no_ticket_landed
+        PASS [   0.014s] (110/253) farcooler-daemon people::rep_plan_tests::a_rep_moves_no_theme_through_the_general_update
+        PASS [   0.010s] (111/253) farcooler-daemon people::rep_plan_tests::a_rep_moves_no_ticket_to_building
+        PASS [   0.008s] (112/253) farcooler-daemon people::rep_plan_tests::a_rep_moves_no_ticket_to_review
+        PASS [   0.008s] (113/253) farcooler-daemon people::rep_plan_tests::a_rep_records_no_agent
+        PASS [   0.009s] (114/253) farcooler-daemon people::rep_plan_tests::a_rep_removes_no_page
+        PASS [   0.403s] (115/253) farcooler-daemon people::plan_tests::a_member_writes_none_of_the_orchestrators_record
+        PASS [   0.419s] (116/253) farcooler-daemon people::plan_tests::a_member_reads_the_plan_the_owner_does
+        PASS [   0.011s] (117/253) farcooler-daemon people::rep_plan_tests::a_rep_sends_no_bare_plan_write
+        PASS [   0.009s] (118/253) farcooler-daemon people::rep_plan_tests::a_rep_sends_no_bare_theme_move
+        PASS [   0.011s] (119/253) farcooler-daemon people::rep_plan_tests::a_rep_sends_no_mismatched_payload
+        PASS [   0.013s] (120/253) farcooler-daemon people::rep_plan_tests::a_rep_sends_no_retired_plan_write
+        PASS [   0.014s] (121/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_agent_to_work
+        PASS [   0.014s] (122/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_page
+        PASS [   0.012s] (123/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_theme_budget
+        PASS [   0.013s] (124/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_ruling_standing
+        PASS [   0.011s] (125/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_theme_budget_while_moving_it
+        PASS [   0.010s] (126/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_ticket_branch
+        PASS [   0.011s] (127/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_ticket_budget
+        PASS [   0.013s] (128/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_ticket_checkout
+        PASS [   0.011s] (129/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_ticket_pull_request
+        PASS [   0.012s] (130/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_ticket_checkout_by_id
+        PASS [   0.010s] (131/253) farcooler-daemon people::rep_plan_tests::a_rep_sets_no_ticket_sha
+        PASS [   0.010s] (132/253) farcooler-daemon rpc::tests::the_board_reads_are_read_and_its_writes_are_control
+        PASS [   0.011s] (133/253) farcooler-daemon people::rep_plan_tests::a_rep_stacks_no_ticket
+        PASS [   0.361s] (134/253) farcooler-daemon people::plan_tests::a_published_workspace_refuses_a_stage_set_by_hand
+        PASS [   0.010s] (135/253) farcooler-daemon task_ops::tests::a_new_acceptance_item_gets_an_id_and_an_existing_one_keeps_its_own
+        PASS [   0.012s] (136/253) farcooler-daemon task_ops::tests::a_notes_structure_has_to_be_an_object
+        PASS [   0.010s] (137/253) farcooler-daemon task_ops::tests::a_word_that_does_not_parse_is_refused_rather_than_read_as_a_person
+        PASS [   0.011s] (138/253) farcooler-daemon task_ops::tests::a_title_is_one_line_and_has_to_be_one
+        PASS [   0.051s] (139/253) farcooler-daemon task_ops::tests::an_old_key_resolves_through_get_by_key
+        PASS [   0.013s] (140/253) farcooler-daemon task_ops::tests::an_unnamed_actor_is_the_person_at_the_client
+        PASS [   0.014s] (141/253) farcooler-daemon task_ops::tests::an_unreadable_optional_id_is_refused_rather_than_dropped
+        PASS [   0.010s] (142/253) farcooler-daemon task_ops::tests::an_unspecified_enum_is_a_filter_and_never_a_value
+        PASS [   0.011s] (143/253) farcooler-daemon task_ops::tests::every_status_and_kind_survives_the_round_trip
+        PASS [   0.096s] (144/253) farcooler-daemon task_ops::tests::filing_a_task_with_an_intent_is_not_an_edit
+        PASS [   0.334s] (145/253) farcooler-daemon task_ops::tests::a_second_question_before_an_answer_is_the_one_answered
+        PASS [   0.358s] (146/253) farcooler-daemon task_ops::tests::an_answer_records_only_its_own_questions_other_options
+        PASS [   0.071s] (147/253) farcooler-daemon task_starts::tests::a_blocker_finishing_announces_what_it_blocked
+        PASS [   0.078s] (148/253) farcooler-daemon task_starts::tests::a_card_the_engine_moved_is_told_to_open_boards
+        PASS [   0.194s] (149/253) farcooler-daemon task_starts::tests::a_hold_is_let_go_when_its_time_comes_and_boards_hear
+        PASS [   0.394s] (150/253) farcooler-daemon task_ops::tests::only_a_decision_can_carry_rejected_options
+        PASS [   0.177s] (151/253) farcooler-daemon task_starts::tests::a_line_reaches_the_wire_with_its_positions
+        PASS [   0.143s] (152/253) farcooler-daemon task_starts::tests::a_subagent_recorded_on_the_wire
+        PASS [   0.168s] (153/253) farcooler-daemon task_starts::tests::a_moved_task_comes_back_whole
+        PASS [   0.173s] (154/253) farcooler-daemon task_starts::tests::a_note_from_a_newer_build_breaks_no_read
+        PASS [   0.136s] (155/253) farcooler-daemon task_starts::tests::set_wait_reads_the_wire
+        PASS [   0.146s] (156/253) farcooler-daemon task_starts::tests::ending_with_no_id_on_the_wire_ends_every_open_one
+        PASS [   0.251s] (157/253) farcooler-daemon workflow_runtime::process_logs::tests::an_archived_items_tail_is_read_on_request
+        PASS [   0.225s] (158/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_bounds_a_two_mib_single_line_failure
+        PASS [   0.503s] (159/253) farcooler-daemon workflow_runtime::process_logs::tests::an_archived_items_tail_is_read_over_rpc
+        PASS [   0.347s] (160/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_bounds_captured_output_from_a_failed_process
+        PASS [   0.217s] (161/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_bounds_lossy_utf8_expansion
+        PASS [   0.514s] (162/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_bounds_legacy_logs_without_changing_retained_evidence
+        PASS [   1.504s] (163/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_failed_gate_keeps_both_streams_and_get_points_to_its_tail
+        PASS [   0.212s] (164/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_keeps_only_the_last_forty_lines
+        PASS [   0.182s] (165/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_keeps_short_tails_whole
+        PASS [   0.992s] (166/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_budgets_plain_text_tails_without_shortening_newest_logs
+        PASS [   1.033s] (167/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_drops_oldest_tails_to_bound_many_failures
+        PASS [   0.432s] (168/253) farcooler-daemon workspace_ops::tests::a_workspace_wakes_on_answer_until_its_switch_is_turned_off
+        PASS [   0.399s] (169/253) farcooler-daemon workspace_ops::tests::a_workspaces_paths_are_for_host_admin_only
+        PASS [   0.976s] (170/253) farcooler-daemon workspace_ops::tests::a_deleted_workspace_takes_its_orchestrators_settings_with_it
+        PASS [   0.010s] (171/253) farcooler-daemon workspace_ops::tests::check_in_enable_requires_owner_and_person_seat
+        PASS [   0.409s] (172/253) farcooler-daemon workspace_ops::tests::check_in_owner_enable_refuses_unreadable_and_read_only_callers
+        PASS [   0.465s] (173/253) farcooler-daemon workspace_ops::tests::completed_concurrent_stops_release_both_tokens_after_a_version_race
+        PASS [   1.162s] (174/253) farcooler-daemon workspace_ops::tests::disable_refuses_owner_device_revoked_after_initial_person_read
+        PASS [   0.048s] (175/253) farcooler-protocol board_reads_tests::an_older_client_ignores_the_new_fields
+        PASS [   0.019s] (176/253) farcooler-protocol board_reads_tests::read_state_holds_its_tags
+        PASS [   0.011s] (177/253) farcooler-protocol board_reads_tests::read_state_is_one_advertised_capability_owning_its_write
+        PASS [   0.015s] (178/253) farcooler-protocol build_identity::tests::a_dirty_tree_is_not_the_clean_commit
+        PASS [   0.006s] (179/253) farcooler-protocol build_identity::tests::a_string_without_a_commit_matches_only_itself
+        PASS [   0.007s] (180/253) farcooler-protocol build_identity::tests::different_commits_are_different_builds
+        PASS [   0.006s] (181/253) farcooler-protocol build_identity::tests::one_commit_in_every_spelling_is_one_build
+        PASS [   0.008s] (182/253) farcooler-protocol capability_tests::a_retired_capability_is_never_advertised_again
+        PASS [   1.262s] (183/253) farcooler-daemon workspace_ops::tests::only_the_person_or_live_orchestrator_can_replace_its_seat
+        PASS [   0.009s] (184/253) farcooler-protocol capability_tests::capability_names_are_unique
+        PASS [   0.010s] (185/253) farcooler-protocol capability_tests::bring_here_is_served_behind_its_own_word
+        PASS [   0.008s] (186/253) farcooler-protocol capability_tests::chat_modes_methods_are_retired
+        PASS [   0.007s] (187/253) farcooler-protocol capability_tests::compose_is_served_and_says_what_it_takes
+        PASS [   0.008s] (188/253) farcooler-protocol capability_tests::every_capability_a_method_names_is_one_this_build_advertises
+        PASS [   0.014s] (189/253) farcooler-protocol capability_tests::every_method_round_trips_through_its_wire_name
+        PASS [   0.008s] (190/253) farcooler-protocol capability_tests::passkey_keys_is_withheld_until_offered
+        PASS [   0.010s] (191/253) farcooler-protocol capability_tests::the_interrupt_is_served_behind_its_own_word
+        PASS [   0.024s] (192/253) farcooler-protocol cost_wire_tests::a_plan_with_cost_reads_the_same_to_an_older_app
+        PASS [   0.008s] (193/253) farcooler-protocol cost_wire_tests::cost_is_an_advertised_capability_with_no_method_of_its_own
+        PASS [   0.008s] (194/253) farcooler-protocol framing::tests::malformed_body_rejected
+        PASS [   0.061s] (195/253) farcooler-protocol cost_wire_tests::cost_holds_its_tags
+        PASS [   0.007s] (196/253) farcooler-protocol framing::tests::oversized_prefix_rejected_without_allocating
+        PASS [   0.007s] (197/253) farcooler-protocol framing::tests::partial_frame_yields_none_and_keeps_bytes
+        PASS [   0.008s] (198/253) farcooler-protocol framing::tests::two_frames_in_one_buffer
+        PASS [   0.008s] (199/253) farcooler-protocol framing::tests::round_trip
+        PASS [   0.007s] (200/253) farcooler-protocol framing::tests::zero_length_rejected
+        PASS [   0.009s] (201/253) farcooler-protocol ids::tests::ids_are_time_ordered
+        PASS [   0.009s] (202/253) farcooler-protocol ids::tests::round_trip
+        PASS [   0.007s] (203/253) farcooler-protocol ids::tests::short_ids_distinguish_same_millisecond_ids
+        PASS [   0.006s] (204/253) farcooler-protocol ids::tests::wrong_length_rejected
+        PASS [   0.008s] (205/253) farcooler-protocol line_wire_tests::a_plan_with_the_line_reads_back_whole
+        PASS [   0.006s] (206/253) farcooler-protocol line_wire_tests::the_line_is_one_advertised_capability_owning_every_method
+        PASS [   0.007s] (207/253) farcooler-protocol page_wire_tests::a_whole_list_with_documents_fits_one_envelope
+        PASS [   0.007s] (208/253) farcooler-protocol page_wire_tests::builds_before_pages_ignore_them
+        PASS [   0.016s] (209/253) farcooler-protocol page_wire_tests::no_task_or_plan_message_carries_a_page
+        PASS [   0.009s] (210/253) farcooler-protocol page_wire_tests::pages_are_one_advertised_capability_owning_every_method
+        PASS [   0.079s] (211/253) farcooler-protocol line_wire_tests::the_line_holds_its_tags
+        PASS [   0.010s] (212/253) farcooler-protocol plan_layer_tests::builds_before_the_layer_ignore_it
+        PASS [   0.015s] (213/253) farcooler-protocol plan_layer_tests::no_task_message_carries_the_layer
+        PASS [   0.064s] (214/253) farcooler-protocol page_wire_tests::pages_hold_their_tags
+        PASS [   0.006s] (215/253) farcooler-protocol plan_layer_tests::the_layer_is_one_advertised_capability_owning_every_method
+        PASS [   0.007s] (216/253) farcooler-protocol ruling_wire_tests::a_plan_with_rulings_reads_the_same_to_an_older_app
+        PASS [   0.013s] (217/253) farcooler-protocol ruling_wire_tests::no_task_message_carries_a_ruling
+        PASS [   0.007s] (218/253) farcooler-protocol ruling_wire_tests::rulings_are_one_advertised_capability
+        PASS [   0.064s] (219/253) farcooler-protocol plan_layer_tests::the_layer_holds_its_tags
+        PASS [   0.009s] (220/253) farcooler-protocol ruling_wire_tests::the_new_fields_are_skipped_by_older_readers
+        PASS [   0.008s] (221/253) farcooler-protocol ruling_wire_tests::the_owner_s_marks_are_their_own_capability
+        PASS [   0.045s] (222/253) farcooler-protocol ruling_wire_tests::rulings_hold_their_tags
+        PASS [   0.007s] (223/253) farcooler-protocol task_starts_tests::waits_and_workers_are_two_advertised_capabilities
+        PASS [   0.019s] (224/253) farcooler-protocol task_starts_tests::waits_and_workers_hold_their_tags
+        PASS [   0.049s] (225/253) farcooler-protocol ruling_wire_tests::the_owner_s_marks_hold_their_tags
+        PASS [   0.006s] (226/253) farcooler-protocol tests::a_lookup_prefers_this_channels_name_over_the_bare_one
+        PASS [   0.006s] (227/253) farcooler-protocol tests::a_channel_round_trips_through_its_name
+        PASS [   0.007s] (228/253) farcooler-protocol tests::an_absent_block_reason_is_absent_on_the_wire_and_an_empty_one_is_not
+        PASS [   0.009s] (229/253) farcooler-protocol tests::an_unknown_channel_is_local_not_stable
+        PASS [   0.008s] (230/253) farcooler-protocol tests::an_unknown_method_names_no_capability
+        PASS [   0.007s] (231/253) farcooler-protocol tests::each_channel_has_its_own_binary_name
+        PASS [   0.007s] (232/253) farcooler-protocol tests::every_channel_also_answers_to_the_name_cargo_gives_it
+        PASS [   0.007s] (233/253) farcooler-protocol tests::needs_you_list_is_gated_on_its_own_advertised_capability
+        PASS [   0.008s] (234/253) farcooler-protocol tests::notice_task_is_advertised
+        PASS [   0.008s] (235/253) farcooler-protocol tests::release_binaries_keep_their_bare_names
+        PASS [   0.020s] (236/253) farcooler-protocol tests::needs_you_takes_fresh_tags
+        PASS [   0.011s] (237/253) farcooler-protocol tests::renamed_messages_keep_their_field_numbers
+        PASS [   0.011s] (238/253) farcooler-protocol tests::report_takes_fresh_tags
+        PASS [   0.007s] (239/253) farcooler-protocol tests::stable_looks_for_exactly_one_name
+        PASS [   0.011s] (240/253) farcooler-protocol tests::terminal_names_and_ports_take_fresh_tags
+        PASS [   0.010s] (241/253) farcooler-protocol tests::the_floor_capabilities_are_always_present
+        PASS [   0.010s] (242/253) farcooler-protocol tests::the_stamped_channel_is_one_of_the_four
+        PASS [   0.010s] (243/253) farcooler-protocol tests::workstreams_is_not_the_frozen_worktrees_word
+        PASS [   0.015s] (244/253) farcooler-protocol tests::workspace_additions_take_fresh_tags
+        PASS [   0.017s] (245/253) farcooler-protocol workflow_commands::publication_grant_tests::ov1179_publication_grant_and_rollback_are_closed_commands
+        PASS [   0.020s] (246/253) farcooler-protocol workflow_commands::publication_grant_boundaries::ov1179_publication_grant_rejects_unknown_fields_and_actions
+        PASS [   0.013s] (247/253) farcooler-protocol workflow_commands::tests::workflow_reasoned_wire_preserves_legacy_and_refuses_unknown_fields
+        PASS [   0.013s] (248/253) farcooler-protocol workflow_commands::tests::workflow_wire_carries_retry_and_routed_definitions_exactly
+        PASS [   0.007s] (249/253) farcooler-protocol workflow_commands::tests::workflow_wire_parser_rejects_authority_result_and_unknown_nested_fields
+        PASS [   0.006s] (250/253) farcooler-protocol workflow_cutover::tests::cutover_vocabulary_is_closed_and_carries_no_authority
+        PASS [   0.007s] (251/253) farcooler-protocol workflow_config::security_review_tests::legacy_adapter_bytes_keep_their_pin_and_security_policy_changes_it
+        PASS [   9.992s] (252/253) farcooler-daemon task_ops::tests::a_long_board_lists_within_the_frame_cap
+        PASS [  15.622s] (253/253) farcooler-daemon workflow_runtime::process_logs::tests::workflow_get_with_a_long_history_carries_live_tails_only
+────────────
+     Summary [  19.666s] 253 tests run: 253 passed, 4878 skipped
