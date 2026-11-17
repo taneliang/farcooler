@@ -25,6 +25,39 @@ spec.loader.exec_module(lane)
 
 
 class LandingTests(unittest.TestCase):
+    def script_reach(self, paths, extra_commands=None):
+        changes = lane.load_module("script_ci_changes", ROOT / "scripts/ci-changes.py")
+        workflows = {"ci": (ROOT / ".github/workflows/ci.yml").read_text(),
+                     "ios-ui-build": (ROOT / ".github/actions/ios-ui-build/action.yml").read_text()}
+        ctx = lane.make_ctx(ROOT, Path("/tmp/ov-1324-plan"), "HEAD")
+        commands = {j: "\n".join(s.run for s in lane.steps_for(j, workflows, ctx) if not s.skip)
+                    for j in lane.JOBS}
+        commands.update(extra_commands or {})
+        return set(lane.jobs_for(paths, changes.SITE, lambda _: True, commands, changes.families))
+
+    def test_retry_diff_runs_only_script_checks(self):
+        paths = [".github/workflows/ci-runner-retry.yml", "scripts/ci-runner-retry.py",
+                 "scripts/ci-runner-retry-test.py"]
+        for diff in ([p] for p in paths):
+            with self.subTest(diff=diff):
+                self.assertEqual(self.script_reach(diff), {"wire", "doc-comments"})
+        chosen = self.script_reach(paths)
+        self.assertEqual(chosen, {"wire", "doc-comments"})
+        with patch.object(policy, "rust_selection", side_effect=AssertionError("Rust must not run")):
+            proposal = lane.rust_proposal(ROOT, argparse.Namespace(full_rust=False), chosen, policy)
+        self.assertEqual(proposal["reasons"], ["Rust not reached"])
+
+    def test_gate_script_consumers_and_unknowns_stay_covered(self):
+        for path, required in (("scripts/lane-gate.py", set(lane.JOBS)),
+                               ("apps/macos/test.sh", {"swift-tests"}),
+                               ("scripts/macos-rust-tests.py", {"rust"}),
+                               ("scripts/new-unknown.py", set(lane.JOBS)),
+                               (".github/workflows/new-unknown.yml", set(lane.JOBS))):
+            with self.subTest(path=path):
+                self.assertTrue(self.script_reach([path]) >= required)
+        self.assertEqual(self.script_reach(["scripts/ci-runner-retry.py", "scripts/new-unknown.py"]),
+                         set(lane.JOBS))
+
     def test_engine_entry_point_keeps_optimized_policy_and_normal_admission(self):
         # Execute the published engine command against the real wrapper. Stand-ins
         # record the boundary calls; no actual machine lock or display is touched.
