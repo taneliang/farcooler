@@ -5,6 +5,7 @@ pub(super) async fn configured(review: bool, mode: &str) -> (tempfile::TempDir, 
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("selected"); std::fs::create_dir(&repo).unwrap();
     adapters::git(&repo, &["init", "--quiet"]).await.unwrap();
+    adapters::git(&repo, &["config", "commit.gpgsign", "false"]).await.unwrap();
     adapters::git(&repo, &["-c", "user.name=Test", "-c", "user.email=test@localhost",
         "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "base"]).await.unwrap();
     let base = adapters::git(&repo, &["rev-parse", "HEAD"]).await.unwrap();
@@ -171,7 +172,7 @@ async fn workflow_coding_admitted_unknown_never_launches_and_cancel_stays_uncert
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
     assert!(!runtime.root.join("receipts").join(format!("{}.output", digest(&binding.effect))).exists());
     let state = runtime.state("w").unwrap().unwrap();
-    runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(), expected_revision: state.revision,
+    runtime.submit_now(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(), expected_revision: state.revision,
         sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 201).unwrap();
     runtime.pump(202).await.unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Uncertain);
@@ -346,7 +347,7 @@ async fn workflow_coding_cancel_unknown_provider_completes_when_its_process_has_
     for time in 2..15 { runtime.pump(time).await.unwrap(); }
     let original = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.active).unwrap();
     let state = runtime.state("w").unwrap().unwrap();
-    runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(), expected_revision: state.revision,
+    runtime.submit_now(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(), expected_revision: state.revision,
         sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 100).unwrap();
     runtime.pump(101).await.unwrap();
     assert_eq!(runtime.state("w").unwrap().unwrap().items["one"].phase, Phase::Cancelled);
@@ -1016,7 +1017,7 @@ async fn workflow_coding_cancel_uncertain_provision_uses_quiescence_not_candidat
     let root = runtime.root.clone(); drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
     let state = runtime.state("w").unwrap().unwrap();
-    assert!(runtime.submit(&runtime.controller(), Request { id: "cancel-provision".into(), workspace: "w".into(),
+    assert!(runtime.submit_now(&runtime.controller(), Request { id: "cancel-provision".into(), workspace: "w".into(),
         expected_revision: state.revision, sequence: 2,
         command: Command::Cancel { item: "one".into(), reason: None } }, 21).unwrap().result.is_ok());
     runtime.pump(22).await.unwrap();
@@ -1039,7 +1040,7 @@ async fn uncertain_provision_without_quiescence_stays_uncertain() {
         }
         assert!(runtime.observe("w", &binding.effect, Outcome::Uncertain, false, 20).unwrap());
         let state = runtime.state("w").unwrap().unwrap();
-        assert!(runtime.submit(&runtime.controller(), Request { id: "cancel-provision".into(), workspace: "w".into(),
+        assert!(runtime.submit_now(&runtime.controller(), Request { id: "cancel-provision".into(), workspace: "w".into(),
             expected_revision: state.revision, sequence: 2,
             command: Command::Cancel { item: "one".into(), reason: None } }, 21).unwrap().result.is_ok());
         runtime.pump(22).await.unwrap();

@@ -34,10 +34,16 @@ fn load_milli() -> Option<u64> {
     (read == 1 && load >= 0.0).then_some((load * 1000.0) as u64)
 }
 impl Runtime {
-    pub(super) fn schedule_ready(&self, workspaces: &[String], now_ms: i64) -> Result<()> {
-        self.schedule_with_load(workspaces, now_ms, load_milli())
+    pub(super) fn schedule_ready(&self, workspaces: &[String], now_ms: i64, ready_queues: &BTreeSet<(String, String)>) -> Result<()> {
+        self.schedule(workspaces, now_ms, load_milli(), Some(ready_queues))
     }
+    #[cfg(test)]
     fn schedule_with_load(&self, workspaces: &[String], now_ms: i64, load: Option<u64>) -> Result<()> {
+        self.schedule(workspaces, now_ms, load, None)
+    }
+    fn schedule(&self, workspaces: &[String], now_ms: i64, load: Option<u64>,
+        ready_queues: Option<&BTreeSet<(String, String)>>) -> Result<()>
+    {
         let mut scan = self.scheduling.lock().unwrap();
         // Admission history outlives both completed runs and runtime restarts. Read it once,
         // rather than parsing the durable event log on every one-second service scan.
@@ -83,6 +89,7 @@ impl Runtime {
                 let Some(item) = state.items.get(&key) else { continue };
                 // Queue follows the admitted policy, including after publication removal.
                 let queue = item.phase == Phase::WaitingJoin && item.definition.start_policy.as_ref().is_some_and(|p| p.auto_queue);
+                if queue && ready_queues.is_some_and(|ready| !ready.contains(&(workspace.clone(), key.clone()))) { continue; }
                 let retry_key = (workspace.clone(), key.clone(), queue);
                 if scan.refused.get(&retry_key).is_some_and(|until| now_ms < *until) { continue; }
                 let command = if queue { Command::Queue { item: key.clone() } } else {

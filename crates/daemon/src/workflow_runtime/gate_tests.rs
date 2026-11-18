@@ -532,7 +532,7 @@ async fn stopping_a_parallel_review_after_restart_reaps_its_gate() {
     crate::effect_runner::Owner::write(&runtime.owner_path(&check), pid).unwrap();
     std::fs::write(runtime.root.join("receipts").join(format!("{}.process.json", digest(&check.effect))), b"{").unwrap();
     let state = runtime.state("w").unwrap().unwrap();
-    assert!(runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
+    assert!(runtime.submit_now(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
         expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into(), reason: None } }, 200).unwrap().result.is_ok());
     // Reap the simulated orphan concurrently: on macOS a zombie can still hold its group.
     let (pumped, status) = tokio::time::timeout(Duration::from_secs(5), async {
@@ -586,7 +586,7 @@ async fn security_policy_refuses_misrouted_full_and_path_rules_bypass_at_admissi
         let request = Request { id: "unsafe".into(), workspace: "w".into(), expected_revision: 0, sequence: 1,
             command: Command::Enqueue { item: "one".into(), definition: d, policy_pin: "policy/v1".into(),
                 resource: runtime.resource().into(), dependencies: BTreeSet::new(), initial_candidate: None } };
-        let error = runtime.submit(&runtime.controller(), request, 1).unwrap_err();
+        let error = runtime.submit_now(&runtime.controller(), request, 1).unwrap_err();
         assert!(error.to_string().contains("security review") || error.to_string().contains("full review policy"), "{attack}: {error}");
         runtime.pump(2).await.unwrap();
         assert!(runtime.state("w").unwrap().is_none(), "{attack}");

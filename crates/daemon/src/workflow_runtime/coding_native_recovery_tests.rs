@@ -46,7 +46,7 @@ async fn workflow_coding_native_reopen_stop_owns_original_pty_without_relaunch()
     assert!(runtime.quiesce_native(&foreign).await.is_err());
     assert_eq!(host.0.pane_life(&owner.pane, id).await.unwrap(), farcooler_tmux::PaneLife::Live);
     let state = runtime.state("w").unwrap().unwrap();
-    runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
+    runtime.submit_now(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
         expected_revision: state.revision, sequence: 2, command: Command::Cancel { item: "one".into() , reason: None } }, 201).unwrap();
     assert_eq!(finish(&mut runtime, "w").await.items["one"].phase, Phase::Cancelled);
     assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(), Outcome::SafeFailure);
@@ -109,7 +109,7 @@ async fn workflow_service_native_stop_ignores_launch_drift_with_original_owner()
         let state = runtime.state(&workspace).unwrap().unwrap();
         assert_eq!(state.items["one"].phase,Phase::Uncertain,"{drift}");
         assert_eq!(host.0.pane_life(&owner.pane,id).await.unwrap(),farcooler_tmux::PaneLife::Live);
-        runtime.submit(&runtime.controller(),Request { id:"cancel".into(),workspace:workspace.clone(),
+        runtime.submit_now(&runtime.controller(),Request { id:"cancel".into(),workspace:workspace.clone(),
             expected_revision:state.revision,sequence:2,command:Command::Cancel { item:"one".into() , reason: None } },201).unwrap();
         assert_eq!(finish(&mut runtime,&workspace).await.items["one"].phase,Phase::Cancelled,"{drift}");
         assert_eq!(runtime.reconcile_coding(&binding).await.unwrap(),Outcome::SafeFailure);
@@ -196,7 +196,7 @@ async fn workflow_native_review_never_launched_stop_ends_cancelled() {
     let (dir, mut runtime, _fake) = three_gates("never").await;
     let binding = held_review(&mut runtime).await;
     let state = runtime.state("w").unwrap().unwrap();
-    assert!(runtime.submit(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
+    assert!(runtime.submit_now(&runtime.controller(), Request { id: "cancel".into(), workspace: "w".into(),
         expected_revision: state.revision, sequence: 2,
         command: Command::Cancel { item: "one".into(), reason: None } }, 200).unwrap().result.is_ok());
     runtime.pump(201).await.unwrap();

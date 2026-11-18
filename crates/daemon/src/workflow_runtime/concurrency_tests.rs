@@ -10,7 +10,7 @@ pub(super) fn enqueue_item(runtime: &mut Runtime, workspace: &str, item: &str, d
     let request = Request { id: format!("enqueue-{item}"), workspace: workspace.into(), expected_revision: revision,
         sequence, command: Command::Enqueue { item: item.into(), definition, policy_pin: "policy/v1".into(),
             resource: Exec::item_resource(workspace, item), dependencies: BTreeSet::new(), initial_candidate: None } };
-    assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
+    assert!(runtime.submit_now(&controller, request, 1).unwrap().result.is_ok());
 }
 
 /// The build stage of each item waits (up to four seconds) until both builds have started,

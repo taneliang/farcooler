@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let receipt = runtime.submit(&controller, Request { id: "enqueue-fixture".into(), workspace: "fixture".into(),
         expected_revision: 0, sequence: 1, command: Command::Enqueue { item: "coding".into(),
             definition: coding_definition(true), policy_pin: "policy/v1".into(), resource: runtime.resource().into(),
-            dependencies: BTreeSet::new(), initial_candidate: None } }, 1)?;
+            dependencies: BTreeSet::new(), initial_candidate: None } }, 1).await?;
     if receipt.result.is_err() { return Err("fixture enqueue refused".into()); }
     // No controller commands or notice reads/ACKs occur during execution.
     for time in 2..32 {

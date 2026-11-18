@@ -164,7 +164,7 @@ mod tests {
         let runtime = Runtime::create(&dir.path().join("runtime")).await.unwrap();
         let controller = runtime.controller();
         for n in 0..count {
-            let receipt = runtime.submit(&controller, Request {
+            let receipt = runtime.submit_now(&controller, Request {
                 id: format!("enqueue-{n}"), workspace: workspace.into(), expected_revision: n as u64,
                 sequence: n as u64 + 1,
                 command: Command::Enqueue { item: format!("item-{n:03}"), definition: coding_definition(false),

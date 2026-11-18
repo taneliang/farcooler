@@ -14,7 +14,7 @@ pub(super) fn enqueue(runtime: &mut Runtime, workspace: &str, item: &str, defini
     let request = Request { id: format!("enqueue-{item}"), workspace: workspace.into(), expected_revision: revision,
         sequence, command: Command::Enqueue { item: item.into(), definition, policy_pin: "policy/v1".into(),
             resource: runtime.resource().into(), dependencies: BTreeSet::new(), initial_candidate: None } };
-    let receipt = runtime.submit(&controller, request, 1).unwrap(); assert!(receipt.result.is_ok(), "{:?}", receipt.result);
+    let receipt = runtime.submit_now(&controller, request, 1).unwrap(); assert!(receipt.result.is_ok(), "{:?}", receipt.result);
 }
 pub(super) async fn finish(runtime: &mut Runtime, workspace: &str) -> State {
     for time in 2..40 {
@@ -158,7 +158,7 @@ async fn workflow_runtime_cancel_requires_original_settlement() {
         }
         let controller = runtime.controller();
         let revision = runtime.state("w").unwrap().unwrap().revision;
-        assert!(runtime.submit(&controller, Request { id: "cancel".into(), workspace: "w".into(),
+        assert!(runtime.submit_now(&controller, Request { id: "cancel".into(), workspace: "w".into(),
             expected_revision: revision, sequence: 2, command: Command::Cancel { item: "coding".into() , reason: None } }, 3)
             .unwrap().result.is_ok());
         drop(runtime);
@@ -178,7 +178,7 @@ async fn workflow_runtime_capabilities_specs_and_writer_are_local() {
     let controller = runtime.controller();
     let request = Request { id: "forged".into(), workspace: "w".into(), expected_revision: 0, sequence: 1,
         command: Command::Advance };
-    assert!(other.submit(&controller, request, 1).is_err());
+    assert!(other.submit_now(&controller, request, 1).is_err());
     let mut definition = coding_definition(true);
     definition.stages[1].operation.arguments.push("arbitrary command".into());
     assert!(adapters::validate(&definition).is_err());
@@ -215,7 +215,7 @@ fn enqueue_tracker(runtime: &mut Runtime, workspace: &str, item: &str, dependenc
         command: Command::Enqueue { item: item.into(), definition, policy_pin: "policy/v1".into(),
             resource: runtime.resource().into(), dependencies: dependencies.iter().map(|d| (*d).into()).collect(),
             initial_candidate: Some("checklist:exact-revision".into()) } };
-    let receipt = runtime.submit(&controller, request, 1).unwrap(); assert!(receipt.result.is_ok(), "{:?}", receipt.result);
+    let receipt = runtime.submit_now(&controller, request, 1).unwrap(); assert!(receipt.result.is_ok(), "{:?}", receipt.result);
 }
 
 #[tokio::test]
@@ -551,7 +551,7 @@ async fn workflow_runtime_cancels_runs_on_a_deleted_board_with_a_reason() {
     let request = Request { id: "enqueue-kept".into(), workspace: live.clone(), expected_revision: 0, sequence: 1,
         command: Command::Enqueue { item: "coding".into(), definition: coding_definition(true), policy_pin: "policy/v1".into(),
             resource: Exec::item_resource(&live, "coding"), dependencies: BTreeSet::new(), initial_candidate: None } };
-    assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
+    assert!(runtime.submit_now(&controller, request, 1).unwrap().result.is_ok());
     runtime.pump(2).await.unwrap();
     let item = runtime.state(&gone).unwrap().unwrap().items["coding"].clone();
     assert!(matches!(item.phase, Phase::Cancelled | Phase::Cancelling), "{:?}", item.phase);
@@ -601,7 +601,7 @@ async fn the_sweep_skips_refused_runs_and_asks_once_about_the_rest() {
         let request = Request { id: format!("enqueue-{item}"), workspace: gone.clone(), expected_revision: n as u64, sequence: n as u64 + 1,
             command: Command::Enqueue { item: item.into(), definition: coding_definition(true), policy_pin: "policy/v1".into(),
                 resource: Exec::item_resource(&gone, item), dependencies: BTreeSet::new(), initial_candidate: None } };
-        assert!(runtime.submit(&controller, request, 1).unwrap().result.is_ok());
+        assert!(runtime.submit_now(&controller, request, 1).unwrap().result.is_ok());
     }
     // Shape the three runs on the stored state: a follower, a group whose push landed, and a run the engine refuses
     // for a reason the rule cannot see (a stop already named on it).

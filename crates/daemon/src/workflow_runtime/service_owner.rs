@@ -124,6 +124,13 @@ impl Runtime {
     }
     pub(super) fn select_item_configuration(&mut self, workspace: &str, item_id: &str, item: &Item) -> Result<()> {
         if !self.service_mode { return Ok(()); }
+        self.coding = self.item_configuration(workspace, item_id, item)?;
+        self.resource = item.resource.clone();
+        self.base = self.coding.as_ref().map_or_else(|| "0".repeat(40), |c| c.base.clone());
+        Ok(())
+    }
+    pub(super) fn item_configuration(&self, workspace: &str, item_id: &str, item: &Item) -> Result<Option<CodingConfig>> {
+        if !self.service_mode { return Ok(self.coding.clone()); }
         // The admitted item's policy pin is immutable and also present in every
         // effect/receipt. Never consult the workspace's current selection here.
         let bundle = self.store.workflow_bundle(&item.policy_pin)?.ok_or(Error::Refused("missing item bundle"))?;
@@ -147,10 +154,7 @@ impl Runtime {
             (Some(AdapterConfiguration::Coding(config)), _) => config.validate_pinned_definition(&bundle.definition)?,
             (None, _) => self.validate_publication(&bundle.definition, None)?,
         }
-        self.coding = bundle.adapter.map(|AdapterConfiguration::Coding(config)| config);
-        self.resource = item.resource.clone();
-        self.base = self.coding.as_ref().map_or_else(|| "0".repeat(40), |c| c.base.clone());
-        Ok(())
+        Ok(bundle.adapter.map(|AdapterConfiguration::Coding(config)| config))
     }
     pub(super) fn validate_item_launch(&mut self, workspace: &str, item: &Item) -> Result<()> {
         if !self.service_mode { return Ok(()); }

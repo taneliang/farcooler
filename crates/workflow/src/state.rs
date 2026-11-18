@@ -258,6 +258,8 @@ pub enum Command {
     Retry { item: String },
     /// The orchestrator queues a ticket waiting at its `Join` step into the open group.
     Queue { item: String },
+    /// The runner checked this exact waiting candidate against the landing head.
+    RefreshJoin { item: String, previous: String, base: String, result: JoinRefresh },
     /// The orchestrator pulls a queued ticket out of a group that has not left yet.
     Leave { item: String },
     /// The orchestrator moves a tracker-only ticket to a column: one of its steps, or `done` or `cancelled`.
@@ -281,6 +283,11 @@ pub enum Command {
     /// The orchestrator reopens a closed ticket: it comes back under its own name as a ticket at rest, on
     /// `definition`, the tracker-only template at the column it reopens in (ov-968).
     Reopen { item: String, definition: Definition, policy_pin: String, resource: String },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JoinRefresh {
+    Rebased { candidate: String },
+    Conflict { paths: Vec<String> },
 }
 #[typeshare]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -33,9 +33,9 @@ pub(super) fn hide_environment(reply: &mut serde_json::Value) {
 /// What a hidden environment value reads as.
 pub(super) use crate::workflow_summary::HIDDEN;
 
-/// Runner-prepared inputs. Neither field is accepted from the wire.
+/// Runner-prepared inputs.
 #[derive(Default)]
-pub(super) struct Prepared { pub tree: Option<RunTree>, pub close_verified: bool }
+pub(super) struct Prepared { pub tree: Option<RunTree>, pub close_verified: bool, pub queue_held: bool }
 
 /// The CLI's small view is a projection only: no durable item or archive is changed.
 fn summarize(mut value:serde_json::Value) -> serde_json::Value {
@@ -138,7 +138,7 @@ impl Runtime {
     pub(super) fn wire_command_with(&self, workspace: &str, principal: &str, deciders: &[String], actor: Option<&WorkflowActor>, action: Action,
         prepared: Prepared) -> Result<serde_json::Value>
     {
-        let Prepared { tree, close_verified } = prepared;
+        let Prepared { tree, close_verified, queue_held } = prepared;
         let payload = serde_json::to_string(&(principal, &action))?;
         if payload.len() > MAX_BYTES { return Err(Error::Refused("oversized command")); }
         // A proposal is filed and answered by the daemon before the engine is involved (`workflow_drafts`).
@@ -275,6 +275,8 @@ impl Runtime {
                 Action::Queue { item, run, pin, .. } | Action::Leave { item, run, pin, .. } => {
                     if !state.items.get(item).is_some_and(|i| &i.run == run && &i.pin == pin) {
                         self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Stale))?
+                    } else if queue_held {
+                        self.store.workflow_wire_write_by(workspace,&id,&payload,actor,Write::Refuse(Refusal::Resource))?
                     } else {
                         let command = if matches!(action, Action::Queue { .. }) { Command::Queue { item:item.clone() } }
                             else { Command::Leave { item:item.clone() } };

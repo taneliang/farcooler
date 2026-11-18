@@ -39,6 +39,10 @@ const UNREAD_SETTINGS: &str = "This repository’s Git settings couldn’t be re
 const REDIRECTED_TRANSPORT: &str = "This repository’s Git config redirects the landing remote’s address, so the ticket wasn’t started. Remove the URL rewrite or include from that config, then start it again.";
 fn unread_target() -> Error { Error::Domain(farcooler_core::error::DomainError::refused(UNREAD_TARGET.into())) }
 
+pub(super) fn redirects_transport(config: &str) -> bool {
+    config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif."))
+}
+
 /// A push refspec: the candidate commit onto the target ref.
 pub(crate) fn push_target(candidate: &str, target: &str) -> String {
     format!("{candidate}:{target}")
@@ -309,10 +313,13 @@ impl Exec {
     /// (ov-1058 re-review). `None` for a landing on this machine, whose tickets start at the local landing ref as
     /// before. A remote that can't be asked refuses the start: never the stale local main instead.
     pub(super) async fn start_head(&self, log: &Path) -> Result<Option<String>> {
+        self.start_head_within(log, START_READ).await
+    }
+    pub(super) async fn start_head_within(&self, log: &Path, wait: Duration) -> Result<Option<String>> {
         let Some((identity, url)) = self.start_landing().await? else { return Ok(None) };
         let (_hold, cancel) = tokio::sync::watch::channel(false);
         let (_, _, exit) = self.remote_git(url, &["ls-remote".into(), "--refs".into(), url.into(), identity.target.clone()],
-            log, START_READ, cancel).await.map_err(|_| unread_target())?;
+            log, wait, cancel).await.map_err(|_| unread_target())?;
         let head = (exit == Some(0)).then(|| String::from_utf8_lossy(&self.bytes(log).unwrap_or_default()).lines().find_map(|l| l.split_once('\t')
             .filter(|(sha, name)| *name == identity.target && super::coding::sha(sha)).map(|(sha, _)| sha.to_string()))).flatten();
         head.map(Some).ok_or_else(unread_target)
@@ -365,7 +372,7 @@ impl Exec {
         let Some(identity) = self.coding.as_ref().and_then(|c| c.landing.as_ref()) else { return Ok(None) };
         let Some(url) = super::coding::landing_url(identity) else { return Ok(None) };
         let config = adapters::git(&self.repository(), &["config", "--list"]).await?;
-        if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
+        if redirects_transport(&config) {
             return Err(Error::Domain(farcooler_core::error::DomainError::refused(REDIRECTED_TRANSPORT.into())));
         }
         Ok(Some((identity, url)))
@@ -383,7 +390,7 @@ impl Exec {
     pub(super) async fn fetch_target(&self, identity: &CodingLanding, url: &str, log: &Path) -> Result<Option<String>> {
         self.fetch_target_within(identity, url, log, FETCH_WAIT).await
     }
-    async fn fetch_target_within(&self, identity: &CodingLanding, url: &str, log: &Path, wait: Duration) -> Result<Option<String>> {
+    pub(super) async fn fetch_target_within(&self, identity: &CodingLanding, url: &str, log: &Path, wait: Duration) -> Result<Option<String>> {
         let Some(head) = self.fetch_private(identity, url, log, wait).await? else { return Ok(None) };
         // The shared repository gets the commit for the fold to build on, by its hash, and no ref.
         let (program, environment) = self.transfer_environment().await?;

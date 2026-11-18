@@ -94,7 +94,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
             let id = match command {
                 Command::Approve { item, .. } | Command::Review { item, .. }
                 | Command::Observe { item, .. } | Command::Cancel { item, .. } | Command::Retry { item }
-                | Command::Queue { item } | Command::Leave { item }
+                | Command::Queue { item } | Command::Leave { item } | Command::RefreshJoin { item, .. }
                 | Command::Move { item, .. } | Command::Start { item, .. }
                 | Command::Resolve { item, .. } | Command::SendBack { item, .. } | Command::Close { item, .. } | Command::Land { item, .. } => item,
                 Command::Decide { .. } | Command::Enqueue { .. } | Command::Advance | Command::RefreshGroups { .. } | Command::Reopen { .. } => unreachable!(),
@@ -488,6 +488,31 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                     item.grouped_in = Some(gid);
                     item.phase = Phase::Joined;
                 }
+                Command::RefreshJoin { previous, base, result, .. } => {
+                    controller(input)?;
+                    if item.phase != Phase::WaitingJoin || item.pending.is_some() { return Err(Refusal::Phase); }
+                    if item.candidate.as_ref() != Some(previous) { return Err(Refusal::Stale); }
+                    let sha = |s: &str| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit());
+                    if !sha(previous) || !sha(base) { return Err(Refusal::Invalid); }
+                    match result {
+                        JoinRefresh::Rebased { candidate } if sha(candidate) && candidate != previous => {
+                            item.candidate = Some(candidate.clone());
+                        }
+                        JoinRefresh::Conflict { paths } if !paths.is_empty() => {
+                            let build = item.definition.stages[..item.stage].iter().rposition(|s| s.kind == StageKind::Build)
+                                .ok_or(Refusal::Phase)?;
+                            if item.definition.stages[build..item.stage].iter().any(|s| lands(&s.kind)) { return Err(Refusal::Phase); }
+                            item.brief = Some(rebase_conflict_brief(base, paths));
+                            item.candidate = None;
+                            item.stage = build;
+                            item.attempt = 1;
+                            item.fence = item.fence.checked_add(1).ok_or(Refusal::Limit)?;
+                            item.phase = Phase::Blocked;
+                            item.run.clear();
+                        }
+                        _ => return Err(Refusal::Invalid),
+                    }
+                }
                 Command::Leave { .. } => {
                     controller(input)?;
                     detach(&mut next, id, &mut item)?;
@@ -774,6 +799,17 @@ fn conflict_brief(evidence: &Evidence, files: &[String]) -> Result<String, Refus
         reason.push_str("… See the fold receipt for the full conflicting file list.");
     }
     Ok(reason)
+}
+
+fn rebase_conflict_brief(base: &str, paths: &[String]) -> String {
+    let mut brief = format!("Rebase your existing work onto landing base {base}, resolve the conflicts, run the affected tests, and commit the result. Conflicting paths: {paths:?}");
+    if brief.len() > MAX_REWORK_REASON_BYTES {
+        let mut end = MAX_REWORK_REASON_BYTES - '…'.len_utf8();
+        while !brief.is_char_boundary(end) { end -= 1; }
+        brief.truncate(end);
+        brief.push('…');
+    }
+    brief
 }
 
 /// An absent limit leaves the landing batch uncapped. The state envelope still bounds memory.

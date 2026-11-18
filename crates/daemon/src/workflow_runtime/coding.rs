@@ -47,23 +47,7 @@ impl CodingConfigExt for CodingConfig {
             || self.checks.len() > 8
             || self.ci.repository.is_empty() || self.ci.workflow.is_empty() || self.ci.event.is_empty()
         { return Err(Error::Refused("invalid coding configuration")); }
-        if let Some(landing) = &self.landing {
-            if !valid_id(&landing.job) || !landing.target.starts_with("refs/heads/") || !valid_id(&landing.target)
-                || landing.target.contains("..") {
-                return Err(Error::Refused("invalid or changed local landing identity"));
-            }
-            match landing_url(landing) {
-                // A remote has no config file here to pin; what it is, is its URL (ov-1026).
-                Some(url) => if !sound_remote_url(url) || !landing.config_digest.is_empty() {
-                    return Err(Error::Refused("invalid landing remote"));
-                },
-                None => if landing.repository.canonicalize()? != landing.repository
-                    || !landing.repository.join("HEAD").is_file() || landing.repository.join(".git").exists()
-                    || digest(&bounded_file(&landing.repository.join("config"))?) != landing.config_digest {
-                    return Err(Error::Refused("invalid or changed local landing identity"));
-                },
-            }
-        }
+        if let Some(landing) = &self.landing { validate_landing_identity(landing)?; }
         match &self.harness {
             CodingHarness::Command(command) => command.validate()?,
             CodingHarness::Native { preset, settings, project_hooks, plugin_dir, prompt, process, codex_hooks } => {
@@ -406,6 +390,25 @@ impl Exec {
     pub(super) fn landing_ref(&self) -> &str {
         self.coding.as_ref().map_or("refs/heads/landed", |c| c.landing_ref.as_str())
     }
+}
+
+pub(super) fn validate_landing_identity(landing: &CodingLanding) -> Result<()> {
+    if !valid_id(&landing.job) || !landing.target.starts_with("refs/heads/") || !valid_id(&landing.target)
+        || landing.target.contains("..") {
+        return Err(Error::Refused("invalid or changed local landing identity"));
+    }
+    match landing_url(landing) {
+        // A remote has no config file here to pin; what it is, is its URL (ov-1026).
+        Some(url) => if !sound_remote_url(url) || !landing.config_digest.is_empty() {
+            return Err(Error::Refused("invalid landing remote"));
+        },
+        None => if landing.repository.canonicalize()? != landing.repository
+            || !landing.repository.join("HEAD").is_file() || landing.repository.join(".git").exists()
+            || digest(&bounded_file(&landing.repository.join("config"))?) != landing.config_digest {
+            return Err(Error::Refused("invalid or changed local landing identity"));
+        },
+    }
+    Ok(())
 }
 
 /// Configuration inputs must never block on a FIFO or allocate unbounded bytes.

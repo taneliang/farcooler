@@ -106,7 +106,7 @@ impl Exec {
     /// The local repository's configuration must not redirect or extend the transport.
     async fn refuse_redirected_transport(&self, binding: &Binding) -> Result<()> {
         let config = self.git_recorded(binding, &self.repository(), &["config", "--list"]).await?;
-        if config.lines().any(|l| l.starts_with("url.") || l.starts_with("include.") || l.starts_with("includeif.")) {
+        if super::coding_landing::redirects_transport(&config) {
             return Err(Error::Refused("local landing config redirects transport"));
         }
         Ok(())
@@ -413,13 +413,18 @@ impl Exec {
         self.refuse_redirected_transport(binding).await?;
         let log = self.poll_log(binding, poll);
         if let Some(url) = super::coding::landing_url(identity) { return self.fetch_target(identity, url, &log).await; }
+        self.fetch_local_target(identity, &log, Duration::from_secs(60), cancel).await
+    }
+
+    pub(super) async fn fetch_local_target(&self, identity: &CodingLanding, log: &Path, wait: Duration,
+        cancel: &tokio::sync::watch::Receiver<bool>) -> Result<Option<String>>
+    {
         let local = Self::base_ref(identity);
         let (program, environment) = self.git_environment().await?;
         let argv = vec![program, "fetch".into(), "--quiet".into(), "--no-tags".into(), "--no-recurse-submodules".into(),
             identity.repository.to_string_lossy().into_owned(), format!("+{}:{local}", identity.target)];
-        durable(&log, b"")?;
-        let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, &log,
-            Duration::from_secs(60), cancel.clone()).await?;
+        durable(log, b"")?;
+        let exit = crate::effect_runner::configured(&self.repository(), &argv, &environment, log, wait, cancel.clone()).await?;
         if exit != Some(0) { return Ok(None); }
         let head = adapters::git(&self.repository(), &["rev-parse", &local]).await?;
         Ok(sha(&head).then_some(head))

@@ -90,8 +90,10 @@ fn mentions(log: &[Input]) -> BTreeMap<String, u64> {
             | Command::Review { item, .. } | Command::Observe { item, .. } | Command::Cancel { item, .. }
             | Command::Close { item, .. } | Command::Retry { item } | Command::Queue { item } | Command::Leave { item }
             | Command::Move { item, .. } | Command::Start { item, .. } | Command::Resolve { item, .. }
-            | Command::SendBack { item, .. } | Command::Land { item, .. } | Command::Reopen { item, .. } => item,
-            Command::Advance | Command::RefreshGroups { .. } => continue,
+            | Command::SendBack { item, .. } | Command::Land { item, .. } | Command::Reopen { item, .. }
+            | Command::RefreshJoin { item, result: crate::JoinRefresh::Conflict { .. }, .. } => item,
+            Command::Advance | Command::RefreshGroups { .. }
+            | Command::RefreshJoin { result: crate::JoinRefresh::Rebased { .. }, .. } => continue,
         };
         out.insert(item.clone(), input.expected_revision);
     }

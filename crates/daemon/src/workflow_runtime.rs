@@ -13,6 +13,7 @@ use uuid::Uuid;
 use tokio::sync::{mpsc, oneshot};
 
 mod scheduling;
+mod waiting_join;
 mod adapters;
 mod process_logs;
 mod script_hooks;
@@ -436,7 +437,17 @@ impl Runtime {
     pub fn events(&self, workspace: &str) -> Result<Vec<Input>> {
         Ok(self.store.workflow_events(workspace)?)
     }
-    pub fn submit(&self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
+    pub async fn submit(&self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
+        self.authorize(controller.instance)?;
+        if let Command::Queue { item } = &request.command
+            && !self.prepare_queue(&request.workspace, item, request.expected_revision, None, None, now_ms).await
+            && self.state(&request.workspace)?.is_some_and(|s| s.revision == request.expected_revision)
+        {
+            return Err(Error::Refused("waiting branch could not be rebased onto the landing head"));
+        }
+        self.submit_now(controller, request, now_ms)
+    }
+    fn submit_now(&self, controller: &Controller, request: Request, now_ms: i64) -> Result<Receipt> {
         self.authorize(controller.instance)?;
         match &request.command {
             Command::Enqueue { definition, resource, .. } => {
@@ -687,7 +698,8 @@ impl Runtime {
     async fn launch_ready_noting(&mut self, workspaces: &[String], now_ms: i64, running: &mut Vec<Running>,
         futures: &mut Vec<Slot>, count: &mut usize, waiting: &mut Vec<Placed>) -> Result<()>
     {
-        self.schedule_ready(workspaces, now_ms)?;
+        let ready_queues = self.refresh_waiting_joins(workspaces, now_ms).await?;
+        self.schedule_ready(workspaces, now_ms, &ready_queues)?;
         let started = std::time::Instant::now();
         let clock = || now_ms.saturating_add(i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX));
         for workspace in workspaces {
@@ -872,7 +884,7 @@ impl Runtime {
             Inbox::Apply(authority, request, time, reply) => {
                 let request = *request;
                 let result = match authority {
-                    Authority::Controller(instance) => self.submit(&Controller { instance }, request, time),
+                    Authority::Controller(instance) => self.submit(&Controller { instance }, request, time).await,
                     Authority::Decision(instance, principal) =>
                         self.decide(&DecisionSession { instance, principal }, request, time),
                 };
@@ -891,6 +903,7 @@ impl Runtime {
                     self.validate_wire_publication(&admission.workspace(), &admission.principal(), &action).await?;
                     let tree = self.prepare_start(&admission.workspace(), &admission.principal(), &action).await?;
                     let close_verified = self.verify_close(&admission.workspace(), &admission.principal(), &action).await?;
+                    let queue_held = self.wire_queue_held(&admission.workspace(), &admission.principal(), &action).await?;
                     // The remote is read before anything is written: a commit it does not hold lands nothing.
                     // It is the last await, so the recheck below sees any authority lost while it was pending.
                     let landed_refusal = if let farcooler_protocol::workflow_commands::Action::Landed { item, run, pin, sha, .. } = &*action {
@@ -908,7 +921,7 @@ impl Runtime {
                     } else if let farcooler_protocol::workflow_commands::Action::Resolve { mutation, item, run, pin } = &*action {
                         self.resolve_wire(&admission.workspace(), item, run, pin, mutation.epoch).await?
                     } else {
-                        self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, wire_commands::Prepared { tree, close_verified })?
+                        self.wire_command_with(&admission.workspace(), &admission.principal(), &deciders, Some(&admission.actor()), *action, wire_commands::Prepared { tree, close_verified, queue_held })?
                     };
                     if get {
                         let epoch = result.pointer("/state/epoch").and_then(|v| v.as_u64()).unwrap_or(1);

@@ -45,7 +45,7 @@ mod tests {
     }
     async fn send(runtime: &Runtime, action: Action) -> serde_json::Value {
         let proof = runtime.verify_close("w", "orchestrator", &action).await.unwrap();
-        runtime.wire_command_with("w", "orchestrator", &["orchestrator".into()], None, action, super::super::wire_commands::Prepared { tree:None, close_verified:proof }).unwrap()
+        runtime.wire_command_with("w", "orchestrator", &["orchestrator".into()], None, action, super::super::wire_commands::Prepared { close_verified:proof, ..Default::default() }).unwrap()
     }
     #[tokio::test]
     async fn workflow_close_verifies_landing_and_replays_without_reading_the_target() {
