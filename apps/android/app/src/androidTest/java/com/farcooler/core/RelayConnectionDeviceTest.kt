@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.farcooler.BuildConfig
 import com.farcooler.account.Account
 import com.farcooler.account.RelayAnswer
 import com.farcooler.account.relayPost
@@ -33,19 +34,15 @@ class RelayConnectionDeviceTest {
     @Test
     fun prepareThePhone() {
         assumeNotNull(InstrumentationRegistry.getArguments().getString("prepareRelay"))
+        if (InstrumentationRegistry.getArguments().getString("preparePreview") == "true") {
+            checkPreviewBuild()
+        }
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val offer = buildJsonObject {
             put("ssh_public", requireNotNull(Identity.publicKey))
             put("node_public", requireNotNull(NodeIdentity.mintIfNeeded()).second)
         }
         File(context.filesDir, "relay-offer.json").writeText(offer.toString())
-        if (InstrumentationRegistry.getArguments().getString("preparePreview") == "true") {
-            // Public channel settings only. Sign in through the app; never import or log tokens.
-            check(context.getSharedPreferences("farcooler.account", Context.MODE_PRIVATE).edit()
-                .putString("account.relay", PREVIEW_RELAY)
-                .putString("account.clientID", "client_01M03MXE27CHCZJJ0TMY7KCMAH")
-                .commit())
-        }
     }
 
     @Test
@@ -60,6 +57,7 @@ class RelayConnectionDeviceTest {
             "previewProbe only checked an unauthenticated 401; use previewAccount=true and previewMachineId"
         }
         if (arguments.getString("previewAccount") == "true") {
+            checkPreviewBuild()
             val context = InstrumentationRegistry.getInstrumentation().targetContext
             val account = Account(context)
             check(account.relay == PREVIEW_RELAY) { "Configure the disposable app for the preview relay first" }
@@ -109,6 +107,18 @@ class RelayConnectionDeviceTest {
             throw error
         } finally {
             client.close()
+        }
+    }
+
+    private fun checkPreviewBuild() {
+        // Relay/client preferences cannot change the manifest's OAuth callback.
+        // A local APK with preview preferences asks WorkOS for farcooler-local://auth,
+        // which the preview project rejects before the account can sign in.
+        check(BuildConfig.CHANNEL == "preview" && BuildConfig.AUTH_SCHEME == "farcooler-preview") {
+            "Preview verification requires a preview-channel APK (including farcooler-preview://auth); rebuild a clean checkout with FARCOOLER_CHANNEL=preview"
+        }
+        check(BuildConfig.WORKOS_CLIENT_ID.isNotBlank()) {
+            "Build with the public preview WorkOS client ID via -Pfarcooler.workosClientId"
         }
     }
 

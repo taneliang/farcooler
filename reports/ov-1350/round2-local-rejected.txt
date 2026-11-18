@@ -1,0 +1,19 @@
+
+com.farcooler.core.RelayConnectionDeviceTest:
+Error in prepareThePhone(com.farcooler.core.RelayConnectionDeviceTest):
+java.lang.IllegalStateException: Preview verification requires a preview-channel APK (including farcooler-preview://auth); rebuild a clean checkout with FARCOOLER_CHANNEL=preview
+	at com.farcooler.core.RelayConnectionDeviceTest.checkPreviewBuild(RelayConnectionDeviceTest.kt:117)
+	at com.farcooler.core.RelayConnectionDeviceTest.prepareThePhone(RelayConnectionDeviceTest.kt:38)
+
+
+Time: 0.006
+There was 1 failure:
+1) prepareThePhone(com.farcooler.core.RelayConnectionDeviceTest)
+java.lang.IllegalStateException: Preview verification requires a preview-channel APK (including farcooler-preview://auth); rebuild a clean checkout with FARCOOLER_CHANNEL=preview
+	at com.farcooler.core.RelayConnectionDeviceTest.checkPreviewBuild(RelayConnectionDeviceTest.kt:117)
+	at com.farcooler.core.RelayConnectionDeviceTest.prepareThePhone(RelayConnectionDeviceTest.kt:38)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
+
+

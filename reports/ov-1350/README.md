@@ -1,5 +1,29 @@
 # ov-1350: Android relay connection
 
+## Fix round 2: preview sign-in setup corrected
+
+Newest ticket finding `accdd821` requires the authenticated preview account and
+paired Mac connection capture. The native interface fix is retained.
+
+Opening the previous round's normal sign-in flow exposed an additional setup
+failure, captured in [round2-invalid-redirect.png](round2-invalid-redirect.png):
+WorkOS rejects `farcooler-local://auth` and suggests `farcooler-preview://auth`.
+`preparePreview` had changed only the account relay/client preferences on a local
+APK. `Account.REDIRECT_URI` and the manifest callback still come from the build
+channel; preferences cannot change them. Thus the previous instructions could
+not sign into preview even with an authorized test account.
+
+The test now rejects that mixed setup before writing a fixture or using the
+account, and requires a preview-channel APK with its public WorkOS client ID.
+It no longer writes channel preferences. Build from a **clean checkout**:
+`scripts/version.sh` deliberately resolves a dirty checkout to local even with
+`FARCOOLER_CHANNEL=preview` set. These are local artifact settings, not remote
+relay flags. Do not change WorkOS redirects to accommodate the local APK.
+
+The authenticated connection acceptance remains open until an authorized preview
+test account and paired Mac are available. The sign-in setup correction alone
+does not establish that connection.
+
 ## Fix round 1: preview verification is still blocked
 
 The review rejected the missing authenticated preview account connection. Its
@@ -15,7 +39,8 @@ attempting the tunnel. It records the successful account response metadata but
 never credentials. The obsolete `previewProbe` argument fails explicitly instead
 of silently continuing after a 401. `preparePreview=true` configures only the
 disposable app's public relay URL and matching WorkOS client ID; it does not sign
-in or change any remote relay setting.
+in or change any remote relay setting. This setup was superseded in round 2
+because it could not change the APK callback scheme.
 
 The UI fixture also now replaces its previous `ov-1350-relay` entry. Previously
 each run appended the same ID, and `RunnerStore.selected` chose the first entry,
@@ -85,10 +110,12 @@ Use an isolated emulator, not a person's installed app. Build the native librari
 ```sh
 ./scripts/build-android-libs.sh
 cargo build -p farcooler-jni
+export FARCOOLER_CHANNEL=preview
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 apps/android/gradlew -p apps/android testInstrumentedUnitTest \
   -Pfarcooler.nativeLibDir="$PWD/target/debug" \
+  -Pfarcooler.workosClientId=client_01M03MXE27CHCZJJ0TMY7KCMAH \
   assembleInstrumented assembleAndroidTest
 (cd crates/tailcat/go && CGO_ENABLED=0 go build -o /tmp/ov-1350-helper .)
 ```
@@ -108,8 +135,8 @@ For the optional production UI capture, first create the emulator's real device 
 adb shell am instrument -w \
   -e class com.farcooler.core.RelayConnectionDeviceTest#prepareThePhone \
   -e prepareRelay true -e preparePreview true \
-  com.farcooler.android.local.test.test/androidx.test.runner.AndroidJUnitRunner
-adb exec-out run-as com.farcooler.android.local.test cat files/relay-offer.json > /tmp/ov-1350-offer.json
+  com.farcooler.android.preview.test.test/androidx.test.runner.AndroidJUnitRunner
+adb exec-out run-as com.farcooler.android.preview.test cat files/relay-offer.json > /tmp/ov-1350-offer.json
 ```
 
 Keep the following harness running in another terminal. It creates its own keys, SSH configuration, allowlist and runtime; it does not edit the owner's SSH configuration or runner. Choose a new scratch directory. `config.json` contains throwaway private keys and must not be committed.
@@ -131,12 +158,12 @@ adb shell am instrument -w \
   -e class com.farcooler.core.RelayConnectionDeviceTest#aTunnelCarriesTheAndroidClientToTheRunner \
   -e relayConfig /data/local/tmp/ov-1350-config.json \
   -e showRunner true \
-  com.farcooler.android.local.test.test/androidx.test.runner.AndroidJUnitRunner
-adb shell am start -W -n com.farcooler.android.local.test/com.farcooler.ui.MainActivity
+  com.farcooler.android.preview.test.test/androidx.test.runner.AndroidJUnitRunner
+adb shell am start -W -n com.farcooler.android.preview.test/com.farcooler.ui.MainActivity
 adb logcat -d -s Tailcat:I RelayConnection:I
 ```
 
-Omit `--offer`, `prepareThePhone` and `showRunner` for a core-only integration run. The test is skipped unless `relayConfig` is supplied. Stop the harness with Ctrl-C; it terminates only its own helper and sshd. All verification here used the separate `.local.test` application ID.
+Omit `--offer`, `prepareThePhone` and `showRunner` for a core-only integration run. The test is skipped unless `relayConfig` is supplied. Stop the harness with Ctrl-C; it terminates only its own helper and sshd. All verification here used the separate `.preview.test` application ID (rounds 0/1 used `.local.test`).
 
 For authenticated preview verification, first sign the disposable app into a
 preview test account through its normal sign-in UI. Pair the disposable Mac to
@@ -149,7 +176,7 @@ adb shell am instrument -w \
   -e relayConfig /data/local/tmp/ov-1350-config.json \
   -e previewAccount true -e previewMachineId "$PREVIEW_MACHINE_ID" \
   -e showRunner true \
-  com.farcooler.android.local.test.test/androidx.test.runner.AndroidJUnitRunner
+  com.farcooler.android.preview.test.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 Only a run with the authenticated account response, matching Mac registration,
