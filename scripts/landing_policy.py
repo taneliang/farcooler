@@ -162,6 +162,7 @@ SCRIPT_USERS = {
     'scripts/landing-timing.py': {'wire'},  # ci.yml wire runs self-test/check; script calls are checks or release automation, not platform builds.
     'scripts/landing_policy.py': None,  # Full: selection, command rewrites and worker scheduling affect every family.
     'scripts/lane-gate.py': None,  # Full: orchestrates and selects every gate job, including preflight and evidence.
+    'scripts/lint-gate.sh': {'wire'},  # Workflow lint check runs this wrapper; its lint scripts are wire users.
     'scripts/mac-capture-stop-test.sh': {'swift-tests'},  # ci.yml swift-tests invokes this test; wrapper subprocesses use stand-in tools.
     'scripts/mac-capture.sh': None,  # Full: transitive gate users not established; retain conservative fallback.
     'scripts/macos-bundle-native-test.py': None,  # Full: transitive gate users not established; retain conservative fallback.
