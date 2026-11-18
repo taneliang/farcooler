@@ -20,6 +20,23 @@ It no longer writes channel preferences. Build from a **clean checkout**:
 `FARCOOLER_CHANNEL=preview` set. These are local artifact settings, not remote
 relay flags. Do not change WorkOS redirects to accommodate the local APK.
 
+Verification:
+
+- [round2-local-rejected.txt](round2-local-rejected.txt): invalid local setup rejected.
+- [round2-preview-prepared.txt](round2-preview-prepared.txt): preview setup passes.
+- [round2-preview-login.png](round2-preview-login.png): normal preview login form
+  reached, replacing the invalid redirect screen. No email or credentials entered.
+- [round2-preview-blocked.txt](round2-preview-blocked.txt): strict verification
+  stops at the missing session before checking any machine ID or dialing.
+- [round2-device-after.txt](round2-device-after.txt),
+  [round2-android-logcat.txt](round2-android-logcat.txt), and
+  [round2-connected.png](round2-connected.png): fresh disposable Mac connection
+  using the preview APK, still signed out. This is separate DERP evidence, not
+  authenticated preview acceptance.
+- [round2-checks.txt](round2-checks.txt): device results, host JNI rebuild and all
+  1,627 JVM tests passing. The initial JVM attempt lacked the host library;
+  results above refer to the corrected rerun.
+
 The authenticated connection acceptance remains open until an authorized preview
 test account and paired Mac are available. The sign-in setup correction alone
 does not establish that connection.

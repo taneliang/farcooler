@@ -1,0 +1,14 @@
+Nov 18 fix round 2
+Go: GOCACHE=/tmp/ov-1350-go-cache go test ./... PASS (cached)
+Local APK/test build: assembleInstrumented assembleAndroidTest PASS (5s)
+Local prepareThePhone preparePreview=true: expected FAIL; rejects the local callback before fixture creation (round2-local-rejected.txt)
+Clean preview build: FARCOOLER_CHANNEL=preview, -Pfarcooler.workosClientId=client_01M03MXE27CHCZJJ0TMY7KCMAH; both APKs packaged
+Preview prepareThePhone preparePreview=true: PASS (0.14s)
+Preview normal sign-in: reaches AuthKit email/SSO form (round2-preview-login.png)
+Strict previewAccount=true: FAIL at missing authorized session, before machine-ID lookup or tunnel; no preview success claimed
+Fresh disposable Mac tunnel with preview APK and showRunner=true: PASS (0.739s)
+Preview UI: connected fleet captured; account remains signed out (round2-connected.png)
+Initial JVM run: invalid because target/debug/libfarcooler_jni.dylib was missing; native-dependent tests failed
+Rebuilt required library: cargo build -p farcooler-jni PASS (1m33s)
+JVM rerun with host JNI: testInstrumentedUnitTest PASS (8s); 1627 tests, 0 failures/errors/skips
+No relay flag, deployment, WorkOS redirect, or account setting changed remotely
