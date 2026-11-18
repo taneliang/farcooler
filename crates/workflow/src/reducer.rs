@@ -333,7 +333,7 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                             evidence_matches(&item, evidence)?;
                             route(&mut item, id, input, label, Some(evidence), Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }
-                        Outcome::Passed(evidence) | Outcome::Rejected(evidence) | Outcome::RejectedWithDetails(evidence, _) => {
+                        Outcome::Passed(evidence) | Outcome::Rejected(evidence) | Outcome::RejectedWithDetails(evidence, _) | Outcome::RejectedWithBrief(evidence, _) => {
                             if item.run.starts_with("cancel:") { return Err(Refusal::Phase); }
                             evidence_matches(&item, evidence)?;
                             if let Outcome::RejectedWithDetails(_, detail) = outcome {
@@ -341,6 +341,10 @@ fn step_inner(state: &State, input: &Input, settling_hook: bool) -> Result<Trans
                                     || detail.job.chars().any(char::is_control) || detail.first_line.chars().any(char::is_control)
                                 { return Err(Refusal::Evidence); }
                                 if item.group_of.is_some() { item.group_failure = Some(detail.clone()); }
+                            }
+                            if let Outcome::RejectedWithBrief(_, brief) = outcome {
+                                if item.group_of.is_some() || item.definition.stages[item.stage].kind != StageKind::Check || !valid_rework_reason(brief) { return Err(Refusal::Evidence); }
+                                item.brief = Some(brief.clone());
                             }
                             finish(&mut item, id, input, matches!(outcome, Outcome::Passed(_)), evidence, Out { room: room(&next, &spawn), effects: &mut effects, spawn: &mut spawn })?;
                         }

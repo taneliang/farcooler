@@ -299,7 +299,7 @@ pub enum Outcome {
     /// Digest-verified gate diagnostics and the members whose changed paths they name.
     /// An empty member list takes the published anonymous-failure route.
     GateRejected { evidence: Evidence, members: Vec<String>, brief: String, failure: GroupFailure },
-    Passed(Evidence), Rejected(Evidence), RejectedWithDetails(Evidence, GroupFailure), Labeled(String, Evidence), SafeFailure,
+    Passed(Evidence), Rejected(Evidence), RejectedWithDetails(Evidence, GroupFailure), RejectedWithBrief(Evidence, String), Labeled(String, Evidence), SafeFailure,
     /// A `SafeFailure` that says why, in a sentence kept on the run as its `failure` (ov-1058).
     SafeFailureBecause(String),
     Interrupted, Uncertain, Stopped { operation: String, receipt: String } }

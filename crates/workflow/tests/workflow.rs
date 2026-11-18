@@ -528,3 +528,21 @@ fn workflow_archived_replay_is_identical() {
     assert_eq!(digest(&state), digest(&replay));
     assert!(replay.archive.contains_key("a"));
 }
+
+#[test]
+fn rejected_ticket_check_briefs_the_next_build() {
+    let mut definition = Definition::coding();
+    definition.schema = 2;
+    definition.max_reworks = 0;
+    definition.rework_target = None;
+    definition.stages[2].routes.insert("rejected".into(), Target::Step("stage-1".into()));
+    definition.stages[2].limit = 4;
+    let mut state = start(definition);
+    for _ in 0..2 {
+        state = step(&state, &observe(&state, Outcome::Passed(evidence(&state.items["item"])))).unwrap().state;
+    }
+    let message = "Lint failed: scripts/copy-lint.py\nfile.swift:12: bad copy";
+    let result = step(&state, &observe(&state, Outcome::RejectedWithBrief(evidence(&state.items["item"]), message.into()))).unwrap();
+    assert_eq!(result.state.items["item"].definition.stages[result.state.items["item"].stage].kind, StageKind::Build);
+    assert_eq!(result.effects[0].brief.as_deref(), Some(message));
+}

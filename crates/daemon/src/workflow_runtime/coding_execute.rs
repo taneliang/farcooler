@@ -725,7 +725,12 @@ impl Exec {
             let failure = farcooler_workflow::GroupFailure {
                 job: plain(&command.argv.join(" "), 256), first_line: plain(first, 1000), split: false,
             };
-            if binding.effect.members.is_empty() { return Ok(Outcome::RejectedWithDetails(evidence, failure)); }
+            if binding.effect.members.is_empty() {
+                if matches!(binding.effect.kind, EffectKind::Execute(StageKind::Check)) {
+                    return Ok(Outcome::RejectedWithBrief(evidence, bounded_gate_brief(&failure.job, &output)));
+                }
+                return Ok(Outcome::RejectedWithDetails(evidence, failure));
+            }
             let diagnostics = gate_diagnostics(&output);
             let mut members = Vec::new();
             let effects = self.store.workflow_outbox(&binding.workspace)?;
