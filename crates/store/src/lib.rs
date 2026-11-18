@@ -95,6 +95,7 @@ pub use wakes::{PendingWake, WakeKind};
 pub use workspaces::{Vacated, valid_prefix};
 
 pub mod workflow_publication;
+mod workflow_sol_upgrade;
 pub mod workflow_notices;
 pub mod workflow_overlay;
 

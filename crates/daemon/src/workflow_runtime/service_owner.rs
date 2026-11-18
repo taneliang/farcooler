@@ -72,6 +72,7 @@ impl Runtime {
         if !writer.metadata()?.is_file() || writer.metadata()?.nlink() != 1 { return Err(Error::Refused("aliased writer")); }
         rustix::fs::flock(&writer, rustix::fs::FlockOperation::NonBlockingLockExclusive)
             .map_err(|_| Error::Refused("workflow service already owned"))?;
+        store.workflow_upgrade_sol_62()?;
         let (send,inbox) = mpsc::channel(32);
         Ok(Self { exec:Exec { yielding:crate::yielding::Yielding::at(&root), activities: Default::default(), places: std::sync::Arc::new(std::sync::Mutex::new(Places::load(&root)?)), root,store,service_mode:true,resource:String::new(),base:"0".repeat(40),coding:None,launched:None,host:None,seeding:Default::default(),active_trees:Default::default(),
             #[cfg(test)] user_home:None, #[cfg(test)] build_free_bytes:Some(u64::MAX) },

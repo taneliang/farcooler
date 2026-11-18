@@ -425,19 +425,44 @@ async fn workflow_coding_a_started_ticket_tells_its_agent_which_ticket_it_is() {
 #[tokio::test]
 async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_launches_its_own() {
     use farcooler_protocol::{workflow_commands::{Action, Mutation}, workflow_config::AdapterConfiguration};
-    let (dir, mut runtime) = configured(false, "pass").await;
+    let (dir, runtime) = configured(false, "pass").await;
     let published = runtime.coding.clone().unwrap();
     let mut definition = published.definition().unwrap();
-    // Use Main's published choices, so this catches a missing model in the real allowlist.
+    // Start from Main's pre-ov-1356 publication, not an already upgraded draft.
     let bundle: serde_json::Value = serde_json::from_str(include_str!("../../../../.claude/agent/reports/ov-1071/workflow-main.json")).unwrap();
     definition.models.insert("build".into(), serde_json::from_value(bundle["definition"]["models"]["build"].clone()).unwrap());
+    definition.models.get_mut("build").unwrap().retain(|m| m != "codex:gpt-6.2-sol");
     let m = |id: &str, revision, sequence| Mutation { id: id.into(), revision, epoch: 1, sequence };
     let wire = |runtime: &Runtime, principal, action| runtime.wire_command("w", principal, action).unwrap();
     let ok = |value: &serde_json::Value| assert!(value.pointer("/receipt/result/Ok").is_some(), "{value}");
     let adapter = Some(Box::new(AdapterConfiguration::Coding(published.clone())));
-    let pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
+    let old_pin = farcooler_store::workflow_publication::configuration_pin(&definition, adapter.as_deref());
     ok(&wire(&runtime, "owner", Action::Publish { reason:None, notifications: None, adapter, mutation: m("publish", 0, 1), expected_pin: None, definition }));
     assert_eq!(runtime.track_tickets(&[("w".into(), "ov-7".into(), "backlog".into()), ("w".into(), "ov-8".into(), "backlog".into())]).unwrap(), 2);
+    let state = runtime.state("w").unwrap().unwrap();
+    let waiting = &state.items["ov-7"];
+    let refused = wire(&runtime, "orchestrator", Action::Start { mutation: m("before-upgrade-sol", state.revision, 1), item: "ov-7".into(),
+        run: waiting.run.clone(), pin: waiting.pin.clone(), start_pin: old_pin.clone(),
+        models: [("build".into(), "codex:gpt-6.2-sol".into())].into(), worktree: None, with: vec![] });
+    assert!(refused.pointer("/receipt/result/Err/ModelRefused").is_some(), "the previously published choices reproduce the refusal: {refused}");
+    let held = &state.items["ov-8"];
+    ok(&wire(&runtime, "owner", Action::Start { mutation: m("before-upgrade", state.revision, 1), item: "ov-8".into(),
+        run: held.run.clone(), pin: held.pin.clone(), start_pin: old_pin.clone(), models: Default::default(), worktree: None, with: vec![] }));
+    let old_state = runtime.state("w").unwrap();
+    let store = runtime.store.clone();
+    drop(runtime);
+    // Exercise the real production bootstrap, then reopen the fixture to check launches without providers.
+    drop(Runtime::open_service(&dir.path().join("service"), store).unwrap());
+    let mut runtime = Runtime::open(&dir.path().join("runtime")).unwrap();
+    let configuration = runtime.store.workflow_configuration("w").unwrap().unwrap();
+    let pin = configuration.pin;
+    assert_ne!(pin, old_pin, "changing choices must publish a new pin");
+    assert_eq!(runtime.state("w").unwrap(), old_state, "existing runs and ticket pins are untouched");
+    assert!(!runtime.store.workflow_bundle(&old_pin).unwrap().unwrap().definition.models["build"].contains(&"codex:gpt-6.2-sol".into()));
+    let held = &old_state.as_ref().unwrap().items["ov-7"];
+    let stale = wire(&runtime, "orchestrator", Action::Start { mutation: m("old-publication", old_state.as_ref().unwrap().revision, 1), item: "ov-7".into(),
+        run: held.run.clone(), pin: held.pin.clone(), start_pin: old_pin, models: Default::default(), worktree: None, with: vec![] });
+    assert_eq!(stale.pointer("/receipt/result/Err").and_then(|e| e.as_str()), Some("Stale"));
     let start = |runtime: &Runtime, item: &str, models: &[(&str, &str)], sequence| {
         let state = runtime.state("w").unwrap().unwrap(); let held = &state.items[item];
         wire(runtime, "orchestrator", Action::Start { mutation: m(&format!("start-{item}-{sequence}"), state.revision, sequence), item: item.into(),
@@ -451,8 +476,8 @@ async fn workflow_coding_two_tickets_start_with_different_models_and_each_build_
     assert_eq!(start(&runtime, "ov-7", &[("build", "codex:gpt-4")], 2), refused,
         "replaying the command keeps the receipt naming the refused model");
     ok(&start(&runtime, "ov-7", &[("build", "codex:gpt-6.2-sol")], 3));
-    ok(&start(&runtime, "ov-8", &[], 4));
     let state = runtime.state("w").unwrap().unwrap();
+    assert_eq!(state.items["ov-8"].pin, old_state.as_ref().unwrap().items["ov-8"].pin, "a running build keeps its original bundle");
     assert_eq!(state.items["ov-7"].models["build"], "codex:gpt-6.2-sol");
     assert_eq!(state.items["ov-8"].models["build"], "claude:sonnet", "no pick, the step's default");
     runtime.pump(2).await.unwrap(); // Only provision; never launch a real provider.
