@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """ov-1189: combined group selection, CI coverage floor and build-free reports."""
 import importlib.util
+import io
 import os
 import re
 from pathlib import Path
@@ -12,7 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent.parent
@@ -146,6 +147,23 @@ def selected(paths):
 
 
 class DiskTests(unittest.TestCase):
+    def test_plain_gate_preserves_run_jobs_exceptions(self):
+        for error in (OSError(28, "No space left on device"), RuntimeError("unexpected failure")):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as temporary, \
+                    patch.dict(os.environ, {k: v for k, v in os.environ.items() if not k.startswith("FARCOOLER_")}, clear=True), \
+                    patch.object(lane, "run_jobs", side_effect=error), \
+                    patch.object(lane, "toolchain_preflight", return_value={}), \
+                    patch.object(lane, "print_summary") as summary, \
+                    redirect_stdout(io.StringIO()):
+                args = ["--worktree", str(ROOT), "--base", "HEAD", "--only", "wire", "--log-dir", temporary]
+                if isinstance(error, OSError):
+                    self.assertEqual(lane.main(args), 1)
+                    self.assertIn(lane.DISK_FULL, summary.call_args.args[0][0][2])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "unexpected failure"):
+                        lane.main(args)
+                    self.assertIn("unexpected failure", summary.call_args.args[0][0][2])
+
     def test_low_disk_wrapper_refuses_within_a_minute_without_deleting(self):
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary).resolve()

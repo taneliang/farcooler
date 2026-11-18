@@ -881,7 +881,6 @@ def md(cell):
 
 
 def main(argv):
-    import gate_disk
     ap = argparse.ArgumentParser(description="Run the CI jobs a change reaches.")
     ap.add_argument("--full-rust", action="store_true", help="run the whole Rust suite even when the change only reaches some crates, plain or --landing (ov-1268)")
     ap.add_argument("--landing", action="store_true", help="local landing: parallel families, CI retains release bundle proof")
@@ -915,6 +914,7 @@ def main(argv):
 
 
 def gate(args):
+    import gate_disk
     if getattr(args, "landing", False):
         # Planning also reads Git before any worker starts. Do not let those
         # reads refresh the protocol build stamp's watched index (ov-1185).
@@ -949,7 +949,6 @@ def gate(args):
     chosen = [j for j in JOBS if j in reach and (not only or j in only) and j not in skip]
 
     if args.landing and not args.dry_run:
-        import gate_disk
         try:
             gate_disk.admit(repo, chosen)
         except gate_disk.ResourceRefusal as e:
