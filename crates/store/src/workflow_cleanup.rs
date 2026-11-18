@@ -20,6 +20,14 @@ pub(crate) fn select(tx: &Transaction<'_>, before: &State, after: &State) -> Res
     Ok(())
 }
 impl Store {
+    /// Recovery can retain a new, deterministic tree-release intent for a known finished group.
+    /// Never overwrite a prior attempt: an interrupted deletion must not be replayed.
+    pub fn workflow_cleanup_enqueue(&self, effect: &CleanupEffect) -> Result<()> {
+        self.conn().execute("INSERT OR IGNORE INTO engine_build_cleanup(workspace,id,payload) VALUES (?1,?2,?3)",
+            params![effect.workspace, effect.id, serde_json::to_string(effect)?])?;
+        Ok(())
+    }
+
     /// A stale cleanup must not consume a later build's output, or bypass cutover quarantine.
     pub fn workflow_cleanup_skip(&self, effect: &CleanupEffect) -> Result<Option<String>> {
         let conn = self.conn();

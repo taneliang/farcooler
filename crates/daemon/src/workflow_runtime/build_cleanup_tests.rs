@@ -137,6 +137,8 @@ async fn build_cleanup_uncertain_run_records_skip_and_retains_output() {
 #[tokio::test]
 async fn build_cleanup_cancellation_releases_output_and_recovery_keeps_the_result() {
     let (_dir, runtime, tree) = building().await;
+    std::fs::create_dir_all(tree.join("apps/android/app/build")).unwrap();
+    std::fs::write(tree.join("apps/android/app/build/binary"), b"gradle").unwrap();
     // This build was queued but never admitted; cancellation needs no stop effect.
     runtime.internal("w", Command::Cancel { item: "one".into(), reason: None }, Grant::Controller, 3).unwrap();
     let root = runtime.root.clone();
@@ -144,9 +146,10 @@ async fn build_cleanup_cancellation_releases_output_and_recovery_keeps_the_resul
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.pump(4).await.unwrap();
     assert!(!tree.join("target").exists());
+    assert!(!tree.join("apps/android/app/build").exists());
     let records = runtime.store.workflow_cleanups("w").unwrap();
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].result.as_ref().unwrap().bytes_freed, 8);
+    assert_eq!(records[0].result.as_ref().unwrap().bytes_freed, 14);
     let root = runtime.root.clone();
     drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
@@ -377,7 +380,7 @@ async fn build_cleanup_crash_after_deletion_does_not_replay_against_rebuilt_outp
 
 
 // A published group may provision and build its own candidate before a person's review.
-async fn building_group(folders: Option<Vec<String>>) -> (tempfile::TempDir, Runtime, String, PathBuf) {
+pub(super) async fn building_group(folders: Option<Vec<String>>) -> (tempfile::TempDir, Runtime, String, PathBuf) {
     use super::coding_verbs_tests::{at_join, batched_push, command, lander, until};
     let (dir, mut runtime) = lander("pass").await;
     std::fs::write(runtime.repository().join(".git/info/exclude"), "target/\ncustom-output/\n").unwrap();
@@ -454,9 +457,9 @@ async fn build_cleanup_cancelled_group_retains_open_output_and_unlisted_files() 
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.pump(100).await.unwrap();
     assert!(!tree.join("target").exists(), "ended groups retry after recovery and file closure");
-    assert_eq!(std::fs::read(tree.join("personal-notes")).unwrap(), b"keep");
+    assert!(!tree.exists(), "the disposable group checkout is released after file closure");
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
-    assert_eq!(record.result.as_ref().unwrap().bytes_freed, 18);
+    assert!(record.result.as_ref().unwrap().bytes_freed > 18);
     assert!(!record.result.as_ref().unwrap().retry);
     runtime.pump(100).await.unwrap();
     let again = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
@@ -465,22 +468,26 @@ async fn build_cleanup_cancelled_group_retains_open_output_and_unlisted_files() 
 
 
 #[tokio::test]
-async fn build_cleanup_cancelled_group_releases_output_but_preserves_unlisted_work() {
+async fn build_cleanup_cancelled_group_releases_the_whole_disposable_tree() {
     use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(None).await;
+    let foreign = tempfile::tempdir().unwrap();
+    std::fs::write(foreign.path().join("live-output"), b"keep").unwrap();
+    std::os::unix::fs::symlink(foreign.path(), tree.join("foreign-tree")).unwrap();
     let head = adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap();
     std::fs::write(tree.join("personal-notes"), b"keep").unwrap();
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
     runtime.pump(100).await.unwrap();
     assert!(!tree.join("target").exists());
-    assert_eq!(std::fs::read(tree.join("personal-notes")).unwrap(), b"keep");
-    assert!(adapters::git(&tree, &["cat-file", "-e", &head]).await.is_ok());
+    assert!(!tree.exists());
+    assert_eq!(std::fs::read(foreign.path().join("live-output")).unwrap(), b"keep");
+    assert!(adapters::git(&runtime.repository(), &["cat-file", "-e", &head]).await.is_ok());
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
-    assert_eq!(record.result.unwrap().bytes_freed, 12);
+    assert!(record.result.unwrap().bytes_freed > 12);
 }
 
 #[tokio::test]
-async fn build_cleanup_ended_group_with_empty_policy_keeps_ignored_output_on_recovery() {
+async fn build_cleanup_ended_group_with_empty_output_policy_still_releases_its_tree() {
     use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(Some(vec![])).await;
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
@@ -488,15 +495,14 @@ async fn build_cleanup_ended_group_with_empty_policy_keeps_ignored_output_on_rec
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter()
         .find(|r| r.effect.item == group).unwrap();
     assert!(record.effect.folders.is_empty(), "the published policy disables output deletion");
-    assert_eq!(record.result.as_ref().unwrap().bytes_freed, 0);
+    assert!(record.result.as_ref().unwrap().bytes_freed > 12);
     assert!(record.result.as_ref().unwrap().skipped.is_empty());
-    assert_eq!(std::fs::read(tree.join("target/output")).unwrap(), b"group output",
-        "pruning must honor the policy even when git ignores the remaining output");
+    assert!(!tree.exists(), "folder policy does not retain finished group checkouts");
     let root = runtime.root.clone();
     drop(runtime);
     let mut runtime = Runtime::open(&root).unwrap();
     runtime.pump(100).await.unwrap();
-    assert_eq!(std::fs::read(tree.join("target/output")).unwrap(), b"group output");
+    assert!(!tree.exists());
     let again = runtime.store.workflow_cleanups("w").unwrap().into_iter()
         .find(|r| r.effect.item == group).unwrap();
     assert_eq!(again.result, record.result, "recovery preserves the settled cleanup result");
@@ -515,15 +521,15 @@ async fn build_cleanup_cancelled_group_preserves_committed_work_after_pruning() 
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
     runtime.pump(100).await.unwrap();
     assert!(!tree.join("target").exists(), "commits must not prevent output release");
-    assert!(tree.exists(), "cleanup preserves the source checkout");
+    assert!(!tree.exists(), "cleanup releases the source checkout while retaining its branch");
     let retained = adapters::git(&runtime.repository(), &["rev-parse", "--verify", &branch]).await.unwrap();
     assert_eq!(retained, head, "pruning must retain the ref protecting a group's commits from GC");
     let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().find(|r| r.effect.item == group).unwrap();
-    assert_eq!(record.result.unwrap().bytes_freed, 12);
+    assert!(record.result.unwrap().bytes_freed > 12);
 }
 
 #[tokio::test]
-async fn build_cleanup_cancelled_group_keeps_a_tree_with_unanchored_commits() {
+async fn build_cleanup_cancelled_group_anchors_detached_commits_before_removing_the_tree() {
     use super::coding_verbs_tests::command;
     let (_dir, mut runtime, group, tree) = building_group(None).await;
     adapters::git(&tree, &["checkout", "--detach"]).await.unwrap();
@@ -533,8 +539,9 @@ async fn build_cleanup_cancelled_group_keeps_a_tree_with_unanchored_commits() {
     command(&runtime, Command::Cancel { item: group.clone(), reason: None });
     runtime.pump(100).await.unwrap();
     assert!(!tree.join("target").exists(), "unanchored commits must not prevent output release");
-    assert!(tree.exists(), "the tree's HEAD is the only reference protecting this commit");
-    assert_eq!(adapters::git(&tree, &["rev-parse", "HEAD"]).await.unwrap(), head);
+    assert!(!tree.exists());
+    let reference = format!("refs/workflow/finished/{}", adapters::folder_name(&digest(&("w", &group))));
+    assert_eq!(adapters::git(&runtime.repository(), &["rev-parse", &reference]).await.unwrap(), head);
 }
 
 
@@ -671,3 +678,29 @@ async fn build_cleanup_scheduled_retry_when_runtime_is_idle() { scheduled_cleanu
 
 #[tokio::test]
 async fn build_cleanup_scheduled_retry_while_another_effect_runs() { scheduled_cleanup(true).await; }
+
+#[tokio::test]
+async fn build_cleanup_recovery_releases_a_group_tree_retained_by_an_older_engine() {
+    use super::coding_verbs_tests::{command, until};
+    let (_dir, mut runtime, group, tree) = building_group(None).await;
+    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    std::fs::create_dir_all(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/binary"), b"old output retained").unwrap();
+    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
+    // An older engine settled folder cleanup but deliberately left this checkout behind.
+    let record = runtime.store.workflow_cleanups("w").unwrap().into_iter().rev().find(|r| r.effect.item == group).unwrap();
+    assert!(runtime.store.workflow_cleanup_begin(&record.effect, None).unwrap());
+    runtime.store.workflow_cleanup_result(&record.effect, &farcooler_workflow::cleanup::CleanupResult {
+        bytes_freed: 0, skipped: Vec::new(), retry: false,
+    }).unwrap();
+    let root = runtime.root.clone();
+    drop(runtime);
+    let mut runtime = Runtime::open(&root).unwrap();
+    runtime.pump(100).await.unwrap();
+    assert!(!tree.exists(), "recovery releases a known finished group's old tree");
+    let records = runtime.store.workflow_cleanups("w").unwrap();
+    let released = records.iter().rev().find(|r| r.effect.item == group && r.effect.id != record.effect.id).unwrap();
+    assert!(released.result.as_ref().unwrap().bytes_freed > 12);
+    runtime.pump(100).await.unwrap();
+    assert_eq!(runtime.store.workflow_cleanups("w").unwrap().len(), records.len());
+}

@@ -263,7 +263,7 @@ async fn a_conflict_returns_the_ticket_to_build_with_paths_and_frees_the_target(
     assert_eq!(outbox(&runtime, StageKind::Run), 0, "the fold stopped the group; the gate never ran on a half-folded tree");
     let group = state.items.iter().find(|(_, i)| i.group_of.is_some()).map(|(_, i)| i.phase.clone());
     assert_eq!(group, Some(Phase::Failed));
-    // A failed fold keeps its source checkout for inspection (ov-1203).
+    // A failed fold releases its checkout; its durable receipt still reconciles (ov-1351).
     let tree = runtime.store.workflow_outbox("w").unwrap().into_iter().find(|s| s.effect.kind == EffectKind::Execute(StageKind::Fold)).unwrap();
     let binding = Binding::new("w", &tree.effect, tree.resource_generation.unwrap(), 0,
         &runtime.item_base("w", &tree.effect).unwrap());
@@ -271,7 +271,7 @@ async fn a_conflict_returns_the_ticket_to_build_with_paths_and_frees_the_target(
     assert!(matches!(recovered, Outcome::FoldConflict { ref evidence, ref files, .. }
         if evidence.candidate == theirs && files == &["shared.txt".to_string()]), "{recovered:?}");
     let tree = runtime.tree(&binding);
-    assert!(tree.exists(), "{}", tree.display());
+    assert!(!tree.exists(), "{}", tree.display());
 }
 
 #[tokio::test]

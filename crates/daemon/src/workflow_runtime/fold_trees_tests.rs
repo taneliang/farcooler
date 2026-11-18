@@ -1,4 +1,4 @@
-//! Ended groups release only build output; source checkouts and old-name trees remain.
+//! Finished groups release fold/gate trees; live runs and unknown leftovers remain.
 use super::*;
 use super::coding_verbs_tests::{at_join, batched_push, command, lander, phase_of, until};
 
@@ -34,10 +34,10 @@ async fn a_landed_group_releases_build_output_instead_of_parking_it() {
     command(&runtime, Command::Queue { item: "one".into() });
     let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Done)).await;
     let first = group_of(&state);
-    assert!(runtime.item_tree("w", &first).exists(), "the source checkout remains");
+    assert!(!runtime.item_tree("w", &first).exists(), "a landed group frees its fold and gate checkout");
     assert!(branch_exists(&runtime, "w", &first).await, "its commits aren't merged into the local checkout, so its branch stays");
     let listed = adapters::git(&runtime.repository(), &["worktree", "list", "--porcelain"]).await.unwrap();
-    assert!(listed.contains(&folder_name_of(&first)), "the repository retains its checkout: {listed}");
+    assert!(!listed.contains(&folder_name_of(&first)), "the repository unregisters its checkout: {listed}");
 
     at_join(&mut runtime, "two", &definition).await;
     command(&runtime, Command::Queue { item: "two".into() });
@@ -48,8 +48,8 @@ async fn a_landed_group_releases_build_output_instead_of_parking_it() {
         !e.unwrap().file_name().to_string_lossy().starts_with("build-")), "no ended output is parked");
     let records = runtime.store.workflow_cleanups("w").unwrap();
     let cleanup = records.iter().find(|r| r.effect.item == first).expect("group cleanup recorded");
-    assert_eq!(cleanup.result.as_ref().unwrap().bytes_freed, 1);
-    assert_eq!(trees(&runtime).len(), 4, "ticket and group source checkouts remain");
+    assert!(cleanup.result.as_ref().unwrap().bytes_freed > 1);
+    assert_eq!(trees(&runtime).len(), 2, "only ticket source checkouts remain");
 }
 
 fn folder_name_of(item: &str) -> String { adapters::folder_name(&digest(&("w", item))) }
@@ -79,7 +79,7 @@ async fn recovery_preserves_an_unowned_legacy_trees_files_and_detached_commits()
 }
 
 #[tokio::test]
-async fn a_failed_group_keeps_its_source_tree() {
+async fn a_failed_group_frees_its_source_tree() {
     let (_dir, mut runtime) = lander("gate-fail").await;
     let definition = batched_push(&runtime, "any", 5000);
     at_join(&mut runtime, "one", &definition).await;
@@ -87,7 +87,7 @@ async fn a_failed_group_keeps_its_source_tree() {
     let state = until(&mut runtime, |s| phase_of(s, "one") == Some(Phase::Failed)).await;
     let group = group_of(&state);
     assert_eq!(phase_of(&state, &group), Some(Phase::Failed), "the failed group stays on the board");
-    assert!(runtime.item_tree("w", &group).exists(), "its source checkout remains");
+    assert!(!runtime.item_tree("w", &group).exists(), "a failed group frees its fold and gate checkout");
 }
 
 /// The fold tree of a group that is still working stays, and so does a run's tree under the old name while the run
@@ -120,4 +120,38 @@ async fn recovery_keeps_unowned_live_and_unknown_discarded_trees() {
     let listed = adapters::git(&repo, &["worktree", "list", "--porcelain"]).await.unwrap();
     assert!(listed.contains(orphan.to_str().unwrap()), "{listed}");
     assert!(trash.exists(), "unknown leftovers are not permission to delete source");
+}
+
+#[tokio::test]
+async fn a_split_group_frees_its_tree_while_its_halves_rebuild() {
+    let (_dir, mut runtime) = lander("batch-fail").await;
+    let definition = batched_push(&runtime, "any", 5000);
+    for item in ["x", "a", "b"] { at_join(&mut runtime, item, &definition).await; }
+    for item in ["x", "a", "b"] { command(&runtime, Command::Queue { item: item.into() }); }
+    let state = runtime.state("w").unwrap().unwrap();
+    let split = state.items["a"].grouped_in.clone().unwrap();
+    assert_eq!(state.items[&split].members.len(), 2);
+    for item in ["x", "a", "b"] {
+        until(&mut runtime, |s| phase_of(s, item) == Some(Phase::Done)).await;
+    }
+    assert!(!runtime.item_tree("w", &split).exists(), "the rejected parent tree is released");
+    assert_eq!(trees(&runtime).len(), 3, "the new groups rebuilt and released their trees too");
+}
+
+#[tokio::test]
+async fn a_cancelled_group_keeps_its_tree_until_the_running_effect_settles() {
+    let (_dir, mut runtime, group, tree) = super::build_cleanup_tests::building_group(None).await;
+    until(&mut runtime, |s| s.items[&group].phase == Phase::WaitingReview).await;
+    std::fs::create_dir_all(tree.join("target")).unwrap();
+    std::fs::write(tree.join("target/binary"), b"busy").unwrap();
+    command(&runtime, Command::Cancel { item: group.clone(), reason: None });
+    runtime.active_trees.lock().unwrap().insert(tree.clone());
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    assert!(tree.join("target/binary").exists(), "an in-flight gate still owns the tree");
+    runtime.active_trees.lock().unwrap().clear();
+    runtime.release_builds(&["w".into()]).await.unwrap();
+    assert!(!tree.exists(), "the cancellation releases the tree after the effect joins");
+    let board = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
+    assert!(board["build_cleanup"].as_array().unwrap().iter().any(|r|
+        r["effect"]["item"] == group && r["result"]["bytes_freed"].as_u64().is_some_and(|n| n > 4)));
 }

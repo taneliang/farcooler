@@ -40,13 +40,17 @@ The engine releases a run's build output when it enters review, join or
 landing, or ends. Build output remains available to its checks. The published workflow's `build_folders`
 list selects the folders; omitting it defaults to `target`,
 `apps/android/app/build`, `apps/*/build` and `.build`. An empty list disables
-cleanup. Patterns are relative to the run's own worktree, and `*` matches one
+build-folder cleanup for runs. Patterns are relative to the run's own worktree, and `*` matches one
 directory component. Groups inherit the same published folder policy and record
-cleanup on the same transitions as ticket runs. Ended groups release output
-instead of parking it for another fold. Source checkouts, reports and Git
-references remain available after a group ends, including during recovery.
+cleanup on the same transitions as ticket runs. When a group lands, fails or is
+cancelled, its disposable fold/gate checkout is removed after its running effects
+settle. Split groups rebuild their smaller folds. Output is never parked for the
+next group. The folder list does not retain finished group checkouts. Git references
+retain the group's commits (including a detached HEAD); durable logs and receipts
+remain outside the checkout. Recovery also releases known finished groups left
+behind by older engines; unknown directories stay untouched.
 
-Cleanup preserves tracked files, git metadata and everything outside those
+Run build-folder cleanup preserves tracked files, git metadata and everything outside those
 folders. It skips folders with open files, trees another live run uses, and
 Uncertain runs. Each attempt records bytes freed or a skip reason in the
 `workflow get` response's `build_cleanup` results, keyed by item and run. Repeating an engine read or recovering an

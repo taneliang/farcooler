@@ -18,6 +18,7 @@ impl Exec {
     pub(super) async fn release_builds_checked(&self, workspaces: &[String], mut before_result: impl FnMut() -> Result<()>) -> Result<bool> {
         let mut retry = false;
         for workspace in workspaces {
+            self.retain_finished_group_cleanups(workspace)?;
             for record in self.store.workflow_cleanups(workspace)? {
                 if record.result.as_ref().is_some_and(|r| !r.retry) { continue; }
                 let effect = record.effect;
@@ -111,6 +112,13 @@ impl Exec {
             match answer {
                 Ok(bytes) => { result.bytes_freed = result.bytes_freed.saturating_add(bytes); removed.push(path); }
                 Err(why) => result.skipped.push(format!("{label}: {why}")),
+            }
+        }
+        if !result.retry && self.ended_group(effect)? && effect.tree.is_none() {
+            let released = self.release_group_tree(&tree, held, effect).await;
+            match released {
+                Ok(bytes) => result.bytes_freed = result.bytes_freed.saturating_add(bytes),
+                Err(why) => { result.retry = true; result.skipped.push(why); }
             }
         }
         Ok(result)
