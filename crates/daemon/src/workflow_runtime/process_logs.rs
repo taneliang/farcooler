@@ -269,27 +269,74 @@ mod tests {
     }
 
     fn manager_json_recipe(cli: &str) -> String {
-        let skill = include_str!("../../assets/manager/SKILL.md");
-        let (_, example) = skill.split_once("```sh\nworkflow_json=").unwrap();
-        let (example, _) = example.split_once("\n```").unwrap();
-        format!("workflow_json={example}").replace("{{cli}}", cli)
+        let plugin = crate::skill_install::render(crate::skill_install::Harness::Claude, cli);
+        let skill = plugin.iter().find(|file| file.relative == "skills/manager/SKILL.md").unwrap();
+        skill.contents.lines().find(|line| line.starts_with("workflow_json=")).unwrap().to_owned()
     }
 
     #[test]
-    fn workflow_get_manager_recipe_preserves_json_escapes() {
-        let reply = r#"{"tail":"\u001b[31mline\npath\\( \"quoted\""}"#;
+    fn workflow_get_manager_recipe_preserves_captured_json_escapes() {
+        // Exact JSON string excerpts at the failures from the two ov-1340 captures.
+        // In the manager's original command, echo "$o" emitted a raw ESC, collapsed
+        // the backslash before '(', or left a backslash followed by a raw ESC.
+        let cases = [
+            (r#"o\u001b[33;37Hrequired"#, "o\x1b[33;37Hrequired"),
+            (r#"rmtree\\(|cleanup_target"#, "rmtree\\(|cleanup_target"),
+            (r#"=codex\u001b\\\u001b[?2026h\u001b[?25l"#, "=codex\x1b\\\x1b[?2026h\x1b[?25l"),
+        ];
         let recipe = format!(
             "fixture_cli() {{ printf '%s\\n' \"$1\"; }}\n{}",
             manager_json_recipe("fixture_cli \"$1\""),
         );
-        // Force Bash echo to interpret escapes, as zsh does by default.
+        for (encoded_tail, tail) in cases {
+            let reply = format!(r#"{{"tail":"{encoded_tail}"}}"#);
+            // Enable backslash interpretation in Bash echo, as in the manager's zsh shell.
+            let output = std::process::Command::new("/bin/bash")
+                .args(["-O", "xpg_echo", "-c", &recipe, "workflow-json", &reply])
+                .output().unwrap();
+            assert!(output.status.success());
+            let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(parsed["tail"], tail);
+            assert_eq!(output.stdout, format!("{reply}\n").as_bytes());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn workflow_get_original_manager_capture_reproduces_malformed_bytes() {
+        // Replay the logged caller with the exact JSON escapes around the failures.
+        let script = r#"
+fixture_cli() { printf '%s\n' "$1"; }
+o=$(fixture_cli "$1" workflow get "$workspace" --json)
+echo "$o"
+"#;
+        let cases = [
+            (r#"{"tail":"o\u001b[33;37Hrequired"}"#, b"{\"tail\":\"o\x1b[33;37Hrequired\"}\n".as_slice()),
+            (r#"{"tail":"rmtree\\(|cleanup_target"}"#, b"{\"tail\":\"rmtree\\(|cleanup_target\"}\n".as_slice()),
+            (r#"{"tail":"=codex\u001b\\\u001b[?2026h\u001b[?25l"}"#, b"{\"tail\":\"=codex\x1b\\\x1b[?2026h\x1b[?25l\"}\n".as_slice()),
+        ];
+        for (reply, broken) in cases {
+            let output = std::process::Command::new("/bin/zsh")
+                .args(["-f", "-c", script, "workflow-json", reply])
+                .output().unwrap();
+            assert!(output.status.success());
+            assert_eq!(output.stdout, broken);
+            assert!(serde_json::from_slice::<serde_json::Value>(&output.stdout).is_err());
+        }
+    }
+
+    #[test]
+    fn workflow_get_manager_recipe_propagates_a_failed_read_without_json() {
+        let recipe = format!(
+            "fixture_cli() {{ printf '%s\\n' 'Workflow read timed out' >&2; return 1; }}\n{}",
+            manager_json_recipe("fixture_cli"),
+        );
         let output = std::process::Command::new("/bin/bash")
-            .args(["-O", "xpg_echo", "-c", &recipe, "workflow-json", reply])
+            .args(["-c", &recipe])
             .output().unwrap();
-        assert!(output.status.success());
-        let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(parsed["tail"], "\x1b[31mline\npath\\( \"quoted\"");
-        assert_eq!(output.stdout, format!("{reply}\n").as_bytes());
+        assert_eq!(output.status.code(), Some(1));
+        assert!(output.stdout.is_empty());
+        assert_eq!(output.stderr, b"Workflow read timed out\n");
     }
 
     // Like the workflow.get load test, this uses the real CLI binary. Build it with
@@ -319,9 +366,9 @@ mod tests {
             .find(|pane| pane.terminal_id == terminal).unwrap().pane_id;
         let quoted_log = crate::service::shell_quote(log.to_str().unwrap());
         svc.tmux.pipe_pane_start(&pane, &format!("cat >> {quoted_log}")).await.unwrap();
-        let script = r#"n=0; while :; do printf '\033[31m%s\033[0m\n' "sample-$n é \\( \""; n=$((n+1)); sleep 0.01; done"#;
+        let script = r#"n=0; while :; do printf '\033[31m%s\033[0m =codex\033\\\033[?2026h\033[?25l\n' "sample-$n é rmtree\\(|cleanup_target \""; n=$((n+1)); sleep 0.01; done"#;
         svc.tmux.send_keys(&pane, &format!("{script}\n")).await.unwrap();
-        let first_sample = "\x1b[31msample-0 é \\( \"\x1b[0m".as_bytes();
+        let first_sample = "\x1b[31msample-0 é rmtree\\(|cleanup_target \"\x1b[0m =codex\x1b\\\x1b[?2026h\x1b[?25l".as_bytes();
         tokio::time::timeout(PANE_PATIENCE, async {
             while !std::fs::read(&log).unwrap().windows(first_sample.len()).any(|bytes| bytes == first_sample) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -355,7 +402,8 @@ mod tests {
             let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             let tail = json["process_logs"].as_array().unwrap().iter()
                 .find(|entry| entry["effect"] == effect.id).unwrap()["tail"].as_str().unwrap();
-            assert!(tail.contains("\x1b[31msample-") && tail.contains("é \\( \""));
+            assert!(tail.contains("\x1b[31msample-"));
+            assert!(tail.contains("é rmtree\\(|cleanup_target \"\x1b[0m =codex\x1b\\\x1b[?2026h\x1b[?25l"));
             tails.insert(tail.to_owned());
         }
         assert!(tails.len() > 1, "the captured pane output changed during the reads");

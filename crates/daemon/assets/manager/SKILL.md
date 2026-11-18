@@ -102,24 +102,14 @@ waits on their approval; until it's published, work waits on the board. Plain
 terminals the owner opens for their own scripts are theirs and keep working as
 they always have: never route them through the engine or stop them.
 
-Each `workflow` write names the state it read. `<ws>` is the `id` that `--json workspace show` gives.
-Read `workflow get <ws> --json` before every write, since each write moves it, and pass `--revision`
-(its `state.revision`), `--epoch` (`state.epoch`), `--sequence` (one more than the largest value in
-`state.source_sequences`, or 1) and, for a ticket, `--run` and `--pin` (its `state.items.<key>.run` and
-`.pin`). `--command-id` is new for each write (`ov-7-start-1`); send one again only to retry a reply
-that was lost. A `Stale` refusal means read again and send with a new id. Rebuild with fresh revision,
-epoch, sequence, run, pin and any start pin or review evidence. Try at most five times total; if still
-stale, report it and wait for the next check-in. Inspect other refusals before retrying.
-
-Pipe the CLI's stdout directly to a JSON parser. To reuse a reply in shell code,
-set `workspace` to the workspace ID and pass the captured string with `printf`.
-Some shells interpret backslash escapes in `echo`, which corrupts JSON in captured
-pane output. Keep stderr separate and check the CLI's exit status.
-
-```sh
-workflow_json=$({{cli}} workflow get "$workspace" --json) &&
-    printf '%s\n' "$workflow_json"
-```
+Read the state before every `workflow` write. Set `workspace` to `<ws>`, the ID from `--json workspace show`.
+Pipe the example's `printf` to the JSON parser. Keep CLI errors visible. Shell `echo` can corrupt pane escapes.
+Pass `--revision` (`state.revision`), `--epoch` (`state.epoch`), `--sequence` (one more than the
+largest `state.source_sequences` value, or 1) and, for a ticket, `--run` and `--pin` from `state.items.<key>`.
+Use a new `--command-id` for each write (`ov-7-start-1`); send one again only to retry a reply that
+was lost. On `Stale`, read again and rebuild with a new id, fresh revision, epoch, sequence, run, pin and
+any start pin or review evidence. Try at most five times total. If still stale, report it and wait for
+the next check-in. Inspect other refusals before retrying.
 
 1. **Track.** A card made on a published board is tracked by itself, at rest;
    `workflow track <ws> <key> --column todo` brings one that isn't, and `workflow
@@ -168,7 +158,7 @@ work nobody plans to do.
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager
 {{cli}} task note <key> --repo <repo> --kind decision --body "<what, and why>" --rejected "<the alternative>" --actor manager
 {{cli}} --json workspace show "$FARCOOLER_WORKSPACE"
-{{cli}} workflow get <ws> --json
+workflow_json=$({{cli}} workflow get "$workspace" --json) && printf '%s\n' "$workflow_json"
 {{cli}} workflow track <ws> <key> --column todo --command-id <key>-track-1 --revision <r> --epoch <e> --sequence <n>
 {{cli}} workflow move <ws> <key> --to todo --run <run> --pin <pin> --command-id <key>-move-1 --revision <r> --epoch <e> --sequence <n>
 {{cli}} workflow start <ws> <key> --start-pin <pin> --run <run> --pin <pin> --worktree <key>-<slug> --branch <key>-<slug> --command-id <key>-start-1 --revision <r> --epoch <e> --sequence <n>
