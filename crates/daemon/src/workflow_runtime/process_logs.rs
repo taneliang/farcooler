@@ -268,6 +268,100 @@ mod tests {
         assert!(get["process_logs"].as_array().unwrap().iter().all(|log| log["item"] == "item-001"));
     }
 
+    fn manager_json_recipe(cli: &str) -> String {
+        let skill = include_str!("../../assets/manager/SKILL.md");
+        let (_, example) = skill.split_once("```sh\nworkflow_json=").unwrap();
+        let (example, _) = example.split_once("\n```").unwrap();
+        format!("workflow_json={example}").replace("{{cli}}", cli)
+    }
+
+    #[test]
+    fn workflow_get_manager_recipe_preserves_json_escapes() {
+        let reply = r#"{"tail":"\u001b[31mline\npath\\( \"quoted\""}"#;
+        let recipe = format!(
+            "fixture_cli() {{ printf '%s\\n' \"$1\"; }}\n{}",
+            manager_json_recipe("fixture_cli \"$1\""),
+        );
+        // Force Bash echo to interpret escapes, as zsh does by default.
+        let output = std::process::Command::new("/bin/bash")
+            .args(["-O", "xpg_echo", "-c", &recipe, "workflow-json", reply])
+            .output().unwrap();
+        assert!(output.status.success());
+        let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(parsed["tail"], "\x1b[31mline\npath\\( \"quoted\"");
+        assert_eq!(output.stdout, format!("{reply}\n").as_bytes());
+    }
+
+    // Like the workflow.get load test, this uses the real CLI binary. Build it with
+    // cargo build -p farcooler-cli before running this test with --ignored.
+    #[tokio::test]
+    #[ignore]
+    async fn workflow_get_cli_json_while_pane_output_changes() {
+        use super::super::admission_tests::factory;
+        use crate::test_support::{PANE_PATIENCE, shell_ready, short_fixture};
+        use farcooler_protocol::v1::Scope;
+        use farcooler_transport::{HandshakeConfig, Peer, UnixListenerServer};
+        use tokio::process::Command;
+
+        let cli = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/farcooler")
+            .canonicalize().expect("build the CLI first");
+        let (dir, svc, repo) = short_fixture().await;
+        let workspace = svc.store.ensure_main_workspace(repo).unwrap().id.to_string();
+        let (_runtime_dir, runtime) = failed_logs_in(&workspace, 20, &"\x1b[31m".repeat(1600)).await;
+        let effect = runtime.store.workflow_outbox(&workspace).unwrap().pop().unwrap().effect;
+        let log = runtime.exec.effect_log(&effect).unwrap();
+        std::fs::write(&log, "").unwrap();
+
+        let worktree = svc.store.list_worktrees_for_repository(repo).unwrap().remove(0);
+        let terminal = svc.create_terminal(worktree.id, "changing output", "shell").await.unwrap().id;
+        shell_ready(&svc, terminal).await;
+        let pane = svc.tmux.list_tagged_panes().await.unwrap().into_iter()
+            .find(|pane| pane.terminal_id == terminal).unwrap().pane_id;
+        let quoted_log = crate::service::shell_quote(log.to_str().unwrap());
+        svc.tmux.pipe_pane_start(&pane, &format!("cat >> {quoted_log}")).await.unwrap();
+        let script = r#"n=0; while :; do printf '\033[31m%s\033[0m\n' "sample-$n é \\( \""; n=$((n+1)); sleep 0.01; done"#;
+        svc.tmux.send_keys(&pane, &format!("{script}\n")).await.unwrap();
+        let first_sample = "\x1b[31msample-0 é \\( \"\x1b[0m".as_bytes();
+        tokio::time::timeout(PANE_PATIENCE, async {
+            while !std::fs::read(&log).unwrap().windows(first_sample.len()).any(|bytes| bytes == first_sample) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("pane started producing captured output");
+
+        let rpc = factory(&svc, &runtime, Peer { client_id: None, scope: Scope::Control }, None);
+        let home = dir.path().join("state");
+        let listener = UnixListenerServer::bind(home.join("farcoolerd.sock")).unwrap();
+        let server = tokio::spawn(async move {
+            listener.serve(move |_| Some((HandshakeConfig { daemon_version: "test".into() }, rpc.clone()))).await
+        });
+        // Exercise the manager's documented shell recipe as well as direct stdout.
+        let recipe = manager_json_recipe("\"$1\"");
+        let mut tails = BTreeSet::new();
+        for n in 0..16 {
+            let mut command = if n % 2 == 0 {
+                let mut command = Command::new(&cli);
+                command.args(["workflow", "get", &workspace, "--json"]);
+                command
+            } else {
+                // Enable the same escape interpretation that zsh gives echo by default.
+                let mut command = Command::new("/bin/bash");
+                command.args(["-O", "xpg_echo", "-c", &recipe, "workflow-json"])
+                    .arg(&cli).env("workspace", &workspace);
+                command
+            };
+            let output = command.env("FARCOOLER_HOME", &home).output().await.unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.stdout.len() > 200 * 1024, "exercise a multi-chunk reply");
+            let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            let tail = json["process_logs"].as_array().unwrap().iter()
+                .find(|entry| entry["effect"] == effect.id).unwrap()["tail"].as_str().unwrap();
+            assert!(tail.contains("\x1b[31msample-") && tail.contains("é \\( \""));
+            tails.insert(tail.to_owned());
+        }
+        assert!(tails.len() > 1, "the captured pane output changed during the reads");
+        server.abort();
+    }
+
     fn get_with_bounded_logs(runtime: &Runtime, count: usize) -> serde_json::Value {
         let reply = runtime.wire_command("w", "owner", farcooler_protocol::workflow_commands::Action::Get).unwrap();
         use farcooler_protocol::v1 as pb;

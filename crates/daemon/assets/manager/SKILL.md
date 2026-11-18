@@ -111,6 +111,16 @@ that was lost. A `Stale` refusal means read again and send with a new id. Rebuil
 epoch, sequence, run, pin and any start pin or review evidence. Try at most five times total; if still
 stale, report it and wait for the next check-in. Inspect other refusals before retrying.
 
+Pipe the CLI's stdout directly to a JSON parser. To reuse a reply in shell code,
+set `workspace` to the workspace ID and pass the captured string with `printf`.
+Some shells interpret backslash escapes in `echo`, which corrupts JSON in captured
+pane output. Keep stderr separate and check the CLI's exit status.
+
+```sh
+workflow_json=$({{cli}} workflow get "$workspace" --json) &&
+    printf '%s\n' "$workflow_json"
+```
+
 1. **Track.** A card made on a published board is tracked by itself, at rest;
    `workflow track <ws> <key> --column todo` brings one that isn't, and `workflow
    move … --to <column>` moves one at rest (`done` or `cancelled` closes it).

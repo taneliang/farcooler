@@ -61,6 +61,9 @@ impl Publication {
 #[derive(Subcommand, Clone)]
 pub enum WorkflowCmd {
     /// Read current state; --full includes definitions and notification history.
+    ///
+    /// Pipe --json stdout directly to a parser. If you store it in a shell variable,
+    /// use printf '%s\n' "$value" to pass it on. Shell echo can interpret JSON escapes.
     Get { workspace: Uuid, #[arg(long)] full: bool },
     /// Read one ticket's process logs, from every run, failed or not: the tails `get` leaves out for archived
     /// and removed tickets and for a live ticket's earlier steps. Each names its whole log file too.
