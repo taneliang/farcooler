@@ -264,6 +264,49 @@ describe('the sealed ceremony reply', () => {
     expect((await take(ALICE)).body).toEqual(one(fixture.sealed, ALICE))
   })
 
+  it('classifies a refused retry before a browser consumes the stored reply', async () => {
+    expect((await post(ALICE)).status).toBe(200)
+    const real = env.DB
+    const wrapped = new WeakMap<object, D1PreparedStatement>()
+    let consumed = false
+    const consume = async () => {
+      const rows = await real.prepare(`DELETE FROM ceremony_replies WHERE ceremony = ? AND account_id = ? RETURNING sealed`)
+        .bind(CEREMONY, ALICE).all()
+      consumed = rows.results.length === 1
+    }
+    const db = new Proxy(real, {
+      get(target, prop) {
+        if (prop === 'prepare') return (sql: string) => {
+          const statement = target.prepare(sql)
+          if (!sql.includes('INSERT INTO ceremony_replies')) return statement
+          const wrap = (s: D1PreparedStatement): D1PreparedStatement => {
+            const proxy = new Proxy(s, { get(inner, key) {
+              if (key === 'bind') return (...args: unknown[]) => wrap(inner.bind(...args))
+              if (key === 'run') return async () => { const result = await inner.run(); await consume(); return result }
+              return Reflect.get(inner, key, inner)
+            } })
+            wrapped.set(proxy, s)
+            return proxy
+          }
+          return wrap(statement)
+        }
+        if (prop === 'batch') return async (statements: D1PreparedStatement[]) => {
+          const results = await target.batch(statements.map(s => wrapped.get(s) ?? s))
+          await consume()
+          return results
+        }
+        return Reflect.get(target, prop, target)
+      },
+    })
+    const response = await worker.fetch(new Request('https://relay.test/v1/ceremony/reply', {
+      method: 'POST', headers: { authorization: `Bearer ${await sessionFor(ALICE)}` },
+      body: JSON.stringify({ ceremony: CEREMONY, account: ALICE, sealed: junk(7) }),
+    }), { ...(env as any), DB: db } as never, ctx)
+    expect(consumed).toBe(true)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({ error: 'already_posted' })
+  })
+
   it('takes a poster’s new reply once its old one outlived its window', async () => {
     const start = Date.now()
     await post(ALICE)

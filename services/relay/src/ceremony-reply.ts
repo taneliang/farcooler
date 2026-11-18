@@ -114,7 +114,9 @@ async function postReply(request: Request, env: Env): Promise<Response> {
   // yet been swept, is replaced: nobody can read it any more.
   const now = Date.now()
   const cutoff = now - REPLY_TTL_MS
-  const written = await env.DB.prepare(
+  // D1 batches run in one transaction: a take must not delete the existing
+  // reply between a refused insert and the lookup that explains the refusal.
+  const [written, existing] = await env.DB.batch([env.DB.prepare(
     `INSERT INTO ceremony_replies (ceremony, account_id, posted_by, sealed, created_at)
      SELECT ?1, ?2, ?3, ?4, ?5
      WHERE ?3 = ?2 OR (SELECT COUNT(*) FROM ceremony_replies
@@ -122,13 +124,12 @@ async function postReply(request: Request, env: Env): Promise<Response> {
      ON CONFLICT (ceremony, posted_by) DO UPDATE SET account_id = ?2, sealed = ?4, created_at = ?5
      WHERE ceremony_replies.created_at < ?6`,
   )
-    .bind(ceremony, account, poster, sealed, now, cutoff, REPLIES_MAX)
-    .run()
-  if (!written.meta.changes) {
-    const existing = await env.DB.prepare(`SELECT 1 FROM ceremony_replies
+    .bind(ceremony, account, poster, sealed, now, cutoff, REPLIES_MAX),
+  env.DB.prepare(`SELECT 1 FROM ceremony_replies
       WHERE ceremony = ? AND account_id = ? AND posted_by = ? AND created_at >= ?`)
-      .bind(ceremony, account, poster, cutoff).first()
-    return json({ error: existing ? 'already_posted' : 'slots_full' }, 409)
+    .bind(ceremony, account, poster, cutoff)])
+  if (!written.meta.changes) {
+    return json({ error: existing.results.length ? 'already_posted' : 'slots_full' }, 409)
   }
   return json({ ok: true })
 }
